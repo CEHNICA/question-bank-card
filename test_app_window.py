@@ -240,7 +240,10 @@ class ShortcutTests(unittest.TestCase):
             )
             shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(link))
 
-            self.assertEqual(shortcut.GetPath(shell.SLGP_RAWPATH)[0], str(target))
+            # Windows may expand an 8.3 temporary-directory component when a
+            # Shell Link is loaded.  Compare file identity rather than the two
+            # equivalent path spellings.
+            self.assertTrue(os.path.samefile(shortcut.GetPath(shell.SLGP_RAWPATH)[0], target))
             self.assertEqual(shortcut.GetArguments(), f'"{launcher}"')
 
 
