@@ -207,6 +207,11 @@
     return parts.join(" · ");
   }
 
+  function paperDisplayName(paper) {
+    const name = typeof paper?.name === "string" ? paper.name.trim() : "";
+    return name || paper?.filename || "未命名试卷";
+  }
+
   function miniMeter(paper) {
     const c = paper.counts || {};
     const total = c.total || 0;
@@ -234,8 +239,8 @@
       const item = el("li", `paper-item${paper.id === state.paperId ? " active" : ""}${paper.status === "failed" ? " failed" : ""}`);
       const link = el("button", "paper-link");
       link.type = "button";
-      link.title = paper.filename;
-      link.append(el("span", "paper-file", paper.filename));
+      link.title = paperDisplayName(paper);
+      link.append(el("span", "paper-file", paperDisplayName(paper)));
       const meta = el("span", "paper-meta", paperSummary(paper));
       if (ACTIVE_STATUS.has(paper.status)) meta.classList.add("busy");
       link.append(meta, miniMeter(paper));
@@ -279,6 +284,26 @@
     }
     renderPaperList();
     await refreshPaper();
+  }
+
+  function clearPaperSelection() {
+    clearTimeout(state.pollTimer);
+    state.paperId = null;
+    state.paper = null;
+    state.questions = [];
+    state.current = null;
+    state.rendered.clear();
+    state.editing.clear();
+    state.expanded.clear();
+    $("cards").replaceChildren();
+    $("paperView").hidden = true;
+    $("emptyState").hidden = false;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("paper");
+    url.searchParams.delete("document");
+    url.searchParams.delete("draft");
+    history.replaceState(null, "", url);
+    renderPaperList();
   }
 
   async function refreshPaper() {
@@ -368,7 +393,7 @@
     const paper = state.paper;
     $("emptyState").hidden = true;
     $("paperView").hidden = false;
-    $("paperName").textContent = paper.filename;
+    $("paperName").textContent = paperDisplayName(paper);
     const c = counts();
     const statusText = $("paperStatus");
     if (ACTIVE_STATUS.has(paper.status)) {
@@ -396,7 +421,9 @@
     const error = $("paperError");
     error.hidden = paper.status !== "failed";
     if (!error.hidden) {
-      error.replaceChildren(el("span", "", paper.error || "处理失败"), button("重试", "small", retryPaper));
+      const actions = el("span", "error-actions");
+      actions.append(button("重试", "small", retryPaper), button("删除任务", "small danger", deletePaper));
+      error.replaceChildren(el("span", "", paper.error || "处理失败"), actions);
     }
     renderMeter(c);
     renderDoneBanner(c);
@@ -1277,6 +1304,82 @@
       await api(`/api/papers/${state.paperId}/retry`, { method: "POST", body: {} });
       refreshPaper();
       loadPapers();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  function openRenameDialog() {
+    if (!state.paper) return;
+    const input = $("renameInput");
+    input.value = paperDisplayName(state.paper);
+    input.setCustomValidity("");
+    $("renameOriginal").textContent = `原始文件：${state.paper.filename || "未记录"}`;
+    $("renameDialog").showModal();
+    requestAnimationFrame(() => { input.focus(); input.select(); });
+  }
+
+  $("renamePaper").addEventListener("click", openRenameDialog);
+  $("renameInput").addEventListener("input", () => $("renameInput").setCustomValidity(""));
+  $("renameForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.paper) return;
+    const input = $("renameInput");
+    const name = input.value.trim();
+    if (!name) {
+      input.setCustomValidity("请输入任务名称");
+      input.reportValidity();
+      return;
+    }
+    const paperId = state.paper.id;
+    const previous = state.paper;
+    const save = $("renameSave");
+    save.disabled = true;
+    try {
+      const data = await api(`/api/papers/${paperId}`, { method: "PATCH", body: { name } });
+      const updated = data.paper || { ...previous, name };
+      const index = state.papers.findIndex((paper) => paper.id === paperId);
+      if (index >= 0) state.papers[index] = updated;
+      if (state.paperId === paperId) {
+        state.paper = updated;
+        renderPaper();
+      }
+      renderPaperList();
+      if ($("renameDialog").open) $("renameDialog").close();
+      toast("任务名称已修改，题目来源已同步更新", "success");
+    } catch (error) {
+      toast(error.message, "error");
+      input.focus();
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  async function deletePaper() {
+    const paper = state.paper;
+    if (!paper || paper.status !== "failed") return;
+    const displayName = paperDisplayName(paper);
+    const ok = await confirmDialog({
+      title: `删除任务“${displayName}”？`,
+      text: "会删除这项失败任务、上传的原文件和未完成题卡，且无法撤销。若其中已有正式题库记录，系统会拒绝删除。",
+      ok: "删除任务",
+      danger: true
+    });
+    if (!ok) return;
+    const paperId = paper.id;
+    const oldIndex = state.papers.findIndex((item) => item.id === paperId);
+    try {
+      const result = await api(`/api/papers/${paperId}`, { method: "DELETE" });
+      const message = result.warning || `已删除任务“${displayName}”`;
+      const kind = result.warning ? "error" : "";
+      state.papers = state.papers.filter((item) => item.id !== paperId);
+      if (state.paperId !== paperId) {
+        renderPaperList();
+        toast(message, kind);
+        return;
+      }
+      const next = state.papers[Math.min(Math.max(oldIndex, 0), state.papers.length - 1)];
+      clearPaperSelection();
+      if (next) await selectPaper(next.id);
+      toast(message, kind);
     } catch (error) { toast(error.message, "error"); }
   }
 

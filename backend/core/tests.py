@@ -685,6 +685,14 @@ class ApiTests(TestCase):
         headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
         return self.client.post(path, data=json.dumps(body or {}), content_type="application/json", **headers)
 
+    def patch(self, path, body=None, header=True):
+        headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
+        return self.client.patch(path, data=json.dumps(body or {}), content_type="application/json", **headers)
+
+    def delete(self, path, header=True):
+        headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
+        return self.client.delete(path, **headers)
+
     def test_requires_page_header(self):
         response = self.post(f"/api/questions/{self.q.id}/approve", {"approved": True}, header=False)
         self.assertEqual(response.status_code, 403)
@@ -723,6 +731,165 @@ class ApiTests(TestCase):
         malformed = self.client.get("/api/library?document=--------------------------------")
         self.assertEqual(malformed.status_code, 200)
         self.assertEqual(malformed.json()["total"], 0)
+
+    def test_rename_updates_every_publication_source_without_revalidating_stale_content(self):
+        self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        self.post(f"/api/papers/{self.paper.id}/publish")
+
+        for stem in ("已知 $x=2$", "已知 $x=3$"):
+            current = PublishedQuestion.objects.filter(
+                question=self.q, status=PublishedQuestion.Status.PUBLISHED,
+            ).first()
+            if stem.endswith("3$"):
+                library.withdraw(current)
+            self.post(f"/api/questions/{self.q.id}/text", {
+                "stem": stem, "options": {"A": "1", "B": "2"},
+            })
+            self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+            self.post(f"/api/papers/{self.paper.id}/publish")
+
+        before = {
+            item.pk: (item.version, item.status, item.published_at, item.withdrawn_at, item.content_hash)
+            for item in PublishedQuestion.objects.filter(question=self.q)
+        }
+        self.assertEqual(
+            [item.status for item in PublishedQuestion.objects.filter(question=self.q).order_by("version")],
+            [PublishedQuestion.Status.SUPERSEDED, PublishedQuestion.Status.WITHDRAWN,
+             PublishedQuestion.Status.PUBLISHED],
+        )
+        self.q.refresh_from_db()
+        self.assertTrue(library.approval_is_current(self.q))
+
+        response = self.patch(f"/api/papers/{self.paper.id}", {"name": "秋季月考任务"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["changed"])
+        self.assertEqual(response.json()["paper"]["name"], "秋季月考任务")
+        self.assertEqual(response.json()["paper"]["filename"], "卷.pdf")
+        self.paper.refresh_from_db()
+        self.q.refresh_from_db()
+        self.assertEqual(self.paper.filename, "卷.pdf")
+        self.assertEqual(self.paper.task_name, "秋季月考任务")
+        self.assertTrue(library.approval_is_current(self.q))
+        self.assertTrue(library.publication_state(self.q)["up_to_date"])
+
+        publications = list(PublishedQuestion.objects.filter(question=self.q).order_by("version"))
+        self.assertEqual(len(publications), 3)
+        for publication in publications:
+            old = before[publication.pk]
+            self.assertEqual(
+                (publication.version, publication.status, publication.published_at, publication.withdrawn_at),
+                old[:4],
+            )
+            self.assertNotEqual(publication.content_hash, old[4])
+            self.assertEqual(publication.source_filename, "秋季月考任务")
+            self.assertEqual(publication.content["source_filename"], "秋季月考任务")
+            self.assertEqual(publication.content_hash, library.content_hash(publication.content))
+            self.assertEqual(publication.content["review"]["approved_content_hash"], publication.content_hash)
+            self.assertIn(library.search_key("秋季月考任务"), publication.search_text)
+            self.assertNotIn(library.search_key("卷.pdf"), publication.search_text)
+
+        listing = self.client.get("/api/library?q=秋季月考任务").json()
+        self.assertEqual(listing["total"], 1)
+        self.assertEqual(listing["items"][0]["source_filename"], "秋季月考任务")
+        self.assertEqual(listing["facets"]["sources"], [{
+            "document_id": str(self.paper.id), "filename": "秋季月考任务", "count": 1,
+        }])
+        self.assertEqual(self.client.get("/api/library?q=卷.pdf").json()["total"], 0)
+
+    def test_rename_keeps_an_already_stale_approval_stale(self):
+        self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        self.q.refresh_from_db()
+        approved_hash = self.q.approved_content_hash
+        Question.objects.filter(pk=self.q.pk).update(stem="审批后被后台改过")
+        self.q.refresh_from_db()
+        self.assertFalse(library.approval_is_current(self.q))
+
+        response = self.patch(f"/api/papers/{self.paper.id}", {"name": "改名后仍需复核"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.q.refresh_from_db()
+        self.assertTrue(self.q.approved)
+        self.assertEqual(self.q.approved_content_hash, approved_hash)
+        self.assertFalse(library.approval_is_current(self.q))
+
+    def test_rename_validates_name_and_keeps_original_filename(self):
+        endpoint = f"/api/papers/{self.paper.id}"
+        for invalid in (None, "", "   ", "甲\n乙", "甲\x00乙", "甲" * 256):
+            with self.subTest(invalid=repr(invalid)):
+                response = self.patch(endpoint, {"name": invalid})
+                self.assertEqual(response.status_code, 400)
+                self.paper.refresh_from_db()
+                self.assertEqual(self.paper.task_name, "")
+                self.assertEqual(self.paper.filename, "卷.pdf")
+
+        same = self.patch(endpoint, {"name": "卷.pdf"})
+        self.assertEqual(same.status_code, 200)
+        self.assertFalse(same.json()["changed"])
+        self.paper.refresh_from_db()
+        self.assertEqual(self.paper.task_name, "")
+        self.assertEqual(self.paper.filename, "卷.pdf")
+
+    def test_paper_rename_and_delete_require_local_page_header(self):
+        failed = Paper.objects.create(
+            filename="失败.pdf", kind="pdf", sha256="h" * 64, status=Paper.Status.FAILED,
+        )
+        rename = self.patch(f"/api/papers/{self.paper.id}", {"name": "不应生效"}, header=False)
+        delete = self.delete(f"/api/papers/{failed.id}", header=False)
+        self.assertEqual(rename.status_code, 403)
+        self.assertEqual(delete.status_code, 403)
+        self.paper.refresh_from_db()
+        self.assertEqual(self.paper.task_name, "")
+        self.assertTrue(Paper.objects.filter(pk=failed.pk).exists())
+
+    def test_delete_failed_task_removes_related_drafts_and_controlled_folder(self):
+        failed = Paper.objects.create(
+            filename="失败.pdf", kind="pdf", sha256="d" * 64, status=Paper.Status.FAILED,
+        )
+        folder = self.temp / str(failed.id)
+        folder.mkdir()
+        source = folder / "source.pdf"
+        source.write_bytes(b"private draft")
+        failed.source_path = str(source)
+        failed.save(update_fields=["source_path"])
+        draft = Question.objects.create(paper=failed, number=1, stem="未完成草稿")
+        block = Block.objects.create(
+            paper=failed, seq=0, type="text", page_idx=0, bbox=[0, 0, 10, 10], text="草稿",
+        )
+
+        response = self.delete(f"/api/papers/{failed.id}")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["deleted"], str(failed.id))
+        self.assertFalse(Paper.objects.filter(pk=failed.pk).exists())
+        self.assertFalse(Question.objects.filter(pk=draft.pk).exists())
+        self.assertFalse(Block.objects.filter(pk=block.pk).exists())
+        self.assertFalse(folder.exists())
+
+    def test_delete_keeps_task_when_its_files_cannot_be_staged(self):
+        failed = Paper.objects.create(
+            filename="占用中.pdf", kind="pdf", sha256="b" * 64, status=Paper.Status.FAILED,
+        )
+        folder = self.temp / str(failed.id)
+        folder.mkdir()
+        (folder / "source.pdf").write_bytes(b"busy")
+        with mock.patch("pathlib.Path.replace", side_effect=OSError("busy")):
+            response = self.delete(f"/api/papers/{failed.id}")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("被占用", response.json()["error"])
+        self.assertTrue(Paper.objects.filter(pk=failed.pk).exists())
+        self.assertTrue(folder.exists())
+
+    def test_delete_rejects_nonfailed_and_any_task_with_publication_history(self):
+        ready = self.delete(f"/api/papers/{self.paper.id}")
+        self.assertEqual(ready.status_code, 400)
+        self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
+
+        self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        self.post(f"/api/papers/{self.paper.id}/publish")
+        Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.FAILED)
+        blocked = self.delete(f"/api/papers/{self.paper.id}")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("正式题库", blocked.json()["error"])
+        self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
+        self.assertTrue(PublishedQuestion.objects.filter(paper_id=self.paper.pk).exists())
 
     def test_text_edit_clears_text_flags_but_requires_separate_approval(self):
         data = self.post(f"/api/questions/{self.q2.id}/text", {"stem": "求证：AB=CD", "question_type": "free_response"}).json()
@@ -862,11 +1029,53 @@ class ApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_upload_creates_queued_paper(self):
+        source = self.temp / "valid-upload.pdf"
+        fake_page_pdf(source)
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}):
-            upload = io.BytesIO(b"%PDF-1.4 test")
+            upload = io.BytesIO(source.read_bytes())
             upload.name = "新卷.pdf"
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="新卷.pdf")
         self.assertEqual(paper.status, Paper.Status.QUEUED)
+        self.assertEqual(len(paper.pages), 1)
         self.assertTrue(Path(paper.source_path).is_file())
+
+    def test_upload_pdf_preflight_accepts_exactly_200_pages(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(200)]
+        upload = io.BytesIO(b"mock PDF at the supported page limit")
+        upload.name = "200页.pdf"
+        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
+                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 201, response.content)
+        paper = Paper.objects.get(filename="200页.pdf")
+        self.assertEqual(len(paper.pages), 200)
+        self.assertTrue((self.temp / str(paper.id)).is_dir())
+
+    def test_upload_pdf_preflight_rejects_201_pages_without_orphan_task_or_folder(self):
+        before_ids = set(Paper.objects.values_list("id", flat=True))
+        before_folders = {path.name for path in self.temp.iterdir() if path.is_dir()}
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
+        upload = io.BytesIO(b"mock PDF over the supported page limit")
+        upload.name = "201页.pdf"
+        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
+                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("200 页", response.json()["error"])
+        self.assertEqual(set(Paper.objects.values_list("id", flat=True)), before_ids)
+        self.assertEqual({path.name for path in self.temp.iterdir() if path.is_dir()}, before_folders)
+
+    def test_rejected_upload_cleanup_failure_leaves_only_reconcilable_staging(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
+        upload = io.BytesIO(b"mock private PDF")
+        upload.name = "稍后清理.pdf"
+        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
+                mock.patch("core.views.imaging.page_sizes", return_value=pages), \
+                mock.patch("core.views.shutil.rmtree", side_effect=OSError("busy")):
+            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Paper.objects.filter(filename="稍后清理.pdf").exists())
+        leftovers = [path.name for path in self.temp.iterdir() if path.is_dir() and path.name.startswith(".uploading-")]
+        self.assertEqual(len(leftovers), 1)

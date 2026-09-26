@@ -16,6 +16,8 @@ class Paper(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     filename = models.CharField(max_length=255)
+    # 人可修改的任务显示名；filename 始终保留最初上传的文件名，方便追溯原卷。
+    task_name = models.CharField(max_length=255, blank=True, default="")
     kind = models.CharField(max_length=8)                   # pdf | image | docx
     sha256 = models.CharField(max_length=64, db_index=True)
     source_path = models.CharField(max_length=500)           # 上传的原文件
@@ -38,6 +40,10 @@ class Paper(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+    @property
+    def display_name(self) -> str:
+        return self.task_name.strip() or self.filename
 
 
 class Block(models.Model):

@@ -47,7 +47,7 @@ class Command(BaseCommand):
             worked = False
             try:
                 for paper in Paper.objects.filter(status__in=ACTIVE).order_by("created_at"):
-                    self.stdout.write(f"处理试卷 {paper.filename}（{paper.get_status_display()}）")
+                    self.stdout.write(f"处理试卷 {paper.display_name}（{paper.get_status_display()}）")
                     sys.stdout.flush()
                     process_paper(paper)
                     worked = True

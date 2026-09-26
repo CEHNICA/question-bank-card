@@ -5,7 +5,11 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import sqlite3
+import tempfile
 import unittest
+import uuid
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import start_question_bank as launcher
@@ -92,6 +96,34 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher.urllib.request, "urlopen", return_value=Response()) as urlopen:
             self.assertEqual(launcher._running_instance(), "http://127.0.0.1:49152")
         self.assertEqual(urlopen.call_args.args[0], "http://127.0.0.1:49152/api/health")
+
+    def test_staged_storage_is_restored_or_cleaned_from_database_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_root = root / "data"
+            data_root.mkdir()
+            database = root / "db.sqlite3"
+            kept_id, deleted_id = uuid.uuid4(), uuid.uuid4()
+            with contextlib.closing(sqlite3.connect(database)) as connection:
+                connection.execute("CREATE TABLE core_paper (id char(32) PRIMARY KEY)")
+                connection.execute("INSERT INTO core_paper (id) VALUES (?)", (kept_id.hex,))
+                connection.commit()
+
+            staged_kept = data_root / f".deleting-{kept_id}-{uuid.uuid4().hex}"
+            staged_deleted = data_root / f".deleting-{deleted_id}-{uuid.uuid4().hex}"
+            staged_upload = data_root / f".uploading-{uuid.uuid4()}-{uuid.uuid4().hex}"
+            unrelated = data_root / ".deleting-not-a-paper"
+            for path in (staged_kept, staged_deleted, staged_upload, unrelated):
+                path.mkdir()
+                (path / "source.pdf").write_bytes(b"test")
+
+            with patch.object(launcher, "DATA_ROOT", data_root), patch.object(launcher, "DATABASE", database):
+                self.assertEqual(launcher._reconcile_staged_storage(), (1, 2))
+
+            self.assertTrue((data_root / str(kept_id) / "source.pdf").is_file())
+            self.assertFalse(staged_deleted.exists())
+            self.assertFalse(staged_upload.exists())
+            self.assertTrue(unrelated.is_dir())
 
 
 if __name__ == "__main__":

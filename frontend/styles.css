@@ -183,7 +183,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 /* ---------------------------------------------------------------- 试卷头 */
 .paper-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px 24px; flex-wrap: wrap; }
 .paper-title { min-width: 0; flex: 1 1 360px; }
-.paper-title h2 { font-size: 21px; font-weight: 700; letter-spacing: .01em; line-height: 1.35; }
+.paper-name-row { display: flex; align-items: center; gap: 6px 10px; min-width: 0; flex-wrap: wrap; }
+.paper-title h2 { min-width: 0; font-size: 21px; font-weight: 700; letter-spacing: .01em; line-height: 1.35; overflow-wrap: anywhere; }
+.rename-paper { min-height: 28px; padding-inline: 8px; color: var(--muted); flex: none; }
 .paper-status { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
 .paper-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .paper-actions .button { min-height: 38px; padding-inline: 16px; }
@@ -212,6 +214,8 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .done-banner span { display: inline-flex; align-items: center; gap: 8px; }
 .paper-error { margin-top: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--red-soft); border: 1px solid var(--red-line); color: var(--red);
   display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.paper-error > span { min-width: 0; line-height: 1.55; }
+.error-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .progress { margin-top: 14px; height: 6px; border-radius: 99px; background: var(--bg-sunken); overflow: hidden; }
 .progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #34917f); border-radius: 99px; transition: width .4s; }
 .progress.indeterminate span { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
@@ -447,6 +451,11 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
 .confirm-text { grid-column: 2; font-size: 13.5px; color: var(--ink-2); line-height: 1.7; white-space: pre-line; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px 20px; }
 .confirm-dialog.danger .button.primary { background: var(--red); border-color: var(--red); }
+.rename-dialog { width: min(540px, 92vw); }
+.rename-body { display: grid; gap: 10px; padding: 20px 24px 2px; }
+.rename-body .field { font-size: 13px; }
+.rename-body input { min-height: 40px; font-size: 15px; }
+.rename-original { color: var(--muted); font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
 .keys-dialog { width: min(560px, 94vw); }
 .keys-body { padding: 8px 22px 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 .keys-body h4 { grid-column: 1 / -1; margin: 14px 0 4px; font-size: 12px; color: var(--muted); letter-spacing: .06em; }
@@ -523,6 +532,9 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
   .toolbar { position: static; margin-top: 12px; }
   .paper-actions { width: 100%; }
   .paper-actions .button { flex: 1 1 150px; }
+  .paper-error { align-items: flex-start; flex-direction: column; }
+  .error-actions { align-self: stretch; }
+  .error-actions .button { flex: 1; }
   .filters { width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .filter { flex: 0 0 auto; }
   .empty-steps { grid-template-columns: 1fr; }
@@ -537,6 +549,8 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
   .compact-row .chip { display: none; }
   .qb-options.cols-2, .qb-options.cols-4 { grid-template-columns: 1fr; }
   .dialog-head, .page-tabs { padding-inline: 14px; }
+  .rename-body { padding-inline: 14px; }
+  .rename-dialog .confirm-actions { padding-inline: 14px; }
   .page-stage { padding-inline: 12px; }
   .to-top { right: 12px; bottom: 12px; }
   .viewer-source, .viewer-text { padding: 14px; }

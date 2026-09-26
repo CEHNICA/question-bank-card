@@ -8,6 +8,8 @@ import getpass
 import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import socket
 import subprocess
@@ -43,6 +45,14 @@ MIGRATION_MARKER = RUNTIME / ".migration-schema.sha256"
 BACKUPS = USER_ROOT / "backups"
 PREFERRED_PORT = 8768
 SECRET_NAMES = {"MINERU_TOKEN", "MINIMAX_API_KEY", "SILICONFLOW_API_KEY"}
+STAGED_DELETE_NAME = re.compile(
+    r"^\.deleting-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
+    re.IGNORECASE,
+)
+STAGED_UPLOAD_NAME = re.compile(
+    r"^\.uploading-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
+    re.IGNORECASE,
+)
 
 
 def _child_environment(
@@ -202,7 +212,46 @@ def _prepare() -> None:
     _run_step(_service_command("migrate", "--noinput"), "检查本地数据")
     RUNTIME.mkdir(parents=True, exist_ok=True)
     MIGRATION_MARKER.write_text(migration_hash, encoding="ascii")
+    _reconcile_staged_storage()
     _relocate_local_paths()
+
+
+def _reconcile_staged_storage() -> tuple[int, int]:
+    """按数据库状态恢复或清理上传/删除流程留下的暂存目录。"""
+    if not DATA_ROOT.is_dir() or not DATABASE.is_file():
+        return 0, 0
+    try:
+        with contextlib.closing(sqlite3.connect(f"file:{DATABASE.as_posix()}?mode=ro", uri=True)) as connection:
+            paper_ids = {str(uuid.UUID(str(row[0]))) for row in connection.execute("SELECT id FROM core_paper")}
+    except (sqlite3.Error, ValueError):
+        # 数据库状态不明确时不碰任何暂存文件，避免把仍有记录的原卷误删。
+        return 0, 0
+
+    restored = removed = 0
+    staged_paths = [*DATA_ROOT.glob(".deleting-*"), *DATA_ROOT.glob(".uploading-*")]
+    for staged in sorted(staged_paths):
+        match = STAGED_DELETE_NAME.fullmatch(staged.name) or STAGED_UPLOAD_NAME.fullmatch(staged.name)
+        if match is None or staged.is_symlink() or not staged.is_dir():
+            continue
+        paper_id = str(uuid.UUID(match.group(1)))
+        canonical = DATA_ROOT / paper_id
+        if paper_id in paper_ids:
+            if canonical.exists():
+                continue
+            try:
+                staged.replace(canonical)
+            except OSError:
+                continue
+            restored += 1
+        else:
+            try:
+                shutil.rmtree(staged)
+            except OSError:
+                continue
+            removed += 1
+    if restored or removed:
+        print(f"恢复未完成的任务文件操作：还原 {restored} 项，清理 {removed} 项", flush=True)
+    return restored, removed
 
 
 def _migration_fingerprint() -> str:

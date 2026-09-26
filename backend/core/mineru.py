@@ -17,6 +17,10 @@ from .models import Paper
 
 API_ROOT = "https://mineru.net/api/v4"
 MAX_ZIP_BYTES = 250 * 1024 * 1024
+# 当前产品内 API 管理文档对精准解析 API 标明的上限：
+# https://mineru.net/apiManage/docs?openApplyModal=true
+# 集中在这里，便于官方调整后更新。
+MAX_PDF_PAGES = 200
 logger = logging.getLogger(__name__)
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
@@ -28,7 +32,7 @@ ERROR_HINTS = {
     "-60002": "文件格式识别失败，请检查文件类型",
     "-60003": "云端读取文件失败，请检查文件是否损坏后重试",
     "-60005": "文件超过 MinerU 的大小限制",
-    "-60006": "文件超过 MinerU 的页数限制，请拆分后重试",
+    "-60006": "MinerU 返回页数超限；当前精准解析 API 文档标明最多 200 页，请拆分成较小的 PDF 后重试",
     "-60007": "MinerU 模型服务暂时不可用，请稍后重试",
     "-60009": "MinerU 任务队列已满，请稍后重试",
     "-60010": "MinerU 解析失败，请稍后重试",
@@ -38,6 +42,18 @@ ERROR_HINTS = {
 
 class MineruError(RuntimeError):
     pass
+
+
+def page_limit_message(page_count: int, subject: str = "这份文件") -> str:
+    return (
+        f"{subject}共 {page_count} 页，超过 MinerU 精准解析 API 当前最多 {MAX_PDF_PAGES} 页的限制。"
+        f"请先拆成每份不超过 {MAX_PDF_PAGES} 页的 PDF，再分别上传。"
+    )
+
+
+def validate_page_count(page_count: int, subject: str = "这份文件") -> None:
+    if page_count > MAX_PDF_PAGES:
+        raise MineruError(page_limit_message(page_count, subject))
 
 
 def _safe_error_code(value: object) -> str:
@@ -51,13 +67,30 @@ def _safe_trace_id(value: object) -> str:
     return value if isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{32}", value) else ""
 
 
+def _is_page_limit_error(value: object) -> bool:
+    """只对白名单特征分类，绝不把远端 err_msg 原样显示给用户。"""
+    if not isinstance(value, str) or len(value) > 1000:
+        return False
+    message = value.casefold()
+    english = "page" in message and any(word in message for word in ("limit", "exceed", "too many"))
+    chinese = "页" in message and any(word in message for word in ("限制", "超过", "超出", "过多"))
+    return english or chinese
+
+
 def _error_message(stage: str, result: dict | None, status: int | None = None) -> str:
     # Never include response text, remote error messages, signed URLs or tokens.
     result = result if isinstance(result, dict) else {}
     code = _safe_error_code(result.get("code"))
     trace_id = _safe_trace_id(result.get("trace_id"))
-    if code:
-        hint = ERROR_HINTS.get(code, "MinerU 拒绝了本次请求，请核对 API 配置")
+    if code == "-60006":
+        # 云端限额可能先于本文档更新，不能把本地页数与旧上限拼成逻辑矛盾的句子。
+        hint = ERROR_HINTS["-60006"]
+    elif code in ERROR_HINTS:
+        hint = ERROR_HINTS[code]
+    elif _is_page_limit_error(result.get("err_msg")):
+        hint = ERROR_HINTS["-60006"]
+    elif code:
+        hint = "MinerU 拒绝了本次请求，请核对 API 配置"
     elif status in {401, 403}:
         hint = "Token 无效、过期或没有接口权限，请在 MinerU API 管理页核对"
     elif status == 429:
@@ -133,6 +166,7 @@ def _download_zip(session: requests.Session, url: str, target: Path) -> None:
 
 def request_extract(paper: Paper, token: str, source: Path) -> Path:
     """调用 MinerU 云端接口。不保存上传地址、下载地址和授权头。"""
+    validate_page_count(len(paper.pages))
     target = Path(paper.source_path).parent / "mineru_result.zip"
     with requests.Session() as session:
         batch = _api_json(session, token, "file-urls/batch",
@@ -162,7 +196,10 @@ def request_extract(paper: Paper, token: str, source: Path) -> Path:
                 _download_zip(session, url, target)
                 return target
             if state == "failed":
-                raise MineruError(_error_message("解析", {"code": task.get("err_code")}))
+                raise MineruError(_error_message("解析", {
+                    "code": task.get("err_code"),
+                    "err_msg": task.get("err_msg"),
+                }))
             time.sleep(5)
     raise MineruError("MinerU 解析超时")
 

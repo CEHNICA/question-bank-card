@@ -84,7 +84,10 @@
       <section id="paperView" hidden>
         <div class="paper-head">
           <div class="paper-title">
-            <h2 id="paperName"></h2>
+            <div class="paper-name-row">
+              <h2 id="paperName"></h2>
+              <button id="renamePaper" class="button quiet small rename-paper" type="button">修改名称</button>
+            </div>
             <p id="paperStatus" class="paper-status"></p>
           </div>
           <div class="paper-actions">
@@ -231,6 +234,28 @@
       <div class="confirm-actions">
         <button class="button" value="cancel" type="submit">取消</button>
         <button id="confirmOk" class="button primary" value="ok" type="submit">确定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="renameDialog" class="rename-dialog" aria-labelledby="renameTitle">
+    <form id="renameForm">
+      <div class="dialog-head">
+        <div>
+          <h3 id="renameTitle">修改任务名称</h3>
+          <p class="hint">新名称会同步到这份任务下所有题目的来源；原始文件名不会改变。</p>
+        </div>
+      </div>
+      <div class="rename-body">
+        <label class="field" for="renameInput">
+          <span>任务名称</span>
+          <input id="renameInput" name="name" type="text" maxlength="255" autocomplete="off" required>
+        </label>
+        <p id="renameOriginal" class="rename-original"></p>
+      </div>
+      <div class="confirm-actions">
+        <button class="button" type="button" data-close>取消</button>
+        <button id="renameSave" class="button primary" type="submit">保存名称</button>
       </div>
     </form>
   </dialog>

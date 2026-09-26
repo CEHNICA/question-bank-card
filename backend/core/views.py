@@ -6,6 +6,7 @@ import math
 import os
 import re
 import shutil
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from PIL import Image
 
-from . import library, m3import, photos, readers
+from . import imaging, library, m3import, mineru, photos, readers
 from .models import Paper, PublishedQuestion, Question
 from .pipeline import (FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, PageStore, candidates_in, figure_flag,
                        reorder_photo_pages)
@@ -88,12 +89,24 @@ def _file(path: Path, content_type: str):
     return FileResponse(path.open("rb"), content_type=content_type)
 
 
+def _valid_paper_name(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if not name or len(name) > 255:
+        return None
+    if any(unicodedata.category(char) in {"Cc", "Cs", "Zl", "Zp"} for char in name):
+        return None
+    return name
+
+
 # ---------------------------------------------------------------- JSON
 
 def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
     info = paper.photos or {}
     data = {
-        "id": str(paper.id), "filename": paper.filename, "kind": paper.kind, "status": paper.status,
+        "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
+        "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "status_label": Paper.Status(paper.status).label, "progress": paper.progress, "total": paper.total,
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "pages_version": photos.order_version(info),
@@ -241,13 +254,47 @@ def papers(request):
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     paper = Paper(filename=Path(upload.name).name[:255], kind=kind, sha256=digest.hexdigest())
     folder = settings.DATA_ROOT / str(paper.id)
-    folder.mkdir(parents=True, exist_ok=False)
-    target = folder / f"source{suffix}"
+    staged = settings.DATA_ROOT / f".uploading-{paper.id}-{uuid.uuid4().hex}"
+    staged.mkdir(parents=True, exist_ok=False)
+    target = staged / f"source{suffix}"
     with target.open("wb") as output:
         for chunk in upload.chunks():
             output.write(chunk)
-    paper.source_path = str(target)
-    paper.save()
+    if kind == "pdf":
+        try:
+            pages = imaging.page_sizes(target, "pdf")
+            if not pages:
+                raise ValueError("empty pdf")
+            mineru.validate_page_count(len(pages), "这份 PDF")
+        except mineru.MineruError as exc:
+            try:
+                shutil.rmtree(staged)
+            except OSError:
+                pass  # 下次启动会按 .uploading-* 规则继续清理。
+            return _error(str(exc))
+        except Exception:
+            try:
+                shutil.rmtree(staged)
+            except OSError:
+                pass  # 下次启动会按 .uploading-* 规则继续清理。
+            return _error("这份 PDF 无法打开或没有有效页面，请检查文件后重试")
+        paper.pages = pages
+    try:
+        staged.replace(folder)
+        paper.source_path = str(folder / target.name)
+        paper.save()
+    except Exception:
+        if folder.exists() and not staged.exists():
+            try:
+                folder.replace(staged)
+            except OSError:
+                pass
+        cleanup = staged if staged.exists() else folder
+        try:
+            shutil.rmtree(cleanup)
+        except OSError:
+            pass
+        raise
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
@@ -326,10 +373,62 @@ def paper_page_order(request, paper_id):
     return JsonResponse({"paper": paper_json(paper), "changed": True})
 
 
+@csrf_exempt
 def paper_detail(request, paper_id):
-    if request.method != "GET":
-        return HttpResponseNotAllowed(["GET"])
     paper = get_object_or_404(Paper, pk=paper_id)
+    if request.method == "PATCH":
+        rejected = _guard(request)
+        if rejected:
+            return rejected
+        payload = _body(request)
+        name = _valid_paper_name(payload.get("name") if payload is not None else None)
+        if name is None:
+            return _error("任务名需为 1–255 个字符，且不能包含换行或控制字符")
+        paper, changed = library.rename_paper(paper, name)
+        return JsonResponse({"paper": paper_json(paper), "changed": changed})
+    if request.method == "DELETE":
+        rejected = _guard(request, json_body=False)
+        if rejected:
+            return rejected
+        paper_id_text = str(paper.id)
+        data_root = settings.DATA_ROOT.resolve()
+        folder = (data_root / paper_id_text).resolve()
+        if folder.parent != data_root:
+            return _error("任务文件位置不安全，未执行删除", 500)
+        staged = data_root / f".deleting-{paper_id_text}-{uuid.uuid4().hex}"
+        try:
+            with transaction.atomic():
+                paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+                if paper.status != Paper.Status.FAILED:
+                    return _error("只有处理失败的任务可以删除")
+                if paper.publications.exists():
+                    return _error("这项任务已有正式题库记录，为保留来源追溯不能删除")
+                if folder.exists():
+                    folder.replace(staged)
+                paper.delete()
+        except OSError:
+            if staged.exists() and not folder.exists():
+                try:
+                    staged.replace(folder)
+                except OSError:
+                    pass
+            return _error("任务文件正在被占用，暂时无法删除；请关闭正在查看的原卷后再试")
+        except Exception:
+            if staged.exists() and not folder.exists():
+                try:
+                    staged.replace(folder)
+                except OSError:
+                    pass
+            raise
+        warning = ""
+        if staged.exists():
+            try:
+                shutil.rmtree(staged)
+            except OSError:
+                warning = "任务已删除，但有残留文件暂时被占用；关闭程序并重新启动后会继续清理"
+        return JsonResponse({"deleted": paper_id_text, "warning": warning})
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
     return JsonResponse({"paper": paper_json(paper),
                          "questions": [question_json(q) for q in paper.questions.all()]})
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import re
@@ -15,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import imaging
-from .models import PublishedQuestion, Question
+from .models import Paper, PublishedQuestion, Question
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
 OPTION_KEYS = ("A", "B", "C", "D")
@@ -58,7 +59,7 @@ def final_content(question: Question) -> dict:
             for r in question.regions
         ],
         "document_id": str(question.paper_id),
-        "source_filename": question.paper.filename,
+        "source_filename": question.paper.display_name,
         # 审核记录随不可变快照保存，但不参与内容版本哈希；相同内容重复点击入库不会制造新版本。
         "review": {
             "state": question.state,
@@ -138,6 +139,10 @@ def _search_text(content: dict) -> str:
 def publish(question: Question) -> tuple[PublishedQuestion, bool]:
     """入库一题。内容没变就不重复生成版本。返回 (快照, 是否新建)。"""
     with transaction.atomic():
+        try:
+            paper = Paper.objects.select_for_update().get(pk=question.paper_id)
+        except Paper.DoesNotExist:
+            raise ValueError("这份试卷任务已删除，不能再入库") from None
         question = Question.objects.select_for_update().select_related("paper").get(pk=question.pk)
         if not question.approved:
             raise ValueError(f"第 {question.number} 题还没有通过终审")
@@ -162,8 +167,8 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 figure["file"] = name
                 figure["url"] = f"/api/library/{publication_id}/figures/{name}"
             publication = PublishedQuestion.objects.create(
-                id=publication_id, question=question, paper=question.paper,
-                source_filename=question.paper.filename, number=question.number,
+                id=publication_id, question=question, paper=paper,
+                source_filename=paper.display_name, number=question.number,
                 question_type=question.question_type, version=(latest.version if latest else 0) + 1,
                 content=content, content_hash=digest, search_text=_search_text(content),
             )
@@ -173,6 +178,55 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             shutil.rmtree(folder, ignore_errors=True)
             raise
     return publication, True
+
+
+def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
+    """修改任务显示名，并同步所有草稿审批与正式题来源标签。
+
+    filename 始终保留原上传文件名。任务名属于来源元数据；重命名不会新建题目版本，
+    也不会把原本已经失效的人工审批重新变成有效。
+    """
+    with transaction.atomic():
+        paper = Paper.objects.select_for_update().get(pk=paper.pk)
+        old_name = paper.display_name
+        if name == old_name:
+            return paper, False
+
+        questions = list(
+            Question.objects.select_for_update().select_related("paper").filter(paper=paper)
+        )
+        current_approval_ids = [question.pk for question in questions if approval_is_current(question)]
+        publications = list(PublishedQuestion.objects.select_for_update().filter(paper=paper))
+
+        # 输入恢复为原文件名时不保存一份重复值。
+        paper.task_name = "" if name == paper.filename else name
+        paper.save(update_fields=["task_name", "updated_at"])
+
+        if current_approval_ids:
+            approved_questions = list(
+                Question.objects.select_related("paper").filter(pk__in=current_approval_ids)
+            )
+            for question in approved_questions:
+                question.approved_content_hash = approval_hash(question)
+            Question.objects.bulk_update(approved_questions, ["approved_content_hash"])
+
+        for publication in publications:
+            old_hash = publication.content_hash
+            content = deepcopy(publication.content)
+            content["source_filename"] = paper.display_name
+            new_hash = content_hash(content)
+            review = content.get("review")
+            if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:
+                review["approved_content_hash"] = new_hash
+            publication.source_filename = paper.display_name
+            publication.content = content
+            publication.content_hash = new_hash
+            publication.search_text = _search_text(content)
+        if publications:
+            PublishedQuestion.objects.bulk_update(
+                publications, ["source_filename", "content", "content_hash", "search_text"]
+            )
+    return paper, True
 
 
 def publication_state(question: Question) -> dict | None:
