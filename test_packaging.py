@@ -102,6 +102,9 @@ class DistributionLicenseTests(unittest.TestCase):
     def test_build_and_installer_ship_license_materials(self):
         build = (self.ROOT / "packaging" / "build.ps1").read_text(encoding="utf-8")
         installer = (self.ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
+        source_template = (self.ROOT / "packaging" / "CORRESPONDING_SOURCE.template.txt").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("$ThirdPartyLicenses", build)
         self.assertIn("Copy-Item -LiteralPath $ProjectLicense", build)
         self.assertIn("LicenseFile=..\\LICENSE", installer)
@@ -111,9 +114,14 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertIn("[System.Text.UTF8Encoding]::new($false)", build)
         self.assertNotIn("-Encoding ascii", build)
         self.assertIn("CORRESPONDING_SOURCE.txt", build)
-        self.assertIn("releases/tag/v${Version}", build)
-        self.assertIn("5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249", build)
-        self.assertIn("44075a84e329db55b9bef5f342a70fd26d69e48ad1d33cb89d9664581c641156", build)
+        self.assertIn("CORRESPONDING_SOURCE.template.txt", build)
+        self.assertIn("[System.Text.UTF8Encoding]::new($false, $true)", build)
+        self.assertIn("题库题卡版 {{VERSION}}——对应源码", source_template)
+        self.assertIn("releases/tag/v{{VERSION}}", source_template)
+        self.assertIn("question-bank-card-{{VERSION}}-source.zip", source_template)
+        self.assertIn("5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249", source_template)
+        self.assertIn("44075a84e329db55b9bef5f342a70fd26d69e48ad1d33cb89d9664581c641156", source_template)
+        self.assertNotIn("é¢˜", source_template)
 
 
 class Utf8ChildProcessTests(unittest.TestCase):

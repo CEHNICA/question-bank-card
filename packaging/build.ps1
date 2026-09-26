@@ -204,25 +204,21 @@ Copy-Item -LiteralPath (Join-Path $PackagingRoot 'INSTALLATION-NOTICE.txt') -Des
 Copy-Item -LiteralPath (Join-Path $PackagingRoot 'THIRD_PARTY_NOTICES.txt') -Destination $BundleRoot -Force
 Copy-Item -LiteralPath $ProjectLicense -Destination $BundleRoot -Force
 Copy-Item -LiteralPath $ThirdPartyLicenses -Destination $BundleRoot -Recurse -Force
-$correspondingSource = @"
-题库题卡版 ${Version}——对应源码
-================================
-
-本安装包对应的第一方源码、PyMuPDF 1.28.2 源码和 MuPDF 1.28.2 源码位于：
-https://github.com/CEHNICA/question-bank-card/releases/tag/v${Version}
-
-下载文件：
-- question-bank-card-${Version}-source.zip
-- pymupdf-1.28.2.tar.gz
-  SHA-256: 5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249
-- mupdf-1.28.2-source.tar.gz
-  SHA-256: 44075a84e329db55b9bef5f342a70fd26d69e48ad1d33cb89d9664581c641156
-- third-party-licenses-${Version}.zip
-- SHA256SUMS.txt
-
-项目许可证全文见 LICENSE，第三方许可证见 THIRD_PARTY_LICENSES。
-"@
-Set-Content -LiteralPath (Join-Path $BundleRoot 'CORRESPONDING_SOURCE.txt') -Value $correspondingSource -Encoding utf8
+$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+$correspondingSourceTemplate = Join-Path $PackagingRoot 'CORRESPONDING_SOURCE.template.txt'
+$correspondingSource = $strictUtf8.GetString(
+    [System.IO.File]::ReadAllBytes($correspondingSourceTemplate)
+).Replace('{{VERSION}}', $Version)
+$correspondingSourcePath = Join-Path $BundleRoot 'CORRESPONDING_SOURCE.txt'
+[System.IO.File]::WriteAllText($correspondingSourcePath, $correspondingSource, $strictUtf8)
+$writtenCorrespondingSource = $strictUtf8.GetString(
+    [System.IO.File]::ReadAllBytes($correspondingSourcePath)
+)
+if ($writtenCorrespondingSource -ne $correspondingSource -or
+        $writtenCorrespondingSource -notmatch [regex]::Escape("releases/tag/v${Version}") -or
+        $writtenCorrespondingSource -notmatch [regex]::Escape("question-bank-card-${Version}-source.zip")) {
+    throw 'CORRESPONDING_SOURCE.txt failed its UTF-8 or version-substitution check.'
+}
 
 Write-Host "[4/6] Auditing the bundle for private data and runtime files..."
 Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot)
