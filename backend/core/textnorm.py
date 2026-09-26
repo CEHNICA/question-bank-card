@@ -1,0 +1,130 @@
+"""题面文字的规范化：判断两次识读是否"说的是同一件事"。
+
+只用于比较，不改动保存的文字。空格、全半角、$ 与花括号、\\dfrac/\\frac、
+\\vec/\\overrightarrow、\\le/\\leqslant 这类写法差异都视为相同。
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+
+SYMBOLS = {
+    "angle": "∠", "parallel": "∥", "perp": "⊥", "bot": "⊥", "triangle": "△", "bigtriangleup": "△",
+    "times": "×", "div": "÷", "cdot": "·", "pm": "±", "mp": "∓", "le": "≤", "leq": "≤", "leqslant": "≤",
+    "leqq": "≤", "ge": "≥", "geq": "≥", "geqslant": "≥", "geqq": "≥", "ne": "≠", "neq": "≠",
+    "approx": "≈", "equiv": "≡", "cong": "≅", "sim": "∽", "backsim": "∽", "pi": "π", "infty": "∞",
+    "in": "∈", "notin": "∉", "subset": "⊂", "subseteq": "⊆", "subsetneqq": "⊊", "supset": "⊃",
+    "supseteq": "⊇", "cup": "∪", "cap": "∩", "emptyset": "∅", "varnothing": "∅", "forall": "∀",
+    "exists": "∃", "neg": "¬", "because": "∵", "therefore": "∴", "circ": "°", "degree": "°",
+    "prime": "'", "cdots": "…", "ldots": "…", "dots": "…", "mid": "|", "vert": "|", "lvert": "|",
+    "rvert": "|", "rightarrow": "→", "to": "→", "Rightarrow": "⇒", "Leftrightarrow": "⇔",
+    "square": "□", "Box": "□", "lbrace": "{", "rbrace": "}", "{": "{", "}": "}",
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε",
+    "theta": "θ", "lambda": "λ", "mu": "μ", "rho": "ρ", "sigma": "σ", "tau": "τ", "phi": "φ",
+    "varphi": "φ", "omega": "ω", "Delta": "Δ", "Omega": "Ω", "odot": "⊙", "boldsymbol": "",
+    "mathbb": "", "mathrm": "", "mathbf": "", "mathit": "", "text": "", "textbf": "", "operatorname": "",
+    "overrightarrow": "→", "vec": "→", "dfrac": "frac", "tfrac": "frac",
+}
+PUNCT = {"。": ".", "．": ".", "，": ",", "：": ":", "；": ";", "、": ",", "“": '"', "”": '"', "‘": "'",
+         "’": "'", "（": "(", "）": ")", "【": "[", "】": "]", "－": "-", "−": "-", "–": "-", "—": "-",
+         "～": "~", "∶": ":", "﹒": ".", "▱": "□", "丄": "⊥", "⩽": "≤", "⩾": "≥", "≦": "≤", "≧": "≥"}
+SPACING = re.compile(r"\\(?:left|right|big|Big|bigg|Bigg|displaystyle|textstyle|limits|nolimits|quad|qquad)(?![A-Za-z])|\\[,;:! ]")
+COMMAND = re.compile(r"\\([A-Za-z]+|[{}])")
+SCORE = re.compile(r"[(（]\s*\d{1,2}\s*分\s*[)）]")
+BLANK = re.compile(r"_{2,}|\\underline\{\s*(?:\\quad|\\qquad|~|\s)*\}|(?:\\_)+")
+
+
+def canon(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = SCORE.sub("", text)
+    text = BLANK.sub("_", text)
+    text = SPACING.sub("", text)
+    text = COMMAND.sub(lambda m: SYMBOLS.get(m.group(1), "\\" + m.group(1)), text)
+    text = "".join(PUNCT.get(ch, ch) for ch in text)
+    text = text.replace("//", "∥").replace("^\\circ", "°").replace("^°", "°")
+    text = re.sub(r"[\s$\\{}]", "", text)
+    text = re.sub(r"\(\)|\[\]", "()", text)
+    return text.rstrip(".,;:")
+
+
+def same_reading(first: dict, second: dict) -> bool:
+    if canon(first.get("stem", "")) != canon(second.get("stem", "")):
+        return False
+    keys = set(first.get("options") or {}) | set(second.get("options") or {})
+    return all(canon((first.get("options") or {}).get(k, "")) == canon((second.get("options") or {}).get(k, ""))
+               for k in keys)
+
+
+# 平行四边形符号 ▱：模型有时写成 \square、\Box、\parallelogram 或方框字符。
+# 只在后面紧跟 2–5 个顶点字母（如 ABCD）时才改；填空框和运算中的 \square 不动。
+_PARALLELOGRAM_TOKEN = (
+    r"(?:\\(?:square|Box|parallelogram)(?![A-Za-z])|[□◻⬜]|"
+    r"\\(?:text|mathrm|mathbf)\{\s*(?:[□◻⬜▱]|\\(?:square|Box|parallelogram)(?![A-Za-z]))\s*\})"
+)
+_VERTICES = r"((?:[A-Z]\s*){2,5})"
+_TOKEN_BEFORE_VERTICES = re.compile(
+    _PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?(?=(?:[A-Z]\s*){2})"
+)
+_ONLY_PARALLELOGRAM = re.compile(
+    r"^\s*" + _PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?" + _VERTICES + r"\s*$"
+)
+_MATH_SPAN = re.compile(r"(?<!\\)(\${1,2})(.*?)(?<!\\)\1", re.S)
+_TOKEN_BEFORE_MATH_VERTICES = re.compile(
+    _PARALLELOGRAM_TOKEN + r"\s*(?=\$\s*(?:[A-Z]\s*){2,5}\$)"
+)
+
+
+def fix_symbols(value: str) -> str:
+    """把误写的平行四边形方框改回 ▱；原始填空框及乘法占位符保持不变。"""
+    text = str(value or "")
+    # □$ABCD$ 这类符号和顶点被分别包裹的写法先处理。
+    text = _TOKEN_BEFORE_MATH_VERTICES.sub("▱", text)
+    result: list[str] = []
+    start = 0
+    for match in _MATH_SPAN.finditer(text):
+        result.append(_TOKEN_BEFORE_VERTICES.sub("▱", text[start:match.start()]))
+        delimiter, body = match.group(1), match.group(2)
+        whole = _ONLY_PARALLELOGRAM.fullmatch(body)
+        if whole:
+            result.append("▱" + re.sub(r"\s+", "", whole.group(1)))
+        else:
+            body = _TOKEN_BEFORE_VERTICES.sub(r"\\text{▱}", body)
+            result.append(f"{delimiter}{body}{delimiter}")
+        start = match.end()
+    result.append(_TOKEN_BEFORE_VERTICES.sub("▱", text[start:]))
+    return "".join(result)
+
+
+def fix_reading_symbols(value: dict) -> dict:
+    """规范结构化识读结果；保留 raw 原文，便于追查模型当时实际返回了什么。"""
+    if not isinstance(value, dict):
+        return value
+    fixed = dict(value)
+    if isinstance(fixed.get("stem"), str):
+        fixed["stem"] = fix_symbols(fixed["stem"])
+    if isinstance(fixed.get("options"), dict):
+        fixed["options"] = {
+            key: fix_symbols(option) if isinstance(option, str) else option
+            for key, option in fixed["options"].items()
+        }
+    return fixed
+
+
+NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s*[.．、]\s*")
+
+
+def clean_stem(stem: str, number: int | None = None) -> str:
+    """去掉模型偶尔带上的题号和分值。"""
+    text = str(stem or "").strip()
+    match = NUMBER_PREFIX.match(text)
+    if match and (number is None or int(match.group(1)) == number):
+        text = text[match.end():]
+    text = re.sub(r"^\s*[(（]\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
+    return text.strip()
+
+
+def clean_option(value: str, key: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(rf"^\s*{key}\s*[.．、:：]\s*", "", text)
+    return text.strip()

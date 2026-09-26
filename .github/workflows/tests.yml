@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.lock.txt
+      - name: Test desktop launcher
+        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging
+      - name: Test backend
+        working-directory: backend
+        run: python manage.py test core.tests core.test_photos core.test_resilience
+      - name: Test frontend rendering
+        run: node frontend/test_qb_render.js

@@ -1,0 +1,248 @@
+"""窗口版启动器与桌面图标工具的离线测试：不联网、不启动真实浏览器或服务。"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import app_window
+import create_shortcut
+
+
+class DirectSplash:
+    """测试用启动画面：直接在当前线程执行。"""
+
+    def __init__(self):
+        self.messages = []
+
+    def say(self, text):
+        self.messages.append(text)
+
+    def run(self, work):
+        return work(self)
+
+
+class CredentialTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_ready_needs_both_services_even_if_skipped(self):
+        self.assertFalse(app_window.credentials_ready({"mineru_token": "", "minimax_key": ""}))
+        self.assertTrue(app_window.credentials_ready({"mineru_token": "m", "minimax_key": "k"}))
+        self.assertFalse(app_window.credentials_ready({"mineru_token": "m"}))
+        self.assertFalse(app_window.credentials_ready({"minimax_key": "k"}))
+
+    def test_invalid_saved_token_goes_to_console(self):
+        with patch.object(app_window, "load_credentials", return_value={"mineru_token": "bad", "minimax_key": "k"}), \
+                patch.object(app_window.launcher, "_mineru_token_validity", return_value=False):
+            with self.assertRaises(app_window.NeedsConsole):
+                app_window.resolve_credentials_quietly()
+
+    def test_invalid_environment_token_falls_back_to_saved(self):
+        validity = {"env-bad": False, "saved-good": True}
+        with patch.dict(os.environ, {"MINERU_TOKEN": "Bearer env-bad"}), \
+                patch.object(app_window, "load_credentials", return_value={"mineru_token": "saved-good", "minimax_key": "k\\_1"}), \
+                patch.object(app_window.launcher, "_mineru_token_validity", side_effect=lambda t: validity[t]):
+            self.assertEqual(app_window.resolve_credentials_quietly(), ("saved-good", "k_1"))
+
+    def test_offline_check_does_not_block_start(self):
+        with patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok", "minimax_key": "k"}), \
+                patch.object(app_window.launcher, "_mineru_token_validity", return_value=None):
+            self.assertEqual(app_window.resolve_credentials_quietly(), ("tok", "k"))
+
+    def test_minimax_only_in_environment_is_not_used_silently(self):
+        with patch.dict(os.environ, {"MINIMAX_API_KEY": "env-key"}), \
+                patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok"}):
+            self.assertFalse(app_window.credentials_ready())
+
+
+class WindowTests(unittest.TestCase):
+    def test_edge_is_preferred_and_profile_stays_outside_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            edge = base / "x86" / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+            chrome = base / "pf" / "Google" / "Chrome" / "Application" / "chrome.exe"
+            for exe in (edge, chrome):
+                exe.parent.mkdir(parents=True)
+                exe.write_bytes(b"")
+            env = {"PROGRAMFILES(X86)": str(base / "x86"), "PROGRAMFILES": str(base / "pf"), "LOCALAPPDATA": str(base / "local")}
+            with patch.dict(os.environ, env), patch.object(app_window, "_registry_app_paths", return_value=[]):
+                self.assertEqual(app_window.browser_candidates(), [edge, chrome])
+                profile = app_window.window_profile()
+            self.assertTrue(str(profile).startswith(str(base / "local")))
+            self.assertNotIn(str(app_window.ROOT), str(profile))
+            state = json.loads((profile / "Local State").read_text(encoding="utf-8"))
+            self.assertIs(state["background_mode"]["enabled"], False)
+            command = app_window.window_command(edge, "http://127.0.0.1:8768", profile)
+            self.assertIn("--app=http://127.0.0.1:8768", command)
+            self.assertIn(f"--user-data-dir={profile}", command)
+
+    def test_no_browser_falls_back_to_default_browser(self):
+        with patch.object(app_window, "browser_candidates", return_value=[]), \
+                patch.object(app_window.webbrowser, "open_new_tab") as opened:
+            self.assertIsNone(app_window.open_window("http://127.0.0.1:8768"))
+        opened.assert_called_once_with("http://127.0.0.1:8768")
+
+
+class MainFlowTests(unittest.TestCase):
+    def patches(self, **extra):
+        base = {
+            "os": SimpleNamespace(name="nt", environ=os.environ),
+            "sys": SimpleNamespace(version_info=(3, 12, 0)),
+            "_log_stream": Mock(return_value=io.StringIO()),
+            "_set_app_id": Mock(),
+            "_message": Mock(),
+        }
+        base.update(extra)
+        return [patch.object(app_window, name, value) for name, value in base.items()]
+
+    def run_patched(self, patchers, launcher_patches, arguments=None):
+        started = []
+        for item in patchers + [patch.object(app_window.launcher, n, v) for n, v in launcher_patches.items()]:
+            started.append(item)
+            item.start()
+        try:
+            return app_window.main(arguments)
+        finally:
+            for item in reversed(started):
+                item.stop()
+
+    def test_running_instance_only_opens_window(self):
+        prepare = Mock()
+        opened = Mock()
+        result = self.run_patched(self.patches(open_window=opened),
+                                  {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
+        self.assertEqual(result, 0)
+        opened.assert_called_once_with("http://127.0.0.1:8768")
+        prepare.assert_not_called()
+
+    def test_first_install_is_handed_to_console(self):
+        handoff = Mock(return_value=0)
+        mutex = Mock()
+        result = self.run_patched(self.patches(_needs_install=Mock(return_value=True), _hand_off_to_console=handoff),
+                                  {"_running_instance": Mock(return_value=None), "InstanceMutex": mutex})
+        self.assertEqual(result, 0)
+        handoff.assert_called_once()
+        mutex.assert_not_called()
+
+    def test_configure_argument_only_opens_credential_dialog(self):
+        configure = Mock(return_value=True)
+        prepare = Mock()
+        message = Mock()
+        result = self.run_patched(
+            self.patches(_configure_credentials=configure, _message=message),
+            {"_running_instance": Mock(return_value=None), "_prepare": prepare},
+            ["--configure"],
+        )
+        self.assertEqual(result, 0)
+        configure.assert_called_once_with(first_run=False)
+        prepare.assert_not_called()
+        message.assert_called_once()
+
+    def test_full_start_keeps_secrets_in_worker_and_cleans_up(self):
+        environments = {}
+        processes = {}
+
+        def fake_start(args, environment, log_name):
+            process = Mock()
+            process.poll.return_value = None
+            processes[log_name] = process
+            environments[log_name] = dict(environment)
+            return process, io.BytesIO()
+
+        mutex = Mock(acquired=True)
+        waited = Mock()
+        saved = {"mineru_token": "m-token", "minimax_key": "mm-key", "siliconflow_key": "sf-key"}
+        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": ""}):
+            result = self.run_patched(
+                self.patches(_needs_install=Mock(return_value=False), Splash=DirectSplash, load_credentials=Mock(return_value=saved),
+                             open_window=Mock(return_value=Mock()), wait_for_window=waited),
+                {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
+                 "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=True), "load_credentials": Mock(return_value=saved),
+                 "_available_port": Mock(return_value=8768), "ChildJob": Mock(), "_start": fake_start, "_health": Mock(),
+                 "_write_instance": Mock(), "_clear_instance": Mock()})
+        self.assertEqual(result, 0)
+        worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]), ("m-token", "mm-key", "sf-key"))
+        for name in ("MINERU_TOKEN", "MINIMAX_API_KEY", "SILICONFLOW_API_KEY"):
+            self.assertNotIn(name, web)
+        self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
+        waited.assert_called_once()
+        for process in processes.values():
+            process.terminate.assert_called_once()
+        mutex.close.assert_called_once()
+
+    def test_invalid_token_found_during_start_releases_lock_before_configuration(self):
+        order = []
+        mutex = Mock(acquired=True)
+        mutex.close.side_effect = lambda: order.append("mutex closed")
+        configure = Mock(side_effect=lambda **_kwargs: order.append("configure") or False)
+        saved = {"mineru_token": "bad", "minimax_key": "k"}
+        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}):
+            result = self.run_patched(
+                self.patches(_needs_install=Mock(return_value=False), Splash=DirectSplash, load_credentials=Mock(return_value=saved),
+                             _configure_credentials=configure, open_window=Mock()),
+                {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
+                 "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=False), "_clear_instance": Mock()})
+        self.assertEqual(result, 0)
+        self.assertEqual(order, ["mutex closed", "configure"])
+
+
+class ShortcutTests(unittest.TestCase):
+    def test_shortcut_runs_window_launcher_with_project_python(self):
+        spec = create_shortcut.shortcut_spec()
+        self.assertTrue(spec["target"].endswith("pythonw.exe"))
+        self.assertIn("app_launcher.pyw", spec["arguments"])
+        self.assertTrue(spec["icon"].endswith("app.ico,0"))
+
+    def test_powershell_quotes_paths(self):
+        script = create_shortcut.powershell_script(Path("C:/Users/O'Neil/Desktop/题库题卡版.lnk"),
+                                                   {"target": "a", "arguments": '"b"', "workdir": "c", "icon": "d,0", "description": "e"})
+        self.assertIn("O''Neil", script)
+        self.assertIn("题库题卡版.lnk", script)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Shell Link only")
+    def test_unicode_target_path_survives_real_shell_link(self):
+        import pythoncom
+        from win32com.shell import shell
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "题库题卡版"
+            folder.mkdir()
+            target = folder / "pythonw.exe"
+            shutil.copy2(sys.executable, target)
+            launcher = folder / "app_launcher.pyw"
+            launcher.write_text("", encoding="utf-8")
+            icon = folder / "app.ico"
+            icon.write_bytes(b"")
+            link = Path(tmp) / "题库题卡版.lnk"
+            spec = {
+                "target": str(target),
+                "arguments": f'"{launcher}"',
+                "workdir": str(folder),
+                "icon": f"{icon},0",
+                "description": "题库题卡版",
+            }
+
+            create_shortcut._write_with_com(link, spec)
+            shortcut = pythoncom.CoCreateInstance(
+                shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink,
+            )
+            shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(link))
+
+            self.assertEqual(shortcut.GetPath(shell.SLGP_RAWPATH)[0], str(target))
+            self.assertEqual(shortcut.GetArguments(), f'"{launcher}"')
+
+
+if __name__ == "__main__":
+    unittest.main()

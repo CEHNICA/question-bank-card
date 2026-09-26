@@ -1,0 +1,60 @@
+题库题卡版——第三方组件说明
+================================
+
+本文件仅是组件和许可类型摘要，不替代各项目的完整许可文本，也不构成法律意见。
+构建时的精确版本由 backend/requirements.lock.txt 和
+packaging/requirements-build.lock.txt 锁定。
+
+运行时组件
+------------
+
+- asgiref 3.12.1 — BSD-3-Clause
+  https://github.com/django/asgiref
+- certifi 2026.7.22 — MPL-2.0
+  https://github.com/certifi/python-certifi
+- charset-normalizer 3.5.1 — MIT
+  https://github.com/jawah/charset_normalizer
+- Django 5.2.17 — BSD-3-Clause
+  https://www.djangoproject.com/
+- idna 3.20 — BSD-3-Clause
+  https://github.com/kjd/idna
+- Pillow 12.3.0 — MIT-CMU
+  https://python-pillow.github.io/
+- PyMuPDF 1.28.2 — GNU Affero General Public License v3.0 或 Artifex 商业许可（双许可）
+  https://pymupdf.readthedocs.io/en/latest/about.html#license
+  https://github.com/pymupdf/PyMuPDF
+- pywin32 312 — PSF
+  https://github.com/mhammond/pywin32
+- requests 2.34.2 — Apache-2.0
+  https://requests.readthedocs.io/
+- sqlparse 0.6.0 — BSD-3-Clause
+  https://github.com/andialbrecht/sqlparse
+- tzdata 2026.4 — Apache-2.0
+  https://github.com/python/tzdata
+- urllib3 2.8.0 — MIT
+  https://github.com/urllib3/urllib3
+- KaTeX（前端内置版本）— MIT
+  https://github.com/KaTeX/KaTeX
+  完整 MIT 文本随程序保留在 frontend/vendor/katex/LICENSE。
+
+构建工具
+--------
+
+- Python 3.12 — Python Software Foundation License
+  https://www.python.org/psf/
+- PyInstaller 6.22.3 — GPL-2.0-or-later with the PyInstaller bootloader exception
+  https://pyinstaller.org/
+- Inno Setup 7.1.0 — Inno Setup License
+  https://jrsoftware.org/files/is/license.txt
+
+开源与对应源码
+----------------
+
+本项目第一方源代码采用 GNU AGPLv3（AGPL-3.0-only），许可证全文见根目录 LICENSE。
+源代码：https://github.com/CEHNICA/question-bank-card
+
+PyMuPDF 1.28.2 / MuPDF 1.28.2 明确采用 AGPLv3 / 商业双许可。仅从本仓库构建程序
+并不自动完成二进制分发所需的全部第三方许可交付。公开发布安装包时，应随同提供实际
+打包组件的完整许可文本、NOTICE 和相应版本的对应源码与构建材料。
+
+本文件仅为工程摘要，不构成法律意见。

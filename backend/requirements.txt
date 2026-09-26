@@ -1,0 +1,6 @@
+# 人工维护的直接依赖范围；启动器实际安装 requirements.lock.txt 中已验证的精确版本。
+Django>=5.2,<5.3
+PyMuPDF>=1.28,<1.29
+Pillow>=12,<13
+requests>=2.34,<2.35
+pywin32>=312,<313; platform_system == "Windows"
