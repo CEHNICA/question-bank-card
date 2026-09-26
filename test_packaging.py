@@ -77,6 +77,39 @@ class BundleAuditTests(unittest.TestCase):
                 audit_installer(installer)
 
 
+class DistributionLicenseTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent
+
+    def test_complete_license_materials_are_versioned(self):
+        self.assertGreater((self.ROOT / "LICENSE").stat().st_size, 30_000)
+        license_root = self.ROOT / "THIRD_PARTY_LICENSES"
+        expected = {
+            "Python-3.12",
+            "Django-5.2.17",
+            "Pillow-12.3.0",
+            "PyMuPDF-MuPDF-1.28.2",
+            "pywin32-312",
+            "requests-2.34.2",
+            "KaTeX-0.18.9",
+            "PyInstaller-6.22.3",
+            "Inno-Setup-7.1.0",
+            "packaging-26.3",
+            "setuptools-84.0.0",
+        }
+        self.assertTrue((license_root / "README.md").is_file())
+        self.assertTrue(expected.issubset({path.name for path in license_root.iterdir()}))
+
+    def test_build_and_installer_ship_license_materials(self):
+        build = (self.ROOT / "packaging" / "build.ps1").read_text(encoding="utf-8")
+        installer = (self.ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn("$ThirdPartyLicenses", build)
+        self.assertIn("Copy-Item -LiteralPath $ProjectLicense", build)
+        self.assertIn("LicenseFile=..\\LICENSE", installer)
+        self.assertIn('{app}\\THIRD_PARTY_LICENSES', installer)
+        self.assertIn("OutputBaseFilename=QuestionBankCard-Setup-", installer)
+        self.assertIn("'SHA256SUMS.txt'", build)
+
+
 class Utf8ChildProcessTests(unittest.TestCase):
     def test_start_overrides_poisoned_encoding_and_writes_chinese_log(self):
         """Regression test for desktop uploads failing before process_paper ran."""

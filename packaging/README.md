@@ -23,8 +23,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Versi
 默认产物：
 
 - `packaging/dist/QuestionBankCard/QuestionBankCard.exe`
-- `packaging/dist/installer/题库题卡版-Setup-1.0.0.exe`
-- 安装包同名 `.sha256` 校验文件
+- `packaging/dist/installer/QuestionBankCard-Setup-1.0.0.exe`
+- `packaging/dist/installer/SHA256SUMS.txt`
 
 只生成 onedir：
 
@@ -42,15 +42,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Versi
 
 第一方源代码采用 `AGPL-3.0-only`。PyMuPDF 1.28.2 / MuPDF 1.28.2 采用 AGPLv3 / 商业双许可；KaTeX 等组件保留各自许可证。
 
-构建脚本会把根 `LICENSE`、安装说明和第三方组件摘要放入程序目录，并让安装器展示 AGPLv3。公开分发二进制版本时，发布者仍有责任：
+构建脚本会把根 `LICENSE`、安装说明、第三方组件摘要和 `THIRD_PARTY_LICENSES` 完整许可证目录放入程序目录，并让安装器展示 AGPLv3。公开分发二进制版本时，发布者仍有责任：
 
 1. 在同一发布页提供该二进制所对应的完整第一方源码、锁文件、PyInstaller spec、构建脚本和本地修改；
 2. 提供 PyMuPDF 1.28.2 与 MuPDF 1.28.2 的对应源码、构建材料和完整许可证，而不只是上游链接；
-3. 随二进制收齐实际打包组件的完整第三方许可证与 NOTICE；
+3. 核对 `THIRD_PARTY_LICENSES` 与实际打包版本一致；
 4. 保留源代码地址和无担保声明；
 5. 在发布前再次审计敏感数据，并根据需要完成代码签名。
 
-本仓库当前不发布预构建安装包。这些说明不构成法律意见；商业分发前请自行完成专业许可审查，或取得适用的商业许可。
+这些说明不构成法律意见；商业分发前请自行完成专业许可审查，或取得适用的商业许可。
 
 ## 可重复性
 

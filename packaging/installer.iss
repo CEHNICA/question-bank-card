@@ -18,6 +18,10 @@ AppId={{8C1BC21C-A8B7-4E81-9E25-59032D0967D8}
 AppName={#MyAppName}
 AppVersion={#AppVersion}
 AppVerName={#MyAppName} {#AppVersion}
+AppPublisher=CEHNICA
+AppPublisherURL=https://github.com/CEHNICA/question-bank-card
+AppSupportURL=https://github.com/CEHNICA/question-bank-card/issues
+AppUpdatesURL=https://github.com/CEHNICA/question-bank-card/releases
 DefaultDirName={localappdata}\Programs\QuestionBankCard
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -28,7 +32,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#OutputDir}
-OutputBaseFilename={#MyAppName}-Setup-{#AppVersion}
+OutputBaseFilename=QuestionBankCard-Setup-{#AppVersion}
 SetupIconFile=..\assets\app.ico
 LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -48,6 +52,8 @@ VersionInfoVersion={#AppVersion}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#AppVersion}
+VersionInfoCompany=CEHNICA
+VersionInfoCopyright=Copyright (c) 2026 CEHNICA and contributors
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
@@ -64,6 +70,7 @@ Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\INSTALLATION-NOTICE.txt"
 Type: files; Name: "{app}\THIRD_PARTY_NOTICES.txt"
 Type: files; Name: "{app}\LICENSE"
+Type: filesandordirs; Name: "{app}\THIRD_PARTY_LICENSES"
 
 [Files]
 ; SourceDir 必须在 build.ps1 中先经 audit_bundle.py 审计。

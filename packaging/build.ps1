@@ -24,6 +24,7 @@ $AuditScript = Join-Path $PackagingRoot 'audit_bundle.py'
 $ApplicationRequirements = Join-Path $ProjectRoot 'backend\requirements.lock.txt'
 $BuildRequirements = Join-Path $PackagingRoot 'requirements-build.lock.txt'
 $ProjectLicense = Join-Path $ProjectRoot 'LICENSE'
+$ThirdPartyLicenses = Join-Path $ProjectRoot 'THIRD_PARTY_LICENSES'
 
 
 function Invoke-Native {
@@ -104,13 +105,14 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         '080404b0',
-        [StringStruct('CompanyName', 'Local User'),
+        [StringStruct('CompanyName', 'CEHNICA'),
          StringStruct('FileDescription', 'Question Bank Card'),
          StringStruct('FileVersion', '$Version'),
          StringStruct('InternalName', 'QuestionBankCard'),
          StringStruct('OriginalFilename', 'QuestionBankCard.exe'),
          StringStruct('ProductName', 'Question Bank Card'),
-         StringStruct('ProductVersion', '$Version')])
+         StringStruct('ProductVersion', '$Version'),
+         StringStruct('LegalCopyright', 'Copyright (c) 2026 CEHNICA and contributors')])
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]
@@ -162,6 +164,9 @@ foreach ($requiredFile in @(
         throw "Required build file is missing: $requiredFile"
     }
 }
+if (-not (Test-Path -LiteralPath $ThirdPartyLicenses -PathType Container)) {
+    throw "Required third-party license directory is missing: $ThirdPartyLicenses"
+}
 
 Write-Host "[1/6] Preparing isolated Python 3.12 build environment..."
 New-BuildVirtualEnvironment
@@ -198,6 +203,7 @@ Invoke-Native -FilePath $BuildPython -ArgumentList @(
 Copy-Item -LiteralPath (Join-Path $PackagingRoot 'INSTALLATION-NOTICE.txt') -Destination $BundleRoot -Force
 Copy-Item -LiteralPath (Join-Path $PackagingRoot 'THIRD_PARTY_NOTICES.txt') -Destination $BundleRoot -Force
 Copy-Item -LiteralPath $ProjectLicense -Destination $BundleRoot -Force
+Copy-Item -LiteralPath $ThirdPartyLicenses -Destination $BundleRoot -Recurse -Force
 
 Write-Host "[4/6] Auditing the bundle for private data and runtime files..."
 Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot)
@@ -227,7 +233,7 @@ $InstallerPath = $installerItem.FullName
 Write-Host "[6/6] Auditing the installer and generating SHA-256..."
 Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot, '--installer', $InstallerPath)
 $hash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$checksumPath = "$InstallerPath.sha256"
+$checksumPath = Join-Path $InstallerRoot 'SHA256SUMS.txt'
 Set-Content -LiteralPath $checksumPath -Value "$hash *$(Split-Path -Leaf $InstallerPath)" -Encoding ascii
 
 Write-Host ''

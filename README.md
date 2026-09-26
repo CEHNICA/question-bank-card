@@ -70,7 +70,7 @@ node frontend\test_qb_render.js
 powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.0.0
 ```
 
-构建说明见 [packaging/README.md](packaging/README.md)。公开分发自行构建的二进制前，请完整阅读其中的许可证与对应源码要求。
+构建说明见 [packaging/README.md](packaging/README.md)。安装包会包含项目许可证、源码地址以及 [完整第三方许可证目录](THIRD_PARTY_LICENSES/README.md)。公开分发自行构建的二进制前，请完整阅读对应源码要求。
 
 ## 参与贡献
 
@@ -80,6 +80,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Versi
 
 第一方源代码采用 [GNU Affero General Public License v3.0](LICENSE)，SPDX 标识为 `AGPL-3.0-only`。Copyright © 2026 CEHNICA and contributors.
 
-第三方组件保留各自许可证；详情见 [packaging/THIRD_PARTY_NOTICES.txt](packaging/THIRD_PARTY_NOTICES.txt)。其中 PyMuPDF 采用 AGPLv3 / Artifex 商业双许可，KaTeX 采用 MIT 许可证并在 `frontend/vendor/katex/LICENSE` 保留完整文本。
+第三方组件保留各自许可证；摘要见 [packaging/THIRD_PARTY_NOTICES.txt](packaging/THIRD_PARTY_NOTICES.txt)，完整文本见 [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md)。其中 PyMuPDF 采用 AGPLv3 / Artifex 商业双许可，KaTeX 采用 MIT 许可证。
 
 本项目按“原样”提供，不附带任何担保。本说明不构成法律意见。
