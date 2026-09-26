@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$Version = '1.0.0',
+    [string]$Version = '1.0.1',
 
     [switch]$SkipInstaller,
     [switch]$SkipDependencyInstall
@@ -253,7 +253,12 @@ Write-Host "[6/6] Auditing the installer and generating SHA-256..."
 Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot, '--installer', $InstallerPath)
 $hash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumPath = Join-Path $InstallerRoot 'SHA256SUMS.txt'
-Set-Content -LiteralPath $checksumPath -Value "$hash *$(Split-Path -Leaf $InstallerPath)" -Encoding ascii
+$checksumLine = "$hash *$(Split-Path -Leaf $InstallerPath)`n"
+[System.IO.File]::WriteAllText(
+    $checksumPath,
+    $checksumLine,
+    [System.Text.UTF8Encoding]::new($false)
+)
 
 Write-Host ''
 Write-Host 'Build complete:'

@@ -248,6 +248,141 @@ class ParseTests(TestCase):
         self.assertEqual(readers.parse_band("【刻度】07"), 7)
         self.assertIsNone(readers.parse_band("【刻度】无"))
 
+    def test_generated_figure_descriptions_are_not_options(self):
+        reading = readers.parse_reading(
+            "【题型】单选题\n【题干】选出正确的数轴（ ）[图：数轴上有 [?]、1、2]\n"
+            "【A】[图：数轴上有 1、2、3]\n"
+            "【B】【图片: 函数图象经过 [?]】\n"
+            "【C】（图示：一个三角形）\n"
+            "【D】图\n【配图】1=A, 2=B, 3=C",
+            4,
+        )
+        self.assertEqual(reading["options"], {"D": "图"})
+        self.assertEqual(reading["stem"], "选出正确的数轴（ ）")
+        self.assertEqual(reading["figure_descriptions"], ["A", "B", "C", "stem"])
+        self.assertFalse(reading["unclear"])
+
+    def test_figure_description_filter_is_conservative(self):
+        for value in (
+            "[图：数轴]", "【图片: 函数图象】", "（示意图：三角形）", "[表格：星期与产量]",
+            "（图形：呈阶梯状排列的六个正方形）",
+            "数轴上标有点，标号依次为 1, 2, 3, 4, 5",
+            "数轴上标有点，标号依次为 $-2$、$-1$、$0$、$1$、$2$",
+        ):
+            self.assertTrue(readers.is_figure_description(value), value)
+        for value in (
+            "如图，点 A 在数轴上", "图1中的阴影部分", "[图1]", "$[a,b]$", "图",
+            "数轴上点 A 表示 1", "向右", "甲",
+        ):
+            self.assertFalse(readers.is_figure_description(value), value)
+
+    def test_all_reader_prompts_forbid_turning_figures_into_text(self):
+        prompts = [
+            readers.transcribe_prompt(4, with_figures=True),
+            readers.transcribe_prompt(4, with_figures=False),
+            readers.arbiter_prompt(4, {"stem": "题干"}, {"stem": "题干"}),
+        ]
+        for prompt in prompts:
+            self.assertIn("不得改写成", prompt)
+            self.assertIn("某个选项只有图时", prompt)
+            self.assertIn("表格", prompt)
+            self.assertIn("Markdown", prompt)
+
+    def test_markdown_table_can_be_removed_without_touching_surrounding_text(self):
+        source = "已知数据如下：\n\n| 星期 | 一 | 二 |\n|---|---|---|\n| 增减 | +5 | -2 |\n\n求总数。"
+        cleaned, removed = readers.strip_markdown_tables(source)
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, "已知数据如下：\n\n求总数。")
+        untouched, removed = readers.strip_markdown_tables("若 $|x|=2$，求 $x$。")
+        self.assertFalse(removed)
+        self.assertEqual(untouched, "若 $|x|=2$，求 $x$。")
+
+    def test_migration_cleans_drafts_but_preserves_human_edits_and_published_snapshot(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        paper = Paper.objects.create(filename="图片选项.pdf", kind="pdf", sha256="f" * 64)
+        table_text = "根据下表回答：\n\n| 星期 | 一 |\n|---|---|\n| 增减 | +5 |\n\n求总数。"
+        question = Question.objects.create(
+            paper=paper,
+            number=4,
+            question_type="single_choice",
+            stem=table_text,
+            options={
+                "A": "数轴上标有点，标号依次为 1, 2, 3, 4, 5",
+                "B": "向右",
+                "C": "数轴上标有点，标号依次为 -2, -1, 0, 1, 2",
+                "D": "数轴上标有点，标号依次为 $-2$、$-1$、$0$、$1$、$2$",
+            },
+            figures=[
+                {"slot": "A", "page_idx": 0, "bbox": [1, 2, 3, 4], "source": "auto"},
+                {"slot": "B", "page_idx": 0, "bbox": [2, 3, 4, 5], "source": "auto"},
+                {"slot": "stem", "page_idx": 0, "bbox": [5, 6, 7, 8], "source": "auto"},
+            ],
+            read_a={"options": {}, "figures": {"1": "A", "2": "B", "3": "stem"},
+                    "raw": "【A】\\n【B】\\n【配图】1=A,2=B,3=题干"},
+            state="green",
+            approved=True,
+            approved_content_hash="a" * 64,
+        )
+        human = Question.objects.create(
+            paper=paper,
+            number=5,
+            options={"A": "[图：这是人工保留的说明]"},
+            figures=[{"slot": "A", "page_idx": 0, "bbox": [1, 2, 3, 4], "source": "auto"}],
+            read_a={"options": {}, "figures": {"1": "A"}, "raw": "原始记录"},
+            edited=True,
+            text_source="human",
+            state="green",
+            approved=True,
+            approved_content_hash="b" * 64,
+        )
+        table_only = Question.objects.create(
+            paper=paper,
+            number=6,
+            stem=table_text,
+            figures=[{"slot": "stem", "page_idx": 0, "bbox": [5, 6, 7, 8], "source": "auto"}],
+            read_a={"options": {}, "figures": {"1": "stem"}, "raw": "原始表格"},
+            state="green",
+            approved=True,
+            approved_content_hash="c" * 64,
+        )
+        publication = PublishedQuestion.objects.create(
+            question=table_only,
+            paper=paper,
+            source_filename=paper.filename,
+            number=6,
+            question_type="free_response",
+            version=1,
+            content={"stem": table_text},
+            content_hash="d" * 64,
+            search_text=table_text,
+        )
+        migrate = import_module("core.migrations.0006_remove_ai_figure_descriptions").forwards
+        migrate(apps, None)
+        migrate(apps, None)
+        question.refresh_from_db()
+        human.refresh_from_db()
+        table_only.refresh_from_db()
+        publication.refresh_from_db()
+        self.assertEqual(question.options, {"B": "向右"})
+        self.assertEqual(question.stem, "根据下表回答：\n\n求总数。")
+        self.assertEqual(question.read_a["raw"], "【A】\\n【B】\\n【配图】1=A,2=B,3=题干")
+        self.assertFalse(question.approved)
+        self.assertEqual(question.approved_content_hash, "")
+        self.assertEqual(question.state, "yellow")
+        self.assertTrue(any("重复转写" in flag for flag in question.flags))
+        self.assertTrue(any("表格内容" in flag for flag in question.flags))
+        self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, question.flags)
+        self.assertEqual(human.options, {"A": "[图：这是人工保留的说明]"})
+        self.assertTrue(human.approved)
+        self.assertEqual(table_only.stem, "根据下表回答：\n\n求总数。")
+        self.assertFalse(table_only.approved)
+        self.assertTrue(any("表格内容" in flag for flag in table_only.flags))
+        self.assertFalse(any("AI 生成的图片说明" in flag for flag in table_only.flags))
+        self.assertEqual(publication.content["stem"], table_text)
+
 
 def fake_page_pdf(path: Path, pages: int = 1) -> None:
     images = []
@@ -384,6 +519,106 @@ class PipelineTests(TestCase):
         q2 = self.paper.questions.get(number=2)
         self.assertEqual([f["slot"] for f in q2.figures], ["A"])
         self.assertEqual(q2.state, "green", q2.flags)
+
+    def test_plain_image_description_from_second_reader_is_not_saved(self):
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("a", 2): (
+                "【题型】单选题\n【题干】四位同学画数轴如图所示（ ）\n"
+                "【A】\n【B】\n【C】\n【D】\n【配图】1=A\n【其他题号】无"
+            ),
+            ("b", 2): tagged(
+                "四位同学画数轴如图所示（ ）",
+                {
+                    "A": "数轴上标有点，标号依次为 1, 2, 3, 4, 5",
+                    "B": "数轴上标有点，标号依次为 -1, -2, 0, 1, 2",
+                    "C": "数轴上标有点，标号依次为 -2, -1, 0, 1, 2",
+                    "D": "数轴上标有点，标号依次为 -2, -1, [?], 1, 2",
+                },
+            ),
+        }
+        chat = self.run_paper(answers)
+        q2 = self.paper.questions.get(number=2)
+        self.assertEqual(q2.options, {})
+        self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
+        self.assertEqual(q2.state, "yellow", q2.flags)
+        self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, q2.flags)
+        self.assertFalse(any("看不清的字" in flag for flag in q2.flags))
+        self.assertEqual(set(q2.read_b["options"]), {"A", "B", "C", "D"})
+        self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
+
+    def test_real_printed_option_text_next_to_a_figure_is_preserved(self):
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("a", 2): (
+                "【题型】单选题\n【题干】选择箭头方向（ ）\n"
+                "【A】\n【配图】1=A\n【其他题号】无"
+            ),
+            ("b", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
+            ("arbiter", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
+        }
+        chat = self.run_paper(answers)
+        q2 = self.paper.questions.get(number=2)
+        self.assertEqual(q2.options, {"A": "向右"})
+        self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
+        self.assertEqual(q2.text_source, "majority")
+        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertTrue(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
+
+    def test_plain_image_description_from_primary_reader_is_not_saved(self):
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("a", 2): tagged(
+                "选择正确的数轴（ ）",
+                {"A": "数轴上标有点，标号依次为 1, 2, 3, 4, 5"},
+                figures="1=A",
+            ),
+            ("b", 2): tagged("选择正确的数轴（ ）"),
+        }
+        chat = self.run_paper(answers)
+        q2 = self.paper.questions.get(number=2)
+        self.assertEqual(q2.options, {})
+        self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
+        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
+
+    def test_arbiter_figure_description_without_a_bound_figure_gets_warning(self):
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("a", 2): tagged("选择正确答案（ ）", {"A": "甲"}),
+            ("b", 2): tagged("选择正确答案（ ）", {"A": "乙"}),
+            ("arbiter", 2): tagged("选择正确答案（ ）", {"A": "[图：一条没有框出的数轴]"}),
+        }
+        self.run_paper(answers)
+        q2 = self.paper.questions.get(number=2)
+        self.assertEqual(q2.options, {})
+        self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, q2.flags)
+        self.assertEqual(q2.state, "yellow")
+
+    def test_markdown_table_is_not_saved_when_the_table_is_a_stem_figure(self):
+        table_stem = "根据下表回答：\n\n| 星期 | 一 | 二 |\n|---|---|---|\n| 增减 | +5 | -2 |\n\n求总数。"
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("a", 2): tagged(table_stem, {"A": "1", "B": "2"}, figures="1=题干"),
+            ("b", 2): tagged(table_stem, {"A": "1", "B": "2"}),
+        }
+        chat = self.run_paper(answers)
+        q2 = self.paper.questions.get(number=2)
+        self.assertEqual(q2.stem, "根据下表回答：\n\n求总数。")
+        self.assertEqual([figure["slot"] for figure in q2.figures], ["stem"])
+        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertIn("| 星期 |", q2.read_a["stem"])
+        self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
     def test_resegment_keeps_unchanged_cards_and_rereads_changed(self):
         answers = {("locate", 4): "【刻度】无", **{("*", n): tagged(f"第{n}题", {"A": "1", "B": "2"}) for n in (1, 2, 3)},

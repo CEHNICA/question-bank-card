@@ -67,7 +67,7 @@ node frontend\test_qb_render.js
 安装 Inno Setup 7 后，在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.0.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.0.1
 ```
 
 构建说明见 [packaging/README.md](packaging/README.md)。安装包会包含项目许可证、源码地址以及 [完整第三方许可证目录](THIRD_PARTY_LICENSES/README.md)。公开分发自行构建的二进制前，请完整阅读对应源码要求。

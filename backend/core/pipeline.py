@@ -401,7 +401,7 @@ def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
 
 FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
-MENTIONS_FIGURE = re.compile(r"如图|图中|下图|右图|左图|上图|图所示|见图|图[①②③1-9]")
+MENTIONS_FIGURE = re.compile(r"如图|图中|下图|右图|左图|上图|图所示|见图|图[①②③1-9]|如表|下表|表中|表所示")
 
 
 def figure_flag(flag: str) -> bool:
@@ -409,6 +409,63 @@ def figure_flag(flag: str) -> bool:
 
 
 # ---------------------------------------------------------------- 3. 读题
+
+
+def _figure_slots(reading: dict | None) -> set[str]:
+    """主读者明确归到题干或 A–D 的候选图槽位。"""
+    return {
+        role for role in ((reading or {}).get("figures") or {}).values()
+        if role == "stem" or role in readers.OPTION_KEYS
+    }
+
+
+def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | None) -> dict | None:
+    """配图内容以裁图为准，不采用模型生成的选项说明或 Markdown 表格。
+
+    只有完整的括号式图片说明，或已知的严格数轴说明句式才会删除。不能仅凭
+    主读者把文字留空，就删除另一读者识别到的任意文字；图旁仍可能有必须保留
+    的印刷字。归到题干的 Markdown 表格只保留裁图。返回清理后的副本，原始
+    read_a/read_b/read_c 仍原样留作审计。
+    """
+    if reading is None:
+        return None
+    slots = _figure_slots(figure_reading)
+    option_slots = slots & set(readers.OPTION_KEYS)
+    primary_options = (figure_reading or {}).get("options") or {}
+    # 至少找到一个选项图，且主读 A–D 全空，是“纯图片选择题”的强证据。
+    # 这时次读未绑定槽位里的严格图片说明也要清理；稍后会为这些未绑定图加黄旗。
+    pure_figure_choice = bool(option_slots) and not any(
+        str(primary_options.get(slot, "")).strip() for slot in readers.OPTION_KEYS
+    )
+    # 纯图片选择题检查全部 A–D；混合题只检查已经绑定裁图的槽位。实际删除
+    # 仍须通过严格说明模式，因此“向右”等真实短语不会因主读漏字而被清掉。
+    eligible_slots = set(readers.OPTION_KEYS) if pure_figure_choice else option_slots
+    remove = {
+        slot for slot in eligible_slots
+        if readers.is_figure_description((reading.get("options") or {}).get(slot, ""))
+    }
+    stem = reading.get("stem", "")
+    table_removed = False
+    if "stem" in slots:
+        stem, table_removed = readers.strip_markdown_tables(stem)
+    if not remove and not table_removed:
+        return reading
+    cleaned = dict(reading)
+    cleaned["stem"] = stem
+    cleaned["options"] = {
+        key: value for key, value in (reading.get("options") or {}).items()
+        if key not in remove
+    }
+    if remove:
+        cleaned["figure_descriptions"] = sorted(
+            set(cleaned.get("figure_descriptions") or []) | remove,
+            key=lambda slot: (slot != "stem", slot),
+        )
+    cleaned["unclear"] = "[?]" in cleaned.get("stem", "") or any(
+        "[?]" in value for value in cleaned["options"].values()
+    )
+    return cleaned
+
 
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
@@ -438,29 +495,34 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         return {**update, "state": Question.State.RED, "error": errors.get("a") or errors.get("b") or "识读失败",
                 "flags": []}
     a, b = results.get("a"), results.get("b")
-    if a and b and same_reading(a, b):
-        final, source = a, "agree"
+    figure_source = a or {}
+    a_text = _without_inferred_figure_text(a, figure_source)
+    b_text = _without_inferred_figure_text(b, figure_source)
+    normalized_results = [result for result in (a_text, b_text) if result]
+    if a and b and same_reading(a_text, b_text):
+        final, source = a_text, "agree"
     elif a and b:
         try:
-            c = readers.arbitrate(primary, clean_url, number, a, b)
+            c = readers.arbitrate(primary, clean_url, number, a_text, b_text)
             update["read_c"] = c
-            if same_reading(c, a):
-                final, source = a, "majority"
-            elif same_reading(c, b):
-                final, source = b, "majority"
+            c_text = _without_inferred_figure_text(c, figure_source)
+            normalized_results.append(c_text)
+            if same_reading(c_text, a_text):
+                final, source = a_text, "majority"
+            elif same_reading(c_text, b_text):
+                final, source = b_text, "majority"
             else:
-                final, source = c, "arbiter"
+                final, source = c_text, "arbiter"
                 flags.append("两次识读不一致，已由第三次识读裁决，请看标黄的地方")
         except readers.ReaderError as error:
-            final, source = a, "single"
+            final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}
             flags.append("两次识读不一致，裁决失败，请看标黄的地方")
     else:
-        final = a or b
+        final = a_text or b_text
         source = "single"
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
 
-    figure_source = a or {}
     figures, foreign = [], []
     labels = {c["label"]: c for c in snapshot["candidates"]}
     for label, role in (figure_source.get("figures") or {}).items():
@@ -474,6 +536,16 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     has_option_figures = any(f["slot"] in {"A", "B", "C", "D"} for f in figures)
     if not figures and (figure_source.get("missing_figure") or MENTIONS_FIGURE.search(final.get("stem", ""))):
         flags.append(FLAG_NO_FIGURE if MENTIONS_FIGURE.search(final.get("stem", "")) else FLAG_UNFOUND_FIGURE)
+    audited_results = list(results.values()) + normalized_results
+    if isinstance(update.get("read_c"), dict):
+        audited_results.append(update["read_c"])
+    described_slots = {
+        slot for result in audited_results
+        for slot in (result.get("figure_descriptions") or [])
+    }
+    bound_slots = {f["slot"] for f in figures if f["slot"] == "stem" or f["slot"] in readers.OPTION_KEYS}
+    if described_slots - bound_slots and not any(figure_flag(flag) for flag in flags):
+        flags.append(FLAG_UNFOUND_FIGURE)
     if final.get("unclear"):
         flags.append("有看不清的字（[?]），请对照原卷补上")
     # 两位读者都说看到了别的题号才提示；能用"第N题图"解释的不算。

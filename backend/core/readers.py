@@ -68,6 +68,8 @@ TRANSCRIBE_RULES = """你是数学试卷誊录员。图片是从一张学生做�
 只誊录印刷体内容：
 - 学生的手写字、批改符号、圈画、划线、草稿一律忽略；括号或横线里手写填的答案不要写，保留空括号（ ）或横线 ____。
 - 数学式用 LaTeX，行内公式用 $...$ 包住；中文和中文标点照原卷。
+- 数轴、函数图象、平面/立体几何图（包括棱柱）、统计图、表格、流程图等视觉内容不得改写成“[图：……]”“图片中……”或其他文字说明，也不要重排成 Markdown 表格、字符图或项目列表。只誊录图外真正印刷的题干文字。
+- 某个选项只有图时，对应的【A】【B】【C】【D】留空；图内的数字、字母、刻度和表格单元格仍属于配图，不要另抄成选项文字。
 - 平行四边形符号写成 ▱（例如 ▱ABCD），不要写成 \\square、\\Box 或 □。
 - 题号不要写进题干；分值（如"（15分）"）不要写。
 - 小问 (1)(2)… 各起一行。
@@ -79,6 +81,7 @@ FIGURE_RULES = """图中蓝色框和编号标出的是候选配图。请在【�
 编号=题干（属于本题题干的印刷图）、编号=A/B/C/D（某个选项的印刷图）、
 编号=第N题（印刷的图，但属于别的题，例如图下印着"第14题图"）、编号=无关（手写、草图、涂画）。
 例如：1=题干, 2=第14题, 3=无关。没有蓝框就写"无"。
+数轴、几何图、立体图、统计图、表格等只在【配图】里标为题干或 A/B/C/D；纯图片选项的文字标签必须留空，不得描述或重排图片内容。
 如果原卷本题有印刷的图，却没有被任何蓝框框住，在【配图】末尾加上"缺图"。"""
 
 OUTPUT_FORMAT = """只按下面的格式输出，不要输出别的内容：
@@ -148,14 +151,81 @@ def split_tags(text: str) -> dict[str, str]:
 TYPE_NAMES = {"单选": "single_choice", "多选": "multiple_choice", "选择": "single_choice",
               "填空": "fill_blank", "解答": "free_response"}
 
+# 视觉模型偶尔会把纯图片选项改写成无障碍式说明。这里只处理完整包裹、带冒号的
+# 明确占位说明；“如图……”“图 1”或数学区间 [a,b] 等真实印刷文字不会命中。
+FIGURE_DESCRIPTION = re.compile(
+    r"^\s*(?:"
+    r"\[\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：]\s*\S[\s\S]*\]|"
+    r"【\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：]\s*\S[\s\S]*】|"
+    r"[（(]\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：]\s*\S[\s\S]*[）)]"
+    r")\s*[。.]?\s*$"
+)
+
+BRACKETED_FIGURE_DESCRIPTION = re.compile(
+    r"(?:"
+    # 同一行取到最后一个 ]，允许说明内部出现模型的不确定标记 [?]。
+    r"\[\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：][^\r\n]*\]|"
+    r"【\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：]\s*[^】]+】|"
+    r"[（(]\s*(?:图|图片|图形|图示|示意图|表|表格)\s*[:：]\s*[^）)]+[）)]"
+    r")"
+)
+# 旧模型在数轴图片选项上还会省略“[图：]”，但使用非常固定的说明句式。
+# 只接受包含至少三个数值/未知标记的完整“标号依次为”句，避免把“数轴上点 A
+# 表示……”这类真正的印刷选项误删。
+NUMBER_LINE_DESCRIPTION = re.compile(
+    r"^\s*(?:一条)?数轴上(?:从左到右)?标有(?:若干个?)?点\s*[，,]?\s*标号依次为\s*"
+    r"(?:\$?\s*[−-]?\s*(?:\d+(?:\.\d+)?|\[\?\])\s*\$?\s*[、，,]\s*){2,}"
+    r"\$?\s*[−-]?\s*(?:\d+(?:\.\d+)?|\[\?\])\s*\$?\s*[。.]?\s*$"
+)
+MARKDOWN_TABLE_SEPARATOR = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$")
+
+
+def is_figure_description(value: str) -> bool:
+    """是否为证据充分的模型图片说明，而不是原卷上的选项文字。"""
+    text = str(value or "")
+    return bool(FIGURE_DESCRIPTION.fullmatch(text) or NUMBER_LINE_DESCRIPTION.fullmatch(text))
+
+
+def strip_bracketed_figure_descriptions(value: str) -> tuple[str, bool]:
+    """移除 AI 插入的 [图：……] 片段，保留同一字段里的真实文字。"""
+    text = str(value or "")
+    cleaned, count = BRACKETED_FIGURE_DESCRIPTION.subn("", text)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, bool(count)
+
+
+def strip_markdown_tables(value: str) -> tuple[str, bool]:
+    """移除视觉模型从原卷表格重排出的 Markdown 表；真实表格由裁图保留。"""
+    lines = str(value or "").splitlines()
+    kept: list[str] = []
+    removed = False
+    index = 0
+    while index < len(lines):
+        if (index + 1 < len(lines) and "|" in lines[index]
+                and MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1])):
+            removed = True
+            index += 2
+            while index < len(lines) and "|" in lines[index] and lines[index].strip():
+                index += 1
+            continue
+        kept.append(lines[index])
+        index += 1
+    cleaned = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    return cleaned, removed
+
 
 def parse_reading(text: str, number: int) -> dict:
     tags = split_tags(text)
     if "题干" not in tags:
         raise ValueError("缺少【题干】")
     options = {}
+    figure_descriptions = []
     for key in OPTION_KEYS:
         value = fix_symbols(clean_option(tags.get(key, ""), key))
+        value, described = strip_bracketed_figure_descriptions(value)
+        if described:
+            figure_descriptions.append(key)
         if value and value not in {"无", "…", "..."}:
             options[key] = value
     kind = "unknown"
@@ -174,6 +244,9 @@ def parse_reading(text: str, number: int) -> dict:
     others = [int(v) for v in re.findall(r"\d{1,2}", tags.get("其他题号", "")) if int(v) != number]
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
+    stem, stem_described = strip_bracketed_figure_descriptions(stem)
+    if stem_described:
+        figure_descriptions.append("stem")
     if options:
         # 模型偶尔把选项也写进题干末尾：从独占一行的"A."起截掉。
         cut = re.search(r"\n\s*A\s*[.．、:：]", stem)
@@ -188,7 +261,8 @@ def parse_reading(text: str, number: int) -> dict:
         "missing_figure": "缺图" in figure_text,
         "others": sorted(set(others)),
         "number_seen": int(seen[0]) if seen else None,
-        "unclear": "[?]" in tags["题干"] or any("[?]" in v for v in options.values()),
+        "figure_descriptions": figure_descriptions,
+        "unclear": "[?]" in stem or any("[?]" in v for v in options.values()),
     }
 
 

@@ -108,6 +108,8 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertIn('{app}\\THIRD_PARTY_LICENSES', installer)
         self.assertIn("OutputBaseFilename=QuestionBankCard-Setup-", installer)
         self.assertIn("'SHA256SUMS.txt'", build)
+        self.assertIn("[System.Text.UTF8Encoding]::new($false)", build)
+        self.assertNotIn("-Encoding ascii", build)
         self.assertIn("CORRESPONDING_SOURCE.txt", build)
         self.assertIn("releases/tag/v${Version}", build)
         self.assertIn("5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249", build)
