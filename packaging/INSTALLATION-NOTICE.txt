@@ -10,5 +10,6 @@
 7. 本程序第一方源码采用 GNU AGPLv3（AGPL-3.0-only）。许可证全文随程序放在 LICENSE 中。
 8. 源代码与构建说明：https://github.com/CEHNICA/question-bank-card
 9. 第三方组件和许可证见 THIRD_PARTY_NOTICES.txt。
+10. 本安装包对应的精确源码下载位置、文件名和校验值见 CORRESPONDING_SOURCE.txt。
 
 如果你修改并向网络用户提供本程序的功能，或向他人分发二进制版本，请遵守 AGPLv3 及各第三方组件的许可证，并向接收者提供相应源码。

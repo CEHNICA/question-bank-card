@@ -71,6 +71,7 @@ Type: files; Name: "{app}\INSTALLATION-NOTICE.txt"
 Type: files; Name: "{app}\THIRD_PARTY_NOTICES.txt"
 Type: files; Name: "{app}\LICENSE"
 Type: filesandordirs; Name: "{app}\THIRD_PARTY_LICENSES"
+Type: files; Name: "{app}\CORRESPONDING_SOURCE.txt"
 
 [Files]
 ; SourceDir 必须在 build.ps1 中先经 audit_bundle.py 审计。

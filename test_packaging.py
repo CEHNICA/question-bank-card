@@ -108,6 +108,10 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertIn('{app}\\THIRD_PARTY_LICENSES', installer)
         self.assertIn("OutputBaseFilename=QuestionBankCard-Setup-", installer)
         self.assertIn("'SHA256SUMS.txt'", build)
+        self.assertIn("CORRESPONDING_SOURCE.txt", build)
+        self.assertIn("releases/tag/v$Version", build)
+        self.assertIn("5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249", build)
+        self.assertIn("44075a84e329db55b9bef5f342a70fd26d69e48ad1d33cb89d9664581c641156", build)
 
 
 class Utf8ChildProcessTests(unittest.TestCase):
