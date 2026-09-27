@@ -260,6 +260,50 @@ def stored_or_derived_review(question) -> dict:
             "reason": "题目文字没有发现图像提示词，但现有识读绑定了印刷配图",
             "signals": ["existing_conflict_flag"], "cue_matches": [], "excluded_count": 0,
         }
+
+    # Existing databases already contain everything the new rule needs.  Derive
+    # the same decision from those saved reads so old cards gain the safeguard
+    # without a reread, page render, MinerU request, or model call.
+    readings = [
+        value for value in (
+            getattr(question, "read_a", None),
+            getattr(question, "read_b", None),
+            getattr(question, "read_c", None),
+        ) if isinstance(value, dict)
+    ]
+    primary = next((value for value in readings if "stem" in value or "figures" in value), {})
+    candidates = list(getattr(question, "figure_candidates", None) or [])
+    state = str(getattr(question, "state", "") or "")
+    if (primary or candidates) and state in {"green", "yellow"} and str(getattr(question, "stem", "")).strip():
+        kind = str(primary.get("type") or "unknown")
+        if kind == "unknown":
+            kind = str(getattr(question, "question_type", "unknown") or "unknown")
+        options = getattr(question, "options", None) or {}
+        option_slots = {
+            figure.get("slot") for figure in current_figures
+            if figure.get("slot") in {"A", "B", "C", "D"}
+        }
+        missing_option_slots = (
+            {"A", "B", "C", "D"} - option_slots
+            if kind in {"single_choice", "multiple_choice"} and not options else set()
+        )
+        described_slots = {
+            slot for reading in readings
+            for slot in (reading.get("figure_descriptions") or [])
+        }
+        return automatic_review(
+            stem=question.stem,
+            options=options,
+            candidate_labels={
+                str(candidate.get("label")) for candidate in candidates
+                if isinstance(candidate, dict) and candidate.get("label") is not None
+            },
+            assignments={str(label): role for label, role in (primary.get("figures") or {}).items()},
+            figures=current_figures,
+            reader_missing=bool(primary.get("missing_figure") or missing_option_slots),
+            described_slots=described_slots | missing_option_slots,
+        )
+
     cues = cue_matches(question.stem, question.options)
     figures = current_figures
     if cues and not figures:

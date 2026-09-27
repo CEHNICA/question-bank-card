@@ -876,6 +876,33 @@ class ApiTests(TestCase):
         headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
         return self.client.patch(path, data=json.dumps(body or {}), content_type="application/json", **headers)
 
+    def test_empty_review_reuses_saved_reads_without_rereading_old_cards(self):
+        candidate = {"label": "1", "seq": 1, "page_idx": 0, "bbox": [300, 310, 440, 370]}
+        base_read = {
+            "stem": "求证", "options": {}, "type": "free_response", "figures": {"1": "none"},
+            "missing_figure": False, "figure_descriptions": [],
+        }
+        Question.objects.filter(pk=self.q2.pk).update(
+            figure_review={}, figure_candidates=[candidate], read_a=base_read, read_b={}, read_c={},
+            figures=[], question_type="free_response",
+        )
+        self.q2.refresh_from_db()
+        self.assertEqual(figure_policy.stored_or_derived_review(self.q2)["status"], "auto_excluded")
+
+        self.q2.read_a = {**base_read, "figures": {}}
+        self.q2.save(update_fields=["read_a"])
+        self.assertEqual(figure_policy.stored_or_derived_review(self.q2)["status"], "conflict")
+
+        self.q2.question_type = "single_choice"
+        self.q2.read_a = {**base_read, "type": "single_choice", "figures": {"1": "A"}}
+        self.q2.figures = [{
+            "slot": "A", "page_idx": 0, "bbox": [300, 310, 440, 370], "source": "auto",
+        }]
+        self.q2.save(update_fields=["question_type", "read_a", "figures"])
+        review = figure_policy.stored_or_derived_review(self.q2)
+        self.assertEqual(review["status"], "blocked_missing")
+        self.assertEqual(review["missing_slots"], ["B", "C", "D"])
+
     def delete(self, path, header=True):
         headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
         return self.client.delete(path, **headers)
