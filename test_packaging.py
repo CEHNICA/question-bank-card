@@ -119,7 +119,7 @@ class BundleAuditTests(unittest.TestCase):
 
     def test_installer_must_be_a_realistic_windows_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
-            installer = Path(tmp) / "题库题卡版-Setup.exe"
+            installer = Path(tmp) / "TiYouJu-Setup.exe"
             installer.write_bytes(b"MZ" + b"\0" * (1024 * 1024))
             audit_installer(installer)
             installer.write_bytes(b"NO" + b"\0" * (1024 * 1024))
@@ -159,19 +159,36 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertIn("Copy-Item -LiteralPath $ProjectLicense", build)
         self.assertIn("LicenseFile=..\\LICENSE", installer)
         self.assertIn('{app}\\THIRD_PARTY_LICENSES', installer)
-        self.assertIn("OutputBaseFilename=QuestionBankCard-Setup-", installer)
+        self.assertIn("OutputBaseFilename=TiYouJu-Setup-", installer)
         self.assertIn("'SHA256SUMS.txt'", build)
         self.assertIn("[System.Text.UTF8Encoding]::new($false)", build)
         self.assertNotIn("-Encoding ascii", build)
         self.assertIn("CORRESPONDING_SOURCE.txt", build)
         self.assertIn("CORRESPONDING_SOURCE.template.txt", build)
         self.assertIn("[System.Text.UTF8Encoding]::new($false, $true)", build)
-        self.assertIn("题库题卡版 {{VERSION}}——对应源码", source_template)
+        self.assertIn("题有据 {{VERSION}}——对应源码", source_template)
         self.assertIn("releases/tag/v{{VERSION}}", source_template)
         self.assertIn("question-bank-card-{{VERSION}}-source.zip", source_template)
         self.assertIn("5e0be7908a715aa20333caddd73f1d6f01e4cd0c26e869fa2dd0b7f344da2249", source_template)
         self.assertIn("44075a84e329db55b9bef5f342a70fd26d69e48ad1d33cb89d9664581c641156", source_template)
         self.assertNotIn("é¢˜", source_template)
+
+    def test_rebrand_keeps_upgrade_and_user_data_identity_stable(self):
+        build = (self.ROOT / "packaging" / "build.ps1").read_text(encoding="utf-8")
+        installer = (self.ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn("[string]$Version = '1.2.0'", build)
+        self.assertIn(r"StringStruct('ProductName', '\u9898\u6709\u636e')", build)
+        self.assertIn('#define MyAppName "题有据"', installer)
+        self.assertIn('#define MyAppExeName "QuestionBankCard.exe"', installer)
+        self.assertIn("AppId={{8C1BC21C-A8B7-4E81-9E25-59032D0967D8}", installer)
+        self.assertIn("DefaultDirName={localappdata}\\Programs\\QuestionBankCard", installer)
+        self.assertIn('Name: "{localappdata}\\QuestionBankCard"', installer)
+        self.assertIn("UsePreviousGroup=no", installer)
+        self.assertIn('Name: "{userdesktop}\\{#MyLegacyAppName}.lnk"', installer)
+        self.assertIn('Type: files; Name: "{userprograms}\\{#MyLegacyAppName}.lnk"', installer)
+        self.assertIn('Type: files; Name: "{userprograms}\\{#MyLegacyAppName}\\{#MyLegacyAppName}.lnk"', installer)
+        self.assertIn('Type: dirifempty; Name: "{userprograms}\\{#MyLegacyAppName}"', installer)
+        self.assertNotIn('Type: filesandordirs; Name: "{userprograms}\\{#MyLegacyAppName}"', installer)
 
 
 class Utf8ChildProcessTests(unittest.TestCase):

@@ -21,7 +21,7 @@ from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag,
-    recheck_automatic_review, stored_or_derived_review,
+    missing_choice_figure_slots, recheck_automatic_review, stored_or_derived_review,
 )
 from .mineru import (
     MAX_PDF_PAGES, MineruError, load_blocks, request_extract_file_from_pool, write_pdf_slice,
@@ -1144,7 +1144,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 "group_id": snapshot.get("group_id"),
                 **box,
             })   # 属于同一题组内别的题的图，交给那道题
-    option_figure_slots = {f["slot"] for f in figures if f["slot"] in readers.OPTION_KEYS}
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
@@ -1158,9 +1157,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     kind = final.get("type") or "unknown"
     if kind == "unknown":
         kind = snapshot["question_type"]
-    choice_missing_slots = set()
-    if kind in {"single_choice", "multiple_choice"} and not final.get("options"):
-        choice_missing_slots = set(readers.OPTION_KEYS) - option_figure_slots
+    choice_missing_slots = missing_choice_figure_slots(
+        kind=kind,
+        options=final.get("options") or {},
+        figures=figures,
+        readings=audited_results,
+    )
     choice_missing = bool(choice_missing_slots)
     policy_stem = snapshot.get("stem", "") if snapshot.get("edited") else final.get("stem", "")
     policy_options = snapshot.get("options", {}) if snapshot.get("edited") else final.get("options") or {}

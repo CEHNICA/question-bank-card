@@ -1,6 +1,6 @@
 """窗口版启动器：像普通软件一样打开题库。
 
-双击桌面上的“题库题卡版”图标（或 app_launcher.pyw）后：
+双击桌面上的“题有据”图标（或 app_launcher.pyw）后：
 1. 不弹黑色命令行窗口，先显示一个小的启动画面；
 2. 在后台启动网页服务和工作者（沿用 start_question_bank.py 的全部逻辑与安全约束）；
 3. 用 Edge（没有 Edge 时用 Chrome）的“应用窗口”模式打开题库：没有地址栏和标签页，
@@ -33,9 +33,10 @@ from credential_store import CredentialStoreError, credential_pool, load_credent
 ROOT = launcher.ROOT
 ASSETS = ROOT / "assets"
 ICON_PNG = ASSETS / "app-icon.png"
-CONSOLE_LAUNCHER = ROOT / "启动题库题卡版.cmd"
+CONSOLE_LAUNCHER = ROOT / "启动题有据.cmd"
 LOG_FILE = launcher.RUNTIME / "launcher.log"
-APP_TITLE = "题库题卡版"
+APP_TITLE = "题有据"
+APP_SUBTITLE = "原卷可追溯的题库整理工具"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 
@@ -258,7 +259,7 @@ def _control_window(web: subprocess.Popen) -> None:
     root = tk.Tk()
     root.title(APP_TITLE)
     root.geometry("360x140")
-    tk.Label(root, text="题库正在运行，已在浏览器中打开。\n关闭这个小窗口即停止服务。", pady=24).pack()
+    tk.Label(root, text="题有据正在运行，已在浏览器中打开。\n关闭这个小窗口即停止服务。", pady=24).pack()
     tk.Button(root, text="停止并退出", command=root.destroy).pack()
     _set_icon(root)
     root.mainloop()
@@ -307,7 +308,8 @@ class Splash:
             tk.Label(frame, image=self.image, bg="#ffffff").pack(pady=(26, 8))
         else:
             tk.Label(frame, text="题", font=("SimSun", 30, "bold"), fg="#fff4dc", bg="#1f6b5f", width=2).pack(pady=(26, 8))
-        tk.Label(frame, text="题库 · 题卡版", font=("Microsoft YaHei UI", 14, "bold"), fg="#1c2a28", bg="#ffffff").pack()
+        tk.Label(frame, text=APP_TITLE, font=("Microsoft YaHei UI", 14, "bold"), fg="#1c2a28", bg="#ffffff").pack()
+        tk.Label(frame, text=APP_SUBTITLE, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(pady=(2, 0))
         self.status = tk.StringVar(value="正在启动…")
         tk.Label(frame, textvariable=self.status, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(pady=(6, 10))
         style = ttk.Style(root)
@@ -366,7 +368,7 @@ class Splash:
 def _hand_off_to_console(reason: str) -> int:
     print(f"转交命令行启动器：{reason}", flush=True)
     if not CONSOLE_LAUNCHER.is_file():
-        _message(f"{reason}。\n请双击“启动题库题卡版.cmd”。", error=True)
+        _message(f"{reason}。\n请双击“启动题有据.cmd”。", error=True)
         return 1
     _message(f"{reason}。\n\n接下来会打开命令行窗口，请按提示完成一次；以后双击图标就能直接打开窗口版。")
     subprocess.Popen(["cmd.exe", "/c", str(CONSOLE_LAUNCHER)], cwd=ROOT, creationflags=CREATE_NEW_CONSOLE)

@@ -210,6 +210,7 @@ render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
+favicon = _frontend("favicon.png", "image/png")
 
 
 def katex_asset(request, asset: str):
@@ -311,7 +312,7 @@ def papers(request):
     if rejected:
         return rejected
     if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请打开“题库题卡版 - 配置 API”设置）")
+        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请从开始菜单的“题有据”文件夹打开“配置 API”）")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")

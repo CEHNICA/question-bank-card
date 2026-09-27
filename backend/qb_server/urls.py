@@ -10,6 +10,7 @@ urlpatterns = [
     path("library.js", views.library_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
+    path("favicon.png", views.favicon),
     path("vendor/katex/<path:asset>", views.katex_asset),
     path("api/health", views.health),
     path("api/status", views.status),

@@ -34,7 +34,7 @@ for source in sorted(FRONTEND_ROOT.rglob("*")):
     if source.name.startswith("test_"):
         continue
     if source.name != "LICENSE" and source.suffix.lower() not in {
-        ".css", ".html", ".js", ".map", ".svg", ".ttf", ".woff", ".woff2"
+        ".css", ".html", ".js", ".map", ".png", ".svg", ".ttf", ".woff", ".woff2"
     }:
         continue
     datas.append((str(source), destination_for(FRONTEND_ROOT, source, "frontend")))

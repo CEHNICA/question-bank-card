@@ -1,5 +1,5 @@
-题库题卡版 {{VERSION}}——对应源码
-================================
+题有据 {{VERSION}}——对应源码
+==========================
 
 本安装包对应的第一方源码、PyMuPDF 1.28.2 源码和 MuPDF 1.28.2 源码位于：
 https://github.com/CEHNICA/question-bank-card/releases/tag/v{{VERSION}}

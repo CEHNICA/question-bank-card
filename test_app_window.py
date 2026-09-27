@@ -333,17 +333,38 @@ class MainFlowTests(unittest.TestCase):
 
 
 class ShortcutTests(unittest.TestCase):
+    def test_public_brand_is_used_without_changing_internal_launcher(self):
+        self.assertEqual(app_window.APP_TITLE, "题有据")
+        self.assertEqual(app_window.APP_SUBTITLE, "原卷可追溯的题库整理工具")
+        self.assertEqual(create_shortcut.NAME, "题有据")
+        self.assertEqual(create_shortcut.LEGACY_NAME, "题库题卡版")
+        self.assertEqual(app_window.CONSOLE_LAUNCHER.name, "启动题有据.cmd")
+        self.assertTrue(app_window.CONSOLE_LAUNCHER.is_file())
+
     def test_shortcut_runs_window_launcher_with_project_python(self):
         spec = create_shortcut.shortcut_spec()
         self.assertTrue(spec["target"].endswith("pythonw.exe"))
         self.assertIn("app_launcher.pyw", spec["arguments"])
         self.assertTrue(spec["icon"].endswith("app.ico,0"))
+        self.assertEqual(spec["description"], "题有据 · 原卷可追溯的题库整理工具")
 
     def test_powershell_quotes_paths(self):
-        script = create_shortcut.powershell_script(Path("C:/Users/O'Neil/Desktop/题库题卡版.lnk"),
+        script = create_shortcut.powershell_script(Path("C:/Users/O'Neil/Desktop/题有据.lnk"),
                                                    {"target": "a", "arguments": '"b"', "workdir": "c", "icon": "d,0", "description": "e"})
         self.assertIn("O''Neil", script)
-        self.assertIn("题库题卡版.lnk", script)
+        self.assertIn("题有据.lnk", script)
+
+    def test_rebrand_removes_only_exact_legacy_shortcut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            new_link = folder / "题有据.lnk"
+            old_link = folder / "题库题卡版.lnk"
+            unrelated = folder / "题库题卡版-我的备份.lnk"
+            old_link.write_bytes(b"old")
+            unrelated.write_bytes(b"keep")
+            create_shortcut.remove_legacy_shortcut(new_link)
+            self.assertFalse(old_link.exists())
+            self.assertTrue(unrelated.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Shell Link only")
     def test_unicode_target_path_survives_real_shell_link(self):
@@ -351,7 +372,7 @@ class ShortcutTests(unittest.TestCase):
         from win32com.shell import shell
 
         with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "题库题卡版"
+            folder = Path(tmp) / "题有据"
             folder.mkdir()
             target = folder / "pythonw.exe"
             shutil.copy2(sys.executable, target)
@@ -359,13 +380,13 @@ class ShortcutTests(unittest.TestCase):
             launcher.write_text("", encoding="utf-8")
             icon = folder / "app.ico"
             icon.write_bytes(b"")
-            link = Path(tmp) / "题库题卡版.lnk"
+            link = Path(tmp) / "题有据.lnk"
             spec = {
                 "target": str(target),
                 "arguments": f'"{launcher}"',
                 "workdir": str(folder),
                 "icon": f"{icon},0",
-                "description": "题库题卡版",
+                "description": "题有据",
             }
 
             create_shortcut._write_with_com(link, spec)

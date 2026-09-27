@@ -38,6 +38,10 @@ _CHINESE_CUE = re.compile(
     r"(?:根据|依据|结合)\s*(?:下|上|左|右)?\s*图(?:\s*(?:中|所示))?"
     r"(?=$|[\s，,。:：；;（(]|可知|可得|显示)|"
     r"(?:由|从)\s*(?:下|上|左|右)?\s*图(?:\s*中)?\s*(?:可知|可得|看出|得出)|"
+    r"(?:参照|参考)\s*(?:下|上|左|右|左侧|右侧)?\s*(?:的\s*)?"
+    r"[^，,。:：；;\n]{0,24}?(?:示意图|简图|统计图|折线图|柱状图|扇形图|电路图|"
+    r"结构图|装置图|流程图|函数图(?:像|象)|坐标图|路线图|地图|图)"
+    r"(?=$|[\s，,。:：；;（(])|"
     r"(?<![\u4e00-\u9fffA-Za-z0-9])图\s*为|"
     r"图\s*[①②③④⑤⑥⑦⑧⑨一二三四五六七八九1-9][A-Za-z]?|"
     r"(?<!不)如\s*表(?!格)(?:\s*所示)?(?=$|[\s，,。:：；;（(])|"
@@ -107,6 +111,39 @@ def cue_matches(stem: str, options: dict | None = None) -> list[str]:
 
 def has_figure_cue(stem: str, options: dict | None = None) -> bool:
     return bool(cue_matches(stem, options))
+
+
+def missing_choice_figure_slots(
+    *, kind: str, options: dict | None, figures: list[dict], readings: list[dict] | None = None,
+) -> set[str]:
+    """Return image-option slots that still need a bound crop.
+
+    A reader can occasionally label an ordinary graph question as multiple
+    choice even though a second reader calls it free response.  With no option
+    text and only a stem figure, treating that disagreement as four missing
+    image options creates a false missing-figure warning.  Suppress only that
+    narrow conflict; a single reader, reader consensus, or any bound option
+    figure still keeps the existing A-D completeness safeguard.
+    """
+    option_slots = {"A", "B", "C", "D"}
+    if kind not in {"single_choice", "multiple_choice"} or options:
+        return set()
+    bound = {
+        figure.get("slot") for figure in figures
+        if isinstance(figure, dict) and figure.get("slot") in option_slots
+    }
+    has_stem_figure = any(
+        isinstance(figure, dict) and figure.get("slot") == "stem" for figure in figures
+    )
+    declared = {
+        str(reading.get("type") or "unknown")
+        for reading in (readings or []) if isinstance(reading, dict)
+    }
+    choice_types = {"single_choice", "multiple_choice"}
+    non_choice_types = {"fill_blank", "free_response"}
+    if has_stem_figure and not bound and declared & choice_types and declared & non_choice_types:
+        return set()
+    return option_slots - bound
 
 
 def automatic_review(
@@ -279,13 +316,11 @@ def stored_or_derived_review(question) -> dict:
         if kind == "unknown":
             kind = str(getattr(question, "question_type", "unknown") or "unknown")
         options = getattr(question, "options", None) or {}
-        option_slots = {
-            figure.get("slot") for figure in current_figures
-            if figure.get("slot") in {"A", "B", "C", "D"}
-        }
-        missing_option_slots = (
-            {"A", "B", "C", "D"} - option_slots
-            if kind in {"single_choice", "multiple_choice"} and not options else set()
+        missing_option_slots = missing_choice_figure_slots(
+            kind=kind,
+            options=options,
+            figures=current_figures,
+            readings=readings,
         )
         described_slots = {
             slot for reading in readings

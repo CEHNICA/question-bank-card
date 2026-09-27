@@ -1,4 +1,4 @@
-"""题库题卡版：仅本机使用的设置。"""
+"""题有据：仅本机使用的设置。"""
 
 import os
 from pathlib import Path

@@ -152,6 +152,7 @@ class TextTests(TestCase):
             "观察下图并回答问题。",
             "根据右图可知，点 A 的坐标是（ ）。",
             "根据表中数据完成计算。",
+            "参照右侧三棱柱示意图，求该三棱柱的体积。",
             "函数的图象大致是（　　）",
             "图为河床横断面示意图。",
             "As shown in the figure below, find the value of x.",
@@ -178,10 +179,19 @@ class TextTests(TestCase):
             "As shown in the equation below, solve for x.",
             "Use the table method.",
             "According to graph theory, a tree has no cycles.",
+            "参考图书资料回答问题。",
         ]
         for value in negative:
             with self.subTest(value=value):
                 self.assertEqual(figure_policy.cue_matches(value), [])
+
+
+class StaticAssetTests(TestCase):
+    def test_favicon_is_served_as_png(self):
+        response = self.client.get("/favicon.png")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG\r\n\x1a\n"))
 
 
 class ParallelogramSymbolTests(TestCase):
@@ -580,6 +590,49 @@ class PipelineTests(TestCase):
                 self.assertIn(figure_policy.FLAG_NO_FIGURE, result["flags"])
                 self.assertEqual(result["figure_review"]["status"], "blocked_missing")
                 self.assertEqual(result["figure_review"]["source"], "automatic")
+
+    def test_graph_with_stem_figure_is_not_treated_as_four_missing_image_options(self):
+        stem = (
+            "The graph below shows the temperature during a morning experiment.\n\n"
+            "At what time did the temperature first reach 18℃?"
+        )
+        primary = readers.parse_reading(
+            f"【题号】6\n【题型】单选题\n【题干】\n{stem}\n【配图】1=题干\n【其他题号】无",
+            6,
+        )
+        checker = readers.parse_reading(
+            f"【题号】6\n【题型】解答题\n【题干】\n{stem}\n【其他题号】无",
+            6,
+        )
+        snapshot = {
+            "id": 999,
+            "number": 6,
+            "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            "candidates": [{
+                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
+            }],
+            "question_type": "unknown",
+        }
+        with mock.patch.object(
+                readers, "read_question",
+                side_effect=lambda _engine, _url, _number, with_figures: primary if with_figures else checker,
+        ) as read_mock, mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
+
+        self.assertEqual(read_mock.call_count, 2)
+        arbitrate_mock.assert_not_called()
+        self.assertEqual([figure["slot"] for figure in result["figures"]], ["stem"])
+        self.assertEqual(result["figure_review"]["status"], "ok")
+        self.assertEqual(result["figure_review"]["cue_matches"], ["graph below"])
+        self.assertNotIn(figure_policy.FLAG_UNFOUND_FIGURE, result["flags"])
+        self.assertEqual(result["state"], Question.State.GREEN)
+
+        self.assertEqual(
+            figure_policy.missing_choice_figure_slots(
+                kind="single_choice", options={}, figures=[], readings=[primary, checker],
+            ),
+            {"A", "B", "C", "D"},
+        )
 
     def test_printed_figure_without_text_reference_is_a_review_conflict(self):
         result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干")

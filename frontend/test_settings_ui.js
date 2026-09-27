@@ -5,8 +5,17 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+
+// 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
+for (const page of [html, libraryHtml]) {
+  assert.match(page, /<strong>题有据<\/strong>/);
+  assert.match(page, /class="brand-mark"[^>]*src="\/favicon\.png"/);
+  assert.doesNotMatch(page, /题库题卡版/);
+}
+assert.match(html, /题有据 1\.2\.0（本机安装）/);
 
 // 顶栏只有一个带文字的设置入口，抽屉包含约定的五个分区。
 assert.match(html, /id="settingsButton"[^>]*>[\s\S]*?<use href="#i-gear"\/>[\s\S]*?设置<\/button>/);

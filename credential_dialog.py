@@ -30,7 +30,7 @@ from credential_store import (
 )
 
 
-APP_TITLE = "题库题卡版"
+APP_TITLE = "题有据"
 Verifier = Callable[[str], bool | None]
 
 MODEL_ROLE_OPTIONS = {
@@ -204,7 +204,8 @@ class CredentialDialog:
         self.busy = False
         self.owns_root = parent is None
         self.root = tk.Tk() if self.owns_root else tk.Toplevel(parent)
-        self.root.title("首次设置 API 与模型" if first_run else "配置 API 与模型")
+        dialog_title = "首次设置 API 与模型" if first_run else "配置 API 与模型"
+        self.root.title(f"{APP_TITLE} · {dialog_title}")
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
         self.root.configure(bg="#f5f5ef")

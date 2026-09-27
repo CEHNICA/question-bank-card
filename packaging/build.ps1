@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$Version = '1.1.0',
+    [string]$Version = '1.2.0',
 
     [switch]$SkipInstaller,
     [switch]$SkipDependencyInstall
@@ -106,11 +106,11 @@ VSVersionInfo(
       StringTable(
         '080404b0',
         [StringStruct('CompanyName', 'CEHNICA'),
-         StringStruct('FileDescription', 'Question Bank Card'),
+         StringStruct('FileDescription', '\u9898\u6709\u636e - \u539f\u5377\u53ef\u8ffd\u6eaf\u7684\u9898\u5e93\u6574\u7406\u5de5\u5177'),
          StringStruct('FileVersion', '$Version'),
          StringStruct('InternalName', 'QuestionBankCard'),
          StringStruct('OriginalFilename', 'QuestionBankCard.exe'),
-         StringStruct('ProductName', 'Question Bank Card'),
+         StringStruct('ProductName', '\u9898\u6709\u636e'),
          StringStruct('ProductVersion', '$Version'),
          StringStruct('LegalCopyright', 'Copyright (c) 2026 CEHNICA and contributors')])
     ]),

@@ -1,6 +1,6 @@
 # 第三方许可证
 
-本目录收录题库题卡版 Windows 安装包所包含的运行时组件、内嵌前端资源与打包引导程序的许可证和 NOTICE。具体版本由 `backend/requirements.lock.txt` 与 `packaging/requirements-build.lock.txt` 锁定。
+本目录收录题有据 Windows 安装包所包含的运行时组件、内嵌前端资源与打包引导程序的许可证和 NOTICE。具体版本由 `backend/requirements.lock.txt` 与 `packaging/requirements-build.lock.txt` 锁定。
 
 ## 运行时组件
 

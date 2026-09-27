@@ -240,7 +240,7 @@ def audit_installer(installer: Path) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="审计题库题卡版桌面打包结果")
+    parser = argparse.ArgumentParser(description="审计题有据桌面打包结果")
     parser.add_argument("--bundle", required=True, type=Path, help="PyInstaller onedir 输出目录")
     parser.add_argument("--installer", type=Path, help="可选：Inno Setup 生成的 EXE")
     return parser.parse_args(argv)

@@ -31,7 +31,7 @@ class SingleInstance:
                 import fcntl
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise SystemExit("已有一个题卡版工作者在运行，本进程退出。")
+            raise SystemExit("已有一个题有据工作者在运行，本进程退出。")
 
 
 class Command(BaseCommand):

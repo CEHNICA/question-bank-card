@@ -118,7 +118,7 @@ def create_backup() -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="题库题卡版备份与校验")
+    parser = argparse.ArgumentParser(description="题有据备份与校验")
     parser.add_argument("--verify", metavar="BACKUP_DIR", type=Path, help="只校验指定备份")
     args = parser.parse_args()
     try:

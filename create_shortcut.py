@@ -1,4 +1,4 @@
-"""在桌面和开始菜单放一个“题库题卡版”图标，双击即以窗口版打开题库。
+"""在桌面和开始菜单放一个“题有据”图标，双击即以窗口版打开题库。
 
 只写快捷方式文件（.lnk），不改注册表、不需要管理员权限；删掉图标即可撤销。
 """
@@ -15,8 +15,9 @@ ROOT = Path(__file__).resolve().parent
 VENV_PYTHONW = ROOT / "backend" / ".venv" / "Scripts" / "pythonw.exe"
 LAUNCHER = ROOT / "app_launcher.pyw"
 ICON = ROOT / "assets" / "app.ico"
-NAME = "题库题卡版"
-DESCRIPTION = "题库 · 题卡终审与正式题库（窗口版）"
+NAME = "题有据"
+LEGACY_NAME = "题库题卡版"
+DESCRIPTION = "题有据 · 原卷可追溯的题库整理工具"
 
 
 def shortcut_spec() -> dict[str, str]:
@@ -98,12 +99,19 @@ def create(link: Path) -> None:
         raise RuntimeError(f"没能写入 {link}")
 
 
+def remove_legacy_shortcut(link: Path) -> None:
+    """改名后只清理同一目录下由旧版创建的精确快捷方式名。"""
+    legacy_link = link.with_name(f"{LEGACY_NAME}.lnk")
+    if legacy_link != link:
+        legacy_link.unlink(missing_ok=True)
+
+
 def main() -> int:
     if os.name != "nt":
         print("只支持 Windows。")
         return 1
     if not VENV_PYTHONW.is_file():
-        print("还没有建立运行环境。请先双击“启动题库题卡版.cmd”完成第一次安装，再运行本工具。")
+        print("还没有建立运行环境。请先双击“启动题有据.cmd”完成第一次安装，再运行本工具。")
         return 1
     places = [("桌面", _special_folder("Desktop") / f"{NAME}.lnk")]
     try:
@@ -113,12 +121,13 @@ def main() -> int:
     for label, link in places:
         try:
             create(link)
+            remove_legacy_shortcut(link)
             print(f"已创建{label}图标：{link}")
         except Exception as exc:  # noqa: BLE001
             print(f"创建{label}图标失败：{exc}")
             if label == "桌面":
                 return 1
-    print("\n以后双击“题库题卡版”图标即可打开独立窗口；关掉窗口，后台服务会一起停止。")
+    print(f"\n以后双击“{NAME}”图标即可打开独立窗口；关掉窗口，后台服务会一起停止。")
     return 0
 
 

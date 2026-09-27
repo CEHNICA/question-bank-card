@@ -1,4 +1,4 @@
-# Windows 安装包构建
+# 题有据 Windows 安装包构建
 
 构建流程使用 PyInstaller onedir 生成无控制台的 Windows 程序，再用 Inno Setup 生成当前用户安装包。目标电脑不需要预装 Python，安装和日常启动不需要管理员权限。
 
@@ -17,19 +17,19 @@ winget install --id JRSoftware.InnoSetup.7 --exact --source winget --accept-sour
 在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.2.0
 ```
 
 默认产物：
 
 - `packaging/dist/QuestionBankCard/QuestionBankCard.exe`
-- `packaging/dist/installer/QuestionBankCard-Setup-1.1.0.exe`
+- `packaging/dist/installer/TiYouJu-Setup-1.2.0.exe`
 - `packaging/dist/installer/SHA256SUMS.txt`
 
 只生成 onedir：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.1.0 -SkipInstaller
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.2.0 -SkipInstaller
 ```
 
 ## 数据边界
@@ -37,6 +37,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Versi
 构建只选择应用代码、前端静态文件、迁移、图标和许可文件。PyInstaller 完成后，`audit_bundle.py` 会检查最终目录；检出数据库、`backend/data`、日志、备份、凭据、PDF、ZIP/TGZ 或测试缓存时，构建立即失败。
 
 安装位置为 `%LOCALAPPDATA%\Programs\QuestionBankCard`，用户数据位于 `%LOCALAPPDATA%\QuestionBankCard`。卸载会移除程序和快捷方式，但故意保留用户数据。
+
+`v1.2.0` 起产品显示名改为“题有据”，但继续使用原来的 AppId、安装目录、程序文件名和用户数据目录。直接运行新安装包即可覆盖升级；安装器会精确移除旧版桌面及开始菜单快捷方式，并在“题有据”分组中创建新快捷方式，不会迁移或删除题库数据。
 
 ## 许可证与二进制分发
 

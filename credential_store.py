@@ -20,7 +20,7 @@ class CredentialStoreError(RuntimeError):
     """A credential file could not be protected or read."""
 
 
-# siliconflow_key is optional: in 题卡版 it makes the second reader a different vendor
+# siliconflow_key is optional: in 题有据 it makes the second reader a different vendor
 # (Qwen-VL); in M3 it does the zoomed third reading. The file is shared by both.
 CREDENTIAL_KEYS = ("mineru_token", "minimax_key", "siliconflow_key")
 MAX_ACCOUNT_POOL_SIZE = 8
@@ -230,7 +230,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
         payload = json.loads(_transform(path.read_bytes(), protect=False).decode("utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise CredentialStoreError(
-                "已保存的凭据格式不受支持，请打开“题库题卡版 - 配置 API”重新设置。"
+                "已保存的凭据格式不受支持，请从开始菜单的“题有据”文件夹打开“配置 API”重新设置。"
             )
         result: dict[str, object] = {}
         for service, (legacy_key, pool_key) in ACCOUNT_POOL_FIELDS.items():
@@ -240,7 +240,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
                 result[pool_key] = pool
         return result
     except (OSError, UnicodeError, ValueError, TypeError, CredentialStoreError) as exc:
-        raise CredentialStoreError("已保存的凭据无法读取，请打开“题库题卡版 - 配置 API”重新设置。") from exc
+        raise CredentialStoreError("已保存的凭据无法读取，请从开始菜单的“题有据”文件夹打开“配置 API”重新设置。") from exc
 
 
 def save_credentials(values: Mapping[str, object], path: Path | None = None) -> None:

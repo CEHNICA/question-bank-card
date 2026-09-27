@@ -1,8 +1,9 @@
-#define MyAppName "题库题卡版"
+#define MyAppName "题有据"
+#define MyLegacyAppName "题库题卡版"
 #define MyAppExeName "QuestionBankCard.exe"
 
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.2.0"
 #endif
 
 #ifndef SourceDir
@@ -32,7 +33,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#OutputDir}
-OutputBaseFilename=QuestionBankCard-Setup-{#AppVersion}
+OutputBaseFilename=TiYouJu-Setup-{#AppVersion}
 SetupIconFile=..\assets\app.ico
 LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -45,6 +46,8 @@ CloseApplicationsFilter={#MyAppExeName}
 RestartApplications=no
 SetupLogging=yes
 UsePreviousAppDir=yes
+; 品牌改名后不要沿用旧版“题库题卡版”的开始菜单分组。
+UsePreviousGroup=no
 ChangesAssociations=no
 ChangesEnvironment=no
 AllowNetworkDrive=no
@@ -72,6 +75,16 @@ Type: files; Name: "{app}\THIRD_PARTY_NOTICES.txt"
 Type: files; Name: "{app}\LICENSE"
 Type: filesandordirs; Name: "{app}\THIRD_PARTY_LICENSES"
 Type: files; Name: "{app}\CORRESPONDING_SOURCE.txt"
+; 同一 AppId 覆盖升级时清理旧品牌快捷方式，用户数据和程序内部路径保持不变。
+Type: files; Name: "{userdesktop}\{#MyLegacyAppName}.lnk"
+; 源码版创建器曾把快捷方式直接放在开始菜单根目录。
+Type: files; Name: "{userprograms}\{#MyLegacyAppName}.lnk"
+; v1.1.0 安装器在旧品牌分组内创建的三个快捷方式。
+Type: files; Name: "{userprograms}\{#MyLegacyAppName}\{#MyLegacyAppName}.lnk"
+Type: files; Name: "{userprograms}\{#MyLegacyAppName}\配置 API.lnk"
+Type: files; Name: "{userprograms}\{#MyLegacyAppName}\卸载 {#MyLegacyAppName}.lnk"
+; 只有旧分组已经为空时才移除目录，保留用户自行放入的其他内容。
+Type: dirifempty; Name: "{userprograms}\{#MyLegacyAppName}"
 
 [Files]
 ; SourceDir 必须在 build.ps1 中先经 audit_bundle.py 审计。

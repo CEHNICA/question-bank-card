@@ -1,4 +1,4 @@
-"""双击启动题卡版：准备本地环境，读取已加密保存的凭据，启动网页和后台工作者。"""
+"""启动题有据：准备本地环境，读取已加密保存的凭据，启动网页和后台工作者。"""
 
 from __future__ import annotations
 
@@ -436,7 +436,7 @@ def _relocate_local_paths() -> None:
 
 
 def _running_instance() -> str | None:
-    """已经有一个题卡版在运行就直接打开它，避免两套服务抢同一个数据库。"""
+    """已经有一个题有据在运行就直接打开它，避免两套服务抢同一个数据库。"""
     urls: list[str] = []
     if INSTANCE_FILE.is_file():
         try:
@@ -734,12 +734,12 @@ def main() -> int:
         return 1
     existing = _running_instance()
     if existing:
-        print(f"题卡版已经在运行：{existing}（已为你打开）。")
+        print(f"题有据已经在运行：{existing}（已为你打开）。")
         webbrowser.open_new_tab(existing)
         return 0
     instance_mutex = InstanceMutex()
     if not instance_mutex.acquired:
-        print("题卡版正在另一个窗口启动或运行；为保护数据库，本次不会重复启动。")
+        print("题有据正在另一个窗口启动或运行；为保护数据库，本次不会重复启动。")
         return 0
     job = None
     processes: list[subprocess.Popen] = []
@@ -813,7 +813,7 @@ def main() -> int:
         del worker_env
         time.sleep(1.5)
         if worker.poll() is not None:
-            print("注意：后台工作者没有启动成功（可能已有另一个题卡版在运行），新卷暂时不会被处理。"
+            print("注意：后台工作者没有启动成功（可能已有另一个题有据在运行），新卷暂时不会被处理。"
                   "详情见 backend/runtime/worker.log")
         web, log = _start(["runserver", f"127.0.0.1:{port}", "--noreload"], web_env, "web.log")
         processes.append(web)
@@ -821,7 +821,7 @@ def main() -> int:
         job.add(web)
         _health(url, web)
         _write_instance(port)
-        print(f"\n题卡终审页已就绪：{url}")
+        print(f"\n题有据逐题核对页已就绪：{url}")
         print(f"正式题库：{url}/library")
         webbrowser.open_new_tab(url)
         print("关闭此窗口或按 Ctrl+C 即停止本次服务。")
