@@ -1,10 +1,10 @@
-"""Native Windows dialog for first-run API setup and later reconfiguration.
+"""Native Windows dialog for first-run API and model-role configuration.
 
 The dialog deliberately knows nothing about the launcher implementation.  It
-only normalizes the three supported credentials and stores them through the
-existing DPAPI-backed :mod:`credential_store` module.  A caller may supply a
-MinerU verifier; it is always run on a worker thread so a slow network cannot
-freeze the window.
+normalizes the three supported credentials, stores them through the existing
+DPAPI-backed store, and saves allow-listed non-secret model preferences beside
+them.  A caller may supply API verifiers; they always run on a worker thread so
+a slow network cannot freeze the window.
 """
 
 from __future__ import annotations
@@ -17,50 +17,161 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from credential_store import CredentialStoreError, load_credentials, save_credentials
+from credential_store import (
+    DEFAULT_MODEL_PREFERENCES,
+    MAX_ACCOUNT_POOL_SIZE,
+    CredentialStoreError,
+    credential_pool,
+    load_credentials,
+    load_model_preferences,
+    normalize_model_preferences,
+    save_credentials,
+    save_model_preferences,
+)
 
 
 APP_TITLE = "题库题卡版"
 Verifier = Callable[[str], bool | None]
 
+MODEL_ROLE_OPTIONS = {
+    "primary_engine": (
+        ("MiniMax-M3", "minimax_m3"),
+        ("Qwen3-VL-32B-Instruct（硅基流动）", "siliconflow_qwen3"),
+    ),
+    "checker_engine": (
+        ("自动（优先选择另一家，缺少则跟随主读）", "auto"),
+        ("MiniMax-M3", "minimax_m3"),
+        ("Qwen3-VL-32B-Instruct（硅基流动）", "siliconflow_qwen3"),
+    ),
+    "arbiter_engine": (
+        ("跟随主读", "primary"),
+        ("跟随复核", "checker"),
+        ("MiniMax-M3", "minimax_m3"),
+        ("Qwen3-VL-32B-Instruct（硅基流动）", "siliconflow_qwen3"),
+    ),
+}
+_MODEL_LABEL_BY_VALUE = {
+    role: {value: label for label, value in options}
+    for role, options in MODEL_ROLE_OPTIONS.items()
+}
+_MODEL_VALUE_BY_LABEL = {
+    role: {label: value for label, value in options}
+    for role, options in MODEL_ROLE_OPTIONS.items()
+}
 
-def normalize_credential_values(values: dict[str, str]) -> dict[str, str]:
-    """Normalize form values without logging or otherwise exposing them."""
-    mineru = values.get("mineru_token", "").strip()
-    if mineru.lower().startswith("bearer "):
-        mineru = mineru[7:].strip()
-    minimax = values.get("minimax_key", "").strip().replace("\\_", "_")
-    siliconflow = values.get("siliconflow_key", "").strip()
-    result = {"mineru_token": mineru, "minimax_key": minimax}
-    if siliconflow:
-        result["siliconflow_key"] = siliconflow
+
+_FORM_POOLS = {
+    "mineru": ("mineru_token", "mineru_tokens", "MinerU Token"),
+    "minimax": ("minimax_key", "minimax_keys", "MiniMax API Key"),
+    "siliconflow": ("siliconflow_key", "siliconflow_keys", "硅基流动 API Key"),
+}
+
+
+def _split_form_pool(value: str, service: str) -> list[str]:
+    """Split the masked semicolon field while preserving invalid inner whitespace for validation."""
+
+    accounts: list[str] = []
+    for raw in value.split(";"):
+        account = raw.strip()
+        if service == "mineru" and account.lower().startswith("bearer "):
+            account = account[7:].strip()
+        if service == "minimax":
+            account = account.replace("\\_", "_")
+        if account and account not in accounts:
+            accounts.append(account)
+    return accounts
+
+
+def _accounts(values: dict[str, object], service: str) -> list[str]:
+    legacy_key, pool_key, _label = _FORM_POOLS[service]
+    raw = values.get(pool_key) if pool_key in values else values.get(legacy_key, "")
+    if isinstance(raw, str):
+        return _split_form_pool(raw, service)
+    if isinstance(raw, (list, tuple)):
+        return [item for item in raw if isinstance(item, str) and item]
+    return []
+
+
+def normalize_credential_values(values: dict[str, str]) -> dict[str, object]:
+    """Normalize three semicolon-separated account pools without exposing them."""
+
+    result: dict[str, object] = {}
+    for service, (legacy_key, pool_key, _label) in _FORM_POOLS.items():
+        accounts = _split_form_pool(values.get(legacy_key, ""), service)
+        if accounts:
+            result[legacy_key] = accounts[0]
+            result[pool_key] = accounts
     return result
 
 
-def validate_credential_values(values: dict[str, str]) -> str | None:
+def validate_credential_values(values: dict[str, object]) -> str | None:
     """Return a user-facing error, or ``None`` when local checks pass."""
-    if not values.get("mineru_token"):
-        return "请输入 MinerU Token。"
-    if not values.get("minimax_key"):
-        return "请输入 MiniMax API Key。"
-    for label, key in (
-        ("MinerU Token", "mineru_token"),
-        ("MiniMax API Key", "minimax_key"),
-        ("硅基流动 API Key", "siliconflow_key"),
-    ):
-        value = values.get(key, "")
-        if any(character.isspace() for character in value):
-            return f"{label} 中不能包含空格或换行，请检查后重试。"
-        if any(ord(character) < 32 or ord(character) == 127 for character in value):
-            return f"{label} 中包含不可见字符，请重新粘贴。"
-        if len(value) > 16_384:
-            return f"{label} 过长，请检查是否粘贴了多余内容。"
+    if not _accounts(values, "mineru"):
+        return "请输入至少一个 MinerU Token。"
+    for service, (_legacy_key, _pool_key, label) in _FORM_POOLS.items():
+        accounts = _accounts(values, service)
+        if len(accounts) > MAX_ACCOUNT_POOL_SIZE:
+            return f"{label} 最多填写 {MAX_ACCOUNT_POOL_SIZE} 个账号。"
+        for index, value in enumerate(accounts, start=1):
+            prefix = f"{label} 的第 {index} 个账号"
+            if any(character.isspace() for character in value):
+                return f"{prefix}中不能包含空格或换行，请检查后重试。"
+            if any(ord(character) < 32 or ord(character) == 127 for character in value):
+                return f"{prefix}中包含不可见字符，请重新粘贴。"
+            if len(value) > 16_384:
+                return f"{prefix}过长，请检查是否粘贴了多余内容。"
     return None
 
 
-def credentials_complete(values: dict[str, str]) -> bool:
-    normalized = normalize_credential_values(values)
-    return bool(normalized.get("mineru_token") and normalized.get("minimax_key"))
+def credentials_complete(
+    values: dict[str, object], preferences: dict[str, str] | None = None,
+) -> bool:
+    selected = normalize_model_preferences(preferences or DEFAULT_MODEL_PREFERENCES)
+    primary_service = "siliconflow" if selected["primary_engine"] == "siliconflow_qwen3" else "minimax"
+    return bool(_accounts(values, "mineru") and _accounts(values, primary_service))
+
+
+def validate_model_preferences(
+    preferences: dict[str, str], credentials: dict[str, object],
+) -> str | None:
+    """Reject a role that explicitly requires an unavailable provider key."""
+    normalized = normalize_model_preferences(preferences)
+    explicit = {
+        normalized["primary_engine"],
+        normalized["checker_engine"],
+        normalized["arbiter_engine"],
+    }
+    if not _accounts(credentials, "minimax") and "minimax_m3" in explicit:
+        return "所选模型需要先填写 MiniMax API Key。"
+    if not _accounts(credentials, "siliconflow") and "siliconflow_qwen3" in explicit:
+        return "所选模型需要先填写硅基流动 API Key。"
+    return None
+
+
+def verify_credential_accounts(
+    values: dict[str, object],
+    *,
+    verify_mineru: Verifier | None = None,
+    verify_minimax: Verifier | None = None,
+    verify_siliconflow: Verifier | None = None,
+) -> dict[str, bool | None]:
+    """Verify every configured account and return labels that contain no secret text."""
+
+    results: dict[str, bool | None] = {}
+    for name, verifier, service in (
+        ("MinerU", verify_mineru, "mineru"),
+        ("MiniMax", verify_minimax, "minimax"),
+        ("硅基流动", verify_siliconflow, "siliconflow"),
+    ):
+        if verifier is None:
+            continue
+        for index, account in enumerate(_accounts(values, service), start=1):
+            label = f"{name} 第 {index} 个账号"
+            try:
+                results[label] = verifier(account)
+            except Exception:  # noqa: BLE001 - a verifier failure is an unknown network result
+                results[label] = None
+    return results
 
 
 def _resource_root() -> Path:
@@ -77,6 +188,7 @@ class CredentialDialog:
         first_run: bool = False,
         verify_mineru: Verifier | None = None,
         verify_minimax: Verifier | None = None,
+        verify_siliconflow: Verifier | None = None,
         parent=None,
     ) -> None:
         import tkinter as tk
@@ -86,12 +198,13 @@ class CredentialDialog:
         self.ttk = ttk
         self.verify_mineru = verify_mineru
         self.verify_minimax = verify_minimax
+        self.verify_siliconflow = verify_siliconflow
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.saved = False
         self.busy = False
         self.owns_root = parent is None
         self.root = tk.Tk() if self.owns_root else tk.Toplevel(parent)
-        self.root.title("首次设置 API" if first_run else "配置 API")
+        self.root.title("首次设置 API 与模型" if first_run else "配置 API 与模型")
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
         self.root.configure(bg="#f5f5ef")
@@ -106,14 +219,26 @@ class CredentialDialog:
             current = {}
             load_warning = "原来的配置无法读取，请重新填写后保存。"
 
+        try:
+            current_preferences = load_model_preferences()
+        except CredentialStoreError:
+            current_preferences = dict(DEFAULT_MODEL_PREFERENCES)
+            preference_warning = "原来的模型选择无法读取，已恢复默认选择。"
+            load_warning = "\n".join(filter(None, (load_warning, preference_warning)))
+
         self.values = {
-            "mineru_token": tk.StringVar(value=current.get("mineru_token", "")),
-            "minimax_key": tk.StringVar(value=current.get("minimax_key", "")),
-            "siliconflow_key": tk.StringVar(value=current.get("siliconflow_key", "")),
+            "mineru_token": tk.StringVar(value="; ".join(credential_pool(current, "mineru"))),
+            "minimax_key": tk.StringVar(value="; ".join(credential_pool(current, "minimax"))),
+            "siliconflow_key": tk.StringVar(value="; ".join(credential_pool(current, "siliconflow"))),
+        }
+        self.model_values = {
+            role: tk.StringVar(value=_MODEL_LABEL_BY_VALUE[role][current_preferences[role]])
+            for role in DEFAULT_MODEL_PREFERENCES
         }
         self.show_secrets = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value=load_warning)
         self._entries = []
+        self._model_controls = []
         self._build(first_run)
         self._center()
         self.root.after(80, self._poll_events)
@@ -144,8 +269,8 @@ class CredentialDialog:
                         font=("Microsoft YaHei UI", 9))
         style.configure("Field.TLabel", background="#ffffff", foreground="#243c36",
                         font=("Microsoft YaHei UI", 9, "bold"))
-        style.configure("Hint.TLabel", background="#ffffff", foreground="#77827e",
-                        font=("Microsoft YaHei UI", 8))
+        style.configure("Section.TLabel", background="#ffffff", foreground="#183b34",
+                        font=("Microsoft YaHei UI", 11, "bold"))
         style.configure("Accent.TButton", font=("Microsoft YaHei UI", 9, "bold"),
                         foreground="#ffffff", background="#1f6b5f", bordercolor="#1f6b5f")
         style.map("Accent.TButton", background=[("active", "#195a50"), ("disabled", "#9aaaa5")])
@@ -155,45 +280,84 @@ class CredentialDialog:
         card = ttk.Frame(outer, style="Card.TFrame", padding=(26, 22))
         card.pack(fill="both", expand=True)
 
-        title = "第一次使用，先配置 API" if first_run else "配置 API"
+        title = "第一次使用，先配置 API 与模型" if first_run else "配置 API 与模型"
         ttk.Label(card, text=title, style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(
             card,
-            text="用于解析试卷和核对题目。MinerU 与 MiniMax 必填，硅基流动可选。",
+            text=("MinerU 必填；MiniMax 与硅基流动按下方所选模型填写。"
+                  f"每类最多 {MAX_ACCOUNT_POOL_SIZE} 个账号，多个凭据用英文分号 ; 分隔。"),
             style="Body.TLabel",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 18))
 
         row = 2
         fields = (
-            ("MinerU Token", "mineru_token", "必填 · 可直接粘贴 Bearer Token"),
-            ("MiniMax API Key", "minimax_key", "必填 · 用于识读题目"),
-            ("硅基流动 API Key", "siliconflow_key", "可选 · 使用另一家模型复核"),
+            ("MinerU Token（必填；多个用 ; 分隔）", "mineru_token"),
+            ("MiniMax API Key（多个用 ; 分隔）", "minimax_key"),
+            ("硅基流动 API Key（多个用 ; 分隔）", "siliconflow_key"),
         )
-        for label, key, hint in fields:
-            ttk.Label(card, text=label, style="Field.TLabel").grid(row=row, column=0, columnspan=2, sticky="w")
-            row += 1
+        for label, key in fields:
+            ttk.Label(card, text=label, style="Field.TLabel").grid(row=row, column=0, sticky="w")
             entry = ttk.Entry(card, textvariable=self.values[key], show="●", width=64)
-            entry.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 3), ipady=5)
+            entry.grid(row=row, column=1, sticky="ew", padx=(12, 0), pady=4, ipady=4)
             entry.bind("<Return>", lambda _event: self._save())
             self._entries.append(entry)
             row += 1
-            ttk.Label(card, text=hint, style="Hint.TLabel").grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 11))
-            row += 1
 
         show = ttk.Checkbutton(card, text="显示输入内容", variable=self.show_secrets, command=self._toggle_visibility)
-        show.grid(row=row, column=0, sticky="w", pady=(0, 13))
+        show.grid(row=row, column=1, sticky="w", padx=(12, 0), pady=(1, 13))
+        row += 1
+
+        ttk.Separator(card, orient="horizontal").grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=(0, 13)
+        )
+        row += 1
+        ttk.Label(card, text="识读模型分工", style="Section.TLabel").grid(
+            row=row, column=0, columnspan=2, sticky="w"
+        )
+        row += 1
+        ttk.Label(
+            card,
+            text="主读先形成题面；复核独立核对；裁决只在两次读法不一致时决定最终文本。",
+            style="Body.TLabel", wraplength=560, justify="left",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(3, 11))
+        row += 1
+
+        model_fields = (
+            ("主读", "primary_engine"),
+            ("复核", "checker_engine"),
+            ("裁决", "arbiter_engine"),
+        )
+        for label, role in model_fields:
+            ttk.Label(card, text=label, style="Field.TLabel").grid(row=row, column=0, sticky="w")
+            combobox = ttk.Combobox(
+                card,
+                textvariable=self.model_values[role],
+                values=[option_label for option_label, _value in MODEL_ROLE_OPTIONS[role]],
+                state="readonly",
+                width=48,
+            )
+            combobox.grid(row=row, column=1, sticky="ew", padx=(12, 0), pady=(1, 1))
+            combobox.bind("<Return>", lambda _event: self._save())
+            self._model_controls.append(combobox)
+            row += 1
+
+        ttk.Label(
+            card,
+            text="这些选择只影响之后识读；已有题卡和正式题库不会自动变化。",
+            style="Body.TLabel", wraplength=560, justify="left",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 12))
         row += 1
 
         notice = (
             "隐私说明：密钥通过 Windows DPAPI 加密，仅保存在当前 Windows 用户下，"
             "不会写入题库文件或日志。"
         )
-        ttk.Label(card, text=notice, style="Body.TLabel", wraplength=520, justify="left").grid(
+        ttk.Label(card, text=notice, style="Body.TLabel", wraplength=560, justify="left").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(0, 10)
         )
         row += 1
         self.status_label = ttk.Label(card, textvariable=self.status, style="Body.TLabel",
-                                      wraplength=520, justify="left")
+                                      wraplength=560, justify="left")
         self.status_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
         row += 1
 
@@ -209,7 +373,8 @@ class CredentialDialog:
 
     def _center(self) -> None:
         self.root.update_idletasks()
-        width, height = 620, max(570, self.root.winfo_reqheight())
+        width = max(690, self.root.winfo_reqwidth())
+        height = max(620, self.root.winfo_reqheight())
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 3)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
@@ -222,8 +387,15 @@ class CredentialDialog:
         for entry in self._entries:
             entry.configure(show=mask)
 
-    def _form_values(self) -> dict[str, str]:
+    def _form_values(self) -> dict[str, object]:
         return normalize_credential_values({key: value.get() for key, value in self.values.items()})
+
+    def _form_preferences(self) -> dict[str, str]:
+        selected = {
+            role: _MODEL_VALUE_BY_LABEL[role].get(variable.get(), DEFAULT_MODEL_PREFERENCES[role])
+            for role, variable in self.model_values.items()
+        }
+        return normalize_model_preferences(selected)
 
     def _set_busy(self, value: bool) -> None:
         self.busy = value
@@ -231,49 +403,62 @@ class CredentialDialog:
         self.save_button.configure(state=state)
         for entry in self._entries:
             entry.configure(state=state)
+        for control in self._model_controls:
+            control.configure(state="disabled" if value else "readonly")
 
     def _save(self) -> None:
         if self.busy:
             return
         values = self._form_values()
+        preferences = self._form_preferences()
         problem = validate_credential_values(values)
+        if problem is None:
+            problem = validate_model_preferences(preferences, values)
         if problem:
             self._show_error(problem)
             return
-        if self.verify_mineru is None and self.verify_minimax is None:
-            self._persist(values)
+        if all(verifier is None for verifier in (
+            self.verify_mineru, self.verify_minimax, self.verify_siliconflow,
+        )):
+            self._persist(values, preferences)
             return
         self._set_busy(True)
-        self.status.set("正在验证 API 配置…")
+        # 目前只有 MinerU 提供不产生识读费用的凭据预检。
+        # 模型 Key 不冒充“已验证”，会在首次识读时由账号池隔离失效项。
+        if self.verify_mineru and not self.verify_minimax and not self.verify_siliconflow:
+            self.status.set("正在验证 MinerU Token…")
+        else:
+            self.status.set("正在验证 API 配置…")
 
         def verify() -> None:
-            results: dict[str, bool | None] = {}
-            for name, verifier, key in (
-                ("MinerU", self.verify_mineru, "mineru_token"),
-                ("MiniMax", self.verify_minimax, "minimax_key"),
-            ):
-                if verifier is None:
-                    continue
-                try:
-                    results[name] = verifier(values[key])
-                except Exception:  # noqa: BLE001 - a verifier failure is an unknown network result
-                    results[name] = None
-            self.events.put(("verified", (results, values)))
+            results = verify_credential_accounts(
+                values,
+                verify_mineru=self.verify_mineru,
+                verify_minimax=self.verify_minimax,
+                verify_siliconflow=self.verify_siliconflow,
+            )
+            self.events.put(("verified", (results, values, preferences)))
 
         threading.Thread(target=verify, name="credential-verification", daemon=True).start()
 
-    def _persist(self, values: dict[str, str]) -> None:
+    def _persist(self, values: dict[str, object], preferences: dict[str, str]) -> None:
         try:
             save_credentials(values)
+            save_model_preferences(preferences)
         except CredentialStoreError as exc:
             self._set_busy(False)
             self._show_error(str(exc))
             return
         self.saved = True
-        self.status.set("API 配置已加密保存。")
+        self.status.set("API 配置与模型选择已保存。")
         self.root.after(180, self.root.destroy)
 
-    def _verified(self, results: dict[str, bool | None], values: dict[str, str]) -> None:
+    def _verified(
+        self,
+        results: dict[str, bool | None],
+        values: dict[str, object],
+        preferences: dict[str, str],
+    ) -> None:
         from tkinter import messagebox
 
         self._set_busy(False)
@@ -292,7 +477,7 @@ class CredentialDialog:
             if not proceed:
                 self.status.set("尚未保存，请检查网络或 Token 后重试。")
                 return
-        self._persist(values)
+        self._persist(values, preferences)
 
     def _show_error(self, text: str) -> None:
         from tkinter import messagebox
@@ -309,8 +494,8 @@ class CredentialDialog:
             while True:
                 kind, payload = self.events.get_nowait()
                 if kind == "verified":
-                    result, values = payload
-                    self._verified(result, values)
+                    result, values, preferences = payload
+                    self._verified(result, values, preferences)
         except queue.Empty:
             pass
         with contextlib.suppress(Exception):
@@ -332,6 +517,7 @@ def show_credential_dialog(
     first_run: bool = False,
     verify_mineru: Verifier | None = None,
     verify_minimax: Verifier | None = None,
+    verify_siliconflow: Verifier | None = None,
     parent=None,
 ) -> bool:
     """Show the API setup window; return ``True`` only after a successful save."""
@@ -339,6 +525,7 @@ def show_credential_dialog(
         first_run=first_run,
         verify_mineru=verify_mineru,
         verify_minimax=verify_minimax,
+        verify_siliconflow=verify_siliconflow,
         parent=parent,
     ).show()
 
@@ -347,6 +534,9 @@ __all__ = [
     "CredentialDialog",
     "credentials_complete",
     "normalize_credential_values",
+    "MODEL_ROLE_OPTIONS",
     "show_credential_dialog",
     "validate_credential_values",
+    "validate_model_preferences",
+    "verify_credential_accounts",
 ]

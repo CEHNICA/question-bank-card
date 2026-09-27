@@ -2,32 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
-import os
 import shutil
 import threading
-from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict, defaultdict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 
 from django.conf import settings
 from django.db import close_old_connections, transaction
+from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, photos, readers, segment
+from . import imaging, import_planning, photos, readers, segment
+from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag,
     recheck_automatic_review, stored_or_derived_review,
 )
-from .mineru import MineruError, load_blocks, request_extract
-from .models import Block, Paper, Question
+from .mineru import (
+    MAX_PDF_PAGES, MineruError, load_blocks, request_extract_file_from_pool, write_pdf_slice,
+)
+from .models import Block, ImportChunk, Paper, Question, QuestionGroup
 from .textnorm import same_reading
 from .word import convert_docx_to_pdf
 
 logger = logging.getLogger(__name__)
-PARALLEL = max(1, min(8, int(os.environ.get("QB_PARALLEL", "4"))))
+PARALLEL = readers._parallel_limit()
+MINERU_HEARTBEAT_SECONDS = 5.0
+FLAG_RESEGMENT_PRESERVED = "重新切题未再找到这张人工题卡，已保留；请核对题号与原卷范围"
 
 
 def _invalidate_approval(question: Question) -> None:
@@ -99,8 +105,9 @@ class PageStore:
                 image.save(target, format="PNG", optimize=False, compress_level=3)
             self.memory[page_idx] = image
             while len(self.memory) > self.MAX_MEMORY_PAGES:
-                _, old_image = self.memory.popitem(last=False)
-                old_image.close()
+                # 只移除缓存引用，不主动 close：并行识读线程可能正在裁剪这一页。
+                # 待调用者的临时引用释放后，Pillow 对象会自然回收。
+                self.memory.popitem(last=False)
             return image
 
     def preview(self, page_idx: int) -> Path:
@@ -119,7 +126,384 @@ def _set(paper: Paper, **fields) -> None:
     paper.save(update_fields=[*fields, "updated_at"])
 
 
+def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None) -> None:
+    """Touch one paper from the orchestration thread, optionally saving progress."""
+
+    fields = {"updated_at": timezone.now()}
+    if progress is not None:
+        fields["progress"] = progress
+    if total is not None:
+        fields["total"] = total
+    Paper.objects.filter(pk=paper_id).update(**fields)
+
+
 # ---------------------------------------------------------------- 1. 解析
+
+def _ensure_import_chunks(paper: Paper) -> list[ImportChunk]:
+    """为需要本地切片的 PDF 建立确定、可重试的分片计划。"""
+    chunks = list(paper.import_chunks.order_by("sequence"))
+    if not chunks:
+        chunk_limit = import_planning.pdf_chunk_page_limit(
+            paper.material_type, MAX_PDF_PAGES,
+        )
+        plan = import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
+        chunks = ImportChunk.objects.bulk_create([
+            ImportChunk(paper=paper, **item.as_record()) for item in plan
+        ])
+    import_planning.validate_chunk_coverage(
+        chunks, expected_start=1, expected_end=len(paper.pages),
+    )
+    return list(paper.import_chunks.order_by("sequence"))
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _chunk_error_message(error: Exception) -> str:
+    """Keep user-safe MinerU details, but never persist local paths from exceptions."""
+
+    if isinstance(error, MineruError):
+        return str(error)[:500]
+    return f"分片处理失败（{type(error).__name__}）"
+
+
+def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
+    """并行解析缺失分片，并按原始顺序无损合并结果。
+
+    主线程先顺序生成本地分片；工作线程只执行 MinerU 请求和读取结果 ZIP，
+    所有 ORM 更新也都由主线程完成。这样一个分片失败时，其他已完成分片
+    仍能安全持久化，下次重试只提交失败或缺失的部分。
+    """
+    chunks = _ensure_import_chunks(paper)
+    folder = paper_dir(paper) / "chunks"
+    folder.mkdir(parents=True, exist_ok=True)
+    results: dict[int, list[dict]] = {}
+    jobs: list[dict] = []
+
+    for chunk in chunks:
+        source = folder / f"chunk_{chunk.sequence:03d}.pdf"
+        archive = folder / f"chunk_{chunk.sequence:03d}.zip"
+        page_count = chunk.source_page_end - chunk.source_page_start + 1
+        blocks = None
+        try:
+            blocks = load_blocks(archive, page_count) if archive.is_file() else None
+        except MineruError:
+            # 只丢弃本程序拥有的分片缓存；原始 PDF 永不改动。
+            archive.unlink(missing_ok=True)
+        if blocks is not None:
+            results[chunk.sequence] = blocks
+            ImportChunk.objects.filter(pk=chunk.pk).update(
+                status=ImportChunk.Status.PARSED,
+                artifact_path=str(archive),
+                error="",
+                updated_at=timezone.now(),
+            )
+            continue
+        jobs.append({
+            "pk": chunk.pk,
+            "sequence": chunk.sequence,
+            "source_page_start": chunk.source_page_start,
+            "source_page_end": chunk.source_page_end,
+            "page_map": tuple(int(page) for page in chunk.page_map),
+            "page_count": page_count,
+            "source": source,
+            "archive": archive,
+            "attempts": chunk.attempts + 1,
+        })
+
+    _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks))
+
+    failures: list[tuple[int, Exception]] = []
+    if jobs:
+        ready_jobs: list[dict] = []
+        for job in jobs:
+            ImportChunk.objects.filter(pk=job["pk"]).update(
+                status=ImportChunk.Status.PARSING,
+                attempts=job["attempts"],
+                artifact_path=str(job["archive"]),
+                error="",
+                updated_at=timezone.now(),
+            )
+            try:
+                if not job["source"].is_file():
+                    # PyMuPDF opens the same original file for every slice, so do
+                    # this deterministically on the main thread before networking.
+                    write_pdf_slice(
+                        render,
+                        job["source"],
+                        job["source_page_start"] - 1,
+                        job["source_page_end"],
+                    )
+            except Exception as exc:
+                failures.append((job["sequence"], exc))
+                ImportChunk.objects.filter(pk=job["pk"]).update(
+                    status=ImportChunk.Status.FAILED,
+                    error=_chunk_error_message(exc),
+                    updated_at=timezone.now(),
+                )
+            else:
+                ready_jobs.append(job)
+
+        def run(job: dict) -> list[dict]:
+            request_extract_file_from_pool(
+                job["source"], job["archive"], job["page_count"],
+            )
+            return load_blocks(job["archive"], job["page_count"])
+
+        if ready_jobs:
+            try:
+                token_pool = account_pool("mineru")
+            except AccountPoolError as exc:
+                raise MineruError(str(exc)) from None
+            max_workers = min(token_pool.size, len(ready_jobs))
+            if max_workers <= 0:
+                raise MineruError("MinerU 账号池中没有可用账号")
+
+        if ready_jobs:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_jobs = {executor.submit(run, job): job for job in ready_jobs}
+                pending = set(future_jobs)
+                while pending:
+                    done, pending = wait(
+                        pending,
+                        timeout=MINERU_HEARTBEAT_SECONDS,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    if not done:
+                        _paper_heartbeat(paper.pk)
+                        continue
+                    for future in done:
+                        job = future_jobs[future]
+                        try:
+                            blocks = future.result()
+                            digest = _file_sha256(job["source"])
+                        except Exception as exc:
+                            failures.append((job["sequence"], exc))
+                            ImportChunk.objects.filter(pk=job["pk"]).update(
+                                status=ImportChunk.Status.FAILED,
+                                error=_chunk_error_message(exc),
+                                updated_at=timezone.now(),
+                            )
+                        else:
+                            results[job["sequence"]] = blocks
+                            ImportChunk.objects.filter(pk=job["pk"]).update(
+                                status=ImportChunk.Status.PARSED,
+                                sha256=digest,
+                                artifact_path=str(job["archive"]),
+                                error="",
+                                updated_at=timezone.now(),
+                            )
+                        _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks))
+
+    if failures:
+        # Futures are all drained before reaching here, so later successes and
+        # their ZIP files/statuses are already durable. Report the first source
+        # chunk failure deterministically rather than completion-order roulette.
+        failures.sort(key=lambda item: item[0])
+        raise failures[0][1]
+
+    merged: list[dict] = []
+    for chunk in sorted(chunks, key=lambda item: item.sequence):
+        blocks = results.get(chunk.sequence)
+        if blocks is None:
+            raise MineruError(f"第 {chunk.sequence} 个分片没有可用解析结果")
+        for block in blocks:
+            local_page = block["page_idx"]
+            if not 0 <= local_page < len(chunk.page_map):
+                raise MineruError(f"第 {chunk.sequence} 个分片返回了无效页码")
+            merged.append({
+                **block,
+                "seq": len(merged),
+                "page_idx": int(chunk.page_map[local_page]) - 1,
+            })
+    return merged
+
+
+def _plan_structure(paper: Paper, blocks: list[dict]) -> tuple[dict, bool]:
+    """用已有 MinerU 块本地判断题号结构；不调用任何识读模型。"""
+    ranges = photos.page_ranges(paper.pages, blocks)
+    ordered_ranges = [ranges.get(page["page_idx"]) for page in paper.pages]
+    plan = import_planning.analyze_page_number_ranges(
+        ordered_ranges, material_type=paper.material_type,
+    )
+    scopes = segment.numbering_scopes(paper.pages, blocks)
+    scoped_restart = len(scopes) > 1
+    suggested_groups = [scope["pages"] for scope in scopes] if scoped_restart else [
+        list(range(group.page_start - 1, group.page_end)) for group in plan.groups
+    ]
+    structure = dict(paper.structure or {})
+    structure.update({
+        "page_ranges": [list(value) if value else None for value in ordered_ranges],
+        "suggested_groups": suggested_groups,
+        "suggested_scopes": scopes if scoped_restart else [],
+        "signals": [
+            {
+                "kind": signal.kind,
+                "page": signal.source_page - 1,
+                "numbers": list(signal.numbers),
+                "overlap": list(signal.overlapping_numbers),
+                "message": signal.message,
+            }
+            for signal in plan.signals
+        ],
+    })
+    if scoped_restart and not structure["signals"]:
+        structure["signals"] = [{
+            "kind": "numbering_restart",
+            "page": scopes[1]["start_page"],
+            "numbers": [scopes[1]["first_number"]],
+            "overlap": [],
+            "message": "同一资料中题号重新开始；已按独立题组保留，不会覆盖前面的同号题",
+        }]
+    confirmed = bool(structure.get("confirmed"))
+    needs_confirmation = (
+        (plan.needs_confirmation or (paper.material_type == Paper.MaterialType.EXAM and scoped_restart))
+        and not confirmed
+    )
+    return structure, needs_confirmation
+
+
+def _question_group_specs(paper: Paper) -> list[dict]:
+    """Return the current confirmed/suggested scopes in a model-ready form."""
+    structure = paper.structure or {}
+    scopes = structure.get("confirmed_scopes") or structure.get("suggested_scopes") or []
+    page_groups = structure.get("confirmed_groups") or \
+        structure.get("suggested_groups") or [list(range(len(paper.pages)))]
+    specs: list[dict] = []
+    source_groups = scopes if scopes else [{"pages": pages} for pages in page_groups]
+    for sequence, scope in enumerate(source_groups):
+        pages = scope.get("pages") if isinstance(scope, dict) else None
+        if not isinstance(pages, list):
+            continue
+        valid = sorted({int(page) for page in pages if type(page) is int and 0 <= page < len(paper.pages)})
+        if not valid:
+            continue
+        title = ("第 %d 组" % (sequence + 1)) if paper.material_type == Paper.MaterialType.BOOK \
+            else (paper.display_name if sequence == 0 else f"{paper.display_name}（{sequence + 1}）")
+        specs.append({
+            "title": title[:255],
+            "kind": (QuestionGroup.Kind.CHAPTER if paper.material_type == Paper.MaterialType.BOOK
+                     else QuestionGroup.Kind.EXAM),
+            "sequence": sequence,
+            "page_start": min(valid) + 1,
+            "page_end": max(valid) + 1,
+            "metadata": {
+                "pages": valid,
+                **({"seq_start": scope.get("seq_start"), "seq_end": scope.get("seq_end")}
+                   if isinstance(scope, dict) and (scope.get("seq_start") is not None
+                                                   or scope.get("seq_end") is not None) else {}),
+            },
+        })
+    if not specs:
+        raise RuntimeError("没有可用于切题的页面组")
+    return specs
+
+
+def _group_pages(group: QuestionGroup) -> tuple[int, ...]:
+    pages = (group.metadata or {}).get("pages")
+    if not isinstance(pages, list):
+        pages = list(range((group.page_start or 1) - 1, group.page_end or 0))
+    return tuple(sorted({int(page) for page in pages if type(page) is int}))
+
+
+def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
+    """把已确认/自动建议的页组落成题号作用域。
+
+    A human page-order change can produce a different confirmed scope plan after
+    cards already exist.  In that case reuse the group whose pages still match,
+    update/create the remaining groups, and move cards only when their regions
+    identify exactly one new scope.  This preserves source keys without guessing
+    between two scopes that share a physical page.
+    """
+    existing = list(paper.question_groups.order_by("sequence", "id"))
+    structure = dict(paper.structure or {})
+    rebuild = bool(structure.get("groups_need_rebuild"))
+    if existing and not rebuild:
+        return existing
+
+    specs = _question_group_specs(paper)
+    if not existing:
+        QuestionGroup.objects.bulk_create([
+            QuestionGroup(paper=paper, **spec) for spec in specs
+        ])
+        if rebuild:
+            structure["groups_need_rebuild"] = False
+            structure["groups_applied_at"] = structure.get("confirmed_at") or timezone.now().isoformat()
+            Paper.objects.filter(pk=paper.pk).update(structure=structure, updated_at=timezone.now())
+            paper.structure = structure
+        return list(paper.question_groups.order_by("sequence", "id"))
+
+    with transaction.atomic():
+        # Match exact page membership first. This lets a cross-group page reorder
+        # swap group sequence while each card keeps the same stable source group.
+        unused = list(existing)
+        selected: list[QuestionGroup | None] = []
+        for spec in specs:
+            wanted = tuple(spec["metadata"]["pages"])
+            match = next((group for group in unused if _group_pages(group) == wanted), None)
+            if match is not None:
+                unused.remove(match)
+            selected.append(match)
+
+        # A former single scope may have split into several confirmed scopes.
+        # Reuse one remaining group for the first unmatched scope and create the rest.
+        for index, group in enumerate(selected):
+            if group is None and unused:
+                selected[index] = unused.pop(0)
+
+        # Avoid transient unique_group_sequence collisions when two existing
+        # groups exchange order.
+        sequence_offset = max([group.sequence for group in existing] + [0]) + len(existing) + len(specs) + 1
+        QuestionGroup.objects.filter(paper=paper).update(sequence=F("sequence") + sequence_offset)
+
+        desired: list[QuestionGroup] = []
+        for spec, group in zip(specs, selected):
+            if group is None:
+                group = QuestionGroup.objects.create(paper=paper, **spec)
+            else:
+                metadata = dict(group.metadata or {})
+                metadata.update(spec["metadata"])
+                for key in ("seq_start", "seq_end"):
+                    if key not in spec["metadata"]:
+                        metadata.pop(key, None)
+                group.sequence = spec["sequence"]
+                group.page_start = spec["page_start"]
+                group.page_end = spec["page_end"]
+                group.metadata = metadata
+                # Keep a human/previous source title on a matched group. Only a
+                # newly created group needs the generated title/kind.
+                group.save(update_fields=[
+                    "sequence", "page_start", "page_end", "metadata", "updated_at",
+                ])
+            desired.append(group)
+
+        desired_pages = {group.pk: set(_group_pages(group)) for group in desired}
+        changed_questions: list[Question] = []
+        for question in paper.questions.all():
+            region_pages = {
+                item.get("page_idx") for item in (question.regions or question.regions_auto or [])
+                if isinstance(item, dict) and type(item.get("page_idx")) is int
+            }
+            matches = [
+                group for group in desired
+                if region_pages and region_pages.issubset(desired_pages[group.pk])
+            ]
+            if len(matches) == 1 and question.group_id != matches[0].pk:
+                question.group = matches[0]
+                changed_questions.append(question)
+        if changed_questions:
+            Question.objects.bulk_update(changed_questions, ["group"])
+
+        structure["groups_need_rebuild"] = False
+        structure["groups_applied_at"] = structure.get("confirmed_at") or timezone.now().isoformat()
+        Paper.objects.filter(pk=paper.pk).update(structure=structure, updated_at=timezone.now())
+        paper.structure = structure
+    return desired
 
 def parse(paper: Paper) -> None:
     _set(paper, status=Paper.Status.PARSING, error="")
@@ -134,33 +518,53 @@ def parse(paper: Paper) -> None:
     render, kind = render_source(paper)
     if not paper.pages:
         _set(paper, pages=imaging.page_sizes(render, kind))
-    archive = Path(paper.zip_path) if paper.zip_path else folder / "mineru_result.zip"
-    if not archive.is_file():
-        token = os.environ.get("MINERU_TOKEN", "").strip()
-        if not token:
-            raise MineruError("没有配置 MinerU Token，无法解析新试卷")
-        archive = request_extract(paper, token, render)
-    try:
-        blocks = load_blocks(archive, len(paper.pages))
-    except MineruError:
-        # Only remove the per-paper cache we own. A failed/oversized download used
-        # to leave a file behind, causing every retry to reopen the same bad ZIP.
-        owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
-        token = os.environ.get("MINERU_TOKEN", "").strip()
-        if not owned_archive or not token:
-            raise
-        archive.unlink(missing_ok=True)
-        archive = request_extract(paper, token, render)
-        blocks = load_blocks(archive, len(paper.pages))
+    chunked = kind == "pdf" and (
+        import_planning.pdf_requires_chunks(
+            len(paper.pages), paper.material_type, MAX_PDF_PAGES,
+        )
+        or paper.import_chunks.exists()
+    )
+    archive: Path | None = None
+    if chunked:
+        blocks = _chunk_blocks(paper, render)
+    else:
+        archive = Path(paper.zip_path) if paper.zip_path else folder / "mineru_result.zip"
+
+        def heartbeat() -> None:
+            _paper_heartbeat(paper.pk)
+
+        if not archive.is_file():
+            request_extract_file_from_pool(
+                render, archive, len(paper.pages), heartbeat=heartbeat,
+            )
+        try:
+            blocks = load_blocks(archive, len(paper.pages))
+        except MineruError:
+            # Only remove the per-paper cache we own. A failed/oversized download used
+            # to leave a file behind, causing every retry to reopen the same bad ZIP.
+            owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
+            if not owned_archive:
+                raise
+            archive.unlink(missing_ok=True)
+            request_extract_file_from_pool(
+                render, archive, len(paper.pages), heartbeat=heartbeat,
+            )
+            blocks = load_blocks(archive, len(paper.pages))
     if paper.photos:
         blocks = arrange_photo_pages(paper, blocks)
+        paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])
+    structure, needs_confirmation = _plan_structure(paper, blocks)
     with transaction.atomic():
         paper.blocks.all().delete()
         Block.objects.bulk_create([Block(paper=paper, **block) for block in blocks], batch_size=300)
-        _set(paper, zip_path=str(archive), status=Paper.Status.SEGMENTING)
-    store = PageStore(paper)
-    for page in paper.pages:
-        store.preview(page["page_idx"])
+        _set(
+            paper,
+            zip_path=str(archive) if archive is not None else "",
+            structure=structure,
+            status=Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING,
+            progress=0,
+            total=0,
+        )
 
 
 # ---------------------------------------------------------------- 1½. 手机照片：合成、排页序
@@ -246,19 +650,44 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
     photos.build_pdf(paper_dir(paper), info, Path(paper.render_path))
     clear_page_cache(paper)
     blocks = _block_dicts(paper)
-    ranges = photos.page_ranges(imaging.page_sizes(Path(paper.render_path), "pdf"),
-                                [photos.remap_page(mapping, b) for b in blocks])
+    # Block.seq is the stable content order used to divide two numbering scopes
+    # that share a page. Once whole pages move, the old global seq order is no
+    # longer the new reading order, so rebuild it while preserving order inside
+    # each page. Otherwise a reverse page move can create seq_end=-1 and drop a
+    # complete scope after structure confirmation.
+    ordered_blocks = sorted(blocks, key=lambda block: (mapping[block["page_idx"]], block["seq"]))
+    seq_mapping = {block["seq"]: sequence for sequence, block in enumerate(ordered_blocks)}
+    remapped_blocks = [
+        {**photos.remap_page(mapping, block), "seq": seq_mapping[block["seq"]]}
+        for block in blocks
+    ]
+    new_pages = imaging.page_sizes(Path(paper.render_path), "pdf")
+    ranges = photos.page_ranges(new_pages, remapped_blocks)
     info["notes"] = [_page_note(info, ranges, "已手动调整。"),
                      *[note for note in info.get("notes", []) if not note.startswith(PAGE_NOTE)]]
     _store_ranges(info, ranges)
     with transaction.atomic():
         changed = list(paper.blocks.all())
+        # Two-phase renumbering avoids a transient collision on the
+        # (paper, seq) unique constraint when seq values exchange places.
+        if changed:
+            offset = max(block.seq for block in changed) + len(changed) + 1
+            paper.blocks.update(seq=F("seq") + offset)
         for block in changed:
+            old_seq = block.seq
             block.page_idx = mapping[block.page_idx]
-        Block.objects.bulk_update(changed, ["page_idx"], batch_size=300)
+            block.seq = seq_mapping[old_seq]
+        Block.objects.bulk_update(changed, ["page_idx", "seq"], batch_size=300)
         for question in paper.questions.all():
             for field in ("regions", "regions_auto", "figures", "figure_candidates"):
-                setattr(question, field, [photos.remap_page(mapping, item) for item in getattr(question, field)])
+                remapped = [photos.remap_page(mapping, item) for item in getattr(question, field)]
+                if field == "figure_candidates":
+                    remapped = [
+                        {**item, **({"seq": seq_mapping[item["seq"]]}
+                                   if item.get("seq") in seq_mapping else {})}
+                        for item in remapped
+                    ]
+                setattr(question, field, remapped)
             if not any(figure.get("source") == "manual" for figure in question.figures):
                 question.figure_review = {}
             _invalidate_approval(question)
@@ -266,8 +695,56 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
                 "regions", "regions_auto", "figures", "figure_candidates", "figure_review",
                 "approved", "approved_at", "approved_content_hash", "updated_at",
             ])
-        _set(paper, photos=info, pages=imaging.page_sizes(Path(paper.render_path), "pdf"),
-             status=Paper.Status.SEGMENTING, error="")
+        # Question groups are source scopes, so their page membership must move
+        # with the pages just like blocks and cards.  Leaving this stale can put a
+        # chapter's cards under another chapter after a cross-group reorder.
+        for group in paper.question_groups.select_for_update():
+            metadata = dict(group.metadata or {})
+            old_pages = metadata.get("pages")
+            if not isinstance(old_pages, list):
+                old_pages = list(range((group.page_start or 1) - 1, group.page_end or len(paper.pages)))
+            old_pages = [page for page in old_pages if type(page) is int and page in mapping]
+            new_group_pages = sorted({mapping[page] for page in old_pages if page in mapping})
+            if not new_group_pages:
+                continue
+            source_pages = metadata.get("source_pages")
+            if isinstance(source_pages, list) and len(source_pages) == len(old_pages):
+                source_by_old_page = dict(zip(old_pages, source_pages))
+                metadata["source_pages"] = [
+                    source_by_old_page[old_page]
+                    for old_page in sorted(old_pages, key=mapping.get)
+                ]
+            for key in ("seq_start", "seq_end"):
+                old_seq = metadata.get(key)
+                if type(old_seq) is int and old_seq in seq_mapping:
+                    metadata[key] = seq_mapping[old_seq]
+                elif key in metadata:
+                    metadata.pop(key, None)
+            metadata["pages"] = new_group_pages
+            group.metadata = metadata
+            group.page_start = min(new_group_pages) + 1
+            group.page_end = max(new_group_pages) + 1
+            group.save(update_fields=["metadata", "page_start", "page_end", "updated_at"])
+        # Re-evaluate the conflict after the human page-order change. A reorder
+        # must not silently bypass the safeguard that prevented two exams from
+        # being merged in the first place.
+        paper.pages = new_pages
+        structure_before = dict(paper.structure or {})
+        for key in ("confirmed", "confirmed_at", "confirmed_groups", "confirmed_scopes"):
+            structure_before.pop(key, None)
+        source_pages = structure_before.get("source_pages")
+        if isinstance(source_pages, list) and len(source_pages) == len(order):
+            structure_before["source_pages"] = [source_pages[old_page] for old_page in order]
+        paper.structure = structure_before
+        structure, needs_confirmation = _plan_structure(paper, remapped_blocks)
+        _set(
+            paper,
+            photos=info,
+            pages=new_pages,
+            structure=structure,
+            status=Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING,
+            error="",
+        )
 
 
 # ---------------------------------------------------------------- 2. 切题
@@ -339,28 +816,71 @@ def segment_paper(paper: Paper) -> None:
     """切题。已有题卡时（重新切题）：内容没变的题卡原样保留（包括已通过的），变了的才重读；
     人工调整过范围或手动补的题卡不动。"""
     blocks = _block_dicts(paper)
-    layout, starts = segment.analyse(paper.pages, blocks)
     store = PageStore(paper)
-    notes = locate_missing(paper, layout, starts, store)
-    questions = segment.build_questions(layout, starts, blocks)
+    groups = _ensure_question_groups(paper)
+    notes: list[str] = []
+    questions: list[dict] = []
+    for group in groups:
+        metadata = group.metadata or {}
+        pages_in_group = metadata.get("pages")
+        if not isinstance(pages_in_group, list):
+            start = (group.page_start or 1) - 1
+            end = group.page_end or len(paper.pages)
+            pages_in_group = list(range(start, end))
+        page_ids = {int(page) for page in pages_in_group if type(page) is int}
+        group_pages = [page for page in paper.pages if page["page_idx"] in page_ids]
+        seq_start, seq_end = metadata.get("seq_start"), metadata.get("seq_end")
+        group_blocks = [
+            block for block in blocks
+            if block["page_idx"] in page_ids
+            and (seq_start is None or block["seq"] >= seq_start)
+            and (seq_end is None or block["seq"] <= seq_end)
+        ]
+        if not group_pages or not group_blocks:
+            continue
+        layout, starts = segment.analyse(group_pages, group_blocks)
+        group_notes = locate_missing(paper, layout, starts, store)
+        notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note for note in group_notes])
+        for item in segment.build_questions(layout, starts, group_blocks):
+            questions.append({**item, "group": group})
     if not questions:
         raise RuntimeError("没有在试卷里找到印刷题号，无法切题")
-    existing = {q.number: q for q in paper.questions.all()}
-    kept = reread = 0
+    existing: dict[tuple[int | None, int], list[Question]] = defaultdict(list)
+    existing_questions = list(paper.questions.all())
+    for question in existing_questions:
+        group_id = question.group_id or (groups[0].id if len(groups) == 1 else None)
+        existing[(group_id, question.number)].append(question)
+    for bucket in existing.values():
+        bucket.sort(key=lambda question: (_region_position(question.regions), question.pk))
+    kept = reread = preserved = 0
     with transaction.atomic():
-        numbers = set()
+        matched_ids: set[int] = set()
         for item in questions:
-            numbers.add(item["number"])
+            group = item["group"]
+            identity = (group.id, item["number"])
             regions = imaging.trim_regions(item["regions"], store.load) if item["regions"] else []
             candidates = _label_candidates(item["figure_candidates"])
-            question = existing.get(item["number"])
+            bucket = existing.get(identity, [])
+            question = min(
+                bucket,
+                key=lambda candidate: (
+                    abs(_region_position(candidate.regions) - _region_position(regions)),
+                    candidate.pk,
+                ),
+                default=None,
+            )
+            if question is not None:
+                bucket.remove(question)
+                matched_ids.add(question.pk)
             if question is None:
                 Question.objects.create(
-                    paper=paper, number=item["number"], section=item["section"][:120],
+                    paper=paper, group=group, number=item["number"], section=item["section"][:120],
                     question_type=item["question_type"], regions=regions, regions_auto=regions,
                     start_source=item["start"]["source"], figure_candidates=candidates,
                 )
                 continue
+            if question.group_id != group.id:
+                question.group = group
             if question.start_source == "manual" or (question.regions and question.regions != question.regions_auto):
                 continue  # 人工框的范围优先
             regions_changed = question.regions != regions
@@ -401,12 +921,58 @@ def segment_paper(paper: Paper) -> None:
                 question.flags = []
                 question.error = ""
             question.save()
-        for number, question in existing.items():
-            if number not in numbers and question.start_source != "manual" and not question.publications.exists():
-                question.delete()
+        for question in existing_questions:
+            if question.pk in matched_ids or question.start_source == "manual":
+                continue
+            if question.edited or question.approved or question.publications.exists():
+                # 自动重切不能物理删除人工改字、已通过草稿或已入库的来源卡。
+                # 但新结构已经找不到它，也不能悄悄沿用旧“通过”状态。
+                question.state = Question.State.YELLOW
+                question.flags = [
+                    *[flag for flag in (question.flags or []) if flag != FLAG_RESEGMENT_PRESERVED],
+                    FLAG_RESEGMENT_PRESERVED,
+                ]
+                question.error = ""
+                question.reread_requested = False
+                _invalidate_approval(question)
+                question.save(update_fields=[
+                    "state", "flags", "error", "reread_requested",
+                    "approved", "approved_at", "approved_content_hash", "updated_at",
+                ])
+                preserved += 1
+                continue
+            question.delete()
+        desired_group_ids = [group.pk for group in groups]
+        paper.question_groups.exclude(pk__in=desired_group_ids).filter(questions__isnull=True).delete()
         if existing:
             notes.append(f"重新切题：{kept} 张题卡内容没变，原样保留；{reread} 张范围变了，已重新识读。")
+        if preserved:
+            notes.append(
+                f"重新切题时有 {preserved} 张人工改字、已通过或已入库题卡未被新结构命中；"
+                "已保留并标黄，请对照原卷核对。"
+            )
         _set(paper, status=Paper.Status.READING, notes=notes, progress=0, total=paper.questions.count())
+
+
+def _region_position(regions: list[dict] | None) -> float:
+    """Comparable source position used only to pair repeated display numbers.
+
+    A question number is not an identity: books routinely restart at 1, and OCR
+    may miss the boundary that should have created a new group.  Pairing each
+    new slice with the nearest still-unmatched old slice preserves distinct
+    cards and their UUIDs instead of repeatedly overwriting one dictionary row.
+    """
+
+    if not regions:
+        return 1e30
+    first = regions[0] if isinstance(regions[0], dict) else {}
+    bbox = first.get("bbox") if isinstance(first, dict) else None
+    page = first.get("page_idx", 0) if isinstance(first, dict) else 0
+    try:
+        x, y = float(bbox[0]), float(bbox[1])
+        return float(page) * 1_000_000.0 + y * 1_000.0 + x
+    except (TypeError, ValueError, IndexError):
+        return 1e30
 
 
 def _label_candidates(candidates: list[dict]) -> list[dict]:
@@ -484,7 +1050,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     number = snapshot["number"]
     primary, checker = readers.primary_engine(), readers.checker_engine()
     if primary is None:
-        return {"state": Question.State.RED, "error": "没有配置 MiniMax API Key，无法读题", "flags": []}
+        return {"state": Question.State.RED, "error": "没有配置所选主读模型的 API Key，无法读题", "flags": []}
     if not snapshot["regions"]:
         return {"state": Question.State.RED, "flags": [],
                 "error": "没有切出这道题的原卷范围，请点“调整范围”在原卷上框出来"}
@@ -495,11 +1061,37 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
-    for name, engine, url, figures in (("a", primary, marked_url, True), ("b", checker, clean_url, False)):
+    jobs = [
+        (name, engine, url, figures)
+        for name, engine, url, figures in (
+            ("a", primary, marked_url, True),
+            ("b", checker, clean_url, False),
+        )
+        if engine is not None
+    ]
+    if checker is None:
+        errors["b"] = "所选复核模型没有可用的 API Key"
+
+    def run_reader(job: tuple[str, readers.Engine, str, bool]) -> tuple[str, dict | None, str]:
+        name, engine, url, figures = job
         try:
-            results[name] = readers.read_question(engine, url, number, with_figures=figures)
+            return name, readers.read_question(engine, url, number, with_figures=figures), ""
         except readers.ReaderError as error:
-            errors[name] = str(error)
+            return name, None, str(error)
+
+    # 主读和复核彼此独立；两个提供商或同提供商多账号时
+    # 可同时进行。若只有一个账号，AccountPool 会在内部自动串行。
+    if len(jobs) == 1:
+        completed = [run_reader(jobs[0])]
+    else:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+            futures = [executor.submit(run_reader, job) for job in jobs]
+            completed = [future.result() for future in futures]
+    for name, result, error in completed:
+        if result is not None:
+            results[name] = result
+        else:
+            errors[name] = error
     flags: list[str] = []
     update: dict = {"read_a": results.get("a", {"error": errors.get("a", "")}),
                     "read_b": results.get("b", {"error": errors.get("b", "")}), "read_c": {}}
@@ -515,7 +1107,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final, source = a_text, "agree"
     elif a and b:
         try:
-            c = readers.arbitrate(primary, clean_url, number, a_text, b_text)
+            arbiter = readers.arbiter_engine(primary, checker)
+            if arbiter is None:
+                raise readers.ReaderError("没有可用的分歧裁决模型")
+            c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
             normalized_results.append(c_text)
@@ -544,7 +1139,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         if role in {"stem", "A", "B", "C", "D"}:
             figures.append({"slot": role, **box, "source": "auto"})
         elif role.startswith("q") and role[1:].isdigit():
-            foreign.append({"number": int(role[1:]), **box})   # 属于别的题的图，交给那道题
+            foreign.append({
+                "number": int(role[1:]),
+                "group_id": snapshot.get("group_id"),
+                **box,
+            })   # 属于同一题组内别的题的图，交给那道题
     option_figure_slots = {f["slot"] for f in figures if f["slot"] in readers.OPTION_KEYS}
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
@@ -612,7 +1211,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
 
 def _snapshot(question: Question) -> dict:
-    return {"id": question.id, "number": question.number, "regions": question.regions,
+    return {"id": question.id, "number": question.number, "group_id": question.group_id,
+            "start_source": question.start_source, "regions": question.regions,
             "candidates": question.figure_candidates, "question_type": question.question_type,
             "stem": question.stem, "options": question.options, "edited": question.edited}
 
@@ -701,7 +1301,13 @@ def _same_box(figure: dict, others: list[dict]) -> bool:
 def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
     """读 A 题时发现某张图印着"第 N 题图"：把它交给第 N 题（常见于几道题的图排在同一行）。"""
     for item in foreign:
-        target = paper.questions.filter(number=item["number"]).first()
+        targets = paper.questions.filter(number=item["number"])
+        if item.get("group_id") is not None:
+            targets = targets.filter(group_id=item["group_id"])
+        # 老数据可能没有题组。遇到同题号多于一张时宁可不猜，也不能把图跨章节贴错。
+        if targets.count() != 1:
+            continue
+        target = targets.first()
         if target is None or any(f.get("source") == "manual" for f in target.figures):
             continue
         if _same_box(item, target.figures):

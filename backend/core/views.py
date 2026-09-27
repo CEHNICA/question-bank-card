@@ -8,6 +8,7 @@ import re
 import shutil
 import unicodedata
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
@@ -19,13 +20,13 @@ from django.views.decorators.csrf import csrf_exempt
 
 from PIL import Image
 
-from . import imaging, library, m3import, mineru, photos, readers
+from . import imaging, import_planning, library, m3import, mineru, photos, preferences, readers
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, cue_matches, figure_flag,
     stored_or_derived_review,
 )
-from .models import Paper, PublishedQuestion, Question
+from .models import Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionGroup
 from .pipeline import PageStore, candidates_in, reorder_photo_pages
 from .textnorm import fix_reading_symbols, fix_symbols
 
@@ -111,8 +112,21 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
+        "material_type": paper.material_type, "archived": paper.archived,
         "status_label": Paper.Status(paper.status).label, "progress": paper.progress, "total": paper.total,
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
+        "structure": paper.structure or {},
+        "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
+        "suggested_groups": (paper.structure or {}).get("suggested_groups") or [],
+        "question_groups": [
+            {
+                "id": group.pk,
+                "title": group.title,
+                "sequence": group.sequence,
+                "pages": list((group.metadata or {}).get("pages") or []),
+            }
+            for group in paper.question_groups.order_by("sequence", "id")
+        ],
         "pages_version": photos.order_version(info),
         "imported_from_m3": bool(paper.imported_from), "created_at": paper.created_at.isoformat(),
         "photos": {
@@ -125,7 +139,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
         } if info else None,
     }
     if with_counts:
-        rows = list(paper.questions.select_related("paper"))
+        rows = list(paper.questions.select_related("paper", "group"))
         approved_ids = {row.pk for row in rows if library.approval_is_current(row)}
         figure_blocked_ids = {
             row.pk for row in rows if blocks_approval(stored_or_derived_review(row))
@@ -159,7 +173,10 @@ def question_json(question: Question) -> dict:
         digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:10]
         figures.append({**figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
     return {
-        "id": question.id, "number": question.number, "section": question.section,
+        "id": question.id, "source_key": str(question.source_key), "number": question.number,
+        "group": ({"id": question.group_id, "title": question.group.title,
+                   "sequence": question.group.sequence} if question.group_id else None),
+        "section": question.section,
         "question_type": question.question_type, "regions": question.regions,
         "regions_changed": question.regions != question.regions_auto, "start_source": question.start_source,
         "figure_candidates": question.figure_candidates, "figures": figures,
@@ -216,13 +233,67 @@ def health(request):
 def status(request):
     checker = readers.checker_engine()
     primary = readers.primary_engine()
+    arbiter = readers.arbiter_engine(primary, checker)
+    engines = readers.engine_settings()
+    try:
+        saved_preferences = preferences.load() if preferences.preference_path().is_file() else None
+    except preferences.PreferenceError:
+        saved_preferences = None
+    if saved_preferences is not None:
+        engines["saved"] = {
+            "primary": saved_preferences["primary_engine"],
+            "checker": saved_preferences["checker_engine"],
+            "arbiter": saved_preferences["arbiter_engine"],
+        }
+        engines["restart_required"] = engines["saved"] != engines["selected"]
     return JsonResponse({
         "upload_enabled": readers.configured("mineru") and primary is not None,
         "mineru": readers.configured("mineru"),
         "reader": primary.label if primary else None,
         "checker": checker.label if checker else None,
+        "arbiter": arbiter.label if arbiter else None,
         "independent_checker": bool(checker and primary and checker.provider != primary.provider),
+        "engines": engines,
         "m3_available": m3import.m3_backend() is not None,
+    })
+
+
+@csrf_exempt
+def model_settings(request):
+    """保存非秘密模型角色偏好；运行中的 worker 不热切换，重启后生效。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("模型设置格式不正确")
+    roles = {
+        "primary_engine": payload.get("primary"),
+        "checker_engine": payload.get("checker"),
+        "arbiter_engine": payload.get("arbiter"),
+    }
+    normalized = preferences.normalize(roles)
+    if normalized is None:
+        return _error("模型选择不受支持")
+    selected = set(normalized.values())
+    if "minimax_m3" in selected and not readers.configured("minimax"):
+        return _error("所选模型需要先配置 MiniMax API Key")
+    if "siliconflow_qwen3" in selected and not readers.configured("siliconflow"):
+        return _error("所选模型需要先配置硅基流动 API Key")
+    try:
+        saved = preferences.save(normalized)
+    except preferences.PreferenceError as exc:
+        return _error(str(exc), 500)
+    return JsonResponse({
+        "saved": {
+            "primary": saved["primary_engine"],
+            "checker": saved["checker_engine"],
+            "arbiter": saved["arbiter_engine"],
+        },
+        "restart_required": True,
+        "message": "模型选择已保存；关闭并重新打开题库后生效，已有题卡不会自动重读。",
     })
 
 
@@ -231,39 +302,50 @@ def status(request):
 @csrf_exempt
 def papers(request):
     if request.method == "GET":
-        return JsonResponse({"papers": [paper_json(p) for p in Paper.objects.all()[:200]]})
+        include_archived = request.GET.get("archived") == "1"
+        queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)
+        return JsonResponse({"papers": [paper_json(p) for p in queryset[:200]]})
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
     if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新试卷需要同时配置 MinerU Token 和 MiniMax API Key（请打开“题库题卡版 - 配置 API”设置）")
+        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请打开“题库题卡版 - 配置 API”设置）")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
+    material_type = request.POST.get("material_type", Paper.MaterialType.EXAM)
+    if material_type not in Paper.MaterialType.values:
+        return _error("请选择“一份试卷”或“一本书”")
     kinds = []
     for item in uploads:
         kind = UPLOAD_KINDS.get(Path(item.name).suffix.lower())
         if kind is None:
             return _error(f"{Path(item.name).name}：只支持 PDF、JPG、PNG、WEBP 或 DOCX")
-        if item.size > settings.MAX_UPLOAD_BYTES:
-            return _error(f"{Path(item.name).name} 超过 50 MB")
+        limit = settings.MAX_PDF_UPLOAD_BYTES if kind == "pdf" else settings.MAX_UPLOAD_BYTES
+        if item.size > limit:
+            shown_limit = 200 if kind == "pdf" else limit // (1024 * 1024)
+            return _error(f"{Path(item.name).name} 超过 {shown_limit} MB")
         kinds.append(kind)
     if kinds[0] == "image" or len(uploads) > 1:
         if any(kind != "image" for kind in kinds):
             return _error("几个文件一起上传时只能都是照片（合成一份试卷）；PDF 和 Word 请一份一份上传")
-        return _upload_photos(request, uploads)
+        return _upload_photos(request, uploads, material_type=material_type)
     upload = uploads[0]
     suffix = Path(upload.name).suffix.lower()
     kind = kinds[0]
     digest = hashlib.sha256()
     for chunk in upload.chunks():
         digest.update(chunk)
-    existing = Paper.objects.filter(sha256=digest.hexdigest()).exclude(status=Paper.Status.FAILED).first()
+    existing = Paper.objects.filter(sha256=digest.hexdigest(), material_type=material_type, archived=False)\
+        .exclude(status=Paper.Status.FAILED).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
-    paper = Paper(filename=Path(upload.name).name[:255], kind=kind, sha256=digest.hexdigest())
+    paper = Paper(
+        filename=Path(upload.name).name[:255], kind=kind, sha256=digest.hexdigest(),
+        material_type=material_type,
+    )
     folder = settings.DATA_ROOT / str(paper.id)
     staged = settings.DATA_ROOT / f".uploading-{paper.id}-{uuid.uuid4().hex}"
     staged.mkdir(parents=True, exist_ok=False)
@@ -276,13 +358,6 @@ def papers(request):
             pages = imaging.page_sizes(target, "pdf")
             if not pages:
                 raise ValueError("empty pdf")
-            mineru.validate_page_count(len(pages), "这份 PDF")
-        except mineru.MineruError as exc:
-            try:
-                shutil.rmtree(staged)
-            except OSError:
-                pass  # 下次启动会按 .uploading-* 规则继续清理。
-            return _error(str(exc))
         except Exception:
             try:
                 shutil.rmtree(staged)
@@ -293,7 +368,18 @@ def papers(request):
     try:
         staged.replace(folder)
         paper.source_path = str(folder / target.name)
-        paper.save()
+        with transaction.atomic():
+            paper.save()
+            if kind == "pdf" and import_planning.pdf_requires_chunks(
+                len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES,
+            ):
+                chunk_limit = import_planning.pdf_chunk_page_limit(
+                    paper.material_type, mineru.MAX_PDF_PAGES,
+                )
+                ImportChunk.objects.bulk_create([
+                    ImportChunk(paper=paper, **chunk.as_record())
+                    for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
+                ])
     except Exception:
         if folder.exists() and not staged.exists():
             try:
@@ -309,7 +395,7 @@ def papers(request):
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
-def _upload_photos(request, uploads) -> JsonResponse:
+def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM) -> JsonResponse:
     """一张或几张照片合成一份试卷。页序先按拍摄时间/文件名粗排，MinerU 读完后按卷面题号排定。"""
     if len(uploads) > photos.MAX_PHOTOS:
         return _error(f"一份试卷最多 {photos.MAX_PHOTOS} 张照片")
@@ -323,13 +409,16 @@ def _upload_photos(request, uploads) -> JsonResponse:
     if len(set(digests)) != len(digests):
         return _error("选中的照片里有重复的文件，请去掉重复的再上传")
     # 同一组照片（不论选择顺序）、同样的处理方式算同一份卷；不做扫描件效果再传一次会得到另一份卷。
-    combined = hashlib.sha256(f"photos:{int(enhance)}:{','.join(sorted(digests))}".encode()).hexdigest()
-    existing = Paper.objects.filter(sha256=combined).exclude(status=Paper.Status.FAILED).first()
+    combined = hashlib.sha256(
+        f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()
+    ).hexdigest()
+    existing = Paper.objects.filter(sha256=combined, material_type=material_type, archived=False)\
+        .exclude(status=Paper.Status.FAILED).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
-    paper = Paper(filename=name[:255], kind="image", sha256=combined)
+    paper = Paper(filename=name[:255], kind="image", sha256=combined, material_type=material_type)
     folder = settings.DATA_ROOT / str(paper.id)
     folder.mkdir(parents=True, exist_ok=False)
     files = []
@@ -364,7 +453,8 @@ def paper_page_order(request, paper_id):
     count = len(paper.pages)
     if not paper.photos or count < 2:
         return _error("只有几张照片合成的试卷可以调整页序")
-    if paper.status not in (Paper.Status.READY, Paper.Status.FAILED) or not paper.blocks.exists():
+    if paper.status not in (Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING) \
+            or not paper.blocks.exists():
         return _error("这份试卷还在处理中，稍后再调整页序")
     payload = _body(request) or {}
     order = payload.get("order")
@@ -382,6 +472,354 @@ def paper_page_order(request, paper_id):
     reorder_photo_pages(paper, order)
     paper.refresh_from_db()
     return JsonResponse({"paper": paper_json(paper), "changed": True})
+
+
+def _validated_split_groups(value, page_count: int) -> list[list[int]] | None:
+    """A split must be a lossless partition: every current page exactly once."""
+    if not isinstance(value, list) or len(value) < 2:
+        return None
+    groups: list[list[int]] = []
+    flattened: list[int] = []
+    for raw_group in value:
+        if not isinstance(raw_group, list) or not raw_group:
+            return None
+        if any(type(page) is not int or not 0 <= page < page_count for page in raw_group):
+            return None
+        if len(set(raw_group)) != len(raw_group):
+            return None
+        group = list(raw_group)
+        groups.append(group)
+        flattened.extend(group)
+    if sorted(flattened) != list(range(page_count)) or len(flattened) != page_count:
+        return None
+    return groups
+
+
+def _remap_page_items(items, page_mapping: dict[int, int], seq_mapping: dict[int, int] | None = None) -> list[dict]:
+    result = []
+    for raw in items or []:
+        if not isinstance(raw, dict) or raw.get("page_idx") not in page_mapping:
+            continue
+        item = deepcopy(raw)
+        item["page_idx"] = page_mapping[item["page_idx"]]
+        if seq_mapping is not None and item.get("seq") in seq_mapping:
+            item["seq"] = seq_mapping[item["seq"]]
+        result.append(item)
+    return result
+
+
+def _copy_split_question(
+    question: Question,
+    *,
+    paper: Paper,
+    group: QuestionGroup,
+    page_mapping: dict[int, int],
+    seq_mapping: dict[int, int],
+) -> Question | None:
+    """Preserve an already-read card only when all of its source regions stay together."""
+    source_items = [
+        *(question.regions or []),
+        *(question.regions_auto or []),
+        *(question.figures or []),
+        *(question.figure_candidates or []),
+    ]
+    source_pages = {item.get("page_idx") for item in source_items if isinstance(item, dict)}
+    if not source_pages or not source_pages.issubset(page_mapping):
+        return None
+    return Question.objects.create(
+        paper=paper,
+        group=group,
+        number=question.number,
+        section=question.section,
+        question_type=question.question_type,
+        regions=_remap_page_items(question.regions, page_mapping),
+        regions_auto=_remap_page_items(question.regions_auto, page_mapping),
+        start_source=question.start_source,
+        figure_candidates=_remap_page_items(question.figure_candidates, page_mapping, seq_mapping),
+        figures=_remap_page_items(question.figures, page_mapping),
+        figure_review=deepcopy(question.figure_review),
+        read_a=deepcopy(question.read_a),
+        read_b=deepcopy(question.read_b),
+        read_c=deepcopy(question.read_c),
+        stem=question.stem,
+        options=deepcopy(question.options),
+        text_source=question.text_source,
+        state=question.state,
+        flags=deepcopy(question.flags),
+        error=question.error,
+        edited=question.edited,
+        approved=False,
+        approved_at=None,
+        approved_content_hash="",
+        answer=question.answer,
+        analysis=question.analysis,
+        reread_requested=False,
+    )
+
+
+@csrf_exempt
+def paper_split(request, paper_id):
+    """Split mixed photos or a PDF locally without losing, duplicating, or re-sending pages."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("拆分内容格式不正确")
+
+    paper = get_object_or_404(Paper, pk=paper_id)
+    groups = _validated_split_groups(payload.get("groups"), len(paper.pages))
+    if groups is None:
+        return _error("拆分必须让每一页恰好出现一次，不能漏页、重复页或使用无效页码")
+    is_photo_source = bool(paper.photos) and paper.kind == "image"
+    render_source = Path(paper.render_path or paper.source_path)
+    is_pdf_source = paper.kind in {"pdf", "docx"} and render_source.suffix.lower() == ".pdf"
+    if not is_photo_source and not is_pdf_source:
+        return _error("这项任务没有可安全拆分的照片或 PDF 原稿")
+    if is_pdf_source and any(
+        group != list(range(min(group), max(group) + 1)) for group in groups
+    ):
+        return _error("PDF 只能按连续页段拆分，请重新核对分组")
+    if paper.archived:
+        return _error("这项任务已经归档，不能重复拆分")
+    if paper.status not in {Paper.Status.NEEDS_GROUPING, Paper.Status.READY, Paper.Status.FAILED}:
+        return _error("这项任务还在处理中，完成后再拆分")
+    if paper.publications.exists():
+        return _error("这项任务已有正式题库记录，为保留来源追溯不能拆分")
+
+    data_root = settings.DATA_ROOT.resolve()
+    source_folder = (data_root / str(paper.id)).resolve()
+    if source_folder.parent != data_root or not source_folder.is_dir():
+        return _error("任务原文件不完整，未执行拆分", 500)
+
+    created_folders: list[Path] = []
+    staged_folders: list[Path] = []
+    pending_moves: list[tuple[Path, Path]] = []
+    children: list[Paper] = []
+    committed = False
+    try:
+        with transaction.atomic():
+            paper = Paper.objects.select_for_update().get(pk=paper_id)
+            if paper.archived or paper.publications.exists():
+                return _error("任务状态已经变化，请刷新后重试")
+            source_info = deepcopy(paper.photos) if is_photo_source else {}
+            source_order = source_info.get("order") or list(range(len(source_info.get("files") or [])))
+            if is_photo_source and len(source_order) != len(paper.pages):
+                return _error("照片页序记录不完整，未执行拆分", 500)
+            source_blocks = list(paper.blocks.order_by("seq"))
+            source_questions = list(paper.questions.select_related("group").order_by("id"))
+
+            for group_index, source_pages in enumerate(groups, start=1):
+                page_mapping = {old_page: new_page for new_page, old_page in enumerate(source_pages)}
+                selected_blocks = [block for block in source_blocks if block.page_idx in page_mapping]
+                child = Paper(
+                    filename=paper.filename,
+                    task_name=f"{paper.display_name}（第 {group_index} 部分）"[:255],
+                    kind="image" if is_photo_source else "pdf",
+                    material_type=paper.material_type,
+                    sha256=hashlib.sha256(
+                        f"{paper.sha256}:split:{','.join(map(str, source_pages))}".encode()
+                    ).hexdigest(),
+                    status=Paper.Status.SEGMENTING if selected_blocks else Paper.Status.QUEUED,
+                    structure={
+                        "confirmed": True,
+                        "confirmed_groups": [list(range(len(source_pages)))],
+                        "suggested_groups": [list(range(len(source_pages)))],
+                        "split_from": str(paper.id),
+                        "source_pages": [page + 1 for page in source_pages],
+                        "signals": [],
+                    },
+                    notes=[f"由任务“{paper.display_name}”无损拆分；对应原任务第 "
+                           f"{'、'.join(str(page + 1) for page in source_pages)} 页。"],
+                )
+                final_folder = data_root / str(child.id)
+                staged = data_root / f".splitting-{child.id}-{uuid.uuid4().hex}"
+                staged.mkdir(parents=True, exist_ok=False)
+                staged_folders.append(staged)
+
+                if is_photo_source:
+                    child_files = []
+                    child_ranges = {}
+                    for new_page, old_page in enumerate(source_pages):
+                        source_file_index = source_order[old_page]
+                        source_record = source_info["files"][source_file_index]
+                        source_raw = source_folder / source_record["file"]
+                        suffix = source_raw.suffix.lower() or ".jpg"
+                        target_raw = staged / f"photo_{new_page + 1:02d}{suffix}"
+                        shutil.copy2(source_raw, target_raw)
+                        record = deepcopy(source_record)
+                        record["file"] = target_raw.name
+                        child_files.append(record)
+
+                        source_page_file = photos.page_file(source_folder, source_file_index)
+                        target_page_file = photos.page_file(staged, new_page)
+                        if source_page_file.is_file():
+                            shutil.copy2(source_page_file, target_page_file)
+                        else:
+                            image, straightened = photos.process_photo(
+                                target_raw, clean=source_info.get("enhance", True),
+                            )
+                            record["straightened"] = straightened
+                            image.save(target_page_file, format="JPEG", quality=90, optimize=True)
+                        ranges = source_info.get("ranges") or {}
+                        child_ranges[str(new_page)] = deepcopy(ranges.get(str(source_file_index)))
+
+                    child.photos = {
+                        "files": child_files,
+                        "enhance": source_info.get("enhance", True),
+                        "order": list(range(len(child_files))),
+                        "mineru_order": list(range(len(child_files))),
+                        "basis": "从原任务拆分",
+                        "check": "",
+                        "manual": True,
+                        "ranges": child_ranges,
+                        "notes": ["已从混合上传中拆出；所有原图均保留，未重新压缩。"],
+                    }
+                    render = staged / "pages.pdf"
+                    photos.build_pdf(staged, child.photos, render)
+                    child.source_path = str(final_folder / child_files[0]["file"])
+                else:
+                    render = staged / "source.pdf"
+                    mineru.write_pdf_slice(
+                        render_source,
+                        render,
+                        min(source_pages),
+                        max(source_pages) + 1,
+                    )
+                    child.source_path = str(final_folder / render.name)
+                child.pages = imaging.page_sizes(render, "pdf")
+                child.render_path = str(final_folder / render.name)
+                child.save()
+
+                question_group = QuestionGroup.objects.create(
+                    paper=child,
+                    title=child.display_name,
+                    kind=(QuestionGroup.Kind.CHAPTER if child.material_type == Paper.MaterialType.BOOK
+                          else QuestionGroup.Kind.EXAM),
+                    sequence=0,
+                    page_start=1,
+                    page_end=len(source_pages),
+                    metadata={"pages": list(range(len(source_pages))),
+                              "source_pages": [page + 1 for page in source_pages]},
+                )
+                seq_mapping = {block.seq: sequence for sequence, block in enumerate(selected_blocks)}
+                Block.objects.bulk_create([
+                    Block(
+                        paper=child,
+                        seq=seq_mapping[block.seq],
+                        type=block.type,
+                        page_idx=page_mapping[block.page_idx],
+                        bbox=deepcopy(block.bbox),
+                        text=block.text,
+                    )
+                    for block in selected_blocks
+                ], batch_size=300)
+                for question in source_questions:
+                    _copy_split_question(
+                        question,
+                        paper=child,
+                        group=question_group,
+                        page_mapping=page_mapping,
+                        seq_mapping=seq_mapping,
+                    )
+                pending_moves.append((staged, final_folder))
+                children.append(child)
+
+            structure = deepcopy(paper.structure or {})
+            structure.update({
+                "confirmed": True,
+                "split_children": [str(child.id) for child in children],
+                "split_groups": groups,
+                "split_at": timezone.now().isoformat(),
+            })
+            paper.archived = True
+            paper.structure = structure
+            paper.notes = [*(paper.notes or []), f"已无损拆成 {len(children)} 项任务；原任务保留为归档来源。"]
+            paper.save(update_fields=["archived", "structure", "notes", "updated_at"])
+        committed = True
+        # Move files only after the database commit. If Windows or the process
+        # interrupts here, startup reconciliation can restore each .splitting
+        # directory because the child record already exists.
+        for staged, final_folder in pending_moves:
+            staged.replace(final_folder)
+            staged_folders.remove(staged)
+            created_folders.append(final_folder)
+    except OSError:
+        if not committed:
+            for folder in [*staged_folders, *created_folders]:
+                shutil.rmtree(folder, ignore_errors=True)
+            return _error("拆分时有文件正在被占用，原任务未改变；关闭原卷窗口后再试")
+        return _error("拆分记录已安全保存，但部分文件尚未就位；请重新启动程序，它会自动恢复", 500)
+    except Exception:
+        for folder in [*staged_folders, *created_folders]:
+            shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+    return JsonResponse({
+        "papers": [paper_json(child) for child in children],
+        "source": paper_json(paper),
+        "message": f"已拆成 {len(children)} 项任务；每一页都已核对且原任务已归档保留。",
+    }, status=201)
+
+
+@csrf_exempt
+def paper_confirm_structure(request, paper_id):
+    """Confirm that numbering restarts belong to one material and continue safely.
+
+    Repeated numbers still keep separate internal question groups, so confirming
+    a book/exam never overwrites an earlier card with the same printed number.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        if paper.status != Paper.Status.NEEDS_GROUPING:
+            return _error("这项任务当前不需要确认资料结构")
+        if paper.publications.exists():
+            return _error("这项任务已有正式题库记录，不能再改变资料结构")
+        structure = deepcopy(paper.structure or {})
+        groups = structure.get("suggested_groups") or [list(range(len(paper.pages)))]
+        scopes = structure.get("suggested_scopes") or []
+        structure.update({
+            "confirmed": True,
+            "confirmed_groups": groups,
+            "confirmed_scopes": scopes,
+            "confirmed_at": timezone.now().isoformat(),
+            # Existing groups may describe the page order before a human
+            # rearrangement. The worker will safely reconcile them with these
+            # confirmed scopes before cutting any card.
+            "groups_need_rebuild": True,
+        })
+        paper.structure = structure
+        paper.status = Paper.Status.SEGMENTING
+        paper.error = ""
+        paper.save(update_fields=["structure", "status", "error", "updated_at"])
+    return JsonResponse({
+        "paper": paper_json(paper),
+        "message": "已确认属于同一份资料；重复题号会分属不同题组，现已继续切题。",
+    })
+
+
+@csrf_exempt
+def paper_archive(request, paper_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status in {
+        Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
+    }:
+        return _error("任务正在处理中，完成或失败后再归档")
+    paper.archived = True
+    paper.save(update_fields=["archived", "updated_at"])
+    return JsonResponse({"paper": paper_json(paper), "archived": True})
 
 
 @csrf_exempt
@@ -410,10 +848,15 @@ def paper_detail(request, paper_id):
         try:
             with transaction.atomic():
                 paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
-                if paper.status != Paper.Status.FAILED:
-                    return _error("只有处理失败的任务可以删除")
+                if paper.status not in {Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING}:
+                    return _error("任务还在处理中；只有待终审、待确认结构或失败的任务可以删除")
                 if paper.publications.exists():
                     return _error("这项任务已有正式题库记录，为保留来源追溯不能删除")
+                structure = paper.structure or {}
+                if structure.get("split_from") or structure.get("split_children") or Paper.objects.filter(
+                    structure__split_from=paper_id_text,
+                ).exists():
+                    return _error("这项任务属于拆分资料，必须保留原稿与追溯关系；可以归档，但不能永久删除")
                 if folder.exists():
                     folder.replace(staged)
                 paper.delete()
@@ -440,8 +883,13 @@ def paper_detail(request, paper_id):
         return JsonResponse({"deleted": paper_id_text, "warning": warning})
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
-    return JsonResponse({"paper": paper_json(paper),
-                         "questions": [question_json(q) for q in paper.questions.all()]})
+    return JsonResponse({
+        "paper": paper_json(paper),
+        "questions": [
+            question_json(q)
+            for q in paper.questions.select_related("group").order_by("group__sequence", "number", "id")
+        ],
+    })
 
 
 def page_preview(request, paper_id, page: int):
@@ -458,16 +906,55 @@ def paper_retry(request, paper_id):
     rejected = _guard(request)
     if rejected:
         return rejected
-    paper = get_object_or_404(Paper, pk=paper_id)
-    if paper.status != Paper.Status.FAILED:
-        return _error("只有失败的试卷需要重试")
-    has_blocks = paper.blocks.exists()
-    paper.status = Paper.Status.SEGMENTING if has_blocks and not paper.questions.exists() else \
-        Paper.Status.READING if paper.questions.exists() else Paper.Status.QUEUED
-    paper.error = ""
-    paper.save(update_fields=["status", "error", "updated_at"])
-    paper.questions.filter(state=Question.State.RED).update(state=Question.State.WAITING)
-    return JsonResponse({"paper": paper_json(paper)})
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    requested_type = payload.get("material_type")
+    if requested_type is not None and requested_type not in Paper.MaterialType.values:
+        return _error("资料类型不正确")
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        if paper.status != Paper.Status.FAILED:
+            return _error("只有处理失败的任务需要重试")
+        has_blocks = paper.blocks.exists()
+        has_questions = paper.questions.exists()
+        fields = ["status", "error", "updated_at"]
+        if requested_type is not None and requested_type != paper.material_type:
+            # 0008 及更旧版本没有“试卷/教材”字段，迁移时只能保守地按试卷处理。
+            # 允许人在还没有任何解析成果时明确改成教材，不靠文件名猜测。
+            if paper.kind != "pdf":
+                return _error("只有 PDF 任务可以切换试卷/教材模式")
+            if has_blocks or has_questions or paper.import_chunks.exists() or paper.publications.exists():
+                return _error("这项任务已有解析或审核记录，为保留来源不能再改资料类型")
+            paper.material_type = requested_type
+            fields.append("material_type")
+            if requested_type == Paper.MaterialType.BOOK:
+                note = "已明确按教材模式重试：PDF 在本机每 100 页稳定分片。"
+                paper.notes = [*(paper.notes or []), note]
+                fields.append("notes")
+        # 0009 之前失败的教材没有 ImportChunk 记录。重试时按现行策略补建，
+        # 避免再次把整本书作为一次 MinerU 请求发送。
+        if paper.kind == "pdf" and paper.pages and not paper.import_chunks.exists() and \
+                import_planning.pdf_requires_chunks(
+                    len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES,
+                ):
+            chunk_limit = import_planning.pdf_chunk_page_limit(
+                paper.material_type, mineru.MAX_PDF_PAGES,
+            )
+            ImportChunk.objects.bulk_create([
+                ImportChunk(paper=paper, **chunk.as_record())
+                for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
+            ])
+        paper.status = Paper.Status.SEGMENTING if has_blocks and not paper.questions.exists() else \
+            Paper.Status.READING if has_questions else Paper.Status.QUEUED
+        paper.error = ""
+        paper.save(update_fields=fields)
+        paper.questions.filter(state=Question.State.RED).update(state=Question.State.WAITING)
+    return JsonResponse({
+        "paper": paper_json(paper),
+        "message": "已按教材模式分片重试" if requested_type == Paper.MaterialType.BOOK
+        else "已重试处理",
+    })
 
 
 @csrf_exempt
@@ -495,6 +982,8 @@ def approve_green(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status == Paper.Status.NEEDS_GROUPING:
+        return _error("请先确认资料结构或拆分任务，再标记题卡通过")
     now = timezone.now()
     changed = []
     with transaction.atomic():
@@ -523,6 +1012,8 @@ def publish_paper(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status == Paper.Status.NEEDS_GROUPING:
+        return _error("请先确认资料结构或拆分任务，再入库")
     created, unchanged, problems = 0, 0, []
     for question in paper.questions.filter(approved=True):
         try:
@@ -544,15 +1035,46 @@ def add_question(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status == Paper.Status.NEEDS_GROUPING:
+        return _error("请先确认资料结构或拆分任务，再补录题目")
     payload = _body(request)
     number = payload.get("number") if payload else None
     regions = _valid_regions(paper, payload.get("regions")) if payload else None
     if type(number) is not int or not 1 <= number <= 999 or regions is None:
         return _error("需要题号（1–999）和原卷范围")
-    if paper.questions.filter(number=number).exists():
+    region_pages = {item["page_idx"] for item in regions}
+    all_groups = list(paper.question_groups.order_by("sequence", "id"))
+    group_pages: dict[int, set[int]] = {}
+    for group in all_groups:
+        pages = (group.metadata or {}).get("pages")
+        if not isinstance(pages, list):
+            pages = list(range((group.page_start or 1) - 1, group.page_end or len(paper.pages)))
+        group_pages[group.pk] = {page for page in pages if type(page) is int}
+
+    requested_group_id = payload.get("group_id") if payload else None
+    if requested_group_id is not None:
+        if type(requested_group_id) is not int:
+            return _error("题组编号格式不正确")
+        group = next((item for item in all_groups if item.pk == requested_group_id), None)
+        if group is None:
+            return _error("所选题组不属于这项任务")
+        if not region_pages.issubset(group_pages[group.pk]):
+            return _error("所框范围不在所选题组的页面内，请重新选择题组或范围")
+    else:
+        matching_groups = [
+            group for group in all_groups if region_pages.issubset(group_pages[group.pk])
+        ]
+        if all_groups and len(matching_groups) > 1:
+            return _error("这一页包含多个题组；请在题号旁明确选择题组后再添加")
+        if all_groups and not matching_groups:
+            return _error("这道题的范围跨越题组，请缩小范围后再添加")
+        group = matching_groups[0] if matching_groups else None
+    if group is not None and paper.questions.filter(group=group, number=number).exists():
+        return _error(f"已经有第 {number} 题了")
+    if group is None and paper.questions.filter(group__isnull=True, number=number).exists():
         return _error(f"已经有第 {number} 题了")
     question = Question.objects.create(
-        paper=paper, number=number, regions=regions, regions_auto=regions, start_source="manual",
+        paper=paper, group=group, number=number, regions=regions, regions_auto=regions, start_source="manual",
         figure_candidates=candidates_in(paper, regions), reread_requested=True,
     )
     return JsonResponse({"question": question_json(question)}, status=201)
@@ -602,6 +1124,8 @@ def question_action(request, question_id, action: str):
             Question.objects.select_for_update().select_related("paper"), pk=question_id,
         )
         if action == "approve":
+            if question.paper.status == Paper.Status.NEEDS_GROUPING:
+                return _error("请先确认资料结构或拆分任务，再标记题卡通过")
             value = payload.get("approved", True)
             if type(value) is not bool:
                 return _error("approved 必须是 true 或 false")

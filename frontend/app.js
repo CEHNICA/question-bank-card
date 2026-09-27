@@ -6,6 +6,109 @@
  * 交互：J/K 在题卡间移动，Enter 通过并跳到下一张，Space 放大对照原卷，
  * E 改字，U 撤销通过，? 查看全部快捷键。题卡原卷截图上悬停会出现放大镜。
  */
+const QBUpload = (() => {
+  "use strict";
+
+  const RULES = [
+    { category: "photo", label: "照片", extension: /\.(jpe?g|png|webp)$/i, mime: /^image\/(jpeg|png|webp)$/i },
+    { category: "pdf", label: "PDF", extension: /\.pdf$/i, mime: /^application\/pdf$/i },
+    {
+      category: "docx", label: "Word", extension: /\.docx$/i,
+      mime: /^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document$/i
+    }
+  ];
+
+  function classifyFile(file) {
+    const name = String(file?.name || "");
+    const type = String(file?.type || "");
+    const rule = RULES.find((candidate) => candidate.extension.test(name) || candidate.mime.test(type));
+    return rule ? { category: rule.category, label: rule.label, supported: true }
+      : { category: "unsupported", label: "不支持", supported: false };
+  }
+
+  function isEditingTarget(target) {
+    if (!target) return false;
+    if (typeof target.closest === "function") {
+      return Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
+    }
+    const tag = String(target.tagName || "").toLowerCase();
+    return ["input", "textarea", "select"].includes(tag) || target.isContentEditable === true;
+  }
+
+  function shouldInterceptPaste(target, clipboardData) {
+    if (isEditingTarget(target)) return false;
+    return Boolean(clipboardData?.files?.length);
+  }
+
+  function pad(value) { return String(value).padStart(2, "0"); }
+
+  function screenshotName(now, sequence, extension) {
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    return `剪贴板截图-${stamp}${sequence > 1 ? `-${sequence}` : ""}.${extension}`;
+  }
+
+  function imageExtension(file) {
+    const fromName = String(file?.name || "").match(/\.(jpe?g|png|webp)$/i)?.[1]?.toLowerCase();
+    if (fromName) return fromName === "jpeg" ? "jpg" : fromName;
+    const subtype = String(file?.type || "").toLowerCase().split("/")[1];
+    return subtype === "jpeg" ? "jpg" : (["jpg", "png", "webp"].includes(subtype) ? subtype : "png");
+  }
+
+  function isGenericClipboardImage(file) {
+    if (classifyFile(file).category !== "photo") return false;
+    const name = String(file?.name || "").trim();
+    return !name || /^(image|clipboard|pasted-image)(?:\.(?:jpe?g|png|webp))?$/i.test(name);
+  }
+
+  function prepareClipboardFiles(fileList, now = new Date(), FileCtor = globalThis.File) {
+    let screenshotSequence = 0;
+    return Array.from(fileList || [], (file) => {
+      if (!isGenericClipboardImage(file) || typeof FileCtor !== "function") return file;
+      screenshotSequence += 1;
+      return new FileCtor([file], screenshotName(now, screenshotSequence, imageExtension(file)), {
+        type: file.type || `image/${imageExtension(file)}`,
+        lastModified: file.lastModified || now.getTime()
+      });
+    });
+  }
+
+  function routeFiles(fileList) {
+    const files = Array.from(fileList || []);
+    const pictures = [];
+    const documents = [];
+    const unsupported = [];
+    files.forEach((file) => {
+      const info = classifyFile(file);
+      if (info.category === "photo") pictures.push(file);
+      else if (info.supported) documents.push(file);
+      else unsupported.push(file);
+    });
+    return { files, pictures, documents, unsupported, accepted: files.filter((file) => classifyFile(file).supported) };
+  }
+
+  function buildClipboardBatch(fileList, now = new Date(), FileCtor = globalThis.File) {
+    const files = prepareClipboardFiles(fileList, now, FileCtor);
+    const items = files.map((file, index) => ({ index, file, ...classifyFile(file) }));
+    const accepted = items.filter((item) => item.supported).map((item) => item.file);
+    return { files, items, accepted, unsupported: items.filter((item) => !item.supported).map((item) => item.file) };
+  }
+
+  async function runConfirmedPaste(files, confirm, upload) {
+    if (!files?.length) return false;
+    if (!(await confirm())) return false;
+    await upload(files);
+    return true;
+  }
+
+  return {
+    classifyFile, isEditingTarget, shouldInterceptPaste, screenshotName,
+    prepareClipboardFiles, routeFiles, buildClipboardBatch, runConfirmedPaste
+  };
+})();
+
+if (typeof module !== "undefined" && module.exports) module.exports = QBUpload;
+
+if (typeof window !== "undefined" && typeof document !== "undefined") {
 (() => {
   "use strict";
 
@@ -139,6 +242,17 @@
     return (state.paper?.pages || []).find((item) => item.page_idx === page) || { width: 1000, height: 1414 };
   }
 
+  function questionCompare(a, b) {
+    const group = (a.group?.sequence ?? 0) - (b.group?.sequence ?? 0);
+    if (group) return group;
+    const number = a.number - b.number;
+    return number || a.id - b.id;
+  }
+
+  function hasMultipleQuestionGroups() {
+    return new Set(state.questions.map((question) => question.group?.id).filter((id) => id != null)).size > 1;
+  }
+
   // 审批绑定到题面版本。兼容尚未返回新字段的旧服务，但只要后端明确
   // 表示哈希失配，就绝不能把旧审批当成当前版本已通过。
   function approvalNeedsReview(q) {
@@ -196,7 +310,7 @@
       return;
     }
     const s = state.status;
-    const reader = s.reader ? `读题 ${s.reader}` : "未配置 MiniMax，无法读题";
+    const reader = s.reader ? `读题 ${s.reader}` : "所选主读模型未配置，无法读题";
     const checker = s.checker ? (s.independent_checker ? `复核 ${s.checker}（另一家模型）` : `复核 ${s.checker}（同一模型再独立读一遍）`) : "";
     $("engineLine").textContent = [reader, checker].filter(Boolean).join(" · ");
     $("engineLine").title = $("engineLine").textContent;
@@ -204,7 +318,7 @@
     if (!s.upload_enabled) {
       note.hidden = false;
       note.textContent = !s.mineru ? "没有配置 MinerU Token，暂时不能上传新卷；已有的题卡照常可用。"
-        : "没有配置 MiniMax API Key，暂时不能上传新卷。";
+        : "没有配置所选主读模型的 API Key，暂时不能上传新资料。";
       $("dropZone").classList.add("disabled");
       $("dropZone").setAttribute("aria-disabled", "true");
       $("fileInput").disabled = true;
@@ -215,6 +329,7 @@
       $("fileInput").disabled = false;
     }
     $("m3Button").hidden = !s.m3_available;
+    renderSettingsModels();
   }
 
   function paperSummary(paper) {
@@ -223,6 +338,7 @@
       return paper.status_label;
     }
     if (paper.status === "failed") return "处理失败";
+    if (paper.status === "needs_grouping") return "等待确认资料结构";
     const c = paper.counts || {};
     const parts = [`${c.total || 0} 题`];
     const todo = (c.yellow || 0) + (c.red || 0);
@@ -329,6 +445,7 @@
     url.searchParams.delete("draft");
     history.replaceState(null, "", url);
     renderPaperList();
+    renderSettingsTask();
   }
 
   async function refreshPaper() {
@@ -398,7 +515,7 @@
 
   function renderDoneBanner(c) {
     const banner = $("doneBanner");
-    const done = c.all > 0 && !c.todo && !c.green && !c.waiting && !ACTIVE_STATUS.has(state.paper.status);
+    const done = c.all > 0 && !c.todo && !c.green && !c.waiting && state.paper.status === "ready";
     banner.hidden = !done;
     if (!done) return;
     const text = el("span");
@@ -427,6 +544,8 @@
         : `${paper.status_label}……一般一两分钟，不需要你做任何事。`;
     } else if (paper.status === "failed") {
       statusText.textContent = "处理失败";
+    } else if (paper.status === "needs_grouping") {
+      statusText.textContent = "检测到题号重新开始或页面可能来自不同资料；确认调整页序或拆分任务后才会继续识读。";
     } else if (!c.all) {
       statusText.textContent = "没有题卡";
     } else if (c.todo) {
@@ -447,31 +566,45 @@
     error.hidden = paper.status !== "failed";
     if (!error.hidden) {
       const actions = el("span", "error-actions");
-      actions.append(button("重试", "small", retryPaper), button("删除任务", "small danger", deletePaper));
+      actions.append(button("重试", "small", () => retryPaper()));
+      if (paper.kind === "pdf" && paper.material_type !== "book") {
+        actions.append(button("按教材重试", "small", () => retryPaper("book")));
+      }
+      actions.append(button("删除任务", "small danger", deletePaper));
       error.replaceChildren(el("span", "", paper.error || "处理失败"), actions);
     }
     renderMeter(c);
     renderDoneBanner(c);
-    $("approveGreen").disabled = !c.green;
+    const structureBlocked = paper.status === "needs_grouping";
+    $("approveGreen").disabled = !c.green || structureBlocked;
     $("approveGreen").textContent = c.green ? `批量标记绿卡通过（${c.green}）` : "批量标记绿卡通过";
     $("approveGreen").title = "绿卡只表示 AI 识读一致。批量标记前，请确认这些题符合你的审核标准。";
-    $("publishButton").disabled = !c.unpublished;
+    $("publishButton").disabled = !c.unpublished || structureBlocked;
     $("publishButton").textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
     const notes = paper.notes || [];
-    $("notesBox").hidden = !notes.length;
+    // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
+    $("notesBox").hidden = true;
     $("notesList").replaceChildren(...notes.map((note) => el("li", "", note)));
-    $("addQuestion").hidden = ACTIVE_STATUS.has(paper.status) && paper.status !== "reading";
+    $("addQuestion").hidden = structureBlocked || (ACTIVE_STATUS.has(paper.status) && paper.status !== "reading");
     $("resegment").hidden = !["ready", "failed"].includes(paper.status);
-    const canReorder = Boolean(paper.photos) && (paper.pages || []).length > 1 && ["ready", "failed"].includes(paper.status);
+    const canReorder = Boolean(paper.photos) && (paper.pages || []).length > 1 && ["ready", "failed", "needs_grouping"].includes(paper.status);
     $("pageOrder").hidden = !canReorder;
     $("toolsMenu").hidden = $("addQuestion").hidden && $("resegment").hidden && $("pageOrder").hidden;
     const check = $("orderCheck");
-    check.hidden = !(paper.photos && paper.photos.check);
+    const hasConflict = Boolean(paper.structure_conflict);
+    check.hidden = !(hasConflict || (paper.photos && paper.photos.check));
     if (!check.hidden) {
+      const message = paper.structure_message || (typeof paper.structure_conflict === "object" && paper.structure_conflict.message)
+        || paper.photos?.check || "检测到题号重复或重新开始，请确认这些页面属于同一份资料还是多份资料。";
+      const actions = el("span", "error-actions");
       const fix = button("调整页序", "small", openOrderDialog);
       fix.disabled = !canReorder;
-      check.replaceChildren(el("span", "", paper.photos.check), fix);
+      actions.append(fix);
+      if (hasConflict) actions.append(button("确认是一份资料并继续", "small primary", confirmStructure));
+      if (hasConflict && suggestedSplitGroups(paper).length > 1) actions.append(button("拆分任务", "small button-outline", openSplitDialog));
+      check.replaceChildren(el("span", "", message), actions);
     }
+    renderSettingsTask();
     renderFilters(c);
     renderCards();
   }
@@ -739,6 +872,7 @@
     state.lens = on;
     writePref("qb-lens", on ? "1" : "0");
     $("lensToggle").setAttribute("aria-pressed", String(on));
+    $("settingsLens").checked = on;
     if (!on) hideLens();
   }
 
@@ -1183,7 +1317,16 @@
     if (review?.status === "conflict") return el("span", "chip yellow", "配图冲突 · 待确认");
     if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
     if (isApproved(q)) return el("span", "chip approved", "已标记通过");
-    if (q.state === "green") return el("span", "chip green", q.text_source === "majority" ? "三读两票一致 · 待审核" : q.text_source === "human" ? "已人工修改 · 待审核" : "两次识读一致 · 待审核");
+    if (q.state === "green") {
+      const majority = q.text_source === "majority";
+      const chip = el("span", "chip green", majority ? "AI 三读多数一致 · 未人工审核"
+        : q.text_source === "human" ? "已人工修改 · 未人工审核" : "AI 两次一致 · 未人工审核");
+      chip.title = majority
+        ? "前两次 AI 识读不同，第三次与其中一次相同；仍需人工对照原卷。"
+        : q.text_source === "human" ? "题面经过人工修改，但当前版本尚未标记通过。"
+          : "两次独立 AI 识读相同；一致不等于正确，仍需人工对照原卷。";
+      return chip;
+    }
     if (q.state === "yellow") return el("span", "chip yellow", "需核对原卷");
     if (q.state === "red") return el("span", "chip red", "识读失败");
     return el("span", "chip waiting", q.state === "reading" ? "AI 读题中…" : "等待识读");
@@ -1279,6 +1422,7 @@
 
     const body = el("div", "card-body");
     const head = el("header", "card-head");
+    if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
     head.append(el("span", "qnum", `第 ${q.number} 题`), el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
     body.append(head);
@@ -1377,7 +1521,7 @@
     if (data.question) {
       const index = state.questions.findIndex((q) => q.id === data.question.id);
       if (index >= 0) state.questions[index] = data.question; else state.questions.push(data.question);
-      state.questions.sort((a, b) => a.number - b.number);
+      state.questions.sort(questionCompare);
     }
     if (data.paper) {
       state.paper = data.paper;
@@ -1432,11 +1576,20 @@
     } catch (error) { toast(error.message, "error"); }
   }
 
-  async function retryPaper() {
+  async function retryPaper(materialType = null) {
+    if (materialType === "book" && !(await confirmDialog({
+      title: "按教材模式重试？",
+      text: "程序会在本机每 100 页稳定分片，再分别交给 MinerU。原 PDF 不会被改动。",
+      ok: "按教材重试",
+    }))) return;
     try {
-      await api(`/api/papers/${state.paperId}/retry`, { method: "POST", body: {} });
+      const data = await api(`/api/papers/${state.paperId}/retry`, {
+        method: "POST",
+        body: materialType ? { material_type: materialType } : {},
+      });
       refreshPaper();
       loadPapers();
+      toast(data.message || "已重试处理");
     } catch (error) { toast(error.message, "error"); }
   }
 
@@ -1488,11 +1641,15 @@
 
   async function deletePaper() {
     const paper = state.paper;
-    if (!paper || paper.status !== "failed") return;
+    if (!paper || !["ready", "failed", "needs_grouping"].includes(paper.status)) return;
+    if ((paper.counts?.published || 0) > 0) {
+      toast("这项任务已有正式题库记录，为保留来源追溯只能归档", "error");
+      return;
+    }
     const displayName = paperDisplayName(paper);
     const ok = await confirmDialog({
       title: `删除任务“${displayName}”？`,
-      text: "会删除这项失败任务、上传的原文件和未完成题卡，且无法撤销。若其中已有正式题库记录，系统会拒绝删除。",
+      text: "会永久删除这项任务、上传的原文件和全部草稿题卡，且无法撤销。已有正式题库记录的任务不能删除，只能归档。",
       ok: "删除任务",
       danger: true
     });
@@ -1515,6 +1672,182 @@
       toast(message, kind);
     } catch (error) { toast(error.message, "error"); }
   }
+
+  async function archivePaper() {
+    const paper = state.paper;
+    if (!paper) return;
+    if (ACTIVE_STATUS.has(paper.status)) {
+      toast("任务正在处理中，完成后再归档", "error");
+      return;
+    }
+    const displayName = paperDisplayName(paper);
+    const ok = await confirmDialog({
+      title: `归档任务“${displayName}”？`,
+      text: "归档后会从左侧任务列表隐藏，但不会删除原文件、题卡或正式题库中的来源记录。",
+      ok: "归档任务"
+    });
+    if (!ok) return;
+    const paperId = paper.id;
+    const oldIndex = state.papers.findIndex((item) => item.id === paperId);
+    try {
+      await api(`/api/papers/${paperId}/archive`, { method: "POST", body: {} });
+      state.papers = state.papers.filter((item) => item.id !== paperId);
+      const next = state.papers[Math.min(Math.max(oldIndex, 0), state.papers.length - 1)];
+      clearPaperSelection();
+      if (next) await selectPaper(next.id);
+      toast(`已归档任务“${displayName}”`, "success");
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  // ---------------------------------------------------------------- 设置
+
+  function setApiState(id, configured) {
+    const node = $(id);
+    node.textContent = configured ? "已配置" : "未配置";
+    node.className = `api-state ${configured ? "ready" : "missing"}`;
+  }
+
+  function selectedEngine(engines, role, fallback) {
+    return engines.saved?.[role] || engines.selected?.[role] || engines.selection?.[role]
+      || engines[`${role}_setting`] || engines[role] || fallback;
+  }
+
+  function fillModelSelect(select, entries, selected) {
+    select.replaceChildren(...entries.map(({ value, label }) => {
+      const option = el("option", "", label);
+      option.value = value;
+      return option;
+    }));
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  }
+
+  function renderSettingsModels() {
+    const status = state.status;
+    if (!status) return;
+    const engines = status.engines || {};
+    const configured = status.configured || engines.configured || {};
+    setApiState("settingsMineruState", Boolean(status.mineru || configured.mineru));
+    setApiState("settingsMinimaxState", Boolean(configured.minimax));
+    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow));
+
+    const labels = new Map((engines.choices || []).map((choice) => [choice.key,
+      `${choice.provider} · ${choice.model}${choice.available === false ? "（API 未配置）" : ""}`]));
+    const modelEntries = [
+      { value: "minimax_m3", label: labels.get("minimax_m3") || "MiniMax · MiniMax-M3" },
+      { value: "siliconflow_qwen3", label: labels.get("siliconflow_qwen3") || "硅基流动 · Qwen3-VL-32B-Instruct" }
+    ];
+    fillModelSelect($("settingsPrimaryModel"), modelEntries, selectedEngine(engines, "primary", "minimax_m3"));
+    fillModelSelect($("settingsCheckerModel"), [
+      { value: "auto", label: "自动（优先使用另一家已配置模型）" }, ...modelEntries
+    ], selectedEngine(engines, "checker", "auto"));
+    fillModelSelect($("settingsArbiterModel"), [
+      { value: "primary", label: "沿用主读模型" },
+      { value: "checker", label: "沿用复核模型" },
+      ...modelEntries
+    ], selectedEngine(engines, "arbiter", "primary"));
+    const summary = [
+      status.reader && `当前主读：${status.reader}`,
+      status.checker && `复核：${status.checker}`,
+      status.arbiter && `裁决：${status.arbiter}`
+    ].filter(Boolean).join("；") || "当前没有可用的识读模型。";
+    $("settingsModelSummary").textContent = engines.restart_required
+      ? `${summary}。上方已显示新选择，重启桌面程序后生效。` : summary;
+  }
+
+  function renderSettingsTask() {
+    const paper = state.paper;
+    $("settingsNoTask").hidden = Boolean(paper);
+    $("settingsTaskPanel").hidden = !paper;
+    if (!paper) return;
+    $("settingsTaskName").textContent = paperDisplayName(paper);
+    $("settingsTaskStatus").textContent = paper.status_label || paperSummary(paper);
+    const active = ACTIVE_STATUS.has(paper.status);
+    $("settingsRename").disabled = active;
+    $("settingsAddQuestion").disabled = paper.status === "needs_grouping" || (active && paper.status !== "reading");
+    $("settingsResegment").disabled = !["ready", "failed"].includes(paper.status);
+    $("settingsPageOrder").disabled = !(paper.photos && (paper.pages || []).length > 1
+      && ["ready", "failed", "needs_grouping"].includes(paper.status));
+    const groups = suggestedSplitGroups(paper);
+    $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
+    $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
+    $("settingsSplit").textContent = groups.length > 1 ? `按建议拆成 ${groups.length} 份` : "拆分任务";
+
+    const notes = [...(paper.notes || [])];
+    const structureMessage = paper.structure_message
+      || (typeof paper.structure_conflict === "object" && paper.structure_conflict.message);
+    if (structureMessage && !notes.includes(structureMessage)) notes.unshift(structureMessage);
+    if (paper.error && !notes.includes(paper.error)) notes.unshift(paper.error);
+    $("settingsTaskNotes").replaceChildren(...(notes.length ? notes : ["暂无处理记录。"])
+      .map((note) => el("li", "", note)));
+
+    const published = paper.counts?.published || 0;
+    $("settingsArchive").hidden = false;
+    $("settingsArchive").disabled = active;
+    const isSplitTask = Boolean(paper.structure?.split_from || paper.structure?.split_children?.length);
+    $("settingsDelete").hidden = published > 0 || isSplitTask
+      || !["ready", "failed", "needs_grouping"].includes(paper.status);
+    $("settingsDangerHint").textContent = published > 0
+      ? `已有 ${published} 道正式题库记录。为保留来源追溯，只能归档，不能永久删除。`
+      : isSplitTask ? "这是拆分资料的原稿或子任务；为保留双向追溯，只能归档。"
+      : active ? "任务正在处理中，完成或失败后才能永久删除。"
+        : "归档只从任务列表隐藏；永久删除会一并删除原文件和草稿，无法撤销。";
+  }
+
+  function closeSettingsThen(action) {
+    if ($("settingsDialog").open) $("settingsDialog").close();
+    requestAnimationFrame(action);
+  }
+
+  function openSettings() {
+    renderSettingsModels();
+    renderSettingsTask();
+    $("settingsLens").checked = state.lens;
+    $("settingsModelResult").textContent = "";
+    $("settingsDialog").showModal();
+    requestAnimationFrame(() => $("settingsClose").focus());
+  }
+
+  $("settingsButton").addEventListener("click", openSettings);
+  $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
+  $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
+  $("settingsAddQuestion").addEventListener("click", () => closeSettingsThen(() => openPageDialog("new")));
+  $("settingsResegment").addEventListener("click", () => closeSettingsThen(resegmentPaper));
+  $("settingsPageOrder").addEventListener("click", () => closeSettingsThen(openOrderDialog));
+  $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
+  $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
+  $("settingsArchive").addEventListener("click", () => closeSettingsThen(archivePaper));
+  $("settingsDelete").addEventListener("click", () => closeSettingsThen(deletePaper));
+
+  $("modelSettingsForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const save = $("settingsModelSave");
+    save.disabled = true;
+    $("settingsModelResult").textContent = "正在保存…";
+    try {
+      const data = await api("/api/settings/models", {
+        method: "POST",
+        body: {
+          primary: $("settingsPrimaryModel").value,
+          checker: $("settingsCheckerModel").value,
+          arbiter: $("settingsArbiterModel").value
+        }
+      });
+      const message = data.message || (data.restart_required
+        ? "已保存；重启桌面程序后生效。"
+        : "已保存；只影响之后开始或重新识读的任务，不会改写现有题卡。");
+      $("settingsModelResult").textContent = message;
+      toast(message, "success");
+      await loadStatus();
+      if (data.saved) {
+        if (data.saved.primary) $("settingsPrimaryModel").value = data.saved.primary;
+        if (data.saved.checker) $("settingsCheckerModel").value = data.saved.checker;
+        if (data.saved.arbiter) $("settingsArbiterModel").value = data.saved.arbiter;
+      }
+    } catch (error) {
+      $("settingsModelResult").textContent = error.message;
+      toast(error.message, "error");
+    } finally { save.disabled = false; }
+  });
 
   $("approveGreen").addEventListener("click", async () => {
     const count = counts().green;
@@ -1684,6 +2017,22 @@
         ? "橙色实线框是已选的配图；选中后可用方向键移动、Delete 删除。蓝色虚线框是候选图，点一下加入；也可以直接拖框。修改后需重新审核题卡。"
         : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
     $("numberField").hidden = mode !== "new";
+    const groups = state.paper.question_groups || [];
+    $("groupField").hidden = mode !== "new" || groups.length < 2;
+    if (mode === "new") {
+      $("groupSelect").replaceChildren(
+        el("option", "", "自动（按所框页面判断）"),
+        ...groups.map((group) => {
+          const option = el("option", "", group.title || `第 ${group.sequence + 1} 组`);
+          option.value = String(group.id);
+          return option;
+        })
+      );
+      $("groupSelect").value = "";
+      if (groups.length > 1) {
+        $("pageDialogHint").textContent += " 如果同一页里有多个题组，请在题号旁明确选择它属于哪一组。";
+      }
+    }
     $("slotField").hidden = mode !== "figures";
     $("numberInput").value = "";
     lens.classList.remove("on");
@@ -1957,7 +2306,10 @@
         const number = Number($("numberInput").value);
         if (!Number.isInteger(number) || number < 1) { toast("请填写题号", "error"); return; }
         if (!dialog.boxes.length) { toast("请先在原卷上拖出这道题的范围", "error"); return; }
-        const data = await api(`/api/papers/${state.paperId}/questions`, { method: "POST", body: { number, regions: readingOrder(dialog.boxes) } });
+        const selectedGroup = $("groupSelect").value;
+        const body = { number, regions: readingOrder(dialog.boxes) };
+        if (selectedGroup) body.group_id = Number(selectedGroup);
+        const data = await api(`/api/papers/${state.paperId}/questions`, { method: "POST", body });
         applyQuestion(data);
         toast(`已添加第 ${number} 题，AI 正在读题`);
         refreshPaper();
@@ -1968,7 +2320,7 @@
 
   $("addQuestion").addEventListener("click", () => { $("toolsMenu").open = false; openPageDialog("new"); });
 
-  $("resegment").addEventListener("click", async () => {
+  async function resegmentPaper() {
     $("toolsMenu").open = false;
     const ok = await confirmDialog({
       title: "按最新的切题规则重新切这份试卷？",
@@ -1985,14 +2337,24 @@
       refreshPaper();
       loadPapers();
     } catch (error) { toast(error.message, "error"); }
-  });
+  }
+
+  $("resegment").addEventListener("click", resegmentPaper);
 
   // ---------------------------------------------------------------- 上传与 M3 导入
 
   // 照片（一张或几张）先弹出确认框，合成一份试卷；PDF、Word 一份一份直接上传。
-  const PHOTO_NAME = /\.(jpe?g|png|webp)$/i;
   const MAX_PHOTOS = 30;
   const photoUpload = { files: [], urls: [] };
+  const pasteUpload = { batch: null, resolve: null };
+
+  function selectedMaterialType() {
+    return document.querySelector('input[name="materialType"]:checked')?.value === "book" ? "book" : "exam";
+  }
+
+  function materialTypeLabel() {
+    return selectedMaterialType() === "book" ? "一本书 / 讲义" : "一份试卷";
+  }
 
   async function sendUpload(form, label) {
     toast(`正在上传 ${label}…`);
@@ -2002,9 +2364,16 @@
   }
 
   async function handleFiles(fileList) {
-    const files = [...fileList];
-    if (!files.length) return;
+    const routed = QBUpload.routeFiles(fileList);
+    if (!routed.files.length) return;
+    if (!routed.accepted.length) {
+      toast("只支持 PDF、DOCX、JPG、PNG 和 WEBP 文件", "error");
+      return;
+    }
     if (!state.status?.upload_enabled) { toast($("uploadNote").textContent || "暂时不能上传", "error"); return; }
+    if (routed.unsupported.length) {
+      toast(`已跳过 ${routed.unsupported.length} 个不支持的文件`, "error");
+    }
     let acknowledged = false;
     try { acknowledged = Boolean(sessionStorage.getItem("qb-cloud-upload-ack")); } catch { /* 无存储时每次都提示 */ }
     if (!acknowledged) {
@@ -2016,12 +2385,13 @@
       if (!accepted) return;
       try { sessionStorage.setItem("qb-cloud-upload-ack", "1"); } catch { /* 无存储时每次都提示 */ }
     }
-    const pictures = files.filter((file) => PHOTO_NAME.test(file.name));
-    const others = files.filter((file) => !PHOTO_NAME.test(file.name));
+    const pictures = routed.pictures;
+    const others = routed.documents;
     let last = null;
     for (const file of others) {
       const form = new FormData();
       form.append("file", file);
+      form.append("material_type", selectedMaterialType());
       try { last = await sendUpload(form, file.name); } catch (error) { toast(`${file.name}：${error.message}`, "error"); }
     }
     if (last) { await loadPapers(); selectPaper(last.id); }
@@ -2029,10 +2399,59 @@
     else if (pictures.length) openPhotoDialog(pictures);
   }
 
+  function fileSizeLabel(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) return "大小未知";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.max(0.1, bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function openPasteDialog(batch) {
+    pasteUpload.batch = batch;
+    const counts = new Map();
+    batch.items.filter((item) => item.supported).forEach((item) => {
+      counts.set(item.label, (counts.get(item.label) || 0) + 1);
+    });
+    const kinds = [...counts].map(([label, count]) => `${label} ${count}`).join("、");
+    const skipped = batch.unsupported.length ? `；${batch.unsupported.length} 个不支持的文件不会上传` : "";
+    $("pasteTitle").textContent = `粘贴 ${batch.items.length} 个文件`;
+    $("pasteSummary").textContent = `可上传 ${batch.accepted.length} 个${kinds ? `（${kinds}）` : ""}${skipped}`;
+    $("pasteNote").textContent = `当前按“${materialTypeLabel()}”上传。请核对文件和顺序；PDF、Word 会分别建立任务，照片会保持下列顺序进入照片确认。`;
+    $("pasteUpload").textContent = `继续上传（${batch.accepted.length}）`;
+    $("pasteUpload").disabled = !batch.accepted.length;
+    $("pasteList").replaceChildren(...batch.items.map((item) => {
+      const row = el("li", `paste-item${item.supported ? "" : " unsupported"}`);
+      const details = el("span", "paste-file");
+      details.append(el("span", "paste-name", item.file.name || "未命名文件"), el("span", "paste-size", fileSizeLabel(item.file.size)));
+      row.append(details, el("span", "paste-kind", item.label));
+      return row;
+    }));
+    $("pasteDialog").showModal();
+    return new Promise((resolve) => { pasteUpload.resolve = resolve; });
+  }
+
+  $("pasteUpload").addEventListener("click", () => {
+    const resolve = pasteUpload.resolve;
+    pasteUpload.resolve = null;
+    $("pasteDialog").close();
+    resolve?.(true);
+  });
+
+  $("pasteDialog").addEventListener("close", () => {
+    const resolve = pasteUpload.resolve;
+    pasteUpload.resolve = null;
+    pasteUpload.batch = null;
+    $("pasteList").replaceChildren();
+    resolve?.(false);
+  });
+
   function openPhotoDialog(files) {
     photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
     photoUpload.files = files;
     photoUpload.urls = files.map((file) => URL.createObjectURL(file));
+    $("photoHint").innerHTML = selectedMaterialType() === "book"
+      ? "这些照片会合成<strong>一本书 / 讲义</strong>。重复题号会保留，后续按章节或练习分组。"
+      : "这些照片会合成<strong>一份试卷</strong>。页序不用管，读完后会按卷面上印的题号自动排好。";
     $("photoTitle").textContent = files.length > 1 ? `上传 ${files.length} 张照片` : "上传 1 张照片";
     $("photoUpload").textContent = files.length > 1 ? `上传（${files.length} 张合成一份试卷）` : "上传";
     $("photoUpload").disabled = false;
@@ -2044,7 +2463,7 @@
       item.append(image, el("span", "photo-name", file.name));
       return item;
     }));
-    $("photoDialog").showModal();
+    if (!$("photoDialog").open) $("photoDialog").showModal();
   }
 
   $("photoUpload").addEventListener("click", async () => {
@@ -2053,6 +2472,7 @@
     const form = new FormData();
     files.forEach((file) => form.append("file", file));
     form.append("enhance", $("photoEnhance").checked ? "1" : "0");
+    form.append("material_type", selectedMaterialType());
     $("photoUpload").disabled = true;
     try {
       const paper = await sendUpload(form, files.length > 1 ? `${files.length} 张照片` : files[0].name);
@@ -2087,9 +2507,118 @@
     if (!event.target.closest?.("#dropZone")) event.preventDefault();
   }));
 
+  document.addEventListener("paste", async (event) => {
+    if (!QBUpload.shouldInterceptPaste(event.target, event.clipboardData)) return;
+    event.preventDefault();
+    if ($("pasteDialog").open) {
+      toast("请先确认或取消当前这批文件", "error");
+      return;
+    }
+    const batch = QBUpload.buildClipboardBatch(event.clipboardData.files);
+    if (!batch.accepted.length) {
+      toast("剪贴板中的文件不支持；请选择 PDF、DOCX、JPG、PNG 或 WEBP", "error");
+      return;
+    }
+    await QBUpload.runConfirmedPaste(batch.accepted, () => openPasteDialog(batch), (files) => handleFiles(files));
+  });
+
   // ---------------------------------------------------------------- 照片卷：调整页序
 
   const pageOrder = { order: [] };
+  const splitPlan = { paperId: null, groups: [] };
+
+  function suggestedSplitGroups(paper) {
+    if (!paper) return [];
+    const conflict = typeof paper.structure_conflict === "object" ? paper.structure_conflict : {};
+    const raw = paper.suggested_groups || conflict.suggested_groups || conflict.groups || [];
+    if (!Array.isArray(raw)) return [];
+    const groups = raw.map((group) => Array.isArray(group) ? group : group?.pages)
+      .filter(Array.isArray)
+      .map((group) => [...new Set(group.filter((page) => Number.isInteger(page) && page >= 0))])
+      .filter((group) => group.length);
+    const flattened = groups.flat();
+    const expected = Array.from({ length: (paper.pages || []).length }, (_value, index) => index);
+    return flattened.length === expected.length
+      && [...flattened].sort((a, b) => a - b).every((page, index) => page === expected[index])
+      ? groups : [];
+  }
+
+  async function confirmStructure() {
+    const paper = state.paper;
+    if (!paper || paper.status !== "needs_grouping") return;
+    const ok = await confirmDialog({
+      title: "确认这些页面属于同一份资料？",
+      text: "程序会继续处理，并把重新开始的题号放进独立题组；同号题不会互相覆盖。若页面其实来自不同试卷，请改用“拆分任务”。",
+      ok: "确认并继续"
+    });
+    if (!ok) return;
+    try {
+      const data = await api(`/api/papers/${paper.id}/confirm-structure`, { method: "POST", body: {} });
+      toast(data.message || "已确认，正在继续处理。", "success");
+      await selectPaper(paper.id);
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  function openSplitDialog() {
+    const paper = state.paper;
+    const groups = suggestedSplitGroups(paper);
+    if (!paper || groups.length < 2) {
+      toast("暂时没有可靠的拆分建议，请先调整页序", "error");
+      return;
+    }
+    splitPlan.paperId = paper.id;
+    splitPlan.groups = groups.map((group) => [...group]);
+    const names = paper.photos?.names || [];
+    $("splitTitle").textContent = `把“${paperDisplayName(paper)}”拆成 ${groups.length} 份`;
+    $("splitConfirm").textContent = `确认拆成 ${groups.length} 份`;
+    $("splitConfirm").disabled = false;
+    $("splitGroups").replaceChildren(...groups.map((group, groupIndex) => {
+      const section = el("section", "split-group");
+      section.append(el("h4", "", `第 ${groupIndex + 1} 份 · ${group.length} 页`));
+      const pages = el("div", "split-pages");
+      group.forEach((page) => {
+        const item = el("div", "split-page");
+        const image = el("img");
+        image.src = previewUrl(paper.id, page);
+        image.alt = `原资料第 ${page + 1} 页`;
+        image.loading = "lazy";
+        item.append(image, el("span", "", names[page] || `原第 ${page + 1} 页`));
+        pages.append(item);
+      });
+      section.append(pages);
+      return section;
+    }));
+    $("splitDialog").showModal();
+  }
+
+  $("splitConfirm").addEventListener("click", async () => {
+    if (!splitPlan.paperId || splitPlan.groups.length < 2) return;
+    const save = $("splitConfirm");
+    const groupCount = splitPlan.groups.length;
+    save.disabled = true;
+    try {
+      const data = await api(`/api/papers/${splitPlan.paperId}/split`, {
+        method: "POST", body: { groups: splitPlan.groups }
+      });
+      if ($("splitDialog").open) $("splitDialog").close();
+      const targetId = data.papers?.[0]?.id || data.paper?.id || null;
+      clearPaperSelection();
+      await loadPapers();
+      const target = targetId && state.papers.find((paper) => paper.id === targetId);
+      if (target) await selectPaper(target.id);
+      else if (state.papers.length) await selectPaper(state.papers[0].id);
+      toast(data.message || `已拆成 ${groupCount} 份任务；原任务已保留或归档`, "success");
+    } catch (error) {
+      toast(error.message, "error");
+      save.disabled = false;
+    }
+  });
+
+  $("splitDialog").addEventListener("close", () => {
+    splitPlan.paperId = null;
+    splitPlan.groups = [];
+    $("splitGroups").replaceChildren();
+  });
 
   function openOrderDialog() {
     if (!state.paper?.photos) return;
@@ -2165,7 +2694,9 @@
       const data = await api(`/api/papers/${state.paperId}/page-order`, { method: "POST", body: { order: pageOrder.order } });
       if ($("orderDialog").open) $("orderDialog").close();
       state.rendered.clear();
-      toast(data.changed ? "页序已保存，正在按新页序重新切题" : "页序没变，已确认");
+      toast(data.paper?.status === "needs_grouping"
+        ? "页序已保存，但题号仍有重合；请继续核对并拆分任务"
+        : data.changed ? "页序已保存，正在按新页序重新切题" : "页序没变，已确认");
       refreshPaper();
       loadPapers();
     } catch (error) { toast(error.message, "error"); }
@@ -2211,7 +2742,7 @@
   toTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
   syncScroll();
 
-  $("keysButton").addEventListener("click", () => $("keysDialog").showModal());
+  $("keysButton").addEventListener("click", () => closeSettingsThen(() => $("keysDialog").showModal()));
 
   // 下拉菜单：点外面或按 Esc 收起。
   document.addEventListener("click", (event) => {
@@ -2253,3 +2784,4 @@
 
   start();
 })();
+}

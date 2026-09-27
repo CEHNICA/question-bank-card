@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import start_question_bank as launcher
 from credential_dialog import show_credential_dialog
-from credential_store import CredentialStoreError, load_credentials
+from credential_store import CredentialStoreError, credential_pool, load_credentials
 
 ROOT = launcher.ROOT
 ASSETS = ROOT / "assets"
@@ -90,40 +91,60 @@ def _needs_install() -> bool:
     return current != previous
 
 
-def _saved_credentials() -> dict[str, str]:
+def _saved_credentials() -> dict[str, object]:
     try:
         return load_credentials()
     except CredentialStoreError as exc:
         raise NeedsConsole(str(exc)) from exc
 
 
-def credentials_ready(saved: dict[str, str] | None = None) -> bool:
-    """不联网，只看上传新试卷所需的两项凭据是否都有非空值。"""
+def credentials_ready(
+    saved: dict[str, object] | None = None,
+    preferences: dict[str, str] | None = None,
+) -> bool:
+    """不联网，只看 MinerU 与当前所选主读模型的凭据是否就绪。"""
     saved = _saved_credentials() if saved is None else saved
+    preferences = launcher._model_preferences() if preferences is None else preferences
     has_token = bool(
         launcher._strip_bearer(os.environ.get("MINERU_TOKEN", ""))
-        or launcher._strip_bearer(saved.get("mineru_token", ""))
+        or credential_pool(saved, "mineru")
     )
-    # MiniMax：命令行启动器在“只有环境变量、没有保存”时会让人明确选择，这里同样转交。
-    return has_token and bool(saved.get("minimax_key", "").strip().replace("\\_", "_"))
+    primary_name = preferences.get("primary_engine", "minimax_m3")
+    model_accounts = credential_pool(
+        saved, "siliconflow" if primary_name == "siliconflow_qwen3" else "minimax",
+    )
+    # 只有环境变量、没有保存时仍转交命令行，让人明确选择本次使用方式。
+    return has_token and bool(model_accounts)
 
 
-def resolve_credentials_quietly() -> tuple[str, str]:
+def resolve_credentials_quietly() -> tuple[list[str], list[str]]:
     """与 launcher._resolve_credentials 同样的优先级，但绝不提问；需要提问时抛 NeedsConsole。"""
     saved = _saved_credentials()
-    if not credentials_ready(saved):
+    preferences = launcher._model_preferences()
+    if not credentials_ready(saved, preferences):
         raise NeedsConsole("还没有保存题库凭据")
     environment_token = launcher._strip_bearer(os.environ.get("MINERU_TOKEN", ""))
-    token = environment_token or launcher._strip_bearer(saved.get("mineru_token", ""))
-    if token:
-        validity = launcher._mineru_token_validity(token)
-        if validity is False and environment_token and saved.get("mineru_token"):
-            token = launcher._strip_bearer(saved["mineru_token"])
-            validity = launcher._mineru_token_validity(token) if token else None
-        if validity is False:
-            raise NeedsConsole("保存的 MinerU Token 未通过官网验证，需要重新输入")
-    minimax_key = saved["minimax_key"].strip().replace("\\_", "_")
-    return token, minimax_key
+    saved_tokens = credential_pool(saved, "mineru")
+    tokens = [environment_token] if environment_token else saved_tokens
+    environment_validity: bool | None = None
+    if environment_token:
+        environment_validity = launcher._mineru_token_validity(environment_token)
+        if environment_validity is False and saved_tokens:
+            tokens = saved_tokens
+        elif environment_validity is False:
+            raise NeedsConsole("环境变量中的 MinerU Token 未通过官网验证，需要重新输入")
+
+    if environment_token and tokens == [environment_token]:
+        checked_tokens = tokens
+    else:
+        # 账号池隔离单个过期账号：启动时并行做无消费预检，
+        # 只过滤官网明确判定失效的项。网络不通（None）仍交给运行时池处理。
+        with ThreadPoolExecutor(max_workers=min(8, len(tokens))) as executor:
+            validity = list(executor.map(launcher._mineru_token_validity, tokens))
+        checked_tokens = [token for token, result in zip(tokens, validity) if result is not False]
+        if not checked_tokens:
+            raise NeedsConsole("保存的 MinerU 账号均未通过官网验证，需要重新输入")
+    return checked_tokens, credential_pool(saved, "minimax")
 
 
 # ---------------------------------------------------------------- 浏览器应用窗口
@@ -398,7 +419,7 @@ def _main(arguments: list[str] | None = None) -> int:
         if saved:
             running = launcher._running_instance()
             suffix = "\n\n题库当前正在运行，请关闭后重新打开以使用新配置。" if running else ""
-            _message(f"API 配置已加密保存。{suffix}")
+            _message(f"API 密钥与模型选择已保存；密钥已加密。{suffix}")
         return 0
     if arguments:
         _message("无法识别的启动参数。", error=True)
@@ -423,7 +444,7 @@ def _main(arguments: list[str] | None = None) -> int:
         ready = False
         reason = str(exc)
     else:
-        reason = "还没有保存 MinerU / MiniMax 凭据"
+        reason = "还没有保存 MinerU Token 或所选主读模型的 API Key"
     if not ready and not _configure_credentials(first_run=True, reason=reason):
         return 0
 
@@ -449,27 +470,31 @@ def _main(arguments: list[str] | None = None) -> int:
                 launcher._run_step = original_step
             ui.say("正在确认凭据…")
             try:
-                token, minimax_key = resolve_credentials_quietly()
+                mineru_tokens, minimax_keys = resolve_credentials_quietly()
             except NeedsConsole as exc:
                 return ("configure", str(exc))
-            siliconflow_key = launcher._siliconflow_key()
+            siliconflow_keys = launcher._siliconflow_keys()
+            credential_pools = {
+                "mineru": mineru_tokens,
+                "minimax": minimax_keys,
+                "siliconflow": siliconflow_keys,
+            }
+            preferences = launcher._model_preferences()
+            model_env = launcher.model_preference_environment(preferences)
             base_env = launcher._child_environment({
                 key: value for key, value in os.environ.items()
-                if key.upper() not in launcher.SECRET_NAMES and not key.upper().endswith("_CONFIGURED")
+                if key.upper() not in launcher.SECRET_NAMES
+                and key.upper() not in launcher.MODEL_ENVIRONMENT_KEYS
+                and key.upper() not in launcher.CREDENTIAL_STATUS_NAMES
             })
-            # 与命令行启动器一致：网页进程只知道“配置了没有”，密钥只交给后台工作者。
+            base_env.update(launcher._parallel_environment(base_env, credential_pools, preferences))
+            # 模型角色和型号可供网页展示；三类密钥仍只交给后台工作者。
             web_env = dict(base_env)
-            web_env.update({"QB_MINERU_CONFIGURED": "1" if token else "0",
-                            "QB_MINIMAX_CONFIGURED": "1" if minimax_key else "0",
-                            "QB_SILICONFLOW_CONFIGURED": "1" if siliconflow_key else "0"})
-            worker_env = dict(base_env)
-            if token:
-                worker_env["MINERU_TOKEN"] = token
-            if minimax_key:
-                worker_env["MINIMAX_API_KEY"] = minimax_key
-            if siliconflow_key:
-                worker_env["SILICONFLOW_API_KEY"] = siliconflow_key
-            del token, minimax_key, siliconflow_key
+            web_env.update(launcher._credential_status_environment(credential_pools))
+            web_env.update(model_env)
+            worker_env = launcher._worker_credential_environment(base_env, credential_pools)
+            worker_env.update(model_env)
+            del mineru_tokens, minimax_keys, siliconflow_keys, credential_pools, preferences, model_env
             ui.say("正在启动后台服务…")
             port = launcher._available_port()
             url = f"http://127.0.0.1:{port}"

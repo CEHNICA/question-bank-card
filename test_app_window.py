@@ -35,6 +35,11 @@ class CredentialTests(unittest.TestCase):
         patcher = patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""})
         patcher.start()
         self.addCleanup(patcher.stop)
+        preferences = patch.object(app_window.launcher, "_model_preferences", return_value={
+            "primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary",
+        })
+        preferences.start()
+        self.addCleanup(preferences.stop)
 
     def test_ready_needs_both_services_even_if_skipped(self):
         self.assertFalse(app_window.credentials_ready({"mineru_token": "", "minimax_key": ""}))
@@ -53,17 +58,48 @@ class CredentialTests(unittest.TestCase):
         with patch.dict(os.environ, {"MINERU_TOKEN": "Bearer env-bad"}), \
                 patch.object(app_window, "load_credentials", return_value={"mineru_token": "saved-good", "minimax_key": "k\\_1"}), \
                 patch.object(app_window.launcher, "_mineru_token_validity", side_effect=lambda t: validity[t]):
-            self.assertEqual(app_window.resolve_credentials_quietly(), ("saved-good", "k_1"))
+            self.assertEqual(app_window.resolve_credentials_quietly(), (["saved-good"], ["k_1"]))
 
     def test_offline_check_does_not_block_start(self):
         with patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok", "minimax_key": "k"}), \
                 patch.object(app_window.launcher, "_mineru_token_validity", return_value=None):
-            self.assertEqual(app_window.resolve_credentials_quietly(), ("tok", "k"))
+            self.assertEqual(app_window.resolve_credentials_quietly(), (["tok"], ["k"]))
+
+    def test_invalid_saved_mineru_account_is_isolated_without_echoing_the_token(self):
+        saved = {
+            "mineru_token": "good-one",
+            "mineru_tokens": ["good-one", "private-bad-token"],
+            "minimax_key": "k",
+            "minimax_keys": ["k"],
+        }
+        with patch.object(app_window, "load_credentials", return_value=saved), \
+                patch.object(app_window.launcher, "_mineru_token_validity", side_effect=[True, False]):
+            self.assertEqual(app_window.resolve_credentials_quietly(), (["good-one"], ["k"]))
+
+    def test_all_invalid_saved_mineru_accounts_require_reconfiguration_without_echo(self):
+        saved = {
+            "mineru_token": "private-bad-one",
+            "mineru_tokens": ["private-bad-one", "private-bad-two"],
+            "minimax_key": "k",
+        }
+        with patch.object(app_window, "load_credentials", return_value=saved), \
+                patch.object(app_window.launcher, "_mineru_token_validity", return_value=False):
+            with self.assertRaises(app_window.NeedsConsole) as caught:
+                app_window.resolve_credentials_quietly()
+        self.assertIn("均未通过", str(caught.exception))
+        self.assertNotIn("private-bad", str(caught.exception))
 
     def test_minimax_only_in_environment_is_not_used_silently(self):
         with patch.dict(os.environ, {"MINIMAX_API_KEY": "env-key"}), \
                 patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok"}):
             self.assertFalse(app_window.credentials_ready())
+
+    def test_siliconflow_only_saved_credentials_work_when_it_is_primary(self):
+        preferences = {
+            "primary_engine": "siliconflow_qwen3", "checker_engine": "auto", "arbiter_engine": "primary",
+        }
+        saved = {"mineru_token": "tok", "minimax_key": "", "siliconflow_key": "sf"}
+        self.assertTrue(app_window.credentials_ready(saved, preferences))
 
 
 class WindowTests(unittest.TestCase):
@@ -162,21 +198,119 @@ class MainFlowTests(unittest.TestCase):
 
         mutex = Mock(acquired=True)
         waited = Mock()
-        saved = {"mineru_token": "m-token", "minimax_key": "mm-key", "siliconflow_key": "sf-key"}
-        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": ""}):
+        saved = {
+            "mineru_token": "m-token", "mineru_tokens": ["m-token", "m-token-2"],
+            "minimax_key": "mm-key", "minimax_keys": ["mm-key", "mm-key-2"],
+            "siliconflow_key": "sf-key", "siliconflow_keys": ["sf-key", "sf-key-2"],
+        }
+        preferences = {
+            "primary_engine": "siliconflow_qwen3",
+            "checker_engine": "minimax_m3",
+            "arbiter_engine": "checker",
+        }
+        with patch.dict(os.environ, {
+            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
+            "MINERU_TOKENS_JSON": '["untrusted"]',
+            "MINIMAX_API_KEYS_JSON": '["untrusted"]',
+            "SILICONFLOW_API_KEYS_JSON": '["untrusted"]',
+            "QB_PRIMARY_ENGINE": "untrusted", "QB_CHECKER_ENGINE": "untrusted",
+            "QB_ARBITER_ENGINE": "untrusted", "QB_MINIMAX_MODEL": "untrusted",
+            "QB_SILICONFLOW_MODEL": "untrusted", "QB_MODEL_PREFERENCES_FILE": "C:/untrusted.json",
+            "QB_PARALLEL": "",
+        }):
             result = self.run_patched(
                 self.patches(_needs_install=Mock(return_value=False), Splash=DirectSplash, load_credentials=Mock(return_value=saved),
                              open_window=Mock(return_value=Mock()), wait_for_window=waited),
                 {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
                  "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=True), "load_credentials": Mock(return_value=saved),
-                 "_available_port": Mock(return_value=8768), "ChildJob": Mock(), "_start": fake_start, "_health": Mock(),
+                  "_model_preferences": Mock(return_value=preferences),
+                  "_available_port": Mock(return_value=8768), "ChildJob": Mock(), "_start": fake_start, "_health": Mock(),
                  "_write_instance": Mock(), "_clear_instance": Mock()})
         self.assertEqual(result, 0)
         worker, web = environments["worker.log"], environments["web.log"]
         self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]), ("m-token", "mm-key", "sf-key"))
-        for name in ("MINERU_TOKEN", "MINIMAX_API_KEY", "SILICONFLOW_API_KEY"):
+        self.assertEqual(json.loads(worker["MINERU_TOKENS_JSON"]), ["m-token", "m-token-2"])
+        self.assertEqual(json.loads(worker["MINIMAX_API_KEYS_JSON"]), ["mm-key", "mm-key-2"])
+        self.assertEqual(json.loads(worker["SILICONFLOW_API_KEYS_JSON"]), ["sf-key", "sf-key-2"])
+        for name in app_window.launcher.SECRET_NAMES:
             self.assertNotIn(name, web)
+        self.assertEqual(
+            (web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
+            ("2", "2", "2"),
+        )
+        self.assertEqual(worker["QB_PARALLEL"], "4")
+        self.assertEqual(web["QB_PARALLEL"], "4")
         self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
+        for environment in (worker, web):
+            self.assertEqual(environment["QB_PRIMARY_ENGINE"], "siliconflow_qwen3")
+            self.assertEqual(environment["QB_CHECKER_ENGINE"], "minimax_m3")
+            self.assertEqual(environment["QB_ARBITER_ENGINE"], "checker")
+            self.assertEqual(environment["QB_MINIMAX_MODEL"], "MiniMax-M3")
+            self.assertEqual(environment["QB_SILICONFLOW_MODEL"], "Qwen/Qwen3-VL-32B-Instruct")
+            self.assertTrue(Path(environment["QB_MODEL_PREFERENCES_FILE"]).is_absolute())
+            self.assertNotEqual(environment["QB_MODEL_PREFERENCES_FILE"], "C:/untrusted.json")
+        waited.assert_called_once()
+        for process in processes.values():
+            process.terminate.assert_called_once()
+        mutex.close.assert_called_once()
+
+    def test_siliconflow_only_primary_completes_desktop_start(self):
+        environments = {}
+        processes = {}
+
+        def fake_start(args, environment, log_name):
+            process = Mock()
+            process.poll.return_value = None
+            processes[log_name] = process
+            environments[log_name] = dict(environment)
+            return process, io.BytesIO()
+
+        mutex = Mock(acquired=True)
+        waited = Mock()
+        saved = {"mineru_token": "m-token", "siliconflow_key": "sf-key"}
+        preferences = {
+            "primary_engine": "siliconflow_qwen3",
+            "checker_engine": "auto",
+            "arbiter_engine": "primary",
+        }
+        with patch.dict(os.environ, {
+            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
+        }):
+            result = self.run_patched(
+                self.patches(
+                    _needs_install=Mock(return_value=False), Splash=DirectSplash,
+                    load_credentials=Mock(return_value=saved),
+                    open_window=Mock(return_value=Mock()), wait_for_window=waited,
+                ),
+                {
+                    "_running_instance": Mock(return_value=None),
+                    "InstanceMutex": Mock(return_value=mutex),
+                    "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=True),
+                    "load_credentials": Mock(return_value=saved),
+                    "_model_preferences": Mock(return_value=preferences),
+                    "_available_port": Mock(return_value=8768), "ChildJob": Mock(),
+                    "_start": fake_start, "_health": Mock(),
+                    "_write_instance": Mock(), "_clear_instance": Mock(),
+                },
+            )
+
+        self.assertEqual(result, 0)
+        worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual(worker["MINERU_TOKEN"], "m-token")
+        self.assertEqual(worker["SILICONFLOW_API_KEY"], "sf-key")
+        self.assertNotIn("MINIMAX_API_KEY", worker)
+        self.assertEqual(json.loads(worker["MINERU_TOKENS_JSON"]), ["m-token"])
+        self.assertEqual(json.loads(worker["SILICONFLOW_API_KEYS_JSON"]), ["sf-key"])
+        for name in app_window.launcher.SECRET_NAMES:
+            self.assertNotIn(name, web)
+        self.assertEqual(web["QB_MINIMAX_CONFIGURED"], "0")
+        self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
+        self.assertEqual(web["QB_MINIMAX_POOL_SIZE"], "0")
+        self.assertEqual(web["QB_SILICONFLOW_POOL_SIZE"], "1")
+        for environment in (worker, web):
+            self.assertEqual(environment["QB_PRIMARY_ENGINE"], "siliconflow_qwen3")
+            self.assertEqual(environment["QB_CHECKER_ENGINE"], "auto")
+            self.assertEqual(environment["QB_ARBITER_ENGINE"], "primary")
         waited.assert_called_once()
         for process in processes.values():
             process.terminate.assert_called_once()

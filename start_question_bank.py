@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import getpass
 import hashlib
 import json
@@ -21,7 +22,16 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from credential_store import CredentialStoreError, load_credentials, save_credentials
+from credential_store import (
+    DEFAULT_MODEL_PREFERENCES,
+    MODEL_ENVIRONMENT_KEYS,
+    CredentialStoreError,
+    credential_pool,
+    load_credentials,
+    load_model_preferences,
+    model_preference_environment,
+    save_credentials,
+)
 
 
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -44,13 +54,38 @@ INSTANCE_FILE = RUNTIME / "instance.json"
 MIGRATION_MARKER = RUNTIME / ".migration-schema.sha256"
 BACKUPS = USER_ROOT / "backups"
 PREFERRED_PORT = 8768
-SECRET_NAMES = {"MINERU_TOKEN", "MINIMAX_API_KEY", "SILICONFLOW_API_KEY"}
+POOL_ENVIRONMENT_NAMES = {
+    "mineru": ("MINERU_TOKEN", "MINERU_TOKENS_JSON", "QB_MINERU_CONFIGURED", "QB_MINERU_POOL_SIZE"),
+    "minimax": ("MINIMAX_API_KEY", "MINIMAX_API_KEYS_JSON", "QB_MINIMAX_CONFIGURED", "QB_MINIMAX_POOL_SIZE"),
+    "siliconflow": (
+        "SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS_JSON",
+        "QB_SILICONFLOW_CONFIGURED", "QB_SILICONFLOW_POOL_SIZE",
+    ),
+}
+SECRET_NAMES = {
+    name
+    for legacy_name, pool_name, _configured_name, _size_name in POOL_ENVIRONMENT_NAMES.values()
+    for name in (legacy_name, pool_name)
+}
+CREDENTIAL_STATUS_NAMES = {
+    name
+    for _legacy_name, _pool_name, configured_name, size_name in POOL_ENVIRONMENT_NAMES.values()
+    for name in (configured_name, size_name)
+}
+MODEL_PROVIDER_BY_ENGINE = {
+    "minimax_m3": "minimax",
+    "siliconflow_qwen3": "siliconflow",
+}
 STAGED_DELETE_NAME = re.compile(
     r"^\.deleting-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
     re.IGNORECASE,
 )
 STAGED_UPLOAD_NAME = re.compile(
     r"^\.uploading-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
+    re.IGNORECASE,
+)
+STAGED_SPLIT_NAME = re.compile(
+    r"^\.splitting-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
     re.IGNORECASE,
 )
 
@@ -70,6 +105,94 @@ def _child_environment(
         "QB_FRONTEND_ROOT": str(FRONTEND),
     })
     return environment
+
+
+def _worker_credential_environment(
+    base: dict[str, str], pools: dict[str, list[str]],
+) -> dict[str, str]:
+    """Add compact account pools only to the worker environment.
+
+    Singular variables intentionally remain as the first account for older
+    backend code. Pool JSON never enters command arguments or the web process.
+    """
+
+    environment = dict(base)
+    for service, (legacy_name, pool_name, _configured_name, _size_name) in POOL_ENVIRONMENT_NAMES.items():
+        accounts = pools.get(service, [])
+        if accounts:
+            environment[legacy_name] = accounts[0]
+            environment[pool_name] = json.dumps(accounts, ensure_ascii=True, separators=(",", ":"))
+    return environment
+
+
+def _credential_status_environment(pools: dict[str, list[str]]) -> dict[str, str]:
+    """Return non-secret availability/count fields safe for the web process."""
+
+    result: dict[str, str] = {}
+    for service, (_legacy_name, _pool_name, configured_name, size_name) in POOL_ENVIRONMENT_NAMES.items():
+        count = len(pools.get(service, []))
+        result[configured_name] = "1" if count else "0"
+        result[size_name] = str(count)
+    return result
+
+
+def _parallel_environment(
+    source: dict[str, str],
+    pools: dict[str, list[str]],
+    preferences: dict[str, str],
+) -> dict[str, str]:
+    """Choose safe reader concurrency without multiplying use of one account.
+
+    A user-supplied value is honoured only when it is an integer from 1 to 8.
+    Otherwise concurrency follows the distinct provider pools that can actually
+    serve the selected primary/checker/arbiter roles.  The worker and web
+    process receive only the resulting non-secret number.
+    """
+
+    raw = str(source.get("QB_PARALLEL", "")).strip()
+    try:
+        explicit = int(raw)
+    except (TypeError, ValueError):
+        explicit = 0
+    if 1 <= explicit <= 8:
+        return {"QB_PARALLEL": str(explicit)}
+
+    primary = MODEL_PROVIDER_BY_ENGINE.get(
+        preferences.get("primary_engine", DEFAULT_MODEL_PREFERENCES["primary_engine"]),
+        "minimax",
+    )
+    providers = {primary} if pools.get(primary) else set()
+
+    checker_choice = preferences.get(
+        "checker_engine", DEFAULT_MODEL_PREFERENCES["checker_engine"],
+    )
+    if checker_choice == "auto":
+        checker = next(
+            (
+                provider for provider in ("minimax", "siliconflow")
+                if provider != primary and pools.get(provider)
+            ),
+            primary,
+        )
+    else:
+        checker = MODEL_PROVIDER_BY_ENGINE.get(checker_choice, primary)
+    if pools.get(checker):
+        providers.add(checker)
+
+    arbiter_choice = preferences.get(
+        "arbiter_engine", DEFAULT_MODEL_PREFERENCES["arbiter_engine"],
+    )
+    if arbiter_choice == "checker":
+        arbiter = checker
+    elif arbiter_choice == "primary":
+        arbiter = primary
+    else:
+        arbiter = MODEL_PROVIDER_BY_ENGINE.get(arbiter_choice, primary)
+    if pools.get(arbiter):
+        providers.add(arbiter)
+
+    automatic = sum(len(pools.get(provider, [])) for provider in providers)
+    return {"QB_PARALLEL": str(max(1, min(8, automatic)))}
 
 
 def _service_command(role: str, *extra: str) -> list[str]:
@@ -217,7 +340,7 @@ def _prepare() -> None:
 
 
 def _reconcile_staged_storage() -> tuple[int, int]:
-    """按数据库状态恢复或清理上传/删除流程留下的暂存目录。"""
+    """按数据库状态恢复或清理上传、拆分、删除流程留下的暂存目录。"""
     if not DATA_ROOT.is_dir() or not DATABASE.is_file():
         return 0, 0
     try:
@@ -228,9 +351,17 @@ def _reconcile_staged_storage() -> tuple[int, int]:
         return 0, 0
 
     restored = removed = 0
-    staged_paths = [*DATA_ROOT.glob(".deleting-*"), *DATA_ROOT.glob(".uploading-*")]
+    staged_paths = [
+        *DATA_ROOT.glob(".deleting-*"),
+        *DATA_ROOT.glob(".uploading-*"),
+        *DATA_ROOT.glob(".splitting-*"),
+    ]
     for staged in sorted(staged_paths):
-        match = STAGED_DELETE_NAME.fullmatch(staged.name) or STAGED_UPLOAD_NAME.fullmatch(staged.name)
+        match = (
+            STAGED_DELETE_NAME.fullmatch(staged.name)
+            or STAGED_UPLOAD_NAME.fullmatch(staged.name)
+            or STAGED_SPLIT_NAME.fullmatch(staged.name)
+        )
         if match is None or staged.is_symlink() or not staged.is_dir():
             continue
         paper_id = str(uuid.UUID(match.group(1)))
@@ -420,13 +551,31 @@ def _strip_bearer(value: str) -> str:
     return value[7:].strip() if value.lower().startswith("bearer ") else value
 
 
-def _siliconflow_key() -> str:
-    """Optional third reader for 双读核对; never prompted for at startup."""
+def _siliconflow_keys() -> list[str]:
+    """Optional reader account pool; never prompted for by the console launcher."""
     try:
-        saved = load_credentials().get("siliconflow_key", "")
+        saved = credential_pool(load_credentials(), "siliconflow")
     except CredentialStoreError:
-        saved = ""
-    return (saved or os.environ.get("SILICONFLOW_API_KEY", "")).strip()
+        saved = []
+    if saved:
+        return saved
+    environment_key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
+    return [environment_key] if environment_key else []
+
+
+def _siliconflow_key() -> str:
+    """Legacy singular accessor retained for callers outside this package."""
+    keys = _siliconflow_keys()
+    return keys[0] if keys else ""
+
+
+def _model_preferences() -> dict[str, str]:
+    """Load safe non-secret role choices, falling back for legacy installs."""
+    try:
+        return load_model_preferences()
+    except CredentialStoreError as exc:
+        print(exc)
+        return dict(DEFAULT_MODEL_PREFERENCES)
 
 
 def _resolve_credentials() -> tuple[str, str]:
@@ -436,36 +585,51 @@ def _resolve_credentials() -> tuple[str, str]:
     except CredentialStoreError as exc:
         print(exc)
         saved = {}
-    entered: dict[str, str] = {}
+    entered: dict[str, object] = {}
     invalid_saved_token = False
+    saved_mineru = credential_pool(saved, "mineru")
 
     environment_token = _strip_bearer(os.environ.get("MINERU_TOKEN", ""))
     if environment_token:
         token, token_source = environment_token, "environment"
         print("已读取环境变量中的 MinerU Token。")
-    elif "mineru_token" in saved:
-        token, token_source = _strip_bearer(saved["mineru_token"]), "saved"
+    elif saved_mineru:
+        token, token_source = saved_mineru[0], "saved"
         print("已读取当前用户保存的 MinerU 配置。")
     else:
         token = _strip_bearer(getpass.getpass("MinerU API Token（留空仅查看已有资料）："))
         token_source = "manual"
         entered["mineru_token"] = token
+        entered["mineru_tokens"] = [token] if token else []
 
     while token:
         validity = _mineru_token_validity(token)
         if validity is False:
-            if token_source == "environment" and saved.get("mineru_token"):
+            if token_source == "environment" and saved_mineru:
                 print("环境变量中的 MinerU Token 未通过官网验证，正在尝试当前用户保存的值。")
-                token = _strip_bearer(saved["mineru_token"])
+                token = saved_mineru[0]
                 token_source = "saved"
                 continue
-            print("MinerU Token 未通过官网验证，请隐藏式重新输入。")
             if token_source == "saved":
-                saved.pop("mineru_token", None)
+                # 只移除明确失效的这一项，继续尝试池中其他账号。
+                # 绝不因首项过期而清空整个已保存账号池。
+                saved_mineru = [candidate for candidate in saved_mineru if candidate != token]
+                if saved_mineru:
+                    saved["mineru_token"] = saved_mineru[0]
+                    saved["mineru_tokens"] = saved_mineru
+                else:
+                    saved.pop("mineru_token", None)
+                    saved["mineru_tokens"] = []
                 invalid_saved_token = True
+                if saved_mineru:
+                    print("已跳过一个未通过官网验证的 MinerU 账号，正在尝试池中下一个。")
+                    token = saved_mineru[0]
+                    continue
+            print("MinerU Token 未通过官网验证，请隐藏式重新输入。")
             token = _strip_bearer(getpass.getpass("重新输入 MinerU API Token（留空仅查看）："))
             token_source = "manual"
             entered["mineru_token"] = token
+            entered["mineru_tokens"] = [token] if token else []
             continue
         if validity is None:
             print("暂时无法预检 MinerU Token；上传时会显示上游状态码和错误码。")
@@ -474,7 +638,7 @@ def _resolve_credentials() -> tuple[str, str]:
         break
     environment_key = os.environ.get("MINIMAX_API_KEY", "").strip().replace("\\_", "_")
     if "minimax_key" in saved:
-        minimax_key = saved["minimax_key"].strip().replace("\\_", "_")
+        minimax_key = str(saved["minimax_key"]).strip().replace("\\_", "_")
         print("已读取当前用户保存的 MiniMax 配置。")
         if environment_key:
             print("已忽略 MINIMAX_API_KEY 环境变量；当前用户保存的 MiniMax 配置优先。")
@@ -490,9 +654,11 @@ def _resolve_credentials() -> tuple[str, str]:
         else:
             minimax_key = getpass.getpass("新的 MiniMax API Key（留空则跳过）：").strip().replace("\\_", "_")
             entered["minimax_key"] = minimax_key
+            entered["minimax_keys"] = [minimax_key] if minimax_key else []
     else:
         minimax_key = getpass.getpass("MiniMax API Key（留空则跳过）：").strip().replace("\\_", "_")
         entered["minimax_key"] = minimax_key
+        entered["minimax_keys"] = [minimax_key] if minimax_key else []
 
     if invalid_saved_token:
         try:
@@ -510,6 +676,53 @@ def _resolve_credentials() -> tuple[str, str]:
             else:
                 print("已加密保存。下次启动无需重复输入；可双击“管理题库凭据.cmd”更换或清除。")
     return token, minimax_key
+
+
+def _resolve_credential_pools() -> tuple[list[str], list[str]]:
+    """Run the legacy interactive flow, then expand its selected first accounts.
+
+    The existing prompts remain compatible for users with one account. Pools
+    are normally edited in the native configuration dialog.
+    """
+
+    token, minimax_key = _resolve_credentials()
+    try:
+        saved = load_credentials()
+    except CredentialStoreError:
+        saved = {}
+
+    environment_token = _strip_bearer(os.environ.get("MINERU_TOKEN", ""))
+    saved_mineru = credential_pool(saved, "mineru")
+    if token and environment_token and token == environment_token:
+        mineru_tokens = [token]
+    elif token and token in saved_mineru:
+        mineru_tokens = [token, *(item for item in saved_mineru if item != token)]
+    else:
+        mineru_tokens = [token] if token else []
+
+    # The first account was already checked by _resolve_credentials. Validate
+    # every additional account without ever printing or returning its value.
+    checked_mineru = mineru_tokens[:1]
+    additional = mineru_tokens[1:]
+    if additional:
+        with ThreadPoolExecutor(max_workers=min(8, len(additional))) as executor:
+            additional_validity = list(executor.map(_mineru_token_validity, additional))
+    else:
+        additional_validity = []
+    for index, (candidate, validity) in enumerate(zip(additional, additional_validity), start=2):
+        if validity is False:
+            print(f"已跳过未通过官网验证的第 {index} 个 MinerU 账号。")
+            continue
+        if validity is None:
+            print(f"暂时无法预检第 {index} 个 MinerU 账号；实际上传时仍会由服务端校验。")
+        checked_mineru.append(candidate)
+
+    saved_minimax = credential_pool(saved, "minimax")
+    if minimax_key and minimax_key in saved_minimax:
+        minimax_keys = [minimax_key, *(item for item in saved_minimax if item != minimax_key)]
+    else:
+        minimax_keys = [minimax_key] if minimax_key else []
+    return checked_mineru, minimax_keys
 
 
 def main() -> int:
@@ -534,34 +747,62 @@ def main() -> int:
     try:
         _prepare()
         print("\n题库凭据：与 M3 共用当前 Windows 用户加密保存的配置。")
-        token, minimax_key = _resolve_credentials()
-        siliconflow_key = _siliconflow_key()
+        mineru_tokens, minimax_keys = _resolve_credential_pools()
+        siliconflow_keys = _siliconflow_keys()
+        credential_pools = {
+            "mineru": mineru_tokens,
+            "minimax": minimax_keys,
+            "siliconflow": siliconflow_keys,
+        }
+        preferences = _model_preferences()
+        model_env = model_preference_environment(preferences)
         base_env = _child_environment({
             key: value for key, value in os.environ.items()
-            if key.upper() not in SECRET_NAMES and not key.upper().endswith("_CONFIGURED")
+            if key.upper() not in SECRET_NAMES
+            and key.upper() not in MODEL_ENVIRONMENT_KEYS
+            and key.upper() not in CREDENTIAL_STATUS_NAMES
         })
-        # 网页进程只需要知道"配置了没有"，真正的密钥只交给后台工作者。
+        base_env.update(_parallel_environment(base_env, credential_pools, preferences))
+        # 模型角色和型号不是秘密，网页可用于状态展示；真正的密钥只交给后台工作者。
         web_env = dict(base_env)
-        web_env.update({"QB_MINERU_CONFIGURED": "1" if token else "0",
-                        "QB_MINIMAX_CONFIGURED": "1" if minimax_key else "0",
-                        "QB_SILICONFLOW_CONFIGURED": "1" if siliconflow_key else "0"})
-        worker_env = dict(base_env)
-        if token:
-            worker_env["MINERU_TOKEN"] = token
-        if minimax_key:
-            worker_env["MINIMAX_API_KEY"] = minimax_key
-        if siliconflow_key:
-            worker_env["SILICONFLOW_API_KEY"] = siliconflow_key
-        del token, minimax_key
-        if not worker_env.get("MINIMAX_API_KEY"):
-            print("未配置 MiniMax：只能查看已有题卡，不能读新题。")
-        elif not worker_env.get("MINERU_TOKEN"):
+        web_env.update(_credential_status_environment(credential_pools))
+        web_env.update(model_env)
+        worker_env = _worker_credential_environment(base_env, credential_pools)
+        worker_env.update(model_env)
+        del mineru_tokens, minimax_keys, siliconflow_keys, model_env
+        primary_available = (
+            bool(credential_pools["siliconflow"])
+            if preferences["primary_engine"] == "siliconflow_qwen3"
+            else bool(credential_pools["minimax"])
+        )
+        if not primary_available:
+            print("所选主读模型没有可用的 API Key：只能查看已有题卡，不能读新题。")
+        elif not credential_pools["mineru"]:
             print("未配置 MinerU Token：不能上传新卷；已有试卷、从 M3 导入、单题重读照常可用。")
-        if siliconflow_key:
-            print("第二位读者：硅基流动 Qwen3-VL（另一家模型，核对更独立）。")
-        else:
-            print("第二位读者：MiniMax 再独立读一遍。想换成另一家，可双击“管理题库凭据.cmd”选 3 添加硅基流动 Key。")
-        del siliconflow_key
+        effective_checker = preferences["checker_engine"]
+        if effective_checker == "auto":
+            if preferences["primary_engine"] == "minimax_m3" and credential_pools["siliconflow"]:
+                effective_checker = "siliconflow_qwen3"
+            elif preferences["primary_engine"] == "siliconflow_qwen3" and credential_pools["minimax"]:
+                effective_checker = "minimax_m3"
+            else:
+                effective_checker = preferences["primary_engine"]
+        engine_names = {
+            "minimax_m3": "MiniMax-M3",
+            "siliconflow_qwen3": "硅基流动 Qwen3-VL",
+        }
+        arbiter_names = {
+            "primary": "跟随主读",
+            "checker": "跟随复核",
+            **engine_names,
+        }
+        print(
+            f"模型分工：主读 {engine_names[preferences['primary_engine']]}；"
+            f"复核 {engine_names[effective_checker]}；"
+            f"裁决 {arbiter_names[preferences['arbiter_engine']]}。"
+        )
+        del preferences
+        del credential_pools
         port = _available_port()
         url = f"http://127.0.0.1:{port}"
         job = ChildJob()

@@ -17,19 +17,19 @@ winget install --id JRSoftware.InnoSetup.7 --exact --source winget --accept-sour
 在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.0.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.1.0
 ```
 
 默认产物：
 
 - `packaging/dist/QuestionBankCard/QuestionBankCard.exe`
-- `packaging/dist/installer/QuestionBankCard-Setup-1.0.1.exe`
+- `packaging/dist/installer/QuestionBankCard-Setup-1.1.0.exe`
 - `packaging/dist/installer/SHA256SUMS.txt`
 
 只生成 onedir：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.0.1 -SkipInstaller
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.1.0 -SkipInstaller
 ```
 
 ## 数据边界

@@ -26,6 +26,8 @@
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-5-5-8.5 8.5"/></symbol>
     <symbol id="i-lens" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/></symbol>
     <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l.8 13h9.4l.8-13M10 11v5M14 11v5"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -41,8 +43,7 @@
       <a href="/library">正式题库</a>
     </nav>
     <div class="topbar-tools">
-      <a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码">源码</a>
-      <button id="keysButton" class="icon-button" type="button" title="快捷键（?）" aria-label="查看快捷键"><svg class="icon"><use href="#i-keyboard"/></svg></button>
+      <button id="settingsButton" class="settings-trigger" type="button" aria-haspopup="dialog" aria-controls="settingsDialog"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</button>
     </div>
   </header>
 
@@ -51,9 +52,15 @@
       <label id="dropZone" class="drop-zone">
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
-        <strong>上传试卷</strong>
-        <span>PDF、Word 或照片，拖到这里也行；几张照片一起选会合成一份试卷</span>
+        <strong>上传资料</strong>
+        <span>PDF、Word 或照片；可拖入，也可复制文件后按 Ctrl+V</span>
       </label>
+      <fieldset class="material-type" aria-label="上传资料类型">
+        <legend>这次上传的是</legend>
+        <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
+        <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
+        <small id="bookChunkHint" class="material-hint">书籍 PDF 会先在本机按每 100 页稳定分片，再逐片解析；原文件不会改动。</small>
+      </fieldset>
       <p id="uploadNote" class="side-note" hidden></p>
       <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
@@ -72,10 +79,10 @@
           <circle cx="104" cy="82" r="14" fill="#1f6b5f"/>
           <path d="m97.5 82 4.5 4.5 8.5-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <h2>上传一份试卷，剩下的交给 AI</h2>
+        <h2>上传试卷或教材，剩下的交给 AI</h2>
         <p>AI 会自动切题、读题、挑配图，并让两位“读者”各读一遍互相核对。</p>
         <ol class="empty-steps">
-          <li><b>1</b>左侧上传 PDF、Word 或几张照片</li>
+          <li><b>1</b>左侧选择资料类型，再上传 PDF、Word 或几张照片</li>
           <li><b>2</b>AI 切题、双读核对，一两分钟出题卡</li>
           <li><b>3</b>对照原卷看一眼：对了就通过，错了就改</li>
         </ol>
@@ -133,6 +140,99 @@
     </main>
   </div>
 
+  <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
+    <div class="settings-drawer">
+      <header class="settings-head">
+        <div>
+          <p class="settings-eyebrow">题库题卡版</p>
+          <h2 id="settingsTitle" tabindex="-1">设置</h2>
+        </div>
+        <button id="settingsClose" class="button quiet" type="button" data-close>关闭 <span class="kbd-hint">Esc</span></button>
+      </header>
+      <nav class="settings-nav" aria-label="设置分区">
+        <a href="#settingsModels">API 与模型</a>
+        <a href="#settingsReview">识读说明</a>
+        <a href="#settingsTask">当前任务</a>
+        <a href="#settingsInterface">界面与快捷键</a>
+        <a href="#settingsAbout">隐私与版本</a>
+      </nav>
+      <div class="settings-scroll">
+        <section id="settingsModels" class="settings-section" aria-labelledby="settingsModelsTitle">
+          <h3 id="settingsModelsTitle">API 与模型</h3>
+          <p class="settings-description">密钥只保存在本机；此处只显示是否已经配置，不会读取或显示密钥内容。</p>
+          <div class="api-status-list" aria-label="API 配置状态">
+            <div><span>MinerU</span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
+            <div><span>MiniMax</span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
+            <div><span>硅基流动</span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
+          </div>
+          <p class="settings-footnote">配置或更换密钥，请从开始菜单打开“题库题卡版 - 配置 API”。</p>
+          <form id="modelSettingsForm" class="model-settings-form">
+            <label class="field" for="settingsPrimaryModel"><span>主读模型</span><select id="settingsPrimaryModel" name="primary"></select></label>
+            <label class="field" for="settingsCheckerModel"><span>复核模型</span><select id="settingsCheckerModel" name="checker"></select></label>
+            <label class="field" for="settingsArbiterModel"><span>分歧裁决模型</span><select id="settingsArbiterModel" name="arbiter"></select></label>
+            <p id="settingsModelSummary" class="settings-footnote"></p>
+            <div class="settings-form-actions">
+              <span id="settingsModelResult" class="settings-save-result" role="status"></span>
+              <button id="settingsModelSave" class="button primary" type="submit">保存模型设置</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="settingsReview" class="settings-section" aria-labelledby="settingsReviewTitle">
+          <h3 id="settingsReviewTitle">识读与审核说明</h3>
+          <dl class="explain-list">
+            <div><dt>AI 两次一致</dt><dd>两次独立识读得到相同题面。它只说明两次结果一致，仍不代表已经和原卷人工核对。</dd></div>
+            <div><dt>AI 三读多数一致</dt><dd>前两次结果不同，第三次与其中一次相同，因此采用多数结果。</dd></div>
+            <div><dt>未人工审核</dt><dd>需要你对照左侧原卷确认；点击“标记通过”后才记录为已人工接受当前版本。</dd></div>
+            <div><dt>处理记录</dt><dd>记录程序在切题、页序、配图等环节发现的情况，并不等于报错。</dd></div>
+          </dl>
+        </section>
+
+        <section id="settingsTask" class="settings-section" aria-labelledby="settingsTaskTitle">
+          <h3 id="settingsTaskTitle">当前任务管理</h3>
+          <p id="settingsNoTask" class="settings-description">请先从左侧选择一项任务。</p>
+          <div id="settingsTaskPanel" hidden>
+            <div class="settings-task-head"><strong id="settingsTaskName"></strong><span id="settingsTaskStatus" class="chip plain"></span></div>
+            <div class="settings-actions-grid">
+              <button id="settingsRename" class="button" type="button">修改任务名</button>
+              <button id="settingsAddQuestion" class="button" type="button">补录一道题</button>
+              <button id="settingsResegment" class="button" type="button">重新切题</button>
+              <button id="settingsPageOrder" class="button" type="button">调整页序</button>
+              <button id="settingsConfirmStructure" class="button primary" type="button" hidden>确认属于同一份资料并继续</button>
+              <button id="settingsSplit" class="button button-outline" type="button" hidden>拆分任务</button>
+            </div>
+            <div class="settings-task-notes">
+              <h4>处理记录</h4>
+              <ul id="settingsTaskNotes"></ul>
+            </div>
+            <div class="settings-danger">
+              <h4>归档与删除</h4>
+              <p id="settingsDangerHint" class="settings-footnote"></p>
+              <div class="settings-form-actions">
+                <button id="settingsArchive" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档任务</button>
+                <button id="settingsDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>永久删除</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
+          <h3 id="settingsInterfaceTitle">界面与快捷键</h3>
+          <label class="settings-switch"><span><strong>题卡悬停放大镜</strong><small>放大对照窗口仍使用 Ctrl＋滚轮缩放。</small></span><input id="settingsLens" type="checkbox"></label>
+          <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看完整快捷键</button>
+        </section>
+
+        <section id="settingsAbout" class="settings-section" aria-labelledby="settingsAboutTitle">
+          <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
+          <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
+          <div class="about-row"><span>版本</span><strong>题库题卡版（本机安装）</strong></div>
+          <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
+          <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="pageDialog" class="page-dialog">
     <div class="dialog-head">
       <div>
@@ -141,6 +241,9 @@
       </div>
       <div class="dialog-tools">
         <label id="numberField" class="number-field" hidden>题号 <input id="numberInput" type="number" min="1" max="999"></label>
+        <label id="groupField" class="number-field" hidden>题组
+          <select id="groupSelect"></select>
+        </label>
         <label id="slotField" class="number-field" hidden>新框属于
           <select id="slotSelect">
             <option value="stem">题干</option><option value="A">选项 A</option><option value="B">选项 B</option>
@@ -185,7 +288,7 @@
     <div class="dialog-head">
       <div>
         <h3 id="photoTitle">上传照片</h3>
-        <p class="hint">这些照片会合成<strong>一份试卷</strong>。页序不用管，读完后会按卷面上印的题号自动排好。</p>
+        <p id="photoHint" class="hint">这些照片会合成<strong>一份试卷</strong>。页序不用管，读完后会按卷面上印的题号自动排好。</p>
       </div>
       <div class="dialog-tools">
         <button id="photoUpload" class="button primary" type="button">上传</button>
@@ -197,6 +300,21 @@
       <span><strong>自动处理成扫描件效果</strong>：拍斜了自动拉正，去阴影、提亮、去偏黄（原图会保留）</span>
     </label>
     <ul id="photoList" class="photo-list"></ul>
+  </dialog>
+
+  <dialog id="pasteDialog" class="paste-dialog" aria-labelledby="pasteTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="pasteTitle">粘贴文件</h3>
+        <p id="pasteSummary" class="hint"></p>
+      </div>
+      <div class="dialog-tools">
+        <button id="pasteUpload" class="button primary" type="button">继续上传</button>
+        <button class="button" type="button" data-close>取消</button>
+      </div>
+    </div>
+    <p id="pasteNote" class="paste-note">请先核对文件和顺序。PDF、Word 会分别建立任务；照片会保持下列顺序，进入照片确认流程。</p>
+    <ol id="pasteList" class="paste-list"></ol>
   </dialog>
 
   <dialog id="orderDialog" class="order-dialog">
@@ -211,6 +329,20 @@
       </div>
     </div>
     <ol id="orderList" class="order-list"></ol>
+  </dialog>
+
+  <dialog id="splitDialog" class="split-dialog" aria-labelledby="splitTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="splitTitle">拆分任务</h3>
+        <p class="hint">程序根据题号重新开始的位置给出建议。请核对每组页面；确认前不会删除原任务。</p>
+      </div>
+      <div class="dialog-tools">
+        <button id="splitConfirm" class="button primary" type="button">确认拆分</button>
+        <button class="button" type="button" data-close>取消</button>
+      </div>
+    </div>
+    <div id="splitGroups" class="split-groups"></div>
   </dialog>
 
   <dialog id="m3Dialog" class="m3-dialog">

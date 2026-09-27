@@ -19,7 +19,7 @@ from . import imaging
 from .figure_policy import (
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
-from .models import Paper, PublishedQuestion, Question
+from .models import Paper, PublishedQuestion, Question, QuestionGroup
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
 OPTION_KEYS = ("A", "B", "C", "D")
@@ -63,6 +63,11 @@ def final_content(question: Question) -> dict:
         ],
         "document_id": str(question.paper_id),
         "source_filename": question.paper.display_name,
+        "source_group": ({
+            "id": question.group_id,
+            "title": question.group.title,
+            "sequence": question.group.sequence,
+        } if question.group_id else None),
         # 审核记录随不可变快照保存。一般提示不参与版本身份；人工“确实无图”的决定例外，
         # 因为它是允许一条原本会被阻止的题目入库的关键依据。
         "review": {
@@ -147,7 +152,7 @@ def search_key(value: str) -> str:
 
 def _search_text(content: dict) -> str:
     parts = [content["stem"], *content["options"].values(), content["answer"], content["analysis"],
-             content["source_filename"]]
+             content["source_filename"], (content.get("source_group") or {}).get("title", "")]
     return search_key(" ".join(parts))
 
 
@@ -211,8 +216,9 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             return paper, False
 
         questions = list(
-            Question.objects.select_for_update().select_related("paper").filter(paper=paper)
+            Question.objects.select_for_update().select_related("paper", "group").filter(paper=paper)
         )
+        groups = list(QuestionGroup.objects.select_for_update().filter(paper=paper))
         current_approval_ids = [question.pk for question in questions if approval_is_current(question)]
         publications = list(PublishedQuestion.objects.select_for_update().filter(paper=paper))
 
@@ -220,9 +226,24 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
         paper.task_name = "" if name == paper.filename else name
         paper.save(update_fields=["task_name", "updated_at"])
 
+        renamed_groups = {}
+        for group in groups:
+            if group.title == old_name:
+                group.title = name
+            elif group.title.startswith(f"{old_name}（"):
+                group.title = f"{name}{group.title[len(old_name):]}"[:255]
+            else:
+                continue
+            group.updated_at = timezone.now()
+            renamed_groups[group.pk] = group.title
+        if renamed_groups:
+            QuestionGroup.objects.bulk_update(
+                [group for group in groups if group.pk in renamed_groups], ["title", "updated_at"],
+            )
+
         if current_approval_ids:
             approved_questions = list(
-                Question.objects.select_related("paper").filter(pk__in=current_approval_ids)
+                Question.objects.select_related("paper", "group").filter(pk__in=current_approval_ids)
             )
             for question in approved_questions:
                 question.approved_content_hash = approval_hash(question)
@@ -232,6 +253,9 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             old_hash = publication.content_hash
             content = deepcopy(publication.content)
             content["source_filename"] = paper.display_name
+            source_group = content.get("source_group")
+            if isinstance(source_group, dict) and source_group.get("id") in renamed_groups:
+                source_group["title"] = renamed_groups[source_group["id"]]
             new_hash = content_hash(content)
             review = content.get("review")
             if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:

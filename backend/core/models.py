@@ -6,9 +6,14 @@ from django.db import models
 class Paper(models.Model):
     """一份上传的试卷。status 走完 queued → parsing → reading → ready。"""
 
+    class MaterialType(models.TextChoices):
+        EXAM = "exam", "试卷"
+        BOOK = "book", "书籍"
+
     class Status(models.TextChoices):
         QUEUED = "queued", "排队中"
         PARSING = "parsing", "MinerU 解析中"
+        NEEDS_GROUPING = "needs_grouping", "等待确认资料结构"
         SEGMENTING = "segmenting", "切题中"
         READING = "reading", "AI 读题中"
         READY = "ready", "待你终审"
@@ -19,6 +24,10 @@ class Paper(models.Model):
     # 人可修改的任务显示名；filename 始终保留最初上传的文件名，方便追溯原卷。
     task_name = models.CharField(max_length=255, blank=True, default="")
     kind = models.CharField(max_length=8)                   # pdf | image | docx
+    # 资料结构与文件格式分开记录：同样是 PDF，既可能是一份试卷，也可能是一本书。
+    material_type = models.CharField(
+        max_length=8, choices=MaterialType.choices, default=MaterialType.EXAM,
+    )
     sha256 = models.CharField(max_length=64, db_index=True)
     source_path = models.CharField(max_length=500)           # 上传的原文件
     render_path = models.CharField(max_length=500, blank=True)  # 用于渲染页面的 PDF/图片（docx 转成的 PDF）
@@ -29,12 +38,17 @@ class Paper(models.Model):
     total = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     notes = models.JSONField(default=list)                   # 切题过程中的说明（如"第 5 题由 AI 定位"）
+    # 跨文件格式的资料结构判断：suggested_groups、signals 以及人工 confirmed 结果。
+    # 不放进 photos，因为 PDF 和书籍同样需要这份可追溯记录。
+    structure = models.JSONField(default=dict, blank=True)
     # 手机照片（一张或几张合成一份卷）：
     # {"files": [{"name", "file", "taken", "straightened"}]（选择顺序）, "enhance": 是否做扫描件效果,
     #  "order": 当前第 i 页是 files[order[i]], "mineru_order": 交给 MinerU 时的页序,
     #  "check": 需要人确认页序的原因, "notes": 给人看的处理说明, "manual": 人工调整过页序}
     photos = models.JSONField(default=dict, blank=True)
     imported_from = models.CharField(max_length=80, blank=True)
+    # 已入库任务不能破坏来源链；归档只让任务退出日常侧栏，不删除任何原件或题卡。
+    archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -44,6 +58,83 @@ class Paper(models.Model):
     @property
     def display_name(self) -> str:
         return self.task_name.strip() or self.filename
+
+
+class QuestionGroup(models.Model):
+    """一份资料中的题号作用域，例如一张试卷、一个章节或一组课后练习。"""
+
+    class Kind(models.TextChoices):
+        EXAM = "exam", "试卷"
+        CHAPTER = "chapter", "章节"
+        EXERCISE = "exercise", "练习"
+        EXAMPLE = "example", "例题"
+        OTHER = "other", "其他"
+
+    paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="question_groups")
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.EXAM)
+    sequence = models.PositiveIntegerField(default=0)
+    # 原 PDF 的一基、闭区间页码；未知时留空，而不是猜测。
+    page_start = models.PositiveIntegerField(null=True, blank=True)
+    page_end = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sequence", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["paper", "sequence"], name="unique_group_sequence"),
+            models.CheckConstraint(
+                condition=models.Q(page_start__isnull=True, page_end__isnull=True)
+                | models.Q(
+                    page_start__isnull=False,
+                    page_end__isnull=False,
+                    page_start__gte=1,
+                    page_end__gte=models.F("page_start"),
+                ),
+                name="valid_group_page_range",
+            ),
+        ]
+
+
+class ImportChunk(models.Model):
+    """超长 PDF 的本地分片；分片是处理单元，不是用户侧的新任务。"""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "等待解析"
+        PARSING = "parsing", "解析中"
+        PARSED = "parsed", "解析完成"
+        FAILED = "failed", "解析失败"
+
+    paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="import_chunks")
+    sequence = models.PositiveIntegerField()
+    # 原 PDF 的一基、闭区间页码。
+    source_page_start = models.PositiveIntegerField()
+    source_page_end = models.PositiveIntegerField()
+    # 第 i 项是分片内第 i 页对应的原 PDF 页码（一基）；用于合并与来源追溯。
+    page_map = models.JSONField(default=list)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    sha256 = models.CharField(max_length=64, blank=True, default="")
+    artifact_path = models.CharField(max_length=500, blank=True, default="")
+    error = models.TextField(blank=True, default="")
+    attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sequence", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["paper", "sequence"], name="unique_import_chunk_sequence"),
+            models.CheckConstraint(
+                condition=models.Q(
+                    source_page_start__gte=1,
+                    source_page_end__gte=models.F("source_page_start"),
+                ),
+                name="valid_import_chunk_range",
+            ),
+            models.CheckConstraint(condition=models.Q(sequence__gte=1), name="valid_import_chunk_sequence"),
+        ]
 
 
 class Block(models.Model):
@@ -72,6 +163,11 @@ class Question(models.Model):
         RED = "red", "识读失败"
 
     paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="questions")
+    # 题号只在题组中用于展示；真正稳定的题源身份与题号、排序和任务改名无关。
+    group = models.ForeignKey(
+        QuestionGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name="questions",
+    )
+    source_key = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     number = models.PositiveIntegerField()
     section = models.CharField(max_length=120, blank=True)
     question_type = models.CharField(max_length=24, default="unknown")
@@ -106,6 +202,7 @@ class Question(models.Model):
 
     class Meta:
         ordering = ["number", "id"]
+        indexes = [models.Index(fields=["paper", "group", "number"], name="question_source_lookup")]
 
 
 class PublishedQuestion(models.Model):

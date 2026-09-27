@@ -270,6 +270,74 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
     return layout, chain
 
 
+def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
+    """Find monotonic question-number runs without discarding later restarts.
+
+    ``analyse`` intentionally returns the single strongest increasing chain for
+    one exam.  A book can contain several exercises whose numbering restarts on
+    the very same page (for example ``1, 2, 1, 2``).  This helper keeps those
+    runs as separate source scopes using only MinerU's existing blocks; it adds
+    no model call and therefore no recognition time.
+    """
+
+    if not pages or not blocks:
+        return []
+    layout, selected = analyse(pages, blocks)
+    reliable = sorted(
+        (item for item in layout.candidates if item.at_start and item.score >= 3.0),
+        key=Start.key,
+    )
+    if not reliable:
+        reliable = sorted(selected, key=Start.key)
+    if not reliable:
+        return []
+
+    runs: list[list[Start]] = [[]]
+    seen: set[int] = set()
+    maximum: int | None = None
+    for current in reliable:
+        restart = bool(
+            runs[-1]
+            and maximum is not None
+            and current.number <= maximum
+            and (current.number in seen or current.number <= 3)
+        )
+        if restart:
+            runs.append([])
+            seen = set()
+            maximum = None
+        runs[-1].append(current)
+        seen.add(current.number)
+        maximum = current.number if maximum is None else max(maximum, current.number)
+
+    first_page = min(int(page["page_idx"]) for page in pages)
+    last_page = max(int(page["page_idx"]) for page in pages)
+    scopes: list[dict] = []
+    for index, run in enumerate(runs):
+        first = run[0]
+        following = runs[index + 1][0] if index + 1 < len(runs) else None
+        page_start = first_page if index == 0 else first.page
+        # A restart on a later page is a clean page boundary. Only a restart on
+        # the same physical page needs that page to belong to both source scopes.
+        page_end = (
+            following.page if following is not None and following.page == run[-1].page
+            else following.page - 1 if following is not None
+            else last_page
+        )
+        scopes.append({
+            "sequence": index,
+            "pages": list(range(page_start, page_end + 1)),
+            # Keep headings/front matter in the first scope. Later scopes begin
+            # exactly at the restart block, so two runs on one page stay apart.
+            "seq_start": None if index == 0 else first.seq,
+            "seq_end": (following.seq - 1) if following is not None
+            and isinstance(following.seq, int) else None,
+            "first_number": first.number,
+            "start_page": first.page,
+        })
+    return scopes
+
+
 def missing_numbers(starts: list[Start]) -> list[tuple[int, Start]]:
     """缺号及其所在的前一题（缺号的题目内容此时被并在前一题的范围里）。"""
     ordered = sorted(starts, key=Start.key)

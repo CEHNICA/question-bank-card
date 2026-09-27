@@ -30,6 +30,15 @@ class BundleAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = self.make_bundle(Path(tmp))
             (bundle / "_internal" / "base_library.zip").write_bytes(b"standard-library")
+            certifi = bundle / "_internal" / "certifi" / "cacert.pem"
+            certifi.parent.mkdir(parents=True)
+            certifi.write_text("-----BEGIN CERTIFICATE-----\npublic CA roots\n", encoding="utf-8")
+            licenses = bundle / "THIRD_PARTY_LICENSES" / "example" / "LICENSE.txt"
+            licenses.parent.mkdir(parents=True)
+            licenses.write_text(
+                "A license may document -----BEGIN PRIVATE KEY----- as plain text.",
+                encoding="utf-8",
+            )
             audit_bundle(bundle)
 
     def test_private_and_runtime_files_are_rejected_case_insensitively(self):
@@ -42,6 +51,16 @@ class BundleAuditTests(unittest.TestCase):
             ".venv/pyvenv.cfg",
             "backend/tests/test_views.py",
             "backend/__pycache__/views.pyc",
+            ".env.local",
+            "backend/logs/launcher.log",
+            "backend/cache.db",
+            "backend/cache.db-wal",
+            "backend/cache.db-shm",
+            "private/server.key",
+            "private/client.pfx",
+            "private/client.crt",
+            "notes/review.docx",
+            ".git/config",
             "snapshot.TGZ",
             "mineru_result.ZIP",
         )
@@ -59,6 +78,37 @@ class BundleAuditTests(unittest.TestCase):
                 audit_bundle(bundle)
             for relative in forbidden:
                 self.assertIn(Path(relative).name, str(caught.exception))
+
+    def test_sensitive_text_is_rejected_without_echoing_secret_content(self):
+        sensitive = {
+            "config.json": '{"Authorization": "Bearer supersecret0123456789"}',
+            "worker.ini": 'api_key = "abcdefghijklmnop1234567890"',
+            "private.txt": "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-key-material",
+            "windows-path.txt": r"copied from C:\Users\Alice\Documents\private.pdf",
+            "linux-path.txt": "copied from /home/alice/private/data.json",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            for relative, content in sensitive.items():
+                path = bundle / relative
+                path.write_text(content, encoding="utf-8")
+            self.assertEqual(set(find_forbidden_files(bundle)), set(sensitive))
+            with self.assertRaises(BundleAuditError) as caught:
+                audit_bundle(bundle)
+            message = str(caught.exception)
+            for relative in sensitive:
+                self.assertIn(relative, message)
+            for secret in ("supersecret0123456789", "abcdefghijklmnop1234567890", "Alice", "alice"):
+                self.assertNotIn(secret, message)
+
+    def test_source_code_credential_placeholders_are_not_treated_as_real_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            (bundle / "_internal" / "frontend" / "app.js").write_text(
+                'headers.Authorization = "Bearer " + token; const api_key = settings.api_key;',
+                encoding="utf-8",
+            )
+            audit_bundle(bundle)
 
     def test_missing_main_executable_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sqlite3
 import tempfile
@@ -16,21 +17,38 @@ import start_question_bank as launcher
 
 
 class LauncherTests(unittest.TestCase):
-    def run_main(self, saved: dict[str, str]):
+    def run_main(
+        self,
+        saved: dict[str, str],
+        preferences: dict[str, str] | None = None,
+        parallel: str = "",
+    ):
         environments = {}
         process = Mock()
         process.poll.return_value = 0
+        preferences = preferences or dict(launcher.DEFAULT_MODEL_PREFERENCES)
 
         def capture(args, environment, log_name):
             environments[log_name] = dict(environment)
             return process, io.BytesIO()
 
+        output = io.StringIO()
         with patch.object(launcher.os, "name", "nt"), \
-                patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": ""}), \
+                patch.dict(os.environ, {
+                    "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
+                    "MINERU_TOKENS_JSON": '["untrusted"]',
+                    "MINIMAX_API_KEYS_JSON": '["untrusted"]',
+                    "SILICONFLOW_API_KEYS_JSON": '["untrusted"]',
+                    "QB_PRIMARY_ENGINE": "untrusted", "QB_CHECKER_ENGINE": "untrusted",
+                    "QB_ARBITER_ENGINE": "untrusted", "QB_MINIMAX_MODEL": "untrusted",
+                    "QB_SILICONFLOW_MODEL": "untrusted", "QB_MODEL_PREFERENCES_FILE": "C:/untrusted.json",
+                    "QB_PARALLEL": parallel,
+                }), \
                 patch.object(launcher, "_running_instance", return_value=None), \
                 patch.object(launcher, "InstanceMutex") as mutex_type, \
                 patch.object(launcher, "_prepare"), \
                 patch.object(launcher, "load_credentials", return_value=saved), \
+                patch.object(launcher, "load_model_preferences", return_value=preferences), \
                 patch.object(launcher, "save_credentials"), \
                 patch.object(launcher, "_mineru_token_validity", return_value=True), \
                 patch.object(launcher, "_available_port", return_value=8768), \
@@ -38,9 +56,10 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher, "_start", side_effect=capture), \
                 patch.object(launcher, "_health"), \
                 patch.object(launcher.webbrowser, "open_new_tab"), \
-                patch("builtins.input", return_value=""), contextlib.redirect_stdout(io.StringIO()):
+                patch("builtins.input", return_value=""), contextlib.redirect_stdout(output):
             mutex_type.return_value.acquired = True
             self.assertEqual(launcher.main(), 0)
+        environments["_stdout"] = output.getvalue()
         return environments
 
     def test_only_worker_receives_secrets(self):
@@ -48,15 +67,122 @@ class LauncherTests(unittest.TestCase):
         worker, web = environments["worker.log"], environments["web.log"]
         self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]),
                          ("m-token", "mm-key", "sf-key"))
-        for name in ("MINERU_TOKEN", "MINIMAX_API_KEY", "SILICONFLOW_API_KEY"):
+        self.assertEqual(json.loads(worker["MINERU_TOKENS_JSON"]), ["m-token"])
+        self.assertEqual(json.loads(worker["MINIMAX_API_KEYS_JSON"]), ["mm-key"])
+        self.assertEqual(json.loads(worker["SILICONFLOW_API_KEYS_JSON"]), ["sf-key"])
+        for secret in ("m-token", "mm-key", "sf-key"):
+            self.assertNotIn(secret, environments["_stdout"])
+        for name in launcher.SECRET_NAMES:
             self.assertNotIn(name, web)
         self.assertEqual((web["QB_MINERU_CONFIGURED"], web["QB_MINIMAX_CONFIGURED"], web["QB_SILICONFLOW_CONFIGURED"]),
                          ("1", "1", "1"))
+        self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
+                         ("1", "1", "1"))
+        for environment in (worker, web):
+            self.assertEqual(environment["QB_PRIMARY_ENGINE"], "minimax_m3")
+            self.assertEqual(environment["QB_CHECKER_ENGINE"], "auto")
+            self.assertEqual(environment["QB_ARBITER_ENGINE"], "primary")
+            self.assertEqual(environment["QB_MINIMAX_MODEL"], "MiniMax-M3")
+            self.assertEqual(environment["QB_SILICONFLOW_MODEL"], "Qwen/Qwen3-VL-32B-Instruct")
+            self.assertTrue(Path(environment["QB_MODEL_PREFERENCES_FILE"]).is_absolute())
+
+    def test_all_saved_accounts_reach_only_the_worker_as_compact_json(self):
+        saved = {
+            "mineru_token": "m1", "mineru_tokens": ["m1", "m2"],
+            "minimax_key": "mm1", "minimax_keys": ["mm1", "mm2", "mm3"],
+            "siliconflow_key": "sf1", "siliconflow_keys": ["sf1", "sf2"],
+        }
+        environments = self.run_main(saved)
+        worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual(worker["MINERU_TOKENS_JSON"], '["m1","m2"]')
+        self.assertEqual(worker["MINIMAX_API_KEYS_JSON"], '["mm1","mm2","mm3"]')
+        self.assertEqual(worker["SILICONFLOW_API_KEYS_JSON"], '["sf1","sf2"]')
+        self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]),
+                         ("m1", "mm1", "sf1"))
+        for name in launcher.SECRET_NAMES:
+            self.assertNotIn(name, web)
+        self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
+                         ("2", "3", "2"))
+        self.assertEqual(worker["QB_PARALLEL"], "5")
+        self.assertEqual(web["QB_PARALLEL"], "5")
+        for secret in ("m1", "m2", "mm1", "mm2", "mm3", "sf1", "sf2"):
+            self.assertNotIn(secret, environments["_stdout"])
+
+    def test_explicit_valid_parallelism_overrides_pool_default(self):
+        saved = {
+            "mineru_token": "m1", "mineru_tokens": ["m1", "m2"],
+            "minimax_key": "mm1", "minimax_keys": ["mm1", "mm2", "mm3"],
+            "siliconflow_key": "sf1", "siliconflow_keys": ["sf1", "sf2"],
+        }
+        environments = self.run_main(saved, parallel="7")
+        self.assertEqual(environments["worker.log"]["QB_PARALLEL"], "7")
+        self.assertEqual(environments["web.log"]["QB_PARALLEL"], "7")
+
+    def test_zero_and_invalid_parallelism_fall_back_to_provider_pool_size(self):
+        pools = {
+            "mineru": ["m1", "m2"],
+            "minimax": ["mm1", "mm2", "mm3"],
+            "siliconflow": ["sf1", "sf2"],
+        }
+        preferences = dict(launcher.DEFAULT_MODEL_PREFERENCES)
+        for invalid in ("0", "-1", "abc", "9"):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(
+                    launcher._parallel_environment(
+                        {"QB_PARALLEL": invalid}, pools, preferences,
+                    ),
+                    {"QB_PARALLEL": "5"},
+                )
+        pools["minimax"] = [f"mm{index}" for index in range(8)]
+        pools["siliconflow"] = [f"sf{index}" for index in range(8)]
+        self.assertEqual(
+            launcher._parallel_environment({}, pools, preferences),
+            {"QB_PARALLEL": "8"},
+        )
+
+    def test_custom_model_roles_reach_web_and_worker_from_trusted_preferences(self):
+        selected = {
+            "primary_engine": "siliconflow_qwen3",
+            "checker_engine": "minimax_m3",
+            "arbiter_engine": "checker",
+        }
+        environments = self.run_main(
+            {"mineru_token": "m-token", "minimax_key": "mm-key", "siliconflow_key": "sf-key"},
+            selected,
+        )
+        for environment in (environments["worker.log"], environments["web.log"]):
+            self.assertEqual(environment["QB_PRIMARY_ENGINE"], "siliconflow_qwen3")
+            self.assertEqual(environment["QB_CHECKER_ENGINE"], "minimax_m3")
+            self.assertEqual(environment["QB_ARBITER_ENGINE"], "checker")
+            self.assertNotEqual(environment["QB_MODEL_PREFERENCES_FILE"], "C:/untrusted.json")
 
     def test_missing_siliconflow_is_reported_to_web(self):
         environments = self.run_main({"mineru_token": "m-token", "minimax_key": "mm-key"})
         self.assertEqual(environments["web.log"]["QB_SILICONFLOW_CONFIGURED"], "0")
         self.assertNotIn("SILICONFLOW_API_KEY", environments["worker.log"])
+
+    def test_console_fallback_keeps_good_saved_account_when_first_is_invalid(self):
+        saved = {
+            "mineru_token": "bad-first",
+            "mineru_tokens": ["bad-first", "good-second"],
+            "minimax_key": "model-key",
+            "minimax_keys": ["model-key"],
+        }
+        saved_updates = []
+        validity = {"bad-first": False, "good-second": True}
+        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}), \
+                patch.object(launcher, "load_credentials", return_value=saved), \
+                patch.object(launcher, "save_credentials", side_effect=lambda value: saved_updates.append(value)), \
+                patch.object(launcher, "_mineru_token_validity", side_effect=lambda token: validity[token]), \
+                patch.object(launcher.getpass, "getpass") as prompt, \
+                contextlib.redirect_stdout(io.StringIO()):
+            token, model_key = launcher._resolve_credentials()
+
+        self.assertEqual((token, model_key), ("good-second", "model-key"))
+        prompt.assert_not_called()
+        self.assertEqual(len(saved_updates), 1)
+        self.assertEqual(saved_updates[0]["mineru_token"], "good-second")
+        self.assertEqual(saved_updates[0]["mineru_tokens"], ["good-second"])
 
     def test_existing_instance_is_reused(self):
         with patch.object(launcher.os, "name", "nt"), \
@@ -103,26 +229,31 @@ class LauncherTests(unittest.TestCase):
             data_root = root / "data"
             data_root.mkdir()
             database = root / "db.sqlite3"
-            kept_id, deleted_id = uuid.uuid4(), uuid.uuid4()
+            kept_id, deleted_id, split_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
             with contextlib.closing(sqlite3.connect(database)) as connection:
                 connection.execute("CREATE TABLE core_paper (id char(32) PRIMARY KEY)")
                 connection.execute("INSERT INTO core_paper (id) VALUES (?)", (kept_id.hex,))
+                connection.execute("INSERT INTO core_paper (id) VALUES (?)", (split_id.hex,))
                 connection.commit()
 
             staged_kept = data_root / f".deleting-{kept_id}-{uuid.uuid4().hex}"
             staged_deleted = data_root / f".deleting-{deleted_id}-{uuid.uuid4().hex}"
             staged_upload = data_root / f".uploading-{uuid.uuid4()}-{uuid.uuid4().hex}"
+            staged_split = data_root / f".splitting-{split_id}-{uuid.uuid4().hex}"
             unrelated = data_root / ".deleting-not-a-paper"
-            for path in (staged_kept, staged_deleted, staged_upload, unrelated):
+            for path in (staged_kept, staged_deleted, staged_upload, staged_split, unrelated):
                 path.mkdir()
                 (path / "source.pdf").write_bytes(b"test")
 
-            with patch.object(launcher, "DATA_ROOT", data_root), patch.object(launcher, "DATABASE", database):
-                self.assertEqual(launcher._reconcile_staged_storage(), (1, 2))
+            with patch.object(launcher, "DATA_ROOT", data_root), \
+                    patch.object(launcher, "DATABASE", database), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(launcher._reconcile_staged_storage(), (2, 2))
 
             self.assertTrue((data_root / str(kept_id) / "source.pdf").is_file())
             self.assertFalse(staged_deleted.exists())
             self.assertFalse(staged_upload.exists())
+            self.assertTrue((data_root / str(split_id) / "source.pdf").is_file())
             self.assertTrue(unrelated.is_dir())
 
 

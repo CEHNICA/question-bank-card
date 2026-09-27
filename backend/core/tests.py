@@ -6,14 +6,16 @@ import io
 import json
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from unittest import mock
 
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 from PIL import Image, ImageDraw
 
 from . import figure_policy, library, pipeline, readers, segment
-from .models import Block, Paper, PublishedQuestion, Question
+from .models import Block, ImportChunk, Paper, PublishedQuestion, Question
 from .textnorm import canon, clean_stem, same_reading
 
 
@@ -503,10 +505,37 @@ class PipelineTests(TestCase):
             "question_type": "free_response",
         }
         store = pipeline.PageStore(self.paper)
-        with mock.patch.object(readers, "read_question", side_effect=[primary, checker]) as read_mock, \
+        with mock.patch.object(
+                readers, "read_question",
+                side_effect=lambda _engine, _url, _number, with_figures: primary if with_figures else checker,
+        ) as read_mock, \
                 mock.patch.object(readers, "arbitrate") as arbitrate_mock:
             result = pipeline.read_card(snapshot, store)
         return result, read_mock, arbitrate_mock
+
+    def test_primary_and_checker_can_read_one_card_in_parallel(self):
+        primary = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
+        checker = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
+        barrier = threading.Barrier(2)
+        threads: list[int] = []
+
+        def read(_engine, _url, _number, with_figures):
+            threads.append(threading.get_ident())
+            barrier.wait(timeout=1)
+            return primary if with_figures else checker
+
+        snapshot = {
+            "id": 999, "number": 9, "group_id": None,
+            "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            "candidates": [], "question_type": "free_response",
+        }
+        with mock.patch.object(readers, "read_question", side_effect=read), \
+                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
+
+        self.assertEqual(result["state"], Question.State.GREEN)
+        self.assertEqual(len(set(threads)), 2)
+        arbitrate_mock.assert_not_called()
 
     def test_figure_policy_uses_existing_reads_without_extra_api_call_and_excludes_irrelevant_candidate(self):
         result, read_mock, arbitrate_mock = self.read_policy_card(
@@ -558,6 +587,32 @@ class PipelineTests(TestCase):
         self.assertEqual(result["state"], Question.State.YELLOW)
         self.assertEqual(result["figure_review"]["status"], "conflict")
         self.assertEqual(result["figure_review"]["source"], "automatic")
+
+    def test_missing_checker_key_keeps_primary_reading_for_review(self):
+        primary = readers.Engine("minimax", readers.MINIMAX_MODEL)
+        primary_reading = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
+        snapshot = {
+            "id": 999,
+            "number": 9,
+            "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            "candidates": [],
+            "question_type": "free_response",
+        }
+        store = pipeline.PageStore(self.paper)
+
+        with mock.patch.object(readers, "primary_engine", return_value=primary), \
+                mock.patch.object(readers, "checker_engine", return_value=None), \
+                mock.patch.object(readers, "read_question", return_value=primary_reading) as read_mock, \
+                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            result = pipeline.read_card(snapshot, store)
+
+        read_mock.assert_called_once_with(primary, mock.ANY, 9, with_figures=True)
+        arbitrate_mock.assert_not_called()
+        self.assertEqual(result["stem"], "计算 $1+1$ 的值。")
+        self.assertEqual(result["text_source"], "single")
+        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assertIn("所选复核模型没有可用的 API Key", result["read_b"]["error"])
+        self.assertTrue(any("只有一次识读成功" in flag for flag in result["flags"]))
 
     def test_reread_never_removes_a_manually_selected_figure(self):
         manual = {"slot": "stem", "page_idx": 0, "bbox": [300, 410, 460, 500], "source": "manual"}
@@ -833,6 +888,77 @@ class PipelineTests(TestCase):
         self.assertEqual(read_numbers, {2})
         self.assertTrue(any("重新切题" in note for note in self.paper.notes))
 
+    def test_resegment_preserves_missing_human_cards_and_only_deletes_unreviewed_auto_cards(self):
+        edited = Question.objects.create(
+            paper=self.paper, number=90, stem="人工改过的题干", edited=True, text_source="human",
+            start_source="mineru", state=Question.State.GREEN,
+            regions=[{"page_idx": 0, "bbox": [10, 10, 100, 100]}],
+        )
+        approved = Question.objects.create(
+            paper=self.paper, number=91, stem="已人工通过的草稿", approved=True,
+            approved_at=timezone.now(), approved_content_hash="a" * 64,
+            start_source="mineru", state=Question.State.GREEN,
+            regions=[{"page_idx": 0, "bbox": [10, 110, 100, 200]}],
+        )
+        disposable = Question.objects.create(
+            paper=self.paper, number=92, stem="纯自动未审核", start_source="mineru",
+            state=Question.State.WAITING,
+            regions=[{"page_idx": 0, "bbox": [10, 210, 100, 300]}],
+        )
+
+        with mock.patch.object(pipeline, "locate_missing", return_value=[]):
+            pipeline.segment_paper(self.paper)
+
+        edited.refresh_from_db()
+        approved.refresh_from_db()
+        self.assertEqual(edited.stem, "人工改过的题干")
+        self.assertTrue(edited.edited)
+        self.assertEqual(edited.state, Question.State.YELLOW)
+        self.assertIn(pipeline.FLAG_RESEGMENT_PRESERVED, edited.flags)
+        self.assertEqual(approved.stem, "已人工通过的草稿")
+        self.assertFalse(approved.approved)
+        self.assertEqual(approved.state, Question.State.YELLOW)
+        self.assertIn(pipeline.FLAG_RESEGMENT_PRESERVED, approved.flags)
+        self.assertFalse(Question.objects.filter(pk=disposable.pk).exists())
+        self.paper.refresh_from_db()
+        self.assertTrue(any("已保留并标黄" in note for note in self.paper.notes))
+
+    def test_repeated_number_in_one_group_never_overwrites_another_card(self):
+        first_regions = [{"page_idx": 0, "bbox": [40, 120, 470, 220]}]
+        second_regions = [{"page_idx": 0, "bbox": [40, 320, 470, 420]}]
+
+        def items(section_a="第一处", section_b="第二处"):
+            return [
+                {"number": 1, "section": section_a, "question_type": "free_response",
+                 "regions": first_regions, "figure_candidates": [],
+                 "start": {"source": "mineru"}},
+                {"number": 1, "section": section_b, "question_type": "free_response",
+                 "regions": second_regions, "figure_candidates": [],
+                 "start": {"source": "mineru"}},
+            ]
+
+        with mock.patch.object(pipeline, "locate_missing", return_value=[]), \
+                mock.patch.object(segment, "build_questions", return_value=items()), \
+                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
+            pipeline.segment_paper(self.paper)
+
+        cards = list(self.paper.questions.filter(number=1).order_by("id"))
+        self.assertEqual(len(cards), 2)
+        source_keys = {card.source_key for card in cards}
+        self.assertEqual({card.section for card in cards}, {"第一处", "第二处"})
+
+        self.paper.status = Paper.Status.SEGMENTING
+        self.paper.save(update_fields=["status"])
+        with mock.patch.object(pipeline, "locate_missing", return_value=[]), \
+                mock.patch.object(segment, "build_questions", return_value=items("第一处更新", "第二处更新")), \
+                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
+            pipeline.segment_paper(self.paper)
+
+        cards = list(self.paper.questions.filter(number=1).order_by("id"))
+        self.assertEqual(len(cards), 2)
+        self.assertEqual({card.source_key for card in cards}, source_keys)
+        self.assertEqual({card.section for card in cards}, {"第一处更新", "第二处更新"})
+
     def test_missing_number_is_located_and_split(self):
         answers = {("locate", 4): "【刻度】05", ("*", 1): tagged("x"), ("*", 2): tagged("x"), ("*", 3): tagged("x"),
                    ("*", 4): tagged("x"), ("*", 5): tagged("x"), ("*", 6): tagged("x")}
@@ -1091,11 +1217,13 @@ class ApiTests(TestCase):
         self.assertTrue(Paper.objects.filter(pk=failed.pk).exists())
         self.assertTrue(folder.exists())
 
-    def test_delete_rejects_nonfailed_and_any_task_with_publication_history(self):
-        ready = self.delete(f"/api/papers/{self.paper.id}")
-        self.assertEqual(ready.status_code, 400)
+    def test_delete_rejects_active_and_any_task_with_publication_history(self):
+        Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.SEGMENTING)
+        active = self.delete(f"/api/papers/{self.paper.id}")
+        self.assertEqual(active.status_code, 400)
         self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
 
+        Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.READY)
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
         self.post(f"/api/papers/{self.paper.id}/publish")
         Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.FAILED)
@@ -1104,6 +1232,24 @@ class ApiTests(TestCase):
         self.assertIn("正式题库", blocked.json()["error"])
         self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
         self.assertTrue(PublishedQuestion.objects.filter(paper_id=self.paper.pk).exists())
+
+    def test_delete_rejects_both_split_source_and_split_child(self):
+        source = Paper.objects.create(
+            filename="原书.pdf", kind="pdf", sha256="1" * 64, status=Paper.Status.FAILED,
+        )
+        child = Paper.objects.create(
+            filename="第一册.pdf", kind="pdf", sha256="2" * 64, status=Paper.Status.FAILED,
+            structure={"split_from": str(source.id), "split_index": 1},
+        )
+        source.structure = {"split_children": [str(child.id)]}
+        source.save(update_fields=["structure"])
+
+        for paper in (source, child):
+            with self.subTest(paper=paper.filename):
+                response = self.delete(f"/api/papers/{paper.id}")
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn("追溯", response.json()["error"])
+                self.assertTrue(Paper.objects.filter(pk=paper.pk).exists())
 
     def test_text_edit_clears_text_flags_but_requires_separate_approval(self):
         data = self.post(f"/api/questions/{self.q2.id}/text", {"stem": "求证：AB=CD", "question_type": "free_response"}).json()
@@ -1421,9 +1567,12 @@ class ApiTests(TestCase):
         store.MAX_MEMORY_PAGES = 2
         with mock.patch("core.pipeline.imaging.render_source_page",
                         side_effect=lambda *_args: Image.new("RGB", (12, 12), "white")):
+            first = store.load(0)
             for page_idx in range(3):
                 store.load(page_idx)
         self.assertEqual(list(store.memory), [1, 2])
+        # 被 LRU 淘汰只能释放缓存引用；另一识读线程手里的页面仍必须可用。
+        self.assertEqual(first.crop((0, 0, 2, 2)).size, (2, 2))
 
     def test_add_and_delete_question(self):
         data = self.post(f"/api/papers/{self.paper.id}/questions",
@@ -1461,41 +1610,122 @@ class ApiTests(TestCase):
         self.assertEqual(len(paper.pages), 1)
         self.assertTrue(Path(paper.source_path).is_file())
 
-    def test_upload_pdf_preflight_accepts_exactly_200_pages(self):
-        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(200)]
+    def test_upload_pdf_preflight_accepts_exactly_600_pages(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(600)]
         upload = io.BytesIO(b"mock PDF at the supported page limit")
-        upload.name = "200页.pdf"
+        upload.name = "600页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
-        paper = Paper.objects.get(filename="200页.pdf")
-        self.assertEqual(len(paper.pages), 200)
+        paper = Paper.objects.get(filename="600页.pdf")
+        self.assertEqual(len(paper.pages), 600)
+        self.assertFalse(paper.import_chunks.exists())
         self.assertTrue((self.temp / str(paper.id)).is_dir())
 
-    def test_upload_pdf_preflight_rejects_201_pages_without_orphan_task_or_folder(self):
-        before_ids = set(Paper.objects.values_list("id", flat=True))
-        before_folders = {path.name for path in self.temp.iterdir() if path.is_dir()}
-        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
+    def test_upload_book_at_100_pages_creates_one_stable_chunk(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(100)]
+        upload = io.BytesIO(b"mock 100 page book")
+        upload.name = "100页教材.pdf"
+        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
+                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+            response = self.client.post(
+                "/api/papers", {"file": upload, "material_type": "book"}, HTTP_X_QB_REQUEST="1",
+            )
+        self.assertEqual(response.status_code, 201, response.content)
+        paper = Paper.objects.get(filename="100页教材.pdf")
+        self.assertEqual(paper.material_type, Paper.MaterialType.BOOK)
+        self.assertEqual(
+            list(paper.import_chunks.values_list("source_page_start", "source_page_end")),
+            [(1, 100)],
+        )
+
+    def test_upload_book_over_100_pages_creates_stable_chunks(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(270)]
+        upload = io.BytesIO(b"mock 270 page book")
+        upload.name = "270页教材.pdf"
+        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
+                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+            response = self.client.post(
+                "/api/papers", {"file": upload, "material_type": "book"}, HTTP_X_QB_REQUEST="1",
+            )
+        self.assertEqual(response.status_code, 201, response.content)
+        paper = Paper.objects.get(filename="270页教材.pdf")
+        chunks = list(paper.import_chunks.order_by("sequence"))
+        self.assertEqual(
+            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
+            [(1, 100), (101, 200), (201, 270)],
+        )
+        self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 271)))
+
+    def test_retry_legacy_failed_pdf_can_be_explicitly_changed_to_book(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(270)]
+        failed = Paper.objects.create(
+            filename="旧版失败教材.pdf",
+            kind="pdf",
+            sha256="l" * 64,
+            source_path=str(self.temp / "legacy-book.pdf"),
+            pages=pages,
+            status=Paper.Status.FAILED,
+            error="MinerU 解析失败（接口返回错误）",
+        )
+        self.assertEqual(failed.material_type, Paper.MaterialType.EXAM)
+
+        response = self.post(
+            f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK},
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        failed.refresh_from_db()
+        self.assertEqual(failed.status, Paper.Status.QUEUED)
+        self.assertEqual(failed.material_type, Paper.MaterialType.BOOK)
+        self.assertEqual(failed.error, "")
+        self.assertEqual(
+            list(failed.import_chunks.values_list("source_page_start", "source_page_end")),
+            [(1, 100), (101, 200), (201, 270)],
+        )
+
+    def test_failed_task_with_results_cannot_change_material_type(self):
+        failed = Paper.objects.create(
+            filename="已有解析结果.pdf", kind="pdf", sha256="r" * 64,
+            source_path=str(self.temp / "parsed.pdf"), pages=PAGES[:1], status=Paper.Status.FAILED,
+        )
+        Block.objects.create(
+            paper=failed, seq=0, type="text", page_idx=0, bbox=[10, 10, 20, 20], text="1. 已知",
+        )
+        response = self.post(
+            f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK},
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        failed.refresh_from_db()
+        self.assertEqual(failed.material_type, Paper.MaterialType.EXAM)
+        self.assertEqual(failed.status, Paper.Status.FAILED)
+
+    def test_upload_pdf_over_mineru_limit_creates_lossless_chunk_plan(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(601)]
         upload = io.BytesIO(b"mock PDF over the supported page limit")
-        upload.name = "201页.pdf"
+        upload.name = "601页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("200 页", response.json()["error"])
-        self.assertEqual(set(Paper.objects.values_list("id", flat=True)), before_ids)
-        self.assertEqual({path.name for path in self.temp.iterdir() if path.is_dir()}, before_folders)
+        self.assertEqual(response.status_code, 201, response.content)
+        paper = Paper.objects.get(filename="601页.pdf")
+        chunks = list(ImportChunk.objects.filter(paper=paper).order_by("sequence"))
+        self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
+                         [(1, 600), (601, 601)])
+        self.assertEqual(chunks[0].page_map, list(range(1, 601)))
+        self.assertEqual(chunks[1].page_map, [601])
+        self.assertTrue((self.temp / str(paper.id) / "source.pdf").is_file())
 
-    def test_rejected_upload_cleanup_failure_leaves_only_reconcilable_staging(self):
-        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
-        upload = io.BytesIO(b"mock private PDF")
-        upload.name = "稍后清理.pdf"
+    def test_upload_pdf_exactly_1200_pages_creates_two_complete_chunks(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(1200)]
+        upload = io.BytesIO(b"mock long PDF")
+        upload.name = "1200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages), \
-                mock.patch("core.views.shutil.rmtree", side_effect=OSError("busy")):
+                mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(Paper.objects.filter(filename="稍后清理.pdf").exists())
-        leftovers = [path.name for path in self.temp.iterdir() if path.is_dir() and path.name.startswith(".uploading-")]
-        self.assertEqual(len(leftovers), 1)
+        self.assertEqual(response.status_code, 201, response.content)
+        paper = Paper.objects.get(filename="1200页.pdf")
+        chunks = list(paper.import_chunks.order_by("sequence"))
+        self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
+                         [(1, 600), (601, 1200)])

@@ -27,6 +27,6 @@ jobs:
         run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging
       - name: Test backend
         working-directory: backend
-        run: python manage.py test core.tests core.test_photos core.test_resilience
-      - name: Test frontend rendering
-        run: node frontend/test_qb_render.js
+        run: python manage.py test core
+      - name: Test frontend
+        run: node --test frontend/test_*.js

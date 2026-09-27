@@ -14,7 +14,7 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 from PIL import Image, ImageDraw, ImageStat
 
 from . import photos, pipeline
-from .models import Paper, Question
+from .models import Paper, Question, QuestionGroup
 
 
 def jpeg_bytes(image: Image.Image) -> bytes:
@@ -213,17 +213,33 @@ class PhotoPaperTests(TestCase):
         # 人工把第 3 页调到最前：内容块、题卡范围、页面都跟着换
         paper.status = Paper.Status.READY
         paper.save()
-        question = Question.objects.create(paper=paper, number=10, regions=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}],
+        first_group = QuestionGroup.objects.create(
+            paper=paper, title="前两页", sequence=0, page_start=1, page_end=2,
+            metadata={"pages": [0, 1]},
+        )
+        second_group = QuestionGroup.objects.create(
+            paper=paper, title="最后一页", sequence=1, page_start=3, page_end=3,
+            metadata={"pages": [2]},
+        )
+        question = Question.objects.create(paper=paper, group=second_group, number=10, regions=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}],
                                             regions_auto=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}], state="green")
         response = self.client.post(f"/api/papers/{paper.id}/page-order", data=json.dumps({"order": [2, 0, 1]}),
                                     content_type="application/json", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200, response.content)
         paper.refresh_from_db()
-        self.assertEqual(paper.status, Paper.Status.SEGMENTING)
+        # This manual order restarts from 10–12 back to 1–5.  The new no-loss
+        # safeguard therefore pauses before cards can overwrite one another.
+        self.assertEqual(paper.status, Paper.Status.NEEDS_GROUPING)
         self.assertTrue(paper.photos["manual"])
         self.assertEqual([paper.photos["files"][i]["name"] for i in paper.photos["order"]], ["A.jpg", "B.jpg", "C.jpg"])
         question.refresh_from_db()
         self.assertEqual(question.regions[0]["page_idx"], 0)
+        first_group.refresh_from_db()
+        second_group.refresh_from_db()
+        self.assertEqual(first_group.metadata["pages"], [1, 2])
+        self.assertEqual((first_group.page_start, first_group.page_end), (2, 3))
+        self.assertEqual(second_group.metadata["pages"], [0])
+        self.assertEqual((second_group.page_start, second_group.page_end), (1, 1))
         self.assertEqual({b.text[:3] for b in paper.blocks.filter(page_idx=0)}, {"10.", "11.", "12."})
         self.assertEqual([dark_bars(pipeline.PageStore(paper).load(p)) for p in range(3)], [1, 2, 3])
         self.assertNotEqual(response.json()["paper"]["pages_version"], "")
@@ -231,3 +247,22 @@ class PhotoPaperTests(TestCase):
         bad = self.client.post(f"/api/papers/{paper.id}/page-order", data=json.dumps({"order": [0, 0, 1]}),
                                content_type="application/json", HTTP_X_QB_REQUEST="1")
         self.assertEqual(bad.status_code, 400)
+
+        # Confirming the new physical order must apply its new scopes, not keep
+        # the old group sequence. The existing q10 card follows its page/group
+        # and retains its stable source identity.
+        source_key = question.source_key
+        confirmed = self.client.post(
+            f"/api/papers/{paper.id}/confirm-structure", data=json.dumps({}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        paper.refresh_from_db()
+        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions), \
+                mock.patch.object(pipeline, "locate_missing", return_value=[]):
+            pipeline.segment_paper(paper)
+        question.refresh_from_db()
+        self.assertEqual(question.source_key, source_key)
+        self.assertEqual(question.group.sequence, 0)
+        self.assertEqual(question.group.metadata["pages"], [0])
+        self.assertEqual(paper.questions.count(), 12)

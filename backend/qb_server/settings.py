@@ -25,6 +25,8 @@ USE_TZ = True
 DATA_ROOT = Path(os.environ.get("QB_DATA_ROOT", BASE_DIR / "data")).resolve()
 FRONTEND_ROOT = Path(os.environ.get("QB_FRONTEND_ROOT", BASE_DIR.parent / "frontend")).resolve()
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# 长 PDF 会在本机流式保存后按页切片；源文件大小仍遵守 MinerU 当前的 200 MB 上限。
+MAX_PDF_UPLOAD_BYTES = 200_000_000
 DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 LOGGING = {

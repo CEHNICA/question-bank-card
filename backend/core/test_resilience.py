@@ -10,7 +10,15 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from .mineru import MineruError, _download_zip, _error_message, load_blocks, request_extract
+from .mineru import (
+    ERROR_HINTS,
+    REMOTE_ERROR_PHRASES,
+    MineruError,
+    _download_zip,
+    _error_message,
+    load_blocks,
+    request_extract,
+)
 
 
 class _Response:
@@ -68,22 +76,56 @@ class _ApiSession:
 
 
 class MineruRecoveryTests(SimpleTestCase):
+    def test_all_official_precise_api_error_codes_have_fixed_local_hints(self):
+        official = {"A0202", "A0211", "-500", "-10001", "-10002"}
+        official.update(f"-600{number:02d}" for number in range(1, 23))
+        self.assertEqual(set(ERROR_HINTS), official)
+        for code in sorted(official):
+            with self.subTest(code=code):
+                message = _error_message("解析", {
+                    "code": code,
+                    "err_msg": "Bearer TOP_SECRET https://signed.invalid/file?token=LEAK",
+                })
+                self.assertIn(f"错误码 {code}", message)
+                self.assertIn(ERROR_HINTS[code], message)
+                self.assertNotIn("TOP_SECRET", message)
+                self.assertNotIn("signed.invalid", message)
+
+    def test_documented_remote_phrases_are_classified_without_echoing_them(self):
+        for code, phrases in REMOTE_ERROR_PHRASES:
+            with self.subTest(code=code, phrase=phrases[0]):
+                remote = f"{phrases[0]}; REMOTE_SECRET=https://signed.invalid/?token=LEAK"
+                message = _error_message("解析", {"err_msg": remote})
+                self.assertIn(ERROR_HINTS[code], message)
+                self.assertNotIn("REMOTE_SECRET", message)
+                self.assertNotIn("signed.invalid", message)
+
     def test_page_limit_err_msg_is_classified_without_echoing_remote_text(self):
         message = _error_message("解析", {
             "err_msg": "PDF page count exceeds the page limit; SECRET_REMOTE_TEXT=https://signed.invalid",
         })
-        self.assertIn("200 页", message)
+        self.assertIn("600 页", message)
         self.assertIn("拆分", message)
         self.assertNotIn("SECRET_REMOTE_TEXT", message)
         self.assertNotIn("signed.invalid", message)
 
     def test_arbitrary_remote_error_text_is_never_echoed(self):
         message = _error_message("解析", {
-            "err_msg": "signed_url=https://signed.invalid/file?token=SUPERSECRET",
+            "err_msg": "signed_url=https://signed.invalid/file?token=SUPERSECRET; Bearer TOP_SECRET",
         })
         self.assertIn("检查 MinerU API 配置", message)
         self.assertNotIn("SUPERSECRET", message)
+        self.assertNotIn("TOP_SECRET", message)
         self.assertNotIn("signed.invalid", message)
+
+    def test_invalid_trace_id_is_never_exposed(self):
+        message = _error_message("解析", {
+            "err_msg": "unknown failure",
+            "trace_id": "https://signed.invalid/?token=SUPERSECRET",
+        })
+        self.assertNotIn("signed.invalid", message)
+        self.assertNotIn("SUPERSECRET", message)
+        self.assertNotIn("追踪号", message)
 
     def test_known_error_code_takes_priority_over_err_msg_heuristics(self):
         message = _error_message("解析", {
@@ -115,9 +157,49 @@ class MineruRecoveryTests(SimpleTestCase):
                 with self.assertRaises(MineruError) as raised:
                     request_extract(paper, "secret-token", source)
             message = str(raised.exception)
-            self.assertIn("200 页", message)
+            self.assertIn("600 页", message)
             self.assertIn("拆分", message)
             self.assertNotIn("DO_NOT_ECHO_THIS_REMOTE_TEXT", message)
+
+    def test_failed_batch_preserves_safe_trace_and_local_diagnostic_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.pdf"
+            source.write_bytes(b"test")
+            paper = SimpleNamespace(
+                pk="paper-id", source_path=str(source),
+                pages=[{"page_idx": 0, "width": 1, "height": 1}],
+            )
+            trace_id = "a" * 32
+            session = _ApiSession([
+                {"code": 0, "trace_id": "b" * 32, "data": {
+                    "batch_id": "batch-id", "file_urls": ["https://upload.invalid/source.pdf"],
+                }},
+                {"code": 0, "trace_id": trace_id, "data": {"extract_result": [{
+                    "state": "failed",
+                    "err_msg": "file format not supported; signed_url=https://signed.invalid/?token=LEAK",
+                }]}},
+            ])
+            with patch("core.mineru.requests.Session", return_value=session), \
+                    patch("core.mineru.Paper.objects.filter"):
+                with self.assertRaises(MineruError) as raised:
+                    request_extract(paper, "secret-token", source)
+
+            error = raised.exception
+            message = str(error)
+            self.assertEqual(error.code, "")
+            self.assertEqual(error.category, "-60002")
+            self.assertEqual(error.trace_id, trace_id)
+            self.assertEqual(error.metadata["trace_id"], trace_id)
+            self.assertRegex(error.diagnostic_id, r"^MU-[0-9A-F]{12}$")
+            self.assertIn(error.diagnostic_id, message)
+            self.assertIn(trace_id, message)
+            self.assertIn("诊断分类 -60002", message)
+            self.assertIn("文件格式识别失败", message)
+            self.assertNotIn("signed.invalid", message)
+            self.assertNotIn("LEAK", message)
+            self.assertNotIn("batch-id", message)
+            self.assertNotIn("secret-token", message)
+            self.assertNotIn("signed.invalid", repr(error.metadata))
 
     def test_oversized_download_leaves_no_partial_or_target(self):
         with tempfile.TemporaryDirectory() as directory:

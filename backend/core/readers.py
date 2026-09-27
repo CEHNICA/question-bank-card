@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .account_pool import AccountPoolError, account_pool, secrets_from_environment
 from .textnorm import clean_option, clean_stem, fix_symbols
 
 MINIMAX_MODEL = os.environ.get("QB_MINIMAX_MODEL", "MiniMax-M3")
@@ -23,12 +24,22 @@ MINIMAX_DEFAULT_URL = "https://api.minimax.cn/v1/chat/completions"
 MINIMAX_HOSTS = frozenset({"api.minimax.cn", "api.minimax.io", "api.minimaxi.com"})
 SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SILICONFLOW_MODEL = os.environ.get("QB_SILICONFLOW_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
-RETRYABLE = frozenset({429, 500, 502, 503, 504})
+SERVER_RETRYABLE = frozenset({500, 502, 503, 504})
 BACKOFF = (2.0, 5.0, 12.0)
 MAX_RESPONSE_BYTES = 200_000
 OPTION_KEYS = ("A", "B", "C", "D")
 TAG = re.compile(r"【\s*(题号|题型|题干|A|B|C|D|配图|其他题号|刻度)\s*】")
-_IN_FLIGHT = threading.BoundedSemaphore(int(os.environ.get("QB_PARALLEL", "4")))
+
+
+def _parallel_limit() -> int:
+    try:
+        value = int(os.environ.get("QB_PARALLEL", "4"))
+    except (TypeError, ValueError):
+        value = 4
+    return max(1, min(8, value))
+
+
+_IN_FLIGHT = threading.BoundedSemaphore(_parallel_limit())
 
 
 class ReaderError(RuntimeError):
@@ -44,22 +55,115 @@ class Engine:
     def label(self) -> str:
         return self.model.split("/")[-1]
 
+    @property
+    def key(self) -> str:
+        if self.provider == "minimax" and self.model == MINIMAX_MODEL:
+            return "minimax_m3"
+        if self.provider == "siliconflow" and self.model == SILICONFLOW_MODEL:
+            return "siliconflow_qwen3"
+        return f"{self.provider}:{self.model}"
+
 
 def configured(service: str) -> bool:
     """网页进程拿不到密钥，只拿到"已配置"的标记；工作者进程拿到真正的密钥。"""
-    key = {"minimax": "MINIMAX_API_KEY", "siliconflow": "SILICONFLOW_API_KEY", "mineru": "MINERU_TOKEN"}[service]
-    return bool(os.environ.get(key, "").strip()) or os.environ.get(f"QB_{service.upper()}_CONFIGURED") == "1"
+    if os.environ.get(f"QB_{service.upper()}_CONFIGURED") == "1":
+        return True
+    try:
+        return bool(secrets_from_environment(service))
+    except AccountPoolError:
+        return False
+
+
+def _reported_pool_size(service: str) -> int:
+    try:
+        return max(0, min(8, int(os.environ.get(f"QB_{service.upper()}_POOL_SIZE", "0"))))
+    except (TypeError, ValueError):
+        return 0
+
+
+ENGINE_CHOICES = {
+    "minimax_m3": ("minimax", MINIMAX_MODEL),
+    "siliconflow_qwen3": ("siliconflow", SILICONFLOW_MODEL),
+}
+
+
+def _selected(name: str, default: str, allowed: set[str]) -> str:
+    value = os.environ.get(name, default).strip().lower()
+    return value if value in allowed else default
+
+
+def engine_by_key(key: str) -> Engine | None:
+    spec = ENGINE_CHOICES.get(key)
+    if spec is None:
+        return None
+    provider, model = spec
+    return Engine(provider, model) if configured(provider) else None
 
 
 def primary_engine() -> Engine | None:
-    return Engine("minimax", MINIMAX_MODEL) if configured("minimax") else None
+    selected = _selected("QB_PRIMARY_ENGINE", "minimax_m3", set(ENGINE_CHOICES))
+    return engine_by_key(selected)
 
 
 def checker_engine() -> Engine | None:
     """第二位读者：优先用另一家（硅基流动 Qwen-VL），没有就用 MiniMax 再独立读一遍。"""
-    if configured("siliconflow"):
-        return Engine("siliconflow", SILICONFLOW_MODEL)
-    return primary_engine()
+    selected = _selected("QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES})
+    if selected != "auto":
+        return engine_by_key(selected)
+    primary = primary_engine()
+    # “自动”按提供商选择另一家，而不是把 SiliconFlow 写死成唯一候选。
+    # 这样主读改为 SiliconFlow 且 MiniMax 已配置时，复核会真正来自 MiniMax。
+    for key in ENGINE_CHOICES:
+        other = engine_by_key(key)
+        if other is not None and (primary is None or other.provider != primary.provider):
+            return other
+    return primary
+
+
+def arbiter_engine(primary: Engine | None = None, checker: Engine | None = None) -> Engine | None:
+    """分歧裁决模型；默认沿用主读，也可显式选择复核或某一已配置引擎。"""
+    selected = _selected(
+        "QB_ARBITER_ENGINE", "primary", {"primary", "checker", *ENGINE_CHOICES},
+    )
+    if selected == "primary":
+        return primary if primary is not None else primary_engine()
+    if selected == "checker":
+        return checker if checker is not None else checker_engine()
+    return engine_by_key(selected)
+
+
+def engine_settings() -> dict:
+    """给本机设置页的非秘密模型信息。"""
+    selected = {
+        "primary": _selected("QB_PRIMARY_ENGINE", "minimax_m3", set(ENGINE_CHOICES)),
+        "checker": _selected("QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES}),
+        "arbiter": _selected(
+            "QB_ARBITER_ENGINE", "primary", {"primary", "checker", *ENGINE_CHOICES},
+        ),
+    }
+    primary = primary_engine()
+    checker = checker_engine()
+    arbiter = arbiter_engine(primary, checker)
+    return {
+        "selected": selected,
+        "primary": primary.key if primary else None,
+        "checker": checker.key if checker else None,
+        "arbiter": arbiter.key if arbiter else None,
+        "configured": {
+            "minimax": configured("minimax"),
+            "siliconflow": configured("siliconflow"),
+        },
+        "pool_sizes": {
+            "minimax": _reported_pool_size("minimax"),
+            "siliconflow": _reported_pool_size("siliconflow"),
+        },
+        "choices": [
+            {"key": "minimax_m3", "provider": "MiniMax", "model": MINIMAX_MODEL,
+             "available": configured("minimax")},
+            {"key": "siliconflow_qwen3", "provider": "硅基流动", "model": SILICONFLOW_MODEL,
+             "available": configured("siliconflow")},
+        ],
+    }
 
 
 # ---------------------------------------------------------------- 提示词
@@ -305,10 +409,21 @@ def _post(url: str, key: str, payload: dict, timeout=(10, 150)) -> requests.Resp
                 raise ReaderError("连接模型服务超时或中断") from None
             time.sleep(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
             continue
-        if response.status_code not in RETRYABLE or attempt == len(BACKOFF):
+        # 429 belongs to one account, not the whole provider.  Return it at
+        # once so ``chat`` can cool down that account and lease another one.
+        if response.status_code not in SERVER_RETRYABLE or attempt == len(BACKOFF):
             return response
         time.sleep(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
     return response
+
+
+def _retry_after_seconds(value: object) -> float:
+    """Accept only a small ASCII delta-seconds value; ignore HTTP dates/garbage."""
+
+    text = value.strip() if isinstance(value, str) else ""
+    if not re.fullmatch(r"[0-9]{1,4}(?:\.[0-9]{1,2})?", text):
+        return BACKOFF[-1]
+    return min(60.0, float(text))
 
 
 def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
@@ -317,22 +432,39 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     ]
     messages = [{"role": "user", "content": content}]
     if engine.provider == "minimax":
-        key = os.environ.get("MINIMAX_API_KEY", "").strip()
         name = "MiniMax"
         url = _minimax_url()
         payload = {"model": engine.model, "messages": messages, "temperature": 0, "stream": False,
                    "thinking": {"type": "disabled"}, "reasoning_split": True, "max_completion_tokens": max_tokens}
     else:
-        key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
         name = "硅基流动"
         url = SILICONFLOW_URL
         payload = {"model": engine.model, "messages": messages, "temperature": 0, "stream": False,
                    "max_tokens": max_tokens}
-    if not key or "\n" in key or "\r" in key:
-        raise ReaderError(f"未配置 {name} 的密钥")
-    response = _post(url, key, payload)
-    if response.status_code in (401, 403):
-        raise ReaderError(f"{name} 密钥无效、过期或没有该模型权限")
+    try:
+        pool = account_pool(engine.provider)
+    except AccountPoolError as exc:
+        raise ReaderError(str(exc)) from None
+    response = None
+    attempted: set[int] = set()
+    while len(attempted) < max(1, pool.size):
+        try:
+            with pool.lease(exclude=attempted) as lease:
+                response = _post(url, lease.secret, payload)
+                if response.status_code in (401, 403):
+                    attempted.add(lease.slot)
+                    lease.disable()
+                    continue
+                if response.status_code == 429:
+                    attempted.add(lease.slot)
+                    retry_after = response.headers.get("Retry-After", "")
+                    lease.cooldown(_retry_after_seconds(retry_after))
+                    continue
+                break
+        except AccountPoolError:
+            break
+    if response is None or response.status_code in (401, 403):
+        raise ReaderError(f"{name} 账号池中没有可用密钥")
     if response.status_code != 200:
         raise ReaderError(f"{name} 接口返回 HTTP {response.status_code}")
     if len(response.content) > MAX_RESPONSE_BYTES:
