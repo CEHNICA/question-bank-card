@@ -12,7 +12,7 @@ from unittest import mock
 from django.test import Client, TestCase, override_settings
 from PIL import Image, ImageDraw
 
-from . import library, pipeline, readers, segment
+from . import figure_policy, library, pipeline, readers, segment
 from .models import Block, Paper, PublishedQuestion, Question
 from .textnorm import canon, clean_stem, same_reading
 
@@ -141,6 +141,45 @@ class TextTests(TestCase):
 
     def test_clean_stem(self):
         self.assertEqual(clean_stem("17. （15分）已知向量", 17), "已知向量")
+
+    def test_figure_reference_detector_covers_chinese_and_english_without_substring_matches(self):
+        positive = [
+            "如图所示，求阴影部分的面积。",
+            "由图可知，点 A 在第二象限。",
+            "从图可知，甲车先到达终点。",
+            "观察下图并回答问题。",
+            "根据右图可知，点 A 的坐标是（ ）。",
+            "根据表中数据完成计算。",
+            "函数的图象大致是（　　）",
+            "图为河床横断面示意图。",
+            "As shown in the figure below, find the value of x.",
+            "The diagram above shows a triangular prism.",
+            "Refer to the graph on the right.",
+            "Use the table below to answer the question.",
+            "The map below shows the route.",
+            "The drawing is not to scale.",
+        ]
+        for value in positive:
+            with self.subTest(value=value):
+                self.assertTrue(figure_policy.cue_matches(value))
+
+        negative = [
+            "在图书馆阅读数学书。",
+            "比如图书馆距学校2千米。",
+            "该方法不如表格法直观。",
+            "根据图书资料回答。",
+            "Configure the application before use.",
+            "A stable solution exists.",
+            "Write one paragraph about the result.",
+            "Sketch the graph of y=x.",
+            "Draw the diagram yourself.",
+            "As shown in the equation below, solve for x.",
+            "Use the table method.",
+            "According to graph theory, a tree has no cycles.",
+        ]
+        for value in negative:
+            with self.subTest(value=value):
+                self.assertEqual(figure_policy.cue_matches(value), [])
 
 
 class ParallelogramSymbolTests(TestCase):
@@ -451,6 +490,101 @@ class PipelineTests(TestCase):
         self.paper.refresh_from_db()
         return chat
 
+    def read_policy_card(self, stem, *, figure_role="无", candidates=True):
+        primary = readers.parse_reading(tagged(stem, figures=figure_role), 9)
+        checker = readers.parse_reading(tagged(stem), 9)
+        snapshot = {
+            "id": 999,
+            "number": 9,
+            "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            "candidates": ([{
+                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
+            }] if candidates else []),
+            "question_type": "free_response",
+        }
+        store = pipeline.PageStore(self.paper)
+        with mock.patch.object(readers, "read_question", side_effect=[primary, checker]) as read_mock, \
+                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            result = pipeline.read_card(snapshot, store)
+        return result, read_mock, arbitrate_mock
+
+    def test_figure_policy_uses_existing_reads_without_extra_api_call_and_excludes_irrelevant_candidate(self):
+        result, read_mock, arbitrate_mock = self.read_policy_card(
+            "计算 $1+1$ 的值。", figure_role="1=无关",
+        )
+
+        # 新规则只消费两位读者已有的结构化结果，不增加模型/API 调用。
+        self.assertEqual(read_mock.call_count, 2)
+        arbitrate_mock.assert_not_called()
+        self.assertEqual(result["figures"], [])
+        self.assertEqual(result["figure_review"]["status"], "auto_excluded")
+        self.assertEqual(result["figure_review"]["source"], "automatic")
+        self.assertEqual(result["figure_review"]["excluded_count"], 1)
+
+    def test_unclassified_candidate_is_not_silently_deleted(self):
+        result, read_mock, _ = self.read_policy_card("计算 $1+1$ 的值。", figure_role="无")
+        self.assertEqual(read_mock.call_count, 2)
+        self.assertEqual(result["figure_review"]["status"], "conflict")
+        self.assertEqual(result["figure_review"]["unclassified_count"], 1)
+        self.assertEqual(result["state"], Question.State.YELLOW)
+
+    def test_bound_candidate_does_not_hide_a_second_unclassified_candidate(self):
+        review = figure_policy.automatic_review(
+            stem="如图所示，求角 A。",
+            options={},
+            candidate_labels={"1", "2"},
+            assignments={"1": "stem"},
+            figures=[{
+                "slot": "stem", "page_idx": 0, "bbox": [10, 20, 30, 40], "source": "auto",
+            }],
+        )
+
+        self.assertEqual(review["status"], "conflict")
+        self.assertEqual(review["unclassified_count"], 1)
+        self.assertIn("candidate_unclassified", review["signals"])
+
+    def test_missing_figure_reference_is_blocked_for_chinese_and_english(self):
+        for stem in ("如图所示，求角 A。", "As shown in the diagram below, find angle A."):
+            with self.subTest(stem=stem):
+                result, _, _ = self.read_policy_card(stem, candidates=False)
+                self.assertEqual(result["state"], Question.State.YELLOW)
+                self.assertIn(figure_policy.FLAG_NO_FIGURE, result["flags"])
+                self.assertEqual(result["figure_review"]["status"], "blocked_missing")
+                self.assertEqual(result["figure_review"]["source"], "automatic")
+
+    def test_printed_figure_without_text_reference_is_a_review_conflict(self):
+        result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干")
+        self.assertEqual([figure["slot"] for figure in result["figures"]], ["stem"])
+        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assertEqual(result["figure_review"]["status"], "conflict")
+        self.assertEqual(result["figure_review"]["source"], "automatic")
+
+    def test_reread_never_removes_a_manually_selected_figure(self):
+        manual = {"slot": "stem", "page_idx": 0, "bbox": [300, 410, 460, 500], "source": "manual"}
+        question = Question.objects.create(
+            paper=self.paper,
+            number=9,
+            question_type="free_response",
+            stem="计算 $1+1$ 的值。",
+            regions=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            regions_auto=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            figure_candidates=[{"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]}],
+            figures=[manual],
+            state=Question.State.WAITING,
+        )
+        chat = ScriptedChat({
+            ("a", 9): tagged("计算 $1+1$ 的值。", figures="1=无关"),
+            ("b", 9): tagged("计算 $1+1$ 的值。"),
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+
+        question.refresh_from_db()
+        self.assertEqual(question.figures, [manual])
+        self.assertEqual(question.figures[0]["source"], "manual")
+        self.assertEqual(question.figure_review["status"], "ok")
+        self.assertEqual(question.figure_review["source"], "human")
+
     def test_full_pipeline_states(self):
         answers = {
             ("locate", 4): "【刻度】无",
@@ -503,14 +637,16 @@ class PipelineTests(TestCase):
         # 第 2 题：选择题，但选项全是图？这里没有选项文字也没有选项图 → 提示；"第 3 题"已由图解释，不提示范围
         self.assertFalse(any("露出了" in f for f in cards[2].flags), cards[2].flags)
         self.assertEqual(cards[2].figures, [])
-        # 第 3 题得到了这张图，"如图"提示被清掉
+        # 第 3 题得到借入图，但自己范围内还有一张未分类候选图，不能因此静默放行。
         self.assertTrue(any(f["source"] == "other" for f in cards[3].figures), cards[3].figures)
-        self.assertFalse(any(pipeline.figure_flag(f) for f in cards[3].flags), cards[3].flags)
+        self.assertEqual(cards[3].figure_review["status"], "conflict")
+        self.assertIn("candidate_unclassified", cards[3].figure_review["signals"])
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, cards[3].flags)
         # 第 6 题说"如图"却没有图 → 提示
         self.assertIn(pipeline.FLAG_NO_FIGURE, cards[6].flags)
         self.assertEqual(cards[6].state, "yellow")
 
-    def test_option_figures_do_not_trigger_missing_options(self):
+    def test_partial_option_figures_keep_the_question_blocked(self):
         answers = {("locate", 4): "【刻度】无", ("*", 1): tagged("x"), ("*", 3): tagged("x"), ("*", 5): tagged("x"),
                    ("*", 6): tagged("x"),
                    ("a", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【A】\n【B】\n【配图】1=A\n【其他题号】无",
@@ -518,7 +654,50 @@ class PipelineTests(TestCase):
         self.run_paper(answers)
         q2 = self.paper.questions.get(number=2)
         self.assertEqual([f["slot"] for f in q2.figures], ["A"])
-        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertEqual(q2.state, "yellow", q2.flags)
+        self.assertEqual(q2.figure_review["status"], "blocked_missing")
+        self.assertEqual(q2.figure_review["missing_slots"], ["B", "C", "D"])
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, q2.flags)
+
+    def test_borrowed_figure_does_not_clear_conflict_or_unfilled_option_slots(self):
+        no_cue = Question.objects.create(
+            paper=self.paper,
+            number=8,
+            stem="计算 $1+1$ 的值。",
+            regions=[{"page_idx": 0, "bbox": [50, 300, 480, 380]}],
+            state=Question.State.YELLOW,
+        )
+        missing_options = Question.objects.create(
+            paper=self.paper,
+            number=9,
+            question_type="single_choice",
+            stem="下列四幅图中，正确的是（ ）。",
+            regions=[{"page_idx": 0, "bbox": [50, 380, 480, 520]}],
+            state=Question.State.YELLOW,
+            flags=[figure_policy.FLAG_UNFOUND_FIGURE],
+            figure_review={
+                "status": "blocked_missing",
+                "source": "automatic",
+                "reason": "纯图片选择题的选项图尚未补齐",
+                "signals": ["unbound_figure_description"],
+                "cue_matches": ["下列四幅图"],
+                "missing_slots": ["A", "B", "C", "D"],
+                "excluded_count": 0,
+            },
+        )
+
+        pipeline.assign_foreign_figures(self.paper, [
+            {"number": 8, "page_idx": 0, "bbox": [300, 310, 440, 370]},
+            {"number": 9, "page_idx": 0, "bbox": [300, 390, 440, 450]},
+        ])
+
+        no_cue.refresh_from_db()
+        missing_options.refresh_from_db()
+        self.assertEqual(no_cue.figure_review["status"], "conflict")
+        self.assertIn("bound_figure_without_text_cue", no_cue.figure_review["signals"])
+        self.assertEqual(missing_options.figure_review["status"], "blocked_missing")
+        self.assertEqual(missing_options.figure_review["missing_slots"], ["A", "B", "C", "D"])
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, missing_options.flags)
 
     def test_plain_image_description_from_second_reader_is_not_saved(self):
         answers = {
@@ -545,6 +724,8 @@ class PipelineTests(TestCase):
         self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
         self.assertEqual(q2.state, "yellow", q2.flags)
         self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, q2.flags)
+        self.assertEqual(q2.figure_review["status"], "blocked_missing")
+        self.assertEqual(q2.figure_review["missing_slots"], ["B", "C", "D"])
         self.assertFalse(any("看不清的字" in flag for flag in q2.flags))
         self.assertEqual(set(q2.read_b["options"]), {"A", "B", "C", "D"})
         self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
@@ -566,7 +747,9 @@ class PipelineTests(TestCase):
         self.assertEqual(q2.options, {"A": "向右"})
         self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
         self.assertEqual(q2.text_source, "majority")
-        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertEqual(q2.state, "yellow", q2.flags)
+        self.assertIn(figure_policy.FLAG_UNCUED_FIGURE, q2.flags)
+        self.assertEqual(q2.figure_review["status"], "conflict")
         self.assertTrue(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
     def test_plain_image_description_from_primary_reader_is_not_saved(self):
@@ -585,7 +768,10 @@ class PipelineTests(TestCase):
         q2 = self.paper.questions.get(number=2)
         self.assertEqual(q2.options, {})
         self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
-        self.assertEqual(q2.state, "green", q2.flags)
+        self.assertEqual(q2.state, "yellow", q2.flags)
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, q2.flags)
+        self.assertEqual(q2.figure_review["status"], "blocked_missing")
+        self.assertEqual(q2.figure_review["missing_slots"], ["B", "C", "D"])
         self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
     def test_arbiter_figure_description_without_a_bound_figure_gets_warning(self):
@@ -623,6 +809,7 @@ class PipelineTests(TestCase):
     def test_resegment_keeps_unchanged_cards_and_rereads_changed(self):
         answers = {("locate", 4): "【刻度】无", **{("*", n): tagged(f"第{n}题", {"A": "1", "B": "2"}) for n in (1, 2, 3)},
                    **{("*", n): tagged(f"第{n}题") for n in (5, 6)}}
+        answers[("a", 2)] = tagged("第2题", {"A": "1", "B": "2"}, figures="1=无关")
         self.run_paper(answers)
         q1 = self.paper.questions.get(number=1)
         q1.approved = True
@@ -674,7 +861,7 @@ class ApiTests(TestCase):
         self.paper.source_path = str(folder / "source.pdf")
         self.paper.save()
         self.q = Question.objects.create(
-            paper=self.paper, number=1, question_type="single_choice", stem="已知 $x=1$", options={"A": "1", "B": "2"},
+            paper=self.paper, number=1, question_type="single_choice", stem="如图，已知 $x=1$", options={"A": "1", "B": "2"},
             regions=[{"page_idx": 0, "bbox": [50, 100, 480, 300]}], state=Question.State.GREEN,
             figures=[{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250], "source": "auto"}],
         )
@@ -714,7 +901,7 @@ class ApiTests(TestCase):
         self.assertTrue(publication.content["review"]["approved_content_hash"])
         self.assertTrue((self.temp / "library" / str(publication.id) / "figure-1.png").is_file())
         # 改字后再入库 → 第 2 版，旧版标记为已替代
-        self.post(f"/api/questions/{self.q.id}/text", {"stem": "已知 $x=2$", "options": {"A": "1", "B": "2"}})
+        self.post(f"/api/questions/{self.q.id}/text", {"stem": "如图，已知 $x=2$", "options": {"A": "1", "B": "2"}})
         self.q.refresh_from_db()
         self.assertFalse(self.q.approved)
         self.assertEqual(self.q.approved_content_hash, "")
@@ -726,7 +913,7 @@ class ApiTests(TestCase):
                          ["superseded", "published"])
         library = self.client.get("/api/library").json()
         self.assertEqual(library["total"], 1)
-        self.assertEqual(library["items"][0]["content"]["stem"], "已知 $x=2$")
+        self.assertEqual(library["items"][0]["content"]["stem"], "如图，已知 $x=2$")
         self.assertEqual(self.client.get(f"/api/library?q=x=2").json()["total"], 1)
         malformed = self.client.get("/api/library?document=--------------------------------")
         self.assertEqual(malformed.status_code, 200)
@@ -736,7 +923,7 @@ class ApiTests(TestCase):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
         self.post(f"/api/papers/{self.paper.id}/publish")
 
-        for stem in ("已知 $x=2$", "已知 $x=3$"):
+        for stem in ("如图，已知 $x=2$", "如图，已知 $x=3$"):
             current = PublishedQuestion.objects.filter(
                 question=self.q, status=PublishedQuestion.Status.PUBLISHED,
             ).first()
@@ -800,7 +987,7 @@ class ApiTests(TestCase):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
         self.q.refresh_from_db()
         approved_hash = self.q.approved_content_hash
-        Question.objects.filter(pk=self.q.pk).update(stem="审批后被后台改过")
+        Question.objects.filter(pk=self.q.pk).update(stem="如图，审批后被后台改过")
         self.q.refresh_from_db()
         self.assertFalse(library.approval_is_current(self.q))
 
@@ -931,10 +1118,213 @@ class ApiTests(TestCase):
         data = self.post(f"/api/questions/{self.q.id}/figures",
                          {"figures": [{"slot": "A", "page_idx": 0, "bbox": [60, 200, 120, 260]}]}).json()
         self.assertEqual(data["question"]["figures"][0]["source"], "manual")
+        self.assertEqual(data["question"]["figure_review"]["status"], "ok")
+        self.assertEqual(data["question"]["figure_review"]["source"], "human")
         self.assertFalse(data["question"]["approved"])
         self.assertFalse(Question.objects.get(pk=self.q.id).approved_content_hash)
         image = self.client.get(data["question"]["figures"][0]["url"])
         self.assertEqual(image.status_code, 200)
+
+    def test_blocking_figure_reviews_reject_direct_and_bulk_approval(self):
+        for status in ("blocked_missing", "conflict"):
+            with self.subTest(status=status):
+                Question.objects.filter(pk=self.q2.pk).update(
+                    state=Question.State.YELLOW,
+                    approved=False,
+                    approved_content_hash="",
+                    figure_review={
+                        "status": status,
+                        "reason": "测试中的配图冲突",
+                        "signals": ["text_reference"] if status == "blocked_missing" else ["printed_figure"],
+                        "source": "automatic",
+                    },
+                )
+                response = self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True})
+                self.assertEqual(response.status_code, 400, response.content)
+                self.q2.refresh_from_db()
+                self.assertFalse(self.q2.approved)
+
+        # 即使异常旧数据把阻塞题留成绿卡，批量通过也必须做同样的防线检查。
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN,
+            figure_review={
+                "status": "blocked_missing",
+                "reason": "题干提示有图但未绑定配图",
+                "signals": ["text_reference"],
+                "source": "automatic",
+            },
+        )
+        response = self.post(f"/api/papers/{self.paper.id}/approve-green")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.q2.refresh_from_db()
+        self.assertFalse(self.q2.approved)
+
+    def test_human_no_figure_confirmation_is_traceable_and_allows_approval(self):
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.YELLOW,
+            flags=[figure_policy.FLAG_NO_FIGURE],
+            figure_review={
+                "status": "blocked_missing",
+                "reason": "题干提示有图但未绑定配图",
+                "signals": ["text_reference"],
+                "source": "automatic",
+            },
+        )
+        blocked = self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True})
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+
+        confirmed = self.post(
+            f"/api/questions/{self.q2.id}/figure-review",
+            {"decision": "confirm_no_figure"},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        payload = confirmed.json()["question"]
+        self.assertEqual(payload["figure_review"]["status"], "confirmed_no_figure")
+        self.assertEqual(payload["figure_review"]["source"], "human")
+        self.assertTrue(payload["figure_review"]["reason"])
+        self.assertFalse(any(figure_policy.figure_flag(flag) for flag in payload["flags"]))
+
+        self.q2.refresh_from_db()
+        self.assertEqual(self.q2.figure_review["status"], "confirmed_no_figure")
+        self.assertEqual(self.q2.figure_review["source"], "human")
+        approved = self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True})
+        self.assertEqual(approved.status_code, 200, approved.content)
+
+        published = self.post(f"/api/papers/{self.paper.id}/publish").json()
+        self.assertEqual(published["created"], 1, published)
+        snapshot = PublishedQuestion.objects.get(question=self.q2).content
+        self.assertEqual(snapshot["review"]["figure_review"]["status"], "confirmed_no_figure")
+        self.assertEqual(snapshot["review"]["figure_review"]["source"], "human")
+
+    def test_no_figure_confirmation_can_restore_previous_figures(self):
+        original = json.loads(json.dumps(self.q.figures))
+        confirmed = self.post(
+            f"/api/questions/{self.q.id}/figure-review",
+            {"decision": "confirm_no_figure"},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        self.assertEqual(confirmed.json()["question"]["figures"], [])
+
+        reset = self.post(f"/api/questions/{self.q.id}/figure-review", {"decision": "reset"})
+        self.assertEqual(reset.status_code, 200, reset.content)
+        self.q.refresh_from_db()
+        self.assertEqual(self.q.figures, original)
+        self.assertEqual(self.q.figure_review["status"], "ok")
+        self.assertFalse(self.q.approved)
+
+    def test_text_and_region_changes_invalidate_old_no_figure_confirmation(self):
+        confirmed = {
+            "status": "confirmed_no_figure",
+            "reason": "人工确认本题确实无图",
+            "signals": ["human_confirmation"],
+            "source": "human",
+        }
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN, flags=[], figure_review=confirmed,
+        )
+
+        edited = self.post(f"/api/questions/{self.q2.id}/text", {
+            "stem": "如图所示，求证：AB=CD",
+            "question_type": "free_response",
+        })
+        self.assertEqual(edited.status_code, 200, edited.content)
+        edited_question = edited.json()["question"]
+        self.assertEqual(edited_question["figure_review"]["status"], "blocked_missing")
+        self.assertEqual(edited_question["figure_review"]["source"], "automatic")
+        self.assertEqual(
+            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
+            400,
+        )
+
+        confirmed_again = self.post(
+            f"/api/questions/{self.q2.id}/figure-review",
+            {"decision": "confirm_no_figure"},
+        )
+        self.assertEqual(confirmed_again.status_code, 200, confirmed_again.content)
+        moved = self.post(f"/api/questions/{self.q2.id}/regions", {
+            "regions": [{"page_idx": 0, "bbox": [40, 280, 490, 430]}],
+        })
+        self.assertEqual(moved.status_code, 200, moved.content)
+        self.q2.refresh_from_db()
+        self.assertNotEqual(self.q2.figure_review.get("status"), "confirmed_no_figure")
+
+    def test_published_figure_review_is_immutable_and_new_version_records_new_review(self):
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN,
+            flags=[],
+            figure_review={
+                "status": "confirmed_no_figure",
+                "reason": "人工确认本题确实无图",
+                "signals": ["human_confirmation"],
+                "source": "human",
+            },
+        )
+        self.assertEqual(
+            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
+            200,
+        )
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+        first = PublishedQuestion.objects.get(question=self.q2, version=1)
+        original_snapshot = json.loads(json.dumps(first.content))
+
+        changed = self.post(f"/api/questions/{self.q2.id}/text", {
+            "stem": "如图所示，求证：AB=CD",
+            "question_type": "free_response",
+        }).json()["question"]
+        self.assertEqual(changed["figure_review"]["status"], "blocked_missing")
+        self.post(f"/api/questions/{self.q2.id}/figure-review", {"decision": "confirm_no_figure"})
+        self.assertEqual(
+            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
+            200,
+        )
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+
+        first.refresh_from_db()
+        second = PublishedQuestion.objects.get(question=self.q2, version=2)
+        self.assertEqual(first.content, original_snapshot)
+        self.assertEqual(first.status, PublishedQuestion.Status.SUPERSEDED)
+        self.assertEqual(second.content["review"]["figure_review"]["status"], "confirmed_no_figure")
+        self.assertEqual(second.content["review"]["figure_review"]["source"], "human")
+
+    def test_review_only_human_no_figure_confirmation_creates_a_new_version(self):
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN,
+            flags=[],
+            figure_review={
+                "status": "ok",
+                "source": "automatic",
+                "reason": "配图检查未发现矛盾",
+                "signals": [],
+                "cue_matches": [],
+                "excluded_count": 0,
+            },
+        )
+        self.assertEqual(
+            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
+            200,
+        )
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+        first = PublishedQuestion.objects.get(question=self.q2, version=1)
+        self.assertEqual(first.content["review"]["figure_review"]["source"], "automatic")
+
+        confirmed = self.post(
+            f"/api/questions/{self.q2.id}/figure-review",
+            {"decision": "confirm_no_figure"},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+        self.assertEqual(confirmed.json()["question"]["figure_review"]["source"], "human")
+        self.assertEqual(
+            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
+            200,
+        )
+        published = self.post(f"/api/papers/{self.paper.id}/publish").json()
+        self.assertEqual(published["created"], 1, published)
+
+        first.refresh_from_db()
+        second = PublishedQuestion.objects.get(question=self.q2, version=2)
+        self.assertEqual(first.status, PublishedQuestion.Status.SUPERSEDED)
+        self.assertEqual(second.content["review"]["figure_review"]["status"], "confirmed_no_figure")
+        self.assertEqual(second.content["review"]["figure_review"]["source"], "human")
 
     def test_cannot_approve_empty(self):
         Question.objects.filter(pk=self.q2.id).update(stem="")
@@ -950,7 +1340,7 @@ class ApiTests(TestCase):
 
     def test_publish_rejects_stale_approval_hash(self):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
-        Question.objects.filter(pk=self.q.id).update(stem="审批后被其他代码改过")
+        Question.objects.filter(pk=self.q.id).update(stem="如图，审批后被其他代码改过")
         result = self.post(f"/api/papers/{self.paper.id}/publish").json()
         self.assertEqual(result["created"], 0)
         self.assertTrue(any("重新终审" in problem for problem in result["problems"]))
@@ -971,7 +1361,10 @@ class ApiTests(TestCase):
         self.post(f"/api/papers/{self.paper.id}/publish")
         self.post(f"/api/questions/{self.q.id}/regions",
                   {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]})
-        # 人工确认文字无误后，题卡先进入可审核态，再单独通过。
+        # 调整范围会清掉旧配图；重新人工配图并确认文字后，才能再通过。
+        self.post(f"/api/questions/{self.q.id}/figures", {
+            "figures": [{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250]}],
+        })
         self.post(f"/api/questions/{self.q.id}/text",
                   {"stem": self.q.stem, "options": self.q.options, "question_type": self.q.question_type})
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})

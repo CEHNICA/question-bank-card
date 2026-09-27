@@ -20,9 +20,13 @@ from django.views.decorators.csrf import csrf_exempt
 from PIL import Image
 
 from . import imaging, library, m3import, mineru, photos, readers
+from .figure_policy import (
+    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
+    FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, cue_matches, figure_flag,
+    stored_or_derived_review,
+)
 from .models import Paper, PublishedQuestion, Question
-from .pipeline import (FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, PageStore, candidates_in, figure_flag,
-                       reorder_photo_pages)
+from .pipeline import PageStore, candidates_in, reorder_photo_pages
 from .textnorm import fix_reading_symbols, fix_symbols
 
 FRONTEND = settings.FRONTEND_ROOT
@@ -123,12 +127,17 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
     if with_counts:
         rows = list(paper.questions.select_related("paper"))
         approved_ids = {row.pk for row in rows if library.approval_is_current(row)}
+        figure_blocked_ids = {
+            row.pk for row in rows if blocks_approval(stored_or_derived_review(row))
+        }
         published = PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)\
             .values("question_id").distinct().count()
         data["counts"] = {
             "total": len(rows),
-            "green": sum(1 for r in rows if r.state == Question.State.GREEN and r.pk not in approved_ids),
-            "yellow": sum(1 for r in rows if r.state == Question.State.YELLOW and r.pk not in approved_ids),
+            "green": sum(1 for r in rows if r.state == Question.State.GREEN and r.pk not in approved_ids
+                         and r.pk not in figure_blocked_ids),
+            "yellow": sum(1 for r in rows if (r.state == Question.State.YELLOW or r.pk in figure_blocked_ids)
+                          and r.pk not in approved_ids),
             "red": sum(1 for r in rows if r.state == Question.State.RED and r.pk not in approved_ids),
             "waiting": sum(1 for r in rows if r.state in (Question.State.WAITING, Question.State.READING)),
             "approved": len(approved_ids),
@@ -143,6 +152,7 @@ def _reading(value: dict) -> dict:
 
 
 def question_json(question: Question) -> dict:
+    figure_review = stored_or_derived_review(question)
     approval_valid = library.approval_is_current(question)
     figures = []
     for index, figure in enumerate(question.figures):
@@ -153,6 +163,7 @@ def question_json(question: Question) -> dict:
         "question_type": question.question_type, "regions": question.regions,
         "regions_changed": question.regions != question.regions_auto, "start_source": question.start_source,
         "figure_candidates": question.figure_candidates, "figures": figures,
+        "figure_review": figure_review, "figure_blocked": blocks_approval(figure_review),
         "stem": question.stem, "options": question.options, "text_source": question.text_source,
         "state": question.state, "flags": question.flags, "error": question.error,
         "edited": question.edited, "approved": approval_valid,
@@ -491,7 +502,8 @@ def approve_green(request, paper_id):
             state=Question.State.GREEN,
         ))
         for question in questions:
-            if not question.stem.strip() or library.approval_is_current(question):
+            if (not question.stem.strip() or library.approval_is_current(question)
+                    or blocks_approval(stored_or_derived_review(question))):
                 continue
             question.approved = True
             question.approved_at = now
@@ -558,6 +570,22 @@ def _clear_approval(question: Question) -> None:
     question.approved_content_hash = ""
 
 
+def _apply_figure_review(question: Question, review: dict) -> None:
+    """Store a local decision and keep legacy flags/state in sync for old clients."""
+    question.figure_review = review
+    question.flags = [flag for flag in (question.flags or []) if not figure_flag(flag)]
+    if review.get("status") == BLOCKED_MISSING:
+        question.flags.append(FLAG_NO_FIGURE if review.get("cue_matches") and not question.figures
+                              else FLAG_UNFOUND_FIGURE)
+    elif review.get("status") == CONFLICT:
+        question.flags.append(
+            FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or [])
+            else FLAG_UNCUED_FIGURE
+        )
+    if question.state in library.REVIEWABLE_STATES:
+        question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+
+
 @csrf_exempt
 def question_action(request, question_id, action: str):
     if request.method != "POST":
@@ -581,6 +609,9 @@ def question_action(request, question_id, action: str):
                 return _error("这道题尚未进入可审核状态，请先完成识读或人工修正")
             if value and not question.stem.strip():
                 return _error("题干为空，请先改字")
+            review = stored_or_derived_review(question)
+            if value and blocks_approval(review):
+                return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
             if value:
                 question.approved = True
                 question.approved_at = now
@@ -608,9 +639,9 @@ def question_action(request, question_id, action: str):
             question.analysis = fix_symbols(payload.get("analysis", question.analysis).strip())
             question.edited = True
             question.text_source = "human"
-            question.flags = [f for f in question.flags
-                              if f in (FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE) or "截图" in f
-                              or ("选项是图" in f and not question.options)]
+            question.flags = [f for f in question.flags if not figure_flag(f) and "截图" in f]
+            question.figure_review = {}
+            _apply_figure_review(question, stored_or_derived_review(question))
             question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             question.error = ""
             # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
@@ -622,6 +653,7 @@ def question_action(request, question_id, action: str):
             question.regions = regions
             question.figure_candidates = candidates_in(question.paper, regions)
             question.figures = []
+            question.figure_review = {}
             question.edited = False
             _clear_approval(question)
             question.flags = []
@@ -629,6 +661,7 @@ def question_action(request, question_id, action: str):
             question.reread_requested = True
         elif action == "reread":
             question.edited = False
+            question.figure_review = {}
             _clear_approval(question)
             question.state = Question.State.WAITING
             question.reread_requested = True
@@ -643,10 +676,57 @@ def question_action(request, question_id, action: str):
                 if bbox is None or item.get("page_idx") not in pages or item.get("slot") not in SLOTS:
                     return _error("配图格式不正确")
                 cleaned.append({"slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox, "source": "manual"})
+            previous_figures = list(question.figures or [])
             question.figures = cleaned
-            question.flags = [f for f in question.flags if not figure_flag(f)]
-            if question.state == Question.State.YELLOW and not question.flags:
-                question.state = Question.State.GREEN
+            if cleaned:
+                review = {
+                    "status": OK, "source": "human", "reason": "配图已经由人工设置",
+                    "signals": ["manual_figure"], "cue_matches": cue_matches(question.stem, question.options),
+                    "excluded_count": 0, "confirmed_at": now.isoformat(),
+                }
+            else:
+                review = {
+                    "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
+                    "signals": ["human_confirmed_no_figure"],
+                    "cue_matches": cue_matches(question.stem, question.options),
+                    "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
+                    "previous_figures": previous_figures,
+                }
+            _apply_figure_review(question, review)
+            _clear_approval(question)
+        elif action == "figure-review":
+            decision = payload.get("decision")
+            if decision not in {"confirm_no_figure", "reset"}:
+                return _error("配图确认操作不正确")
+            if decision == "confirm_no_figure":
+                if question.state not in library.REVIEWABLE_STATES or not question.stem.strip():
+                    return _error("这道题尚未完成识读，暂时不能确认无图")
+                previous_figures = list(question.figures or [])
+                question.figures = []
+                _apply_figure_review(question, {
+                    "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
+                    "signals": ["human_confirmed_no_figure"],
+                    "cue_matches": cue_matches(question.stem, question.options),
+                    "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
+                    "previous_figures": previous_figures,
+                })
+            else:
+                current_review = stored_or_derived_review(question)
+                if current_review.get("status") != CONFIRMED_NO_FIGURE:
+                    return _error("这道题没有可撤销的无图确认")
+                pages = {page["page_idx"] for page in question.paper.pages}
+                restored = []
+                for item in current_review.get("previous_figures") or []:
+                    bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
+                    if (bbox is not None and item.get("page_idx") in pages and item.get("slot") in SLOTS
+                            and item.get("source") in {"auto", "manual", "other"}):
+                        restored.append({
+                            "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox,
+                            "source": item["source"],
+                        })
+                question.figures = restored
+                question.figure_review = {}
+                _apply_figure_review(question, stored_or_derived_review(question))
             _clear_approval(question)
         else:
             raise Http404()

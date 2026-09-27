@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 import threading
 from collections import OrderedDict
@@ -17,6 +16,11 @@ from django.utils import timezone
 from PIL import Image
 
 from . import imaging, photos, readers, segment
+from .figure_policy import (
+    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
+    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag,
+    recheck_automatic_review, stored_or_derived_review,
+)
 from .mineru import MineruError, load_blocks, request_extract
 from .models import Block, Paper, Question
 from .textnorm import same_reading
@@ -30,6 +34,17 @@ def _invalidate_approval(question: Question) -> None:
     question.approved = False
     question.approved_at = None
     question.approved_content_hash = ""
+
+
+def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dict]) -> list[str]:
+    """Replace only figure-policy flags; preserve all unrelated review warnings."""
+    result = [flag for flag in (flags or []) if not figure_flag(flag)]
+    if review.get("status") == BLOCKED_MISSING:
+        result.append(FLAG_NO_FIGURE if review.get("cue_matches") and not figures else FLAG_UNFOUND_FIGURE)
+    elif review.get("status") == CONFLICT:
+        result.append(FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or [])
+                      else FLAG_UNCUED_FIGURE)
+    return result
 
 
 # ---------------------------------------------------------------- 文件与页面
@@ -244,9 +259,11 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
         for question in paper.questions.all():
             for field in ("regions", "regions_auto", "figures", "figure_candidates"):
                 setattr(question, field, [photos.remap_page(mapping, item) for item in getattr(question, field)])
+            if not any(figure.get("source") == "manual" for figure in question.figures):
+                question.figure_review = {}
             _invalidate_approval(question)
             question.save(update_fields=[
-                "regions", "regions_auto", "figures", "figure_candidates",
+                "regions", "regions_auto", "figures", "figure_candidates", "figure_review",
                 "approved", "approved_at", "approved_content_hash", "updated_at",
             ])
         _set(paper, photos=info, pages=imaging.page_sizes(Path(paper.render_path), "pdf"),
@@ -375,6 +392,10 @@ def segment_paper(paper: Paper) -> None:
             else:
                 reread += 1
                 question.figures = [f for f in question.figures if f.get("source") == "manual"]
+                question.figure_review = ({
+                    "status": OK, "source": "human", "reason": "配图已经由人工设置",
+                    "signals": ["manual_figure"], "cue_matches": [], "excluded_count": 0,
+                } if question.figures else {})
                 question.state = Question.State.WAITING
                 _invalidate_approval(question)
                 question.flags = []
@@ -397,15 +418,6 @@ def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
              for block in paper.blocks.filter(type__in=segment.FIGURE_TYPES)
              if block.bbox and segment.overlaps_regions(block.page_idx, block.bbox, regions)]
     return _label_candidates(found)
-
-
-FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“配图”框出"
-FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
-MENTIONS_FIGURE = re.compile(r"如图|图中|下图|右图|左图|上图|图所示|见图|图[①②③1-9]|如表|下表|表中|表所示")
-
-
-def figure_flag(flag: str) -> bool:
-    return flag in (FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE) or "选项是图" in flag
 
 
 # ---------------------------------------------------------------- 3. 读题
@@ -533,9 +545,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             figures.append({"slot": role, **box, "source": "auto"})
         elif role.startswith("q") and role[1:].isdigit():
             foreign.append({"number": int(role[1:]), **box})   # 属于别的题的图，交给那道题
-    has_option_figures = any(f["slot"] in {"A", "B", "C", "D"} for f in figures)
-    if not figures and (figure_source.get("missing_figure") or MENTIONS_FIGURE.search(final.get("stem", ""))):
-        flags.append(FLAG_NO_FIGURE if MENTIONS_FIGURE.search(final.get("stem", "")) else FLAG_UNFOUND_FIGURE)
+    option_figure_slots = {f["slot"] for f in figures if f["slot"] in readers.OPTION_KEYS}
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
@@ -543,9 +553,38 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         slot for result in audited_results
         for slot in (result.get("figure_descriptions") or [])
     }
-    bound_slots = {f["slot"] for f in figures if f["slot"] == "stem" or f["slot"] in readers.OPTION_KEYS}
-    if described_slots - bound_slots and not any(figure_flag(flag) for flag in flags):
-        flags.append(FLAG_UNFOUND_FIGURE)
+    # The text reader sees the complete question and is more reliable than the
+    # segmentation heuristic for sub-numbered free-response questions such as
+    # “(1)…(2)…”.  Keep the segment type only as a fallback.
+    kind = final.get("type") or "unknown"
+    if kind == "unknown":
+        kind = snapshot["question_type"]
+    choice_missing_slots = set()
+    if kind in {"single_choice", "multiple_choice"} and not final.get("options"):
+        choice_missing_slots = set(readers.OPTION_KEYS) - option_figure_slots
+    choice_missing = bool(choice_missing_slots)
+    policy_stem = snapshot.get("stem", "") if snapshot.get("edited") else final.get("stem", "")
+    policy_options = snapshot.get("options", {}) if snapshot.get("edited") else final.get("options") or {}
+    review = automatic_review(
+        stem=policy_stem,
+        options=policy_options,
+        candidate_labels=set(labels),
+        assignments=figure_source.get("figures") or {},
+        figures=figures,
+        reader_missing=bool(figure_source.get("missing_figure") or choice_missing),
+        described_slots=described_slots | choice_missing_slots,
+    )
+    if review["status"] == BLOCKED_MISSING:
+        if choice_missing:
+            flags.append("选择题没有读出选项；如果选项是图，请点“配图”把 A–D 各框一下")
+            flags.append(FLAG_UNFOUND_FIGURE)
+        elif review.get("cue_matches") and not figures:
+            flags.append(FLAG_NO_FIGURE)
+        else:
+            flags.append(FLAG_UNFOUND_FIGURE)
+    elif review["status"] == CONFLICT:
+        flags.append(FLAG_UNFOUND_FIGURE if "candidate_unclassified" in review.get("signals", [])
+                     else FLAG_UNCUED_FIGURE)
     if final.get("unclear"):
         flags.append("有看不清的字（[?]），请对照原卷补上")
     # 两位读者都说看到了别的题号才提示；能用"第N题图"解释的不算。
@@ -557,11 +596,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     seen = (a or b).get("number_seen")
     if seen and seen != number:
         flags.append(f"AI 看到的题号是 {seen}，请确认")
-    kind = snapshot["question_type"]
-    if kind == "unknown":
-        kind = final.get("type") or "unknown"
-    if kind in {"single_choice", "multiple_choice"} and not final.get("options") and not has_option_figures:
-        flags.append("选择题没有读出选项；如果选项是图，请点“配图”把 A–D 各框一下")
     return {
         **update,
         "stem": final.get("stem", ""),
@@ -569,6 +603,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         "question_type": kind,
         "text_source": source,
         "figures": figures,
+        "figure_review": review,
         "foreign_figures": foreign,
         "flags": flags,
         "error": "",
@@ -578,7 +613,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
 def _snapshot(question: Question) -> dict:
     return {"id": question.id, "number": question.number, "regions": question.regions,
-            "candidates": question.figure_candidates, "question_type": question.question_type}
+            "candidates": question.figure_candidates, "question_type": question.question_type,
+            "stem": question.stem, "options": question.options, "edited": question.edited}
 
 
 def read_questions(paper: Paper, questions: list[Question]) -> None:
@@ -617,9 +653,19 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             borrowed = [f for f in question.figures if f.get("source") == "other"]
             if borrowed and "figures" in fields:
                 fields["figures"] = fields["figures"] + [f for f in borrowed if not _same_box(f, fields["figures"])]
-                fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
-                if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
-                    fields["state"] = Question.State.GREEN
+                review_stem = question.stem if question.edited else fields.get("stem", question.stem)
+                review_options = question.options if question.edited else fields.get("options", question.options)
+                fields["figure_review"] = recheck_automatic_review(
+                    stem=review_stem,
+                    options=review_options,
+                    figures=fields["figures"],
+                    previous=fields.get("figure_review"),
+                )
+                fields["flags"] = _flags_after_figure_review(
+                    fields.get("flags", []), fields["figure_review"], fields["figures"],
+                )
+                if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
+                    fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
             if question.edited:
                 # 人工改过的文字不被覆盖，只更新识读记录与配图建议。
                 fields = {k: v for k, v in fields.items() if k not in {"stem", "options", "text_source"}}
@@ -628,7 +674,17 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
                     fields["state"] = Question.State.GREEN
             if question.figures and any(f.get("source") == "manual" for f in question.figures):
                 fields.pop("figures", None)
-                fields["flags"] = [f for f in fields.get("flags", []) if "配图" not in f]
+                fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
+                fields["figure_review"] = {
+                    "status": OK, "source": "human", "reason": "配图已经由人工设置",
+                    "signals": ["manual_figure"], "cue_matches": [], "excluded_count": 0,
+                }
+            elif stored_or_derived_review(question).get("status") == CONFIRMED_NO_FIGURE:
+                fields["figures"] = []
+                fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
+                fields["figure_review"] = stored_or_derived_review(question)
+            if fields.get("state") == Question.State.YELLOW and not fields.get("flags"):
+                fields["state"] = Question.State.GREEN
             for key, value in fields.items():
                 setattr(question, key, value)
             question.save()
@@ -650,11 +706,18 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             continue
         if _same_box(item, target.figures):
             continue
+        previous_review = stored_or_derived_review(target)
         target.figures = target.figures + [{"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"],
                                             "source": "other"}]
-        target.flags = [f for f in target.flags if not figure_flag(f)]
-        if target.state == Question.State.YELLOW and not target.flags:
-            target.state = Question.State.GREEN
+        target.figure_review = recheck_automatic_review(
+            stem=target.stem,
+            options=target.options,
+            figures=target.figures,
+            previous=previous_review,
+        )
+        target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
+        if target.state in {Question.State.GREEN, Question.State.YELLOW}:
+            target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
         _invalidate_approval(target)
         target.save()
 

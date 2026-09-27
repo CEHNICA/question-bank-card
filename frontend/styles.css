@@ -310,6 +310,17 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .state-red .flags { background: var(--red-soft); border-color: var(--red-line); color: var(--red); }
 .flags li { display: flex; gap: 7px; }
 .flags li::before { content: ""; flex: none; width: 5px; height: 5px; margin-top: 8px; border-radius: 50%; background: currentColor; }
+.figure-review { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--ink-2); }
+.figure-review-title { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13.5px; }
+.figure-review-title .icon { width: 15px; height: 15px; }
+.figure-review-copy { font-size: 13px; line-height: 1.65; }
+.figure-review-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 2px; }
+.figure-review-blocked_missing, .figure-review-conflict { background: var(--amber-soft); border-color: var(--amber-line); color: #74500f; }
+.figure-review-blocked_missing .figure-review-title, .figure-review-conflict .figure-review-title { color: #704609; }
+.figure-review-auto_excluded { background: #f1f5f1; border-color: #d7e0d7; }
+.figure-review-auto_excluded .figure-review-title { color: var(--accent); }
+.figure-review-confirmed_no_figure { background: var(--green-soft); border-color: #bcdcc7; }
+.figure-review-confirmed_no_figure .figure-review-title { color: var(--green); }
 .rendered { min-height: 40px; }
 .reading-placeholder { display: grid; gap: 10px; padding: 8px 0 16px; }
 .reading-placeholder p { color: var(--muted); font-size: 13.5px; }
@@ -438,7 +449,7 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
 .viewer-text a, .viewer-text button, .viewer-text summary, .viewer-text select, .viewer-text label { cursor: pointer; }
 .viewer-text input, .viewer-text textarea { cursor: text; }
 .viewer-text .qb-question { font-size: 17.5px; }
-.viewer-text .flags { margin-bottom: 14px; }
+.viewer-text .flags, .viewer-text .figure-review { margin-bottom: 14px; }
 .viewer-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 12px 20px; border-top: 1px solid var(--line); background: var(--surface-2); flex-wrap: wrap; }
 .viewer-foot .key-hints { margin-right: auto; }
 /* 确认框、快捷键 */

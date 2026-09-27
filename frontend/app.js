@@ -145,16 +145,41 @@
     return Boolean(q.approval_stale || (q.approved && q.approval_valid === false));
   }
 
+  const FIGURE_REVIEW_BLOCKS = new Set(["blocked_missing", "conflict"]);
+
+  function legacyFigureFlag(q) {
+    return (q.flags || []).find((flag) => /还没有配图|原卷可能有图没有被找到|选项是图/.test(String(flag))) || "";
+  }
+
+  // 新服务会返回结构化的 figure_review；保留对旧 flags/figure_blocked 的兼容，
+  // 这样前端和后端分步更新时也不会放过一张明确提示漏图的题卡。
+  function figureReview(q) {
+    const raw = q.figure_review;
+    let review = typeof raw === "string" ? { status: raw }
+      : raw && typeof raw === "object" ? { ...raw } : null;
+    const legacy = legacyFigureFlag(q);
+    if (!review && (q.figure_blocked || legacy)) {
+      review = { status: "blocked_missing", reason: legacy };
+    }
+    if (!review?.status) return null;
+    if (!review.reason && legacy && FIGURE_REVIEW_BLOCKS.has(review.status)) review.reason = legacy;
+    return review;
+  }
+
+  function figureBlocksApproval(q) {
+    return FIGURE_REVIEW_BLOCKS.has(figureReview(q)?.status);
+  }
+
   function isApproved(q) {
-    return Boolean(q.approved && q.approval_valid !== false && !q.approval_stale);
+    return Boolean(q.approved && q.approval_valid !== false && !q.approval_stale && !figureBlocksApproval(q));
   }
 
   function canApprove(q) {
-    return Boolean(q.stem && (q.state === "green" || q.state === "yellow"));
+    return Boolean(q.stem && !figureBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
   }
 
   function needsCheck(q) {
-    return !isApproved(q) && (approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
+    return !isApproved(q) && (figureBlocksApproval(q) || approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
   }
 
   function anyDialogOpen() {
@@ -332,7 +357,7 @@
     return {
       all: qs.length,
       todo: qs.filter(needsCheck).length,
-      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && q.state === "green").length,
+      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green").length,
       approved: qs.filter(isApproved).length,
       waiting: qs.filter((q) => q.state === "waiting" || q.state === "reading").length,
       red: qs.filter((q) => !isApproved(q) && q.state === "red").length,
@@ -491,7 +516,7 @@
 
   function visible(q) {
     if (state.filter === "todo") return needsCheck(q);
-    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && q.state === "green";
+    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green";
     if (state.filter === "approved") return isApproved(q);
     return true;
   }
@@ -603,7 +628,8 @@
         event.preventDefault();
         if (isApproved(q)) toast(`第 ${q.number} 题已经是通过状态；按 U 可撤销`);
         else if (canApprove(q)) approveQuestion(q, true);
-        else toast(q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
+        else toast(figureBlocksApproval(q) ? "这道题可能漏图：请先补配图，或确认本题确实无图"
+          : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
         break;
       case " ":
         if (onControl) return;
@@ -832,12 +858,10 @@
     applyZoom();
     const text = $("viewerText");
     text.replaceChildren();
-    if (q.flags?.length || q.error) {
-      const flags = el("ul", "flags");
-      if (q.error) flags.append(el("li", "", q.error));
-      (q.flags || []).forEach((flag) => flags.append(el("li", "", flag)));
-      text.append(flags);
-    }
+    const figurePanel = figureReviewPanel(q);
+    if (figurePanel) text.append(figurePanel);
+    const flags = flagsNode(q);
+    if (flags) text.append(flags);
     if (q.stem) {
       const body = el("div");
       R.renderQuestion(body, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed" });
@@ -855,6 +879,8 @@
       approve.replaceChildren(icon("check"), document.createTextNode(approvalNeedsReview(q) ? "重新标记通过" : "通过并下一题"), el("span", "kbd-hint", "Enter"));
       approve.className = "button primary";
       approve.disabled = !canApprove(q);
+      approve.title = figureBlocksApproval(q) ? "请先补配图，或确认本题确实无图"
+        : canApprove(q) ? "对照原卷确认无误后通过，并跳到下一题" : "请等待识读完成并确认题面";
     }
     if (viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
   }
@@ -888,7 +914,10 @@
     const q = questionById(viewer.id);
     if (!q) return;
     if (isApproved(q)) { await approveQuestion(q, false, { advance: false }); return; }
-    if (!canApprove(q)) return;
+    if (!canApprove(q)) {
+      toast(figureBlocksApproval(q) ? "这道题可能漏图：请先补配图，或确认本题确实无图" : "这道题还不能通过", "error");
+      return;
+    }
     const before = viewerList().map((item) => item.id);
     const ok = await approveQuestion(q, true, { advance: false });
     if (!ok) return;
@@ -1046,7 +1075,112 @@
 
   // ---------------------------------------------------------------- 题卡
 
+  function figureReviewCopy(review) {
+    const count = Number(review.excluded_count) || 0;
+    if (review.status === "blocked_missing") return {
+      title: "可能漏图，暂时不能通过",
+      text: review.reason || "题目文字或现有识读结果表明这里应当有图，但当前没有配图。"
+    };
+    if (review.status === "conflict") return {
+      title: "配图判断有冲突，暂时不能通过",
+      text: review.reason || "程序无法确定候选内容是正式配图还是手写痕迹，请对照原卷确认。"
+    };
+    if (review.status === "auto_excluded") return {
+      title: "已自动排除疑似多余图",
+      text: review.reason || (count ? `已排除 ${count} 张疑似手写、草图或批注，不需要逐张检查。` : "疑似手写、草图或批注已从本题配图中排除。")
+    };
+    if (review.status === "confirmed_no_figure") return {
+      title: "已人工确认本题无图",
+      text: review.reason || "漏图提醒已解除；这项人工判断会随题卡保留。"
+    };
+    if (review.status === "ok") return null;
+    return review.reason ? { title: "配图检查说明", text: review.reason } : null;
+  }
+
+  function openFigureEditor(q) {
+    if ($("viewerDialog").open) $("viewerDialog").close();
+    setCurrent(q.id);
+    openPageDialog("figures", questionById(q.id) || q);
+  }
+
+  async function confirmNoFigure(q) {
+    const ok = await confirmDialog({
+      title: `确认第 ${q.number} 题确实无图？`,
+      text: "请先对照左侧原卷。确认后不会重新调用 AI，也不会改动原卷；系统只会记录这次人工判断并解除漏图阻止。如果原卷确实有图，请取消并点“配图”。",
+      ok: "确认无图"
+    });
+    if (!ok) return false;
+    try {
+      const data = await api(`/api/questions/${q.id}/figure-review`, { method: "POST", body: { decision: "confirm_no_figure" } });
+      applyQuestion(data);
+      if ($("viewerDialog").open) renderViewer();
+      toast(`已确认第 ${q.number} 题无图；现在可以继续审核`, "success");
+      return true;
+    } catch (error) {
+      toast(error.message, "error");
+      return false;
+    }
+  }
+
+  async function resetNoFigure(q) {
+    try {
+      const data = await api(`/api/questions/${q.id}/figure-review`, { method: "POST", body: { decision: "reset" } });
+      applyQuestion(data);
+      if ($("viewerDialog").open) renderViewer();
+      toast(`已撤销第 ${q.number} 题的无图确认，请重新核对配图`);
+      return true;
+    } catch (error) {
+      toast(error.message, "error");
+      return false;
+    }
+  }
+
+  function figureReviewPanel(q) {
+    const review = figureReview(q);
+    const copy = review && figureReviewCopy(review);
+    if (!copy) return null;
+    const panel = el("section", `figure-review figure-review-${review.status}`);
+    panel.setAttribute("aria-label", copy.title);
+    const heading = el("strong", "figure-review-title");
+    heading.append(icon(FIGURE_REVIEW_BLOCKS.has(review.status) ? "alert" : "check"), document.createTextNode(copy.title));
+    panel.append(heading, el("p", "figure-review-copy", copy.text));
+    if (FIGURE_REVIEW_BLOCKS.has(review.status)) {
+      const actions = el("div", "figure-review-actions");
+      actions.append(
+        button("配图", "small primary", () => openFigureEditor(q), "原卷确实有图时，在这里补上或调整配图", { iconName: "image" }),
+        button("确认本题确实无图", "small", () => confirmNoFigure(q), "对照原卷后，记录本题没有配图并解除阻止")
+      );
+      panel.append(actions);
+    } else if (review.status === "confirmed_no_figure") {
+      const actions = el("div", "figure-review-actions");
+      actions.append(button("撤销无图确认", "small", () => resetNoFigure(q), "恢复确认前的自动配图并重新判断"));
+      panel.append(actions);
+    }
+    return panel;
+  }
+
+  function questionFlags(q) {
+    const review = figureReview(q);
+    return (q.flags || []).filter((flag) => {
+      if (!review) return true;
+      if (flag === review.reason) return false;
+      return !(FIGURE_REVIEW_BLOCKS.has(review.status) && /还没有配图|原卷可能有图没有被找到|选项是图/.test(String(flag)));
+    });
+  }
+
+  function flagsNode(q) {
+    const flags = questionFlags(q);
+    if (!flags.length && !q.error) return null;
+    const list = el("ul", "flags");
+    if (q.error) list.append(el("li", "", q.error));
+    flags.forEach((flag) => list.append(el("li", "", flag)));
+    return list;
+  }
+
   function stateChip(q) {
+    const review = figureReview(q);
+    if (review?.status === "blocked_missing") return el("span", "chip yellow", "可能漏图 · 待处理");
+    if (review?.status === "conflict") return el("span", "chip yellow", "配图冲突 · 待确认");
     if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
     if (isApproved(q)) return el("span", "chip approved", "已标记通过");
     if (q.state === "green") return el("span", "chip green", q.text_source === "majority" ? "三读两票一致 · 待审核" : q.text_source === "human" ? "已人工修改 · 待审核" : "两次识读一致 · 待审核");
@@ -1109,7 +1243,7 @@
   function renderCard(q) {
     const approved = isApproved(q);
     const approvedCompact = approved && !state.expanded.has(q.id);
-    const displayState = approved ? "approved has-toggle" : approvalNeedsReview(q) ? "yellow" : q.state;
+    const displayState = approved ? "approved has-toggle" : (figureBlocksApproval(q) || approvalNeedsReview(q)) ? "yellow" : q.state;
     const card = el("article", `card state-${displayState}${approvedCompact ? " compact" : ""}`);
     card.dataset.id = q.id;
     card.id = `q-${q.id}`;
@@ -1158,12 +1292,10 @@
       return card;
     }
 
-    if (q.flags?.length || q.error) {
-      const flags = el("ul", "flags");
-      if (q.error) flags.append(el("li", "", q.error));
-      (q.flags || []).forEach((flag) => flags.append(el("li", "", flag)));
-      body.append(flags);
-    }
+    const figurePanel = figureReviewPanel(q);
+    if (figurePanel) body.append(figurePanel);
+    const flags = flagsNode(q);
+    if (flags) body.append(flags);
 
     const rendered = el("div", "rendered");
     if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed" });
@@ -1174,8 +1306,9 @@
     if (!approved) {
       const approve = button(approvalNeedsReview(q) ? "重新标记通过" : "标记通过", "primary", () => approveQuestion(q, true), "", { iconName: "check", key: "Enter" });
       approve.disabled = !canApprove(q);
-      approve.title = canApprove(q) ? "对照原卷确认无误后通过（Enter），会自动跳到下一张"
-        : q.state === "red" ? "识读失败的题需先修改或重读，不能直接通过" : "请等待识读完成并确认题面";
+      approve.title = figureBlocksApproval(q) ? "请先补配图，或确认本题确实无图"
+        : canApprove(q) ? "对照原卷确认无误后通过（Enter），会自动跳到下一张"
+          : q.state === "red" ? "识读失败的题需先修改或重读，不能直接通过" : "请等待识读完成并确认题面";
       actions.append(approve);
     } else {
       actions.append(button("撤销通过", "", () => approveQuestion(q, false), "撤销通过（U）"));

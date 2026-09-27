@@ -80,6 +80,8 @@ class Question(models.Model):
     start_source = models.CharField(max_length=16, default="mineru")
     figure_candidates = models.JSONField(default=list)   # [{label, page_idx, bbox, seq}]
     figures = models.JSONField(default=list)             # [{slot, page_idx, bbox, source}]
+    # 零额外识别调用的配图核查结果。自动判断和人工“确认无图”都保留理由，便于撤销与追溯。
+    figure_review = models.JSONField(default=dict)
     # 识读记录：甲（MiniMax）、乙（第二位读者）、丙（仅分歧时的裁决）。
     read_a = models.JSONField(default=dict)
     read_b = models.JSONField(default=dict)

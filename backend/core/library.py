@@ -16,6 +16,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import imaging
+from .figure_policy import (
+    CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
+)
 from .models import Paper, PublishedQuestion, Question
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
@@ -60,7 +63,8 @@ def final_content(question: Question) -> dict:
         ],
         "document_id": str(question.paper_id),
         "source_filename": question.paper.display_name,
-        # 审核记录随不可变快照保存，但不参与内容版本哈希；相同内容重复点击入库不会制造新版本。
+        # 审核记录随不可变快照保存。一般提示不参与版本身份；人工“确实无图”的决定例外，
+        # 因为它是允许一条原本会被阻止的题目入库的关键依据。
         "review": {
             "state": question.state,
             "flags": list(question.flags or []),
@@ -68,6 +72,7 @@ def final_content(question: Question) -> dict:
             "approved_content_hash": question.approved_content_hash,
             "text_source": question.text_source,
             "edited": question.edited,
+            "figure_review": deepcopy(stored_or_derived_review(question)),
         },
     }
 
@@ -86,6 +91,14 @@ def content_hash(content: dict) -> str:
         {k: source.get(k) for k in ("page_idx", "bbox", "type", "source")}
         for source in content.get("sources", [])
     ]
+    figure_review = (content.get("review") or {}).get("figure_review") or {}
+    if (figure_review.get("status") == CONFIRMED_NO_FIGURE
+            and figure_review.get("source") == "human"):
+        material["figure_review_decision"] = {
+            "status": CONFIRMED_NO_FIGURE,
+            "source": "human",
+            "confirmed_at": figure_review.get("confirmed_at"),
+        }
     canonical = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -96,6 +109,8 @@ def approval_hash(question: Question) -> str:
 
 
 def approval_is_current(question: Question) -> bool:
+    if blocks_approval(stored_or_derived_review(question)):
+        return False
     return bool(
         question.approved
         and question.approved_content_hash
@@ -150,6 +165,9 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             raise ValueError(f"第 {question.number} 题当前状态不能入库，请先完成识读或人工修正")
         if not question.stem.strip():
             raise ValueError(f"第 {question.number} 题题干为空")
+        figure_review = stored_or_derived_review(question)
+        if blocks_approval(figure_review):
+            raise ValueError(f"第 {question.number} 题暂时不能入库：{blocking_message(figure_review)}")
         content = final_content(question)
         digest = content_hash(content)
         if not question.approved_content_hash or question.approved_content_hash != digest:
