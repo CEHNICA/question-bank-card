@@ -106,6 +106,55 @@ class WitnessKeyTests(SimpleTestCase):
         self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15"))
 
 
+class WitnessOcrNoiseTests(SimpleTestCase):
+    """Spellings from real MinerU output that print exactly like the reading."""
+
+    def test_layout_html_tags_on_digital_pdfs_are_not_subscripts(self):
+        # 2024 全国甲卷: MinerU wraps whole runs of an off-baseline line.
+        mineru = "<sub>13.</sub> <sub>已知函数</sub> $f(x)$ <sub>的最小值为</sub>（ ）"
+        self.assertEqual(witness_key(mineru), witness_key("已知函数 $f(x)$ 的最小值为（ ）"))
+        self.assertEqual(witness_key("设<sup>p</sup>为优级品率"), witness_key("设 $p$ 为优级品率"))
+        # A script glued to its symbol keeps its meaning (see the test above).
+        self.assertNotEqual(witness_key("x<sub>2</sub>+1"), witness_key("x2+1"))
+        self.assertNotEqual(witness_key("x <sub>2</sub>+1"), witness_key("x2+1"))
+
+    def test_same_printed_mark_in_another_spelling(self):
+        pairs = (
+            (r"$\bar{z}+z$ 的值为多少", r"$\overline { { z } } + z$ 的值为多少"),
+            (r"约束条件 $\begin{cases} x\geq 0 \\ y\leq 1 \end{cases}$ 则",
+             r"约束条件 $\left\{ { \begin{array} { l } { x \geq 0 } \\ { y \leq 1 } \end{array} } \right.$ 则"),
+            (r"$0.1212212221\ldots$（相邻两个", "0.1212212221...（相邻两个"),
+            (r"$\frac{3}{4}$ 与 $x$ 的和为", r"$\scriptscriptstyle \frac{3}{4}$ 与 $~x$ 的和为"),
+        )
+        for reading, mineru in pairs:
+            with self.subTest(mineru=mineru):
+                self.assertTrue(witness_agrees({"stem": reading}, mineru))
+
+    def test_punctuation_mineru_dropped_is_tolerated_only_where_it_cannot_change_maths(self):
+        tolerated = (
+            ("且4S_n=3a_n+4.(1)求通项；(2)求前n项和T_n.", "且4S_n=3a_n+4(1)求通项；(2)求前n项和T_n"),
+            ("若AB=√5，则阴影部分的面积为", "若AB=√5则阴影部分的面积为"),
+            ("各项系数的最大值是____.", "各项系数的最大值是"),
+        )
+        for reading, mineru in tolerated:
+            with self.subTest(mineru=mineru):
+                self.assertTrue(witness_agrees({"stem": reading}, mineru))
+        options = {"stem": "则 i(z̄+z)=（ ）", "options": {"A": "10i", "B": "2i"}}
+        self.assertTrue(witness_agrees(options, "1 则 i(z̄+z)=（ ） A 10i B. 2i"))
+        not_tolerated = (
+            # The reader left out a comma MinerU saw: read the card again.
+            ("连接AN，CM得到四边形ANCM", "连接AN，CM，得到四边形ANCM"),
+            # A comma between two symbols, or a mark swapped for another.
+            ("若实数x,y满足约束条件", "若实数xy满足约束条件"),
+            ("EF∥AD，AD=4，AB=2", "EF∥ADAD=4，AB=2"),
+            ("噪声影响越大，若已知卡车", "噪声影响越大.若已知卡车"),
+            ("长依次为5.6.7，求面积", "长依次为567，求面积"),
+        )
+        for reading, mineru in not_tolerated:
+            with self.subTest(mineru=mineru):
+                self.assertFalse(witness_agrees({"stem": reading}, mineru))
+
+
 class StemCleanupTests(SimpleTestCase):
     def test_number_and_score_markers_are_removed_only_when_they_are_this_question(self):
         self.assertEqual(clean_stem("14 如图，在正五边形内部", 14), "如图，在正五边形内部")
@@ -115,6 +164,22 @@ class StemCleanupTests(SimpleTestCase):
         self.assertEqual(clean_stem("．如图，所有三角形", 2), "如图，所有三角形")
         self.assertEqual(clean_stem("2..如图，所有三角形", 2), "如图，所有三角形")
         self.assertEqual(clean_stem("（ ）如图，在▱ABCD中", 23), "如图，在▱ABCD中")
+
+    def test_clipped_numbers_and_small_question_score_markers(self):
+        # 装订边裁掉了“1”：读者看到的是“9.”。
+        self.assertEqual(clean_stem("9.（本题满分 6 分）\n\n已知点 A", 19), "已知点 A")
+        self.assertEqual(clean_stem("（本小题满分 6 分）\n\n如图，一架梯子", 20), "如图，一架梯子")
+        self.assertEqual(clean_stem("9.8 米每秒的速度", 19), "9.8 米每秒的速度")
+
+    def test_text_cut_in_from_above_or_below_the_question(self):
+        self.assertEqual(clean_stem("合题目要求的.\n1. 经过点 (3,1)，斜率为", 1), "经过点 (3,1)，斜率为")
+        self.assertEqual(clean_stem("（1）求证\n2. 若 x=1", 2), "（1）求证\n2. 若 x=1")
+        self.assertEqual(clean_stem("求 a 的值．\n\n[选修 4-5：不等式选讲]", 22), "求 a 的值．")
+        self.assertEqual(
+            clean_stem("恒成立，求 a 的取值范围．\n\n（二）选考题：共 10 分，请考生在第 22、23 题中任选一题作答．"
+                       "\n\n[选修 4-4：坐标系与参数方程]", 21),
+            "恒成立，求 a 的取值范围．",
+        )
 
 
 class WitnessChoiceTests(SimpleTestCase):

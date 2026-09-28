@@ -131,17 +131,42 @@ NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s*[.．、]+\s*")
 BARE_NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s+(?=[\u4e00-\u9fff])")
 
 
+_SCORE_MARK = r"[(（]\s*(?:本小?题)?\s*(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]"
+# 分区标题被一起截进题卡时，读者会把它抄在题面末尾（“[选修 4-5：不等式选讲]”、
+# “（二）选考题：共 10 分……”、“三、解答题……”）。
+_TRAILING_SECTION = re.compile(
+    r"(?:\n\s*(?:[\[【(（]?\s*选修\s*\d+\s*[-－—–]\s*\d+[^\n]*"
+    r"|[(（]\s*[一二三]\s*[)）]\s*(?:必考|选考)题[^\n]*"
+    r"|[一二三四五六七八九十]{1,2}\s*[、.．]\s*(?:单项|多项|不定项)?(?:选择|填空|解答|计算|判断|作图)题[^\n]*))+\s*$"
+)
+
+
+def _is_own_number(value: str, number: int | None) -> bool:
+    """Whether a printed number is this card's, allowing a binding edge that
+    clipped its leading digits (“9.” for 19, “0.” for 20)."""
+    if number is None:
+        return True
+    return int(value) == number or (len(value) < len(str(number)) and str(number).endswith(value))
+
+
 def clean_stem(stem: str, number: int | None = None) -> str:
     """去掉模型偶尔带上的题号和分值。"""
     text = str(stem or "").strip()
+    # 截图顶部带进了上一段的尾巴（“合题目要求的。\n1．经过点……”）：
+    # 从本题自己的题号那一行开始。
+    if number is not None:
+        own_line = re.search(rf"\n\s*{number}\s*[.．、]+(?!\d)\s*", text[:120])
+        if own_line and "\n" in text[:own_line.start() + 1] and len(text[:own_line.start()].strip()) <= 60 \
+                and not re.search(r"[(（]\s*\d\s*[)）]", text[:own_line.start()]):
+            text = text[own_line.start():].strip()
     match = NUMBER_PREFIX.match(text)
-    if match and (number is None or int(match.group(1)) == number):
+    if match and _is_own_number(match.group(1), number) and not text[match.end():match.end() + 1].isdigit():
         text = text[match.end():]
     else:
         bare = BARE_NUMBER_PREFIX.match(text)
         if bare and number is not None and int(bare.group(1)) == number:
             text = text[bare.end():]
-    text = re.sub(r"^\s*[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
+    text = re.sub(rf"^\s*{_SCORE_MARK}\s*", "", text)
     # A reader that dropped “本题满分10分” sometimes leaves its opening bracket:
     # “（（1）如图1…”.
     text = re.sub(r"^\s*[(（]\s*(?=[(（]\s*\d{1,2}\s*[)）])", "", text)
@@ -149,6 +174,7 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     text = re.sub(r"^\s*[.．、]+\s*(?=[\u4e00-\u9fff（(])", "", text)
     # An emptied score bracket: “（ ）如图，在▱ABCD中…”.
     text = re.sub(r"^\s*[(（]\s*[)）]\s*(?=[\u4e00-\u9fff])", "", text)
+    text = _TRAILING_SECTION.sub("", text)
     return text.strip()
 
 
@@ -166,11 +192,27 @@ def clean_option(value: str, key: str) -> str:
 # formatting difference may cause another vision read; a false green card is
 # worse than that extra call.
 
+# MinerU marks a *real* sub/superscript with HTML only when it is glued to
+# the symbol it belongs to (x<sub>2</sub>).  On digital PDFs it also wraps
+# whole runs of a line that sits off the baseline, question number and
+# Chinese text included (“<sub>12.</sub> <sub>已知b是</sub>”); those tags are
+# layout, not meaning.
 _HTML_SCRIPT = re.compile(r"<(sub|sup)\b[^>]*>(.*?)</\1\s*>", re.I | re.S)
+_SCRIPT_BASE = re.compile(r"[A-Za-z0-9)\]}'′]")
+_CJK_OR_CJK_PUNCT = re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
 _INLINE_TAG = re.compile(r"</?(?:span|b|i|u|em|strong)\b[^>]*>", re.I)
-_WITNESS_SCORE = re.compile(r"[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]")
+_WITNESS_SCORE = re.compile(_SCORE_MARK)
 _WITNESS_LEAD = re.compile(r"^\s*(?:\d{1,3}\s*[.．、]+(?!\d)|\d{1,3}\s+(?=[\u4e00-\u9fff]))\s*")
 WITNESS_MIN_LENGTH = 6
+
+# Spellings that print identically.  Each pair is an equivalence, never a
+# removal: a decoration, bracket or mark that one engine has and the other
+# lacks still makes the texts differ.
+_BAR = re.compile(r"\\bar(?![A-Za-z])")
+_STYLE = re.compile(r"\\(?:scriptscriptstyle|scriptstyle)(?![A-Za-z])")
+_CASES_OPEN = re.compile(r"\\left\s*\\\{(?:\s|\{)*\\begin\s*\{\s*array\s*\}\s*\{\s*[lcr]+\s*\}")
+_CASES_CLOSE = re.compile(r"\\end\s*\{\s*array\s*\}(?:\s|\})*\\right\s*\.")
+_MATH_SEGMENT = re.compile(r"\$[^$]*\$")
 
 
 # A student's answer letter written into the printed answer brackets
@@ -178,19 +220,35 @@ WITNESS_MIN_LENGTH = 6
 _WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-D]{1,4}\s*[)）]")
 
 
-def witness_key(value: str) -> str:
-    # HTML script tags carry the same meaning as LaTeX _ and ^.  Removing the
-    # tags would make x<sub>2</sub> indistinguishable from plain x2.
-    text = _HTML_SCRIPT.sub(
-        lambda match: ("_" if match.group(1).lower() == "sub" else "^") + "{" + match.group(2) + "}",
-        str(value or ""),
+def _html_script(match: re.Match) -> str:
+    tag, inner = match.group(1).lower(), match.group(2)
+    before = match.string[:match.start()]
+    glued = bool(before) and bool(_SCRIPT_BASE.fullmatch(before[-1]))
+    layout = (
+        bool(_CJK_OR_CJK_PUNCT.search(inner))
+        or not before.strip()
+        or bool(_CJK_OR_CJK_PUNCT.fullmatch(before.rstrip()[-1]))
     )
+    if layout and not glued or _CJK_OR_CJK_PUNCT.search(inner):
+        return inner
+    return ("_" if tag == "sub" else "^") + "{" + inner + "}"
+
+
+def witness_key(value: str) -> str:
+    text = _HTML_SCRIPT.sub(_html_script, str(value or ""))
     text = _INLINE_TAG.sub("", text)
     text = _WITNESS_ANSWER.sub("（ ）", text)
     text = _WITNESS_LEAD.sub("", text, count=1)
     text = _WITNESS_SCORE.sub("", text)
-    return canon(text, strip_trailing_punct=False, collapse_empty_brackets=False,
+    text = _BAR.sub(r"\\overline", text)
+    text = _STYLE.sub(" ", text)
+    text = _CASES_OPEN.sub(r"\\begin{cases}", text)
+    text = _CASES_CLOSE.sub(r"\\end{cases}", text)
+    # Inside math, ~ is only a non-breaking space; in prose it is a mark.
+    text = _MATH_SEGMENT.sub(lambda m: m.group(0).replace("~", " "), text)
+    text = canon(text, strip_trailing_punct=False, collapse_empty_brackets=False,
                  preserve_parallelogram=True)
+    return re.sub(r"\.{3,}|⋯", "…", text)
 
 
 def reading_witness_text(reading: dict) -> str:
@@ -198,6 +256,47 @@ def reading_witness_text(reading: dict) -> str:
     return str(reading.get("stem") or "") + "".join(
         f"{key}.{options[key]}" for key in sorted(options) if str(options[key]).strip()
     )
+
+
+# MinerU's OCR often drops sentence punctuation, answer blanks and empty
+# answer brackets that the vision reader kept (“T_n.” / “T_n”, “为____.” /
+# “为”).  A mark that only the *reading* has is tolerated where it cannot
+# change mathematics: next to a Chinese character, at the very end, before a
+# sub-question label “(1)”, or as the dot after an option letter.  The
+# opposite gap is not tolerated: when MinerU saw a mark the reader left out,
+# the reader may have dropped a printed comma, so the card is read again.
+# Swapping one mark for another (，/；) or a mark between two symbols
+# (x,y / xy, P(12,3) / P(1,23), a.b) always disagrees.
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+_SUBQUESTION = re.compile(r"\((?:\d{1,2}|[ⅠⅡⅢⅣⅤⅰⅱⅲⅳ]|i{1,3}|iv)\)")
+_GAP_MARKS = re.compile(r"[,.;:]{1,2}|_+[,.;:]?|\(\)")
+
+
+def _harmless_gap(text: str, start: int, end: int) -> bool:
+    piece = text[start:end]
+    if not _GAP_MARKS.fullmatch(piece):
+        return False
+    before = text[start - 1] if start else ""
+    after = text[end] if end < len(text) else ""
+    if not after or _CJK.match(before or " ") or _CJK.match(after):
+        return True
+    if piece[0] in ",.;:" and _SUBQUESTION.match(text, end):
+        return True
+    # “A.2√3” / “A 2√3”: the dot after an option letter.
+    return (
+        piece == "." and before in "ABCD" and start >= 1
+        and (start < 2 or not text[start - 2].isalnum() or bool(_CJK.match(text[start - 2])))
+    )
+
+
+def _keys_agree(reading_key: str, witness_key_: str) -> bool:
+    if reading_key == witness_key_:
+        return True
+    for tag, i1, i2, _j1, _j2 in SequenceMatcher(None, reading_key, witness_key_, autojunk=False).get_opcodes():
+        if tag == "equal" or (tag == "delete" and _harmless_gap(reading_key, i1, i2)):
+            continue
+        return False
+    return True
 
 
 def witness_agrees(reading: dict | None, witness: str) -> bool:
@@ -215,7 +314,7 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
         _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
     ):
         return False
-    return witness_key(reading_witness_text(reading)) == expected
+    return _keys_agree(witness_key(reading_witness_text(reading)), expected)
 
 
 def witness_choice(first: dict | None, second: dict | None, witness: str, *, context: int = 3) -> str | None:
