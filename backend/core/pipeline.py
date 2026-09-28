@@ -2430,6 +2430,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
     elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
+    elif a and b and textnorm.witness_agrees(b_text, witness):
+        # The checker and MinerU (two different engines) agree against the
+        # primary.  An arbiter from the primary's model tends to repeat the
+        # primary's slip (measured: a repeating decimal 0.1212212221… misread
+        # by reader A and then “confirmed” by the arbiter), so the witness vote
+        # decides without a third call.
+        final, source = b_text, "majority"
+        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)

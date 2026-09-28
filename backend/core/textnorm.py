@@ -130,7 +130,7 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     match = NUMBER_PREFIX.match(text)
     if match and (number is None or int(match.group(1)) == number):
         text = text[match.end():]
-    text = re.sub(r"^\s*[(（]\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
+    text = re.sub(r"^\s*[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
     return text.strip()
 
 

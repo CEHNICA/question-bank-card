@@ -2015,7 +2015,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     Object.entries(q.reads).forEach(([key, reading]) => {
       if (!reading || (!reading.stem && !reading.error && !reading.witness)) return;
       const item = el("div", "read");
-      const label = reading.witness ? "旁证 · MinerU 文字（与读法甲逐字一致，未再调用复核模型）"
+      const witnessNote = key === "c" ? "与读法乙一致，据此采用读法乙，未再调用裁决模型"
+        : "与读法甲逐字一致，未再调用复核模型";
+      const label = reading.witness ? `旁证 · MinerU 自己识别的文字（${witnessNote}）`
         : `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`;
       item.append(el("p", "read-label", label));
       if (reading.witness) {

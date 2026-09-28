@@ -1270,6 +1270,17 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         reliable = sorted(selected, key=Start.key)
     if not reliable:
         return []
+    # MinerU sometimes emits the same line twice (a printed line plus an
+    # overlapping re-read that includes handwriting).  Two identical numbers a
+    # line apart in the same column are one question, not a restart.
+    deduped: list[Start] = []
+    for item in reliable:
+        previous = deduped[-1] if deduped else None
+        if (previous is not None and previous.number == item.number and previous.page == item.page
+                and previous.col == item.col and abs(item.y - previous.y) < 60):
+            continue
+        deduped.append(item)
+    reliable = deduped
 
     runs: list[list[Start]] = [[]]
     seen: set[int] = set()
@@ -1288,6 +1299,16 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         runs[-1].append(current)
         seen.add(current.number)
         maximum = current.number if maximum is None else max(maximum, current.number)
+
+    # A genuine restart begins a new numbering (1, 2 or 3).  A lone stray such
+    # as a misread “9.” in the middle of a paper is noise, not a new scope.
+    merged: list[list[Start]] = []
+    for run in runs:
+        if merged and len(run) == 1 and run[0].number > 3:
+            merged[-1].extend(run)
+            continue
+        merged.append(run)
+    runs = merged
 
     first_page = min(int(page["page_idx"]) for page in pages)
     last_page = max(int(page["page_idx"]) for page in pages)

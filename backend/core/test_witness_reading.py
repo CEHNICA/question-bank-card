@@ -106,3 +106,18 @@ class WitnessPipelineTests(TestCase):
         question.refresh_from_db()
         self.assertEqual(question.text_source, "single")
         self.assertEqual(question.state, Question.State.YELLOW)
+
+    def test_witness_breaks_a_disagreement_without_an_arbiter(self):
+        question = self.card("3. 在 $0 . 1 2 1 2 2 1 2 2 2 1 \\ldots$ 这些数中，无理数的个数是（ ）个")
+        chat = ScriptedChat({
+            ("a", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+            ("b", 1): tagged("在 $0.1212212221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+            ("arbiter", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual(question.text_source, "majority")
+        self.assertIn("0.1212212221", question.stem)
+        self.assertNotIn("arbiter", [call[0] for call in chat.calls])
+        self.assertEqual(question.read_c["skipped"], "witness")
