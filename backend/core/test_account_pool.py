@@ -147,7 +147,7 @@ class AccountConcurrencyTests(SimpleTestCase):
             with pool.lease() as third:
                 self.assertIn(third.secret, {"a", "b"})
 
-    def test_rate_limit_removes_one_parallel_slot_for_the_rest_of_the_run(self):
+    def test_rate_limit_removes_one_parallel_slot_until_requests_succeed_again(self):
         pool = account_pool.AccountPool("test", ("only",), per_account=3)
         with pool.lease() as lease:
             lease.cooldown(0)
@@ -156,6 +156,22 @@ class AccountConcurrencyTests(SimpleTestCase):
             with pool.lease() as lease:
                 lease.cooldown(0)
         self.assertEqual(pool.capacity, 1)
+        # A burst limit passes: clean requests give the slots back, one at a time.
+        for _ in range(account_pool.RECOVER_AFTER_SUCCESSES - 1):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 1)
+        with pool.lease():
+            pass
+        self.assertEqual(pool.capacity, 2)
+        for _ in range(3 * account_pool.RECOVER_AFTER_SUCCESSES):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 3)          # never above the configured limit
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 2)
+        self.assertEqual(pool.spare, 2)
 
     def test_configured_concurrency_is_validated_and_clamped(self):
         cases = (("", 6), ("2", 2), ("0", 1), ("99", 8), ("x", 6))
@@ -483,18 +499,54 @@ class HedgedRequestTests(SimpleTestCase):
         release = threading.Event()
         calls = []
 
-        def once(_engine, _prompt, _images, _max_tokens=3000):
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
             calls.append(len(calls))
+            if started is not None:
+                started.set()
             if len(calls) == 1:
                 release.wait(5)
                 return "slow"
             return "fast"
 
         with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
                 mock.patch.object(readers, "_chat_once", side_effect=once):
             self.assertEqual(readers.chat(self.engine, "p", []), "fast")
         release.set()
         self.assertEqual(len(calls), 2)
+
+    def test_a_request_still_waiting_for_an_account_slot_is_not_duplicated(self):
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            calls.append(1)
+            time.sleep(0.3)          # queued behind other cards' requests
+            if started is not None:
+                started.set()
+            return "answer"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "answer")
+        self.assertEqual(len(calls), 1)
+
+    def test_no_duplicate_when_every_account_slot_is_busy(self):
+        release = threading.Event()
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            calls.append(1)
+            if started is not None:
+                started.set()
+            release.wait(0.3)
+            return "only"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=False), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "only")
+        self.assertEqual(len(calls), 1)
 
     def test_fast_answer_sends_no_duplicate(self):
         with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "5"}), \
@@ -505,7 +557,9 @@ class HedgedRequestTests(SimpleTestCase):
     def test_a_failed_duplicate_does_not_hide_a_late_success(self):
         release = threading.Event()
 
-        def once(_engine, _prompt, _images, _max_tokens=3000):
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            if started is not None:
+                started.set()
             if not release.is_set():
                 release.set()
                 time.sleep(0.2)
@@ -513,14 +567,20 @@ class HedgedRequestTests(SimpleTestCase):
             raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
 
         with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
                 mock.patch.object(readers, "_chat_once", side_effect=once):
             self.assertEqual(readers.chat(self.engine, "p", []), "late but fine")
 
     def test_both_failing_raises_and_zero_disables_hedging(self):
+        def failing(*args, **_kwargs):
+            if len(args) > 4 and args[4] is not None:
+                args[4].set()
+            time.sleep(0.05)
+            raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
+
         with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.01"}), \
-                mock.patch.object(readers, "_chat_once",
-                                  side_effect=lambda *_a, **_k: (time.sleep(0.05), (_ for _ in ()).throw(
-                                      readers.ReaderError("MiniMax 接口返回 HTTP 500")))[1]):
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=failing):
             with self.assertRaises(readers.ReaderError):
                 readers.chat(self.engine, "p", [])
         with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0"}), \

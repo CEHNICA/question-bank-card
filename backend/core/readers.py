@@ -617,11 +617,21 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     delay = _hedge_after()
     if not delay:
         return _chat_once(engine, prompt, image_urls, max_tokens)
-    first = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens)
+    started = threading.Event()
+    first = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens, started)
+    # The clock starts when the request is on the wire.  Counting the time it
+    # waited for a free account slot duplicated requests that were merely
+    # queued; the duplicates took the slots, and a 30-page book ran with 20
+    # requests waiting behind one.
+    while not started.wait(0.5):
+        if first.done():
+            return first.result()
     try:
         return first.result(timeout=delay)
     except FutureTimeout:
         pass
+    if not _has_spare_slot(engine):
+        return first.result()
     second = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens)
     pending = {first, second}
     failure: BaseException | None = None
@@ -636,7 +646,15 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     raise failure
 
 
-def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
+def _has_spare_slot(engine: Engine) -> bool:
+    try:
+        return account_pool(engine.provider).spare > 0
+    except AccountPoolError:
+        return False
+
+
+def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000,
+               started: threading.Event | None = None) -> str:
     content = [{"type": "text", "text": prompt}] + [
         {"type": "image_url", "image_url": {"url": url}} for url in image_urls
     ]
@@ -664,6 +682,8 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
     while True:
         try:
             with pool.lease(exclude=attempted) as lease:
+                if started is not None:
+                    started.set()
                 response = _post(url, lease.secret, payload)
                 if response.status_code in (401, 403):
                     attempted.add(lease.slot)

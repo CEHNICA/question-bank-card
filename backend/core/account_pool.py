@@ -99,6 +99,10 @@ def account_concurrency(service: str) -> int:
     return max(1, min(MAX_ACCOUNT_CONCURRENCY, value))
 
 
+# Clean requests on an account before a throttled parallel slot is given back.
+RECOVER_AFTER_SUCCESSES = 20
+
+
 @dataclass
 class _State:
     ready_at: float = 0.0
@@ -106,6 +110,8 @@ class _State:
     capacity: int = 1
     disabled: bool = False
     disabled_reason: str = ""
+    limit: int = 1           # configured per-account concurrency
+    successes: int = 0       # clean releases since the last throttle
 
     @property
     def in_use(self) -> bool:
@@ -163,7 +169,7 @@ class AccountPool:
         self.service = service
         self._secrets = secrets
         capacity = max(1, min(MAX_ACCOUNT_CONCURRENCY, int(per_account)))
-        self._states = {secret: _State(capacity=capacity) for secret in secrets}
+        self._states = {secret: _State(capacity=capacity, limit=capacity) for secret in secrets}
         self._condition = threading.Condition()
         self._cursor = 0
 
@@ -241,11 +247,32 @@ class AccountPool:
                 state.disabled = True
                 state.disabled_reason = lease._disable_reason
             else:
-                if lease._throttled and state.capacity > 1:
-                    state.capacity -= 1
+                if lease._throttled:
+                    state.successes = 0
+                    if state.capacity > 1:
+                        state.capacity -= 1
+                else:
+                    # A throttle is usually a burst limit, not a permanent one:
+                    # without recovery one bad minute left a long-running worker
+                    # (and a 300-page book) on a single request at a time.
+                    state.successes += 1
+                    if state.capacity < state.limit and state.successes >= RECOVER_AFTER_SUCCESSES:
+                        state.capacity += 1
+                        state.successes = 0
                 if lease._delay:
                     state.ready_at = max(state.ready_at, time.monotonic() + lease._delay)
             self._condition.notify_all()
+
+    @property
+    def spare(self) -> int:
+        """Leases that could start right now without waiting."""
+
+        with self._condition:
+            now = time.monotonic()
+            return sum(
+                max(0, state.capacity - state.active) for state in self._states.values()
+                if not state.disabled and state.ready_at <= now
+            )
 
     @contextmanager
     def lease(self, *, exclude: set[int] | frozenset[int] | None = None) -> Iterator[AccountLease]:
