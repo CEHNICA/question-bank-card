@@ -138,6 +138,9 @@ def clean_stem(stem: str, number: int | None = None) -> str:
         if bare and number is not None and int(bare.group(1)) == number:
             text = text[bare.end():]
     text = re.sub(r"^\s*[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
+    # A reader that dropped “本题满分10分” sometimes leaves its opening bracket:
+    # “（（1）如图1…”.
+    text = re.sub(r"^\s*[(（]\s*(?=[(（]\s*\d{1,2}\s*[)）])", "", text)
     return text.strip()
 
 
@@ -234,7 +237,10 @@ def witness_choice(first: dict | None, second: dict | None, witness: str, *, con
     votes: set[str] = set()
     for i1, i2, j1, j2 in regions:
         left, right = ka[max(0, i1 - context):i1], ka[i2:i2 + context]
-        if not left and not right:
+        # Both sides need anchoring text.  At the very start or end a missing
+        # passage “matches” trivially (a reading that dropped the opening
+        # sentence would win), so such differences go to the arbiter.
+        if len(left) < min(2, context) or len(right) < min(2, context):
             return None
         a_hit = (left + ka[i1:i2] + right) in kw
         b_hit = (left + kb[j1:j2] + right) in kw

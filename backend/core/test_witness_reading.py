@@ -76,6 +76,13 @@ class WitnessChoiceTests(SimpleTestCase):
         d = {"stem": "CD=6，以 AC，AD 为邻边"}
         self.assertEqual(witness_choice(c, d, "8. 如图，AB=10，CD=6，以AC，AD为邻边作"), "b")
 
+    def test_a_reading_missing_its_opening_sentence_never_wins(self):
+        truncated = {"stem": "(1) 求梯子靠墙的顶端 A 距地面有多少米？"}
+        complete = {"stem": "如图，一架 25 米长的梯子 AB 斜靠在墙 AO 上。(1) 求梯子靠墙的顶端 A 距地面有多少米？"}
+        witness = "0.（本题满分6分） 图，一架25米长的梯子AB斜靠在墙A0上。(1) 求梯子靠墙的顶端 A 距地面有多少米？"
+        self.assertIsNone(witness_choice(truncated, complete, witness))
+        self.assertEqual(clean_stem("（（1）如图1，长方体", 24), "（1）如图1，长方体")
+
     def test_undecided_or_split_differences_defer_to_the_arbiter(self):
         a = {"stem": "已知 x=1，y=2，求 z"}
         b = {"stem": "已知 x=7，y=3，求 z"}
