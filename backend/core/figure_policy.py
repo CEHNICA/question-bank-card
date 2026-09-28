@@ -27,7 +27,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 7
+FIGURE_REVIEW_POLICY_VERSION = 8
 
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
@@ -43,6 +43,9 @@ _CHINESE_CUE = re.compile(
     r"如\s*(?:下|上|左|右)?\s*图(?:\s*[甲乙丙丁①②③④⑤⑥⑦⑧⑨1-9A-Za-z])?"
     r"(?:\s*(?:所示|显示|给出|为|是)|(?=$|[\s，,。:：；;（(]|可知|可得))|"
     r"(?:下|上|左|右)\s*图|"
+    # “如图将△ABC放在……”“如图在菱形中……”：紧跟动词、介词或图形符号。
+    r"(?<![例比譬诸假])如\s*图(?=\s*(?:将|把|在|中|的|点|直线|线段|已知|若|设|有|过|当|"
+    r"[△▱⊙∠$]|Rt))|"
     r"(?:下列|以下|所给)\s*[^，,。:：；;\n]{0,12}?(?:图像|图象|图形)(?:中)?"
     r"(?=$|[\s，,。:：；;（(与和])|"
     r"(?:下列|以下|所给)\s*(?:的\s*)?(?:图像|图象|图形|图示|图案|示意图|简图)|"
@@ -61,6 +64,7 @@ _CHINESE_CUE = re.compile(
     r"(?<![\u4e00-\u9fffA-Za-z0-9])图\s*为|"
     r"图\s*(?:[（(]\s*)?[①②③④⑤⑥⑦⑧⑨一二三四五六七八九1-9][A-Za-z]?\s*[)）]?|"
     r"(?<!不)如\s*表(?!格)(?:\s*所示)?(?=$|[\s，,。:：；;（(])|"
+    r"(?<![例比譬诸假不])如\s*表\s*(?=是|中|为|所列|给出)|"
     r"(?:下|上|左|右)\s*表|见\s*(?:下|上)?\s*表"
     r"(?=$|[\s，,。:：；;（(1-9]|所示|中|可知|可得)|表\s*(?:中|所示)|"
     r"(?:对应值|函数值|取值|数值)\s*表"

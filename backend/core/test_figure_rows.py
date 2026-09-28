@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from . import pipeline
 from .figure_policy import automatic_review
@@ -56,6 +56,47 @@ class FigureRowTests(TestCase):
         self.assertEqual(pipeline.distribute_figure_rows(self.paper), 0)
         q15.refresh_from_db()
         self.assertEqual(q15.figures[0]["bbox"], row[2]["bbox"])
+
+    def test_row_under_the_first_question_serves_the_next_column(self):
+        # 汶源 9 月卷：网格、双曲线、直角三角形印在第 4 题下面，第 5、6 题在右栏。
+        # The reader of question 4 kept two of them and guessed “第 3 题” for one.
+        row = _row()
+        q3 = self.question(3, stem="函数 y=ax²+c 与 y=ac/x 在同一直角坐标系中的图象大致是（ ）",
+                           figures=[{"slot": "stem", "page_idx": 0, "bbox": row[1]["bbox"], "source": "other"}])
+        q3.flags = [pipeline.FLAG_FOREIGN_FIGURE]
+        q3.state = Question.State.YELLOW
+        q3.save()
+        q4 = self.question(4, stem="如图将△ABC放在每个小正方形的边长为1的网格中", candidates=row,
+                           figures=[{"slot": "stem", "page_idx": 0, "bbox": row[0]["bbox"], "source": "auto"},
+                                    {"slot": "stem", "page_idx": 0, "bbox": row[2]["bbox"], "source": "auto"}])
+        q5 = self.question(5, stem="如图，正比例函数 y=x 与反比例函数 y=1/x 的图象相交于 A、B 两点")
+        q6 = self.question(6, stem="已知，如图，在 Rt△ABC 中，∠ACB=90°，CD⊥AB 于点 D")
+        self.assertEqual(pipeline.distribute_figure_rows(self.paper), 3)
+        for question, expected in ((q4, row[0]), (q5, row[1]), (q6, row[2])):
+            question.refresh_from_db()
+            self.assertEqual([figure["bbox"] for figure in question.figures], [expected["bbox"]])
+            self.assertIn(pipeline.FLAG_ROW_FIGURE, question.flags)
+        q3.refresh_from_db()
+        self.assertEqual(q3.figures, [])
+        self.assertNotIn(pipeline.FLAG_FOREIGN_FIGURE, q3.flags)
+
+    def test_a_borrowed_figure_on_a_card_with_its_own_figures_is_confirmed_by_a_person(self):
+        row = _row()
+        own = [{"slot": key, "page_idx": 0, "bbox": [100 + 60 * index, 100, 150 + 60 * index, 150],
+                "source": "auto"} for index, key in enumerate("ABCD")]
+        q3 = self.question(3, stem="下列图象中，大致是函数图象的是（ ）", figures=own)
+        q9 = self.question(9, stem="如图，他们在 A 处仰望塔顶，测得仰角为 30°")
+        pipeline.assign_foreign_figures(self.paper, [
+            {"number": 3, "page_idx": 0, "bbox": row[1]["bbox"]},
+            {"number": 9, "page_idx": 0, "bbox": row[2]["bbox"]},
+        ])
+        q3.refresh_from_db()
+        q9.refresh_from_db()
+        self.assertIn(pipeline.FLAG_FOREIGN_FIGURE, q3.flags)
+        self.assertEqual(q3.state, Question.State.YELLOW)
+        # “如图” without a figure: the other card's “第 9 题图” is what it needs.
+        self.assertNotIn(pipeline.FLAG_FOREIGN_FIGURE, q9.flags)
+        self.assertEqual(q9.state, Question.State.GREEN)
 
     def test_stacked_figures_are_not_a_row(self):
         stacked = [
@@ -142,3 +183,15 @@ class SpillStripCandidateTests(TestCase):
         ]
         segment._drop_spill_candidates(questions)
         self.assertEqual([c["seq"] for c in questions[0]["figure_candidates"]], [18])
+
+
+class FigureCueWordingTests(SimpleTestCase):
+    def test_cues_followed_directly_by_the_sentence(self):
+        from .figure_policy import has_figure_cue
+        for stem in ("如图将△ABC放在每个小正方形的边长为1的网格中", "如图在菱形ABCD中，AC=6",
+                     "如表是某周的生产情况（超产为正，减产为负）"):
+            with self.subTest(stem=stem):
+                self.assertTrue(has_figure_cue(stem))
+        for stem in ("例如图书馆里有 120 本书", "比如表示成分数的形式", "如表示为 x 的函数"):
+            with self.subTest(stem=stem):
+                self.assertFalse(has_figure_cue(stem))

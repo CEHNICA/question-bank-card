@@ -2853,6 +2853,7 @@ def _same_box(figure: dict, others: list[dict]) -> bool:
 
 
 FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
+FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加上，请确认是否需要"
 
 
 def _single_row(candidates: list[dict]) -> list[dict] | None:
@@ -2880,15 +2881,56 @@ def _needs_row_figure(question: Question) -> bool:
     )
 
 
+def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Question] | None:
+    """The consecutive questions a shared figure row serves, else None.
+
+    The row is printed either under the last of those questions (the common
+    “13、14、15 题图” layout) or under the first, with the next questions set
+    in the other column (汶源 9 月卷第 4–6 题).  Every other question must
+    mention a figure and have none.
+    """
+    if owner.number is None:
+        return None
+    count = len(row)
+    for first in (owner.number - count + 1, owner.number):
+        targets = [by_key.get((owner.group_id, first + index)) for index in range(count)]
+        others = [item for item in targets if item is not owner]
+        if all(item is not None and _needs_row_figure(item) for item in others):
+            return targets
+    return None
+
+
+def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> None:
+    """A reader's “this is question N's figure” guess loses to the row order."""
+    for question in paper.questions.exclude(id__in=keep):
+        figures = [
+            figure for figure in question.figures or []
+            if not (figure.get("source") == "other" and _same_box(figure, boxes))
+        ]
+        if len(figures) == len(question.figures or []):
+            continue
+        previous_review = stored_or_derived_review(question)
+        question.figures = figures
+        question.figure_review = recheck_automatic_review(
+            stem=question.stem, options=question.options, figures=figures, previous=previous_review,
+        )
+        flags = [flag for flag in question.flags or [] if flag != FLAG_FOREIGN_FIGURE]
+        question.flags = _flags_after_figure_review(flags, question.figure_review, figures)
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+        _invalidate_approval(question)
+        question.save()
+
+
 def distribute_figure_rows(paper: Paper) -> int:
     """Hand out a shared row of figures to the consecutive questions it serves.
 
     Exams often print the figures of questions 13, 14 and 15 side by side below
     question 15.  Only question 15's range contains them, so 13 and 14 end up
     “missing” a figure while 15 may claim the wrong one.  When the row holds
-    exactly one figure per question — the k-1 immediately preceding questions
-    all mention a figure yet have none — assign them left to right and flag
-    every card so a person confirms the pairing.  No model call is made.
+    exactly one figure per question — the other questions of the run all
+    mention a figure yet have none — assign them left to right and flag every
+    card so a person confirms the pairing.  No model call is made.
     """
     changed = 0
     questions = list(paper.questions.order_by("group_id", "number", "id"))
@@ -2899,10 +2941,9 @@ def distribute_figure_rows(paper: Paper) -> int:
         row = _single_row([item for item in owner.figure_candidates or [] if item.get("bbox")])
         if row is None:
             continue
-        before = [by_key.get((owner.group_id, owner.number - offset)) for offset in range(len(row) - 1, 0, -1)]
-        if any(item is None or not _needs_row_figure(item) for item in before):
+        targets = _row_targets(owner, row, by_key)
+        if targets is None:
             continue
-        targets = [*before, owner]
         for question, figure in zip(targets, row):
             box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
             question.figures = [box]
@@ -2917,6 +2958,7 @@ def distribute_figure_rows(paper: Paper) -> int:
             _invalidate_approval(question)
             question.save()
             changed += 1
+        _drop_borrowed_copies(paper, row, {question.id for question in targets})
     return changed
 
 
@@ -2935,6 +2977,7 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
         if _same_box(item, target.figures):
             continue
         previous_review = stored_or_derived_review(target)
+        had_own_figures = any(f.get("source") not in {"other", "row"} for f in target.figures or [])
         target.figures = target.figures + [{"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"],
                                             "source": "other"}]
         target.figure_review = recheck_automatic_review(
@@ -2944,6 +2987,12 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             previous=previous_review,
         )
         target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
+        # Another card's reader said this picture belongs here.  That is only
+        # convincing when this question mentions a figure it does not have yet;
+        # otherwise (it already has its own figures, or never mentions one) the
+        # guess may be a mislabel, so a person confirms it.
+        if had_own_figures or not target.figure_review.get("cue_matches"):
+            target.flags = [flag for flag in target.flags if flag != FLAG_FOREIGN_FIGURE] + [FLAG_FOREIGN_FIGURE]
         if target.state in {Question.State.GREEN, Question.State.YELLOW}:
             target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
         _invalidate_approval(target)
