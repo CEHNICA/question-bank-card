@@ -807,7 +807,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (!c.all) {
       statusText.textContent = "没有题卡";
     } else if (c.todo) {
-      statusText.textContent = `${c.all} 道题：${c.todo} 张黄/红卡或内容变更需逐题核对，${c.green} 张仅为 AI 识读一致，已标记通过 ${c.approved}。`;
+      statusText.textContent = `${c.all} 道题：${c.todo} 张黄/红卡或内容变更需逐题核对，${c.green} 张为机器识读一致，已标记通过 ${c.approved}。`;
     } else if (c.green) {
       statusText.textContent = `${c.all} 道题：剩下 ${c.green} 张 AI 识读一致的绿卡；它们仍需按你的审核标准确认。`;
     } else {
@@ -854,7 +854,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const structureBlocked = paper.status === "needs_grouping";
     $("approveGreen").disabled = !c.green || structureBlocked;
     $("approveGreen").textContent = c.green ? `批量标记绿卡通过（${c.green}）` : "批量标记绿卡通过";
-    $("approveGreen").title = "绿卡只表示 AI 识读一致。批量标记前，请确认这些题符合你的审核标准。";
+    $("approveGreen").title = "绿卡只表示机器识读彼此一致。批量标记前，请确认这些题符合你的审核标准。";
     $("publishButton").disabled = !c.unpublished || structureBlocked;
     $("publishButton").textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
     const notes = paper.notes || [];

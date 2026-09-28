@@ -115,7 +115,7 @@
           </div>
           <div class="meter-bar" id="meterBar" role="img"></div>
           <div class="meter-legend" id="meterLegend"></div>
-          <p class="review-boundary">绿卡只表示 AI 多次识读一致；“标记通过”表示你接受当前题面版本，并不自动证明已经逐题对照原卷。</p>
+          <p class="review-boundary">绿卡表示机器识读彼此一致（两次识读一致，或与 MinerU 文字逐字一致）；“标记通过”表示你接受当前题面版本，并不自动证明已经逐题对照原卷。</p>
         </div>
         <div id="doneBanner" class="done-banner" hidden></div>
         <div id="toolbar" class="toolbar">
@@ -212,8 +212,10 @@
         <section id="settingsReview" class="settings-section" aria-labelledby="settingsReviewTitle">
           <h3 id="settingsReviewTitle">识读与审核说明</h3>
           <dl class="explain-list">
-            <div><dt>AI 两次一致</dt><dd>两次独立识读得到相同题面。它只说明两次结果一致，仍不代表已经和原卷人工核对。</dd></div>
-            <div><dt>AI 三读多数一致</dt><dd>前两次结果不同，第三次与其中一次相同，因此采用多数结果。</dd></div>
+            <div><dt>两种引擎一致</dt><dd>视觉模型的誊录与 MinerU 自己识别出的文字逐字一致（两套独立引擎），因此不再调用复核模型。</dd></div>
+            <div><dt>AI 两次一致</dt><dd>与 MinerU 文字有出入（常见于有手写的卷子）时，复核模型再独立读一遍，两次得到相同题面。</dd></div>
+            <div><dt>AI 三读多数一致</dt><dd>前两次结果不同；由 MinerU 文字在每处分歧上支持其中一读，或第三次识读与其中一次相同，因此采用多数结果。</dd></div>
+            <div><dt>一致不等于正确</dt><dd>以上都只是机器之间的一致，仍不代表已经和原卷人工核对。</dd></div>
             <div><dt>未人工审核</dt><dd>需要你对照左侧原卷确认；点击“标记通过”后才记录为已人工接受当前版本。</dd></div>
             <div><dt>处理记录</dt><dd>记录程序在切题、页序、配图等环节发现的情况，并不等于报错。</dd></div>
           </dl>
