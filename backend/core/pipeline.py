@@ -2805,10 +2805,23 @@ def process_paper(paper: Paper) -> None:
         _set(paper, status=Paper.Status.FAILED, error=message[:500])
 
 
-def process_rereads() -> int:
-    """人工调整范围或点"重读"后的单题重读。"""
+ACTIVE_PAPER_STATUSES = (
+    Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
+)
+
+
+def process_rereads(*, idle_papers_only: bool = False) -> int:
+    """人工调整范围或点"重读"后的单题重读。
+
+    ``idle_papers_only`` lets the worker's priority lane serve rereads for
+    finished papers while a long book is still being processed, without ever
+    touching a paper the main lane is working on.
+    """
     count = 0
-    for paper in Paper.objects.filter(questions__reread_requested=True).distinct():
+    papers = Paper.objects.filter(questions__reread_requested=True)
+    if idle_papers_only:
+        papers = papers.exclude(status__in=ACTIVE_PAPER_STATUSES)
+    for paper in papers.distinct():
         questions = list(paper.questions.filter(reread_requested=True))
         try:
             read_questions(paper, questions)

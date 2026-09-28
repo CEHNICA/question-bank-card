@@ -339,7 +339,8 @@ def request_extract_file(
                     raise MineruError(f"MinerU 文件上传失败（HTTP {response.status_code}）")
         except requests.RequestException as exc:
             raise MineruError(f"MinerU 文件上传失败（{type(exc).__name__}）") from None
-        deadline = time.monotonic() + 20 * 60
+        started = time.monotonic()
+        deadline = started + 20 * 60
         while time.monotonic() < deadline:
             data, trace_id = _api_json(session, token, f"extract-results/batch/{batch_id}")
             if heartbeat is not None:
@@ -359,7 +360,9 @@ def request_extract_file(
                     "err_msg": task.get("err_msg"),
                     "trace_id": trace_id,
                 })
-            time.sleep(5)
+            # A short exam is usually done within 10–20 s; poll briskly at first
+            # and back off for long books so the API is not hammered.
+            time.sleep(2 if time.monotonic() - started < 60 else 5)
     raise MineruError("MinerU 解析超时")
 
 

@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -16,6 +17,31 @@ from core.models import Paper, Question
 from core.pipeline import process_paper, process_rereads
 
 ACTIVE = [Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING]
+# One reread batch at a time, whichever lane runs it.
+REREAD_LOCK = threading.Lock()
+
+
+def reread_lane(stop: threading.Event, interval: float = 1.5) -> None:
+    """Serve single-card rereads while the main lane is busy with a long task.
+
+    Without this lane a range adjustment on a finished exam waited for an
+    entire book upload to finish.  It only touches papers that are not being
+    processed, and uses the credentials already loaded for the worker.
+    """
+    logger = logging.getLogger("core")
+    while not stop.is_set():
+        try:
+            close_old_connections()
+            if Question.objects.filter(reread_requested=True).exists() and REREAD_LOCK.acquire(blocking=False):
+                try:
+                    process_rereads(idle_papers_only=True)
+                finally:
+                    REREAD_LOCK.release()
+        except Exception:  # the lane must never take the worker down
+            logger.exception("reread lane error")
+        finally:
+            close_old_connections()
+        stop.wait(interval)
 
 
 def apply_saved_credentials():
@@ -91,6 +117,9 @@ class Command(BaseCommand):
         # there is currently no queued work.
         apply_saved_credentials()
         apply_saved_model_preferences()
+        stop = threading.Event()
+        if not once:
+            threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
         while True:
             close_old_connections()
             worked = False
@@ -105,8 +134,9 @@ class Command(BaseCommand):
                 if rereads_pending():
                     apply_saved_credentials()
                     apply_saved_model_preferences()
-                    if process_rereads():
-                        worked = True
+                    with REREAD_LOCK:
+                        if process_rereads():
+                            worked = True
             except Exception:  # 工作者不能因为一次意外就退出
                 logging.getLogger("core").exception("worker loop error")
                 time.sleep(5)
