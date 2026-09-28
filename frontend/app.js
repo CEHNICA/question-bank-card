@@ -2045,17 +2045,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     Object.entries(q.reads).forEach(([key, reading]) => {
       if (!reading || (!reading.stem && !reading.error && !reading.witness)) return;
       const item = el("div", "read");
-      const witnessNote = key === "c" ? "与读法乙一致，据此采用读法乙，未再调用裁决模型"
+      const chosen = reading.chosen === "a" ? "读法甲" : "读法乙";
+      const witnessNote = key === "c" ? `两种读法的分歧逐处对照这段文字，采用${chosen}，未再调用裁决模型`
         : "与读法甲逐字一致，未再调用复核模型";
-      const label = reading.witness ? `旁证 · MinerU 自己识别的文字（${witnessNote}）`
-        : `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`;
+      const objections = Array.isArray(reading.objections) ? reading.objections : [];
+      let label = `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`;
+      if (objections.length) {
+        label = `核对${reading.engine ? ` · ${reading.engine}` : ""}（两次读法一致，但 MinerU 有 ${objections.length} 处不同，已对照原图再看一遍）`;
+      } else if (reading.witness) label = `旁证 · MinerU 自己识别的文字（${witnessNote}）`;
       item.append(el("p", "read-label", label));
-      if (reading.witness) {
-        const literal = el("div", "read-text");
-        R.renderLiteral(literal, reading.witness);
-        item.append(literal);
-      } else if (reading.error) item.append(el("p", "read-error", reading.error));
-      else {
+      if (objections.length) {
+        const list = el("ul", "read-spots");
+        objections.forEach((spot) => {
+          list.append(el("li", "", `…${spot.before}【${spot.reading}】${spot.after}…  MinerU：【${spot.mineru}】`));
+        });
+        item.append(list);
+      }
+      if (reading.error) item.append(el("p", "read-error", reading.error));
+      if (reading.witness && !reading.stem) {
+        if (!reading.error || !objections.length) {
+          const literal = el("div", "read-text");
+          R.renderLiteral(literal, reading.witness);
+          item.append(literal);
+        }
+      } else if (reading.stem) {
         const text = [reading.stem, ...OPTION_KEYS.filter((k) => (reading.options || {})[k]).map((k) => `${k}. ${reading.options[k]}`)].join("\n");
         const literal = el("div", "read-text");
         R.renderLiteral(literal, text);

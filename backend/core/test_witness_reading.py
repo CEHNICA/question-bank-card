@@ -280,7 +280,7 @@ class WitnessPipelineTests(TestCase):
         self.assertNotIn("stem", question.read_b)
 
     def test_disagreeing_witness_falls_back_to_an_independent_reader(self):
-        question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
+        question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ 与 $g ( x )$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
             ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
@@ -290,6 +290,35 @@ class WitnessPipelineTests(TestCase):
         question.refresh_from_db()
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
         self.assertEqual(sorted(call[0] for call in chat.calls), ["a", "b"])
+
+    def test_two_agreeing_reads_against_mineru_get_a_focused_third_look(self):
+        # 凤城高一第 19 题：两次都把 1/x³ 读成 1/x²，MinerU 读对了。
+        question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
+        chat = ScriptedChat({
+            ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            ("verify", 1): tagged("已知函数 $f(x)=x^3$，求 $f(2)$ 的值。"),
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual([call[0] for call in chat.calls].count("verify"), 1)
+        self.assertIn("x^3", question.stem)
+        self.assertEqual((question.state, question.text_source), (Question.State.YELLOW, "arbiter"))
+        self.assertIn(pipeline.FLAG_OBJECTION_CORRECTED, question.flags)
+        self.assertEqual(question.read_c["objections"][0]["mineru"], "3")
+
+    def test_a_confirmed_reading_stays_green(self):
+        # MinerU misread the printed 垂美四边形; the focused look keeps it.
+        question = self.card("1. 对角线互相垂直的四边形叫做垂夹四边形，求证其面积。")
+        reading = tagged("对角线互相垂直的四边形叫做垂美四边形，求证其面积。")
+        chat = ScriptedChat({("a", 1): reading, ("b", 1): reading, ("verify", 1): reading})
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
+        self.assertIn("垂美", question.stem)
+        self.assertEqual(question.read_c["objections"][0]["reading"], "美")
 
     def test_failed_primary_still_uses_the_checker(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")

@@ -2428,6 +2428,40 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     return cleaned
 
 
+FLAG_OBJECTION_CORRECTED = "两次识读一致，但与 MinerU 有几处不同，第三次核对后改了这些地方，请确认"
+FLAG_OBJECTION_UNCHECKED = "两次识读一致，但与 MinerU 有几处不同，核对失败，请展开识读记录确认"
+
+
+def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
+                       image_url: str, primary, checker, figure_source: dict) -> tuple[dict, str]:
+    """Both vision reads agree, yet MinerU printed other characters at a few
+    clean spots (x^3 / x^2, 销售单价 / 销售定价): take one focused third look.
+
+    A confirmed reading stays green; a corrected one is shown for review.
+    """
+    spots = textnorm.witness_objections(final, witness)
+    if not spots:
+        return final, source
+    previous = update.get("read_c") or {}
+    evidence = {"objections": spots, "witness": witness[:4000],
+                **({"chosen": previous["chosen"]} if "chosen" in previous else {})}
+    try:
+        engine = readers.arbiter_engine(primary, checker)
+        if engine is None:
+            raise readers.ReaderError("没有可用的核对模型")
+        checked = readers.verify(engine, image_url, number, final, witness, spots)
+    except readers.ReaderError as error:
+        update["read_c"] = {**evidence, "error": str(error)}
+        flags.append(FLAG_OBJECTION_UNCHECKED)
+        return final, source
+    checked_text = _without_inferred_figure_text(checked, figure_source)
+    update["read_c"] = {**checked, **evidence}
+    if same_reading(checked_text, final):
+        return final, source
+    flags.append(FLAG_OBJECTION_CORRECTED)
+    return checked_text, "arbiter"
+
+
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
     number = snapshot["number"]
@@ -2532,6 +2566,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
     elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
+        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
+                                           image_url=clean_url, primary=primary, checker=checker,
+                                           figure_source=figure_source)
     elif a and b and (textnorm.witness_agrees(b_text, witness)
                       or textnorm.witness_choice(a_text, b_text, witness) is not None):
         # MinerU (a different engine) settles the disagreement.  An arbiter
@@ -2543,6 +2580,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final, source = (a_text if chosen == "a" else b_text), "majority"
         update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness",
                             "chosen": chosen}
+        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
+                                           image_url=clean_url, primary=primary, checker=checker,
+                                           figure_source=figure_source)
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)

@@ -309,6 +309,28 @@ def arbiter_prompt(number: int, first: dict, second: dict, witness: str = "") ->
     ])
 
 
+def verify_prompt(number: int, reading: dict, witness: str, spots: list[dict]) -> str:
+    lines = [reading.get("stem", "")]
+    for key in OPTION_KEYS:
+        if (reading.get("options") or {}).get(key):
+            lines.append(f"【{key}】{reading['options'][key]}")
+    listed = "\n".join(
+        f"{index}. …{spot['before']}【{spot['reading']}】{spot['after']}… 另一引擎读作【{spot['mineru']}】"
+        for index, spot in enumerate(spots, 1)
+    )
+    return "\n\n".join([
+        TRANSCRIBE_RULES,
+        f"这段候选内容（显示编号 {number}）已经誊录了两次，两次一致。但另一个识别引擎（MinerU）"
+        "在下面几处读出了不同的字符（去掉了空格、标点和 LaTeX 写法）。请对照原图，逐处看清印刷体，"
+        "再给出正确的完整誊录。MinerU 也会读错；哪一边对就按哪一边，其余部分照抄原誊录。",
+        f"【原誊录】\n" + "\n".join(lines),
+        f"【不同之处】\n{listed}",
+        "【另一识别引擎的文字】（只作参考，可能混入手写）\n" + witness.strip()[:1500],
+        "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
+        "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…（不是选择题就不写选项）",
+    ])
+
+
 def locate_prompt(number: int) -> str:
     return (
         "图片左侧有红绿相间的编号刻度（01、02、…），每个编号对应它右侧的一条横带。"
@@ -731,6 +753,18 @@ def arbitrate(
     reading["engine"] = engine.label
     reading["raw"] = raw[:6000]
     return reading
+
+
+def verify(engine: Engine, image_url: str, number: int, reading: dict, witness: str, spots: list[dict]) -> dict:
+    """A focused third look at the spots where MinerU disagrees with two agreeing readings."""
+    raw = chat(engine, verify_prompt(number, reading, witness, spots), [image_url])
+    try:
+        result = parse_reading(raw, number)
+    except ValueError as error:
+        raise ReaderError(f"{engine.label} 核对输出不合格式：{error}") from None
+    result["engine"] = engine.label
+    result["raw"] = raw[:6000]
+    return result
 
 
 def locate_band(engine: Engine, image_url: str, number: int) -> int | None:

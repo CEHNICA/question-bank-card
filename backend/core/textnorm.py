@@ -341,6 +341,41 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
     return _keys_agree(witness_key(reading_witness_text(reading)), expected)
 
 
+# A spot where both vision readings agree but MinerU printed something else
+# one-for-one (“x^3” / “x^2”, “销售单价” / “销售定价”).  The same model reading
+# twice tends to repeat its own slip, so such a spot is worth a third, focused
+# look.  Only clean substitutions count: short, made of letters, digits,
+# Chinese or maths symbols, anchored by identical text on both sides —
+# handwriting mixed into MinerU's text shows up as insertions, not these.
+_OBJECTION_CHARS = re.compile(r"^[0-9A-Za-z\u4e00-\u9fffα-ωΑ-Ω△∠⊥∥≤≥≠±×÷°π∞]+$")
+_OCR_LOOKALIKES = ({"O", "0"}, {"o", "0"}, {"l", "1"}, {"I", "1"}, {"I", "l"})
+
+
+def witness_objections(reading: dict | None, witness: str, *, context: int = 3) -> list[dict]:
+    if not reading or not reading.get("stem") or not witness:
+        return []
+    ka = witness_key(reading_witness_text(reading))
+    kw = witness_key(witness)
+    if len(kw) < WITNESS_MIN_LENGTH:
+        return []
+    spots = []
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kw, autojunk=False).get_opcodes():
+        if tag != "replace":
+            continue
+        read, seen = ka[i1:i2], kw[j1:j2]
+        if len(read) > 3 or len(seen) > 3 or {read, seen} in _OCR_LOOKALIKES:
+            continue
+        if not _OBJECTION_CHARS.match(read) or not _OBJECTION_CHARS.match(seen):
+            continue
+        left, right = ka[i1 - context:i1] if i1 >= context else "", ka[i2:i2 + context]
+        if len(left) < context or len(right) < context:
+            continue
+        if kw[j1 - context:j1] != left or kw[j2:j2 + context] != right:
+            continue
+        spots.append({"reading": read, "mineru": seen, "before": left, "after": right})
+    return spots
+
+
 def witness_choice(first: dict | None, second: dict | None, witness: str, *, context: int = 3) -> str | None:
     """Settle a disagreement between two vision readings with MinerU's text.
 

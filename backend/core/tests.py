@@ -649,7 +649,7 @@ class ScriptedChat:
             match = re.search(r"第\s*(\d+)\s*题", prompt)
         number = int(match.group(1))
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
-            "a" if "蓝色框" in prompt else "b"
+            "verify" if "两次一致。但另一个识别引擎" in prompt else "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
