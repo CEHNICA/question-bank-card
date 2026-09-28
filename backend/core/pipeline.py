@@ -2708,10 +2708,16 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     # MinerU's own text for each range is an independent second engine.  Only
     # prose blocks are used: on marked papers the student's working is mostly
     # recognised as separate equation blocks, which would never match.
-    witness_blocks = [block for block in _block_dicts(paper) if block.get("type") in WITNESS_BLOCK_TYPES]
+    blocks_by_page: dict[int, list[dict]] = defaultdict(list)
+    for block in _block_dicts(paper):
+        if block.get("type") in WITNESS_BLOCK_TYPES:
+            blocks_by_page[int(block["page_idx"])].append(block)
     for snapshot in snapshots:
-        snapshot["witness"] = segment._text_in_regions(witness_blocks, snapshot["regions"] or []) \
-            if snapshot.get("regions") else ""
+        regions = snapshot.get("regions") or []
+        # Only the pages this card touches: a long book has thousands of blocks.
+        nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
+                  for block in blocks_by_page.get(page, [])]
+        snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
         state=Question.State.READING,
         reread_requested=False,
