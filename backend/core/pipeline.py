@@ -182,8 +182,15 @@ def _source_kind_has_question_support(
     )
 
 
-def _number_seen_flag(expected: int, readings: list[dict | None]) -> str | None:
-    """Warn only when neither independent reader found the expected number."""
+def _number_seen_flag(
+    expected: int, readings: list[dict | None], *, clipped_number: bool = False,
+) -> str | None:
+    """Warn only when neither independent reader found the expected number.
+
+    ``clipped_number`` marks a start the local rules recovered from a number
+    whose leading digit was cut off by the scan (“9.” read as 19): a reader
+    seeing 9 there confirms the repair rather than contradicting it.
+    """
 
     seen_numbers = {
         value for result in readings
@@ -192,6 +199,9 @@ def _number_seen_flag(expected: int, readings: list[dict | None]) -> str | None:
         if isinstance(value, int) and not isinstance(value, bool)
     }
     if not seen_numbers or expected in seen_numbers:
+        return None
+    if clipped_number and all(
+            value < expected and str(expected).endswith(str(value)) for value in seen_numbers):
         return None
     rendered = "、".join(str(value) for value in sorted(seen_numbers))
     return f"AI 看到的题号是 {rendered}，请确认"
@@ -288,7 +298,8 @@ def persist_local_text_review_upgrades(questions) -> dict[str, int]:
             flags.append(content_flag)
         if number_flag := _number_seen_flag(
                 int(getattr(question, "number", 0) or 0),
-                [getattr(question, "read_a", None), getattr(question, "read_b", None)]):
+                [getattr(question, "read_a", None), getattr(question, "read_b", None)],
+                clipped_number=getattr(question, "start_source", "") == "repaired"):
             flags.append(number_flag)
         state = Question.State.YELLOW if flags else Question.State.GREEN
         changed_fields: list[str] = []
@@ -2558,7 +2569,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     others -= {item["number"] for item in foreign}
     if others:
         flags.append(f"截图里还露出了第 {'、'.join(map(str, sorted(others)))} 题，范围可能需要调整")
-    if number_flag := _number_seen_flag(number, [a, b]):
+    if number_flag := _number_seen_flag(
+            number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
     return {
         **update,

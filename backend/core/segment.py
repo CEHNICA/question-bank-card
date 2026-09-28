@@ -1285,13 +1285,18 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     runs: list[list[Start]] = [[]]
     seen: set[int] = set()
     maximum: int | None = None
-    for current in reliable:
+    for index, current in enumerate(reliable):
         restart = bool(
             runs[-1]
             and maximum is not None
             and current.number <= maximum
             and (current.number in seen or current.number <= 3)
         )
+        following = reliable[index + 1] if index + 1 < len(reliable) else None
+        if restart and following is not None and maximum < following.number <= maximum + 3:
+            # “17. … 2. S=4，求 AE … 18. …”: a sub-question that lost its
+            # parentheses, while the numbering carries straight on.  Skip it.
+            continue
         if restart:
             runs.append([])
             seen = set()
