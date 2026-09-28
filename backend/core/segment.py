@@ -1706,6 +1706,34 @@ def _drop_spill_candidates(questions: list[dict]) -> None:
         question["figure_candidates"] = kept
 
 
+EDGE_ALLOWANCE = 12.0
+
+
+def _cover_own_lines(regions: list[dict], blocks: list[dict]) -> list[dict]:
+    """Widen a column slot to the text lines that belong to it.
+
+    A line that runs a few units past the column split (胜利初二第 15 题
+    “希波克拉底月牙”) otherwise loses its last character in the crop.
+    """
+    widened = []
+    for region in regions:
+        x0, y0, x1, y1 = region["bbox"]
+        for block in blocks:
+            bbox = block.get("bbox")
+            if not bbox or int(block["page_idx"]) != region["page_idx"] \
+                    or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+                continue
+            cx, cy = _center(bbox)
+            if not (region["bbox"][0] <= cx <= region["bbox"][2] and y0 <= cy <= y1):
+                continue
+            if region["bbox"][0] - EDGE_ALLOWANCE <= bbox[0] < x0:
+                x0 = float(bbox[0])
+            if x1 < bbox[2] <= region["bbox"][2] + EDGE_ALLOWANCE:
+                x1 = float(bbox[2])
+        widened.append({**region, "bbox": [round(x0, 1), y0, round(x1, 1), y1]})
+    return widened
+
+
 def build_questions(
     layout: Layout,
     starts: list[Start],
@@ -1755,6 +1783,8 @@ def build_questions(
                 solution_trimmed = True
                 solution_boundary_seq = solution_boundary[1]
         regions = question_regions(layout, start, stop) or _fallback_regions(layout, start, stop)
+        if not textbook:
+            regions = _cover_own_lines(regions, blocks)
         if start.source_kind in {"example", "exercise"}:
             regions = _tighten_book_local_left_column(layout, start, regions, blocks)
         segmentation_flags: list[str] = []

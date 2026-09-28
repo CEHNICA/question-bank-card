@@ -97,6 +97,19 @@ class SegmentTests(TestCase):
         self.assertGreaterEqual(questions[9]["regions"][-1]["bbox"][3], 696)   # D. 3 is inside
         self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 704)
 
+    def test_a_line_running_past_the_column_split_keeps_its_last_character(self):
+        regions = [{"page_idx": 0, "bbox": [53.0, 93.0, 482.0, 275.0]}]
+        blocks = [
+            block(36, 0, [75, 97, 490, 147], "15. 如图 Rt△ABC，图中阴影部分在数学史上称为“希波克拉底"),
+            block(50, 0, [515, 123, 766, 149], "右栏的文字"),
+            block(51, 0, [470, 200, 530, 230], "", "image"),
+        ]
+        widened = segment._cover_own_lines(regions, blocks)
+        self.assertEqual(widened[0]["bbox"], [53.0, 93.0, 490.0, 275.0])
+        # Never more than a few units: a block reaching far into the other column is not followed.
+        far = segment._cover_own_lines(regions, [block(1, 0, [75, 97, 560, 147], "很宽的一行")])
+        self.assertEqual(far[0]["bbox"][2], 482.0)
+
     def test_a_number_glued_to_the_stem_fills_its_gap(self):
         # 胜利初四月考第 9 题：MinerU 读成“9如图，在△ABC中…”，没有点也没有空格。
         blocks = [
