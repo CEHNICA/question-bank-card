@@ -160,8 +160,14 @@ _WITNESS_PUNCT = re.compile(r"[,.;:!?\"'_()\[\]、·…|&]")
 WITNESS_MIN_LENGTH = 6
 
 
+# A student's answer letter written into the printed answer brackets
+# (“是（C）个”).  The letter must not follow a Latin letter, so P(A) stays.
+_WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-D]{1,4}\s*[)）]")
+
+
 def witness_key(value: str) -> str:
     text = _INLINE_TAG.sub("", str(value or ""))
+    text = _WITNESS_ANSWER.sub("（ ）", text)
     text = _WITNESS_LEAD.sub("", text, count=1)
     text = _WITNESS_SCORE.sub("", text)
     text = canon(text)

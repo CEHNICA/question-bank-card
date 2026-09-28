@@ -40,9 +40,14 @@ class WitnessKeyTests(SimpleTestCase):
         self.assertFalse(witness_agrees({"stem": "求 x"}, "求 x"))
         self.assertFalse(witness_agrees({"stem": ""}, ""))
 
+    def test_handwritten_answer_letter_is_ignored_but_probability_notation_is_not(self):
+        reading = {"stem": "无理数的个数是（ ）个", "options": {"A": "1", "B": "2"}}
+        self.assertTrue(witness_agrees(reading, "3. 无理数的个数是（ C ）个 A. 1 B. 2"))
+        self.assertFalse(witness_agrees({"stem": "则 P(A) 与 P(B) 的和为"}, "则 P(B) 与 P(B) 的和为"))
+
     def test_student_handwriting_in_ocr_blocks_the_shortcut(self):
         reading = {"stem": "下列各组数中，是勾股数的是（ ）", "options": {"A": "12,8,5", "B": "9,12,15"}}
-        self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C） A. 12, 8, 5 B. 9,12,15"))
+        self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15"))
 
 
 class WitnessPipelineTests(TestCase):

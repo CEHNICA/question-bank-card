@@ -2600,6 +2600,9 @@ def _snapshot(question: Question) -> dict:
             ]}
 
 
+WITNESS_BLOCK_TYPES = frozenset({"text", "title", "list"})
+
+
 def _reader_parallelism() -> int:
     """How many cards to read at once.
 
@@ -2629,10 +2632,12 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
-    blocks = _block_dicts(paper)
+    # MinerU's own text for each range is an independent second engine.  Only
+    # prose blocks are used: on marked papers the student's working is mostly
+    # recognised as separate equation blocks, which would never match.
+    witness_blocks = [block for block in _block_dicts(paper) if block.get("type") in WITNESS_BLOCK_TYPES]
     for snapshot in snapshots:
-        # MinerU's own text for this range: an independent second engine.
-        snapshot["witness"] = segment._text_in_regions(blocks, snapshot["regions"] or []) \
+        snapshot["witness"] = segment._text_in_regions(witness_blocks, snapshot["regions"] or []) \
             if snapshot.get("regions") else ""
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
         state=Question.State.READING,
