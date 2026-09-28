@@ -225,3 +225,68 @@ class MineruRecoveryTests(SimpleTestCase):
             archive.write_bytes(b"broken")
             with self.assertRaisesRegex(MineruError, "已损坏"):
                 load_blocks(archive, 1)
+
+
+class _FlakyUploadSession(_ApiSession):
+    """The first PUT stalls like the storage bucket did in a real run."""
+
+    def __init__(self, payloads: list[dict], failures: int):
+        super().__init__(payloads)
+        self.failures = failures
+        self.puts = 0
+
+    def put(self, *_args, **kwargs):
+        self.puts += 1
+        body = kwargs.get("data")
+        assert body is not None and body.read() == b"test", "every attempt must send the whole file"
+        if self.puts <= self.failures:
+            import requests
+            raise requests.ReadTimeout("stalled")
+        return _JsonResponse()
+
+
+class MineruNetworkRetryTests(SimpleTestCase):
+    def run_upload(self, failures: int):
+        from .mineru import request_extract_file
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.pdf"
+            source.write_bytes(b"test")
+            session = _FlakyUploadSession([
+                {"code": 0, "data": {"batch_id": "b", "file_urls": ["https://upload.invalid/x"]}},
+                {"code": 0, "data": {"extract_result": [{"state": "failed", "err_msg": "parsing failed"}]}},
+            ], failures)
+            with patch("core.mineru.requests.Session", return_value=session), \
+                    patch("core.mineru.time.sleep") as sleep:
+                with self.assertRaises(MineruError) as raised:
+                    request_extract_file("token", source, Path(directory) / "out.zip", 1)
+            return session, sleep, str(raised.exception)
+
+    def test_a_stalled_upload_is_retried_with_the_whole_file(self):
+        session, sleep, message = self.run_upload(failures=1)
+        self.assertEqual(session.puts, 2)
+        self.assertNotIn("上传失败", message)   # it went on to the (mocked) parse result
+        sleep.assert_any_call(2.0)
+
+    def test_persistent_upload_failure_still_fails_with_a_safe_message(self):
+        session, _sleep, message = self.run_upload(failures=5)
+        self.assertEqual(session.puts, 3)
+        self.assertIn("文件上传失败（ReadTimeout）", message)
+
+    def test_download_retries_transient_errors_only(self):
+        import requests
+
+        class Broken:
+            calls = 0
+
+            def get(self, *_args, **_kwargs):
+                Broken.calls += 1
+                raise requests.ConnectionError("reset")
+
+        with tempfile.TemporaryDirectory() as directory, patch("core.mineru.time.sleep"):
+            with self.assertRaises(MineruError):
+                _download_zip(Broken(), "https://example.invalid/r.zip", Path(directory) / "r.zip")
+        self.assertEqual(Broken.calls, 3)
+        with tempfile.TemporaryDirectory() as directory, patch("core.mineru.time.sleep") as sleep:
+            with self.assertRaises(MineruError):
+                _download_zip(_Session([b"not a zip"]), "https://example.invalid/r.zip", Path(directory) / "r.zip")
+        sleep.assert_not_called()

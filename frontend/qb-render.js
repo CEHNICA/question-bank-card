@@ -679,6 +679,25 @@
     return 1;
   }
 
+  /*
+   * 选项列数还要看实际可用宽度：卡片右栏比试卷窄，按纸面规则排两列时
+   * “∠ABD=∠CBD” 这类选项会被硬折行。渲染后按容器宽度逐级降为 2 列或 1 列。
+   */
+  function fitOptions(root) {
+    const lists = root?.querySelectorAll ? root.querySelectorAll(".qb-options[data-widest]") : [];
+    lists.forEach((list) => {
+      const width = list.clientWidth;
+      if (!width) return;
+      const preferred = Number(list.dataset.cols || 1);
+      const widest = Number(list.dataset.widest || 0);
+      const fontSize = parseFloat(getComputedStyle(list).fontSize) || 16;
+      const need = (cols) => cols * (widest * fontSize * 0.5 + fontSize * 2.4) + (cols - 1) * fontSize;
+      const fitted = [4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
+      list.classList.remove("cols-1", "cols-2", "cols-4");
+      list.classList.add(`cols-${fitted}`);
+    });
+  }
+
   function figureElement(figure, resolveUrl) {
     const frame = document.createElement("figure");
     frame.className = "qb-figure";
@@ -727,7 +746,12 @@
     const options = content.options && typeof content.options === "object" ? content.options : {};
     const hasOptions = OPTION_KEYS.some((key) => String(options[key] ?? "").trim() || figures.some((figure) => figure.slot === key));
     if (hasOptions) {
-      const list = make("ol", `qb-options cols-${optionColumns(options, figures)}`);
+      const columns = optionColumns(options, figures);
+      const list = make("ol", `qb-options cols-${columns}`);
+      if (!figures.some((figure) => OPTION_KEYS.includes(figure.slot))) {
+        list.dataset.cols = String(columns);
+        list.dataset.widest = String(Math.max(0, ...OPTION_KEYS.map((key) => displayWidth(options[key] ?? ""))));
+      }
       OPTION_KEYS.forEach((key) => {
         const item = make("li", "qb-option");
         item.append(make("span", "qb-option-label", `${key}.`));
@@ -791,6 +815,6 @@
     OPTION_KEYS, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale
+    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions
   };
 });

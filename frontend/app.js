@@ -541,8 +541,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const s = state.status;
     const reader = s.reader ? `读题 ${s.reader}` : "所选主读模型未配置，无法读题";
-    const checker = s.checker ? (s.independent_checker ? `复核 ${s.checker}（另一家模型）` : `复核 ${s.checker}（同一模型再独立读一遍）`) : "";
-    $("engineLine").textContent = [reader, checker].filter(Boolean).join(" · ");
+    // The MinerU text of each range is checked first; a second vision read is
+    // only requested when it disagrees with the first reading.
+    const witness = s.reader && s.mineru ? "旁证 MinerU 文字" : "";
+    const checker = s.checker ? (s.independent_checker ? `有出入时复核 ${s.checker}（另一家模型）`
+      : `有出入时复核 ${s.checker}`) : "";
+    $("engineLine").textContent = [reader, witness, checker].filter(Boolean).join(" · ");
     $("engineLine").title = $("engineLine").textContent;
     const note = $("uploadNote");
     if (!s.upload_enabled) {
@@ -1044,6 +1048,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       else empty.append(el("strong", "", "这一栏没有题卡"));
       container.append(empty);
     } else container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
+    R.fitOptions(container);
     renderSelectionState();
   }
 
@@ -1160,13 +1165,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 原卷截图
 
-  function cropView(regions, { figures = [], onZoom } = {}) {
+  const WIDE_CROP_ASPECT = 3.4;
+  const PREVIEW_LONG_SIDE = 2000;
+
+  function cropView(regions, { figures = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
       wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点右边的“调整范围”，在原卷上把它框出来，AI 会自动读题。"));
       return wrap;
     }
     const widest = Math.max(...regions.map((r) => r.bbox[2] - r.bbox[0]));
+    if (capToNatural) {
+      // Never enlarge past the preview image's own pixels: that only blurs.
+      const natural = Math.max(...regions.map((r) => {
+        const page = pageInfo(r.page_idx);
+        const scale = PREVIEW_LONG_SIDE / Math.max(page.width, page.height, 1);
+        return ((r.bbox[2] - r.bbox[0]) / 1000) * page.width * scale;
+      }));
+      // About the size of the typeset text beside it, so characters compare 1:1.
+      if (Number.isFinite(natural) && natural > 0) wrap.style.maxWidth = `${Math.round(Math.min(natural * 0.85, 1000))}px`;
+    }
     regions.forEach((region, index) => {
       const [x0, y0, x1, y1] = region.bbox;
       const rw = x1 - x0;
@@ -1364,6 +1382,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const body = el("div");
       R.renderQuestion(body, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed" });
       text.append(body);
+      requestAnimationFrame(() => R.fitOptions(body));
     } else text.append(el("p", "hint", q.state === "waiting" || q.state === "reading" ? "AI 正在读这道题……" : "还没有题面"));
     [$("zoomFit"), $("zoomWidth"), $("zoomOut"), $("zoomIn")].forEach((button) => { button.disabled = !regions.length; });
     $("viewerPrev").disabled = index <= 0;
@@ -1562,6 +1581,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("viewerSource").parentElement.classList.toggle("stacked", cropAspect(regions) > 2.5 && window.innerWidth > 1100);
   }
 
+  let optionFitTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(optionFitTimer);
+    optionFitTimer = setTimeout(() => R.fitOptions(document.body), 120);
+  });
   window.addEventListener("resize", () => {
     hideLens();
     if (!$("viewerDialog").open) return;
@@ -1921,7 +1945,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
-    sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q) }));
+    // A long, low crop (most choice questions) is unreadably small in the left
+    // column; stack it above the text so it gets the full card width.
+    if (q.regions.length && cropAspect(q.regions) >= WIDE_CROP_ASPECT) card.classList.add("wide-source");
+    sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q), capToNatural: true }));
     const sourceNote = el("p", "source-note");
     sourceNote.append(icon("zoom"), document.createTextNode(q.regions_changed ? "原卷截图（范围已人工调整）· 点击放大对照"
       : q.start_source === "inferred" ? "题号由本地规则补出，请对照原卷核对 · 点击放大对照"
