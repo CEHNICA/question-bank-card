@@ -12,7 +12,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from . import pipeline, readers
 from .models import Paper, Question
 from .tests import PAGES, ScriptedChat, fake_page_pdf, tagged
-from .textnorm import canon, witness_agrees, witness_choice, witness_key
+from .textnorm import canon, clean_stem, witness_agrees, witness_choice, witness_key
 
 
 class WitnessKeyTests(SimpleTestCase):
@@ -48,6 +48,14 @@ class WitnessKeyTests(SimpleTestCase):
     def test_student_handwriting_in_ocr_blocks_the_shortcut(self):
         reading = {"stem": "下列各组数中，是勾股数的是（ ）", "options": {"A": "12,8,5", "B": "9,12,15"}}
         self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15"))
+
+
+class StemCleanupTests(SimpleTestCase):
+    def test_number_and_score_markers_are_removed_only_when_they_are_this_question(self):
+        self.assertEqual(clean_stem("14 如图，在正五边形内部", 14), "如图，在正五边形内部")
+        self.assertEqual(clean_stem("3 个数中，最大的是", 14), "3 个数中，最大的是")
+        self.assertEqual(clean_stem("（本题满分14分）\n（1）比较大小", 17), "（1）比较大小")
+        self.assertEqual(clean_stem("17.（本题满分6分）已知", 17), "已知")
 
 
 class WitnessChoiceTests(SimpleTestCase):

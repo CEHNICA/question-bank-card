@@ -123,6 +123,8 @@ def fix_reading_symbols(value: dict) -> dict:
 
 
 NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s*[.．、]\s*")
+# “14 如图，…”: a printed number whose dot was never there or not seen.
+BARE_NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s+(?=[\u4e00-\u9fff])")
 
 
 def clean_stem(stem: str, number: int | None = None) -> str:
@@ -131,6 +133,10 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     match = NUMBER_PREFIX.match(text)
     if match and (number is None or int(match.group(1)) == number):
         text = text[match.end():]
+    else:
+        bare = BARE_NUMBER_PREFIX.match(text)
+        if bare and number is not None and int(bare.group(1)) == number:
+            text = text[bare.end():]
     text = re.sub(r"^\s*[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]\s*", "", text)
     return text.strip()
 
