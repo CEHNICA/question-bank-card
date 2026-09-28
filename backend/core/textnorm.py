@@ -248,7 +248,10 @@ def witness_key(value: str) -> str:
     text = _MATH_SEGMENT.sub(lambda m: m.group(0).replace("~", " "), text)
     text = canon(text, strip_trailing_punct=False, collapse_empty_brackets=False,
                  preserve_parallelogram=True)
-    return re.sub(r"\.{3,}|⋯", "…", text)
+    text = re.sub(r"\.{3,}|⋯", "…", text)
+    # ΔABC is the triangle; ≌ and \cong are both congruence; √3 and \sqrt{3}.
+    text = re.sub(r"Δ(?=[A-Z]{3}(?![A-Za-z]))", "△", text)
+    return text.replace("≌", "≅").replace("√", "sqrt")
 
 
 def reading_witness_text(reading: dict) -> str:
@@ -289,11 +292,25 @@ def _harmless_gap(text: str, start: int, end: int) -> bool:
     )
 
 
+# MinerU repeats or strands option letters with nothing after them: “B. 48/5
+# B.C. 4” and, for picture options, a bare “A. B. C. D.” at the end.
+_BARE_LABELS = re.compile(r"(?:[A-D]\.)+")
+
+
+def _bare_option_labels(text: str, start: int, end: int) -> bool:
+    if not _BARE_LABELS.fullmatch(text[start:end]):
+        return False
+    rest = text[end:]
+    return not rest or bool(re.match(r"[A-D]\.", rest))
+
+
 def _keys_agree(reading_key: str, witness_key_: str) -> bool:
     if reading_key == witness_key_:
         return True
-    for tag, i1, i2, _j1, _j2 in SequenceMatcher(None, reading_key, witness_key_, autojunk=False).get_opcodes():
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, reading_key, witness_key_, autojunk=False).get_opcodes():
         if tag == "equal" or (tag == "delete" and _harmless_gap(reading_key, i1, i2)):
+            continue
+        if tag == "insert" and _bare_option_labels(witness_key_, j1, j2):
             continue
         return False
     return True
@@ -314,6 +331,13 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
         _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
     ):
         return False
+    # MinerU has no ▱: it prints the parallelogram sign as □.  When the reader
+    # itself wrote ▱ (not a □ that parse_reading() turned into ▱), that □ in
+    # front of the vertices supports it.
+    if raw and "▱" in raw and "□" in expected and not (
+        _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
+    ):
+        expected = re.sub(r"□(?=[A-Z]{2,5})", "▱", expected)
     return _keys_agree(witness_key(reading_witness_text(reading)), expected)
 
 

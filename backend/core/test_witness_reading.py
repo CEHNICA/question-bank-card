@@ -130,6 +130,32 @@ class WitnessOcrNoiseTests(SimpleTestCase):
             with self.subTest(mineru=mineru):
                 self.assertTrue(witness_agrees({"stem": reading}, mineru))
 
+    def test_symbols_mineru_spells_differently(self):
+        self.assertTrue(witness_agrees({"stem": "且与 AE 重合，求 $\\triangle BDE$ 的面积."},
+                                       "且与 AE 重合，求 $\\Delta BDE$ 的面积."))
+        self.assertTrue(witness_agrees({"stem": "求证：△ABE≌△CDF"}, "求证：$\\triangle ABE \\cong \\triangle CDF$"))
+        self.assertTrue(witness_agrees({"stem": "已知 BD=3√2，则 CD 的长为"}, "已知 $BD=3\\sqrt{2}$ ，则 CD 的长为"))
+        # The Greek letter itself is not rewritten.
+        self.assertFalse(witness_agrees({"stem": "若 △x=2，求 y 的值"}, "若 Δx=2，求 y 的值"))
+
+    def test_mineru_square_supports_a_parallelogram_the_reader_wrote_itself(self):
+        read = readers.parse_reading("【题干】在▱ABCD中，连接BD，求证：BD⊥CD", 20)
+        read["raw"] = "【题干】在▱ABCD中，连接BD，求证：BD⊥CD"
+        self.assertTrue(witness_agrees(read, "20. 在□ABCD中，连接BD，求证：BD⊥CD"))
+        guessed = readers.parse_reading("【题干】在□ABCD中，连接BD，求证：BD⊥CD", 20)
+        guessed["raw"] = "【题干】在□ABCD中，连接BD，求证：BD⊥CD"
+        self.assertFalse(witness_agrees(guessed, "20. 在□ABCD中，连接BD，求证：BD⊥CD"))
+
+    def test_stray_option_letters_in_mineru_text(self):
+        reading = {"stem": "则 AH 等于（ ）", "options": {"A": "24/5", "B": "48/5", "C": "4", "D": "5"}}
+        self.assertTrue(witness_agrees(reading, "7. 则 AH 等于（） A. 24/5 B. 48/5 B.C.4 D.5"))
+        pictures = {"stem": "如图所示的几何体，其从上面看的图是（ ）", "options": {}}
+        self.assertTrue(witness_agrees(pictures, "8.如图所示的几何体，其从上面看的图是( C )\nA.\nB.\nC.\nD."))
+        # A label that carries text the reader does not have still disagrees.
+        self.assertFalse(witness_agrees(reading, "7. 则 AH 等于（） A. 24/5 B. 48/5 C.4 D.5 E.6"))
+        self.assertFalse(witness_agrees({"stem": "则 AH 等于（ ）", "options": {"A": "24/5", "B": "48/5", "D": "5"}},
+                                        "7. 则 AH 等于（） A. 24/5 B. 48/5 C.4 D.5"))
+
     def test_punctuation_mineru_dropped_is_tolerated_only_where_it_cannot_change_maths(self):
         tolerated = (
             ("且4S_n=3a_n+4.(1)求通项；(2)求前n项和T_n.", "且4S_n=3a_n+4(1)求通项；(2)求前n项和T_n"),
