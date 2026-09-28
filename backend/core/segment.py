@@ -1646,6 +1646,39 @@ def _tighten_book_local_left_column(
     return [tightened]
 
 
+SPILL_REGION_HEIGHT = 60.0
+
+
+def _drop_spill_candidates(questions: list[dict]) -> None:
+    """A thin spill-over strip must not claim the next question's picture.
+
+    When a question ends at the foot of a column, its range continues with a
+    thin strip at the top of the next column, above the next question's
+    number.  A picture there that belongs to the next question (its centre
+    lies in that question's range, not in the strip) used to become an
+    unclassified candidate of both, raising a false 配图冲突.
+    """
+    for index, question in enumerate(questions):
+        regions = question.get("regions") or []
+        strips = [region for region in regions[1:]
+                  if region["bbox"][3] - region["bbox"][1] < SPILL_REGION_HEIGHT]
+        if not strips:
+            continue
+        others = [other.get("regions") or [] for position, other in enumerate(questions) if position != index]
+        kept = []
+        for candidate in question.get("figure_candidates") or []:
+            page, bbox = int(candidate["page_idx"]), candidate["bbox"]
+            only_in_strip = (
+                not center_in_regions(page, bbox, regions)
+                and not overlaps_regions(page, bbox, [r for r in regions if r not in strips])
+                and overlaps_regions(page, bbox, strips)
+            )
+            if only_in_strip and any(center_in_regions(page, bbox, other) for other in others):
+                continue
+            kept.append(candidate)
+        question["figure_candidates"] = kept
+
+
 def build_questions(
     layout: Layout,
     starts: list[Start],
@@ -1791,6 +1824,7 @@ def build_questions(
             "section": section,
             "question_type": _section_type(section),
         })
+    _drop_spill_candidates(questions)
     return questions
 
 

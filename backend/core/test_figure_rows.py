@@ -110,3 +110,35 @@ class LocatedStartSnapTests(TestCase):
         # Already on a stem line, or nothing near: unchanged.
         self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 658.0), 658.0)
         self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 300.0), 300.0)
+
+
+class SpillStripCandidateTests(TestCase):
+    def test_thin_strip_does_not_claim_the_next_questions_picture(self):
+        from . import segment
+        picture = {"seq": 18, "page_idx": 0, "bbox": [905.0, 45.0, 947.0, 123.0]}
+        own = {"seq": 15, "page_idx": 0, "bbox": [411.0, 680.0, 478.0, 790.0]}
+        questions = [
+            {"number": 7, "regions": [
+                {"page_idx": 0, "bbox": [52.0, 779.0, 490.0, 858.0]},
+                {"page_idx": 0, "bbox": [490.0, 41.0, 967.0, 71.0]},   # 30-unit strip
+            ], "figure_candidates": [dict(picture), dict(own)]},
+            {"number": 8, "regions": [{"page_idx": 0, "bbox": [490.0, 64.0, 967.0, 133.0]}],
+             "figure_candidates": [dict(picture)]},
+        ]
+        segment._drop_spill_candidates(questions)
+        self.assertEqual([c["seq"] for c in questions[0]["figure_candidates"]], [15])
+        self.assertEqual([c["seq"] for c in questions[1]["figure_candidates"]], [18])
+
+    def test_a_tall_continuation_keeps_its_pictures(self):
+        from . import segment
+        picture = {"seq": 18, "page_idx": 0, "bbox": [905.0, 45.0, 947.0, 123.0]}
+        questions = [
+            {"number": 7, "regions": [
+                {"page_idx": 0, "bbox": [52.0, 700.0, 490.0, 858.0]},
+                {"page_idx": 0, "bbox": [490.0, 41.0, 967.0, 101.0]},  # a real continuation
+            ], "figure_candidates": [dict(picture)]},
+            {"number": 8, "regions": [{"page_idx": 0, "bbox": [490.0, 94.0, 967.0, 200.0]}],
+             "figure_candidates": [dict(picture)]},
+        ]
+        segment._drop_spill_candidates(questions)
+        self.assertEqual([c["seq"] for c in questions[0]["figure_candidates"]], [18])
