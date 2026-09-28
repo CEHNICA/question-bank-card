@@ -313,11 +313,17 @@ def _unnumbered_starts(blocks: list[dict]) -> list[Start]:
     return found
 
 
-_BARE_NUMBER_START_RE = re.compile(r"^\s*(\d{1,2})\s+(?=[\u4e00-\u9fff])")
+_BARE_NUMBER_START_RE = re.compile(
+    r"^\s*(\d{1,2})(?:\s+(?=[\u4e00-\u9fff])"
+    # “9如图，在△ABC中…”: no dot and no space.  Only words that open a
+    # question qualify, so “3个数中” or “8米长” never become a number.
+    r"|(?=如图|如下|已知|若|设|在|计算|化简|求|解|下列|某|用|把|将|当|对于|阅读|观察|先|"
+    r"有|甲|抛物线|函数|直线|点|[△▱⊙]))"
+)
 
 
 def _bare_number_starts(blocks: list[dict]) -> list[Start]:
-    """“14 如图，…”: a printed number whose dot MinerU dropped.
+    """“14 如图，…” / “9如图，…”: a printed number whose dot MinerU dropped.
 
     These are used only to fill an exact gap in the numbering (13 → ? → 15),
     never to start or extend a chain on their own.

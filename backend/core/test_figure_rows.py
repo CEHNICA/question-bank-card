@@ -152,6 +152,16 @@ class LocatedStartSnapTests(TestCase):
         self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 658.0), 658.0)
         self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 300.0), 300.0)
 
+    def test_a_start_located_on_the_previous_questions_first_line_is_rejected(self):
+        from . import segment
+        blocks = [{"seq": 24, "type": "text", "page_idx": 0, "bbox": [529, 373, 922, 392],
+                   "text": "8.图为某拦河坝改造前后河床的横断面示意图"}]
+        previous = segment.Start(number=8, page=0, x=529, y=373, seq=24, col=1)
+        self.assertTrue(pipeline._inside_previous_opening(blocks, previous, 0, 1, 380.0))
+        self.assertFalse(pipeline._inside_previous_opening(blocks, previous, 0, 1, 575.0))
+        self.assertFalse(pipeline._inside_previous_opening(blocks, previous, 0, 0, 380.0))  # other column
+        self.assertFalse(pipeline._inside_previous_opening(blocks, previous, 1, 1, 380.0))  # next page
+
 
 class SpillStripCandidateTests(TestCase):
     def test_thin_strip_does_not_claim_the_next_questions_picture(self):

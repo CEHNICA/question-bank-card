@@ -1298,6 +1298,24 @@ def _snap_located_start(
     return stem if stem is not None else y
 
 
+FIRST_LINE_HEIGHT = 20.0
+
+
+def _inside_previous_opening(blocks: list[dict] | None, previous: segment.Start,
+                             page_idx: int, col: int, y: float) -> bool:
+    """A located number cannot sit on the previous question's own first line."""
+    if page_idx != previous.page or col != previous.col or y < previous.y:
+        return False
+    # Only the first printed line: MinerU sometimes merges the next question
+    # into the previous paragraph, and a number further down that block is real.
+    opening = next((block for block in blocks or [] if previous.seq is not None and block.get("seq") == previous.seq
+                    and block.get("bbox")), None)
+    bottom = previous.y + FIRST_LINE_HEIGHT
+    if opening:
+        bottom = min(bottom, float(opening["bbox"][3]))
+    return y < bottom - 2
+
+
 def locate_missing(
     paper: Paper, layout, starts: list[segment.Start], store: PageStore, blocks: list[dict] | None = None,
 ) -> list[str]:
@@ -1333,6 +1351,10 @@ def locate_missing(
             continue
         x = region["bbox"][0] + 5
         col = segment.column_of(layout.splits.get(page_idx, []), x + 1)
+        if _inside_previous_opening(blocks, previous, page_idx, col, y):
+            notes.append(f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
+                         f"它暂时和第 {previous.number} 题在同一张卡里。")
+            continue
         snapped = _snap_located_start(blocks, layout, page_idx, col, y)
         # y 是题号上方的空隙：前一题到此为止，本题从这里（再往上留一点）开始。
         starts.append(segment.Start(number=number, page=page_idx, x=x,

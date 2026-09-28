@@ -84,6 +84,18 @@ class SegmentTests(TestCase):
         self.assertTrue(all(q["section"].startswith("三、解答题") for q in questions.values()))
         self.assertTrue(all(q["question_type"] == "free_response" for q in questions.values()))
 
+    def test_a_number_glued_to_the_stem_fills_its_gap(self):
+        # 胜利初四月考第 9 题：MinerU 读成“9如图，在△ABC中…”，没有点也没有空格。
+        blocks = [
+            block(0, 0, [529, 100, 922, 130], "7. 抛物线 y=x² 向左平移1个单位长度"),
+            block(1, 0, [529, 373, 922, 392], "8.图为某拦河坝改造前后河床的横断面示意图"),
+            block(2, 0, [527, 470, 900, 490], "3个数中最大的是多少"),
+            block(3, 0, [527, 579, 921, 607], "9如图，在 $\\triangle ABC$ 中 $\\angle B = 45^{\\circ}$"),
+            block(4, 0, [527, 779, 894, 852], "10.二次函数 y=ax²+bx+c 的图象如图所示"),
+        ]
+        layout, starts = segment.analyse(PAGES[:1], blocks)
+        self.assertEqual([(s.number, s.y) for s in starts], [(7, 100), (8, 373), (9, 579), (10, 779)])
+
     def test_suffix_repair(self):
         blocks = [block(i, 0, [60, 50 + 60 * i, 470, 80 + 60 * i], f"{n}. 题目{n}")
                   for i, n in enumerate([21, 22, 3, 24])]
