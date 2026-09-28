@@ -75,7 +75,7 @@ CREDENTIAL_STATUS_NAMES = {
 }
 # Mirrors backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY: simultaneous
 # requests one account may carry.  QB_<PROVIDER>_ACCOUNT_CONCURRENCY overrides.
-ACCOUNT_CONCURRENCY_DEFAULTS = {"minimax": 4, "siliconflow": 2}
+ACCOUNT_CONCURRENCY_DEFAULTS = {"minimax": 6, "siliconflow": 2}
 MAX_PARALLEL_CARDS = 16
 MODEL_PROVIDER_BY_ENGINE = {
     "minimax_m3": "minimax",

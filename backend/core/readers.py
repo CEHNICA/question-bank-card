@@ -11,6 +11,8 @@ import random
 import re
 import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -550,7 +552,50 @@ def _minimax_token_plan_exhausted(response: requests.Response) -> bool:
     return isinstance(message, str) and TOKEN_PLAN_EXHAUSTED_CODE.search(message) is not None
 
 
+def _hedge_after() -> float:
+    """Seconds before a straggling request gets a duplicate (0 disables)."""
+    try:
+        value = float(os.environ.get("QB_HEDGE_AFTER", "18"))
+    except (TypeError, ValueError):
+        value = 18.0
+    return value if value > 0 else 0.0
+
+
+_HEDGE_EXECUTOR = ThreadPoolExecutor(max_workers=64, thread_name_prefix="qb-reader")
+
+
 def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
+    """One model answer, with a duplicate request for rare stragglers.
+
+    Measured on MiniMax: median 4.3 s, p90 ~8 s, but about one call in thirty
+    stalls for 40–65 s while producing ~100 tokens, and a single straggler
+    holds up the whole paper.  After ``QB_HEDGE_AFTER`` seconds a second,
+    identical request is sent and whichever answers first is used.  At
+    temperature 0 both answers are equivalent, so this changes latency only.
+    """
+    delay = _hedge_after()
+    if not delay:
+        return _chat_once(engine, prompt, image_urls, max_tokens)
+    first = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens)
+    try:
+        return first.result(timeout=delay)
+    except FutureTimeout:
+        pass
+    second = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens)
+    pending = {first, second}
+    failure: BaseException | None = None
+    while pending:
+        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for future in done:
+            error = future.exception()
+            if error is None:
+                return future.result()
+            failure = failure or error
+    assert failure is not None
+    raise failure
+
+
+def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
     content = [{"type": "text", "text": prompt}] + [
         {"type": "image_url", "image_url": {"url": url}} for url in image_urls
     ]

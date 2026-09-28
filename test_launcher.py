@@ -105,7 +105,7 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(name, web)
         self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
                          ("2", "3", "2"))
-        # 3 MiniMax accounts x 4 + 2 SiliconFlow accounts x 2, capped at 16.
+        # 3 MiniMax accounts x 6 + 2 SiliconFlow accounts x 2, capped at 16.
         self.assertEqual(worker["QB_PARALLEL"], "16")
         self.assertEqual(web["QB_PARALLEL"], "16")
         self.assertEqual(worker["QB_PARALLEL_EXPLICIT"], "0")
@@ -144,10 +144,10 @@ class LauncherTests(unittest.TestCase):
             launcher._parallel_environment({"QB_PARALLEL": "9"}, pools, preferences),
             {"QB_PARALLEL": "9", "QB_PARALLEL_EXPLICIT": "1"},
         )
-        # One MiniMax key alone now reads four cards at once by default.
+        # One MiniMax key alone now reads six cards at once by default.
         self.assertEqual(
             launcher._parallel_environment({}, {"minimax": ["mm1"]}, preferences),
-            {"QB_PARALLEL": "4", "QB_PARALLEL_EXPLICIT": "0"},
+            {"QB_PARALLEL": "6", "QB_PARALLEL_EXPLICIT": "0"},
         )
         pools["minimax"] = [f"mm{index}" for index in range(8)]
         pools["siliconflow"] = [f"sf{index}" for index in range(8)]

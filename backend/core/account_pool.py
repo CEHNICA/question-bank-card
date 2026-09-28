@@ -26,7 +26,7 @@ MAX_ACCOUNTS = 8
 MAX_ACCOUNT_CONCURRENCY = 8
 # Conservative defaults: vision providers tolerate a few parallel requests per
 # key; MinerU tasks are long-running uploads and stay at one per token.
-DEFAULT_ACCOUNT_CONCURRENCY = {"minimax": 4, "siliconflow": 2, "mineru": 1}
+DEFAULT_ACCOUNT_CONCURRENCY = {"minimax": 6, "siliconflow": 2, "mineru": 1}
 SERVICE_ENVIRONMENT = {
     "mineru": ("MINERU_TOKENS_JSON", "MINERU_TOKEN"),
     "minimax": ("MINIMAX_API_KEYS_JSON", "MINIMAX_API_KEY"),

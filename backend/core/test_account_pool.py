@@ -158,7 +158,7 @@ class AccountConcurrencyTests(SimpleTestCase):
         self.assertEqual(pool.capacity, 1)
 
     def test_configured_concurrency_is_validated_and_clamped(self):
-        cases = (("", 4), ("2", 2), ("0", 1), ("99", 8), ("x", 4))
+        cases = (("", 6), ("2", 2), ("0", 1), ("99", 8), ("x", 6))
         for raw, expected in cases:
             with self.subTest(raw=raw), mock.patch.dict(
                     "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw}):
@@ -474,3 +474,56 @@ class VisionPoolTests(SimpleTestCase):
         self.assertEqual(readers._retry_after_seconds("garbage", fallback=2.0), 2.0)
         self.assertEqual(readers._retry_after_seconds("120"), 60.0)
         self.assertEqual(readers._retry_after_seconds("1.5"), 1.5)
+
+
+class HedgedRequestTests(SimpleTestCase):
+    engine = readers.Engine("minimax", readers.MINIMAX_MODEL)
+
+    def test_straggler_is_answered_by_a_duplicate_request(self):
+        release = threading.Event()
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000):
+            calls.append(len(calls))
+            if len(calls) == 1:
+                release.wait(5)
+                return "slow"
+            return "fast"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "fast")
+        release.set()
+        self.assertEqual(len(calls), 2)
+
+    def test_fast_answer_sends_no_duplicate(self):
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "5"}), \
+                mock.patch.object(readers, "_chat_once", return_value="ok") as once:
+            self.assertEqual(readers.chat(self.engine, "p", []), "ok")
+        once.assert_called_once()
+
+    def test_a_failed_duplicate_does_not_hide_a_late_success(self):
+        release = threading.Event()
+
+        def once(_engine, _prompt, _images, _max_tokens=3000):
+            if not release.is_set():
+                release.set()
+                time.sleep(0.2)
+                return "late but fine"
+            raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "late but fine")
+
+    def test_both_failing_raises_and_zero_disables_hedging(self):
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.01"}), \
+                mock.patch.object(readers, "_chat_once",
+                                  side_effect=lambda *_a, **_k: (time.sleep(0.05), (_ for _ in ()).throw(
+                                      readers.ReaderError("MiniMax 接口返回 HTTP 500")))[1]):
+            with self.assertRaises(readers.ReaderError):
+                readers.chat(self.engine, "p", [])
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0"}), \
+                mock.patch.object(readers, "_chat_once", return_value="direct") as once:
+            self.assertEqual(readers.chat(self.engine, "p", []), "direct")
+        once.assert_called_once()
