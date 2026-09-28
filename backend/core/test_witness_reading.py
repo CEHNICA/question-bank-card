@@ -58,6 +58,7 @@ class StemCleanupTests(SimpleTestCase):
         self.assertEqual(clean_stem("17.（本题满分6分）已知", 17), "已知")
         self.assertEqual(clean_stem("．如图，所有三角形", 2), "如图，所有三角形")
         self.assertEqual(clean_stem("2..如图，所有三角形", 2), "如图，所有三角形")
+        self.assertEqual(clean_stem("（ ）如图，在▱ABCD中", 23), "如图，在▱ABCD中")
 
 
 class WitnessChoiceTests(SimpleTestCase):

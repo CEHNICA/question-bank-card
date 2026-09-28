@@ -1265,7 +1265,42 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
     return best_row
 
 
-def locate_missing(paper: Paper, layout, starts: list[segment.Start], store: PageStore) -> list[str]:
+_OPTION_LINE = re.compile(r"^\s*[A-DＡ-Ｄ]\s*[.．、:：]")
+LOCATE_SNAP_RANGE = 30.0   # 页面坐标：定位结果向下吸附到题干行的最大距离
+
+
+def _snap_located_start(
+    blocks: list[dict] | None, layout, page_idx: int, col: int, y: float,
+) -> float:
+    """Move an AI-located start onto the first stem line at or just below it.
+
+    The band the model names is coarse.  Landing inside the previous
+    question's option lines (“A. S  B. S/2 …”) used to cut those options off
+    the previous card.  Only MinerU text lines that do not start with an
+    option label, within a short distance, are used; otherwise ``y`` stays.
+    """
+    if not blocks:
+        return y
+    splits = layout.splits.get(page_idx, [])
+    below = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or int(block.get("page_idx", -1)) != page_idx or block.get("type") not in {"text", "title"}:
+            continue
+        if segment.column_of(splits, (bbox[0] + bbox[2]) / 2) != col:
+            continue
+        if y - 12 <= bbox[1] <= y + LOCATE_SNAP_RANGE:
+            below.append((bbox[1], str(block.get("text") or "")))
+    below.sort()
+    if not below or not _OPTION_LINE.match(below[0][1]):
+        return y   # already on (or just above) a non-option line
+    stem = next((top for top, text in below if not _OPTION_LINE.match(text)), None)
+    return stem if stem is not None else y
+
+
+def locate_missing(
+    paper: Paper, layout, starts: list[segment.Start], store: PageStore, blocks: list[dict] | None = None,
+) -> list[str]:
     """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。"""
     notes = []
     engine = readers.primary_engine()
@@ -1298,8 +1333,10 @@ def locate_missing(paper: Paper, layout, starts: list[segment.Start], store: Pag
             continue
         x = region["bbox"][0] + 5
         col = segment.column_of(layout.splits.get(page_idx, []), x + 1)
+        snapped = _snap_located_start(blocks, layout, page_idx, col, y)
         # y 是题号上方的空隙：前一题到此为止，本题从这里（再往上留一点）开始。
-        starts.append(segment.Start(number=number, page=page_idx, x=x, y=y + segment.END_GAP,
+        starts.append(segment.Start(number=number, page=page_idx, x=x,
+                                    y=(snapped if snapped != y else y + segment.END_GAP),
                                     seq=None, source="located", col=col))
         notes.append(f"第 {number} 题的题号 MinerU 没读出来，已由 AI 在原卷上定位。")
     return notes
@@ -1741,7 +1778,7 @@ def _collect_segmentation_items(
             notes.append(f"{group.title}：{leading.message}" if len(groups) > 1 else leading.message)
         missing = segment.missing_numbers(starts)
         if locate_gaps:
-            group_notes = locate_missing(paper, layout, starts, page_store)
+            group_notes = locate_missing(paper, layout, starts, page_store, group_blocks)
             notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
                           for note in group_notes])
         elif missing:

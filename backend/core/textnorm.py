@@ -143,6 +143,8 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     text = re.sub(r"^\s*[(（]\s*(?=[(（]\s*\d{1,2}\s*[)）])", "", text)
     # “2..如图” on the paper: the reader drops the number but keeps a dot.
     text = re.sub(r"^\s*[.．、]+\s*(?=[\u4e00-\u9fff（(])", "", text)
+    # An emptied score bracket: “（ ）如图，在▱ABCD中…”.
+    text = re.sub(r"^\s*[(（]\s*[)）]\s*(?=[\u4e00-\u9fff])", "", text)
     return text.strip()
 
 

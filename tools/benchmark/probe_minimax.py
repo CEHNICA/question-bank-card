@@ -10,7 +10,6 @@ import argparse
 import base64
 import json
 import statistics
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path

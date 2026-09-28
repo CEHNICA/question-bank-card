@@ -93,3 +93,20 @@ class PictureOptionRowTests(TestCase):
         self.assertEqual(pipeline._row_as_choice_options(
             stem="观察下列图形，求面积。", options={}, kind="free_response",
             candidates=self.row, assignments=assignments), assignments)
+
+
+
+class LocatedStartSnapTests(TestCase):
+    def test_a_start_located_inside_the_previous_options_moves_to_the_stem_line(self):
+        from types import SimpleNamespace
+        layout = SimpleNamespace(splits={0: [515.0]})
+        blocks = [
+            {"seq": 13, "type": "text", "page_idx": 0, "bbox": [86, 639, 116, 655], "text": "A. $S$"},
+            {"seq": 16, "type": "text", "page_idx": 0, "bbox": [200, 645, 229, 700], "text": "B. $\\frac{s}{2}$ D. $\\frac{s}{4}$"},
+            {"seq": 18, "type": "text", "page_idx": 0, "bbox": [79, 660, 504, 735], "text": "如图，在▱ABCD中，∠ABC、∠BCD的角平分线交于边"},
+            {"seq": 22, "type": "text", "page_idx": 0, "bbox": [529, 640, 906, 660], "text": "6. 如图所示，DE为中位线"},
+        ]
+        self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 636.0), 660)
+        # Already on a stem line, or nothing near: unchanged.
+        self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 658.0), 658.0)
+        self.assertEqual(pipeline._snap_located_start(blocks, layout, 0, 0, 300.0), 300.0)
