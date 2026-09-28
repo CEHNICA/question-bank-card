@@ -179,6 +179,9 @@ const QBProgress = (() => {
       if (total) {
         const remaining = Math.max(0, total - completed);
         parts.push(remaining ? `剩余 ${remaining} 道，完成的题卡会陆续出现` : "全部题目已读完，正在整理结果");
+        if (remaining && raw.eta_seconds !== undefined && raw.eta_seconds !== null) {
+          parts.push(`按目前速度约还需 ${formatDuration(Math.max(5, safeNumber(raw.eta_seconds)))}`);
+        }
       } else parts.push("题目总数尚未确定，完成的题卡会陆续出现");
     }
 

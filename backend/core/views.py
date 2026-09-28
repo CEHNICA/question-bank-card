@@ -286,6 +286,17 @@ def _processing_json(paper: Paper) -> dict | None:
             "total": paper.total,
             "unit": "question",
         })
+        # A measured estimate, not a promise: the pace between the first and
+        # the latest finished card of this run.  Needs a few finished cards.
+        finished = paper.questions.exclude(
+            state__in=[Question.State.WAITING, Question.State.READING],
+        ).aggregate(first=models.Min("updated_at"), last=models.Max("updated_at"), count=models.Count("id"))
+        remaining = max(0, paper.total - paper.progress)
+        if remaining and finished["count"] >= 4 and finished["first"] and finished["last"]:
+            span = (finished["last"] - finished["first"]).total_seconds()
+            if span > 0:
+                pace = span / (finished["count"] - 1)
+                progress["eta_seconds"] = int(min(24 * 3600, remaining * pace))
     return progress
 
 

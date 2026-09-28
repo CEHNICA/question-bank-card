@@ -53,6 +53,16 @@ assert.equal(reading.headline, "AI 读题中 · 已完成 40/561");
 assert.match(reading.detail, /剩余 521 道/);
 assert.match(reading.detail, /任务创建至今 9分28秒/);
 assert.match(reading.detail, /本任务状态最近更新 刚刚/);
+assert.doesNotMatch(reading.detail, /约还需/, "没有实测速度时不估计剩余时间");
+
+const withPace = Progress.processingPresentation({
+  status: "reading",
+  processing: {
+    stage: "reading", determinate: true, completed: 12, total: 30,
+    elapsed_seconds: 80, idle_seconds: 1, eta_seconds: 95
+  }
+});
+assert.match(withPace.detail, /按目前速度约还需 1分35秒/);
 
 const stale = Progress.processingPresentation({
   status: "reading",

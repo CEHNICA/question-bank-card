@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import ImportChunk, Paper
+from .models import ImportChunk, Paper, Question
 from .views import paper_json
 
 
@@ -91,6 +91,28 @@ class ProcessingProgressTests(TestCase):
         paper.status = Paper.Status.READY
         paper.save(update_fields=["status", "updated_at"])
         self.assertIsNone(paper_json(paper, with_counts=False)["processing"])
+
+    def test_reading_estimate_comes_from_the_measured_pace_of_finished_cards(self):
+        paper = make_paper("pace.pdf", Paper.Status.READING)
+        now = timezone.now()
+        for number in range(1, 11):
+            question = Question.objects.create(
+                paper=paper, number=number,
+                state=Question.State.GREEN if number <= 5 else Question.State.WAITING,
+            )
+            if number <= 5:   # one card finished every 4 seconds
+                Question.all_objects.filter(pk=question.pk).update(
+                    updated_at=now - timedelta(seconds=4 * (5 - number)))
+        paper.progress, paper.total = 5, 10
+        paper.save(update_fields=["progress", "total", "updated_at"])
+        progress = paper_json(paper, with_counts=False)["processing"]
+        self.assertEqual(progress["eta_seconds"], 20)
+
+        few = make_paper("few.pdf", Paper.Status.READING)
+        Question.objects.create(paper=few, number=1, state=Question.State.GREEN)
+        few.progress, few.total = 1, 10
+        few.save(update_fields=["progress", "total", "updated_at"])
+        self.assertNotIn("eta_seconds", paper_json(few, with_counts=False)["processing"])
 
     def test_quota_exhaustion_is_presented_as_a_recoverable_pause(self):
         paper = make_paper("quota.pdf", Paper.Status.FAILED)
