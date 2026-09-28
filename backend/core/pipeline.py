@@ -2489,7 +2489,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             arbiter = readers.arbiter_engine(primary, checker)
             if arbiter is None:
                 raise readers.ReaderError("没有可用的分歧裁决模型")
-            c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
+            c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text, witness) if witness \
+                else readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
             normalized_results.append(c_text)

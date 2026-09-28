@@ -285,7 +285,7 @@ def transcribe_prompt(number: int, with_figures: bool, source_kind: str = "unkno
     return "\n\n".join(parts)
 
 
-def arbiter_prompt(number: int, first: dict, second: dict) -> str:
+def arbiter_prompt(number: int, first: dict, second: dict, witness: str = "") -> str:
     def show(reading: dict) -> str:
         lines = [reading.get("stem", "")]
         for key in OPTION_KEYS:
@@ -299,6 +299,11 @@ def arbiter_prompt(number: int, first: dict, second: dict) -> str:
         "两次都对的地方照抄；有出入的地方以原图印刷体为准。",
         f"【读法甲】\n{show(first)}",
         f"【读法乙】\n{show(second)}",
+        *([
+            "【另一识别引擎的文字】（MinerU 按版面识别，可能混入手写、漏字或把公式写乱，只作参考；"
+            "有出入处以原图印刷体为准，但它常能帮你发现两种读法里被“改正”过的字）\n"
+            + witness.strip()[:1500]
+        ] if witness and witness.strip() else []),
         "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
         "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…（不是选择题就不写选项）",
     ])
@@ -711,8 +716,10 @@ def read_question(
     raise ReaderError(f"{engine.label} 两次输出都不合格式")
 
 
-def arbitrate(engine: Engine, image_url: str, number: int, first: dict, second: dict) -> dict:
-    raw = chat(engine, arbiter_prompt(number, first, second), [image_url])
+def arbitrate(
+    engine: Engine, image_url: str, number: int, first: dict, second: dict, witness: str = "",
+) -> dict:
+    raw = chat(engine, arbiter_prompt(number, first, second, witness), [image_url])
     try:
         reading = parse_reading(raw, number)
     except ValueError as error:
