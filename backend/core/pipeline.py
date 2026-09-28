@@ -421,7 +421,7 @@ def _drop_stale_automatic_figures(question: Question, candidates: list[dict]) ->
         if not isinstance(figure, dict):
             changed = True
             continue
-        if figure.get("source") == "other" or candidate_key(figure) in valid_keys:
+        if figure.get("source") in {"other", "row"} or candidate_key(figure) in valid_keys:
             kept.append(figure)
         else:
             changed = True
@@ -1558,7 +1558,7 @@ def _apply_local_solution_shortening(
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
             or (
-                figure.get("source") == "other"
+                figure.get("source") in {"other", "row"}
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
         )
@@ -2652,7 +2652,14 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
         question = Question.objects.filter(pk=question_id).first()
         if question is None:
             return
-        borrowed = [f for f in question.figures if f.get("source") == "other"]
+        # Figures handed over from another question's range survive a reread.
+        # A row figure that lies in this question's own range is re-decided by
+        # the new reading instead.
+        own_keys = {candidate_key(item) for item in question.figure_candidates or []}
+        borrowed = [
+            f for f in question.figures
+            if f.get("source") == "other" or (f.get("source") == "row" and candidate_key(f) not in own_keys)
+        ]
         if borrowed and "figures" in fields:
             fields["figures"] = fields["figures"] + [
                 f for f in borrowed if not _same_box(f, fields["figures"])
@@ -2739,6 +2746,7 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
                     break
                 pending.add(pool.submit(work, snapshot))
     assign_foreign_figures(paper, foreign)
+    distribute_figure_rows(paper)
     if quota_error is not None:
         raise quota_error
 
@@ -2746,6 +2754,74 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
 def _same_box(figure: dict, others: list[dict]) -> bool:
     return any(o["page_idx"] == figure["page_idx"] and all(abs(a - b) < 1 for a, b in zip(o["bbox"], figure["bbox"]))
                for o in others)
+
+
+FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
+
+
+def _single_row(candidates: list[dict]) -> list[dict] | None:
+    """Candidates laid out left-to-right on one line of one page, else None."""
+    if len(candidates) < 2 or len({item["page_idx"] for item in candidates}) != 1:
+        return None
+    row = sorted(candidates, key=lambda item: item["bbox"][0])
+    for left, right in zip(row, row[1:]):
+        top = max(left["bbox"][1], right["bbox"][1])
+        bottom = min(left["bbox"][3], right["bbox"][3])
+        shorter = min(left["bbox"][3] - left["bbox"][1], right["bbox"][3] - right["bbox"][1])
+        if shorter <= 0 or (bottom - top) < 0.5 * shorter or right["bbox"][0] < left["bbox"][2] - 4:
+            return None
+    return row
+
+
+def _needs_row_figure(question: Question) -> bool:
+    review = stored_or_derived_review(question)
+    return (
+        not question.figures
+        and not question.approved
+        and review.get("source") != "human"
+        and review.get("status") == BLOCKED_MISSING
+        and bool(review.get("cue_matches"))
+    )
+
+
+def distribute_figure_rows(paper: Paper) -> int:
+    """Hand out a shared row of figures to the consecutive questions it serves.
+
+    Exams often print the figures of questions 13, 14 and 15 side by side below
+    question 15.  Only question 15's range contains them, so 13 and 14 end up
+    “missing” a figure while 15 may claim the wrong one.  When the row holds
+    exactly one figure per question — the k-1 immediately preceding questions
+    all mention a figure yet have none — assign them left to right and flag
+    every card so a person confirms the pairing.  No model call is made.
+    """
+    changed = 0
+    questions = list(paper.questions.order_by("group_id", "number", "id"))
+    by_key = {(question.group_id, question.number): question for question in questions}
+    for owner in questions:
+        if owner.approved or any(f.get("source") == "manual" for f in owner.figures or []):
+            continue
+        row = _single_row([item for item in owner.figure_candidates or [] if item.get("bbox")])
+        if row is None:
+            continue
+        before = [by_key.get((owner.group_id, owner.number - offset)) for offset in range(len(row) - 1, 0, -1)]
+        if any(item is None or not _needs_row_figure(item) for item in before):
+            continue
+        targets = [*before, owner]
+        for question, figure in zip(targets, row):
+            box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
+            question.figures = [box]
+            question.figure_review = automatic_review(
+                stem=question.stem, options=question.options, candidate_labels=set(),
+                assignments={}, figures=question.figures,
+            )
+            flags = [flag for flag in (question.flags or []) if not figure_flag(flag) and flag != FLAG_ROW_FIGURE]
+            question.flags = [*flags, FLAG_ROW_FIGURE]
+            if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW
+            _invalidate_approval(question)
+            question.save()
+            changed += 1
+    return changed
 
 
 def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:

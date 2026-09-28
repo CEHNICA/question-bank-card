@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import threading
 from pathlib import Path
 from unittest import mock
 
-from django.test import TransactionTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from . import pipeline, readers
 from .management.commands import run_worker
@@ -16,7 +15,7 @@ from .models import Paper, Question
 from .tests import PAGES, ScriptedChat, fake_page_pdf, tagged
 
 
-class RereadLaneTests(TransactionTestCase):
+class RereadLaneTests(TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
@@ -57,20 +56,28 @@ class RereadLaneTests(TransactionTestCase):
         self.assertTrue(waiting.reread_requested)
         self.assertEqual(waiting.state, Question.State.WAITING)
 
-    def test_lane_runs_in_background_and_stops_cleanly(self):
+    def test_lane_serves_a_reread_and_stops_when_asked(self):
         ready = self.paper(Paper.Status.READY)
         card = self.card(ready)
-        stop = threading.Event()
+
+        class OneTurn:
+            """Stop after a single lane iteration, without real threads."""
+
+            def __init__(self):
+                self.turns = 0
+
+            def is_set(self):
+                return self.turns > 0
+
+            def wait(self, _interval):
+                self.turns += 1
+
+        stop = OneTurn()
         chat = ScriptedChat({("*", 1): tagged("已知 $x=1$，求 $y$ 的值。")})
-        with mock.patch.object(readers, "chat", chat):
-            lane = threading.Thread(target=run_worker.reread_lane, args=(stop, 0.05), daemon=True)
-            lane.start()
-            for _ in range(100):
-                card.refresh_from_db()
-                if not card.reread_requested:
-                    break
-                stop.wait(0.05)
-            stop.set()
-            lane.join(timeout=5)
-        self.assertFalse(lane.is_alive())
+        with mock.patch.object(readers, "chat", chat), \
+                mock.patch.object(run_worker, "close_old_connections"):
+            run_worker.reread_lane(stop, 0)
+        card.refresh_from_db()
+        self.assertEqual(stop.turns, 1)
         self.assertFalse(card.reread_requested)
+        self.assertFalse(run_worker.REREAD_LOCK.locked())

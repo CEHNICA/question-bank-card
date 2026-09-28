@@ -99,7 +99,10 @@ _STUDENT_DRAWING_REQUEST = re.compile(
 # phrase alone is not enough to demand an image—the values could be ordinary
 # text—so it is accepted only when a concrete crop is already bound.
 _BOUND_VISUAL_CUE = re.compile(
-    r"(?:下列|以下|如下|所给)\s*(?:的\s*)?(?:两|三|若干)?\s*(?:组\s*)?数据\s*[:：]"
+    r"(?:下列|以下|如下|所给)\s*(?:的\s*)?(?:两|三|若干)?\s*(?:组\s*)?数据\s*[:：]|"
+    # “……进行检验，数据如下：” / “填写如下列联表”: printed tables.
+    r"(?:数据|结果|信息|情况|成绩)\s*如下\s*[:：]|"
+    r"(?:列联|频数分布|频率分布|分布|统计|数据)\s*表"
 )
 
 _ENGLISH_CUE = re.compile(
@@ -231,7 +234,7 @@ def without_automatic_textbook_badges(figures: list[dict]) -> list[dict]:
         figure for figure in (figures or [])
         if not (
             isinstance(figure, dict)
-            and figure.get("source") in {"auto", "other"}
+            and figure.get("source") in {"auto", "other", "row"}
             and figure.get("slot") not in {"A", "B", "C", "D"}
             and _has_textbook_section_badge_geometry(figure)
         )

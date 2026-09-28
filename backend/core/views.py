@@ -1829,7 +1829,7 @@ def question_action(request, question_id, action: str):
                 for item in current_review.get("previous_figures") or []:
                     bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
                     if (bbox is not None and item.get("page_idx") in pages and item.get("slot") in SLOTS
-                            and item.get("source") in {"auto", "manual", "other"}):
+                            and item.get("source") in {"auto", "manual", "other", "row"}):
                         restored.append({
                             "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox,
                             "source": item["source"],
