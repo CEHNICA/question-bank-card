@@ -205,7 +205,7 @@ class Question(models.Model):
     read_c = models.JSONField(default=dict)
     stem = models.TextField(blank=True)
     options = models.JSONField(default=dict)
-    text_source = models.CharField(max_length=16, blank=True)   # agree | majority | arbiter | single | human
+    text_source = models.CharField(max_length=16, blank=True)   # agree | witness | majority | arbiter | single | human
     state = models.CharField(max_length=10, choices=State.choices, default=State.WAITING)
     flags = models.JSONField(default=list)               # 请看一眼的具体原因
     error = models.CharField(max_length=300, blank=True)

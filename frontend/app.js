@@ -1812,13 +1812,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
     if (isApproved(q)) return el("span", "chip approved", "已标记通过");
     if (q.state === "green") {
-      const majority = q.text_source === "majority";
-      const chip = el("span", "chip green", majority ? "AI 三读多数一致 · 未人工审核"
-        : q.text_source === "human" ? "已人工修改 · 未人工审核" : "AI 两次一致 · 未人工审核");
-      chip.title = majority
-        ? "前两次 AI 识读不同，第三次与其中一次相同；仍需人工对照原卷。"
-        : q.text_source === "human" ? "题面经过人工修改，但当前版本尚未标记通过。"
-          : "两次独立 AI 识读相同；一致不等于正确，仍需人工对照原卷。";
+      const copy = {
+        majority: ["AI 三读多数一致 · 未人工审核", "前两次 AI 识读不同，第三次与其中一次相同；仍需人工对照原卷。"],
+        human: ["已人工修改 · 未人工审核", "题面经过人工修改，但当前版本尚未标记通过。"],
+        witness: ["两种引擎一致 · 未人工审核",
+          "视觉模型的誊录与 MinerU 自己识别的文字逐字一致（两套独立引擎）；一致不等于正确，仍需人工对照原卷。"],
+      }[q.text_source] || ["AI 两次一致 · 未人工审核", "两次独立 AI 识读相同；一致不等于正确，仍需人工对照原卷。"];
+      const chip = el("span", "chip green", copy[0]);
+      chip.title = copy[1];
       return chip;
     }
     if (q.state === "yellow") return el("span", "chip yellow", "需核对原卷");
@@ -2012,10 +2013,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.dataset.questionId = String(q.id);
     const labels = { a: "读法甲", b: "读法乙", c: "裁决" };
     Object.entries(q.reads).forEach(([key, reading]) => {
-      if (!reading || (!reading.stem && !reading.error)) return;
+      if (!reading || (!reading.stem && !reading.error && !reading.witness)) return;
       const item = el("div", "read");
-      item.append(el("p", "read-label", `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`));
-      if (reading.error) item.append(el("p", "read-error", reading.error));
+      const label = reading.witness ? "旁证 · MinerU 文字（与读法甲逐字一致，未再调用复核模型）"
+        : `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`;
+      item.append(el("p", "read-label", label));
+      if (reading.witness) {
+        const literal = el("div", "read-text");
+        R.renderLiteral(literal, reading.witness);
+        item.append(literal);
+      } else if (reading.error) item.append(el("p", "read-error", reading.error));
       else {
         const text = [reading.stem, ...OPTION_KEYS.filter((k) => (reading.options || {})[k]).map((k) => `${k}. ${reading.options[k]}`)].join("\n");
         const literal = el("div", "read-text");

@@ -963,19 +963,25 @@ class PipelineTests(TestCase):
         self.assertEqual(self.paper.status, Paper.Status.READY, self.paper.error)
         cards = {q.number: q for q in self.paper.questions.all()}
         self.assertEqual(sorted(cards), [1, 2, 3, 5, 6])
-        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "agree"))
+        # MinerU's own text of card 1 matches the first vision reading, so the
+        # independent engine is the second witness and no checker call is made.
+        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "witness"))
+        self.assertEqual(cards[1].read_b.get("skipped"), "witness")
         self.assertEqual((cards[2].state, cards[2].text_source), ("green", "majority"), cards[2].flags)
         self.assertEqual([f["slot"] for f in cards[2].figures], ["stem"])
         self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "arbiter"))
         self.assertIn("x^4", cards[3].stem)
         self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
-        self.assertEqual(cards[5].state, "yellow")
-        self.assertTrue(any("只有一次" in f for f in cards[5].flags))
+        # Card 5's text is backed by MinerU, so the failing checker is never
+        # needed; the primary reader's sighting of question 6 is still shown.
+        self.assertEqual((cards[5].state, cards[5].text_source), ("yellow", "witness"))
+        self.assertFalse(any("只有一次" in f for f in cards[5].flags))
         self.assertTrue(any("第 6 题" in f for f in cards[5].flags))
         self.assertEqual(cards[6].state, "red")
         self.assertTrue(any("没有找到第 4 题" in note or "AI 没有找到第 4 题" in note for note in self.paper.notes))
-        # 第二位读者用的是另一家
-        self.assertIn(("b", 1, "siliconflow"), chat.calls)
+        # 第二位读者用的是另一家；旁证一致的第 1 题没有再调用复核模型
+        self.assertNotIn(("b", 1, "siliconflow"), chat.calls)
+        self.assertIn(("b", 2, "siliconflow"), chat.calls)
         self.assertIn(("a", 1, "minimax"), chat.calls)
 
     def test_figure_printed_for_another_question_is_handed_over(self):

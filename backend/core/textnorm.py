@@ -51,6 +51,9 @@ def canon(value: str) -> str:
     text = "".join(PUNCT.get(ch, ch) for ch in text)
     text = text.replace("//", "∥").replace("^\\circ", "°").replace("^°", "°")
     text = re.sub(r"[\s$\\{}]", "", text)
+    # Spacing and braces hid these pairs from the replacements above
+    # (“$B C / / A D$”, “60^{\\circ}”); apply them once more on the bare text.
+    text = text.replace("//", "∥").replace("^°", "°")
     text = re.sub(r"\(\)|\[\]", "()", text)
     return text.rstrip(".,;:")
 
@@ -135,3 +138,50 @@ def clean_option(value: str, key: str) -> str:
     text = str(value or "").strip()
     text = re.sub(rf"^\s*{key}\s*[.．、:：]\s*", "", text)
     return text.strip()
+
+
+# ---------------------------------------------------------------- 跨引擎旁证
+#
+# MinerU already returns its own OCR text for every block it found.  It is a
+# different engine from the vision reader, so when the two agree on every
+# character that carries meaning, the card has genuine cross-engine support
+# and a second vision call adds nothing.  The comparison deliberately ignores
+# punctuation, blanks and LaTeX layout commands, which the two engines format
+# differently, but keeps every digit, letter, operator and Chinese character.
+
+_INLINE_TAG = re.compile(r"</?(?:sub|sup|span|b|i|u|em|strong)\b[^>]*>", re.I)
+_WITNESS_SCORE = re.compile(r"[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]")
+_WITNESS_LEAD = re.compile(r"^\s*(?:\d{1,3}\s*[.．、]+|\d{1,3}\s+(?=[\u4e00-\u9fff]))\s*")
+_WITNESS_LAYOUT = re.compile(
+    r"begin(?:cases|array[lcr]*|aligned|matrix)|end(?:cases|array|aligned|matrix)|"
+    r"overline|widehat|hat|bar|stackrel|scriptscriptstyle|scriptstyle|displaystyle|underline|~"
+)
+_WITNESS_PUNCT = re.compile(r"[,.;:!?\"'_()\[\]、·…|&]")
+WITNESS_MIN_LENGTH = 6
+
+
+def witness_key(value: str) -> str:
+    text = _INLINE_TAG.sub("", str(value or ""))
+    text = _WITNESS_LEAD.sub("", text, count=1)
+    text = _WITNESS_SCORE.sub("", text)
+    text = canon(text)
+    text = _WITNESS_LAYOUT.sub("", text)
+    text = re.sub(r"(?<=\d)\.(?=\d)", "٫", text)   # keep decimal points
+    return _WITNESS_PUNCT.sub("", text)
+
+
+def reading_witness_text(reading: dict) -> str:
+    options = reading.get("options") or {}
+    return str(reading.get("stem") or "") + "".join(
+        f"{key}.{options[key]}" for key in sorted(options) if str(options[key]).strip()
+    )
+
+
+def witness_agrees(reading: dict | None, witness: str) -> bool:
+    """Whether MinerU's own text independently supports a vision reading."""
+    if not reading or not reading.get("stem") or reading.get("unclear"):
+        return False
+    expected = witness_key(witness)
+    if len(expected) < WITNESS_MIN_LENGTH:
+        return False
+    return witness_key(reading_witness_text(reading)) == expected

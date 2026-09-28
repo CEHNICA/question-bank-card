@@ -18,7 +18,7 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, readers, segment
+from . import imaging, import_planning, photos, readers, segment, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -2343,6 +2343,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
+    witness = str(snapshot.get("witness") or "")
     jobs = [
         (name, engine, url, figures)
         for name, engine, url, figures in (
@@ -2377,11 +2378,24 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         except readers.ReaderError as error:
             return name, None, str(error), None
 
-    # 主读和复核彼此独立；两个提供商或同提供商多账号时
-    # 可同时进行。若只有一个账号，AccountPool 会在内部自动串行。
-    if len(jobs) == 1:
+    # 有 MinerU 旁证时先只读一次：主读与另一引擎的文字逐字一致，就不必再花一次
+    # 视觉调用做同模型复核（实测同一模型复读几乎总是逐字相同，旁证更独立）。
+    # 不一致或没有旁证时，照旧请复核读者独立再读一遍。
+    witness_first = bool(witness) and len(jobs) == 2 and \
+        len(textnorm.witness_key(witness)) >= textnorm.WITNESS_MIN_LENGTH
+    if witness_first:
+        first = run_reader(jobs[0])
+        name, result, _error, _quota = first
+        cleaned = _without_inferred_figure_text(result, result) if result is not None else None
+        if cleaned is not None and textnorm.witness_agrees(cleaned, witness):
+            completed = [first]
+            errors.pop("b", None)
+        else:
+            completed = [first, run_reader(jobs[1])]
+    elif len(jobs) == 1:
         completed = [run_reader(jobs[0])]
     else:
+        # 主读和复核彼此独立；两个提供商或同提供商多账号时可同时进行。
         with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
             futures = [executor.submit(run_reader, job) for job in jobs]
             completed = [future.result() for future in futures]
@@ -2408,7 +2422,13 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     a_text = _without_inferred_figure_text(a, figure_source)
     b_text = _without_inferred_figure_text(b, figure_source)
     normalized_results = [result for result in (a_text, b_text) if result]
-    if a and b and same_reading(a_text, b_text):
+    if a and not b and "b" not in errors and textnorm.witness_agrees(a_text, witness):
+        # Cross-engine agreement: the vision reading and MinerU's OCR match.
+        final, source = a_text, "witness"
+        # Kept as audit evidence and shown in the reading history; it has no
+        # ``stem`` so no code path mistakes it for a vision transcription.
+        update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
+    elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
     elif a and b:
         try:
@@ -2589,6 +2609,11 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
+    blocks = _block_dicts(paper)
+    for snapshot in snapshots:
+        # MinerU's own text for this range: an independent second engine.
+        snapshot["witness"] = segment._text_in_regions(blocks, snapshot["regions"] or []) \
+            if snapshot.get("regions") else ""
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
         state=Question.State.READING,
         reread_requested=False,
