@@ -1,10 +1,18 @@
-"""What the cross-engine witness cannot do, measured on real marked exam papers.
+"""Where the cross-engine witness does *not* fire, measured on real papers.
 
-Every case here was captured from a phone photo of a marked 集合/不等式
-worksheet, where MinerU's OCR and the vision model's LaTeX disagree about the
-printed delimiters.  The witness is deliberately conservative: when it cannot
-align the two texts it defers to the second reader, so these tests pin the
-*fail-safe* direction rather than a best case.
+Two independent runs on 2026-09-28, both with a single MiniMax key:
+
+* Scanned exam papers — the shortcut is doing real work: 38 of 113 cards
+  (34%) were settled by MinerU's text instead of a second vision call, up to
+  72% on one 月考 paper.
+* A phone photo of a heavily marked 集合/不等式 worksheet — 0 of 6 cards.
+  MinerU's OCR renders ``\\{x\\mid ...\\}`` as ``|x| ... |`` there, and the
+  student's working bleeds into the prose blocks, so the two texts never
+  align and every card falls back to a second reader.
+
+These tests pin that *fail-safe* direction — the photo case defers instead of
+guessing — rather than a best case.  They also record why the obvious
+one-line fix is wrong.
 """
 
 from __future__ import annotations
@@ -21,9 +29,10 @@ def reading(stem: str, **extra) -> dict:
 class WitnessBraceArtifactTests(SimpleTestCase):
     """MinerU renders ``\\{x\\mid ...\\}`` as ``|x| ... |`` on photographed papers.
 
-    The two spellings never align, so the shortcut stays off.  Normalising
-    ``|x|`` away is *not* a safe fix: the same glyphs carry 绝对值 and
-    conditional probability, which these tests guard.
+    Scanned exam papers do not hit this as hard, so the failure mode is scoped
+    to the photographed-and-marked material above.  Normalising ``|x|`` away is
+    *not* a safe fix: the same glyphs carry 绝对值 and conditional probability,
+    which these tests guard.
     """
 
     # Captured verbatim from MinerU on 2026-09-28 against a phone photo of a
@@ -117,3 +126,20 @@ class WitnessPipelineCostTests(SimpleTestCase):
         reading_with_handwriting = r"\{x\mid x^2 - 3x + 2 = 0\}，非空集合 $\{x\mid 2ax^2-3(a^2+1)x+4=0\}$"
         mineru_with_working = r"|x|x^2 $\Rightarrow -3a^2 + 2a + 1$ $-3x + 2 = 0$ , 非空集合"
         self.assertFalse(witness_agrees(reading(reading_with_handwriting), mineru_with_working))
+
+    def test_scanned_paper_without_handwriting_does_settle(self):
+        # The other half of the comparison, copied verbatim from the same
+        # benchmark run: on scanned exam papers the shortcut fired on 38 of
+        # 113 cards.  Guard both directions so a change to witness_key cannot
+        # silently turn the photographed case into a false green *or* stop the
+        # scanned case from being settled.
+        vision = r"在 Rt△ABC 中，∠C=90°，AB=5，BC=3，则 tanA 的值是（　　）"
+        options = {"A": r"$\frac{3}{4}$", "B": r"$\frac{4}{3}$", "C": r"$\frac{3}{5}$", "D": r"$\frac{4}{5}$"}
+        mineru = (
+            r"在 Rt△ABC 中，∠C=90°，AB=5，BC=3，则 tanA 的值是（）"
+            r"A. $\frac{3}{4}$ B. $\frac{4}{3}$ C. $\frac{3}{5}$ D. $\frac{4}{5}$"
+        )
+        self.assertTrue(witness_agrees(reading(vision, options=options), mineru))
+        # One wrong digit keeps the card out of the shortcut.
+        wrong = dict(options, C=r"$\frac{3}{6}$")
+        self.assertFalse(witness_agrees(reading(vision, options=wrong), mineru))
