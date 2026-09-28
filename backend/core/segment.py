@@ -19,6 +19,12 @@ from dataclasses import dataclass, field
 
 NUMBER_RE = re.compile(r"(?<![\d.．A-Za-z\\^_{])(\d{1,2})\s*[.．、]{1,2}(?!\d)")
 HEADING_RE = re.compile(r"^\s*(?:[一二三四五六七八九十]{1,3}\s*[、.．]|第[一二三四五六七八九十]+部分|[ⅠⅡⅢⅣ]+\s*[、.．])")
+# 全国卷大题内部的“（二）选考题：……”“[选修 4-4：坐标系与参数方程]”：
+# 它们结束上一题的范围（否则会被誊录进第 21、22 题题面），但不替换
+# “三、解答题”作为题卡的大题名称。
+EXAM_SUBHEADING_RE = re.compile(
+    r"^\s*(?:[(（]\s*[一二三]\s*[)）]\s*(?:必考|选考)题|[\[【(（]?\s*选修\s*\d+\s*[-－—–]\s*\d+\s*[:：])"
+)
 NON_CONTENT = {"header", "footer", "page_number", "page_footnote", "aside_text"}
 FIGURE_TYPES = {"image", "table", "chart"}
 SECTION_TYPES = (
@@ -561,8 +567,15 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
         chain = _chain(candidates)
     assign(unnumbered)
     chain = _repair_gaps(chain, candidates, unnumbered)
+    boundaries = [
+        {"page": int(block["page_idx"]), "col": column_of(splits.get(int(block["page_idx"]), []), block["bbox"][0] + 1),
+         "y": block["bbox"][1], "kind": "exam_subheading", "seq": block.get("seq")}
+        for block in blocks
+        if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES
+        and EXAM_SUBHEADING_RE.match(str(block.get("text") or ""))
+    ]
     layout = Layout(page_count=len(pages), splits=splits, slots=_slots(pages, blocks, splits),
-                    headings=headings, candidates=candidates)
+                    headings=headings, candidates=candidates, boundaries=boundaries)
     return layout, chain
 
 

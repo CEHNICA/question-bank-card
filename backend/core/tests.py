@@ -63,6 +63,27 @@ class SegmentTests(TestCase):
         self.assertEqual(q5["question_type"], "free_response")
         self.assertEqual([(n, a.number) for n, a in result["missing"]], [(4, 3)])
 
+    def test_national_paper_elective_headings_end_the_previous_question(self):
+        # 2024 全国甲卷第 21–23 题：选考说明和“[选修 4-4]”曾被截进第 21 题。
+        blocks = [
+            block(0, 0, [60, 40, 900, 70], "三、解答题：共 70 分．"),
+            block(1, 0, [60, 80, 900, 110], "（一）必考题：共 60 分．"),
+            block(2, 0, [60, 120, 900, 220], "21．已知函数 f(x)=(1-ax)ln(1+x)-x．"),
+            block(3, 0, [60, 230, 900, 270], "（二）选考题：共 10 分．请考生在第 22、23 题中任选一题作答．"),
+            block(4, 0, [60, 280, 900, 300], "[选修 4-4：坐标系与参数方程]"),
+            block(5, 0, [60, 310, 900, 400], "22．在平面直角坐标系 xOy 中，曲线 C 的极坐标方程为 ρ=ρcosθ+1．"),
+            block(6, 0, [60, 410, 900, 430], "[选修 4-5：不等式选讲]"),
+            block(7, 0, [60, 440, 900, 520], "23．已知实数 a，b 满足 a+b≥3．"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertEqual(sorted(questions), [21, 22, 23])
+        self.assertLessEqual(questions[21]["regions"][-1]["bbox"][3], 230)
+        self.assertLessEqual(questions[22]["regions"][-1]["bbox"][3], 410)
+        # The major section still names the cards.
+        self.assertTrue(all(q["section"].startswith("三、解答题") for q in questions.values()))
+        self.assertTrue(all(q["question_type"] == "free_response" for q in questions.values()))
+
     def test_suffix_repair(self):
         blocks = [block(i, 0, [60, 50 + 60 * i, 470, 80 + 60 * i], f"{n}. 题目{n}")
                   for i, n in enumerate([21, 22, 3, 24])]
