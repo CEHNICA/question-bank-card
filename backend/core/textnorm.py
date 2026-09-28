@@ -33,10 +33,17 @@ SPACING = re.compile(r"\\(?:left|right|big|Big|bigg|Bigg|displaystyle|textstyle|
 COMMAND = re.compile(r"\\([A-Za-z]+|[{}])")
 SCORE = re.compile(r"[(（]\s*\d{1,2}\s*分\s*[)）]")
 BLANK = re.compile(r"_{2,}|\\underline\{\s*(?:\\quad|\\qquad|~|\s)*\}|(?:\\_)+")
+SUPERSCRIPTS = str.maketrans({
+    "⁰": "^0", "¹": "^1", "²": "^2", "³": "^3", "⁴": "^4",
+    "⁵": "^5", "⁶": "^6", "⁷": "^7", "⁸": "^8", "⁹": "^9",
+})
 
 
 def canon(value: str) -> str:
-    text = unicodedata.normalize("NFKC", str(value or ""))
+    # NFKC alone turns cm² into cm2 while LaTeX remains cm^2.  Preserve the
+    # exponent marker before normalization so typographic and LaTeX forms
+    # compare as the same reading without conflating x² with x2.
+    text = unicodedata.normalize("NFKC", str(value or "").translate(SUPERSCRIPTS))
     text = SCORE.sub("", text)
     text = BLANK.sub("_", text)
     text = SPACING.sub("", text)

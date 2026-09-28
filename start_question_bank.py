@@ -26,6 +26,7 @@ from credential_store import (
     DEFAULT_MODEL_PREFERENCES,
     MODEL_ENVIRONMENT_KEYS,
     CredentialStoreError,
+    credential_path,
     credential_pool,
     load_credentials,
     load_model_preferences,
@@ -103,6 +104,11 @@ def _child_environment(
         "QB_DATABASE": str(DATABASE),
         "QB_DATA_ROOT": str(DATA_ROOT),
         "QB_FRONTEND_ROOT": str(FRONTEND),
+        # Both child processes know only where the DPAPI file lives.  The web
+        # process receives no secret environment variables; the worker reloads
+        # the encrypted file only between tasks.
+        "QB_CREDENTIAL_FILE": str(credential_path().resolve()),
+        "QB_CREDENTIAL_HOT_RELOAD": "1",
     })
     return environment
 
@@ -725,6 +731,19 @@ def _resolve_credential_pools() -> tuple[list[str], list[str]]:
     return checked_mineru, minimax_keys
 
 
+def _saved_credential_pools() -> dict[str, list[str]]:
+    """Load desktop pools without prompting so the in-app settings can open."""
+
+    try:
+        saved = load_credentials()
+    except CredentialStoreError as exc:
+        # Safe, value-free message from credential_store.  A corrupt file is
+        # repaired through the explicitly retained recovery tool.
+        print(exc)
+        saved = {}
+    return {service: credential_pool(saved, service) for service in POOL_ENVIRONMENT_NAMES}
+
+
 def main() -> int:
     if os.name != "nt":
         print("此启动器仅支持 Windows。")
@@ -746,14 +765,8 @@ def main() -> int:
     logs: list[object] = []
     try:
         _prepare()
-        print("\n题库凭据：与 M3 共用当前 Windows 用户加密保存的配置。")
-        mineru_tokens, minimax_keys = _resolve_credential_pools()
-        siliconflow_keys = _siliconflow_keys()
-        credential_pools = {
-            "mineru": mineru_tokens,
-            "minimax": minimax_keys,
-            "siliconflow": siliconflow_keys,
-        }
+        print("\nAPI 凭据可在题库的“设置 → API 与模型”中配置。")
+        credential_pools = _saved_credential_pools()
         preferences = _model_preferences()
         model_env = model_preference_environment(preferences)
         base_env = _child_environment({
@@ -769,7 +782,7 @@ def main() -> int:
         web_env.update(model_env)
         worker_env = _worker_credential_environment(base_env, credential_pools)
         worker_env.update(model_env)
-        del mineru_tokens, minimax_keys, siliconflow_keys, model_env
+        del model_env
         primary_available = (
             bool(credential_pools["siliconflow"])
             if preferences["primary_engine"] == "siliconflow_qwen3"

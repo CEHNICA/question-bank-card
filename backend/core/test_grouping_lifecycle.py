@@ -170,7 +170,9 @@ class GroupedQuestionTests(TestCase):
         self.paper = Paper.objects.create(
             filename="练习册.pdf",
             kind="pdf",
-            material_type=Paper.MaterialType.BOOK,
+            # This suite exercises the generic multi-scope lifecycle with
+            # synthetic declarative lines, not the typed textbook grammar.
+            material_type=Paper.MaterialType.EXAM,
             sha256="a" * 64,
             pages=PAGES,
             status=Paper.Status.SEGMENTING,
@@ -227,8 +229,8 @@ class GroupedQuestionTests(TestCase):
         self.assertNotEqual(first_card.source_key, second_card.source_key)
 
         Question.objects.filter(pk=first_card.pk).update(
-            stem="第一章第 1 题", state=Question.State.GREEN, approved=True,
-            approved_content_hash="1" * 64,
+            stem="第一章第 1 题", state=Question.State.GREEN, approved=False,
+            approved_content_hash="",
         )
         Question.objects.filter(pk=second_card.pk).update(
             stem="第二章第 1 题", state=Question.State.GREEN, approved=True,

@@ -27,10 +27,24 @@ for (const id of ["settingsModels", "settingsReview", "settingsTask", "settingsI
 for (const id of ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
+for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel"]) {
+  assert.match(html, new RegExp(`id="${id}"[^>]*list="${id}s"`));
+}
 assert.match(js, /api\("\/api\/settings\/models"/);
 assert.match(js, /primary:\s*\$\("settingsPrimaryModel"\)\.value/);
 assert.match(js, /checker:\s*\$\("settingsCheckerModel"\)\.value/);
 assert.match(js, /arbiter:\s*\$\("settingsArbiterModel"\)\.value/);
+assert.match(js, /models:\s*\{[\s\S]*?minimax:\s*\$\("settingsMinimaxModel"\)\.value\.trim\(\)[\s\S]*?siliconflow:\s*\$\("settingsSiliconflowModel"\)\.value\.trim\(\)/);
+
+// 角色选项与 model_id 建议必须来自后端；建议列表不限制用户填写其他合法 model_id。
+assert.match(js, /const choices = settingsEngineChoices\(engines\)/);
+assert.match(js, /modelEntries = choices\.map/);
+assert.match(js, /engines\.suggested_models\?\.\[providerKey\]/);
+assert.match(js, /engines\.saved\?\.models\?\.\[providerKey\]\s*\|\|\s*engines\.models\?\.\[providerKey\]/);
+assert.doesNotMatch(js, /MiniMax-M3|Qwen3-VL-32B-Instruct|minimax_m3|siliconflow_qwen3/);
+assert.match(js, /API 未配置/);
+assert.match(js, /从下一项新任务或重新识读开始生效/);
+assert.doesNotMatch(js, /重启桌面程序后生效|重新打开题库后生效/);
 
 // 打开后把键盘焦点放到关闭按钮；原生 dialog 的 Esc 与显式关闭按钮都可退出。
 assert.match(js, /\$\("settingsDialog"\)\.showModal\(\)/);

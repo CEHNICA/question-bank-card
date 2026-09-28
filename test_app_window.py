@@ -242,6 +242,8 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(web["QB_PARALLEL"], "4")
         self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
         for environment in (worker, web):
+            self.assertEqual(environment["QB_CREDENTIAL_HOT_RELOAD"], "1")
+            self.assertTrue(Path(environment["QB_CREDENTIAL_FILE"]).is_absolute())
             self.assertEqual(environment["QB_PRIMARY_ENGINE"], "siliconflow_qwen3")
             self.assertEqual(environment["QB_CHECKER_ENGINE"], "minimax_m3")
             self.assertEqual(environment["QB_ARBITER_ENGINE"], "checker")
@@ -316,20 +318,44 @@ class MainFlowTests(unittest.TestCase):
             process.terminate.assert_called_once()
         mutex.close.assert_called_once()
 
-    def test_invalid_token_found_during_start_releases_lock_before_configuration(self):
-        order = []
+    def test_missing_credentials_still_open_the_app_without_native_dialog(self):
+        environments = {}
+        processes = {}
+
+        def fake_start(args, environment, log_name):
+            process = Mock()
+            process.poll.return_value = None
+            processes[log_name] = process
+            environments[log_name] = dict(environment)
+            return process, io.BytesIO()
+
         mutex = Mock(acquired=True)
-        mutex.close.side_effect = lambda: order.append("mutex closed")
-        configure = Mock(side_effect=lambda **_kwargs: order.append("configure") or False)
-        saved = {"mineru_token": "bad", "minimax_key": "k"}
-        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}):
+        configure = Mock(return_value=False)
+        waited = Mock()
+        with patch.dict(os.environ, {
+            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
+        }):
             result = self.run_patched(
-                self.patches(_needs_install=Mock(return_value=False), Splash=DirectSplash, load_credentials=Mock(return_value=saved),
-                             _configure_credentials=configure, open_window=Mock()),
+                self.patches(
+                    _needs_install=Mock(return_value=False), Splash=DirectSplash,
+                    load_credentials=Mock(return_value={}), _configure_credentials=configure,
+                    open_window=Mock(return_value=Mock()), wait_for_window=waited,
+                ),
                 {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
-                 "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=False), "_clear_instance": Mock()})
+                 "_prepare": Mock(), "_model_preferences": Mock(return_value={
+                     "primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary",
+                 }), "_available_port": Mock(return_value=8768), "ChildJob": Mock(),
+                 "_start": fake_start, "_health": Mock(), "_write_instance": Mock(),
+                 "_clear_instance": Mock()})
         self.assertEqual(result, 0)
-        self.assertEqual(order, ["mutex closed", "configure"])
+        configure.assert_not_called()
+        waited.assert_called_once()
+        self.assertEqual(environments["web.log"]["QB_MINERU_CONFIGURED"], "0")
+        self.assertEqual(environments["web.log"]["QB_MINIMAX_CONFIGURED"], "0")
+        for name in app_window.launcher.SECRET_NAMES:
+            self.assertNotIn(name, environments["web.log"])
+            self.assertNotIn(name, environments["worker.log"])
+        mutex.close.assert_called_once()
 
 
 class ShortcutTests(unittest.TestCase):

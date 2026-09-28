@@ -3,6 +3,15 @@ import uuid
 from django.db import models
 
 
+class ActiveQuestionManager(models.Manager):
+    """Normal application queries never expose cards placed in the recycle bin."""
+
+    use_in_migrations = True
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class Paper(models.Model):
     """一份上传的试卷。status 走完 queued → parsing → reading → ready。"""
 
@@ -162,6 +171,12 @@ class Question(models.Model):
         YELLOW = "yellow", "请看一眼"
         RED = "red", "识读失败"
 
+    class SourceKind(models.TextChoices):
+        EXAMPLE = "example", "例题"
+        EXERCISE = "exercise", "练习"
+        MANUAL = "manual", "人工补录"
+        UNKNOWN = "unknown", "未分类"
+
     paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="questions")
     # 题号只在题组中用于展示；真正稳定的题源身份与题号、排序和任务改名无关。
     group = models.ForeignKey(
@@ -174,6 +189,12 @@ class Question(models.Model):
     regions = models.JSONField(default=list)             # [{page_idx, bbox}]，按阅读顺序
     regions_auto = models.JSONField(default=list)
     start_source = models.CharField(max_length=16, default="mineru")
+    # 题号会在书籍中反复从 1 开始，不能单独充当身份。来源类型与 MinerU
+    # 起始块序号共同提供一次解析内稳定、无需模型的匹配锚点。
+    source_kind = models.CharField(
+        max_length=16, choices=SourceKind.choices, default=SourceKind.UNKNOWN,
+    )
+    source_anchor_seq = models.PositiveIntegerField(null=True, blank=True, db_index=True)
     figure_candidates = models.JSONField(default=list)   # [{label, page_idx, bbox, seq}]
     figures = models.JSONField(default=list)             # [{slot, page_idx, bbox, source}]
     # 零额外识别调用的配图核查结果。自动判断和人工“确认无图”都保留理由，便于撤销与追溯。
@@ -197,12 +218,52 @@ class Question(models.Model):
     answer = models.TextField(blank=True, default="")
     analysis = models.TextField(blank=True, default="")
     reread_requested = models.BooleanField(default=False)
+    # Review-time deletion is deliberately reversible.  The card itself stays
+    # intact so manual edits, approval evidence and publication links survive
+    # deletion and undo byte-for-byte.
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deletion_batch = models.ForeignKey(
+        "QuestionDeletionBatch", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="questions",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ActiveQuestionManager()
+    # Cascades, migrations and the recycle-bin API need an unfiltered manager.
+    all_objects = models.Manager()
+
     class Meta:
         ordering = ["number", "id"]
-        indexes = [models.Index(fields=["paper", "group", "number"], name="question_source_lookup")]
+        default_manager_name = "objects"
+        base_manager_name = "all_objects"
+        indexes = [
+            models.Index(fields=["paper", "group", "number"], name="question_source_lookup"),
+            models.Index(
+                fields=["paper", "group", "source_kind", "source_anchor_seq"],
+                name="question_source_anchor",
+            ),
+        ]
+
+
+class QuestionDeletionBatch(models.Model):
+    """One user deletion gesture; it is the unit used by the Undo action."""
+
+    class Origin(models.TextChoices):
+        USER = "user", "人工删除"
+        RESEGMENT = "resegment", "重新切题自动排除"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="question_deletion_batches")
+    # Kept even after restoration so retrying the same undo remains idempotent.
+    question_ids = models.JSONField(default=list)
+    origin = models.CharField(max_length=16, choices=Origin.choices, default=Origin.USER)
+    reason = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    restored_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 class PublishedQuestion(models.Model):

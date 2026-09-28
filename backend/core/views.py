@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -20,14 +20,17 @@ from django.views.decorators.csrf import csrf_exempt
 
 from PIL import Image
 
-from . import imaging, import_planning, library, m3import, mineru, photos, preferences, readers
+from . import credential_settings, imaging, import_planning, library, m3import, mineru, photos, preferences, readers
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
-    FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, cue_matches, figure_flag,
+    FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
+    cue_matches, figure_flag,
     stored_or_derived_review,
 )
-from .models import Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionGroup
-from .pipeline import PageStore, candidates_in, reorder_photo_pages
+from .models import (
+    Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
+)
+from .pipeline import PageStore, candidates_in, preview_resegment, reorder_photo_pages
 from .textnorm import fix_reading_symbols, fix_symbols
 
 FRONTEND = settings.FRONTEND_ROOT
@@ -73,6 +76,110 @@ def _valid_bbox(value) -> list[float] | None:
     return [x0, y0, x1, y1]
 
 
+def _valid_label_offset(value) -> dict[str, float] | None:
+    """Validate optional, presentation-only figure-label coordinates."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"x", "y"}:
+        return None
+    coordinates: dict[str, float] = {}
+    for key in ("x", "y"):
+        number = value.get(key)
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+            return None
+        if not -4000 <= float(number) <= 4000:
+            return None
+        coordinates[key] = round(float(number), 1)
+    return coordinates
+
+
+def _candidate_key(item: dict) -> str | None:
+    """Use the same stable page/bbox key as the figure editor."""
+    return figure_candidate_key(item)
+
+
+def _candidate_keys(question: Question) -> set[str]:
+    return {
+        key for item in (question.figure_candidates or [])
+        if (key := _candidate_key(item)) is not None
+    }
+
+
+def _saved_ignored_candidates(question: Question, review: dict | None = None) -> list[str]:
+    """Return only still-valid ignored candidate keys from a saved review."""
+    available = _candidate_keys(question)
+    review = review if isinstance(review, dict) else (
+        question.figure_review if isinstance(question.figure_review, dict) else {}
+    )
+    raw = review.get("ignored_candidates")
+    if not isinstance(raw, list):
+        return []
+    return sorted({value for value in raw if isinstance(value, str) and value in available})
+
+
+def _selected_candidate_keys(question: Question, figures: list[dict] | None = None) -> set[str]:
+    """Return candidate identities represented by selected figure boxes.
+
+    Older automatic figures do not carry ``candidate_key``.  An exact saved
+    page/bbox match is still the same candidate; adjusted manual crops retain
+    their explicit provenance key.
+    """
+    available = _candidate_keys(question)
+    selected: set[str] = set()
+    for figure in figures if isinstance(figures, list) else (question.figures or []):
+        if not isinstance(figure, dict):
+            continue
+        explicit = figure.get("candidate_key")
+        if isinstance(explicit, str) and explicit in available:
+            selected.add(explicit)
+            continue
+        exact = _candidate_key(figure)
+        if exact in available:
+            selected.add(exact)
+    return selected
+
+
+def _unclassified_candidate_details(
+    question: Question, *, figures: list[dict] | None = None, ignored_candidates: list[str] | None = None,
+) -> list[dict]:
+    """Identify the concrete candidates behind ``candidate_unclassified``.
+
+    A candidate already assigned to this question, another numbered question,
+    or ``none`` by the primary reader is not an unclassified candidate.  Human
+    selection/ignore decisions then remove candidates from the outstanding
+    list.  The result is safe to expose to the editor and lets the write path
+    prove that a conflict was actually resolved instead of merely hidden.
+    """
+    readings = [
+        value for value in (question.read_a, question.read_b, question.read_c)
+        if isinstance(value, dict)
+    ]
+    primary = next((value for value in readings if "stem" in value or "figures" in value), {})
+    assignments = {
+        str(label): str(role) for label, role in (primary.get("figures") or {}).items()
+    } if isinstance(primary.get("figures"), dict) else {}
+    resolved_elsewhere_labels = {
+        label for label, role in assignments.items()
+        if role == "none" or (role.startswith("q") and role[1:].isdigit())
+    }
+    selected = _selected_candidate_keys(question, figures)
+    ignored = set(ignored_candidates if isinstance(ignored_candidates, list)
+                  else _saved_ignored_candidates(question))
+    result = []
+    for candidate in question.figure_candidates or []:
+        if not isinstance(candidate, dict):
+            continue
+        label = str(candidate.get("label"))
+        key = _candidate_key(candidate)
+        if key is None or label in resolved_elsewhere_labels or key in selected or key in ignored:
+            continue
+        result.append({
+            "key": key, "label": label, "page_idx": candidate.get("page_idx"),
+            "bbox": candidate.get("bbox"),
+        })
+    return result
+
+
 def _valid_regions(paper: Paper, value) -> list[dict] | None:
     if not isinstance(value, list) or not 1 <= len(value) <= 8:
         return None
@@ -107,13 +214,95 @@ def _valid_paper_name(value) -> str | None:
 
 # ---------------------------------------------------------------- JSON
 
+_ACTIVE_PAPER_STATUSES = (
+    Paper.Status.QUEUED,
+    Paper.Status.PARSING,
+    Paper.Status.SEGMENTING,
+    Paper.Status.READING,
+)
+
+
+def _processing_json(paper: Paper) -> dict | None:
+    """Expose only progress that the worker has actually persisted.
+
+    MinerU does not provide a percentage for one submitted file, and local
+    segmentation has no stable denominator.  Those phases therefore stay
+    explicitly indeterminate instead of manufacturing a percentage or ETA.
+    """
+
+    if paper.status not in _ACTIVE_PAPER_STATUSES:
+        return None
+    now = timezone.now()
+    elapsed_seconds = max(0, int((now - paper.created_at).total_seconds()))
+    idle_seconds = max(0, int((now - paper.updated_at).total_seconds()))
+    progress = {
+        "stage": paper.status,
+        "stage_label": Paper.Status(paper.status).label,
+        # Paper.created_at survives retries and manual re-segmentation.  It is
+        # the task creation time, not the start of the current processing run.
+        "task_created_at": paper.created_at.isoformat(),
+        "last_update_at": paper.updated_at.isoformat(),
+        "elapsed_seconds": elapsed_seconds,
+        "idle_seconds": idle_seconds,
+        "determinate": False,
+        "completed": None,
+        "total": None,
+        "unit": "",
+    }
+    if paper.status == Paper.Status.QUEUED:
+        progress["queue_ahead"] = Paper.objects.filter(
+            status__in=_ACTIVE_PAPER_STATUSES,
+            created_at__lt=paper.created_at,
+        ).exclude(pk=paper.pk).count()
+    elif paper.status == Paper.Status.PARSING:
+        chunks = list(paper.import_chunks.order_by("sequence"))
+        if chunks:
+            parsed = sum(chunk.status == ImportChunk.Status.PARSED for chunk in chunks)
+            active = [
+                {
+                    "sequence": chunk.sequence,
+                    "page_start": chunk.source_page_start,
+                    "page_end": chunk.source_page_end,
+                }
+                for chunk in chunks if chunk.status == ImportChunk.Status.PARSING
+            ]
+            progress.update({
+                "determinate": True,
+                "completed": parsed,
+                "total": len(chunks),
+                "unit": "chunk",
+                "chunks": {
+                    "parsed": parsed,
+                    "parsing": sum(chunk.status == ImportChunk.Status.PARSING for chunk in chunks),
+                    "queued": sum(chunk.status == ImportChunk.Status.QUEUED for chunk in chunks),
+                    "failed": sum(chunk.status == ImportChunk.Status.FAILED for chunk in chunks),
+                    "active_ranges": active,
+                },
+            })
+    elif paper.status == Paper.Status.READING and paper.total:
+        progress.update({
+            "determinate": True,
+            "completed": paper.progress,
+            "total": paper.total,
+            "unit": "question",
+        })
+    return progress
+
+
 def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
     info = paper.photos or {}
+    quota_paused = (
+        paper.status == Paper.Status.FAILED
+        and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
+    )
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "material_type": paper.material_type, "archived": paper.archived,
-        "status_label": Paper.Status(paper.status).label, "progress": paper.progress, "total": paper.total,
+        "status_label": "额度不足，已暂停" if quota_paused else Paper.Status(paper.status).label,
+        "recoverable_pause": quota_paused,
+        "progress": paper.progress, "total": paper.total,
+        "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
@@ -129,6 +318,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
         ],
         "pages_version": photos.order_version(info),
         "imported_from_m3": bool(paper.imported_from), "created_at": paper.created_at.isoformat(),
+        "processing": _processing_json(paper),
         "photos": {
             "count": len(info.get("files", [])),
             "names": [info["files"][index]["name"] for index in info.get("order", [])],
@@ -167,11 +357,35 @@ def _reading(value: dict) -> dict:
 
 def question_json(question: Question) -> dict:
     figure_review = stored_or_derived_review(question)
+    valid_candidate_keys = _candidate_keys(question)
+    if isinstance(figure_review, dict) and "ignored_candidates" in figure_review:
+        ignored = sorted({
+            value for value in figure_review.get("ignored_candidates", [])
+            if isinstance(value, str) and value in valid_candidate_keys
+        }) if isinstance(figure_review.get("ignored_candidates"), list) else []
+        figure_review = {
+            **figure_review,
+            "ignored_candidates": ignored,
+            "excluded_count": len(ignored),
+        }
+    if (isinstance(figure_review, dict)
+            and "candidate_unclassified" in (figure_review.get("signals") or [])):
+        details = _unclassified_candidate_details(
+            question, ignored_candidates=_saved_ignored_candidates(question, figure_review),
+        )
+        figure_review = {
+            **figure_review,
+            "unclassified_candidates": details,
+            "unclassified_count": len(details),
+        }
     approval_valid = library.approval_is_current(question)
     figures = []
     for index, figure in enumerate(question.figures):
         digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:10]
-        figures.append({**figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
+        shown_figure = {**figure}
+        if shown_figure.get("candidate_key") not in valid_candidate_keys:
+            shown_figure.pop("candidate_key", None)
+        figures.append({**shown_figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
     return {
         "id": question.id, "source_key": str(question.source_key), "number": question.number,
         "group": ({"id": question.group_id, "title": question.group.title,
@@ -179,6 +393,7 @@ def question_json(question: Question) -> dict:
         "section": question.section,
         "question_type": question.question_type, "regions": question.regions,
         "regions_changed": question.regions != question.regions_auto, "start_source": question.start_source,
+        "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
         "figure_candidates": question.figure_candidates, "figures": figures,
         "figure_review": figure_review, "figure_blocked": blocks_approval(figure_review),
         "stem": question.stem, "options": question.options, "text_source": question.text_source,
@@ -191,6 +406,100 @@ def question_json(question: Question) -> dict:
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
         "publication": library.publication_state(question),
     }
+
+
+_QUESTION_MUTATION_STATUSES = {Paper.Status.READY}
+
+
+def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
+    rows = list(
+        Question.all_objects.filter(
+            paper_id=batch.paper_id,
+            deletion_batch=batch,
+            deleted_at__isnull=False,
+        ).select_related("group").order_by("group__sequence", "number", "id")
+    )
+    return {
+        "id": str(batch.pk),
+        "origin": batch.origin,
+        "reason": batch.reason,
+        "created_at": batch.created_at.isoformat(),
+        "restored_at": batch.restored_at.isoformat() if batch.restored_at else None,
+        "count": len(rows),
+        "questions": [
+            {
+                "id": question.pk,
+                "number": question.number,
+                "group": ({
+                    "id": question.group_id,
+                    "title": question.group.title,
+                    "sequence": question.group.sequence,
+                } if question.group_id else None),
+                "section": question.section,
+                "stem": question.stem[:160],
+                "deleted_at": question.deleted_at.isoformat(),
+            }
+            for question in rows
+        ],
+    }
+
+
+def _sync_paper_question_counts(paper: Paper) -> None:
+    """Keep the persisted progress fields aligned with the visible cards."""
+    active = paper.questions.all()
+    paper.total = active.count()
+    paper.progress = active.exclude(
+        state__in=[Question.State.WAITING, Question.State.READING],
+    ).count()
+    paper.updated_at = timezone.now()
+    paper.save(update_fields=["total", "progress", "updated_at"])
+
+
+def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[QuestionDeletionBatch, int]:
+    """Delete one user-selected set, returning its undo batch.
+
+    An identical retry returns the original batch rather than creating another
+    recycle-bin entry.  Mixing visible and already-deleted cards is rejected so
+    a stale browser can never delete more than the user actually selected.
+    """
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper.pk)
+        if paper.status not in _QUESTION_MUTATION_STATUSES:
+            raise ValueError("只有待终审状态可以删除题卡；处理中或失败的任务不能修改")
+        rows = list(
+            Question.all_objects.select_for_update().select_related("paper", "group")
+            .filter(pk__in=question_ids)
+        )
+        if len(rows) != len(question_ids) or any(row.paper_id != paper.pk for row in rows):
+            raise LookupError("所选题卡不存在，或不属于当前任务")
+        deleted_rows = [row for row in rows if row.deleted_at is not None]
+        if deleted_rows:
+            batch_ids = {row.deletion_batch_id for row in rows}
+            if len(deleted_rows) == len(rows) and len(batch_ids) == 1 and None not in batch_ids:
+                batch = QuestionDeletionBatch.objects.select_for_update().get(pk=batch_ids.pop())
+                if sorted(question_ids) == sorted(batch.question_ids):
+                    return batch, 0
+            raise ValueError("所选题卡中包含已经删除的项目，请刷新页面后重试")
+        if any(row.state in {Question.State.WAITING, Question.State.READING}
+               or row.reread_requested for row in rows):
+            raise ValueError("所选题卡仍在识读或等待重读，请完成处理后再删除")
+        if PublishedQuestion.objects.filter(
+            question_id__in=question_ids,
+            status=PublishedQuestion.Status.PUBLISHED,
+        ).exists():
+            raise ValueError("所选题卡中有已经入库的题目，请先在正式题库中撤回")
+
+        batch = QuestionDeletionBatch.objects.create(
+            paper=paper,
+            question_ids=sorted(question_ids),
+        )
+        deleted_at = timezone.now()
+        Question.all_objects.filter(pk__in=question_ids).update(
+            deleted_at=deleted_at,
+            deletion_batch=batch,
+        )
+        _sync_paper_question_counts(paper)
+    return batch, len(rows)
 
 
 # ---------------------------------------------------------------- 页面与静态文件
@@ -232,21 +541,28 @@ def health(request):
 
 
 def status(request):
-    checker = readers.checker_engine()
-    primary = readers.primary_engine()
-    arbiter = readers.arbiter_engine(primary, checker)
-    engines = readers.engine_settings()
     try:
-        saved_preferences = preferences.load() if preferences.preference_path().is_file() else None
+        applied_preferences = preferences.load_applied_configuration()
+    except preferences.PreferenceError:
+        applied_preferences = None
+    checker = readers.checker_engine(applied_preferences)
+    primary = readers.primary_engine(applied_preferences)
+    arbiter = readers.arbiter_engine(primary, checker, applied_preferences)
+    engines = readers.engine_settings(applied_preferences)
+    try:
+        saved_preferences = preferences.load_configuration() if preferences.preference_path().is_file() else None
     except preferences.PreferenceError:
         saved_preferences = None
     if saved_preferences is not None:
+        saved_roles = saved_preferences["roles"]
         engines["saved"] = {
-            "primary": saved_preferences["primary_engine"],
-            "checker": saved_preferences["checker_engine"],
-            "arbiter": saved_preferences["arbiter_engine"],
+            "primary": saved_roles["primary_engine"],
+            "checker": saved_roles["checker_engine"],
+            "arbiter": saved_roles["arbiter_engine"],
+            "models": saved_preferences["models"],
         }
-        engines["restart_required"] = engines["saved"] != engines["selected"]
+        current = {**engines["selected"], "models": engines["models"]}
+        engines["pending_change"] = engines["saved"] != current
     return JsonResponse({
         "upload_enabled": readers.configured("mineru") and primary is not None,
         "mineru": readers.configured("mineru"),
@@ -260,8 +576,59 @@ def status(request):
 
 
 @csrf_exempt
+def credential_settings_view(request):
+    """Read non-secret pool counts or save DPAPI-protected API credentials.
+
+    Responses never contain a key fragment, fingerprint, or submitted value.
+    The POST contract makes every provider explicit: keep, clear, or replace.
+    """
+
+    if request.method not in {"GET", "POST"}:
+        return HttpResponseNotAllowed(["GET", "POST"])
+    remote = request.META.get("REMOTE_ADDR", "")
+    if remote not in {"127.0.0.1", "::1"}:
+        return _error("凭据设置只能在本机题库中使用", 403)
+    try:
+        if request.method == "GET":
+            services = credential_settings.public_environment_status()
+            return JsonResponse({
+                "services": services,
+                "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE,
+            })
+
+        rejected = _guard(request)
+        if rejected:
+            return rejected
+        payload = _body(request)
+        if payload is None or set(payload) != {"services"} or not isinstance(payload["services"], dict):
+            return _error("凭据设置格式不正确")
+        mineru_verification = credential_settings.verify_mineru_replacement(payload["services"])
+        services = credential_settings.save_actions(payload["services"])
+        credential_settings.apply_public_environment(services)
+        if mineru_verification == "verified":
+            message = "API 配置已加密保存，MinerU Token 已通过官网验证；新任务或下一次重读开始时生效。"
+        elif mineru_verification == "unavailable":
+            message = "API 配置已加密保存；MinerU 官网暂时无法连接，本次 Token 尚未验证。新任务或下一次重读开始时生效。"
+        else:
+            message = "API 配置已加密保存；新任务或下一次重读开始时生效，当前任务不会中途换账号。"
+        return JsonResponse({
+            "services": services,
+            "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE,
+            "restart_required": False,
+            "mineru_verification": mineru_verification,
+            "message": message,
+        })
+    except credential_settings.CredentialValidationError as exc:
+        return _error(str(exc), 400)
+    except credential_settings.CredentialStoreError as exc:
+        # CredentialStoreError messages are deliberately value-free.  Do not
+        # log the request body or chain the DPAPI exception into a response.
+        return _error(str(exc), 500)
+
+
+@csrf_exempt
 def model_settings(request):
-    """保存非秘密模型角色偏好；运行中的 worker 不热切换，重启后生效。"""
+    """保存非秘密模型偏好；worker 会在下一任务边界加载。"""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     rejected = _guard(request)
@@ -278,23 +645,33 @@ def model_settings(request):
     normalized = preferences.normalize(roles)
     if normalized is None:
         return _error("模型选择不受支持")
+    try:
+        current = preferences.load_configuration()
+    except preferences.PreferenceError:
+        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS)}
+    raw_models = payload.get("models", current["models"])
+    normalized_models = preferences.normalize_models(raw_models, defaults=current["models"])
+    if normalized_models is None:
+        return _error("模型 ID 格式不正确：只能使用 1–160 位字母、数字及 . _ : / + -，且不能填写网址")
     selected = set(normalized.values())
     if "minimax_m3" in selected and not readers.configured("minimax"):
         return _error("所选模型需要先配置 MiniMax API Key")
     if "siliconflow_qwen3" in selected and not readers.configured("siliconflow"):
         return _error("所选模型需要先配置硅基流动 API Key")
     try:
-        saved = preferences.save(normalized)
+        saved = preferences.save_configuration(normalized, normalized_models)
     except preferences.PreferenceError as exc:
         return _error(str(exc), 500)
+    saved_roles = saved["roles"]
     return JsonResponse({
         "saved": {
-            "primary": saved["primary_engine"],
-            "checker": saved["checker_engine"],
-            "arbiter": saved["arbiter_engine"],
+            "primary": saved_roles["primary_engine"],
+            "checker": saved_roles["checker_engine"],
+            "arbiter": saved_roles["arbiter_engine"],
+            "models": saved["models"],
         },
-        "restart_required": True,
-        "message": "模型选择已保存；关闭并重新打开题库后生效，已有题卡不会自动重读。",
+        "restart_required": False,
+        "message": "模型选择已保存；下一份任务或下一次重读开始时生效，正在处理的任务不会中途换模型。",
     })
 
 
@@ -312,7 +689,7 @@ def papers(request):
     if rejected:
         return rejected
     if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请从开始菜单的“题有据”文件夹打开“配置 API”）")
+        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请在“设置 → API 与模型”中配置）")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -454,6 +831,8 @@ def paper_page_order(request, paper_id):
     count = len(paper.pages)
     if not paper.photos or count < 2:
         return _error("只有几张照片合成的试卷可以调整页序")
+    if Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exists():
+        return _error("回收站里还有题卡；请先恢复这些题卡，再调整页序", 409)
     if paper.status not in (Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING) \
             or not paper.blocks.exists():
         return _error("这份试卷还在处理中，稍后再调整页序")
@@ -536,6 +915,9 @@ def _copy_split_question(
         regions=_remap_page_items(question.regions, page_mapping),
         regions_auto=_remap_page_items(question.regions_auto, page_mapping),
         start_source=question.start_source,
+        source_kind=question.source_kind,
+        source_anchor_seq=(seq_mapping.get(question.source_anchor_seq)
+                           if question.source_anchor_seq is not None else None),
         figure_candidates=_remap_page_items(question.figure_candidates, page_mapping, seq_mapping),
         figures=_remap_page_items(question.figures, page_mapping),
         figure_review=deepcopy(question.figure_review),
@@ -589,6 +971,8 @@ def paper_split(request, paper_id):
         return _error("这项任务还在处理中，完成后再拆分")
     if paper.publications.exists():
         return _error("这项任务已有正式题库记录，为保留来源追溯不能拆分")
+    if Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exists():
+        return _error("这项任务的回收站里还有题卡；请先恢复这些题卡，再拆分资料")
 
     data_root = settings.DATA_ROOT.resolve()
     source_folder = (data_root / str(paper.id)).resolve()
@@ -818,6 +1202,8 @@ def paper_archive(request, paper_id):
         Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
     }:
         return _error("任务正在处理中，完成或失败后再归档")
+    if Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exists():
+        return _error("回收站里还有题卡；请先恢复这些题卡，再归档任务", 409)
     paper.archived = True
     paper.save(update_fields=["archived", "updated_at"])
     return JsonResponse({"paper": paper_json(paper), "archived": True})
@@ -893,6 +1279,93 @@ def paper_detail(request, paper_id):
     })
 
 
+@csrf_exempt
+def paper_questions_delete(request, paper_id):
+    """Move one explicit multi-selection to the recycle bin as one undo unit."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    raw_ids = payload.get("question_ids") if payload is not None else None
+    if (not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 1000
+            or any(type(value) is not int or value < 1 for value in raw_ids)):
+        return _error("请选择 1–1000 道需要删除的题目")
+    question_ids = list(dict.fromkeys(raw_ids))
+    paper = get_object_or_404(Paper, pk=paper_id)
+    try:
+        batch, deleted = _soft_delete_questions(paper, question_ids)
+    except LookupError as error:
+        return _error(str(error), 404)
+    except ValueError as error:
+        return _error(str(error), 409)
+    batch.refresh_from_db()
+    return JsonResponse({
+        "deleted": deleted,
+        "already_deleted": deleted == 0,
+        "undo_batch": _question_trash_json(batch),
+        "paper": paper_json(Paper.objects.get(pk=paper_id)),
+    })
+
+
+def paper_question_trash(request, paper_id):
+    """List unrestored deletion gestures for the task's recycle bin."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    paper = get_object_or_404(Paper, pk=paper_id)
+    batches = QuestionDeletionBatch.objects.filter(
+        paper=paper,
+        restored_at__isnull=True,
+        questions__deleted_at__isnull=False,
+    ).distinct().order_by("-created_at")
+    return JsonResponse({"batches": [_question_trash_json(batch) for batch in batches]})
+
+
+@csrf_exempt
+def question_deletion_restore(request, paper_id, batch_id):
+    """Restore exactly one deletion gesture; repeated requests are no-ops."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    if _body(request) is None:
+        return _error("请求内容不正确")
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        if paper.status not in _QUESTION_MUTATION_STATUSES:
+            return _error("任务正在处理中；只有待终审状态可以恢复题卡", 409)
+        batch = get_object_or_404(
+            QuestionDeletionBatch.objects.select_for_update(), pk=batch_id, paper=paper,
+        )
+        if batch.restored_at is not None:
+            restored = 0
+        else:
+            rows = Question.all_objects.select_for_update().filter(
+                paper=paper,
+                deletion_batch=batch,
+                deleted_at__isnull=False,
+            )
+            restored = rows.count()
+            rows.update(deleted_at=None, deletion_batch=None)
+            batch.restored_at = timezone.now()
+            batch.save(update_fields=["restored_at"])
+            _sync_paper_question_counts(paper)
+    batch.refresh_from_db()
+    return JsonResponse({
+        "restored": restored,
+        "already_restored": restored == 0,
+        "undo_batch": _question_trash_json(batch),
+        "questions": [
+            question_json(question)
+            for question in Question.objects.filter(pk__in=batch.question_ids)
+            .select_related("group").order_by("group__sequence", "number", "id")
+        ],
+        "paper": paper_json(Paper.objects.get(pk=paper_id)),
+    })
+
+
 def page_preview(request, paper_id, page: int):
     paper = get_object_or_404(Paper, pk=paper_id)
     if page not in {p["page_idx"] for p in paper.pages}:
@@ -959,6 +1432,42 @@ def paper_retry(request, paper_id):
 
 
 @csrf_exempt
+def paper_resegment_preview(request, paper_id):
+    """Pure read-only comparison; never invokes readers or mutates the task."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    if _body(request) is None:
+        return _error("请求内容不正确")
+    paper = get_object_or_404(Paper, pk=paper_id)
+    error = _resegment_safety_error(paper)
+    if error:
+        return _error(error, 409)
+    try:
+        report = preview_resegment(paper)
+    except RuntimeError as exc:
+        return _error(str(exc), 400)
+    return JsonResponse({"paper_id": str(paper.pk), "report": report})
+
+
+def _resegment_safety_error(paper: Paper) -> str:
+    if paper.status != Paper.Status.READY:
+        return "只有已经完成识读、处于待终审状态的任务可以重新切题"
+    if not paper.blocks.exists():
+        return "这项任务没有 MinerU 解析结果，不能重新切题"
+    if Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exists():
+        return "回收站里还有题卡；请先恢复这些题卡，再重新切题"
+    if paper.questions.filter(
+        models.Q(state__in=[Question.State.WAITING, Question.State.READING])
+        | models.Q(reread_requested=True)
+    ).exists():
+        return "仍有题卡正在识读或等待重读；完成后再重新切题"
+    return ""
+
+
+@csrf_exempt
 def paper_resegment(request, paper_id):
     """按最新规则重新切题；内容没变的题卡（包括已通过的）原样保留。"""
     if request.method != "POST":
@@ -966,12 +1475,16 @@ def paper_resegment(request, paper_id):
     rejected = _guard(request)
     if rejected:
         return rejected
-    paper = get_object_or_404(Paper, pk=paper_id)
-    if paper.status not in (Paper.Status.READY, Paper.Status.FAILED) or not paper.blocks.exists():
-        return _error("这份试卷还在处理中，或还没有解析结果")
-    paper.status = Paper.Status.SEGMENTING
-    paper.error = ""
-    paper.save(update_fields=["status", "error", "updated_at"])
+    if _body(request) is None:
+        return _error("请求内容不正确")
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        error = _resegment_safety_error(paper)
+        if error:
+            return _error(error, 409)
+        paper.status = Paper.Status.SEGMENTING
+        paper.error = ""
+        paper.save(update_fields=["status", "error", "updated_at"])
     return JsonResponse({"paper": paper_json(paper)})
 
 
@@ -1070,12 +1583,14 @@ def add_question(request, paper_id):
         if all_groups and not matching_groups:
             return _error("这道题的范围跨越题组，请缩小范围后再添加")
         group = matching_groups[0] if matching_groups else None
-    if group is not None and paper.questions.filter(group=group, number=number).exists():
-        return _error(f"已经有第 {number} 题了")
-    if group is None and paper.questions.filter(group__isnull=True, number=number).exists():
-        return _error(f"已经有第 {number} 题了")
+    existing_source = Question.all_objects.filter(paper=paper, number=number)
+    if group is not None and existing_source.filter(group=group).exists():
+        return _error(f"已经有第 {number} 题了；如果它在回收站中，请先恢复")
+    if group is None and existing_source.filter(group__isnull=True).exists():
+        return _error(f"已经有第 {number} 题了；如果它在回收站中，请先恢复")
     question = Question.objects.create(
         paper=paper, group=group, number=number, regions=regions, regions_auto=regions, start_source="manual",
+        source_kind=Question.SourceKind.MANUAL, source_anchor_seq=None,
         figure_candidates=candidates_in(paper, regions), reread_requested=True,
     )
     return JsonResponse({"question": question_json(question)}, status=201)
@@ -1144,6 +1659,7 @@ def question_action(request, question_id, action: str):
             else:
                 _clear_approval(question)
         elif action == "text":
+            previous_ignored = _saved_ignored_candidates(question)
             stem = payload.get("stem")
             options = payload.get("options", {})
             if not isinstance(stem, str) or not stem.strip() or len(stem) > 20000:
@@ -1166,7 +1682,14 @@ def question_action(request, question_id, action: str):
             question.text_source = "human"
             question.flags = [f for f in question.flags if not figure_flag(f) and "截图" in f]
             question.figure_review = {}
-            _apply_figure_review(question, stored_or_derived_review(question))
+            review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
+            if previous_ignored:
+                review = {
+                    **review,
+                    "ignored_candidates": previous_ignored,
+                    "excluded_count": len(previous_ignored),
+                }
+            _apply_figure_review(question, review)
             question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             question.error = ""
             # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
@@ -1186,7 +1709,17 @@ def question_action(request, question_id, action: str):
             question.reread_requested = True
         elif action == "reread":
             question.edited = False
-            question.figure_review = {}
+            current_review = question.figure_review if isinstance(question.figure_review, dict) else {}
+            has_manual_figure = any(
+                isinstance(figure, dict) and figure.get("source") == "manual"
+                for figure in (question.figures or [])
+            )
+            has_human_no_figure = (
+                current_review.get("source") == "human"
+                and current_review.get("status") == CONFIRMED_NO_FIGURE
+            )
+            if not has_manual_figure and not has_human_no_figure:
+                question.figure_review = {}
             _clear_approval(question)
             question.state = Question.State.WAITING
             question.reread_requested = True
@@ -1194,20 +1727,67 @@ def question_action(request, question_id, action: str):
             figures = payload.get("figures")
             if not isinstance(figures, list) or len(figures) > 12:
                 return _error("配图格式不正确")
+            candidate_keys = _candidate_keys(question)
+            previous_ignored = _saved_ignored_candidates(question)
+            ignored_candidates = payload.get("ignored_candidates", previous_ignored)
+            if (not isinstance(ignored_candidates, list) or len(ignored_candidates) > 200
+                    or not all(isinstance(value, str) and value in candidate_keys
+                               for value in ignored_candidates)):
+                return _error("无关候选图格式不正确")
+            ignored_candidates = sorted(set(ignored_candidates))
             pages = {p["page_idx"] for p in question.paper.pages}
             cleaned = []
             for item in figures:
                 bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
                 if bbox is None or item.get("page_idx") not in pages or item.get("slot") not in SLOTS:
                     return _error("配图格式不正确")
-                cleaned.append({"slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox, "source": "manual"})
+                cleaned_item = {
+                    "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox, "source": "manual",
+                }
+                if "label_offset" in item:
+                    label_offset = _valid_label_offset(item.get("label_offset"))
+                    if label_offset is None:
+                        return _error("配图标签位置格式不正确")
+                    cleaned_item["label_offset"] = label_offset
+                if "candidate_key" in item:
+                    candidate_identity = item.get("candidate_key")
+                    if not isinstance(candidate_identity, str) or candidate_identity not in candidate_keys:
+                        return _error("配图候选来源格式不正确")
+                    cleaned_item["candidate_key"] = candidate_identity
+                else:
+                    # Exact legacy/automatic boxes can recover their candidate
+                    # provenance without asking the user to redraw anything.
+                    candidate_identity = _candidate_key(cleaned_item)
+                    if candidate_identity in candidate_keys:
+                        cleaned_item["candidate_key"] = candidate_identity
+                cleaned.append(cleaned_item)
+            selected_candidate_keys = {
+                item["candidate_key"] for item in cleaned if "candidate_key" in item
+            }
+            if selected_candidate_keys.intersection(ignored_candidates):
+                return _error("同一张候选图不能同时设为配图和无关")
+            current_review = stored_or_derived_review(question)
+            if (cleaned and "candidate_unclassified" in (current_review.get("signals") or [])):
+                remaining = _unclassified_candidate_details(
+                    question, figures=cleaned, ignored_candidates=ignored_candidates,
+                )
+                if remaining:
+                    pages = sorted({int(item["page_idx"]) + 1 for item in remaining
+                                    if isinstance(item.get("page_idx"), int)})
+                    page_text = f"（第 {'、'.join(map(str, pages[:6]))}{' 等页' if len(pages) > 6 else ' 页'}）" if pages else ""
+                    return _error(
+                        f"还有 {len(remaining)} 张候选图尚未处理{page_text}；"
+                        "请逐张选择题干/选项/无关，或明确确认其余候选均无关"
+                    )
             previous_figures = list(question.figures or [])
             question.figures = cleaned
             if cleaned:
                 review = {
                     "status": OK, "source": "human", "reason": "配图已经由人工设置",
                     "signals": ["manual_figure"], "cue_matches": cue_matches(question.stem, question.options),
-                    "excluded_count": 0, "confirmed_at": now.isoformat(),
+                    "excluded_count": len(ignored_candidates),
+                    "ignored_candidates": ignored_candidates,
+                    "confirmed_at": now.isoformat(),
                 }
             else:
                 review = {
@@ -1215,6 +1795,8 @@ def question_action(request, question_id, action: str):
                     "signals": ["human_confirmed_no_figure"],
                     "cue_matches": cue_matches(question.stem, question.options),
                     "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
+                    "ignored_candidates": sorted(candidate_keys),
+                    "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
                 }
             _apply_figure_review(question, review)
@@ -1227,12 +1809,15 @@ def question_action(request, question_id, action: str):
                 if question.state not in library.REVIEWABLE_STATES or not question.stem.strip():
                     return _error("这道题尚未完成识读，暂时不能确认无图")
                 previous_figures = list(question.figures or [])
+                previous_ignored = _saved_ignored_candidates(question)
                 question.figures = []
                 _apply_figure_review(question, {
                     "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
                     "signals": ["human_confirmed_no_figure"],
                     "cue_matches": cue_matches(question.stem, question.options),
                     "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
+                    "ignored_candidates": sorted(_candidate_keys(question)),
+                    "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
                 })
             else:
@@ -1248,10 +1833,26 @@ def question_action(request, question_id, action: str):
                         restored.append({
                             "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox,
                             "source": item["source"],
+                            **({"label_offset": item["label_offset"]}
+                               if _valid_label_offset(item.get("label_offset")) is not None else {}),
+                            **({"candidate_key": item["candidate_key"]}
+                               if isinstance(item.get("candidate_key"), str)
+                               and item["candidate_key"] in _candidate_keys(question) else {}),
                         })
+                previous_ignored = _saved_ignored_candidates(
+                    question,
+                    {"ignored_candidates": current_review.get("previous_ignored_candidates", [])},
+                )
                 question.figures = restored
                 question.figure_review = {}
-                _apply_figure_review(question, stored_or_derived_review(question))
+                review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
+                if previous_ignored:
+                    review = {
+                        **review,
+                        "ignored_candidates": previous_ignored,
+                        "excluded_count": len(previous_ignored),
+                    }
+                _apply_figure_review(question, review)
             _clear_approval(question)
         else:
             raise Http404()
@@ -1266,12 +1867,19 @@ def question_delete(request, question_id):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    question = _question(question_id)
-    if question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exists():
-        return _error("这道题已经入库，请先在正式题库里撤回")
+    question = get_object_or_404(Question.all_objects.select_related("paper"), pk=question_id)
     paper = question.paper
-    question.delete()
-    return JsonResponse({"deleted": True, "paper": paper_json(paper)})
+    try:
+        batch, deleted = _soft_delete_questions(paper, [question.pk])
+    except ValueError as error:
+        return _error(str(error), 409)
+    batch.refresh_from_db()
+    return JsonResponse({
+        "deleted": bool(deleted),
+        "already_deleted": deleted == 0,
+        "undo_batch": _question_trash_json(batch),
+        "paper": paper_json(Paper.objects.get(pk=paper.pk)),
+    })
 
 
 def question_figure(request, question_id, index: int):

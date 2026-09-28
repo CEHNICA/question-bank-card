@@ -176,7 +176,7 @@ class DistributionLicenseTests(unittest.TestCase):
     def test_rebrand_keeps_upgrade_and_user_data_identity_stable(self):
         build = (self.ROOT / "packaging" / "build.ps1").read_text(encoding="utf-8")
         installer = (self.ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
-        self.assertIn("[string]$Version = '1.2.0'", build)
+        self.assertIn("[string]$Version = '1.3.0'", build)
         self.assertIn(r"StringStruct('ProductName', '\u9898\u6709\u636e')", build)
         self.assertIn('#define MyAppName "题有据"', installer)
         self.assertIn('#define MyAppExeName "QuestionBankCard.exe"', installer)

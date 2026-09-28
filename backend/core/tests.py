@@ -70,6 +70,146 @@ class SegmentTests(TestCase):
         self.assertEqual([s.number for s in starts], [21, 22, 23, 24])
         self.assertEqual(starts[2].source, "repaired")
 
+    def test_missing_leading_one_is_repaired_from_existing_blocks_without_a_model(self):
+        blocks = [
+            block(6, 0, [250, 261, 597, 290], "每周两练.数学不难"),
+            block(7, 0, [250, 291, 597, 315], "9. 1 8", "equation"),
+            block(8, 0, [190, 319, 608, 374],
+                  "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
+            block(9, 0, [216, 374, 515, 392], "(1) 若 m=2，求 A∩B；"),
+            block(10, 0, [216, 392, 507, 409], "(2) 若 A∪B=A，求 m 的取值范围；"),
+            block(11, 0, [190, 430, 620, 500], "解(1) 当 m=2 时，计算可得。"),
+            block(21, 0, [193, 654, 646, 712], "2.[2026湖北期中]下列说法正确的是（ ） A.甲 B.乙"),
+            block(22, 1, [190, 100, 646, 160], "3. 已知函数 f(x)=x，求值。"),
+        ]
+
+        result = segment.segment(PAGES, blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [1, 2, 3])
+        inferred = result["starts"][0]
+        self.assertEqual((inferred.seq, inferred.page, inferred.y, inferred.source), (8, 0, 319, "inferred"))
+        self.assertEqual(result["leading"].status, "repaired")
+        self.assertEqual(result["missing"], [])
+        self.assertEqual(result["questions"][0]["regions"][0]["bbox"][1], 310.0)
+
+    def test_split_source_citation_and_stem_use_the_citation_as_inferred_start(self):
+        blocks = [
+            block(0, 0, [60, 80, 470, 105], "[2026吉林联考]"),
+            block(1, 0, [60, 108, 470, 155], "已知集合 A={1,2}，求 A 的子集个数。"),
+            block(2, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(3, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [1, 2, 3])
+        self.assertEqual((result["starts"][0].seq, result["starts"][0].y), (0, 80))
+        self.assertEqual(result["leading"].status, "repaired")
+
+    def test_leading_scan_does_not_cross_the_nearest_section_heading(self):
+        blocks = [
+            block(0, 0, [60, 50, 470, 105], "[2026联考]已知旧章节条件，求结果。"),
+            block(1, 0, [60, 150, 470, 185], "一、选择题"),
+            block(2, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(3, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [2, 3])
+        self.assertEqual(result["leading"].status, "none")
+
+    def test_second_section_without_a_first_section_anchor_does_not_pull_old_body_forward(self):
+        blocks = [
+            block(0, 0, [60, 50, 470, 105], "[2026联考]已知上一章条件，求结果。"),
+            block(1, 0, [60, 150, 470, 185], "二、解答题"),
+            block(2, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(3, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [2, 3])
+        self.assertEqual(result["leading"].status, "none")
+
+    def test_first_question_before_second_section_can_still_be_recovered(self):
+        blocks = [
+            block(0, 0, [60, 30, 470, 60], "一、选择题"),
+            block(1, 0, [60, 80, 470, 135], "已知集合 A={1,2}，其子集个数是（ ） A.2 B.4"),
+            block(2, 0, [60, 180, 470, 215], "二、解答题"),
+            block(3, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(4, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [1, 2, 3])
+        self.assertEqual((result["starts"][0].seq, result["starts"][0].y), (1, 80))
+
+    def test_section_directions_before_first_stem_do_not_consume_the_boundary_evidence(self):
+        blocks = [
+            block(0, 0, [60, 30, 470, 60], "一、选择题"),
+            block(1, 0, [60, 65, 470, 90], "本题共10小题，每小题5分"),
+            block(2, 0, [60, 100, 470, 155], "已知集合 A={1,2}，其子集个数是（ ） A.2 B.4"),
+            block(3, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(4, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [1, 2, 3])
+        self.assertEqual((result["starts"][0].seq, result["starts"][0].y), (2, 100))
+
+    def test_question_shaped_prefix_without_independent_boundary_is_only_suspected(self):
+        blocks = [
+            block(0, 0, [60, 80, 470, 135], "已知集合 A={1,2}，其子集个数是（ ） A.2 B.4"),
+            block(1, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(2, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [2, 3])
+        self.assertEqual(result["leading"].status, "suspected")
+
+    def test_material_that_really_starts_at_two_does_not_invent_question_one(self):
+        blocks = [
+            block(0, 0, [60, 40, 470, 70], "数学练习节选"),
+            block(1, 0, [60, 100, 470, 160], "2. 已知 x=2，求 x+1。"),
+            block(2, 0, [60, 300, 470, 360], "3. 已知 y=3，求 y+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [2, 3])
+        self.assertEqual(result["leading"].status, "none")
+
+    def test_ambiguous_leading_body_warns_but_is_not_synthesized(self):
+        blocks = [
+            block(0, 0, [60, 60, 470, 100], "已知下面两个条件"),
+            block(1, 0, [80, 105, 470, 140], "(1) 条件甲成立"),
+            block(2, 0, [60, 300, 470, 360], "2. 已知 y=3，求 y+1。"),
+            block(3, 0, [60, 500, 470, 560], "3. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [2, 3])
+        self.assertEqual(result["leading"].status, "suspected")
+        self.assertIn("可能漏了组首题", result["leading"].message)
+
+    def test_strong_prefix_before_three_is_only_flagged_not_guessed(self):
+        blocks = [
+            block(0, 0, [60, 60, 470, 120], "[2026联考]已知集合 A，求 A 的子集个数。"),
+            block(1, 0, [60, 300, 470, 360], "3. 已知 y=3，求 y+1。"),
+            block(2, 0, [60, 500, 470, 560], "4. 已知 z=4，求 z+1。"),
+        ]
+
+        result = segment.segment(PAGES[:1], blocks)
+
+        self.assertEqual([item.number for item in result["starts"]], [3, 4])
+        self.assertEqual(result["leading"].status, "suspected")
+
     def test_number_in_middle_of_handwriting_box(self):
         blocks = [
             block(0, 0, [60, 50, 470, 80], "1. 已知 x=1"),
@@ -456,7 +596,12 @@ class ScriptedChat:
 
     def __call__(self, engine, prompt, images, max_tokens=3000):
         import re
-        number = int(re.search(r"第 (\d+) 题", prompt).group(1))
+        # Prefer the explicit candidate label.  The figure instructions also
+        # contain examples such as “第14题图”, which are not this card's id.
+        match = re.search(r"(?:候选显示编号为|显示编号)\s*(\d+)", prompt)
+        if match is None:
+            match = re.search(r"第\s*(\d+)\s*题", prompt)
+        number = int(match.group(1))
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
             "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
@@ -634,6 +779,56 @@ class PipelineTests(TestCase):
             {"A", "B", "C", "D"},
         )
 
+    def test_numeric_statement_list_is_not_invented_as_four_missing_image_options(self):
+        stem = (
+            "下列哪一组中的函数 $f(x)$ 与 $g(x)$ 是同一个函数？\n"
+            "(1) $f(x)=x-1$，$g(x)=x^2/x-1$；\n"
+            "(2) $f(x)=x^2$，$g(x)=(\\sqrt{x})^4$；\n"
+            "(3) $f(x)=x^2$，$g(x)=\\sqrt[3]{x^6}$。"
+        )
+        common = {
+            "stem": stem, "options": {}, "content_kind": "exercise",
+            "figures": {}, "missing_figure": False, "others": [],
+            "number_seen": 2, "figure_descriptions": [], "unclear": False,
+        }
+        primary = {**common, "type": "single_choice", "raw": "primary raw audit"}
+        checker = {**common, "type": "free_response", "raw": "checker raw audit"}
+        snapshot = {
+            "id": 998, "number": 2, "group_id": None,
+            "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            "candidates": [], "question_type": "single_choice",
+            "source_kind": Question.SourceKind.EXERCISE,
+        }
+        with mock.patch.object(
+                readers, "read_question",
+                side_effect=lambda _engine, _url, _number, with_figures, **_kwargs:
+                primary if with_figures else checker,
+        ), mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
+
+        arbitrate_mock.assert_not_called()
+        self.assertEqual(result["question_type"], "free_response")
+        self.assertEqual(result["state"], Question.State.GREEN)
+        self.assertFalse(any("选择题没有读出选项" in flag for flag in result["flags"]))
+        # The local display/type correction must not rewrite either model's
+        # original audit record.
+        self.assertEqual(result["read_a"]["type"], "single_choice")
+        self.assertEqual(result["read_a"]["raw"], "primary raw audit")
+        self.assertEqual(result["read_b"]["type"], "free_response")
+        self.assertEqual(result["read_b"]["raw"], "checker raw audit")
+
+    def test_numeric_type_normalisation_does_not_touch_image_choice_questions(self):
+        final = {"stem": "(1) 甲图；(2) 乙图。", "options": {}}
+        readings = [{"type": "single_choice"}, {"type": "free_response"}]
+
+        self.assertEqual(
+            pipeline._normalise_unlabelled_numeric_choice_type(
+                "single_choice", final=final, readings=readings,
+                candidates=[{"label": "1"}], figures=[],
+            ),
+            "single_choice",
+        )
+
     def test_printed_figure_without_text_reference_is_a_review_conflict(self):
         result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干")
         self.assertEqual([figure["slot"] for figure in result["figures"]], ["stem"])
@@ -668,7 +863,12 @@ class PipelineTests(TestCase):
         self.assertTrue(any("只有一次识读成功" in flag for flag in result["flags"]))
 
     def test_reread_never_removes_a_manually_selected_figure(self):
-        manual = {"slot": "stem", "page_idx": 0, "bbox": [300, 410, 460, 500], "source": "manual"}
+        first_key = "0:300,410,460,500"
+        ignored_key = "0:500,410,640,500"
+        manual = {
+            "slot": "stem", "page_idx": 0, "bbox": [300, 410, 460, 500],
+            "source": "manual", "candidate_key": first_key,
+        }
         question = Question.objects.create(
             paper=self.paper,
             number=9,
@@ -676,8 +876,16 @@ class PipelineTests(TestCase):
             stem="计算 $1+1$ 的值。",
             regions=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
             regions_auto=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            figure_candidates=[{"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]}],
+            figure_candidates=[
+                {"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]},
+                {"label": "2", "seq": 6, "page_idx": 0, "bbox": [500, 410, 640, 500]},
+            ],
             figures=[manual],
+            figure_review={
+                "status": "ok", "source": "human", "reason": "配图已经由人工设置",
+                "signals": ["manual_figure"], "cue_matches": [], "excluded_count": 1,
+                "ignored_candidates": [ignored_key], "confirmed_at": "2026-09-27T00:00:00+08:00",
+            },
             state=Question.State.WAITING,
         )
         chat = ScriptedChat({
@@ -692,6 +900,48 @@ class PipelineTests(TestCase):
         self.assertEqual(question.figures[0]["source"], "manual")
         self.assertEqual(question.figure_review["status"], "ok")
         self.assertEqual(question.figure_review["source"], "human")
+        self.assertEqual(question.figure_review["ignored_candidates"], [ignored_key])
+        self.assertEqual(question.figure_review["confirmed_at"], "2026-09-27T00:00:00+08:00")
+
+    def test_reread_refreshes_text_without_overwriting_human_no_figure_decision(self):
+        ignored_key = "0:300,410,460,500"
+        confirmed = {
+            "status": "confirmed_no_figure",
+            "source": "human",
+            "reason": "已人工确认本题确实无图",
+            "signals": ["human_confirmed_no_figure"],
+            "cue_matches": [],
+            "excluded_count": 1,
+            "ignored_candidates": [ignored_key],
+            "confirmed_at": "2026-09-27T00:00:00+08:00",
+        }
+        question = Question.objects.create(
+            paper=self.paper,
+            number=9,
+            question_type="free_response",
+            stem="重读前的题干。",
+            regions=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            regions_auto=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
+            figure_candidates=[{
+                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
+            }],
+            figures=[],
+            figure_review=confirmed,
+            state=Question.State.WAITING,
+            reread_requested=True,
+        )
+        chat = ScriptedChat({
+            ("a", 9): tagged("重读后的题干。", figures="1=题干"),
+            ("b", 9): tagged("重读后的题干。"),
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+
+        question.refresh_from_db()
+        self.assertEqual(question.stem, "重读后的题干。")
+        self.assertEqual(question.figures, [])
+        self.assertEqual(question.figure_review, confirmed)
+        self.assertFalse(question.reread_requested)
 
     def test_full_pipeline_states(self):
         answers = {
@@ -745,11 +995,15 @@ class PipelineTests(TestCase):
         # 第 2 题：选择题，但选项全是图？这里没有选项文字也没有选项图 → 提示；"第 3 题"已由图解释，不提示范围
         self.assertFalse(any("露出了" in f for f in cards[2].flags), cards[2].flags)
         self.assertEqual(cards[2].figures, [])
-        # 第 3 题得到借入图，但自己范围内还有一张未分类候选图，不能因此静默放行。
-        self.assertTrue(any(f["source"] == "other" for f in cards[3].figures), cards[3].figures)
-        self.assertEqual(cards[3].figure_review["status"], "conflict")
-        self.assertIn("candidate_unclassified", cards[3].figure_review["signals"])
-        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, cards[3].flags)
+        # 第 3 题明确写有“如图”，且自己范围内恰好只有一张普通候选图：
+        # 本地规则可确定性认领该图，随后再接收第 2 题交来的另一张图。
+        # 多候选、无文字提示或图片选项题仍由其他测试保持人工审核。
+        self.assertEqual(
+            sorted(f["source"] for f in cards[3].figures), ["auto", "other"],
+            cards[3].figures,
+        )
+        self.assertEqual(cards[3].figure_review["status"], "ok")
+        self.assertNotIn(figure_policy.FLAG_UNFOUND_FIGURE, cards[3].flags)
         # 第 6 题说"如图"却没有图 → 提示
         self.assertIn(pipeline.FLAG_NO_FIGURE, cards[6].flags)
         self.assertEqual(cards[6].state, "yellow")
@@ -1022,6 +1276,68 @@ class PipelineTests(TestCase):
         self.assertEqual(q4.start_source, "located")
         q3 = self.paper.questions.get(number=3)
         self.assertLessEqual(q3.regions[-1]["bbox"][3], q4.regions[0]["bbox"][1] + segment.START_PAD + 1)
+
+    def test_segment_pipeline_recovers_group_first_question_and_records_note(self):
+        self.paper.blocks.all().delete()
+        self.paper.pages = PAGES
+        self.paper.save(update_fields=["pages"])
+        blocks = [
+            block(6, 0, [250, 261, 597, 290], "每周两练.数学不难"),
+            block(7, 0, [250, 291, 597, 315], "9. 1 8", "equation"),
+            block(8, 0, [190, 319, 608, 374],
+                  "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
+            block(9, 0, [216, 374, 515, 392], "(1) 若 m=2，求 A∩B；"),
+            block(10, 0, [216, 392, 507, 409], "(2) 若 A∪B=A，求 m 的取值范围；"),
+            block(11, 0, [190, 430, 620, 500], "解(1) 当 m=2 时，计算可得。"),
+            block(21, 0, [193, 654, 646, 712], "2.[2026湖北期中]下列说法正确的是（ ） A.甲 B.乙"),
+            block(22, 1, [190, 100, 646, 160], "3. 已知函数 f(x)=x，求值。"),
+        ]
+        Block.objects.bulk_create([Block(paper=self.paper, **item) for item in blocks])
+        with mock.patch.object(pipeline.readers, "locate_band") as locate_band, \
+                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions):
+            pipeline.segment_paper(self.paper)
+
+        self.paper.refresh_from_db()
+        locate_band.assert_not_called()
+        self.assertEqual(
+            list(self.paper.questions.order_by("number").values_list("number", "start_source")),
+            [(1, "inferred"), (2, "mineru"), (3, "mineru")],
+        )
+        self.assertTrue(any("未增加额外模型调用" in note for note in self.paper.notes), self.paper.notes)
+        self.assertTrue(any("仍按正常流程识读" in note for note in self.paper.notes), self.paper.notes)
+        self.assertTrue(any("请对照原卷核对" in note for note in self.paper.notes), self.paper.notes)
+
+        # A second local segmentation is idempotent.  A manually recovered q1
+        # remains authoritative, and already-approved unchanged q2/q3 cards do
+        # not lose approval merely because the local boundary check runs again.
+        q1, q2, q3 = [self.paper.questions.get(number=number) for number in (1, 2, 3)]
+        manual_regions = [{"page_idx": 0, "bbox": [175, 305, 615, 645]}]
+        q1.regions = manual_regions
+        q1.start_source = "manual"
+        q1.save(update_fields=["regions", "start_source"])
+        for question in (q2, q3):
+            question.question_type = "free_response"
+            question.approved = True
+            question.approved_at = timezone.now()
+            question.approved_content_hash = f"approved-{question.number}"
+            question.save(update_fields=["question_type", "approved", "approved_at", "approved_content_hash"])
+        unchanged = {question.number: list(question.regions) for question in (q2, q3)}
+        self.paper.status = Paper.Status.SEGMENTING
+        self.paper.save(update_fields=["status"])
+
+        with mock.patch.object(pipeline.readers, "locate_band") as locate_band, \
+                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions):
+            pipeline.segment_paper(self.paper)
+
+        locate_band.assert_not_called()
+        self.assertEqual(self.paper.questions.count(), 3)
+        q1.refresh_from_db()
+        self.assertEqual((q1.start_source, q1.regions), ("manual", manual_regions))
+        for question in (q2, q3):
+            question.refresh_from_db()
+            self.assertTrue(question.approved)
+            self.assertEqual(question.question_type, "free_response")
+            self.assertEqual(question.regions, unchanged[question.number])
 
 
 class ApiTests(TestCase):
@@ -1605,7 +1921,7 @@ class ApiTests(TestCase):
         Block.objects.create(paper=self.paper, seq=0, type="text", page_idx=0, bbox=[50, 100, 480, 130], text="1. 已知")
         data = self.post(f"/api/papers/{self.paper.id}/resegment").json()
         self.assertEqual(data["paper"]["status"], "segmenting")
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/resegment").status_code, 400)
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/resegment").status_code, 409)
 
     def test_card_without_regions_turns_red_with_hint(self):
         store = pipeline.PageStore(self.paper)
@@ -1636,7 +1952,14 @@ class ApiTests(TestCase):
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/questions",
                                    {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]}).status_code, 400)
         response = self.client.delete(f"/api/questions/{new_id}", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 409)  # 尚在重读队列，不能和工作者竞态
+        Question.objects.filter(pk=new_id).update(
+            reread_requested=False, state=Question.State.GREEN, stem="人工补录完成",
+        )
+        response = self.client.delete(f"/api/questions/{new_id}", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(Question.objects.filter(pk=new_id).exists())
+        self.assertTrue(Question.all_objects.filter(pk=new_id).exists())
 
     def test_page_preview_and_detail(self):
         self.assertEqual(self.client.get(f"/api/papers/{self.paper.id}/pages/0/preview").status_code, 200)

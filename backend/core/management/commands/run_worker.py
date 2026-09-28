@@ -10,10 +10,54 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 
-from core.models import Paper
+from core import credential_settings, preferences
+from core.account_pool import reset_account_pools
+from core.models import Paper, Question
 from core.pipeline import process_paper, process_rereads
 
 ACTIVE = [Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING]
+
+
+def apply_saved_credentials():
+    """Load one DPAPI snapshot before a paper/reread batch starts.
+
+    Failures keep the worker's last known-good environment.  The exception is
+    intentionally not logged with a traceback: no submitted credential value
+    should ever appear in worker logs, even during recovery.
+    """
+
+    try:
+        return credential_settings.apply_worker_environment()
+    except credential_settings.CredentialStoreError:
+        logging.getLogger("core").error(
+            "saved API credentials could not be loaded; keeping current task settings"
+        )
+        return None
+    finally:
+        # A confirmed provider quota error disables that process-local account
+        # so concurrent card jobs stop immediately.  Every paper/reread batch is
+        # a fresh recovery boundary: reset even for source deployments that use
+        # environment variables and do not opt into desktop credential reload.
+        reset_account_pools()
+
+
+def apply_saved_model_preferences():
+    """Load one atomic snapshot before a paper/reread batch starts.
+
+    Nothing calls this from inside ``process_paper`` or ``process_rereads``, so
+    a preference save can never make one active task mix old and new models.
+    """
+    if not preferences.preference_path().is_file():
+        return None
+    try:
+        return preferences.apply_and_record()
+    except preferences.PreferenceError:
+        logging.getLogger("core").exception("model preferences could not be loaded; keeping current task settings")
+        return None
+
+
+def rereads_pending() -> bool:
+    return Question.objects.filter(reread_requested=True).exists()
 
 
 class SingleInstance:
@@ -42,17 +86,27 @@ class Command(BaseCommand):
 
     def handle(self, *args, once=False, **options):
         lock = SingleInstance(settings.DATA_ROOT / "worker.lock")  # noqa: F841 — 持有到进程结束
+        # A stale snapshot may survive a previous app run.  Once this worker
+        # owns the lock, its startup configuration is authoritative even when
+        # there is currently no queued work.
+        apply_saved_credentials()
+        apply_saved_model_preferences()
         while True:
             close_old_connections()
             worked = False
             try:
                 for paper in Paper.objects.filter(status__in=ACTIVE).order_by("created_at"):
+                    apply_saved_credentials()
+                    apply_saved_model_preferences()
                     self.stdout.write(f"处理试卷 {paper.display_name}（{paper.get_status_display()}）")
                     sys.stdout.flush()
                     process_paper(paper)
                     worked = True
-                if process_rereads():
-                    worked = True
+                if rereads_pending():
+                    apply_saved_credentials()
+                    apply_saved_model_preferences()
+                    if process_rereads():
+                        worked = True
             except Exception:  # 工作者不能因为一次意外就退出
                 logging.getLogger("core").exception("worker loop error")
                 time.sleep(5)

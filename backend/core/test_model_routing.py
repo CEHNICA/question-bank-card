@@ -51,6 +51,20 @@ class ModelRoutingTests(SimpleTestCase):
             self.assertEqual(checker.key, "minimax_m3")
             self.assertEqual(readers.arbiter_engine(primary, checker).key, "minimax_m3")
 
+    def test_provider_model_ids_are_dynamic_without_changing_legacy_engine_keys(self):
+        with self.env(
+            QB_SILICONFLOW_CONFIGURED="1",
+            QB_MINIMAX_MODEL="MiniMax-M3.1+vision",
+            QB_SILICONFLOW_MODEL="Qwen/new-vl:model",
+        ):
+            primary = readers.primary_engine()
+            checker = readers.checker_engine()
+            self.assertEqual((primary.key, primary.model), ("minimax_m3", "MiniMax-M3.1+vision"))
+            self.assertEqual((checker.key, checker.model), ("siliconflow_qwen3", "Qwen/new-vl:model"))
+            settings = readers.engine_settings()
+            self.assertEqual(settings["models"]["minimax"], "MiniMax-M3.1+vision")
+            self.assertEqual(settings["choices"][0]["provider_key"], "minimax")
+
     def test_unconfigured_explicit_engine_is_not_silently_mislabelled(self):
         with self.env(QB_PRIMARY_ENGINE="siliconflow_qwen3"):
             self.assertIsNone(readers.primary_engine())

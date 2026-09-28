@@ -83,7 +83,7 @@
         <p>AI 会自动切题、读题、挑配图，并让两位“读者”各读一遍互相核对。</p>
         <ol class="empty-steps">
           <li><b>1</b>左侧选择资料类型，再上传 PDF、Word 或几张照片</li>
-          <li><b>2</b>AI 切题、双读核对，一两分钟出题卡</li>
+          <li><b>2</b>AI 切题、双读核对；页面会如实显示当前阶段和完成数</li>
           <li><b>3</b>对照原卷看一眼：对了就通过，错了就改</li>
         </ol>
       </section>
@@ -102,7 +102,10 @@
             <button id="publishButton" class="button primary" type="button">入库</button>
           </div>
         </div>
-        <div id="progress" class="progress" hidden><span id="progressBar"></span></div>
+        <div id="processingPanel" class="processing-panel" hidden>
+          <div id="processingStages" class="processing-stages" aria-label="处理阶段"></div>
+          <div id="progress" class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span id="progressBar"></span></div>
+        </div>
         <p id="paperError" class="paper-error" hidden></p>
         <p id="orderCheck" class="order-check" hidden></p>
         <div id="reviewMeter" class="review-meter" hidden>
@@ -131,9 +134,17 @@
                 <button id="addQuestion" class="link-button" type="button">漏了一题？手动框出</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
+                <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
               </div>
             </details>
           </div>
+        </div>
+        <div id="selectionBar" class="selection-bar" role="region" aria-label="批量选择题卡" hidden>
+          <span class="selection-summary"><strong id="selectionCount">已选择 0 道题</strong><small id="selectionHint">删除后可以撤销。</small></span>
+          <span class="selection-actions">
+            <button id="selectionCancel" class="button quiet" type="button">取消选择</button>
+            <button id="selectionDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>移到回收站</button>
+          </span>
         </div>
         <div id="cards" class="cards" role="tabpanel"></div>
       </section>
@@ -165,8 +176,28 @@
             <div><span>MiniMax</span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
             <div><span>硅基流动</span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
           </div>
-          <p class="settings-footnote">配置或更换密钥，请从开始菜单的“题有据”文件夹打开“配置 API”。</p>
+          <div class="api-settings-actions">
+            <p class="settings-footnote">软件不会回显密钥或显示末尾字符。保存后，正在识别的任务继续使用原账号，下一项任务自动换用新配置。</p>
+            <button id="settingsCredentialOpen" class="button" type="button">配置 API 与账号池</button>
+          </div>
           <form id="modelSettingsForm" class="model-settings-form">
+            <fieldset class="model-id-settings">
+              <legend>具体模型</legend>
+              <p class="settings-footnote">这里只使用能读取图片的视觉模型。可从已验证建议中选择，也可以填写服务商支持的视觉模型 model_id。</p>
+              <label class="model-id-field" for="settingsMinimaxModel">
+                <span><strong>MiniMax</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
+                <input id="settingsMinimaxModel" name="minimax_model" type="text" list="settingsMinimaxModels"
+                       autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState">
+                <datalist id="settingsMinimaxModels"></datalist>
+              </label>
+              <label class="model-id-field" for="settingsSiliconflowModel">
+                <span><strong>硅基流动</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
+                <input id="settingsSiliconflowModel" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
+                       autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState">
+                <datalist id="settingsSiliconflowModels"></datalist>
+              </label>
+            </fieldset>
+            <p class="model-role-heading">识读分工</p>
             <label class="field" for="settingsPrimaryModel"><span>主读模型</span><select id="settingsPrimaryModel" name="primary"></select></label>
             <label class="field" for="settingsCheckerModel"><span>复核模型</span><select id="settingsCheckerModel" name="checker"></select></label>
             <label class="field" for="settingsArbiterModel"><span>分歧裁决模型</span><select id="settingsArbiterModel" name="arbiter"></select></label>
@@ -198,6 +229,7 @@
               <button id="settingsAddQuestion" class="button" type="button">补录一道题</button>
               <button id="settingsResegment" class="button" type="button">重新切题</button>
               <button id="settingsPageOrder" class="button" type="button">调整页序</button>
+              <button id="settingsTrash" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="settingsTrashLabel">题卡回收站</span></button>
               <button id="settingsConfirmStructure" class="button primary" type="button" hidden>确认属于同一份资料并继续</button>
               <button id="settingsSplit" class="button button-outline" type="button" hidden>拆分任务</button>
             </div>
@@ -233,6 +265,48 @@
     </div>
   </dialog>
 
+  <dialog id="credentialDialog" class="credential-dialog" aria-labelledby="credentialTitle">
+    <form id="credentialForm" class="credential-form" autocomplete="off">
+      <header class="dialog-head">
+        <div>
+          <p class="settings-eyebrow">本机加密设置</p>
+          <h3 id="credentialTitle">API 与账号池</h3>
+          <p class="hint">输入框始终为空，不会读取或显示已经保存的密钥。多个账号请用英文分号分隔，每项最多 8 个。</p>
+        </div>
+        <button class="button quiet" type="button" data-close>关闭</button>
+      </header>
+      <div class="credential-body">
+        <section class="credential-service" data-service="mineru">
+          <div class="credential-service-head"><strong>MinerU Token</strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
+          <label for="credentialMineruInput">替换账号池</label>
+          <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="留空则保持现有配置；多个 Token 用英文分号分隔">
+          <label class="credential-clear"><input id="credentialMineruClear" type="checkbox">清除 MinerU 配置</label>
+        </section>
+        <section class="credential-service" data-service="minimax">
+          <div class="credential-service-head"><strong>MiniMax API Key</strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
+          <label for="credentialMinimaxInput">替换账号池</label>
+          <input id="credentialMinimaxInput" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="留空则保持现有配置；多个 Key 用英文分号分隔">
+          <label class="credential-clear"><input id="credentialMinimaxClear" type="checkbox">清除 MiniMax 配置</label>
+        </section>
+        <section class="credential-service" data-service="siliconflow">
+          <div class="credential-service-head"><strong>硅基流动 API Key</strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
+          <label for="credentialSiliconflowInput">替换账号池（可选）</label>
+          <input id="credentialSiliconflowInput" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="留空则保持现有配置；多个 Key 用英文分号分隔">
+          <label class="credential-clear"><input id="credentialSiliconflowClear" type="checkbox">清除硅基流动配置</label>
+        </section>
+        <p class="credential-security-note">密钥使用当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。新填的 MinerU Token 会先做一次不上传文件、不消耗额度的官网验证；网络不可用时允许保存并明确标为尚未验证。独立配置工具仅保留作故障恢复。</p>
+      </div>
+      <footer class="credential-actions">
+        <span id="credentialResult" class="settings-save-result" role="status"></span>
+        <button id="credentialSave" class="button primary" type="submit">验证并加密保存</button>
+        <button class="button" type="button" data-close>取消</button>
+      </footer>
+    </form>
+  </dialog>
+
   <dialog id="pageDialog" class="page-dialog">
     <div class="dialog-head">
       <div>
@@ -244,18 +318,40 @@
         <label id="groupField" class="number-field" hidden>题组
           <select id="groupSelect"></select>
         </label>
-        <label id="slotField" class="number-field" hidden>新框属于
-          <select id="slotSelect">
-            <option value="stem">题干</option><option value="A">选项 A</option><option value="B">选项 B</option>
-            <option value="C">选项 C</option><option value="D">选项 D</option>
-          </select>
-        </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
         <button class="button" type="button" data-close>取消</button>
       </div>
     </div>
-    <div id="pageTabs" class="page-tabs" role="tablist" aria-label="原卷页码"></div>
+    <nav class="page-navigation" aria-label="原卷翻页">
+      <button id="pagePrevious" class="button small" type="button" aria-label="上一页">上一页</button>
+      <label class="page-number-field">
+        <span class="sr-only">跳到页码</span>
+        第 <input id="pageNumberInput" type="number" min="1" inputmode="numeric" aria-label="页码"> 页
+        <span id="pageNumberTotal" class="page-number-total"></span>
+      </label>
+      <button id="pageNext" class="button small" type="button" aria-label="下一页">下一页</button>
+      <div id="pageTabs" class="page-tabs" role="tablist" aria-label="本题相关页"></div>
+      <details id="allPagesPicker" class="page-picker menu">
+        <summary>全部页</summary>
+        <div class="page-picker-popover">
+          <label class="page-search-field">查找页码 <input id="pageSearchInput" type="search" inputmode="numeric" placeholder="例如 62"></label>
+          <div id="pageSearchResults" class="page-search-results" role="listbox" aria-label="全部原卷页码"></div>
+        </div>
+      </details>
+    </nav>
     <div id="pageStage" class="page-stage"></div>
+    <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
+      <strong>这张图属于</strong>
+      <div class="figure-slot-options">
+        <button type="button" role="menuitem" data-figure-slot="stem">题干</button>
+        <button type="button" role="menuitem" data-figure-slot="A">A</button>
+        <button type="button" role="menuitem" data-figure-slot="B">B</button>
+        <button type="button" role="menuitem" data-figure-slot="C">C</button>
+        <button type="button" role="menuitem" data-figure-slot="D">D</button>
+        <button type="button" role="menuitem" class="irrelevant" data-figure-slot="irrelevant">无关</button>
+      </div>
+      <button type="button" class="figure-slot-cancel" data-figure-slot-cancel>取消</button>
+    </div>
   </dialog>
 
   <dialog id="viewerDialog" class="viewer-dialog" aria-labelledby="viewerTitle">
@@ -370,6 +466,41 @@
     </form>
   </dialog>
 
+  <dialog id="resegmentPreviewDialog" class="resegment-preview-dialog" aria-labelledby="resegmentPreviewTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="resegmentPreviewTitle">重新切题预演</h3>
+        <p class="hint">这一步只计算影响，不修改题卡、不调用识读模型。确认后才会真正应用。</p>
+      </div>
+      <button class="button" type="button" data-close>关闭</button>
+    </div>
+    <div class="resegment-preview-scroll">
+      <div id="resegmentPreviewState" class="resegment-preview-state" role="status"></div>
+      <div id="resegmentPreviewSummary" class="resegment-preview-summary" aria-label="重新切题影响摘要"></div>
+      <div id="resegmentPreviewDetails" class="resegment-preview-details"></div>
+      <label id="resegmentAcknowledgeRow" class="resegment-acknowledge" hidden>
+        <input id="resegmentAcknowledge" type="checkbox">
+        <span>我已查看本次影响，知道范围变化和新增题卡会重新识读；系统移除的题卡可从回收站恢复。</span>
+      </label>
+    </div>
+    <footer class="resegment-preview-actions">
+      <span id="resegmentPreviewResult" class="settings-save-result" role="status"></span>
+      <button class="button" type="button" data-close>取消</button>
+      <button id="resegmentApply" class="button primary" type="button" disabled>确认并应用重新切题</button>
+    </footer>
+  </dialog>
+
+  <dialog id="trashDialog" class="trash-dialog" aria-labelledby="trashTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="trashTitle">题卡回收站</h3>
+        <p class="hint">删除按批次保留。恢复一批后，题卡会回到原来的任务、题组和题号位置。</p>
+      </div>
+      <button class="button" type="button" data-close>关闭</button>
+    </div>
+    <div id="trashList" class="trash-list" aria-live="polite"></div>
+  </dialog>
+
   <dialog id="renameDialog" class="rename-dialog" aria-labelledby="renameTitle">
     <form id="renameForm">
       <div class="dialog-head">
@@ -410,6 +541,8 @@
       <div class="key-row"><span>调整范围 / 配图</span><span><kbd>R</kbd><kbd>F</kbd></span></div>
       <div class="key-row"><span>下一张需核对的卡</span><span><kbd>N</kbd></span></div>
       <div class="key-row"><span>题卡放大镜开 / 关</span><span><kbd>L</kbd></span></div>
+      <div class="key-row"><span>增减选择 / 连续选择题卡</span><span><kbd>Ctrl</kbd>+点击 / <kbd>Shift</kbd>+点击</span></div>
+      <div class="key-row"><span>把已选题卡移到回收站</span><span><kbd>Delete</kbd></span></div>
       <h4>放大对照</h4>
       <div class="key-row"><span>完整显示整题 / 适合宽度</span><span><kbd>0</kbd><kbd>W</kbd></span></div>
       <div class="key-row"><span>缩小 / 放大原卷</span><span><kbd>−</kbd><kbd>+</kbd></span></div>

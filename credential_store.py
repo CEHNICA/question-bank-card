@@ -11,13 +11,19 @@ import ctypes
 import getpass
 import json
 import os
+import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Mapping
 
 
 class CredentialStoreError(RuntimeError):
     """A credential file could not be protected or read."""
+
+
+class CredentialValidationError(CredentialStoreError):
+    """A new credential settings request is structurally invalid."""
 
 
 # siliconflow_key is optional: in 题有据 it makes the second reader a different vendor
@@ -32,6 +38,11 @@ ACCOUNT_POOL_FIELDS = {
 
 MINIMAX_MODEL = "MiniMax-M3"
 SILICONFLOW_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+DEFAULT_MODEL_IDS = {
+    "minimax": MINIMAX_MODEL,
+    "siliconflow": SILICONFLOW_MODEL,
+}
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
 DEFAULT_MODEL_PREFERENCES = {
     "primary_engine": "minimax_m3",
     "checker_engine": "auto",
@@ -46,6 +57,7 @@ MODEL_ENVIRONMENT_KEYS = frozenset({
     "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE",
     "QB_MINIMAX_MODEL", "QB_SILICONFLOW_MODEL", "QB_MODEL_PREFERENCES_FILE",
 })
+_CREDENTIAL_UPDATE_LOCK = threading.Lock()
 
 
 class _DataBlob(ctypes.Structure):
@@ -53,6 +65,9 @@ class _DataBlob(ctypes.Structure):
 
 
 def credential_path() -> Path:
+    explicit = os.environ.get("QB_CREDENTIAL_FILE", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
     local = os.environ.get("LOCALAPPDATA")
     if not local:
         raise CredentialStoreError("找不到当前用户的 LocalAppData 目录。")
@@ -75,28 +90,67 @@ def normalize_model_preferences(values: dict[str, str] | None) -> dict[str, str]
     }
 
 
-def load_model_preferences(path: Path | None = None) -> dict[str, str]:
-    """Load non-secret role choices; a missing file means legacy defaults."""
+def normalize_model_ids(values: Mapping[str, object] | None) -> dict[str, str]:
+    """Return strictly validated model IDs, falling back provider-by-provider."""
+    source = values if isinstance(values, Mapping) else {}
+    result: dict[str, str] = {}
+    for provider, default in DEFAULT_MODEL_IDS.items():
+        value = source.get(provider, default)
+        if (not isinstance(value, str) or MODEL_ID.fullmatch(value) is None
+                or "://" in value or value.startswith("/")):
+            result[provider] = default
+        else:
+            result[provider] = value
+    return result
+
+
+def load_model_configuration(path: Path | None = None) -> dict[str, dict[str, str]]:
+    """Load v1/v2 model preferences; v1 receives the legacy model IDs."""
     path = path or model_preferences_path()
     if not path.is_file():
-        return dict(DEFAULT_MODEL_PREFERENCES)
+        return {
+            "roles": dict(DEFAULT_MODEL_PREFERENCES),
+            "models": dict(DEFAULT_MODEL_IDS),
+        }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
-        raise CredentialStoreError("已保存的模型偏好无法读取，将使用默认选择；可打开“配置 API”重新保存。") from exc
-    if not isinstance(payload, dict) or payload.get("version") != 1 or not isinstance(payload.get("roles"), dict):
-        raise CredentialStoreError("已保存的模型偏好格式不受支持，将使用默认选择；可打开“配置 API”重新保存。")
-    return normalize_model_preferences(payload["roles"])
+        raise CredentialStoreError("已保存的模型偏好无法读取，将使用默认选择；请在软件设置中重新保存。") from exc
+    if (not isinstance(payload, dict) or payload.get("version") not in {1, 2}
+            or not isinstance(payload.get("roles"), dict)):
+        raise CredentialStoreError("已保存的模型偏好格式不受支持，将使用默认选择；请在软件设置中重新保存。")
+    raw_models = payload.get("models") if payload.get("version") == 2 else None
+    if payload.get("version") == 2 and not isinstance(raw_models, dict):
+        raise CredentialStoreError("已保存的模型偏好格式不受支持，将使用默认选择；请在软件设置中重新保存。")
+    return {
+        "roles": normalize_model_preferences(payload["roles"]),
+        "models": normalize_model_ids(raw_models),
+    }
 
 
-def save_model_preferences(values: dict[str, str], path: Path | None = None) -> None:
+def load_model_preferences(path: Path | None = None) -> dict[str, str]:
+    """Load non-secret role choices; a missing file means legacy defaults."""
+    return load_model_configuration(path)["roles"]
+
+
+def save_model_preferences(
+    values: dict[str, str], path: Path | None = None, *, models: Mapping[str, object] | None = None,
+) -> None:
     """Atomically save the allow-listed, non-secret role choices."""
     path = path or model_preferences_path()
-    payload = json.dumps(
-        {"version": 1, "roles": normalize_model_preferences(values)},
-        ensure_ascii=False,
-        indent=2,
-    ) + "\n"
+    # The native legacy dialog edits only roles.  Preserve model IDs already
+    # chosen in the in-app settings page instead of silently resetting them.
+    existing_models = None
+    if models is None and path.is_file():
+        try:
+            existing_models = load_model_configuration(path)["models"]
+        except CredentialStoreError:
+            existing_models = None
+    selected_models = normalize_model_ids(models or existing_models)
+    document = {"version": 1, "roles": normalize_model_preferences(values)}
+    if models is not None or existing_models is not None:
+        document = {"version": 2, "roles": document["roles"], "models": selected_models}
+    payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
     temporary: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,12 +178,18 @@ def model_preference_environment(values: dict[str, str] | None = None) -> dict[s
     QB_MODEL_PREFERENCES_FILE is the shared absolute path for atomic UI updates.
     """
     roles = normalize_model_preferences(values)
+    models = dict(DEFAULT_MODEL_IDS)
+    try:
+        saved = load_model_configuration()
+        models = saved["models"]
+    except CredentialStoreError:
+        pass
     return {
         "QB_PRIMARY_ENGINE": roles["primary_engine"],
         "QB_CHECKER_ENGINE": roles["checker_engine"],
         "QB_ARBITER_ENGINE": roles["arbiter_engine"],
-        "QB_MINIMAX_MODEL": MINIMAX_MODEL,
-        "QB_SILICONFLOW_MODEL": SILICONFLOW_MODEL,
+        "QB_MINIMAX_MODEL": models["minimax"],
+        "QB_SILICONFLOW_MODEL": models["siliconflow"],
         "QB_MODEL_PREFERENCES_FILE": str(model_preferences_path().resolve()),
     }
 
@@ -222,6 +282,85 @@ def credential_pool(values: Mapping[str, object] | None, service: str) -> list[s
     return pool
 
 
+def credential_status(values: Mapping[str, object] | None = None) -> dict[str, dict[str, object]]:
+    """Return the only credential information that may enter the web process.
+
+    Deliberately expose neither prefixes/suffixes nor stable fingerprints: even
+    masked credentials make it easier to correlate a private account.  The UI
+    needs only availability and the number of accounts in each local pool.
+    """
+
+    source = load_credentials() if values is None else values
+    result: dict[str, dict[str, object]] = {}
+    for service in ACCOUNT_POOL_FIELDS:
+        count = len(credential_pool(source, service))
+        result[service] = {"configured": bool(count), "count": count}
+    return result
+
+
+def update_credentials(
+    changes: Mapping[str, object], path: Path | None = None,
+) -> dict[str, dict[str, object]]:
+    """Atomically apply keep/clear/replace operations to encrypted pools.
+
+    This is the shared contract used by the in-app settings page and the
+    native recovery tool.  Validation errors are intentionally phrased without
+    quoting submitted values so an exception or access log cannot disclose a
+    credential.
+    """
+
+    if not isinstance(changes, Mapping):
+        raise CredentialValidationError("凭据设置格式不正确。")
+    unknown = set(changes) - set(ACCOUNT_POOL_FIELDS)
+    if unknown:
+        raise CredentialValidationError("凭据设置中包含不支持的服务。")
+
+    operations: dict[str, tuple[str, list[str] | None]] = {}
+    for service in ACCOUNT_POOL_FIELDS:
+        raw = changes.get(service, {"action": "keep"})
+        if not isinstance(raw, Mapping):
+            raise CredentialValidationError("凭据设置格式不正确。")
+        if set(raw) - {"action", "accounts"}:
+            raise CredentialValidationError("凭据设置格式不正确。")
+        action = raw.get("action")
+        if action not in {"keep", "clear", "replace"}:
+            raise CredentialValidationError("请选择保持、替换或清除凭据。")
+        if action in {"keep", "clear"}:
+            if "accounts" in raw:
+                raise CredentialValidationError("只有替换凭据时才能提交账号。")
+            operations[service] = (str(action), None)
+            continue
+        accounts = raw.get("accounts")
+        if not isinstance(accounts, (list, tuple)):
+            raise CredentialValidationError("替换凭据时请提交账号列表。")
+        _legacy_key, pool_key = ACCOUNT_POOL_FIELDS[service]
+        try:
+            normalized = credential_pool({pool_key: accounts}, service)
+        except CredentialStoreError as exc:
+            raise CredentialValidationError(str(exc)) from None
+        if not normalized:
+            raise CredentialValidationError("替换凭据时至少需要一个账号。")
+        operations[service] = ("replace", normalized)
+
+    target = path or credential_path()
+    with _CREDENTIAL_UPDATE_LOCK:
+        current = load_credentials(target)
+        updated: dict[str, object] = dict(current)
+        for service, (action, accounts) in operations.items():
+            legacy_key, pool_key = ACCOUNT_POOL_FIELDS[service]
+            if action == "keep":
+                continue
+            updated.pop(legacy_key, None)
+            if action == "clear":
+                updated.pop(pool_key, None)
+            else:
+                assert accounts is not None
+                updated[legacy_key] = accounts[0]
+                updated[pool_key] = accounts
+        save_credentials(updated, target)
+        return credential_status(updated)
+
+
 def load_credentials(path: Path | None = None) -> dict[str, object]:
     path = path or credential_path()
     if not path.is_file():
@@ -230,7 +369,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
         payload = json.loads(_transform(path.read_bytes(), protect=False).decode("utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise CredentialStoreError(
-                "已保存的凭据格式不受支持，请从开始菜单的“题有据”文件夹打开“配置 API”重新设置。"
+                "已保存的凭据格式不受支持，请在软件的“API 与模型”中重新设置。"
             )
         result: dict[str, object] = {}
         for service, (legacy_key, pool_key) in ACCOUNT_POOL_FIELDS.items():
@@ -240,7 +379,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
                 result[pool_key] = pool
         return result
     except (OSError, UnicodeError, ValueError, TypeError, CredentialStoreError) as exc:
-        raise CredentialStoreError("已保存的凭据无法读取，请从开始菜单的“题有据”文件夹打开“配置 API”重新设置。") from exc
+        raise CredentialStoreError("已保存的凭据无法读取，请先在软件的“API 与模型”中重试；若仍无法打开，再运行独立配置工具恢复。") from exc
 
 
 def save_credentials(values: Mapping[str, object], path: Path | None = None) -> None:

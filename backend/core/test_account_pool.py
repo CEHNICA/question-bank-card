@@ -24,6 +24,21 @@ class _Response:
         return {"choices": [{"message": {"content": self._text}, "finish_reason": "stop"}]}
 
 
+def _token_plan_response(message: str = "Token Plan exhausted (2056)") -> _Response:
+    response = _Response(429)
+    response.content = b'{"error":true}'
+    response.json = mock.Mock(return_value={
+        "type": "error",
+        "request_id": "opaque-request-id",
+        "error": {
+            "http_code": "429",
+            "type": "rate_limit_error",
+            "message": message,
+        },
+    })
+    return response
+
+
 class AccountPoolTests(SimpleTestCase):
     def tearDown(self):
         account_pool.reset_account_pools()
@@ -121,6 +136,40 @@ class VisionPoolTests(SimpleTestCase):
         self.assertEqual(result, "【题干】有效结果")
         self.assertEqual(seen, ["bad-key", "good-key"])
 
+    def test_exact_selected_model_id_reaches_provider_payload(self):
+        payloads = []
+
+        def post(_url, _key, payload, timeout=(10, 150)):
+            payloads.append(payload)
+            return _Response(200, text="OK")
+
+        environment = {"MINIMAX_API_KEY": "test-key"}
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post):
+            result = readers.chat(
+                readers.Engine("minimax", "MiniMax-Custom-Vision"), "p", [], max_tokens=32,
+            )
+
+        self.assertEqual(result, "OK")
+        self.assertEqual(payloads[0]["model"], "MiniMax-Custom-Vision")
+
+    def test_exact_siliconflow_model_id_reaches_provider_payload(self):
+        payloads = []
+
+        def post(_url, _key, payload, timeout=(10, 150)):
+            payloads.append(payload)
+            return _Response(200, text="OK")
+
+        environment = {"SILICONFLOW_API_KEY": "test-key"}
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post):
+            result = readers.chat(
+                readers.Engine("siliconflow", "Qwen/Custom-VL"), "p", [], max_tokens=32,
+            )
+
+        self.assertEqual(result, "OK")
+        self.assertEqual(payloads[0]["model"], "Qwen/Custom-VL")
+
     def test_all_invalid_keys_return_safe_error(self):
         environment = {
             "SILICONFLOW_API_KEYS_JSON": json.dumps(["private-one", "private-two"]),
@@ -153,6 +202,196 @@ class VisionPoolTests(SimpleTestCase):
         self.assertEqual(result, "【题干】有效结果")
         self.assertEqual(seen, ["busy-key", "good-key"])
 
+    def test_single_rate_limited_key_is_released_then_retried(self):
+        secret = "single-private-key"
+        responses = [
+            _Response(429, headers={"Retry-After": "0"}),
+            _Response(200, text="稍后成功"),
+        ]
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=responses) as post:
+            result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(result, "稍后成功")
+        self.assertEqual(post.call_count, 2)
+
+    def test_minimax_token_plan_exhaustion_raises_safe_dedicated_error(self):
+        secret = "never-print-this-token-plan-key"
+        private_message = "private provider detail: Token Plan exhausted (2056)"
+        response = _token_plan_response(private_message)
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", return_value=response) as post, \
+                self.assertRaises(readers.ReaderQuotaExhausted) as raised:
+            readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(post.call_count, 1)
+        self.assertIn("Token Plan", str(raised.exception))
+        self.assertNotIn(private_message, str(raised.exception))
+        self.assertNotIn(secret, str(raised.exception))
+
+    def test_token_plan_exhausted_account_fails_over_to_next_account(self):
+        seen = []
+
+        def post(_url, key, _payload, timeout=(10, 150)):
+            seen.append(key)
+            return _token_plan_response() if key == "exhausted-key" else _Response(200, text="备用账号成功")
+
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-key", "healthy-key"]),
+            "MINIMAX_API_KEY": "exhausted-key",
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post):
+            result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(result, "备用账号成功")
+        self.assertEqual(seen, ["exhausted-key", "healthy-key"])
+
+    def test_all_token_plan_accounts_exhausted_pause_provider(self):
+        seen = []
+
+        def post(_url, key, _payload, timeout=(10, 150)):
+            seen.append(key)
+            return _token_plan_response()
+
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-one", "exhausted-two"]),
+            "MINIMAX_API_KEY": "exhausted-one",
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post), \
+                self.assertRaises(readers.ReaderQuotaExhausted):
+            readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(seen, ["exhausted-one", "exhausted-two"])
+
+    def test_token_plan_plus_invalid_account_still_pauses_for_quota(self):
+        seen = []
+
+        def post(_url, key, _payload, timeout=(10, 150)):
+            seen.append(key)
+            return _token_plan_response() if key == "exhausted-key" else _Response(401)
+
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-key", "invalid-key"]),
+            "MINIMAX_API_KEY": "exhausted-key",
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post), \
+                self.assertRaises(readers.ReaderQuotaExhausted):
+            readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(seen, ["exhausted-key", "invalid-key"])
+
+    def test_parallel_waiters_share_confirmed_plan_exhaustion(self):
+        secret = "single-exhausted-key"
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+
+        def call(_index):
+            try:
+                readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+            except readers.ReaderQuotaExhausted:
+                return "quota"
+            return "unexpected"
+
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", return_value=_token_plan_response()) as post:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(call, range(2)))
+
+        self.assertEqual(results, ["quota", "quota"])
+        self.assertEqual(post.call_count, 1)
+
+    def test_2056_text_without_exact_error_structure_is_an_ordinary_429(self):
+        secret = "single-private-key"
+        malformed = _Response(429, headers={"Retry-After": "0"})
+        malformed.content = b'{"error":true}'
+        malformed.json = mock.Mock(return_value={
+            "type": "error",
+            "error": {
+                "http_code": "429",
+                "type": "other_error",
+                "message": "not the documented structured error (2056)",
+            },
+        })
+        responses = [malformed, _Response(200, text="普通限流后成功")]
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=responses) as post:
+            result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(result, "普通限流后成功")
+        self.assertEqual(post.call_count, 2)
+
+    def test_persistent_rate_limit_has_bounded_safe_retries(self):
+        secret = "never-show-this-rate-limit-key"
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(
+                    readers, "_post", return_value=_Response(429, headers={"Retry-After": "0"}),
+                ) as post, self.assertRaises(readers.ReaderError) as raised:
+            readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
+
+        self.assertEqual(post.call_count, readers.RATE_LIMIT_ROUNDS)
+        self.assertIn("持续限流", str(raised.exception))
+        self.assertNotIn(secret, str(raised.exception))
+
+    def test_single_account_cooldown_does_not_wake_parallel_http_requests(self):
+        secret = "single-key"
+        lock = threading.Lock()
+        active = 0
+        maximum_active = 0
+        call_count = 0
+
+        def post(_url, _key, _payload, timeout=(10, 150)):
+            nonlocal active, maximum_active, call_count
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+                call_count += 1
+                current = call_count
+            time.sleep(0.01)
+            with lock:
+                active -= 1
+            if current == 1:
+                return _Response(429, headers={"Retry-After": "0.01"})
+            return _Response(200, text=f"成功{current}")
+
+        environment = {
+            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
+            "MINIMAX_API_KEY": secret,
+        }
+        with mock.patch.dict("os.environ", environment, clear=False), \
+                mock.patch.object(readers, "_post", side_effect=post):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(
+                    lambda _index: readers.chat(
+                        readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [],
+                    ),
+                    range(2),
+                ))
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(call_count, 3)
+        self.assertEqual(maximum_active, 1)
+
     def test_http_429_is_not_retried_while_holding_one_key(self):
         response = _Response(429)
         with mock.patch("requests.post", return_value=response) as post, \
@@ -170,5 +409,6 @@ class VisionPoolTests(SimpleTestCase):
     def test_retry_after_parser_rejects_unicode_digits_and_caps_seconds(self):
         self.assertEqual(readers._retry_after_seconds("²"), readers.BACKOFF[-1])
         self.assertEqual(readers._retry_after_seconds("garbage"), readers.BACKOFF[-1])
+        self.assertEqual(readers._retry_after_seconds("garbage", fallback=2.0), 2.0)
         self.assertEqual(readers._retry_after_seconds("120"), 60.0)
         self.assertEqual(readers._retry_after_seconds("1.5"), 1.5)

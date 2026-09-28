@@ -3,7 +3,7 @@
 #define MyAppExeName "QuestionBankCard.exe"
 
 #ifndef AppVersion
-  #define AppVersion "1.2.0"
+  #define AppVersion "1.3.0"
 #endif
 
 #ifndef SourceDir
@@ -83,6 +83,8 @@ Type: files; Name: "{userprograms}\{#MyLegacyAppName}.lnk"
 Type: files; Name: "{userprograms}\{#MyLegacyAppName}\{#MyLegacyAppName}.lnk"
 Type: files; Name: "{userprograms}\{#MyLegacyAppName}\配置 API.lnk"
 Type: files; Name: "{userprograms}\{#MyLegacyAppName}\卸载 {#MyLegacyAppName}.lnk"
+; v1.2.0 曾在新品牌分组中暴露独立配置程序；升级后收回软件内设置。
+Type: files; Name: "{group}\配置 API.lnk"
 ; 只有旧分组已经为空时才移除目录，保留用户自行放入的其他内容。
 Type: dirifempty; Name: "{userprograms}\{#MyLegacyAppName}"
 
@@ -93,7 +95,6 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
-Name: "{group}\配置 API"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--configure"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]

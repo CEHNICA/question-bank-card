@@ -137,13 +137,15 @@ node --test frontend\test_*.js
 
 </details>
 
+如需让 MiniMax 充当辅助测试员，请使用 [MiniMax 辅助只读测试指南](docs/MINIMAX_READONLY_TESTING.md)。该流程固定为项目工作区零写入，不调用项目 API，也不能代替人工对照原卷终审。
+
 <details>
 <summary>展开 Windows 安装包构建说明</summary>
 
 安装 Inno Setup 7 后，在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.3.0
 ```
 
 完整说明见 [packaging/README.md](packaging/README.md)。构建流程会审计最终目录；如发现数据库、原卷、日志、备份或凭据，会立即失败。

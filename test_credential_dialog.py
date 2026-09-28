@@ -22,6 +22,7 @@ from credential_store import (
     _transform,
     credential_pool,
     load_credentials,
+    load_model_configuration,
     load_model_preferences,
     model_preference_environment,
     save_credentials,
@@ -170,6 +171,27 @@ class ModelPreferenceStoreTests(unittest.TestCase):
                 "arbiter_engine": "primary",
             })
 
+    def test_native_role_save_preserves_models_selected_in_the_app(self):
+        selected = {
+            "primary_engine": "siliconflow_qwen3",
+            "checker_engine": "minimax_m3",
+            "arbiter_engine": "checker",
+        }
+        models = {
+            "minimax": "MiniMax-M3",
+            "siliconflow": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "model-preferences.json"
+            save_model_preferences(selected, path, models=models)
+
+            changed_roles = {**selected, "arbiter_engine": "primary"}
+            save_model_preferences(changed_roles, path)
+
+            stored = load_model_configuration(path)
+            self.assertEqual(stored["roles"], changed_roles)
+            self.assertEqual(stored["models"], models)
+
     def test_environment_contract_contains_only_allowlisted_nonsecrets(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(
             os.environ, {"LOCALAPPDATA": temporary}
@@ -188,6 +210,26 @@ class ModelPreferenceStoreTests(unittest.TestCase):
             self.assertTrue(preference_path.is_absolute())
             self.assertEqual(preference_path, Path(temporary).resolve() / "QuestionBankM2" / "model-preferences.json")
             self.assertFalse(any("API_KEY" in name or name == "MINERU_TOKEN" for name in environment))
+
+    def test_environment_contract_uses_saved_concrete_model_ids(self):
+        roles = {
+            "primary_engine": "siliconflow_qwen3",
+            "checker_engine": "minimax_m3",
+            "arbiter_engine": "checker",
+        }
+        models = {
+            "minimax": "MiniMax-Custom-Vision",
+            "siliconflow": "Qwen/Custom-VL",
+        }
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(
+            os.environ, {"LOCALAPPDATA": temporary}
+        ):
+            path = Path(temporary) / "QuestionBankM2" / "model-preferences.json"
+            save_model_preferences(roles, path, models=models)
+            environment = model_preference_environment(roles)
+
+        self.assertEqual(environment["QB_MINIMAX_MODEL"], models["minimax"])
+        self.assertEqual(environment["QB_SILICONFLOW_MODEL"], models["siliconflow"])
 
 
 @unittest.skipUnless(os.name == "nt", "Windows DPAPI only")

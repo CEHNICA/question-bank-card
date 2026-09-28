@@ -79,18 +79,20 @@ class _State:
     ready_at: float = 0.0
     in_use: bool = False
     disabled: bool = False
+    disabled_reason: str = ""
 
 
 class AccountLease:
     """One opaque account reservation.  Its repr intentionally hides the value."""
 
-    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_delay")
+    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay")
 
     def __init__(self, pool: "AccountPool", secret: str, slot: int) -> None:
         self._pool = pool
         self._secret = secret
         self._slot = slot
         self._disable = False
+        self._disable_reason = ""
         self._delay = 0.0
 
     @property
@@ -103,10 +105,11 @@ class AccountLease:
 
         return self._slot
 
-    def disable(self) -> None:
+    def disable(self, reason: str = "invalid") -> None:
         """Remove an invalid/expired account until the worker restarts."""
 
         self._disable = True
+        self._disable_reason = reason
 
     def cooldown(self, seconds: float) -> None:
         """Keep a rate-limited account unavailable for a bounded interval."""
@@ -133,6 +136,16 @@ class AccountPool:
     def enabled_size(self) -> int:
         with self._condition:
             return sum(not state.disabled for state in self._states.values())
+
+    @property
+    def quota_exhausted(self) -> bool:
+        """Whether every configured account was disabled by confirmed quota exhaustion."""
+
+        with self._condition:
+            return bool(self._states) and all(
+                state.disabled and state.disabled_reason == "quota"
+                for state in self._states.values()
+            )
 
     def _acquire(self, exclude: frozenset[int] = frozenset()) -> AccountLease:
         with self._condition:
@@ -170,6 +183,7 @@ class AccountPool:
             state.in_use = False
             if lease._disable:
                 state.disabled = True
+                state.disabled_reason = lease._disable_reason
             elif lease._delay:
                 state.ready_at = max(state.ready_at, time.monotonic() + lease._delay)
             self._condition.notify_all()

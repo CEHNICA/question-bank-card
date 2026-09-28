@@ -1,7 +1,15 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const QB = require("./qb-render.js");
+
+// 本地规则补出的首题必须在题卡旁直接提示人工核对；范围人工调整
+// 仍具有更高显示优先级，不能只把说明藏到任务设置里。
+const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+assert.match(appSource, /q\.regions_changed \?[^:]+:\s*q\.start_source === "inferred"/s);
+assert.match(appSource, /题号由本地规则补出，请对照原卷核对 · 点击放大对照/);
 
 // 平行四边形符号必须成为独立的 Unicode 显示片段，不能送进 KaTeX 的
 // \\square。后面的顶点字母仍然作为数学片段排版。

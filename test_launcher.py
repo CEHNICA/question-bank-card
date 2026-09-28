@@ -79,6 +79,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
                          ("1", "1", "1"))
         for environment in (worker, web):
+            self.assertEqual(environment["QB_CREDENTIAL_HOT_RELOAD"], "1")
+            self.assertTrue(Path(environment["QB_CREDENTIAL_FILE"]).is_absolute())
             self.assertEqual(environment["QB_PRIMARY_ENGINE"], "minimax_m3")
             self.assertEqual(environment["QB_CHECKER_ENGINE"], "auto")
             self.assertEqual(environment["QB_ARBITER_ENGINE"], "primary")
@@ -160,6 +162,16 @@ class LauncherTests(unittest.TestCase):
         environments = self.run_main({"mineru_token": "m-token", "minimax_key": "mm-key"})
         self.assertEqual(environments["web.log"]["QB_SILICONFLOW_CONFIGURED"], "0")
         self.assertNotIn("SILICONFLOW_API_KEY", environments["worker.log"])
+
+    def test_no_credentials_still_opens_in_app_settings_without_prompting(self):
+        environments = self.run_main({})
+        worker, web = environments["worker.log"], environments["web.log"]
+        for name in launcher.SECRET_NAMES:
+            self.assertNotIn(name, worker)
+            self.assertNotIn(name, web)
+        self.assertEqual(web["QB_MINERU_CONFIGURED"], "0")
+        self.assertEqual(web["QB_MINIMAX_CONFIGURED"], "0")
+        self.assertIn("设置 → API 与模型", environments["_stdout"])
 
     def test_console_fallback_keeps_good_saved_account_when_first_is_invalid(self):
         saved = {

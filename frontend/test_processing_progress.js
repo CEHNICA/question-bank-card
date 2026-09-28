@@ -1,0 +1,78 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const Progress = require("./app.js");
+
+assert.equal(Progress.formatDuration(568), "9分28秒");
+assert.equal(Progress.formatAge(2), "刚刚");
+assert.equal(Progress.formatAge(62), "1分2秒前");
+
+const queued = Progress.processingPresentation({
+  status: "queued",
+  processing: { stage: "queued", queue_ahead: 2, elapsed_seconds: 192, idle_seconds: 2 }
+});
+assert.equal(queued.headline, "排队中 · 前面还有 2 项任务");
+assert.match(queued.detail, /任务创建至今 3分12秒/);
+assert.match(queued.detail, /本任务状态最近更新 刚刚/);
+assert.equal(queued.determinate, false);
+const longQueued = Progress.processingPresentation({
+  status: "queued",
+  processing: { stage: "queued", queue_ahead: 1, elapsed_seconds: 900, idle_seconds: 600 }
+});
+assert.equal(longQueued.stale, "", "排队不更新自身状态时不应误报后台停滞");
+
+const chunks = Progress.processingPresentation({
+  status: "parsing",
+  processing: {
+    stage: "parsing", determinate: true, completed: 2, total: 3,
+    elapsed_seconds: 568, idle_seconds: 7,
+    chunks: { active_ranges: [{ page_start: 201, page_end: 270 }] }
+  }
+});
+assert.equal(chunks.headline, "MinerU 解析中 · 已完成 2/3 个分片");
+assert.match(chunks.detail, /正在处理第 201–270 页/);
+assert.equal(chunks.ratio, 2 / 3);
+
+const singleMineru = Progress.processingPresentation({
+  status: "parsing",
+  processing: { stage: "parsing", determinate: false, elapsed_seconds: 20, idle_seconds: 5 }
+});
+assert.equal(singleMineru.determinate, false);
+assert.match(singleMineru.detail, /MinerU 没有提供完成百分比/);
+
+const reading = Progress.processingPresentation({
+  status: "reading",
+  processing: {
+    stage: "reading", determinate: true, completed: 40, total: 561,
+    elapsed_seconds: 568, idle_seconds: 2
+  }
+});
+assert.equal(reading.headline, "AI 读题中 · 已完成 40/561");
+assert.match(reading.detail, /剩余 521 道/);
+assert.match(reading.detail, /任务创建至今 9分28秒/);
+assert.match(reading.detail, /本任务状态最近更新 刚刚/);
+
+const stale = Progress.processingPresentation({
+  status: "reading",
+  processing: {
+    stage: "reading", determinate: true, completed: 1, total: 6,
+    elapsed_seconds: 500, idle_seconds: 241
+  }
+});
+assert.match(stale.stale, /已有 4分1秒没有新的本任务状态更新/);
+assert.match(stale.stale, /这不等同于失败/);
+
+const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+assert.match(appSource, /state\.pollTimer = setTimeout\(refreshPaper, 5000\)/);
+assert.doesNotMatch(`${appSource}\n${html}`, /一般一两分钟|一两分钟出题卡/);
+assert.doesNotMatch(appSource, /paper\.status === "reading"[^;]+:\s*0\.08/);
+assert.match(html, /id="processingStages"/);
+assert.match(html, /aria-valuemin="0" aria-valuemax="100"/);
+assert.match(appSource, /paper\.recoverable_pause/);
+assert.match(appSource, /额度不足，已暂停/);
+assert.match(appSource, /classList\.toggle\("paused"/);
+
+console.log("truthful processing progress checks: OK");

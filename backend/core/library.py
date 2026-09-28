@@ -163,7 +163,10 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             paper = Paper.objects.select_for_update().get(pk=question.paper_id)
         except Paper.DoesNotExist:
             raise ValueError("这份试卷任务已删除，不能再入库") from None
-        question = Question.objects.select_for_update().select_related("paper").get(pk=question.pk)
+        try:
+            question = Question.objects.select_for_update().select_related("paper").get(pk=question.pk)
+        except Question.DoesNotExist:
+            raise ValueError("这道题已放入回收站，请恢复后再入库") from None
         if not question.approved:
             raise ValueError(f"第 {question.number} 题还没有通过终审")
         if question.state not in REVIEWABLE_STATES:
@@ -216,7 +219,7 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             return paper, False
 
         questions = list(
-            Question.objects.select_for_update().select_related("paper", "group").filter(paper=paper)
+            Question.all_objects.select_for_update().select_related("paper", "group").filter(paper=paper)
         )
         groups = list(QuestionGroup.objects.select_for_update().filter(paper=paper))
         current_approval_ids = [question.pk for question in questions if approval_is_current(question)]
@@ -243,11 +246,11 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
 
         if current_approval_ids:
             approved_questions = list(
-                Question.objects.select_related("paper", "group").filter(pk__in=current_approval_ids)
+                Question.all_objects.select_related("paper", "group").filter(pk__in=current_approval_ids)
             )
             for question in approved_questions:
                 question.approved_content_hash = approval_hash(question)
-            Question.objects.bulk_update(approved_questions, ["approved_content_hash"])
+            Question.all_objects.bulk_update(approved_questions, ["approved_content_hash"])
 
         for publication in publications:
             old_hash = publication.content_hash

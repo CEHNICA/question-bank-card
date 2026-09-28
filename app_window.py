@@ -7,8 +7,8 @@
    有自己的任务栏图标；
 4. 关掉这个窗口，后台服务随之停止。
 
-需要人工输入的情况（第一次安装组件、还没保存凭据、保存的 MinerU Token 失效）
-会自动转交给原来的命令行启动器，在那里按提示操作一次即可，以后就不再需要。
+第一次安装组件时会交给原来的命令行启动器；API 凭据则在软件
+的“设置 → API 与模型”中录入。独立配置窗口仅作为凭据文件损坏时的故障恢复入口。
 """
 
 from __future__ import annotations
@@ -146,6 +146,22 @@ def resolve_credentials_quietly() -> tuple[list[str], list[str]]:
         if not checked_tokens:
             raise NeedsConsole("保存的 MinerU 账号均未通过官网验证，需要重新输入")
     return checked_tokens, credential_pool(saved, "minimax")
+
+
+def credential_pools_quietly() -> dict[str, list[str]]:
+    """Load saved pools without blocking application startup for first use.
+
+    The settings page must remain reachable when nothing has been configured.
+    The desktop application treats its encrypted store as authoritative;
+    direct server users can still run the worker without the desktop hot-load
+    flag and provide traditional environment variables there.
+    """
+
+    saved = _saved_credentials()
+    return {
+        service: credential_pool(saved, service)
+        for service in launcher.POOL_ENVIRONMENT_NAMES
+    }
 
 
 # ---------------------------------------------------------------- 浏览器应用窗口
@@ -420,7 +436,7 @@ def _main(arguments: list[str] | None = None) -> int:
         saved = _configure_credentials(first_run=False)
         if saved:
             running = launcher._running_instance()
-            suffix = "\n\n题库当前正在运行，请关闭后重新打开以使用新配置。" if running else ""
+            suffix = "\n\n题库当前正在运行：新配置从下一份任务或下一次重读开始时生效。" if running else ""
             _message(f"API 密钥与模型选择已保存；密钥已加密。{suffix}")
         return 0
     if arguments:
@@ -440,16 +456,6 @@ def _main(arguments: list[str] | None = None) -> int:
         return 0
     if _needs_install():
         return _hand_off_to_console("第一次使用（或组件有更新），需要联网安装已验证版本的组件")
-    try:
-        ready = credentials_ready()
-    except NeedsConsole as exc:
-        ready = False
-        reason = str(exc)
-    else:
-        reason = "还没有保存 MinerU Token 或所选主读模型的 API Key"
-    if not ready and not _configure_credentials(first_run=True, reason=reason):
-        return 0
-
     instance_mutex = launcher.InstanceMutex()
     if not instance_mutex.acquired:
         _message("题库正在启动或已在运行，请稍候几秒再试。")
@@ -470,17 +476,11 @@ def _main(arguments: list[str] | None = None) -> int:
                 launcher._prepare()
             finally:
                 launcher._run_step = original_step
-            ui.say("正在确认凭据…")
+            ui.say("正在读取本机设置…")
             try:
-                mineru_tokens, minimax_keys = resolve_credentials_quietly()
+                credential_pools = credential_pools_quietly()
             except NeedsConsole as exc:
                 return ("configure", str(exc))
-            siliconflow_keys = launcher._siliconflow_keys()
-            credential_pools = {
-                "mineru": mineru_tokens,
-                "minimax": minimax_keys,
-                "siliconflow": siliconflow_keys,
-            }
             preferences = launcher._model_preferences()
             model_env = launcher.model_preference_environment(preferences)
             base_env = launcher._child_environment({
@@ -496,7 +496,7 @@ def _main(arguments: list[str] | None = None) -> int:
             web_env.update(model_env)
             worker_env = launcher._worker_credential_environment(base_env, credential_pools)
             worker_env.update(model_env)
-            del mineru_tokens, minimax_keys, siliconflow_keys, credential_pools, preferences, model_env
+            del credential_pools, preferences, model_env
             ui.say("正在启动后台服务…")
             port = launcher._available_port()
             url = f"http://127.0.0.1:{port}"
