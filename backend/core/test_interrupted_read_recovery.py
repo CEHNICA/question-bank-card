@@ -153,7 +153,9 @@ class InterruptedReadRecoveryTests(TestCase):
             time.sleep(0.05)
             return {"state": Question.State.GREEN, "error": "", "flags": []}
 
-        with mock.patch.object(pipeline, "PARALLEL", 2), \
+        # An explicit two-card limit must not be raised by live account capacity.
+        with mock.patch.dict("os.environ", {"QB_PARALLEL_EXPLICIT": "1"}), \
+                mock.patch.object(pipeline, "PARALLEL", 2), \
                 mock.patch.object(pipeline, "read_card", side_effect=read):
             pipeline.process_paper(self.paper)
 

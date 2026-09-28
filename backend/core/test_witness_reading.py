@@ -21,8 +21,11 @@ class WitnessKeyTests(SimpleTestCase):
             "stem": r"已知 $b$ 是 $a,c$ 的等差中项，则 $|AB|$ 的最小值为（ ）",
             "options": {"A": "2", "B": "3", "C": "4", "D": r"$2\sqrt{5}$"},
         }
-        mineru = r"12. 已知b是 a c, 的等差中项，则 $\left| A B \right|$ 的最小值为（ ） A. 2 B. 3 C. 4 D. $2 \sqrt { 5 }$"
+        mineru = r"12. 已知b是 a,c 的等差中项，则 $\left| A B \right|$ 的最小值为（ ） A. 2 B. 3 C. 4 D. $2 \sqrt { 5 }$"
         self.assertTrue(witness_agrees(reading, mineru))
+        # A moved comma can alter a mathematical expression, so it now falls
+        # back to a second vision reading instead of counting as agreement.
+        self.assertFalse(witness_agrees(reading, mineru.replace("a,c", "a c,")))
 
     def test_degrees_parallel_and_score_markers_normalise(self):
         self.assertEqual(witness_key(r"（本题满分6分）$BC / / AD$，$60 ^ { \circ }$"),
@@ -34,6 +37,59 @@ class WitnessKeyTests(SimpleTestCase):
         self.assertFalse(witness_agrees(base, "E为OB上一点，连接CE，若OE=1"))
         self.assertFalse(witness_agrees({"stem": "0.12122122221"}, "0.1212212221"))
         self.assertFalse(witness_agrees({"stem": "x=0.5 时"}, "x=05 时"))
+
+    def test_mathematical_punctuation_cannot_disappear_in_a_green_card(self):
+        for reading, mineru in (
+            ("x=2，求x的值", "|x|=2，求x的值"),
+            ("点A与点B连接，求线段AB", "点A'与点B连接，求线段A'B"),
+            ("求5的阶乘是多少", "求5!的阶乘是多少"),
+            ("求数列a1的首项", r"求数列$a_{1}$的首项"),
+            ("已知ab=6，求a", r"已知$a\cdot b=6$，求a"),
+            ("已知2x+1=6，求x", "已知2(x+1)=6，求x"),
+            ("点P(12,3)与点Q", "点P(1,23)与点Q"),
+            ("若xy=2，求x", "若x:y=2，求x"),
+            ("已知x=2，求x", "已知[x]=2，求x"),
+            ("数列1,2,3求通项", "数列1,2,3,…求通项"),
+            ("已知ab=6，求a", "已知a.b=6，求a"),
+            ("已知x=2，求x", "已知x=2；求x"),
+            ("求x=2时的值", "求x?=2时的值"),
+            ('已知x=2，求x', '已知"x"=2，求x'),
+        ):
+            with self.subTest(mineru=mineru):
+                self.assertFalse(witness_agrees({"stem": reading}, mineru))
+
+    def test_decorations_are_not_discarded_as_layout(self):
+        for decorated, plain in (
+            (r"$\overline{AB}=CD$，求AB", "$AB=CD$，求AB"),
+            (r"$\hat{x}=1$，求x", "$x=1$，求x"),
+            (r"$\bar{x}=1$，求x", "$x=1$，求x"),
+            (r"$\widehat{ABC}=60°$，求角ABC", "$ABC=60°$，求角ABC"),
+            (r"$\underline{x}=2$，求x", "$x=2$，求x"),
+            (r"$a\stackrel{*}{=}b$，求a", "$a=b$，求a"),
+            ("已知a~b，求a", "已知ab，求a"),
+        ):
+            with self.subTest(decorated=decorated):
+                self.assertFalse(witness_agrees({"stem": plain}, decorated))
+
+    def test_html_subscripts_and_superscripts_keep_their_meaning(self):
+        self.assertEqual(witness_key("x<sub>2</sub>"), witness_key(r"$x_{2}$"))
+        self.assertEqual(witness_key("x<sup>2</sup>"), witness_key(r"$x^{2}$"))
+        self.assertNotEqual(witness_key("x<sub>2</sub>"), witness_key("x2"))
+        self.assertNotEqual(witness_key("x<sup>2</sup>"), witness_key("x2"))
+        self.assertNotEqual(witness_key("1.23米是多少"), witness_key("23米是多少"))
+
+    def test_parallelogram_stays_distinct_from_square_in_witness(self):
+        self.assertEqual(canon("▱ABCD"), canon("□ABCD"))  # existing two-reader comparison
+        self.assertNotEqual(witness_key("如图在▱ABCD中求面积"), witness_key("如图在□ABCD中求面积"))
+        raw_square = "【题干】如图在□ABCD中求面积"
+        reading = readers.parse_reading(raw_square, 1)
+        self.assertEqual(reading["stem"], "如图在▱ABCD中求面积")
+        reading["raw"] = raw_square
+        self.assertFalse(witness_agrees(reading, "如图在▱ABCD中求面积"))
+        raw_correct = "【题干】如图在▱ABCD中求面积"
+        correct = readers.parse_reading(raw_correct, 1)
+        correct["raw"] = raw_correct
+        self.assertTrue(witness_agrees(correct, "如图在▱ABCD中求面积"))
 
     def test_unclear_or_short_readings_never_count(self):
         self.assertFalse(witness_agrees({"stem": "CD=[?]", "unclear": True}, "CD=[?]"))

@@ -40,7 +40,10 @@ SUPERSCRIPTS = str.maketrans({
 })
 
 
-def canon(value: str) -> str:
+def canon(
+    value: str, *, strip_trailing_punct: bool = True, collapse_empty_brackets: bool = True,
+    preserve_parallelogram: bool = False,
+) -> str:
     # NFKC alone turns cm² into cm2 while LaTeX remains cm^2.  Preserve the
     # exponent marker before normalization so typographic and LaTeX forms
     # compare as the same reading without conflating x² with x2.
@@ -49,14 +52,15 @@ def canon(value: str) -> str:
     text = BLANK.sub("_", text)
     text = SPACING.sub("", text)
     text = COMMAND.sub(lambda m: SYMBOLS.get(m.group(1), "\\" + m.group(1)), text)
-    text = "".join(PUNCT.get(ch, ch) for ch in text)
+    text = "".join(ch if preserve_parallelogram and ch == "▱" else PUNCT.get(ch, ch) for ch in text)
     text = text.replace("//", "∥").replace("^\\circ", "°").replace("^°", "°")
     text = re.sub(r"[\s$\\{}]", "", text)
     # Spacing and braces hid these pairs from the replacements above
     # (“$B C / / A D$”, “60^{\\circ}”); apply them once more on the bare text.
     text = text.replace("//", "∥").replace("^°", "°")
-    text = re.sub(r"\(\)|\[\]", "()", text)
-    return text.rstrip(".,;:")
+    if collapse_empty_brackets:
+        text = re.sub(r"\(\)|\[\]", "()", text)
+    return text.rstrip(".,;:") if strip_trailing_punct else text
 
 
 def same_reading(first: dict, second: dict) -> bool:
@@ -158,19 +162,14 @@ def clean_option(value: str, key: str) -> str:
 #
 # MinerU already returns its own OCR text for every block it found.  It is a
 # different engine from the vision reader, so when the two agree on every
-# character that carries meaning, the card has genuine cross-engine support
-# and a second vision call adds nothing.  The comparison deliberately ignores
-# punctuation, blanks and LaTeX layout commands, which the two engines format
-# differently, but keeps every digit, letter, operator and Chinese character.
+# mathematical mark and character, the card has cross-engine support.  A
+# formatting difference may cause another vision read; a false green card is
+# worse than that extra call.
 
-_INLINE_TAG = re.compile(r"</?(?:sub|sup|span|b|i|u|em|strong)\b[^>]*>", re.I)
+_HTML_SCRIPT = re.compile(r"<(sub|sup)\b[^>]*>(.*?)</\1\s*>", re.I | re.S)
+_INLINE_TAG = re.compile(r"</?(?:span|b|i|u|em|strong)\b[^>]*>", re.I)
 _WITNESS_SCORE = re.compile(r"[(（]\s*(?:本题)?(?:满分)?\s*(?:共)?\s*\d{1,2}\s*分\s*[)）]")
-_WITNESS_LEAD = re.compile(r"^\s*(?:\d{1,3}\s*[.．、]+|\d{1,3}\s+(?=[\u4e00-\u9fff]))\s*")
-_WITNESS_LAYOUT = re.compile(
-    r"begin(?:cases|array[lcr]*|aligned|matrix)|end(?:cases|array|aligned|matrix)|"
-    r"overline|widehat|hat|bar|stackrel|scriptscriptstyle|scriptstyle|displaystyle|underline|~"
-)
-_WITNESS_PUNCT = re.compile(r"[,.;:!?\"'_()\[\]、·…|&]")
+_WITNESS_LEAD = re.compile(r"^\s*(?:\d{1,3}\s*[.．、]+(?!\d)|\d{1,3}\s+(?=[\u4e00-\u9fff]))\s*")
 WITNESS_MIN_LENGTH = 6
 
 
@@ -180,14 +179,18 @@ _WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-D]{1,4}\s*[)）]")
 
 
 def witness_key(value: str) -> str:
-    text = _INLINE_TAG.sub("", str(value or ""))
+    # HTML script tags carry the same meaning as LaTeX _ and ^.  Removing the
+    # tags would make x<sub>2</sub> indistinguishable from plain x2.
+    text = _HTML_SCRIPT.sub(
+        lambda match: ("_" if match.group(1).lower() == "sub" else "^") + "{" + match.group(2) + "}",
+        str(value or ""),
+    )
+    text = _INLINE_TAG.sub("", text)
     text = _WITNESS_ANSWER.sub("（ ）", text)
     text = _WITNESS_LEAD.sub("", text, count=1)
     text = _WITNESS_SCORE.sub("", text)
-    text = canon(text)
-    text = _WITNESS_LAYOUT.sub("", text)
-    text = re.sub(r"(?<=\d)\.(?=\d)", "٫", text)   # keep decimal points
-    return _WITNESS_PUNCT.sub("", text)
+    return canon(text, strip_trailing_punct=False, collapse_empty_brackets=False,
+                 preserve_parallelogram=True)
 
 
 def reading_witness_text(reading: dict) -> str:
@@ -203,6 +206,14 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
         return False
     expected = witness_key(witness)
     if len(expected) < WITNESS_MIN_LENGTH:
+        return False
+    # parse_reading() fixes a model's raw □ABCD into ▱ABCD for display.  The
+    # witness must still see that the model did not actually transcribe the
+    # printed symbol: otherwise MinerU's ▱ would falsely make the card green.
+    raw = str(reading.get("raw") or "")
+    if "▱" in expected and raw and (
+        _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
+    ):
         return False
     return witness_key(reading_witness_text(reading)) == expected
 
