@@ -291,34 +291,64 @@ class WitnessPipelineTests(TestCase):
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
         self.assertEqual(sorted(call[0] for call in chat.calls), ["a", "b"])
 
-    def test_two_agreeing_reads_against_mineru_get_a_focused_third_look(self):
+    @staticmethod
+    def pick(side: str):
+        """A scripted spot check that always names ``side`` ("reading" or "mineru")."""
+        import re as _re
+
+        def answer(prompt: str) -> str:
+            lines = []
+            for index, first, second in _re.findall(r"第(\d+)处：.*?甲：(\S+)　乙：(\S+)", prompt):
+                # The reading's spelling is the one scripted below as ``x^2`` / ``美``.
+                reading_is_first = first in {"2", "美"}
+                wants_first = (side == "reading") == reading_is_first
+                lines.append(f"{index}={'甲' if wants_first else '乙'}")
+            return "\n".join(lines)
+        return answer
+
+    def test_two_agreeing_reads_against_mineru_get_a_neutral_spot_check(self):
         # 凤城高一第 19 题：两次都把 1/x³ 读成 1/x²，MinerU 读对了。
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
             ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("verify", 1): tagged("已知函数 $f(x)=x^3$，求 $f(2)$ 的值。"),
+            ("spotcheck", 1): self.pick("mineru"),
         })
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual([call[0] for call in chat.calls].count("verify"), 1)
-        self.assertIn("x^3", question.stem)
-        self.assertEqual((question.state, question.text_source), (Question.State.YELLOW, "arbiter"))
-        self.assertIn(pipeline.FLAG_OBJECTION_CORRECTED, question.flags)
-        self.assertEqual(question.read_c["objections"][0]["mineru"], "3")
+        self.assertEqual([call[0] for call in chat.calls].count("spotcheck"), 1)
+        self.assertIn("x^2", question.stem)          # the text is not rewritten by the check
+        self.assertEqual(question.state, Question.State.YELLOW)
+        flag = next(flag for flag in question.flags if flag.startswith(pipeline.OBJECTION_FLAG_PREFIX))
+        self.assertIn("MinerU：3", flag)
+        self.assertEqual(question.read_c["answers"], ["mineru"])
 
     def test_a_confirmed_reading_stays_green(self):
-        # MinerU misread the printed 垂美四边形; the focused look keeps it.
+        # MinerU misread the printed 垂美四边形; the spot check sides with the reading.
         question = self.card("1. 对角线互相垂直的四边形叫做垂夹四边形，求证其面积。")
         reading = tagged("对角线互相垂直的四边形叫做垂美四边形，求证其面积。")
-        chat = ScriptedChat({("a", 1): reading, ("b", 1): reading, ("verify", 1): reading})
+        chat = ScriptedChat({("a", 1): reading, ("b", 1): reading, ("spotcheck", 1): self.pick("reading")})
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
         self.assertIn("垂美", question.stem)
         self.assertEqual(question.read_c["objections"][0]["reading"], "美")
+
+    def test_an_unclear_spot_check_leaves_the_card_for_a_person(self):
+        question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
+        chat = ScriptedChat({
+            ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            ("spotcheck", 1): "1=不确定",
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual(question.state, Question.State.YELLOW)
+        self.assertEqual(question.read_c["answers"], [None])
+
 
     def test_failed_primary_still_uses_the_checker(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")
@@ -346,3 +376,17 @@ class WitnessPipelineTests(TestCase):
         self.assertIn("0.1212212221", question.stem)
         self.assertNotIn("arbiter", [call[0] for call in chat.calls])
         self.assertEqual(question.read_c["skipped"], "witness")
+
+
+class SpotCheckParsingTests(SimpleTestCase):
+    def test_answers_map_back_to_their_engines(self):
+        spots = [{"reading": "3", "mineru": "2", "before": "1/x", "after": "最小值"},
+                 {"reading": "要", "mineru": "用", "before": "至少需", "after": "_个小"}]
+        prompt, order = readers.spot_check_prompt(spots)
+        self.assertIn("第1处", prompt)
+        self.assertNotIn("原誊录", prompt)
+        raw = "<think>看一下</think>1=甲\n第2处：乙"
+        answers = readers.parse_spot_answers(raw, order)
+        self.assertEqual(answers[0], order[0]["甲"])
+        self.assertEqual(answers[1], order[1]["乙"])
+        self.assertEqual(readers.parse_spot_answers("看不清", order), [None, None])

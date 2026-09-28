@@ -2428,16 +2428,24 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     return cleaned
 
 
-FLAG_OBJECTION_CORRECTED = "两次识读一致，但与 MinerU 有几处不同，第三次核对后改了这些地方，请确认"
-FLAG_OBJECTION_UNCHECKED = "两次识读一致，但与 MinerU 有几处不同，核对失败，请展开识读记录确认"
+OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
+
+
+def _objection_flag(spots: list[dict]) -> str:
+    shown = "；".join(f"…{s['before']}【{s['reading']}】{s['after']}…（MinerU：{s['mineru']}）" for s in spots[:3])
+    more = f" 等 {len(spots)} 处" if len(spots) > 3 else ""
+    return f"{OBJECTION_FLAG_PREFIX}{shown}{more}，请对照原卷"
 
 
 def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
                        image_url: str, primary, checker, figure_source: dict) -> tuple[dict, str]:
     """Both vision reads agree, yet MinerU printed other characters at a few
-    clean spots (x^3 / x^2, 销售单价 / 销售定价): take one focused third look.
+    clean spots (x^3 / x^2, 至少需用 / 至少需要).  The same model reading twice
+    repeats its own slips, so each spot gets one neutral either/or look.
 
-    A confirmed reading stays green; a corrected one is shown for review.
+    Every spot settled for the reading keeps the card green.  Otherwise the
+    text is left as read and the card is yellow with the exact spots, so a
+    person decides; the spot check is not trusted to rewrite anything.
     """
     spots = textnorm.witness_objections(final, witness)
     if not spots:
@@ -2449,17 +2457,16 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
         engine = readers.arbiter_engine(primary, checker)
         if engine is None:
             raise readers.ReaderError("没有可用的核对模型")
-        checked = readers.verify(engine, image_url, number, final, witness, spots)
+        answers = readers.spot_check(engine, image_url, spots)
     except readers.ReaderError as error:
         update["read_c"] = {**evidence, "error": str(error)}
-        flags.append(FLAG_OBJECTION_UNCHECKED)
+        flags.append(_objection_flag(spots))
         return final, source
-    checked_text = _without_inferred_figure_text(checked, figure_source)
-    update["read_c"] = {**checked, **evidence}
-    if same_reading(checked_text, final):
-        return final, source
-    flags.append(FLAG_OBJECTION_CORRECTED)
-    return checked_text, "arbiter"
+    update["read_c"] = {**evidence, "engine": engine.label, "answers": answers}
+    doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
+    if doubtful:
+        flags.append(_objection_flag(doubtful))
+    return final, source
 
 
 def read_card(snapshot: dict, store: PageStore) -> dict:

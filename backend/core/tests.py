@@ -660,14 +660,15 @@ class ScriptedChat:
         match = re.search(r"(?:候选显示编号为|显示编号)\s*(\d+)", prompt)
         if match is None:
             match = re.search(r"第\s*(\d+)\s*题", prompt)
-        number = int(match.group(1))
+        # The spot check names no card; scripts key it by the first card number.
+        number = int(match.group(1)) if match else 1
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
-            "verify" if "两次一致。但另一个识别引擎" in prompt else "a" if "蓝色框" in prompt else "b"
+            "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
             raise value
-        return value
+        return value(prompt) if callable(value) else value
 
 
 def tagged(stem, options=None, figures="无", others="无", number=None):

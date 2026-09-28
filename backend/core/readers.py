@@ -309,26 +309,39 @@ def arbiter_prompt(number: int, first: dict, second: dict, witness: str = "") ->
     ])
 
 
-def verify_prompt(number: int, reading: dict, witness: str, spots: list[dict]) -> str:
-    lines = [reading.get("stem", "")]
-    for key in OPTION_KEYS:
-        if (reading.get("options") or {}).get(key):
-            lines.append(f"【{key}】{reading['options'][key]}")
-    listed = "\n".join(
-        f"{index}. …{spot['before']}【{spot['reading']}】{spot['after']}… 另一引擎读作【{spot['mineru']}】"
-        for index, spot in enumerate(spots, 1)
+def spot_check_prompt(spots: list[dict]) -> tuple[str, list[dict]]:
+    """An either/or question per disputed spot, neither side marked as ours.
+
+    Presented as “the first transcription” versus “another engine”, the model
+    kept its own reading every time in testing; asked neutrally which of two
+    spellings is printed, it found the misread 需用/需要 and x²/x³.
+    """
+    order = []
+    lines = []
+    for index, spot in enumerate(spots, 1):
+        # A stable, content-dependent side so neither engine is always 甲.
+        reading_first = sum(map(ord, spot["before"] + spot["after"] + str(index))) % 2 == 0
+        first, second = (spot["reading"], spot["mineru"]) if reading_first else (spot["mineru"], spot["reading"])
+        order.append({"甲": "reading" if reading_first else "mineru", "乙": "mineru" if reading_first else "reading"})
+        lines.append(f"第{index}处：…{spot['before']}＿{spot['after']}…　甲：{first}　乙：{second}")
+    prompt = (
+        "请只看图片中的印刷体（忽略手写和涂画），判断下面每一处空位上印的是甲还是乙。"
+        "文字已去掉空格、标点和 LaTeX 写法，只比较字符本身。两种写法都可能是对的，请放大看清，"
+        "不要根据常识、上下文或哪种更通顺来猜。\n"
+        + "\n".join(lines)
+        + "\n\n每处一行，只写序号和甲或乙，例如“1=乙”。看不清就写“1=不确定”。"
     )
-    return "\n\n".join([
-        TRANSCRIBE_RULES,
-        f"这段候选内容（显示编号 {number}）已经誊录了两次，两次一致。但另一个识别引擎（MinerU）"
-        "在下面几处读出了不同的字符（去掉了空格、标点和 LaTeX 写法）。请对照原图，逐处看清印刷体，"
-        "再给出正确的完整誊录。MinerU 也会读错；哪一边对就按哪一边，其余部分照抄原誊录。",
-        f"【原誊录】\n" + "\n".join(lines),
-        f"【不同之处】\n{listed}",
-        "【另一识别引擎的文字】（只作参考，可能混入手写）\n" + witness.strip()[:1500],
-        "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
-        "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…（不是选择题就不写选项）",
-    ])
+    return prompt, order
+
+
+def parse_spot_answers(raw: str, order: list[dict]) -> list[str | None]:
+    text = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
+    answers: list[str | None] = [None] * len(order)
+    for match in re.finditer(r"(?:第\s*)?(\d{1,2})\s*处?\s*[=＝:：]\s*(甲|乙)", text):
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(order) and answers[index] is None:
+            answers[index] = order[index][match.group(2)]
+    return answers
 
 
 def locate_prompt(number: int) -> str:
@@ -755,16 +768,10 @@ def arbitrate(
     return reading
 
 
-def verify(engine: Engine, image_url: str, number: int, reading: dict, witness: str, spots: list[dict]) -> dict:
-    """A focused third look at the spots where MinerU disagrees with two agreeing readings."""
-    raw = chat(engine, verify_prompt(number, reading, witness, spots), [image_url])
-    try:
-        result = parse_reading(raw, number)
-    except ValueError as error:
-        raise ReaderError(f"{engine.label} 核对输出不合格式：{error}") from None
-    result["engine"] = engine.label
-    result["raw"] = raw[:6000]
-    return result
+def spot_check(engine: Engine, image_url: str, spots: list[dict]) -> list[str | None]:
+    """For each spot: ``"reading"``, ``"mineru"`` or ``None`` (unclear)."""
+    prompt, order = spot_check_prompt(spots)
+    return parse_spot_answers(chat(engine, prompt, [image_url], max_tokens=600), order)
 
 
 def locate_band(engine: Engine, image_url: str, number: int) -> int | None:

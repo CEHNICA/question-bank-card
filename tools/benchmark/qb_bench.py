@@ -83,7 +83,7 @@ def main() -> int:
             text = payload["messages"][0]["content"][0]["text"]
         except Exception:
             pass
-        kind = ("verify" if "两次一致。但另一个识别引擎" in text else
+        kind = ("spotcheck" if "每一处空位上印的是甲还是乙" in text else
                 "arbiter" if "已经被独立誊录了两次" in text else
                 "locate" if "编号刻度" in text else
                 "read_fig" if "蓝色框" in text else "read")

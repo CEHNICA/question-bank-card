@@ -2051,13 +2051,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const objections = Array.isArray(reading.objections) ? reading.objections : [];
       let label = `${labels[key]}${reading.engine ? ` · ${reading.engine}` : ""}`;
       if (objections.length) {
-        label = `核对${reading.engine ? ` · ${reading.engine}` : ""}（两次读法一致，但 MinerU 有 ${objections.length} 处不同，已对照原图再看一遍）`;
+        label = `逐处核对${reading.engine ? ` · ${reading.engine}` : ""}（两次读法一致，但 MinerU 有 ${objections.length} 处不同，每处只问“原卷印的是哪一个”）`;
       } else if (reading.witness) label = `旁证 · MinerU 自己识别的文字（${witnessNote}）`;
       item.append(el("p", "read-label", label));
       if (objections.length) {
+        const verdicts = { reading: "再看：与读法一致", mineru: "再看：像 MinerU 的写法", null: "再看：不确定" };
+        const answers = Array.isArray(reading.answers) ? reading.answers : [];
         const list = el("ul", "read-spots");
-        objections.forEach((spot) => {
-          list.append(el("li", "", `…${spot.before}【${spot.reading}】${spot.after}…  MinerU：【${spot.mineru}】`));
+        objections.forEach((spot, index) => {
+          const verdict = index < answers.length ? ` · ${verdicts[answers[index]] || verdicts.null}` : "";
+          list.append(el("li", "", `…${spot.before}【${spot.reading}】${spot.after}…  MinerU：【${spot.mineru}】${verdict}`));
         });
         item.append(list);
       }
