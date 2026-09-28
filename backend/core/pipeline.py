@@ -317,6 +317,36 @@ def persist_local_text_review_upgrades(questions) -> dict[str, int]:
     return stats
 
 
+_CHOICE_BRACKET = re.compile(r"[（(]\s*[）)]\s*[。．.]?\s*$")
+
+
+def _row_as_choice_options(
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
+) -> dict[str, str]:
+    """Four printed pictures in one row under a choice stem are options A–D.
+
+    Readers sometimes call all four “题干” (seen on 下面四幅图中，不能证明勾股
+    定理的是（ ）), which then asks the reviewer to box every option by hand.
+    Only applies when no option has text and exactly four pictures that are not
+    already option pictures sit side by side.
+    """
+    if any(str(value).strip() for value in (options or {}).values()):
+        return assignments
+    if kind not in {"single_choice", "multiple_choice"} and not _CHOICE_BRACKET.search(stem or ""):
+        return assignments
+    if any(role in readers.OPTION_KEYS for role in assignments.values()):
+        return assignments
+    loose = [item for item in candidates or []
+             if assignments.get(item.get("label")) in {None, "stem", "none"} and item.get("bbox")]
+    row = _single_row(loose) if len(loose) == 4 else None
+    if row is None:
+        return assignments
+    updated = dict(assignments)
+    for slot, item in zip(readers.OPTION_KEYS, row):
+        updated[item["label"]] = slot
+    return updated
+
+
 def _resolve_automatic_figure_assignments(
     *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
 ) -> dict[str, str]:
@@ -335,7 +365,9 @@ def _resolve_automatic_figure_assignments(
         options=options,
         kind=kind,
         candidates=candidates,
-        assignments=assignments,
+        assignments=_row_as_choice_options(
+            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments,
+        ),
     )
 
 
@@ -2441,14 +2473,17 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
     elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
-    elif a and b and textnorm.witness_agrees(b_text, witness):
-        # The checker and MinerU (two different engines) agree against the
-        # primary.  An arbiter from the primary's model tends to repeat the
-        # primary's slip (measured: a repeating decimal 0.1212212221… misread
-        # by reader A and then “confirmed” by the arbiter), so the witness vote
-        # decides without a third call.
-        final, source = b_text, "majority"
-        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
+    elif a and b and (textnorm.witness_agrees(b_text, witness)
+                      or textnorm.witness_choice(a_text, b_text, witness) is not None):
+        # MinerU (a different engine) settles the disagreement.  An arbiter
+        # from the readers' own model tends to repeat their slips: in testing
+        # it “confirmed” a misread repeating decimal and kept inserted words
+        # (图形的面积 for the printed 图形面积), while MinerU had copied the
+        # printed characters.  Every differing spot must side the same way.
+        chosen = "b" if textnorm.witness_agrees(b_text, witness) else textnorm.witness_choice(a_text, b_text, witness)
+        final, source = (a_text if chosen == "a" else b_text), "majority"
+        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness",
+                            "chosen": chosen}
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)

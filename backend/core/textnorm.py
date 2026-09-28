@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 SYMBOLS = {
     "angle": "∠", "parallel": "∥", "perp": "⊥", "bot": "⊥", "triangle": "△", "bigtriangleup": "△",
@@ -191,3 +192,49 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
     if len(expected) < WITNESS_MIN_LENGTH:
         return False
     return witness_key(reading_witness_text(reading)) == expected
+
+
+def witness_choice(first: dict | None, second: dict | None, witness: str, *, context: int = 3) -> str | None:
+    """Settle a disagreement between two vision readings with MinerU's text.
+
+    Every place where the two readings differ is looked up in the witness
+    together with a few characters of shared context.  Returns ``"a"`` or
+    ``"b"`` only when the witness supports the same reading at every
+    difference; any undecided or split difference returns ``None``.
+
+    Real failures this catches: the vision model "correcting" the paper
+    (inserting 的/是/于, turning FE into EF, 发出 into 出发) or misreading a
+    repeating decimal, while MinerU copied the printed characters.  Extra
+    handwriting in the witness does not matter: only the disputed spots are
+    compared.
+    """
+    if not first or not second or not first.get("stem") or not second.get("stem"):
+        return None
+    ka = witness_key(reading_witness_text(first))
+    kb = witness_key(reading_witness_text(second))
+    kw = witness_key(witness)
+    if not kw or ka == kb:
+        return None
+    # Neighbouring edits a character or two apart are one difference (a swap
+    # such as EF/FE shows up as an insert plus a delete).
+    regions: list[list[int]] = []
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kb, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if regions and i1 - regions[-1][1] <= 2 and j1 - regions[-1][3] <= 2:
+            regions[-1][1], regions[-1][3] = i2, j2
+        else:
+            regions.append([i1, i2, j1, j2])
+    votes: set[str] = set()
+    for i1, i2, j1, j2 in regions:
+        left, right = ka[max(0, i1 - context):i1], ka[i2:i2 + context]
+        if not left and not right:
+            return None
+        a_hit = (left + ka[i1:i2] + right) in kw
+        b_hit = (left + kb[j1:j2] + right) in kw
+        if a_hit == b_hit:
+            return None
+        votes.add("a" if a_hit else "b")
+        if len(votes) > 1:
+            return None
+    return votes.pop() if votes else None

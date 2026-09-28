@@ -12,7 +12,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from . import pipeline, readers
 from .models import Paper, Question
 from .tests import PAGES, ScriptedChat, fake_page_pdf, tagged
-from .textnorm import canon, witness_agrees, witness_key
+from .textnorm import canon, witness_agrees, witness_choice, witness_key
 
 
 class WitnessKeyTests(SimpleTestCase):
@@ -48,6 +48,32 @@ class WitnessKeyTests(SimpleTestCase):
     def test_student_handwriting_in_ocr_blocks_the_shortcut(self):
         reading = {"stem": "下列各组数中，是勾股数的是（ ）", "options": {"A": "12,8,5", "B": "9,12,15"}}
         self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15"))
+
+
+class WitnessChoiceTests(SimpleTestCase):
+    """Real disagreements from marked papers, settled by MinerU's text."""
+
+    def test_inserted_word_loses_even_with_handwriting_in_the_witness(self):
+        a = {"stem": "(2) 求直线 $l$ 与两坐标轴围成的图形面积."}
+        b = {"stem": "(2) 求直线 $l$ 与两坐标轴围成的图形的面积."}
+        witness = "15. (13分) 已知直线 l 经过点(1,6)… (2) 求直线 l 与两坐标轴围成的图形面积. y-6=-2(x-1) K=-2"
+        self.assertEqual(witness_choice(a, b, witness), "a")
+        self.assertEqual(witness_choice(b, a, witness), "b")
+
+    def test_swapped_letters_and_unclear_marks(self):
+        a = {"stem": "若 AD⊥BD，AB=5，BC=3，EF=8，求点 D 到 AF 的距离"}
+        b = {"stem": "若 AD⊥BD，AB=5，BC=3，FE=8，求点 D 到 AF 的距离"}
+        self.assertEqual(witness_choice(a, b, "(2) 若 AD⊥BD, AB=5, BC=3, FE=8, 求点 D 到 AF 的距离. ∴AE=CF"), "b")
+        c = {"stem": "CD=[?]，以 AC，AD 为邻边", "unclear": True}
+        d = {"stem": "CD=6，以 AC，AD 为邻边"}
+        self.assertEqual(witness_choice(c, d, "8. 如图，AB=10，CD=6，以AC，AD为邻边作"), "b")
+
+    def test_undecided_or_split_differences_defer_to_the_arbiter(self):
+        a = {"stem": "已知 x=1，y=2，求 z"}
+        b = {"stem": "已知 x=7，y=3，求 z"}
+        self.assertIsNone(witness_choice(a, b, "已知 x=1，y=3，求 z"))     # split vote
+        self.assertIsNone(witness_choice(a, b, "完全无关的文字"))            # no support
+        self.assertIsNone(witness_choice(a, dict(a), "已知 x=1，y=2，求 z"))  # no difference
 
 
 class WitnessPipelineTests(TestCase):

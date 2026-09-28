@@ -969,8 +969,11 @@ class PipelineTests(TestCase):
         self.assertEqual(cards[1].read_b.get("skipped"), "witness")
         self.assertEqual((cards[2].state, cards[2].text_source), ("green", "majority"), cards[2].flags)
         self.assertEqual([f["slot"] for f in cards[2].figures], ["stem"])
-        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "arbiter"))
-        self.assertIn("x^4", cards[3].stem)
+        # MinerU's text (“f(x)=x^2”) settles the x^2/x^3 disagreement for the
+        # primary reading, so the arbiter's third opinion (x^4) is not needed.
+        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "majority"))
+        self.assertIn("x^2", cards[3].stem)
+        self.assertNotIn(("arbiter", 3, "minimax"), chat.calls)
         self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
         # Card 5's text is backed by MinerU, so the failing checker is never
         # needed; the primary reader's sighting of question 6 is still shown.

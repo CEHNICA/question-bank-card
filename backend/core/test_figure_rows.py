@@ -65,3 +65,31 @@ class FigureRowTests(TestCase):
         self.question(14, stem="如图，在正五边形 ABCDE 的内部作正方形 CDFH")
         self.question(15, stem="如图，四边形 ABCD 是菱形", candidates=stacked)
         self.assertEqual(pipeline.distribute_figure_rows(self.paper), 0)
+
+
+class PictureOptionRowTests(TestCase):
+    row = [
+        {"label": str(index + 1), "page_idx": 0, "bbox": [540 + 70 * index, 226, 594 + 70 * index, 297]}
+        for index in range(4)
+    ]
+
+    def test_four_pictures_under_a_choice_stem_become_options(self):
+        assignments = {"1": "stem", "2": "stem", "3": "stem", "4": "stem"}
+        result = pipeline._row_as_choice_options(
+            stem="下面四幅图中，不能证明勾股定理的是（ ）", options={}, kind="unknown",
+            candidates=list(reversed(self.row)), assignments=assignments,
+        )
+        self.assertEqual(result, {"1": "A", "2": "B", "3": "C", "4": "D"})
+
+    def test_text_options_or_existing_option_pictures_are_left_alone(self):
+        assignments = {"1": "stem", "2": "stem", "3": "stem", "4": "stem"}
+        self.assertEqual(pipeline._row_as_choice_options(
+            stem="下列说法正确的是（ ）", options={"A": "甲"}, kind="single_choice",
+            candidates=self.row, assignments=assignments), assignments)
+        mixed = {"1": "A", "2": "B", "3": "stem", "4": "stem"}
+        self.assertEqual(pipeline._row_as_choice_options(
+            stem="下列图形中（ ）", options={}, kind="single_choice",
+            candidates=self.row, assignments=mixed), mixed)
+        self.assertEqual(pipeline._row_as_choice_options(
+            stem="观察下列图形，求面积。", options={}, kind="free_response",
+            candidates=self.row, assignments=assignments), assignments)
