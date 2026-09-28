@@ -122,7 +122,7 @@ def fix_reading_symbols(value: dict) -> dict:
     return fixed
 
 
-NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s*[.．、]\s*")
+NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s*[.．、]+\s*")
 # “14 如图，…”: a printed number whose dot was never there or not seen.
 BARE_NUMBER_PREFIX = re.compile(r"^\s*(\d{1,2})\s+(?=[\u4e00-\u9fff])")
 
@@ -141,6 +141,8 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     # A reader that dropped “本题满分10分” sometimes leaves its opening bracket:
     # “（（1）如图1…”.
     text = re.sub(r"^\s*[(（]\s*(?=[(（]\s*\d{1,2}\s*[)）])", "", text)
+    # “2..如图” on the paper: the reader drops the number but keeps a dot.
+    text = re.sub(r"^\s*[.．、]+\s*(?=[\u4e00-\u9fff（(])", "", text)
     return text.strip()
 
 
