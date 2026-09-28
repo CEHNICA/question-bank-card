@@ -1,9 +1,14 @@
 """In-memory account pools for cloud services.
 
 Secrets arrive only in the worker process environment.  This module never
-logs, persists, or exposes them through Django responses.  Every account has a
-single lease at a time, so adding accounts increases concurrency without
-silently multiplying requests on one account.
+logs, persists, or exposes them through Django responses.
+
+Each account may carry a small, bounded number of simultaneous leases.
+Measured against a single MiniMax Token Plan key, eight concurrent vision
+requests completed without a single HTTP 429 while per-request latency only
+rose from ~3.7 s to ~5 s, so one-request-per-account left most of the paid
+throughput unused.  The per-account limit is configurable per service and
+adapts downward for the rest of the run whenever the provider answers 429.
 """
 
 from __future__ import annotations
@@ -18,6 +23,10 @@ from typing import Iterator
 
 
 MAX_ACCOUNTS = 8
+MAX_ACCOUNT_CONCURRENCY = 8
+# Conservative defaults: vision providers tolerate a few parallel requests per
+# key; MinerU tasks are long-running uploads and stay at one per token.
+DEFAULT_ACCOUNT_CONCURRENCY = {"minimax": 4, "siliconflow": 2, "mineru": 1}
 SERVICE_ENVIRONMENT = {
     "mineru": ("MINERU_TOKENS_JSON", "MINERU_TOKEN"),
     "minimax": ("MINIMAX_API_KEYS_JSON", "MINIMAX_API_KEY"),
@@ -74,18 +83,41 @@ def secrets_from_environment(service: str) -> tuple[str, ...]:
     return tuple(result)
 
 
+def account_concurrency(service: str) -> int:
+    """Simultaneous requests allowed on one account of ``service``.
+
+    ``QB_<SERVICE>_ACCOUNT_CONCURRENCY`` overrides the default.  Invalid values
+    fall back to the default; valid ones are clamped to 1..8.
+    """
+
+    default = DEFAULT_ACCOUNT_CONCURRENCY.get(service, 1)
+    raw = os.environ.get(f"QB_{service.upper()}_ACCOUNT_CONCURRENCY", "").strip()
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        value = default
+    return max(1, min(MAX_ACCOUNT_CONCURRENCY, value))
+
+
 @dataclass
 class _State:
     ready_at: float = 0.0
-    in_use: bool = False
+    active: int = 0
+    capacity: int = 1
     disabled: bool = False
     disabled_reason: str = ""
+
+    @property
+    def in_use(self) -> bool:
+        """Compatibility view: whether the account has no free lease slot."""
+
+        return self.active >= self.capacity
 
 
 class AccountLease:
     """One opaque account reservation.  Its repr intentionally hides the value."""
 
-    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay")
+    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay", "_throttled")
 
     def __init__(self, pool: "AccountPool", secret: str, slot: int) -> None:
         self._pool = pool
@@ -94,6 +126,7 @@ class AccountLease:
         self._disable = False
         self._disable_reason = ""
         self._delay = 0.0
+        self._throttled = False
 
     @property
     def secret(self) -> str:
@@ -112,21 +145,34 @@ class AccountLease:
         self._disable_reason = reason
 
     def cooldown(self, seconds: float) -> None:
-        """Keep a rate-limited account unavailable for a bounded interval."""
+        """Keep a rate-limited account unavailable for a bounded interval.
+
+        A cooldown is the provider telling us this account is over its limit,
+        so the account also loses one parallel slot for the rest of the run.
+        """
 
         self._delay = max(self._delay, min(60.0, max(0.0, float(seconds))))
+        self._throttled = True
 
     def __repr__(self) -> str:
         return "AccountLease(<redacted>)"
 
 
 class AccountPool:
-    def __init__(self, service: str, secrets: tuple[str, ...]) -> None:
+    def __init__(self, service: str, secrets: tuple[str, ...], per_account: int = 1) -> None:
         self.service = service
         self._secrets = secrets
-        self._states = {secret: _State() for secret in secrets}
+        capacity = max(1, min(MAX_ACCOUNT_CONCURRENCY, int(per_account)))
+        self._states = {secret: _State(capacity=capacity) for secret in secrets}
         self._condition = threading.Condition()
         self._cursor = 0
+
+    @property
+    def capacity(self) -> int:
+        """Total simultaneous leases currently allowed across enabled accounts."""
+
+        with self._condition:
+            return sum(state.capacity for state in self._states.values() if not state.disabled)
 
     @property
     def size(self) -> int:
@@ -159,19 +205,29 @@ class AccountPool:
                     raise AccountPoolError(f"{self.service} 账号池中没有可用账号")
                 if not any(index not in exclude for index, _secret in enabled):
                     raise AccountPoolError(f"{self.service} 本次请求已尝试所有可用账号")
+                # Least-loaded account first; the rotating cursor breaks ties so
+                # equally idle accounts still share work round-robin.
+                best: tuple[int, int, int] | None = None
                 for offset in range(len(self._secrets)):
                     index = (self._cursor + offset) % len(self._secrets)
                     if index in exclude:
                         continue
+                    state = self._states[self._secrets[index]]
+                    if state.disabled or state.active >= state.capacity or state.ready_at > now:
+                        continue
+                    rank = (state.active, offset, index)
+                    if best is None or rank < best:
+                        best = rank
+                if best is not None:
+                    index = best[2]
                     secret = self._secrets[index]
-                    state = self._states[secret]
-                    if not state.disabled and not state.in_use and state.ready_at <= now:
-                        state.in_use = True
-                        self._cursor = (index + 1) % len(self._secrets)
-                        return AccountLease(self, secret, index)
+                    self._states[secret].active += 1
+                    self._cursor = (index + 1) % len(self._secrets)
+                    return AccountLease(self, secret, index)
                 ready_times = [
                     self._states[secret].ready_at for index, secret in enabled
-                    if index not in exclude and not self._states[secret].in_use
+                    if index not in exclude
+                    and self._states[secret].active < self._states[secret].capacity
                     and self._states[secret].ready_at > now
                 ]
                 timeout = max(0.01, min(ready_times) - now) if ready_times else None
@@ -180,12 +236,15 @@ class AccountPool:
     def _release(self, lease: AccountLease) -> None:
         with self._condition:
             state = self._states[lease._secret]
-            state.in_use = False
+            state.active = max(0, state.active - 1)
             if lease._disable:
                 state.disabled = True
                 state.disabled_reason = lease._disable_reason
-            elif lease._delay:
-                state.ready_at = max(state.ready_at, time.monotonic() + lease._delay)
+            else:
+                if lease._throttled and state.capacity > 1:
+                    state.capacity -= 1
+                if lease._delay:
+                    state.ready_at = max(state.ready_at, time.monotonic() + lease._delay)
             self._condition.notify_all()
 
     @contextmanager
@@ -198,18 +257,19 @@ class AccountPool:
 
 
 _POOL_LOCK = threading.Lock()
-_POOLS: dict[tuple[str, tuple[str, ...]], AccountPool] = {}
+_POOLS: dict[tuple[str, tuple[str, ...], int], AccountPool] = {}
 
 
 def account_pool(service: str) -> AccountPool:
     secrets = secrets_from_environment(service)
     if not secrets:
         raise AccountPoolError(f"未配置 {service} 账号")
-    identity = (service, secrets)
+    per_account = account_concurrency(service)
+    identity = (service, secrets, per_account)
     with _POOL_LOCK:
         pool = _POOLS.get(identity)
         if pool is None:
-            pool = AccountPool(service, secrets)
+            pool = AccountPool(service, secrets, per_account)
             _POOLS[identity] = pool
         return pool
 

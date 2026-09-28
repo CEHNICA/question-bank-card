@@ -238,8 +238,9 @@ class MainFlowTests(unittest.TestCase):
             (web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
             ("2", "2", "2"),
         )
-        self.assertEqual(worker["QB_PARALLEL"], "4")
-        self.assertEqual(web["QB_PARALLEL"], "4")
+        # 2 MiniMax accounts x 4 + 2 SiliconFlow accounts x 2 simultaneous requests.
+        self.assertEqual(worker["QB_PARALLEL"], "12")
+        self.assertEqual(web["QB_PARALLEL"], "12")
         self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
         for environment in (worker, web):
             self.assertEqual(environment["QB_CREDENTIAL_HOT_RELOAD"], "1")

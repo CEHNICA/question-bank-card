@@ -27,7 +27,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 6
+FIGURE_REVIEW_POLICY_VERSION = 7
 
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
@@ -70,6 +70,8 @@ _CHINESE_CUE = re.compile(
     r"(?:上述|前述)\s*(?:两|三|四|各|若干)?\s*(?:个|组|幅|张)?\s*表|"
     r"(?:下列|以下)\s*(?:图形|图示|图案|示意图|简图)|"
     r"(?:图像|图象|图形)\s*(?:大致|可能)?\s*是\s*[（(]|"
+    # “……在区间 [a,b] 的大致图像为（ ）”: a choice among printed graphs.
+    r"(?:大致|可能|近似)\s*(?:的\s*)?(?:图像|图象|图形)\s*(?:为|是)\s*[（(]|"
     r"(?:[（(]\s*[一二三四五六七八九1-9]\s*[)）]\s*){2,}\s*"
     r"分别\s*(?:为|是)[^，,。:：；;\n]{0,48}?(?:图像|图象|图形)|"
     r"(?:示意图|简图|统计图|折线图|柱状图|扇形图|电路图|结构图|装置图|流程图|"
@@ -461,6 +463,14 @@ def automatic_review(
             value = match.group(0).strip()
             if value and value.casefold() not in {item.casefold() for item in cues}:
                 cues.append(value)
+        # Two or more printed option crops whose option text is empty *are* the
+        # options: the paper itself supplies them, whatever the stem says.
+        option_crops = {
+            figure.get("slot") for figure in figures if figure.get("slot") in {"A", "B", "C", "D"}
+        }
+        texts = options or {}
+        if len(option_crops) >= 2 and not any(str(texts.get(slot, "")).strip() for slot in option_crops):
+            cues.append("选项为印刷图")
     bound_slots = {
         figure.get("slot") for figure in figures
         if figure.get("slot") == "stem" or figure.get("slot") in {"A", "B", "C", "D"}

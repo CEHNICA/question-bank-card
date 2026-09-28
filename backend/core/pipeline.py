@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 import threading
@@ -2559,9 +2560,33 @@ def _snapshot(question: Question) -> dict:
             ]}
 
 
+def _reader_parallelism() -> int:
+    """How many cards to read at once.
+
+    The launcher's figure is computed once at start-up.  Accounts saved later
+    in Settings reach the worker through hot reload, so the live pool capacity
+    may raise it; an explicit user setting (QB_PARALLEL_EXPLICIT=1) never moves.
+    """
+    base = PARALLEL
+    if os.environ.get("QB_PARALLEL_EXPLICIT") == "1":
+        return base
+    capacity = 0
+    seen: set[str] = set()
+    for engine in (readers.primary_engine(), readers.checker_engine()):
+        if engine is None or engine.provider in seen:
+            continue
+        seen.add(engine.provider)
+        try:
+            capacity += account_pool(engine.provider).capacity
+        except AccountPoolError:
+            continue
+    return max(1, min(readers.MAX_PARALLEL_CARDS, max(base, capacity)))
+
+
 def read_questions(paper: Paper, questions: list[Question]) -> None:
     if not questions:
         return
+    workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
@@ -2655,9 +2680,9 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     # after the pause signal, so they remain safely resumable as READING.
     quota_error: readers.ReaderQuotaExhausted | None = None
     snapshot_iter = iter(snapshots)
-    with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         pending = set()
-        for _ in range(min(PARALLEL, len(snapshots))):
+        for _ in range(min(workers, len(snapshots))):
             pending.add(pool.submit(work, next(snapshot_iter)))
         while pending:
             done, pending = wait(pending, return_when=FIRST_COMPLETED)

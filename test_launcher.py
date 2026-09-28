@@ -105,8 +105,10 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(name, web)
         self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
                          ("2", "3", "2"))
-        self.assertEqual(worker["QB_PARALLEL"], "5")
-        self.assertEqual(web["QB_PARALLEL"], "5")
+        # 3 MiniMax accounts x 4 + 2 SiliconFlow accounts x 2, capped at 16.
+        self.assertEqual(worker["QB_PARALLEL"], "16")
+        self.assertEqual(web["QB_PARALLEL"], "16")
+        self.assertEqual(worker["QB_PARALLEL_EXPLICIT"], "0")
         for secret in ("m1", "m2", "mm1", "mm2", "mm3", "sf1", "sf2"):
             self.assertNotIn(secret, environments["_stdout"])
 
@@ -119,6 +121,7 @@ class LauncherTests(unittest.TestCase):
         environments = self.run_main(saved, parallel="7")
         self.assertEqual(environments["worker.log"]["QB_PARALLEL"], "7")
         self.assertEqual(environments["web.log"]["QB_PARALLEL"], "7")
+        self.assertEqual(environments["worker.log"]["QB_PARALLEL_EXPLICIT"], "1")
 
     def test_zero_and_invalid_parallelism_fall_back_to_provider_pool_size(self):
         pools = {
@@ -127,19 +130,30 @@ class LauncherTests(unittest.TestCase):
             "siliconflow": ["sf1", "sf2"],
         }
         preferences = dict(launcher.DEFAULT_MODEL_PREFERENCES)
-        for invalid in ("0", "-1", "abc", "9"):
+        for invalid in ("0", "-1", "abc", "17"):
             with self.subTest(invalid=invalid):
                 self.assertEqual(
                     launcher._parallel_environment(
-                        {"QB_PARALLEL": invalid}, pools, preferences,
+                        {"QB_PARALLEL": invalid, "QB_MINIMAX_ACCOUNT_CONCURRENCY": "1",
+                         "QB_SILICONFLOW_ACCOUNT_CONCURRENCY": "1"},
+                        pools, preferences,
                     ),
-                    {"QB_PARALLEL": "5"},
+                    {"QB_PARALLEL": "5", "QB_PARALLEL_EXPLICIT": "0"},
                 )
+        self.assertEqual(
+            launcher._parallel_environment({"QB_PARALLEL": "9"}, pools, preferences),
+            {"QB_PARALLEL": "9", "QB_PARALLEL_EXPLICIT": "1"},
+        )
+        # One MiniMax key alone now reads four cards at once by default.
+        self.assertEqual(
+            launcher._parallel_environment({}, {"minimax": ["mm1"]}, preferences),
+            {"QB_PARALLEL": "4", "QB_PARALLEL_EXPLICIT": "0"},
+        )
         pools["minimax"] = [f"mm{index}" for index in range(8)]
         pools["siliconflow"] = [f"sf{index}" for index in range(8)]
         self.assertEqual(
             launcher._parallel_environment({}, pools, preferences),
-            {"QB_PARALLEL": "8"},
+            {"QB_PARALLEL": "16", "QB_PARALLEL_EXPLICIT": "0"},
         )
 
     def test_custom_model_roles_reach_web_and_worker_from_trusted_preferences(self):

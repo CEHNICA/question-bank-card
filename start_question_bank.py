@@ -73,6 +73,10 @@ CREDENTIAL_STATUS_NAMES = {
     for _legacy_name, _pool_name, configured_name, size_name in POOL_ENVIRONMENT_NAMES.values()
     for name in (configured_name, size_name)
 }
+# Mirrors backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY: simultaneous
+# requests one account may carry.  QB_<PROVIDER>_ACCOUNT_CONCURRENCY overrides.
+ACCOUNT_CONCURRENCY_DEFAULTS = {"minimax": 4, "siliconflow": 2}
+MAX_PARALLEL_CARDS = 16
 MODEL_PROVIDER_BY_ENGINE = {
     "minimax_m3": "minimax",
     "siliconflow_qwen3": "siliconflow",
@@ -147,12 +151,13 @@ def _parallel_environment(
     pools: dict[str, list[str]],
     preferences: dict[str, str],
 ) -> dict[str, str]:
-    """Choose safe reader concurrency without multiplying use of one account.
+    """Choose reader concurrency from the accounts that can actually serve.
 
-    A user-supplied value is honoured only when it is an integer from 1 to 8.
-    Otherwise concurrency follows the distinct provider pools that can actually
-    serve the selected primary/checker/arbiter roles.  The worker and web
-    process receive only the resulting non-secret number.
+    A user-supplied value is honoured only when it is an integer from 1 to 16
+    (and is then marked explicit so the worker never raises it).  Otherwise
+    concurrency is the sum, over the distinct providers serving the selected
+    primary/checker/arbiter roles, of accounts x per-account concurrency.  The
+    worker and web process receive only the resulting non-secret number.
     """
 
     raw = str(source.get("QB_PARALLEL", "")).strip()
@@ -160,8 +165,8 @@ def _parallel_environment(
         explicit = int(raw)
     except (TypeError, ValueError):
         explicit = 0
-    if 1 <= explicit <= 8:
-        return {"QB_PARALLEL": str(explicit)}
+    if 1 <= explicit <= MAX_PARALLEL_CARDS:
+        return {"QB_PARALLEL": str(explicit), "QB_PARALLEL_EXPLICIT": "1"}
 
     primary = MODEL_PROVIDER_BY_ENGINE.get(
         preferences.get("primary_engine", DEFAULT_MODEL_PREFERENCES["primary_engine"]),
@@ -197,8 +202,16 @@ def _parallel_environment(
     if pools.get(arbiter):
         providers.add(arbiter)
 
-    automatic = sum(len(pools.get(provider, [])) for provider in providers)
-    return {"QB_PARALLEL": str(max(1, min(8, automatic)))}
+    def per_account(provider: str) -> int:
+        default = ACCOUNT_CONCURRENCY_DEFAULTS.get(provider, 1)
+        try:
+            value = int(str(source.get(f"QB_{provider.upper()}_ACCOUNT_CONCURRENCY", "")).strip() or default)
+        except (TypeError, ValueError):
+            value = default
+        return max(1, min(8, value))
+
+    automatic = sum(len(pools.get(provider, [])) * per_account(provider) for provider in providers)
+    return {"QB_PARALLEL": str(max(1, min(MAX_PARALLEL_CARDS, automatic))), "QB_PARALLEL_EXPLICIT": "0"}
 
 
 def _service_command(role: str, *extra: str) -> list[str]:

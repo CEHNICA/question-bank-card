@@ -107,27 +107,36 @@ def stack_regions(regions: list[dict], page_loader, marks: list[dict] | None = N
     return canvas, layout
 
 
+TRIM_MIN_BLANK = 30.0   # 页面坐标（0–1000）：底部空白至少这么高才裁掉
+
+
 def trim_regions(regions: list[dict], page_loader) -> list[dict]:
-    """去掉每段范围底部的大片空白（解答题的作答空间）。有字迹（含手写）处保留。"""
+    """去掉每段范围底部的大片空白（解答题的作答空间）。有字迹（含手写）处保留。
+
+    先二值化再缩小：直接缩小灰度图会把分式分母、下标这类细笔画平均成浅灰，
+    被误判为空白而裁掉（实测：高考卷 V甲/V乙 的“乙”被切掉半截）。小段空白
+    不值得冒险，只有底部空白足够大时才裁。
+    """
     trimmed = []
     for region in regions:
         page = page_loader(region["page_idx"])
         box = to_pixels(region["bbox"], page.size)
-        gray = page.crop(box).convert("L")
-        width, height = gray.size
-        small = gray.resize((max(1, width // 4), max(1, height // 4)))
+        ink = page.crop(box).convert("L").point(lambda value: 255 if value < 170 else 0)
+        width, height = ink.size
+        small = ink.resize((max(1, width // 4), max(1, height // 4)), Image.Resampling.BOX)
         sw, sh = small.size
         pixels = small.load()
         last_ink = -1
         for y in range(sh):
-            dark = sum(1 for x in range(sw) if pixels[x, y] < 150)
+            dark = sum(1 for x in range(sw) if pixels[x, y] > 40)
             if dark >= max(2, sw // 300):
                 last_ink = y
         x0, y0, x1, y1 = region["bbox"]
         if last_ink < 0:
             continue  # 整段空白
-        keep = min(sh, last_ink + 1 + max(3, sh // 40)) / sh
-        if keep < 0.85:
+        keep = min(sh, last_ink + 1 + max(6, sh // 25)) / sh
+        blank = (y1 - y0) * (1 - keep)
+        if keep < 0.85 and blank >= TRIM_MIN_BLANK:
             y1 = y0 + (y1 - y0) * keep
         trimmed.append({"page_idx": region["page_idx"], "bbox": [x0, y0, x1, round(y1, 1)]})
     return trimmed or regions

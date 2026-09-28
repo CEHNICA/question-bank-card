@@ -142,6 +142,17 @@ _LEADING_SOURCE_RE = re.compile(
 _LEADING_SUBQUESTION_RE = re.compile(r"^\s*[（(]\s*([12])\s*[)）]", re.M)
 _LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-DＡ-Ｄ]\s*[.．、:]", re.I)
 _LEADING_QUESTION_MARK_RE = re.compile(r"[？?]|[（(]\s*[）)]|(?:求|证明|计算|判断|选择|填空)")
+# Numbered exam instructions (“注意事项：1．答题前…”) are not questions.  Both
+# a notice header and instruction vocabulary are required, so an ordinary
+# question that merely mentions “考试” is never discarded.
+_NOTICE_HEADER_RE = re.compile(r"^\s*(?:注意事项|考生须知|答题须知|考试须知|答卷须知)\s*[：:]?")
+_INSTRUCTION_RE = re.compile(
+    r"答题前|答卷前|答题卡|答题纸|准考证|考生号|考籍号|条形码|考试结束|签字笔|2B\s*铅笔|"
+    r"试题卷|试卷上|本试卷|考试时间|草稿纸|选涂|涂黑|作答无效|答题无效|交回"
+)
+# MinerU occasionally drops the full-width dot of the very first number
+# (“1．设 z=…” comes back as “1 设 z=…”).
+_BARE_LEADING_ONE_RE = re.compile(r"^\s*1\s+(?=[\u4e00-\u9fff])")
 _LEADING_NON_QUESTION_RE = re.compile(
     r"(?:注意事项|答卷前|考试时间|满分|姓名|班级|考号|密封线|请将答案|"
     r"本题共\s*\d+\s*小题|每小题\s*\d+\s*分|选择题|填空题|解答题|参考公式)"
@@ -222,20 +233,36 @@ def _column_bounds(splits: list[float], col: int) -> tuple[float, float]:
     return edges[col], edges[col + 1]
 
 
+# MinerU sometimes wraps runs of a line in inline HTML (“<sub>12.</sub> <sub>已知…”),
+# which hides the printed number from the start-of-line test.
+_INLINE_TAG_RE = re.compile(r"</?(?:sub|sup|span|b|i|u|em|strong)\b[^>]*>", re.I)
+
+
+def _plain_block_text(value: object) -> str:
+    return _INLINE_TAG_RE.sub("", str(value or ""))
+
+
 def _candidates(blocks: list[dict]) -> list[Start]:
     found: list[Start] = []
     for block in blocks:
         bbox = block.get("bbox")
-        text = str(block.get("text") or "")
+        text = _plain_block_text(block.get("text"))
         if not bbox or not text.strip() or block.get("type") in NON_CONTENT | FIGURE_TYPES:
             continue
         stripped = text.lstrip(" $　")
         lead = len(text) - len(stripped)
         for match in NUMBER_RE.finditer(text):
             number = int(match.group(1))
-            if number == 0:
-                continue
             at_start = match.start() <= lead
+            if number == 0:
+                # A scan that clipped the binding edge turns “20.” into “0.”.
+                # Keep it only as evidence for gap repair; it never joins a chain.
+                if at_start:
+                    found.append(Start(
+                        number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                        seq=block.get("seq"), at_start=True, score=0.2,
+                    ))
+                continue
             after = text[match.end():match.end() + 6].lstrip(" $")
             looks_like_question = bool(after) and (CJK.match(after) is not None or after[:1] in "如已设若在下对")
             if not at_start and not looks_like_question:
@@ -260,6 +287,80 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 seq=block.get("seq"), at_start=at_start, score=score,
             ))
     return found
+
+
+_UNNUMBERED_START_RE = re.compile(r"^\s*[（(]\s*(?:本题)?满分\s*\d{1,2}\s*分\s*[)）]")
+
+
+def _unnumbered_starts(blocks: list[dict]) -> list[Start]:
+    """Blocks that open like a question but lost their printed number entirely."""
+    found = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            continue
+        if _UNNUMBERED_START_RE.match(_plain_block_text(block.get("text"))):
+            found.append(Start(
+                number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                seq=block.get("seq"), at_start=True, score=0.5, source="unnumbered",
+            ))
+    return found
+
+
+_BARE_NUMBER_START_RE = re.compile(r"^\s*(\d{1,2})\s+(?=[\u4e00-\u9fff])")
+
+
+def _bare_number_starts(blocks: list[dict]) -> list[Start]:
+    """“14 如图，…”: a printed number whose dot MinerU dropped.
+
+    These are used only to fill an exact gap in the numbering (13 → ? → 15),
+    never to start or extend a chain on their own.
+    """
+    found = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            continue
+        match = _BARE_NUMBER_START_RE.match(_plain_block_text(block.get("text")).lstrip(" $　"))
+        if match and int(match.group(1)) > 0:
+            found.append(Start(
+                number=int(match.group(1)), page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                seq=block.get("seq"), at_start=True, score=0.5, source="bare",
+            ))
+    return found
+
+
+def _drop_instruction_candidates(candidates: list[Start], blocks: list[dict]) -> list[Start]:
+    """Remove the numbered items of an exam's notice section (注意事项).
+
+    Only a leading run is removed: it must follow a notice header block (or
+    share its block) and every removed item must use instruction vocabulary.
+    """
+    if not candidates:
+        return candidates
+    headers = [
+        (int(block["page_idx"]), float(block["bbox"][1]))
+        for block in blocks
+        if block.get("bbox") and _NOTICE_HEADER_RE.match(str(block.get("text") or ""))
+    ]
+    if not headers:
+        return candidates
+    text_by_seq = {block.get("seq"): str(block.get("text") or "") for block in blocks}
+    ordered = sorted(candidates, key=lambda item: (item.page, item.y))
+    first_header = min(headers)
+    leading: list[Start] = []
+    for candidate in ordered:
+        if (candidate.page, candidate.y) < first_header:
+            continue
+        text = text_by_seq.get(candidate.seq, "")
+        if _INSTRUCTION_RE.search(text) or _NOTICE_HEADER_RE.match(text):
+            leading.append(candidate)
+            continue
+        break
+    if not leading or len(leading) == len(candidates):
+        return candidates
+    removed = {id(item) for item in leading}
+    return [item for item in candidates if id(item) not in removed]
 
 
 def _headings(blocks: list[dict]) -> list[dict]:
@@ -342,6 +443,7 @@ def _slots(pages: list[dict], blocks: list[dict], splits: dict[int, list[float]]
 
 def _chain(candidates: list[Start]) -> list[Start]:
     """在阅读顺序里挑出最可信的一串递增题号（允许缺号，缺号扣分）。"""
+    candidates = [item for item in candidates if item.number > 0]
     if not candidates:
         return []
     order = sorted(candidates, key=Start.key)
@@ -364,8 +466,16 @@ def _chain(candidates: list[Start]) -> list[Start]:
     return list(reversed(chain))
 
 
-def _repair_gaps(chain: list[Start], candidates: list[Start]) -> list[Start]:
-    """缺号时，若两题之间恰有一个候选、其数字是缺号的末位（如把"23."读成"3."），按缺号采用。"""
+def _repair_gaps(
+    chain: list[Start], candidates: list[Start], unnumbered: list[Start] | None = None,
+) -> list[Start]:
+    """补缺号。
+
+    1. 两题之间恰有一个候选、其数字是缺号的末位（把“23.”读成“3.”，或扫描裁掉
+       装订边把“20.”读成“0.”），按缺号采用。
+    2. 仍缺的号，若两题之间恰好有同样数量的“（本题满分 N 分）”开头、题号被整个
+       裁掉的块，并且按阅读顺序排进去题号仍递增，就依次补上。
+    """
     result: list[Start] = []
     for index, start in enumerate(chain):
         result.append(start)
@@ -376,19 +486,53 @@ def _repair_gaps(chain: list[Start], candidates: list[Start]) -> list[Start]:
         if not missing:
             continue
         between = [c for c in candidates if start.key() < c.key() < following.key() and c.at_start]
+        repaired: list[Start] = []
         for number in missing:
             fits = [c for c in between if str(number).endswith(str(c.number)) and c.number != number]
             if len(fits) == 1:
                 fixed = fits[0]
-                result.append(Start(number=number, page=fixed.page, x=fixed.x, y=fixed.y, seq=fixed.seq,
-                                    at_start=True, score=fixed.score, source="repaired", col=fixed.col))
+                repaired.append(Start(number=number, page=fixed.page, x=fixed.x, y=fixed.y, seq=fixed.seq,
+                                      at_start=True, score=fixed.score, source="repaired", col=fixed.col))
                 between = [c for c in between if c is not fixed and c.key() > fixed.key()]
+        remaining = [number for number in missing if number not in {item.number for item in repaired}]
+        used = {item.seq for item in repaired}
+        for number in list(remaining):
+            exact = [
+                item for item in (unnumbered or [])
+                if item.source == "bare" and item.number == number and item.seq not in used
+                and start.key() < item.key() < following.key()
+            ]
+            if len(exact) == 1:
+                item = exact[0]
+                repaired.append(Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq,
+                                      at_start=True, score=item.score, source="repaired", col=item.col))
+                used.add(item.seq)
+                remaining.remove(number)
+        repaired.sort(key=Start.key)
+        loose = [
+            item for item in (unnumbered or [])
+            if item.source == "unnumbered" and start.key() < item.key() < following.key()
+            and item.seq not in used
+        ]
+        if remaining and len(loose) == len(remaining):
+            trial = sorted(
+                repaired + [
+                    Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq, at_start=True,
+                          score=item.score, source="repaired", col=item.col)
+                    for number, item in zip(remaining, sorted(loose, key=Start.key))
+                ],
+                key=Start.key,
+            )
+            if all(a.number < b.number for a, b in zip(trial, trial[1:])):
+                repaired = trial
+        result.extend(repaired)
     return sorted(result, key=Start.key)
 
 
 def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]:
     """返回版面与题号起点（尚未补缺号）。"""
-    candidates = _candidates(blocks)
+    candidates = _drop_instruction_candidates(_candidates(blocks), blocks)
+    unnumbered = _unnumbered_starts(blocks) + _bare_number_starts(blocks)
     headings = _headings(blocks)
     strong = [c for c in candidates if c.at_start and c.score >= 3]
     splits = _splits_from(strong or candidates, pages, blocks)
@@ -415,7 +559,8 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
         for heading in headings:
             heading["col"] = column_of(splits.get(heading["page"], []), heading["x"] + 1)
         chain = _chain(candidates)
-    chain = _repair_gaps(chain, candidates)
+    assign(unnumbered)
+    chain = _repair_gaps(chain, candidates, unnumbered)
     layout = Layout(page_count=len(pages), splits=splits, slots=_slots(pages, blocks, splits),
                     headings=headings, candidates=candidates)
     return layout, chain
@@ -958,7 +1103,8 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
         return -100, False, False
 
     source = bool(_LEADING_SOURCE_RE.search(text))
-    body = _without_source_prefix(text)
+    bare_one = bool(_BARE_LEADING_ONE_RE.match(text))
+    body = _without_source_prefix(_BARE_LEADING_ONE_RE.sub("", text, count=1))
     # MinerU sometimes separates ``[2026某地联考]`` and ``已知……`` into two
     # adjacent text blocks.  The citation is still the correct top boundary;
     # borrow only the immediately following non-empty line as scoring evidence.
@@ -971,7 +1117,7 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
     options = bool(_LEADING_OPTION_RE.search(text))
     subquestions = set(_LEADING_SUBQUESTION_RE.findall(following_text))
     score = (5 if source else 0) + (2 if stem else 0) + (2 if question_mark else 0) + \
-        (2 if options else 0) + (1 if len(body) >= 18 else 0)
+        (2 if options else 0) + (1 if len(body) >= 18 else 0) + (2 if bare_one else 0)
     if "1" in subquestions:
         score += 1
     if {"1", "2"}.issubset(subquestions):
@@ -1112,8 +1258,12 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     if not pages or not blocks:
         return []
     layout, selected = analyse(pages, blocks)
+    # A candidate the gap repair already re-read as a clipped number (“9.” used
+    # as 19) is part of the main run, not the start of a new numbering scope.
+    repaired_seqs = {item.seq for item in selected if item.source == "repaired" and item.seq is not None}
     reliable = sorted(
-        (item for item in layout.candidates if item.at_start and item.score >= 3.0),
+        (item for item in layout.candidates
+         if item.at_start and item.score >= 3.0 and item.number > 0 and item.seq not in repaired_seqs),
         key=Start.key,
     )
     if not reliable:

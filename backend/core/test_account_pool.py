@@ -115,6 +115,65 @@ class AccountPoolTests(SimpleTestCase):
                 pass
 
 
+class AccountConcurrencyTests(SimpleTestCase):
+    def tearDown(self):
+        account_pool.reset_account_pools()
+
+    def test_one_account_can_carry_its_configured_number_of_leases(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3)
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def task():
+            nonlocal active, peak
+            with pool.lease():
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                time.sleep(0.03)
+                with lock:
+                    active -= 1
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            list(executor.map(lambda _index: task(), range(6)))
+        self.assertEqual(peak, 3)
+        self.assertEqual(pool.capacity, 3)
+
+    def test_leases_spread_to_the_least_loaded_account_first(self):
+        pool = account_pool.AccountPool("test", ("a", "b"), per_account=2)
+        with pool.lease() as first, pool.lease() as second:
+            self.assertNotEqual(first.secret, second.secret)
+            with pool.lease() as third:
+                self.assertIn(third.secret, {"a", "b"})
+
+    def test_rate_limit_removes_one_parallel_slot_for_the_rest_of_the_run(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3)
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 2)
+        for _ in range(3):
+            with pool.lease() as lease:
+                lease.cooldown(0)
+        self.assertEqual(pool.capacity, 1)
+
+    def test_configured_concurrency_is_validated_and_clamped(self):
+        cases = (("", 4), ("2", 2), ("0", 1), ("99", 8), ("x", 4))
+        for raw, expected in cases:
+            with self.subTest(raw=raw), mock.patch.dict(
+                    "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw}):
+                self.assertEqual(account_pool.account_concurrency("minimax"), expected)
+        with mock.patch.dict("os.environ", {"QB_MINERU_ACCOUNT_CONCURRENCY": ""}):
+            self.assertEqual(account_pool.account_concurrency("mineru"), 1)
+
+    def test_shared_pool_uses_service_concurrency(self):
+        with mock.patch.dict("os.environ", {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]),
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3",
+        }):
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+
+
 class VisionPoolTests(SimpleTestCase):
     def tearDown(self):
         account_pool.reset_account_pools()
@@ -377,6 +436,9 @@ class VisionPoolTests(SimpleTestCase):
         environment = {
             "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
             "MINIMAX_API_KEY": secret,
+            # This contract is about a single-slot account: a cooldown must not
+            # release a herd.  Multi-slot accounts are covered separately.
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "1",
         }
         with mock.patch.dict("os.environ", environment, clear=False), \
                 mock.patch.object(readers, "_post", side_effect=post):
@@ -402,7 +464,7 @@ class VisionPoolTests(SimpleTestCase):
         sleep.assert_not_called()
 
     def test_parallel_limit_is_always_safe(self):
-        for value, expected in (("0", 1), ("99", 8), ("bad", 4), ("3", 3)):
+        for value, expected in (("0", 1), ("99", readers.MAX_PARALLEL_CARDS), ("bad", 4), ("3", 3)):
             with self.subTest(value=value), mock.patch.dict("os.environ", {"QB_PARALLEL": value}):
                 self.assertEqual(readers._parallel_limit(), expected)
 

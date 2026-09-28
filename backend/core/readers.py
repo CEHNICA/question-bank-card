@@ -25,7 +25,9 @@ MINIMAX_DEFAULT_URL = "https://api.minimax.cn/v1/chat/completions"
 MINIMAX_HOSTS = frozenset({"api.minimax.cn", "api.minimax.io", "api.minimaxi.com"})
 SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SILICONFLOW_MODEL = preferences.DEFAULT_MODELS["siliconflow"]  # legacy public constant
-SERVER_RETRYABLE = frozenset({500, 502, 503, 504})
+# 529 is MiniMax's "overloaded" answer (seen live during benchmarking); 520-524
+# are CDN-edge failures.  All are transient server-side conditions.
+SERVER_RETRYABLE = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524, 529})
 BACKOFF = (2.0, 5.0, 12.0)
 RATE_LIMIT_ROUNDS = 3
 MAX_RESPONSE_BYTES = 200_000
@@ -33,15 +35,21 @@ OPTION_KEYS = ("A", "B", "C", "D")
 TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|配图|其他题号|刻度)\s*】")
 
 
+MAX_PARALLEL_CARDS = 16
+
+
 def _parallel_limit() -> int:
+    """How many cards are read at the same time (each card makes 1–3 calls)."""
     try:
         value = int(os.environ.get("QB_PARALLEL", "4"))
     except (TypeError, ValueError):
         value = 4
-    return max(1, min(8, value))
+    return max(1, min(MAX_PARALLEL_CARDS, value))
 
 
-_IN_FLIGHT = threading.BoundedSemaphore(_parallel_limit())
+# A process-wide safety cap on simultaneous HTTP requests.  Per-provider
+# limits are enforced by the account pools; this only stops a runaway fan-out.
+_IN_FLIGHT = threading.BoundedSemaphore(min(2 * MAX_PARALLEL_CARDS, 2 * _parallel_limit()))
 
 
 class ReaderError(RuntimeError):
