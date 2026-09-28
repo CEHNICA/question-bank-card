@@ -84,6 +84,19 @@ class SegmentTests(TestCase):
         self.assertTrue(all(q["section"].startswith("三、解答题") for q in questions.values()))
         self.assertTrue(all(q["question_type"] == "free_response" for q in questions.values()))
 
+    def test_previous_option_sharing_a_block_with_the_next_number_stays_with_its_question(self):
+        # 陈毅初三照片卷：MinerU 把第 9 题的“D. 3”和第 10 题合成一个框。
+        blocks = [
+            block(39, 0, [535, 549, 904, 601], "9. 如图, 在菱形 $ABCD$ 中, $AB=13$"),
+            block(40, 0, [537, 607, 562, 623], "A. 6"),
+            block(43, 0, [537, 654, 561, 669], "C. 4"),
+            block(46, 0, [537, 680, 911, 739], "D. 3\n10. 如图, $\\triangle ABC$ 中, $\\angle ACB=90^{\\circ}$"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertGreaterEqual(questions[9]["regions"][-1]["bbox"][3], 696)   # D. 3 is inside
+        self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 704)
+
     def test_a_number_glued_to_the_stem_fills_its_gap(self):
         # 胜利初四月考第 9 题：MinerU 读成“9如图，在△ABC中…”，没有点也没有空格。
         blocks = [

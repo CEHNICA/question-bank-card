@@ -284,7 +284,15 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 score -= 1.5
             height = bbox[3] - bbox[1]
             y = bbox[1]
-            if not at_start and height > 40 and len(text) > 0:
+            before = text[:match.start()]
+            if not at_start and "\n" in before and not before[before.rfind("\n") + 1:].strip(" $　"):
+                # 题号在框内某一行的行首（“D. 3\n10. 如图…”：上一题的选项和本题挤在
+                # 一个框里）：按行估算。短行也占一整行，按字符比例会把本题起点估得太高，
+                # 切掉上一题的最后一个选项。
+                lines = text.count("\n") + 1
+                line_height = min(24.0, max(14.0, height / lines))
+                y = min(bbox[3] - line_height, bbox[1] + before.count("\n") * line_height)
+            elif not at_start and height > 40 and len(text) > 0:
                 # 题号在框中间（常见于手写与题号挤在同一框）：按字符位置估算所在行。
                 y = bbox[1] + height * match.start() / max(1, len(text))
                 y = max(bbox[1], y - 6)
