@@ -378,6 +378,18 @@ class WitnessPipelineTests(TestCase):
         self.assertEqual(question.read_c["skipped"], "witness")
 
 
+class WitnessObjectionTests(SimpleTestCase):
+    def test_only_clean_substitutions_count(self):
+        from .textnorm import witness_objections
+        reading = {"stem": "当 $x>0$ 时，求 $y=2x+\\dfrac{1}{x^3}$ 最小值"}
+        spots = witness_objections(reading, "当 $x > 0$ 时，求 $y = 2x + \\frac{1}{x^{2}}$ 最小值")
+        self.assertEqual([(s["reading"], s["mineru"]) for s in spots], [("3", "2")])
+        # MinerU's look-alike confusions and handwriting insertions are not objections.
+        self.assertEqual(witness_objections({"stem": "若n与α和β所成的角相等"}, "若n与a和β所成的角相等"), [])
+        self.assertEqual(witness_objections({"stem": "求证：△ABN≌△MAD，并说明"}, "求证：VABN≌VMAD，并说明"), [])
+        self.assertEqual(witness_objections({"stem": "则 OE 长为（ ）的值"}, "则 OE 长为（ B ）13 的值"), [])
+
+
 class SpotCheckParsingTests(SimpleTestCase):
     def test_answers_map_back_to_their_engines(self):
         spots = [{"reading": "3", "mineru": "2", "before": "1/x", "after": "最小值"},

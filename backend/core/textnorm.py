@@ -348,7 +348,13 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
 # Chinese or maths symbols, anchored by identical text on both sides —
 # handwriting mixed into MinerU's text shows up as insertions, not these.
 _OBJECTION_CHARS = re.compile(r"^[0-9A-Za-z\u4e00-\u9fffα-ωΑ-Ω△∠⊥∥≤≥≠±×÷°π∞]+$")
-_OCR_LOOKALIKES = ({"O", "0"}, {"o", "0"}, {"l", "1"}, {"I", "1"}, {"I", "l"})
+# MinerU's usual confusions: a disagreement between these proves nothing
+# (in testing MinerU was wrong at every α/a and △/V spot).
+_OCR_LOOKALIKES = (
+    {"O", "0"}, {"o", "0"}, {"l", "1"}, {"I", "1"}, {"I", "l"},
+    {"α", "a"}, {"β", "B"}, {"γ", "y"}, {"ρ", "p"}, {"ω", "w"}, {"ν", "v"}, {"τ", "t"}, {"χ", "x"},
+    {"μ", "u"}, {"△", "V"}, {"∠", "L"},
+)
 
 
 def witness_objections(reading: dict | None, witness: str, *, context: int = 3) -> list[dict]:
