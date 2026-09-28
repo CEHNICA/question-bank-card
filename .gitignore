@@ -38,3 +38,6 @@ credentials.dat
 Thumbs.db
 .idea/
 .vscode/
+
+# benchmark credentials (tools/benchmark)
+secrets.json
