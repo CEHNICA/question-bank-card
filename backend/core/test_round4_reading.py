@@ -44,6 +44,13 @@ class SpotwiseMajorityTests(SimpleTestCase):
         c = reading("从正面看从左面看得到的形状")
         self.assertFalse(textnorm.spotwise_majority(a, b, c))
 
+    def test_neighbouring_spots_are_one_spot(self):
+        # shengli8 #19：“已知点” / “知识点” 被裁成 “知点”，两位读者都没这样读。
+        a = reading("已知点A、B、C在数轴上表示的数a、b、c的位置如图所示")
+        b = reading("知识点A、B、C在数轴上表示的数a、b、c的位置如图所示")
+        c = reading("知点A、B、C在数轴上表示的数a、b、c的位置如图所示")
+        self.assertFalse(textnorm.spotwise_majority(a, b, c))
+
     def test_options_are_part_of_the_comparison(self):
         a = reading("下列计算正确的是", A="1", B="2")
         b = reading("下列计算正确的是", A="1", B="3")
@@ -77,6 +84,14 @@ class DisputedSpotTests(SimpleTestCase):
         a, b = reading("AF=2\\sqrt{3}"), reading("AF=3\\sqrt{3}")
         self.assertIsNone(textnorm.disputed_spots(a, b, reading("AF=5\\sqrt{3}")))
         self.assertEqual(textnorm.disputed_spots(a, a, a), [])
+
+    def test_punctuation_differences_are_not_worth_a_question(self):
+        spot = lambda a, b, before="xx", after="yy": {"reading": a, "mineru": b, "before": before, "after": after}
+        for a, b in (("()", ""), ("'", "′"), (".", ";"), ("_", "()"), ("", ".")):
+            self.assertTrue(textnorm.punctuation_only_spot(spot(a, b)), (a, b))
+        self.assertFalse(textnorm.punctuation_only_spot(spot("", ".", before="2", after="5")))  # 2.5 / 25
+        for a, b in (("6", "5"), ("∴", "∵"), ("", "sqrt"), ("-", ""), ("定", "单")):
+            self.assertFalse(textnorm.punctuation_only_spot(spot(a, b)), (a, b))
 
     def test_empty_side_is_shown_as_empty_in_the_question(self):
         prompt, _order = readers.spot_check_prompt([{"reading": "±", "mineru": "", "before": "方根是", "after": ""}])
@@ -201,6 +216,23 @@ class ReadingPipelineTests(TestCase):
         self.assertEqual(question.text_source, "arbiter")
         self.assertIn("两次识读不一致，已由第三次识读裁决", question.flags)
         self.assertTrue(question.stem.startswith("如图"))
+
+    def test_mineru_still_gets_its_say_after_the_arbiter(self):
+        # shengli7 #16：两位读者和裁决都写“器补”，MinerU 读的是印刷的“添补”。
+        question = self.card()
+        self.paper.blocks.create(seq=1, type="text", page_idx=0, bbox=[60, 110, 470, 170],
+                                 text="1. 小毅设计了包装盒，共有____种添补的方法")
+        self.run_card(question, {
+            ("a", 1): tagged("三、解答题 小毅设计了包装盒，共有____种器补的方法"),
+            ("b", 1): tagged("小毅设计了包装盒，共有____种器补的方法和步骤"),
+            ("arbiter", 1): tagged("小毅设计了包装盒，共有____种器补的方法"),
+            ("spotcheck", 1): lambda prompt: "1=不确定\n2=不确定\n3=不确定",
+        })
+        self.assertEqual(question.state, Question.State.YELLOW)
+        flag = next(f for f in question.flags if f.startswith(pipeline.ARBITER_OBJECTION_FLAG_PREFIX))
+        self.assertIn("【器】", flag)
+        self.assertEqual(question.read_c["stem"], "小毅设计了包装盒，共有____种器补的方法")   # arbiter kept
+        self.assertIn("objection_check", question.read_c)
 
     def test_a_choice_question_missing_a_letter_is_not_green(self):
         question = self.card()

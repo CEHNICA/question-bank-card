@@ -399,7 +399,7 @@ def _headings(blocks: list[dict]) -> list[dict]:
         text = str(block.get("text") or "")
         if block.get("bbox") and HEADING_RE.match(text) and block.get("type") not in NON_CONTENT | FIGURE_TYPES:
             result.append({"page": int(block["page_idx"]), "x": block["bbox"][0], "y": block["bbox"][1],
-                           "text": text.strip()[:80], "seq": block.get("seq")})
+                           "bottom": block["bbox"][3], "text": text.strip()[:80], "seq": block.get("seq")})
     return result
 
 
@@ -593,7 +593,7 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
     chain = _repair_gaps(chain, candidates, unnumbered)
     boundaries = [
         {"page": int(block["page_idx"]), "col": column_of(splits.get(int(block["page_idx"]), []), block["bbox"][0] + 1),
-         "y": block["bbox"][1], "kind": "exam_subheading", "seq": block.get("seq")}
+         "y": block["bbox"][1], "bottom": block["bbox"][3], "kind": "exam_subheading", "seq": block.get("seq")}
         for block in blocks
         if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES
         and EXAM_SUBHEADING_RE.match(str(block.get("text") or ""))
@@ -1491,6 +1491,22 @@ def _section_type(text: str) -> str:
     return "unknown"
 
 
+def _heading_floor(layout: Layout, start: Start) -> float:
+    """Just below a section heading printed right above this question.
+
+    The padding above a number otherwise reached into “三、解答题（共 10 小题
+    共 90 分）” and one reader copied the heading into shengli7 #16.
+    """
+    floor = 0.0
+    for item in [*layout.headings, *layout.boundaries]:
+        bottom = item.get("bottom")
+        if bottom is None or item.get("page") != start.page or item.get("col", start.col) != start.col:
+            continue
+        if item.get("y", 0.0) < start.y and float(bottom) <= start.y + 2:
+            floor = max(floor, min(float(start.y), float(bottom) + 1))
+    return floor
+
+
 def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[dict]:
     """从 start 到 stop（阅读顺序中的下一个起点或标题；None 表示卷末）之间的版面矩形。"""
     begin = _slot_index(layout, start.page, start.col)
@@ -1504,7 +1520,7 @@ def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[d
             break
         pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else
                            MID_BLOCK_EXTRA_PAD if not start.at_start else 0)
-        top = max(slot["top"], start.y - pad) if index == begin else slot["top"]
+        top = max(slot["top"], start.y - pad, _heading_floor(layout, start)) if index == begin else slot["top"]
         bottom = slot["bottom"]
         if stop is not None and slot_key == (stop[0], stop[1]):
             bottom = min(bottom, stop[2] - END_GAP)

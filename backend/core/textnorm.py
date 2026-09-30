@@ -93,7 +93,7 @@ def spotwise_majority(first: dict, second: dict, judge: dict) -> bool:
     takes the first reader's word in one place and the second reader's in
     another, every character still has two of three votes.  Only a spot where
     it differs from both readers (something neither of them read) is a real
-    three-way disagreement.  Touching spans count as the same spot.
+    three-way disagreement.
     """
     target = _reading_key(judge)
     if not target:
@@ -102,9 +102,11 @@ def spotwise_majority(first: dict, second: dict, judge: dict) -> bool:
     spans_second = _differing_spans(_reading_key(second), target)
     if not spans_first or not spans_second:
         return not spans_first or not spans_second
+    # Spots a character or two apart are one spot: “已知点” / “知识点” judged
+    # “知点” dropped a character from each reader, and neither reads that.
     for start_a, end_a in spans_first:
         for start_b, end_b in spans_second:
-            if start_a <= end_b and start_b <= end_a:
+            if start_a <= end_b + 2 and start_b <= end_a + 2:
                 return False
     return True
 
@@ -418,6 +420,19 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
             continue
         spots.append({"reading": read, "mineru": seen, "before": left, "after": right})
     return spots
+
+
+_SPOT_PUNCTUATION = re.compile(r"[\s.,;:!?'\"′″`()\[\]{}（）【】、。，；：！？_…·]")
+
+
+def punctuation_only_spot(spot: dict) -> bool:
+    """Whether two sides of a spot differ only in punctuation or brackets."""
+    first, second = str(spot.get("reading") or ""), str(spot.get("mineru") or "")
+    if _SPOT_PUNCTUATION.sub("", first) != _SPOT_PUNCTUATION.sub("", second):
+        return False
+    decimal = "." in first + second and str(spot.get("before") or "")[-1:].isdigit() \
+        and str(spot.get("after") or "")[:1].isdigit()
+    return not decimal
 
 
 def disputed_spots(first: dict | None, second: dict | None, judge: dict | None, *,

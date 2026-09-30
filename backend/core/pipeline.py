@@ -2457,14 +2457,18 @@ FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目�
 OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
 
 
-def _objection_flag(spots: list[dict]) -> str:
+ARBITER_OBJECTION_FLAG_PREFIX = "第三次识读裁决后，MinerU 在这里读法仍不同，再看一次也不能确定："
+
+
+def _objection_flag(spots: list[dict], prefix: str = OBJECTION_FLAG_PREFIX) -> str:
     shown = "；".join(f"…{s['before']}【{s['reading']}】{s['after']}…（MinerU：{s['mineru']}）" for s in spots[:3])
     more = f" 等 {len(spots)} 处" if len(spots) > 3 else ""
-    return f"{OBJECTION_FLAG_PREFIX}{shown}{more}，请对照原卷"
+    return f"{prefix}{shown}{more}，请对照原卷"
 
 
 def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
-                       image_url: str, primary, checker, figure_source: dict) -> tuple[dict, str]:
+                       image_url: str, primary, checker, figure_source: dict,
+                       keep_reading: bool = False) -> tuple[dict, str]:
     """Both vision reads agree, yet MinerU printed other characters at a few
     clean spots (x^3 / x^2, 至少需用 / 至少需要).  The same model reading twice
     repeats its own slips, so each spot gets one neutral either/or look.
@@ -2479,19 +2483,26 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     previous = update.get("read_c") or {}
     evidence = {"objections": spots, "witness": witness[:4000],
                 **({"chosen": previous["chosen"]} if "chosen" in previous else {})}
+
+    prefix = ARBITER_OBJECTION_FLAG_PREFIX if keep_reading else OBJECTION_FLAG_PREFIX
+
+    def record(result: dict) -> None:
+        # After an arbiter the third reading itself must stay on record.
+        update["read_c"] = {**previous, "objection_check": result} if keep_reading else result
+
     try:
         engine = readers.arbiter_engine(primary, checker)
         if engine is None:
             raise readers.ReaderError("没有可用的核对模型")
         answers = readers.spot_check(engine, image_url, spots)
     except readers.ReaderError as error:
-        update["read_c"] = {**evidence, "error": str(error)}
-        flags.append(_objection_flag(spots))
+        record({**evidence, "error": str(error)})
+        flags.append(_objection_flag(spots, prefix))
         return final, source
-    update["read_c"] = {**evidence, "engine": engine.label, "answers": answers}
+    record({**evidence, "engine": engine.label, "answers": answers})
     doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
     if doubtful:
-        flags.append(_objection_flag(doubtful))
+        flags.append(_objection_flag(doubtful, prefix))
     return final, source
 
 
@@ -2517,6 +2528,12 @@ def _second_look(update: dict, flags: list[str], *, a_text: dict, b_text: dict, 
     in no fixed order, keeps those cards for a person; nothing is rewritten.
     """
     spots = textnorm.disputed_spots(a_text, b_text, c_text)
+    if spots is None:
+        return
+    # Punctuation and brackets (“()” / nothing, ′ / ', . / ;) are not worth a
+    # question: in the benchmark the answers there were noise and turned
+    # correct cards yellow.  A decimal point between digits still counts.
+    spots = [spot for spot in spots if not textnorm.punctuation_only_spot(spot)]
     if not spots or len(spots) > 4:
         return
     try:
@@ -2765,6 +2782,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             if source == "majority":
                 _second_look(update, flags, a_text=a_text, b_text=b_text, c_text=c_text,
                              image_url=clean_url, primary=primary, checker=checker)
+                # The arbiter saw MinerU's text but can still keep a slip both
+                # readers made (shengli7 #16 “器补” for the printed 添补).
+                final, source = _settle_objections(
+                    final, source, update, flags, witness=witness, number=number, image_url=clean_url,
+                    primary=primary, checker=checker, figure_source=figure_source, keep_reading=True)
         except readers.ReaderError as error:
             final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}

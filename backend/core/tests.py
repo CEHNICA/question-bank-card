@@ -100,6 +100,21 @@ class SegmentTests(TestCase):
         # end (“且 AE=4，BD=6，分别连”); the estimated start leaves room for it.
         self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 684)
 
+    def test_crop_stays_below_a_section_heading_printed_right_above(self):
+        # shengli7 #16: the padding above “16.” reached into the heading line and
+        # one reader copied “三、解答题（共 10 小题 共 90 分）” into the question.
+        blocks = [
+            block(50, 0, [36, 420, 431, 440], "14. 计算 $1+1$ 的值."),
+            block(51, 0, [36, 445, 431, 461], "15. 若 $|a|=3$，则 a-b="),
+            block(52, 0, [36, 466, 332, 482], "三、解答题（共10小题共90分）"),
+            block(53, 0, [33, 483, 579, 542], "16.（6分）小毅设计了某个产品的包装盒(如图所示)."),
+            block(57, 0, [36, 600, 835, 679], "17.（6分）把下列各数填入它所属的集合内"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertGreaterEqual(questions[16]["regions"][0]["bbox"][1], 482)
+        self.assertLessEqual(questions[16]["regions"][0]["bbox"][1], 484)
+
     def test_a_line_running_past_the_column_split_keeps_its_last_character(self):
         regions = [{"page_idx": 0, "bbox": [53.0, 93.0, 482.0, 275.0]}]
         blocks = [
