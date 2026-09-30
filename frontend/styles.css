@@ -249,6 +249,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .done-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 16px;
   border-radius: var(--radius-lg); background: linear-gradient(90deg, #e3f2ec, #eef7f2); border: 1px solid #bcdccd; color: var(--accent); font-size: 14px; font-weight: 600; }
 .done-banner span { display: inline-flex; align-items: center; gap: 8px; }
+.done-banner .done-actions { flex-wrap: wrap; justify-content: flex-end; }
 .paper-error { margin-top: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--red-soft); border: 1px solid var(--red-line); color: var(--red);
   display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .paper-error.paused { background: var(--amber-soft); border-color: var(--amber-line); color: var(--amber); }
@@ -800,6 +801,10 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
   .source-sticky { position: static; }
   .card.has-toggle:not(.compact) .card-source { padding-top: 48px; }
   .card.has-toggle .card-head { padding-right: 0; }
+}
+@media (max-width: 900px) {
+  .card-actions .kbd-hint { display: none; }
+  .card-actions .button.primary { min-width: 0; }
 }
 @media (max-width: 860px) {
   .viewer-body { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr); }

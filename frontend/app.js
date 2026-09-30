@@ -371,7 +371,21 @@ const QBNotify = (() => {
     return unseen ? `（${unseen} 份读完）${base}` : base;
   }
 
-  return { justFinished, finishedMessage, title };
+  // The next paper in list order (after the open one, wrapping around) that
+  // is ready and still has cards nobody has marked as passed.
+  function nextToReview(papers, openId) {
+    const list = papers || [];
+    const start = Math.max(0, list.findIndex((paper) => paper.id === openId));
+    for (let step = 1; step <= list.length; step += 1) {
+      const paper = list[(start + step) % list.length];
+      if (!paper || paper.id === openId || paper.status !== "ready") continue;
+      const c = paper.counts || {};
+      if ((c.total || 0) > (c.approved || 0)) return paper;
+    }
+    return null;
+  }
+
+  return { justFinished, finishedMessage, title, nextToReview };
 })();
 
 if (typeof module !== "undefined" && module.exports) {
@@ -839,12 +853,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。`
       : `全部 ${c.all} 题已标记通过并入库。`));
     banner.replaceChildren(text);
-    if (c.unpublished) banner.append(button(`入库（${c.unpublished} 题）`, "primary", publish, "", { iconName: "archive" }));
+    const actions = el("span", "done-actions");
+    if (c.unpublished) actions.append(button(`入库（${c.unpublished} 题）`, "primary", publish, "", { iconName: "archive" }));
     else {
       const link = el("a", "button", "去正式题库看看");
       link.href = "/library";
-      banner.append(link);
+      actions.append(link);
     }
+    // Reviewing a batch: offer the next paper that still has cards to look at.
+    const next = QBNotify.nextToReview(state.papers, state.paperId);
+    if (next) {
+      const c2 = next.counts || {};
+      const todo = (c2.yellow || 0) + (c2.red || 0);
+      actions.append(button(`下一份：${paperDisplayName(next)}${todo ? `（${todo} 张要看）` : ""}`,
+        c.unpublished ? "" : "primary", () => selectPaper(next.id), "打开下一份还有题卡没通过的试卷"));
+    }
+    banner.append(actions);
   }
 
   function renderPaper() {

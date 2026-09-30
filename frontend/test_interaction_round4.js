@@ -62,4 +62,15 @@ assert.match(libraryJs, /function printTools\(items, group, position\)/);
 assert.match(libraryCss, /\.print-question-tools/);
 assert.match(libraryCss, /@media \(min-width: 1600px\) \{ \.library-main \{ max-width: 1200px; \} \}/);
 
+// Finishing a paper offers the next one that still has cards to review.
+const list = [
+  { id: "1", status: "ready", counts: { total: 10, approved: 10 } },
+  { id: "2", status: "ready", counts: { total: 10, approved: 10 } },
+  { id: "3", status: "reading", counts: { total: 10 } },
+  { id: "4", status: "ready", counts: { total: 12, approved: 3, yellow: 2 } },
+];
+assert.equal(App.nextToReview(list, "2").id, "4");
+assert.equal(App.nextToReview(list, "4"), null);
+assert.match(js, /下一份：\$\{paperDisplayName\(next\)\}/);
+
 console.log("round 4 interaction checks: OK");
