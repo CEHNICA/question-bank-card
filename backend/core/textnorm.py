@@ -204,6 +204,24 @@ def strip_example_label(text: str) -> str:
     return rest
 
 
+# A printed type note in front of the task: “（多项选择题）函数……”, “【多选】”,
+# “(单选题)”.  It says what kind of question this is; it is not task text.
+_TYPE_LABEL = re.compile(
+    r"^\s*[(（【\[]\s*(多项选择题|多项选择|多选题|多选|不定项选择题|不定项选择|不定项"
+    r"|单项选择题|单项选择|单选题|单选)\s*[)）】\]]\s*"
+)
+
+
+def strip_type_label(text: str) -> tuple[str, str | None]:
+    """Drop a leading type note; return the text and the type it names."""
+    value = str(text or "")
+    match = _TYPE_LABEL.match(value)
+    if not match or not value[match.end():].strip():
+        return value, None
+    kind = "single_choice" if match.group(1).startswith("单") else "multiple_choice"
+    return value[match.end():], kind
+
+
 def _is_own_number(value: str, number: int | None) -> bool:
     """Whether a printed number is this card's, allowing a binding edge that
     clipped its leading digits (“9.” for 19, “0.” for 20)."""
@@ -280,7 +298,7 @@ _MATH_SEGMENT = re.compile(r"\$[^$]*\$")
 
 # A student's answer letter written into the printed answer brackets
 # (“是（C）个”).  The letter must not follow a Latin letter, so P(A) stays.
-_WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-D]{1,4}\s*[)）]")
+_WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-E]{1,5}\s*[)）]")
 
 
 def _html_script(match: re.Match) -> str:
@@ -302,6 +320,7 @@ def witness_key(value: str) -> str:
     text = _INLINE_TAG.sub("", text)
     text = _WITNESS_ANSWER.sub("（ ）", text)
     text = _WITNESS_LEAD.sub("", strip_example_label(text), count=1)
+    text = strip_type_label(text)[0]
     text = _WITNESS_SCORE.sub("", text)
     text = _BAR.sub(r"\\overline", text)
     text = _STYLE.sub(" ", text)
@@ -350,21 +369,21 @@ def _harmless_gap(text: str, start: int, end: int) -> bool:
         return True
     # “A.2√3” / “A 2√3”: the dot after an option letter.
     return (
-        piece == "." and before in "ABCD" and start >= 1
+        piece == "." and before in "ABCDE" and start >= 1
         and (start < 2 or not text[start - 2].isalnum() or bool(_CJK.match(text[start - 2])))
     )
 
 
 # MinerU repeats or strands option letters with nothing after them: “B. 48/5
 # B.C. 4” and, for picture options, a bare “A. B. C. D.” at the end.
-_BARE_LABELS = re.compile(r"(?:[A-D]\.)+")
+_BARE_LABELS = re.compile(r"(?:[A-E]\.)+")
 
 
 def _bare_option_labels(text: str, start: int, end: int) -> bool:
     if not _BARE_LABELS.fullmatch(text[start:end]):
         return False
     rest = text[end:]
-    return not rest or bool(re.match(r"[A-D]\.", rest))
+    return not rest or bool(re.match(r"[A-E]\.", rest))
 
 
 def _keys_agree(reading_key: str, witness_key_: str) -> bool:

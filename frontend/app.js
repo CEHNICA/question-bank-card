@@ -244,7 +244,7 @@ const QBSelection = (() => {
 const QBReviewDiff = (() => {
   "use strict";
 
-  const FIELD_NAMES = { stem: "题干", A: "选项 A", B: "选项 B", C: "选项 C", D: "选项 D" };
+  const FIELD_NAMES = { stem: "题干", A: "选项 A", B: "选项 B", C: "选项 C", D: "选项 D", E: "选项 E" };
   const READER_NAMES = { a: "读法甲", b: "读法乙", c: "第三次裁决" };
   const CONTEXT = 10;
 
@@ -271,7 +271,7 @@ const QBReviewDiff = (() => {
     const marks = {};
     const observedOnly = [];
     let hasContentDifference = false;
-    ["stem", "A", "B", "C", "D"].forEach((field) => {
+    ["stem", "A", "B", "C", "D", "E"].forEach((field) => {
       const final = field === "stem" ? question.stem : (question.options || {})[field] || "";
       const currentRanges = [];
       reads.forEach(([readerKey, reading]) => {
@@ -398,10 +398,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const $ = (id) => document.getElementById(id);
   const R = window.QBRender;
-  const OPTION_KEYS = ["A", "B", "C", "D"];
+  const OPTION_KEYS = ["A", "B", "C", "D", "E"];
   const CHOICE = new Set(["single_choice", "multiple_choice"]);
   const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", free_response: "解答题", unknown: "题型未定" };
-  const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D" };
+  const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D", E: "选项E" };
   const FILTERS = [
     { key: "all", label: "全部" },
     { key: "todo", label: "需逐题核对" },
@@ -1910,7 +1910,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           button("原卷确实无图", "small", () => confirmNoFigure(q), "仅在对照原卷后确认本题确实没有正式配图时使用")
         );
       } else {
-        if ((q.figures || []).length) actions.append(button("确认当前配图及归属", "small primary", () => confirmCurrentFigures(q), "保留每张图现有的题干或 A–D 归属", { iconName: "image" }));
+        if ((q.figures || []).length) actions.append(button("确认当前配图及归属", "small primary", () => confirmCurrentFigures(q), "保留每张图现有的题干或选项归属", { iconName: "image" }));
         actions.append(
           button("调整配图或归属", "small", () => openFigureEditor(q), "补选、裁剪图片，或明确它属于题干还是某个选项"),
           button("这些图与本题无关", "small", () => confirmNoFigure(q), "移除当前配图，并记录原卷中本题没有正式配图")
@@ -2986,6 +2986,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       input.value = (q.options || {})[key] || "";
       input.spellcheck = false;
       optionInputs[key] = input;
+      if (key === "E") {
+        // Most choice questions stop at D; E is there for the ones that print it.
+        input.placeholder = "原卷没有 E 选项就留空";
+        row.classList.add("optional");
+      }
       row.append(el("span", "", key), input);
       optionBox.append(row);
     });
@@ -3113,7 +3118,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小 · 拖框内部移动 · 空白处拖出新框补上跨栏/跨页部分 · 选中后方向键微调、Delete 删除 · 保存后 AI 按新范围重读"
       : mode === "figures"
-        ? "点蓝色候选图或画新框，再选归属（S 题干 · A–D 选项 · X 无关）· 点橙色标签改归属，拖标签只挪标签 · 保存后需重新审核"
+        ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关）· 点橙色标签改归属，拖标签只挪标签 · 保存后需重新审核"
         : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
     $("numberField").hidden = mode !== "new";
     const groups = state.paper.question_groups || [];
@@ -3467,7 +3472,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("figureSlotMenu").querySelector("[data-figure-slot-cancel]").addEventListener("click", () => {
     closeFigureSlotMenu({ cancelPending: true, rerender: true });
   });
-  const SLOT_KEYS = { s: "stem", a: "A", b: "B", c: "C", d: "D", x: "irrelevant" };
+  const SLOT_KEYS = { s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant" };
   $("figureSlotMenu").addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();

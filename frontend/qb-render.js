@@ -14,7 +14,13 @@
 })(typeof window !== "undefined" ? window : globalThis, (root) => {
   "use strict";
 
-  const OPTION_KEYS = ["A", "B", "C", "D"];
+  const OPTION_KEYS = ["A", "B", "C", "D", "E"];
+  // A–D are always shown for a choice question (an empty one says so); E only
+  // when the paper prints it.
+  function shownOptionKeys(options, figures = []) {
+    const hasE = String(options?.E ?? "").trim() || figures.some((figure) => figure.slot === "E");
+    return hasE ? OPTION_KEYS : OPTION_KEYS.slice(0, 4);
+  }
   const EXPLICIT_MATH = /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/g;
   const BLANK = /(?:\\_){2,}|_{3,}|（[ \u3000]*）|\([ \u3000]+\)/g;
   const CJK = /[⺀-⿿　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/;
@@ -668,13 +674,14 @@
     return width;
   }
 
-  // 仿照纸质试卷：选项短就一行四个，中等两个，长则一行一个。
+  // 仿照纸质试卷：选项短就一行排完（四个或五个），中等两个，长则一行一个。
   function optionColumns(options, figures = []) {
-    const values = OPTION_KEYS.map((key) => options?.[key] ?? "");
+    const keys = shownOptionKeys(options, figures);
+    const values = keys.map((key) => options?.[key] ?? "");
     const optionFigures = figures.filter((figure) => OPTION_KEYS.includes(figure.slot));
-    if (optionFigures.length >= 3) return 4;
+    if (optionFigures.length >= 3) return keys.length;
     const widest = Math.max(0, ...values.map(displayWidth));
-    if (widest <= 10) return 4;
+    if (widest <= (keys.length === 5 ? 8 : 10)) return keys.length;
     if (widest <= 26) return 2;
     return 1;
   }
@@ -692,8 +699,8 @@
       const widest = Number(list.dataset.widest || 0);
       const fontSize = parseFloat(getComputedStyle(list).fontSize) || 16;
       const need = (cols) => cols * (widest * fontSize * 0.5 + fontSize * 2.4) + (cols - 1) * fontSize;
-      const fitted = [4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
-      list.classList.remove("cols-1", "cols-2", "cols-4");
+      const fitted = [5, 4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
+      list.classList.remove("cols-1", "cols-2", "cols-4", "cols-5");
       list.classList.add(`cols-${fitted}`);
     });
   }
@@ -746,13 +753,14 @@
     const options = content.options && typeof content.options === "object" ? content.options : {};
     const hasOptions = OPTION_KEYS.some((key) => String(options[key] ?? "").trim() || figures.some((figure) => figure.slot === key));
     if (hasOptions) {
+      const keys = shownOptionKeys(options, figures);
       const columns = optionColumns(options, figures);
       const list = make("ol", `qb-options cols-${columns}`);
       if (!figures.some((figure) => OPTION_KEYS.includes(figure.slot))) {
         list.dataset.cols = String(columns);
-        list.dataset.widest = String(Math.max(0, ...OPTION_KEYS.map((key) => displayWidth(options[key] ?? ""))));
+        list.dataset.widest = String(Math.max(0, ...keys.map((key) => displayWidth(options[key] ?? ""))));
       }
-      OPTION_KEYS.forEach((key) => {
+      keys.forEach((key) => {
         const item = make("li", "qb-option");
         item.append(make("span", "qb-option-label", `${key}.`));
         const body = make("span", "qb-option-body");
@@ -772,7 +780,7 @@
       answer.append(make("strong", "", "答案"));
       const answerBody = make("span");
       // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
-      if (!opts.literal && /^\s*[A-D]{1,4}\s*$/.test(String(content.answer ?? ""))) {
+      if (!opts.literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
         answerBody.className = "qb-choice-answer";
         answerBody.textContent = String(content.answer).trim();
       } else view(answerBody, content.answer, { empty: "原卷未提供" });
@@ -812,7 +820,7 @@
   }
 
   return {
-    OPTION_KEYS, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
+    OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments,
     renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions

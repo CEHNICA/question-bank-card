@@ -270,18 +270,18 @@ class SingleInstance:
 
 
 def clean_saved_example_labels(out=None) -> None:
-    """One-time tidy of cards read before 1.5.1 (see library.strip_saved_example_labels).
+    """Tidy cards read by older versions (see library.tidy_saved_cards).
 
     A failure here must never stop the worker from reading papers."""
     try:
-        from core.library import strip_saved_example_labels
+        from core.library import tidy_saved_cards
 
-        counts = strip_saved_example_labels()
+        counts = tidy_saved_cards()
     except Exception:
         logging.getLogger("core").exception("example label cleanup failed")
         return
     if (counts["questions"] or counts["publications"]) and out is not None:
-        out.write(f"已去掉题面开头的例题标号：{counts['questions']} 张题卡、{counts['publications']} 条已入库题目")
+        out.write(f"已按新规则整理题面格式：{counts['questions']} 张题卡、{counts['publications']} 条已入库题目")
 
 
 class Command(BaseCommand):

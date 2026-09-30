@@ -20,10 +20,22 @@ from .figure_policy import (
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
 from .models import Paper, PublishedQuestion, Question, QuestionGroup
-from .textnorm import strip_example_label
+from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
-OPTION_KEYS = ("A", "B", "C", "D")
+OPTION_KEYS = ("A", "B", "C", "D", "E")
+# Every choice question carries A–D in its content, empty or not; E only when
+# printed.  A four-option question therefore keeps the exact content (and
+# approval hash) it had before E existed.
+BASE_OPTION_KEYS = ("A", "B", "C", "D")
+
+
+def option_content(options: dict | None) -> dict:
+    options = options or {}
+    content = {key: options.get(key, "") for key in BASE_OPTION_KEYS}
+    if str(options.get("E") or "").strip():
+        content["E"] = options["E"]
+    return content
 REVIEWABLE_STATES = {Question.State.GREEN, Question.State.YELLOW}
 
 
@@ -50,7 +62,7 @@ def final_content(question: Question) -> dict:
         "section": question.section,
         "question_type": question.question_type,
         "stem": question.stem,
-        "options": {k: (question.options or {}).get(k, "") for k in OPTION_KEYS} if is_choice else {},
+        "options": option_content(question.options) if is_choice else {},
         "answer": question.answer or "",
         "analysis": question.analysis or "",
         "figures": [
@@ -307,58 +319,104 @@ def publication_json(publication: PublishedQuestion) -> dict:
     }
 
 
-def strip_saved_example_labels() -> dict[str, int]:
-    """Remove a leading “例1”-style label that older reads saved in the stem.
+_E_TAG = re.compile(r"\s*【\s*E\s*】\s*")
+_LABEL_SETS_TYPE = {"unknown", "", "single_choice", "multiple_choice"}
 
-    Before 1.5.1 the reader could copy a textbook example's label into the
-    task text (“例1用列举法表示……”).  Only the label goes; every other word,
-    figure and range stays.  A card whose approval was current keeps it: the
-    reviewer approved that task, and the label is not part of the task.
-    Published snapshots are updated in place, the same way a task rename
-    updates their file name.  Safe to run on every start: once nothing
-    starts with a label it changes nothing.
+
+def tidy_text(stem: str, options: dict | None, question_type: str) -> tuple[str, dict, str]:
+    """Apply the saved-card fixes that only reformat, never re-read.
+
+    * a leading “例1” label is dropped (1.5.1);
+    * a leading “（多项选择题）” note is dropped and names the type, unless a
+      person already made it a fill-in or free-response question;
+    * “3个【E】4个” in option D — an E the parser did not know about — is
+      split into D “3个” and E “4个”.
+    """
+    new_stem = strip_example_label(stem or "")
+    new_stem, labelled = strip_type_label(new_stem)
+    if new_stem != (stem or ""):
+        new_stem = new_stem.lstrip()
+    new_type = question_type or "unknown"
+    if labelled and new_type in _LABEL_SETS_TYPE:
+        new_type = labelled
+    new_options = dict(options or {})
+    fourth = new_options.get("D")
+    if isinstance(fourth, str) and _E_TAG.search(fourth) and not str(new_options.get("E") or "").strip():
+        before, after = _E_TAG.split(fourth, maxsplit=1)
+        if before.strip() and after.strip():
+            new_options["D"] = before.strip()
+            new_options["E"] = after.strip()
+    return new_stem, new_options, new_type
+
+
+def _tidy_reading(reading):
+    if not isinstance(reading, dict):
+        return reading
+    stem, options, _kind = tidy_text(
+        reading.get("stem") if isinstance(reading.get("stem"), str) else "",
+        reading.get("options") if isinstance(reading.get("options"), dict) else {},
+        "unknown",
+    )
+    changed = dict(reading)
+    if isinstance(reading.get("stem"), str):
+        changed["stem"] = stem
+    if isinstance(reading.get("options"), dict):
+        changed["options"] = options
+    return changed
+
+
+def tidy_saved_cards() -> dict[str, int]:
+    """Bring cards read by older versions up to the current text rules.
+
+    Only formatting moves (see tidy_text); every word, figure and range stays.
+    A card whose approval was current keeps it: the reviewer approved that
+    task, and a label or a misplaced “【E】” is not part of it.  Published
+    snapshots get the same treatment in place, as a task rename updates
+    their file name, so publishing again does not mint a new version.  Safe
+    to run on every start: once everything is tidy it changes nothing.
     """
 
     counts = {"questions": 0, "publications": 0}
     with transaction.atomic():
-        candidates = (
-            Question.all_objects.select_for_update()
-            .select_related("paper", "group")
-            .filter(stem__contains="例")
-        )
-        for question in candidates:
-            stem = strip_example_label(question.stem)
-            if stem == question.stem:
+        for question in Question.all_objects.select_for_update().select_related("paper", "group"):
+            stem, options, kind = tidy_text(question.stem, question.options, question.question_type)
+            if (stem, options, kind) == (question.stem, dict(question.options or {}), question.question_type):
                 continue
             approval_was_current = approval_is_current(question)
-            question.stem = stem
+            question.stem, question.options, question.question_type = stem, options, kind
             for field in ("read_a", "read_b", "read_c"):
-                reading = getattr(question, field)
-                if isinstance(reading, dict) and isinstance(reading.get("stem"), str):
-                    cleaned = strip_example_label(reading["stem"])
-                    if cleaned != reading["stem"]:
-                        setattr(question, field, {**reading, "stem": cleaned})
+                setattr(question, field, _tidy_reading(getattr(question, field)))
             if approval_was_current:
                 question.approved_content_hash = approval_hash(question)
             question.save(update_fields=[
-                "stem", "read_a", "read_b", "read_c", "approved_content_hash", "updated_at",
+                "stem", "options", "question_type", "read_a", "read_b", "read_c",
+                "approved_content_hash", "updated_at",
             ])
             counts["questions"] += 1
 
-        for publication in PublishedQuestion.objects.select_for_update().filter(search_text__contains="例"):
+        for publication in PublishedQuestion.objects.select_for_update():
             content = deepcopy(publication.content)
-            stem = strip_example_label(content.get("stem") or "")
-            if stem == (content.get("stem") or ""):
+            original = (content.get("stem") or "", dict(content.get("options") or {}),
+                        content.get("question_type") or "unknown")
+            stem, options, kind = tidy_text(*original)
+            if (stem, options, kind) == original:
                 continue
             old_hash = publication.content_hash
-            content["stem"] = stem
+            content["stem"], content["question_type"] = stem, kind
+            if content.get("options") or options:
+                content["options"] = option_content(options)
             new_hash = content_hash(content)
             review = content.get("review")
             if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:
                 review["approved_content_hash"] = new_hash
             publication.content = content
             publication.content_hash = new_hash
+            publication.question_type = kind
             publication.search_text = _search_text(content)
-            publication.save(update_fields=["content", "content_hash", "search_text"])
+            publication.save(update_fields=["content", "content_hash", "question_type", "search_text"])
             counts["publications"] += 1
     return counts
+
+
+# 1.5.1 name for the same cleanup.
+strip_saved_example_labels = tidy_saved_cards

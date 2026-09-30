@@ -345,7 +345,7 @@
         row.append(node("strong", "", `${index}.`));
         const body = node("div");
         const answer = node("span");
-        if (/^\s*[A-D]{1,4}\s*$/.test(String(item.content.answer ?? ""))) answer.textContent = String(item.content.answer).trim();
+        if (/^\s*[A-E]{1,5}\s*$/.test(String(item.content.answer ?? ""))) answer.textContent = String(item.content.answer).trim();
         else QB.renderTypeset(answer, item.content.answer, { empty: "（原卷未提供答案）" });
         body.append(answer);
         if (String(item.content.analysis || "").trim()) {

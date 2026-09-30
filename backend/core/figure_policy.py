@@ -142,6 +142,13 @@ _ENGLISH_CUE = re.compile(
     re.IGNORECASE,
 )
 
+# Options may run to E (some textbook multiple-choice questions print five).
+# A picture-only choice question must still bind A–D; E is only checked when
+# the paper has one.
+OPTION_SLOTS = frozenset({"A", "B", "C", "D", "E"})
+REQUIRED_OPTION_SLOTS = frozenset({"A", "B", "C", "D"})
+
+
 # Backwards-compatible public matcher used by older tests and callers.
 MENTIONS_FIGURE = re.compile(
     rf"(?:{_CHINESE_CUE.pattern}|{_ENGLISH_CUE.pattern})",
@@ -152,7 +159,9 @@ MENTIONS_FIGURE = re.compile(
 def _question_text(stem: str, options: dict | None = None) -> str:
     values = [str(stem or "")]
     if isinstance(options, dict):
-        values.extend(str(options.get(key, "") or "") for key in ("A", "B", "C", "D"))
+        values.extend(str(options.get(key, "") or "") for key in sorted(REQUIRED_OPTION_SLOTS))
+        if str(options.get("E", "") or "").strip():
+            values.append(str(options["E"]))
     return unicodedata.normalize("NFKC", "\n".join(values))
 
 
@@ -239,7 +248,7 @@ def without_automatic_textbook_badges(figures: list[dict]) -> list[dict]:
         if not (
             isinstance(figure, dict)
             and figure.get("source") in {"auto", "other", "row"}
-            and figure.get("slot") not in {"A", "B", "C", "D"}
+            and figure.get("slot") not in OPTION_SLOTS
             and _has_textbook_section_badge_geometry(figure)
         )
     ]
@@ -259,14 +268,14 @@ def _automatic_decoration_labels(
 
     choice_kind = kind in {"single_choice", "multiple_choice"}
     has_text_options = bool(options)
-    has_assigned_option = any(role in {"A", "B", "C", "D"} for role in assignments.values())
+    has_assigned_option = any(role in OPTION_SLOTS for role in assignments.values())
     labels: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, dict) or candidate.get("label") is None:
             continue
         label = str(candidate["label"])
         assigned_role = assignments.get(label)
-        if assigned_role in {"A", "B", "C", "D"}:
+        if assigned_role in OPTION_SLOTS:
             # A genuinely image-based choice may itself be small.  Never
             # override a reader's explicit option assignment.
             continue
@@ -301,7 +310,7 @@ def resolve_automatic_figure_assignments(
             label = candidate.get("label")
             if label is not None and str(label) not in decorations:
                 resolved[str(label)] = "stem"
-        bound_roles = {"stem", "A", "B", "C", "D"}
+        bound_roles = {"stem", *OPTION_SLOTS}
         if str(kind or "unknown") not in {"single_choice", "multiple_choice"} \
                 and not any(role in bound_roles for role in resolved.values()):
             # If a free-response stem explicitly says a supplied figure exists
@@ -335,7 +344,7 @@ def repaired_automatic_figures(
             continue
         label = str(candidate.get("label"))
         role = assignments.get(label)
-        if role not in {"stem", "A", "B", "C", "D"}:
+        if role not in {"stem", *OPTION_SLOTS}:
             continue
         key = candidate_key(candidate)
         if key is None or (role, key) in existing:
@@ -383,7 +392,7 @@ def missing_choice_figure_slots(
     narrow conflict; a single reader, reader consensus, or any bound option
     figure still keeps the existing A-D completeness safeguard.
     """
-    option_slots = {"A", "B", "C", "D"}
+    option_slots = REQUIRED_OPTION_SLOTS
     if kind not in {"single_choice", "multiple_choice"} or options:
         return set()
     bound = {
@@ -473,20 +482,20 @@ def automatic_review(
         # Two or more printed option crops whose option text is empty *are* the
         # options: the paper itself supplies them, whatever the stem says.
         option_crops = {
-            figure.get("slot") for figure in figures if figure.get("slot") in {"A", "B", "C", "D"}
+            figure.get("slot") for figure in figures if figure.get("slot") in OPTION_SLOTS
         }
         texts = options or {}
         if len(option_crops) >= 2 and not any(str(texts.get(slot, "")).strip() for slot in option_crops):
             cues.append("选项为印刷图")
     bound_slots = {
         figure.get("slot") for figure in figures
-        if figure.get("slot") == "stem" or figure.get("slot") in {"A", "B", "C", "D"}
+        if figure.get("slot") == "stem" or figure.get("slot") in OPTION_SLOTS
     }
     missing_descriptions = sorted((described_slots or set()) - bound_slots)
     foreign_labels = {label for label, role in assignments.items() if role.startswith("q") and role[1:].isdigit()}
     bound_labels = {
         label for label, role in assignments.items()
-        if role == "stem" or role in {"A", "B", "C", "D"}
+        if role == "stem" or role in OPTION_SLOTS
     }
     decoration_labels = {label for label, role in assignments.items() if role == "decoration"}
     explicitly_excluded = {

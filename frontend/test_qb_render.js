@@ -58,3 +58,10 @@ assert.ok(joinedFit > 0.49 && joinedFit <= 0.501);
 assert.equal(QB.fitScale(() => ({ width: 900, height: 9000 }), 900, 100, { min: 0.04 }), 0.04);
 
 console.log("qb-render regression checks: OK");
+
+// A fifth option is shown only when printed; short ones sit on one row.
+assert.deepEqual(QB.shownOptionKeys({ A: "1", B: "2", C: "3", D: "4" }), ["A", "B", "C", "D"]);
+assert.deepEqual(QB.shownOptionKeys({ A: "0个", B: "1个", C: "2个", D: "3个", E: "4个" }), ["A", "B", "C", "D", "E"]);
+assert.deepEqual(QB.shownOptionKeys({}, [{ slot: "E" }]), ["A", "B", "C", "D", "E"]);
+assert.equal(QB.optionColumns({ A: "0个", B: "1个", C: "2个", D: "3个", E: "4个" }), 5);
+assert.equal(QB.optionColumns({ A: "1", B: "2", C: "3", D: "4" }), 4);

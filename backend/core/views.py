@@ -37,7 +37,7 @@ from .textnorm import fix_reading_symbols, fix_symbols
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
 TYPES = {"single_choice", "multiple_choice", "fill_blank", "free_response", "unknown"}
-SLOTS = {"stem", "A", "B", "C", "D"}
+SLOTS = {"stem", "A", "B", "C", "D", "E"}
 
 
 # ---------------------------------------------------------------- 工具

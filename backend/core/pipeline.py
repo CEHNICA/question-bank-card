@@ -62,7 +62,7 @@ _EXAMPLE_SOLUTION_TEXT_RE = re.compile(
 # structure instead of inventing four missing image options.  This is kept
 # deliberately narrow so genuine image-choice questions are unaffected.
 _NUMERIC_SUBQUESTION_RE = re.compile(r"(?:^|\n|\s)[（(]\s*(\d{1,2})\s*[)）]")
-_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-DＡ-Ｄ]\s*[.．、:：)]", re.I)
+_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-EＡ-Ｅ]\s*[.．、:：)]", re.I)
 _EXERCISE_ACTION_RE = re.compile(
     r"(?:请|试)?(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析)"
 )
@@ -391,7 +391,7 @@ def _sketches_beside_text_options(*, stem: str, options: dict, kind: str, assign
         # printed picture; only a question printed entirely as text is judged.
         return assignments
     return {
-        label: ("none" if role in {"A", "B", "C", "D"} else role)
+        label: ("none" if role in readers.OPTION_KEYS else role)
         for label, role in (assignments or {}).items()
     }
 
@@ -1290,7 +1290,7 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
     return best_row
 
 
-_OPTION_LINE = re.compile(r"^\s*[A-DＡ-Ｄ]\s*[.．、:：]")
+_OPTION_LINE = re.compile(r"^\s*[A-EＡ-Ｅ]\s*[.．、:：]")
 LOCATE_SNAP_RANGE = 30.0   # 页面坐标：定位结果向下吸附到题干行的最大距离
 
 
@@ -2831,7 +2831,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         if label not in labels:
             continue
         box = {"page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"]}
-        if role in {"stem", "A", "B", "C", "D"}:
+        if role == "stem" or role in readers.OPTION_KEYS:
             figures.append({"slot": role, **box, "source": "auto"})
         elif role.startswith("q") and role[1:].isdigit():
             foreign.append({

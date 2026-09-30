@@ -156,7 +156,7 @@ _LEADING_SOURCE_RE = re.compile(
     re.I,
 )
 _LEADING_SUBQUESTION_RE = re.compile(r"^\s*[（(]\s*([12])\s*[)）]", re.M)
-_LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-DＡ-Ｄ]\s*[.．、:]", re.I)
+_LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-EＡ-Ｅ]\s*[.．、:]", re.I)
 _LEADING_QUESTION_MARK_RE = re.compile(r"[？?]|[（(]\s*[）)]|(?:求|证明|计算|判断|选择|填空)")
 # Numbered exam instructions (“注意事项：1．答题前…”) are not questions.  Both
 # a notice header and instruction vocabulary are required, so an ordinary

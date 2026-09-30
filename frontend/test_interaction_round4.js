@@ -51,7 +51,7 @@ assert.match(html, /class="material-options"/);
 assert.match(css, /\.material-type:has\(input\[value="book"\]:checked\) \.material-hint \{ display: block; \}/);
 
 // Figure owners by key; the viewer offers editing.
-assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", x: "irrelevant" \}/);
+assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant" \}/);
 assert.match(html, /data-figure-slot="irrelevant" aria-keyshortcuts="X"/);
 assert.match(html, /id="viewerEdit"/);
 assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"/);

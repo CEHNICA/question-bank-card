@@ -21,7 +21,7 @@ import requests
 
 from . import preferences
 from .account_pool import AccountPoolError, account_pool, secrets_from_environment
-from .textnorm import clean_option, clean_stem, fix_symbols
+from .textnorm import clean_option, clean_stem, fix_symbols, strip_type_label
 
 MINIMAX_MODEL = preferences.DEFAULT_MODELS["minimax"]  # legacy public constant
 MINIMAX_DEFAULT_URL = "https://api.minimax.cn/v1/chat/completions"
@@ -34,8 +34,8 @@ SERVER_RETRYABLE = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524, 529})
 BACKOFF = (2.0, 5.0, 12.0)
 RATE_LIMIT_ROUNDS = 3
 MAX_RESPONSE_BYTES = 200_000
-OPTION_KEYS = ("A", "B", "C", "D")
-TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|配图|其他题号|刻度)\s*】")
+OPTION_KEYS = ("A", "B", "C", "D", "E")
+TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|配图|其他题号|刻度)\s*】")
 
 
 MAX_PARALLEL_CARDS = 16
@@ -239,22 +239,23 @@ TRANSCRIBE_RULES = """你是数学资料誊录员。图片是从数学试卷或�
 - 学生的手写字、批改符号、圈画、划线、草稿一律忽略；括号或横线里手写填的答案不要写，保留空括号（ ）或横线 ____。
 - 数学式用 LaTeX，行内公式用 $...$ 包住；中文和中文标点照原卷。
 - 数轴、函数图象、平面/立体几何图（包括棱柱）、统计图、表格、流程图等视觉内容不得改写成“[图：……]”“图片中……”或其他文字说明，也不要重排成 Markdown 表格、字符图或项目列表。只誊录图外真正印刷的题干文字。
-- 某个选项只有图时，对应的【A】【B】【C】【D】留空；图内的数字、字母、刻度和表格单元格仍属于配图，不要另抄成选项文字。
+- 某个选项只有图时，对应的【A】【B】【C】【D】（或【E】）留空；图内的数字、字母、刻度和表格单元格仍属于配图，不要另抄成选项文字。
 - 逐字照抄印刷内容：原卷有错字、漏字、语句不通、字母顺序或大小写特别（如 FE、边长为 C）、人名书名与常识不符时也原样照抄，不要改正、补字、删字或调换顺序。
 - 原卷印的是平行四边形符号时写成 ▱（例如 ▱ABCD），不要写成 \\square、\\Box 或 □；原卷印的是汉字“平行四边形”就照写汉字。
 - 题号不要写进题干，教材里“例1”“例题2”这类例题标号也不要写进题干；分值（如"（15分）"）不要写。
 - 小问 (1)(2)… 各起一行。
-- 选择题把选项分别写在【A】【B】【C】【D】后面；不是选择题就不要写这四个标记。
+- 选择题把选项分别写在【A】【B】【C】【D】后面，原卷印了 E 选项就再写【E】；不是选择题就不要写这些标记。
+- 题干开头印的“（多项选择题）”“（多选）”“（单选题）”这类题型标注不要写进题干，写在【题型】里。
 - 看不清、无法确定的字写成 [?]，不要猜。
 - 若图里还露出了别的题目的印刷内容（例如上一题的末尾或下一题的开头），不要誊录它；若看到了别的题号，写在【其他题号】里。
 - 独立判断候选内容的性质，不要因为程序提供了候选编号就把教材小标题或讲解正文硬说成题目：
   “例1/例题2”开头的是例题；练习、习题中的作答任务是练习题；概念说明、性质讲解等是教材正文；只有章节或小节名称的是标题；确实无法确定才写不确定。"""
 
 FIGURE_RULES = """图中蓝色框和编号标出的是候选配图。请在【配图】里逐个判断：
-编号=题干（属于本题题干的印刷图）、编号=A/B/C/D（某个选项的印刷图）、
+编号=题干（属于本题题干的印刷图）、编号=A/B/C/D/E（某个选项的印刷图）、
 编号=第N题（印刷的图，但属于别的题，例如图下印着"第14题图"）、编号=无关（手写、草图、涂画）。
 例如：1=题干, 2=第14题, 3=无关。没有蓝框就写"无"。
-数轴、几何图、立体图、统计图、表格等只在【配图】里标为题干或 A/B/C/D；纯图片选项的文字标签必须留空，不得描述或重排图片内容。
+数轴、几何图、立体图、统计图、表格等只在【配图】里标为题干或 A/B/C/D/E；纯图片选项的文字标签必须留空，不得描述或重排图片内容。
 如果原卷本题有印刷的图，却没有被任何蓝框框住，在【配图】末尾加上"缺图"。
 几张图并排时，逐张核对图中的字母、数字标注是否与本题题干提到的点、线、数据一致；对不上的图属于别的题，写“无关”。"""
 
@@ -268,6 +269,7 @@ OUTPUT_FORMAT = """只按下面的格式输出，不要输出别的内容：
 【B】…
 【C】…
 【D】…
+【E】…（原卷没有 E 选项就不写这一行）
 【配图】…
 【其他题号】没有就写"无\""""
 
@@ -306,7 +308,7 @@ def arbiter_prompt(number: int, first: dict, second: dict, witness: str = "") ->
             + witness.strip()[:1500]
         ] if witness and witness.strip() else []),
         "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
-        "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…（不是选择题就不写选项）",
+        "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…\n【E】…（原卷有 E 选项才写；不是选择题就不写选项）",
     ])
 
 
@@ -472,15 +474,20 @@ def parse_reading(text: str, number: int) -> dict:
             break
     figures: dict[str, str] = {}
     figure_text = tags.get("配图", "")
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-DＡ-Ｄ])", figure_text):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", figure_text):
         if role.startswith("第"):
             other = int(re.search(r"\d+", role).group(0))
             figures[label] = "stem" if other == number else f"q{other}"
         else:
-            figures[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤ", "ABCD")))
+            figures[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
     others = [int(v) for v in re.findall(r"\d{1,2}", tags.get("其他题号", "")) if int(v) != number]
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
+    stem, labelled_kind = strip_type_label(stem)
+    stem = stem.strip()
+    if labelled_kind:
+        # The paper's own “（多项选择题）” outranks the model's guess.
+        kind = labelled_kind
     stem, stem_described = strip_bracketed_figure_descriptions(stem)
     if stem_described:
         figure_descriptions.append("stem")
@@ -510,7 +517,8 @@ def parse_reading(text: str, number: int) -> dict:
 
 _INLINE_OPTIONS = re.compile(
     r"(?:(?<=[\s)）　])|^)A\s*[.．、]\s*(?P<A>.+?)\s+B\s*[.．、]\s*(?P<B>.+?)\s+"
-    r"C\s*[.．、]\s*(?P<C>.+?)\s+D\s*[.．、]\s*(?P<D>.+?)\s*$",
+    r"C\s*[.．、]\s*(?P<C>.+?)\s+D\s*[.．、]\s*(?P<D>.+?)"
+    r"(?:\s+E\s*[.．、]\s*(?P<E>.+?))?\s*$",
     re.S,
 )
 
@@ -520,13 +528,15 @@ def split_inline_options(stem: str) -> tuple[str, dict[str, str]]:
     match = _INLINE_OPTIONS.search(stem)
     if not match or not match.start():
         return stem, {}
-    options = {key: fix_symbols(match.group(key).strip()) for key in OPTION_KEYS}
+    options = {key: fix_symbols(match.group(key).strip()) for key in ("A", "B", "C", "D")}
     if not all(options.values()):
         return stem, {}
+    if match.group("E"):
+        options["E"] = fix_symbols(match.group("E").strip())
     return stem[:match.start()].rstrip(), options
 
 
-FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-DＡ-Ｄ]{1,4}\s*([)）])(?=\s*[。．.]?\s*$)")
+FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-EＡ-Ｅ]{1,5}\s*([)）])(?=\s*[。．.]?\s*$)")
 
 
 def drop_filled_choice(stem: str) -> str:
@@ -824,7 +834,7 @@ def classify_figures_prompt(number: int, labels: list[str]) -> str:
     return (
         f"图中用蓝色框和编号标出了候选配图。这是第 {number} 题的截图。上次没有判断编号 {listed} 的框，"
         "请只判断这几个框：\n"
-        "编号=题干（属于本题题干的印刷图）、编号=A/B/C/D（某个选项的印刷图）、"
+        "编号=题干（属于本题题干的印刷图）、编号=A/B/C/D/E（某个选项的印刷图）、"
         "编号=第N题（印刷的图，但属于别的题）、编号=无关（手写、草图、涂画、背面透过来的字、装饰）。\n"
         "每个编号一行，例如：2=无关。不要输出别的内容。"
     )
@@ -836,14 +846,14 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
     raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
     wanted = set(labels)
     result: dict[str, str] = {}
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-DＡ-Ｄ])", raw):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", raw):
         if label not in wanted or label in result:
             continue
         if role.startswith("第"):
             other = int(re.search(r"\d+", role).group(0))
             result[label] = "stem" if other == number else f"q{other}"
         else:
-            result[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤ", "ABCD")))
+            result[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
     return result
 
 
