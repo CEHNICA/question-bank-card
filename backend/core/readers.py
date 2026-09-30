@@ -488,6 +488,10 @@ def parse_reading(text: str, number: int) -> dict:
         cut = re.search(r"\n\s*A\s*[.．、:：]", stem)
         if cut:
             stem = stem[:cut.start()].rstrip()
+    elif kind in {"single_choice", "multiple_choice"}:
+        # 另一种写法：选项全写在【题干】里（“…（ ）A. √23 B. √5 C. √26 D. √11”），
+        # 【A】–【D】为空。拆出来，否则两次识读只因写法不同而“不一致”。
+        stem, options = split_inline_options(stem)
     stem = drop_filled_choice(stem)
     return {
         "stem": stem,
@@ -501,6 +505,24 @@ def parse_reading(text: str, number: int) -> dict:
         "figure_descriptions": figure_descriptions,
         "unclear": "[?]" in stem or any("[?]" in v for v in options.values()),
     }
+
+
+_INLINE_OPTIONS = re.compile(
+    r"(?:(?<=[\s)）　])|^)A\s*[.．、]\s*(?P<A>.+?)\s+B\s*[.．、]\s*(?P<B>.+?)\s+"
+    r"C\s*[.．、]\s*(?P<C>.+?)\s+D\s*[.．、]\s*(?P<D>.+?)\s*$",
+    re.S,
+)
+
+
+def split_inline_options(stem: str) -> tuple[str, dict[str, str]]:
+    """“…（ ）A. 2 B. 3 C. 4 D. 5” → (“…（ ）”, {A: 2, …}); unchanged when not all four are there."""
+    match = _INLINE_OPTIONS.search(stem)
+    if not match or not match.start():
+        return stem, {}
+    options = {key: fix_symbols(match.group(key).strip()) for key in OPTION_KEYS}
+    if not all(options.values()):
+        return stem, {}
+    return stem[:match.start()].rstrip(), options
 
 
 FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-DＡ-Ｄ]{1,4}\s*([)）])(?=\s*[。．.]?\s*$)")
@@ -792,6 +814,34 @@ def spot_check(engine: Engine, image_url: str, spots: list[dict]) -> list[str | 
     """For each spot: ``"reading"``, ``"mineru"`` or ``None`` (unclear)."""
     prompt, order = spot_check_prompt(spots)
     return parse_spot_answers(chat(engine, prompt, [image_url], max_tokens=600), order)
+
+
+def classify_figures_prompt(number: int, labels: list[str]) -> str:
+    listed = "、".join(labels)
+    return (
+        f"图中用蓝色框和编号标出了候选配图。这是第 {number} 题的截图。上次没有判断编号 {listed} 的框，"
+        "请只判断这几个框：\n"
+        "编号=题干（属于本题题干的印刷图）、编号=A/B/C/D（某个选项的印刷图）、"
+        "编号=第N题（印刷的图，但属于别的题）、编号=无关（手写、草图、涂画、背面透过来的字、装饰）。\n"
+        "每个编号一行，例如：2=无关。不要输出别的内容。"
+    )
+
+
+def classify_figures(engine: Engine, image_url: str, number: int, labels: list[str]) -> dict[str, str]:
+    """Roles for boxes a reading left unjudged; boxes it still skips stay unjudged."""
+    raw = chat(engine, classify_figures_prompt(number, labels), [image_url], max_tokens=300)
+    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
+    wanted = set(labels)
+    result: dict[str, str] = {}
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-DＡ-Ｄ])", raw):
+        if label not in wanted or label in result:
+            continue
+        if role.startswith("第"):
+            other = int(re.search(r"\d+", role).group(0))
+            result[label] = "stem" if other == number else f"q{other}"
+        else:
+            result[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤ", "ABCD")))
+    return result
 
 
 def locate_band(engine: Engine, image_url: str, number: int) -> int | None:

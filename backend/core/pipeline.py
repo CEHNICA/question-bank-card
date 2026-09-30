@@ -22,7 +22,7 @@ from . import imaging, import_planning, photos, readers, segment, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
-    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag,
+    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag, has_figure_cue,
     candidate_key, missing_choice_figure_slots, recheck_automatic_review,
     resolve_automatic_figure_assignments, stored_or_derived_review,
     without_automatic_textbook_badges,
@@ -366,9 +366,33 @@ def _resolve_automatic_figure_assignments(
         kind=kind,
         candidates=candidates,
         assignments=_row_as_choice_options(
-            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments,
+            stem=stem, options=options, kind=kind, candidates=candidates,
+            assignments=_sketches_beside_text_options(
+                stem=stem, options=options, kind=kind, assignments=assignments,
+            ),
         ),
     )
+
+
+def _sketches_beside_text_options(*, stem: str, options: dict, kind: str, assignments: dict) -> dict:
+    """A picture tied to an option that already has printed text is a student's sketch.
+
+    On a marked photo (凤城高一) readers tied the parabolas a student drew next
+    to “A. y=-2/x” to option A.  A choice question whose options are printed
+    as text, and whose wording asks for no picture, has no option pictures;
+    such a binding is dropped instead of turning the card yellow.
+    """
+    texts = options or {}
+    all_printed_as_text = all(str(texts.get(key, "")).strip() for key in ("A", "B", "C", "D"))
+    if kind not in {"single_choice", "multiple_choice"} or not all_printed_as_text \
+            or has_figure_cue(stem, options):
+        # A lone captioned option (“A. 向右” beside an arrow) may really be a
+        # printed picture; only a question printed entirely as text is judged.
+        return assignments
+    return {
+        label: ("none" if role in {"A", "B", "C", "D"} else role)
+        for label, role in (assignments or {}).items()
+    }
 
 
 def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dict]) -> list[str]:
@@ -2428,6 +2452,7 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     return cleaned
 
 
+FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目开头可能被切掉了，请点“调整范围”检查"
 OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
 
 
@@ -2633,6 +2658,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     figures, foreign = [], []
     labels = {c["label"]: c for c in snapshot["candidates"]}
+    # Readers sometimes judge only some of the numbered boxes.  An unjudged box
+    # made the card yellow (“原卷可能有图没有被找到”) although nothing was
+    # missing; ask once, about just those boxes.
+    unjudged = sorted(set(labels) - set((figure_source.get("figures") or {})), key=lambda value: int(value))
+    if a and unjudged:
+        try:
+            extra = readers.classify_figures(primary, marked_url, number, unjudged)
+        except readers.ReaderError:
+            extra = {}
+        if extra:
+            figure_source = {**figure_source, "figures": {**(figure_source.get("figures") or {}), **extra}}
+            if isinstance(update.get("read_a"), dict):
+                update["read_a"] = {**update["read_a"], "figures_followup": extra}
     provisional_kind = final.get("type") or snapshot["question_type"] or "unknown"
     figure_assignments = _resolve_automatic_figure_assignments(
         stem=final.get("stem", ""),
@@ -2714,6 +2752,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if number_flag := _number_seen_flag(
             number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
+    elif snapshot.get("start_source") == "located" and not any(
+            isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
+        # The start came from the AI locator and nobody saw the printed number
+        # in the crop: the opening line is probably above it (口镇第 8 题只剩
+        # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
+        flags.append(FLAG_LOCATED_WITHOUT_NUMBER)
     return {
         **update,
         "stem": final.get("stem", ""),
@@ -3013,6 +3057,17 @@ def distribute_figure_rows(paper: Paper) -> int:
         targets = _row_targets(owner, row, by_key)
         if targets is None:
             continue
+        # The row's order is one piece of evidence; the owner's own reader is
+        # another.  When the reader tied exactly the box the order gives the
+        # owner (and nothing else), the two agree and nobody needs to check the
+        # pairing.  A reader that picked a different box (菱形周清第 15 题 took
+        # the leftmost, the order says rightmost) or none keeps every card flagged.
+        own_box = row[targets.index(owner)]
+        claimed = {
+            label for label, role in ((owner.read_a or {}).get("figures") or {}).items()
+            if role == "stem"
+        }
+        confirmed = claimed == {str(own_box.get("label"))} and own_box.get("label") is not None
         for question, figure in zip(targets, row):
             box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
             question.figures = [box]
@@ -3021,9 +3076,10 @@ def distribute_figure_rows(paper: Paper) -> int:
                 assignments={}, figures=question.figures,
             )
             flags = [flag for flag in (question.flags or []) if not figure_flag(flag) and flag != FLAG_ROW_FIGURE]
-            question.flags = [*flags, FLAG_ROW_FIGURE]
+            flags = _flags_after_figure_review(flags, question.figure_review, question.figures)
+            question.flags = flags if confirmed else [*flags, FLAG_ROW_FIGURE]
             if question.state in {Question.State.GREEN, Question.State.YELLOW}:
-                question.state = Question.State.YELLOW
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             _invalidate_approval(question)
             question.save()
             changed += 1

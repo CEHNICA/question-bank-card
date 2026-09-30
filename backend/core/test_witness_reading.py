@@ -350,6 +350,39 @@ class WitnessPipelineTests(TestCase):
         self.assertEqual(question.read_c["answers"], [None])
 
 
+    def figure_card(self):
+        question = self.card("1. 如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。")
+        question.figure_candidates = [
+            {"label": "1", "seq": 7, "page_idx": 0, "bbox": [300.0, 120.0, 380.0, 180.0]},
+            {"label": "2", "seq": 8, "page_idx": 0, "bbox": [400.0, 120.0, 470.0, 180.0]},
+        ]
+        question.save()
+        return question
+
+    def test_boxes_a_reader_did_not_judge_are_asked_about_once(self):
+        question = self.figure_card()
+        chat = ScriptedChat({
+            ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
+            ("classify", 1): "2=无关",
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual([call[0] for call in chat.calls].count("classify"), 1)
+        self.assertEqual((question.state, len(question.figures)), (Question.State.GREEN, 1), question.flags)
+        self.assertEqual(question.read_a["figures_followup"], {"2": "none"})
+
+    def test_a_box_still_unjudged_keeps_the_card_for_a_person(self):
+        question = self.figure_card()
+        chat = ScriptedChat({
+            ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
+            ("classify", 1): "看不清",
+        })
+        with mock.patch.object(readers, "chat", chat):
+            pipeline.read_questions(self.paper, [question])
+        question.refresh_from_db()
+        self.assertEqual(question.state, Question.State.YELLOW)
+
     def test_failed_primary_still_uses_the_checker(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
@@ -402,3 +435,24 @@ class SpotCheckParsingTests(SimpleTestCase):
         self.assertEqual(answers[0], order[0]["甲"])
         self.assertEqual(answers[1], order[1]["乙"])
         self.assertEqual(readers.parse_spot_answers("看不清", order), [None, None])
+
+
+class ReadingFormTests(SimpleTestCase):
+    """Two readings that print the same must not need an arbiter."""
+
+    def test_options_written_inside_the_stem_are_split_out(self):
+        raw = ("【题型】单选题\n【题干】\n已知点 A(2,1,-1)，B(2,t,0)，则 |AB|=（C）"
+               "A. √23 B. √5 C. √26 D. √11\n【A】\n【B】\n【C】\n【D】\n【配图】无")
+        reading = readers.parse_reading(raw, 7)
+        self.assertEqual(reading["stem"], "已知点 A(2,1,-1)，B(2,t,0)，则 |AB|=（　）")
+        self.assertEqual(reading["options"], {"A": "√23", "B": "√5", "C": "√26", "D": "√11"})
+        # Not a choice question, or not all four labels: untouched.
+        self.assertEqual(readers.split_inline_options("点A. B两点间的距离")[1], {})
+        free = readers.parse_reading("【题型】解答题\n【题干】\n说明 A. 的含义与 B. 的区别 C. 与 D. 呢", 3)
+        self.assertEqual(free["options"], {})
+
+    def test_square_root_sign_and_command_are_the_same_reading(self):
+        from .textnorm import same_reading
+        self.assertTrue(same_reading({"stem": "求 BD=3√2 时 CD 的长"}, {"stem": "求 $BD=3\\sqrt{2}$ 时 $CD$ 的长"}))
+        self.assertFalse(same_reading({"stem": "求 BD=3√2 时"}, {"stem": "求 $BD=3\\sqrt{3}$ 时"}))
+

@@ -663,7 +663,8 @@ class ScriptedChat:
         # The spot check names no card; scripts key it by the first card number.
         number = int(match.group(1)) if match else 1
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
-            "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else "a" if "蓝色框" in prompt else "b"
+            "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
+            "classify" if "上次没有判断编号" in prompt else "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
@@ -1343,8 +1344,13 @@ class PipelineTests(TestCase):
         self.assertEqual(numbers, [1, 2, 3, 4, 5, 6])
         q4 = self.paper.questions.get(number=4)
         self.assertEqual(q4.start_source, "located")
+        # The scripted readers report no printed number: the opening may be cut off.
+        self.assertIn(pipeline.FLAG_LOCATED_WITHOUT_NUMBER, q4.flags)
         q3 = self.paper.questions.get(number=3)
-        self.assertLessEqual(q3.regions[-1]["bbox"][3], q4.regions[0]["bbox"][1] + segment.START_PAD + 1)
+        # A located start's crop reaches one line higher (the band is coarse);
+        # the previous question's range still ends at the located number.
+        self.assertLessEqual(q3.regions[-1]["bbox"][3],
+                             q4.regions[0]["bbox"][1] + segment.START_PAD + segment.LOCATED_EXTRA_PAD + 1)
 
     def test_segment_pipeline_recovers_group_first_question_and_records_note(self):
         self.paper.blocks.all().delete()

@@ -98,6 +98,34 @@ class FigureRowTests(TestCase):
         self.assertNotIn(pipeline.FLAG_FOREIGN_FIGURE, q9.flags)
         self.assertEqual(q9.state, Question.State.GREEN)
 
+    def test_no_flag_when_the_owners_reader_took_its_own_box_in_the_row(self):
+        row = _row()
+        q4 = self.question(4, stem="如图将△ABC放在网格中", candidates=row,
+                           figures=[{"slot": "stem", "page_idx": 0, "bbox": row[0]["bbox"], "source": "auto"}])
+        q4.read_a = {"figures": {"1": "stem", "2": "none", "3": "none"}}
+        q4.save()
+        q5 = self.question(5, stem="如图，正比例函数 y=x 与反比例函数的图象相交于 A、B 两点")
+        q6 = self.question(6, stem="已知，如图，在 Rt△ABC 中，CD⊥AB 于点 D")
+        self.assertEqual(pipeline.distribute_figure_rows(self.paper), 3)
+        for question in (q4, q5, q6):
+            question.refresh_from_db()
+            self.assertNotIn(pipeline.FLAG_ROW_FIGURE, question.flags)
+            self.assertEqual(question.state, Question.State.GREEN)
+
+    def test_a_reader_that_picked_another_box_keeps_every_card_flagged(self):
+        # 菱形周清第 15 题：读者选了最左边的图，按顺序它应是最右边那张。
+        row = _row()
+        self.question(13, stem="如图，在菱形 ABCD 中，G，H 分别为 AE，EF 的中点")
+        self.question(14, stem="如图，在正五边形 ABCDE 的内部作正方形 CDFH")
+        q15 = self.question(15, stem="如图，四边形 ABCD 是菱形", candidates=row,
+                            figures=[{"slot": "stem", "page_idx": 0, "bbox": row[0]["bbox"], "source": "auto"}])
+        q15.read_a = {"figures": {"1": "stem", "2": "none", "3": "none"}}
+        q15.save()
+        self.assertEqual(pipeline.distribute_figure_rows(self.paper), 3)
+        q15.refresh_from_db()
+        self.assertIn(pipeline.FLAG_ROW_FIGURE, q15.flags)
+        self.assertEqual(q15.figures[0]["bbox"], row[2]["bbox"])
+
     def test_stacked_figures_are_not_a_row(self):
         stacked = [
             {"label": "1", "seq": 10, "page_idx": 0, "bbox": [527, 600, 623, 650]},
@@ -205,3 +233,26 @@ class FigureCueWordingTests(SimpleTestCase):
         for stem in ("例如图书馆里有 120 本书", "比如表示成分数的形式", "如表示为 x 的函数"):
             with self.subTest(stem=stem):
                 self.assertFalse(has_figure_cue(stem))
+
+
+class SketchBesideTextOptionTests(SimpleTestCase):
+    def test_a_drawing_tied_to_a_text_option_is_a_students_sketch(self):
+        options = {"A": "$y=-\\dfrac{2}{x}$", "B": "$y=|x|$", "C": "$y=x^2+x+1$", "D": "$y=2x-1$"}
+        result = pipeline._sketches_beside_text_options(
+            stem="下列函数中，在区间 $(-\\infty,0)$ 上单调递减的是（ ）", options=options,
+            kind="single_choice", assignments={"1": "A", "2": "stem"})
+        self.assertEqual(result, {"1": "none", "2": "stem"})
+
+    def test_picture_options_and_captioned_options_are_kept(self):
+        kept = pipeline._sketches_beside_text_options(
+            stem="选择箭头方向（ ）", options={"A": "向右"}, kind="single_choice", assignments={"1": "A"})
+        self.assertEqual(kept, {"1": "A"})
+        cued = pipeline._sketches_beside_text_options(
+            stem="下列图形中，是轴对称图形的是（ ）", options={k: "图" + k for k in "ABCD"},
+            kind="single_choice", assignments={"1": "A"})
+        self.assertEqual(cued, {"1": "A"})
+
+    def test_full_width_period_after_the_cue(self):
+        from .figure_policy import has_figure_cue
+        self.assertTrue(has_figure_cue("树 AB 的影子投射在墙上的影高 CD 等于 2 米，如图．若树根到墙角的距离"))
+

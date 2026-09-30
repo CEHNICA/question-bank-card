@@ -35,6 +35,10 @@ SECTION_TYPES = (
 )
 CJK = re.compile(r"[一-鿿（(【]")
 START_PAD = 9      # 题号上方留白
+# AI 定位的题号只精确到一条横带，常常落在题号行下面一行：多往上留一行。
+# 截图因此会带上上一题的最后一行，读题时由 clean_stem 去掉题号行之前的内容；
+# 上一题的范围不变。
+LOCATED_EXTRA_PAD = 20
 END_GAP = 2        # 下一题起点上方留白
 COLUMN_GAP = 120   # 两栏左边距至少相差多少才算不同栏
 BOOK_MAX_CARD_PAGES = 4
@@ -1492,7 +1496,8 @@ def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[d
         slot_key = (slot["page"], slot["col"])
         if stop is not None and slot_key > (stop[0], stop[1]):
             break
-        top = max(slot["top"], start.y - START_PAD) if index == begin else slot["top"]
+        pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else 0)
+        top = max(slot["top"], start.y - pad) if index == begin else slot["top"]
         bottom = slot["bottom"]
         if stop is not None and slot_key == (stop[0], stop[1]):
             bottom = min(bottom, stop[2] - END_GAP)

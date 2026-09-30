@@ -60,6 +60,8 @@ def canon(
     text = text.replace("//", "∥").replace("^°", "°")
     if collapse_empty_brackets:
         text = re.sub(r"\(\)|\[\]", "()", text)
+    # √3 and \sqrt{3} print the same; so do ≌ and \cong.
+    text = text.replace("√", "sqrt").replace("≌", "≅")
     return text.rstrip(".,;:") if strip_trailing_punct else text
 
 
