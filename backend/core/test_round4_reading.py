@@ -86,6 +86,9 @@ class OptionGapTests(SimpleTestCase):
         self.assertEqual(pipeline._option_gaps({"B": "1", "C": "3", "D": "4"}, []), ["A"])
         self.assertEqual(pipeline._option_gaps({"A": "1", "B": "2", "C": "3"}, []), [])
         self.assertEqual(pipeline._option_gaps({}, []), [])
+        # 胜利初四第 9 题：只读出了 B，其余三个选项都没了。
+        self.assertEqual(pipeline._option_gaps({"B": "$\\dfrac{\\sqrt{3}}{3}$"}, []), ["A"])
+        self.assertEqual(pipeline._option_gaps({"A": "1"}, []), [])
 
     def test_two_identical_options_are_reported(self):
         options = {"A": "$\\dfrac{1}{2024}$", "B": "$-\\dfrac{1}{2024}$", "C": "$-\\frac{1}{2024}$", "D": "2024"}

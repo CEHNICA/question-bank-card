@@ -1341,29 +1341,51 @@ def _inside_previous_opening(blocks: list[dict] | None, previous: segment.Start,
     return y < bottom - 2
 
 
+MERGED_QUESTION_FLAG_PREFIX = "这张卡里可能还有第 "
+
+
+def merged_question_flag(number: int) -> str:
+    return f"{MERGED_QUESTION_FLAG_PREFIX}{number} 题（没找到它的题号），请点“调整范围”把它分出来"
+
+
 def locate_missing(
     paper: Paper, layout, starts: list[segment.Start], store: PageStore, blocks: list[dict] | None = None,
+    unresolved: list[tuple[int, int]] | None = None,
 ) -> list[str]:
-    """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。"""
+    """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。
+
+    A number still not found is added to ``unresolved`` as (number, previous
+    number), so the card that swallowed it can say so itself: the note on
+    the paper alone was easy to miss (口镇第 4 题 silently carried 第 5 题).
+    """
     notes = []
     engine = readers.primary_engine()
+    unresolved = unresolved if unresolved is not None else []
     for number, previous in segment.missing_numbers(starts):
         ordered = sorted(starts, key=segment.Start.key)
         following = next((s for s in ordered if s.key() > previous.key() and s.number > number), None)
         regions = segment.region_regions_between(layout, previous, following)
         if engine is None or not regions:
             notes.append(f"没有找到第 {number} 题的印刷题号，它可能和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         try:
             image, placed = imaging.stack_regions(regions, store.load)
             bands = max(12, min(40, image.height // 45))
             ruled, bands = imaging.add_ruler(image, bands)
-            band = readers.locate_band(engine, imaging.jpeg_data_url(ruled, long_side=2200), number)
+            url = imaging.jpeg_data_url(ruled, long_side=2200)
+            band = readers.locate_band(engine, url, number)
+            if not band or not 1 <= band <= bands:
+                # The same question found the number on one run and not the
+                # next (口镇第 5 题); one more look is cheap next to a merged card.
+                band = readers.locate_band(engine, url, number)
         except readers.ReaderError as error:
             notes.append(f"定位第 {number} 题失败（{error}），它暂时和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         if not band or not 1 <= band <= bands:
             notes.append(f"AI 没有找到第 {number} 题的题号，它可能和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         band_height = image.height / bands
         row = _snap_to_gap(image, int((band - 1) * band_height), band_height)
@@ -1379,6 +1401,7 @@ def locate_missing(
         if _inside_previous_opening(blocks, previous, page_idx, col, y):
             notes.append(f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
                          f"它暂时和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         snapped = _snap_located_start(blocks, layout, page_idx, col, y)
         # y 是题号上方的空隙：前一题到此为止，本题从这里（再往上留一点）开始。
@@ -1824,8 +1847,9 @@ def _collect_segmentation_items(
         if leading.message:
             notes.append(f"{group.title}：{leading.message}" if len(groups) > 1 else leading.message)
         missing = segment.missing_numbers(starts)
+        unresolved: list[tuple[int, int]] = []
         if locate_gaps:
-            group_notes = locate_missing(paper, layout, starts, page_store, group_blocks)
+            group_notes = locate_missing(paper, layout, starts, page_store, group_blocks, unresolved)
             notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
                           for note in group_notes])
         elif missing:
@@ -1837,6 +1861,11 @@ def _collect_segmentation_items(
                 "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
             })
         items = segment.build_questions(layout, starts, group_blocks)
+        for number, previous_number in unresolved:
+            holder = next((item for item in items if item.get("number") == previous_number), None)
+            if holder is not None:
+                holder["segmentation_flags"] = [*(holder.get("segmentation_flags") or []),
+                                                merged_question_flag(number)]
         for item in items:
             regions = imaging.trim_regions(item.get("regions") or [], page_store.load)
             prepared = {
@@ -2518,7 +2547,7 @@ def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
     letters = {key for key, value in (options or {}).items()
                if key in _OPTION_LETTERS and str(value or "").strip()}
     letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
-    if len(letters) < 2:
+    if not letters:
         return []
     last = _OPTION_LETTERS.index(max(letters))
     return [letter for letter in _OPTION_LETTERS[:last] if letter not in letters]
@@ -2550,7 +2579,7 @@ def _restore_skipped_options(final: dict, readings: list[dict], witness: str) ->
     """
     options = dict(final.get("options") or {})
     present = {key for key, value in options.items() if str(value or "").strip()}
-    if len(present) < 2:
+    if not present:
         return final, {}
     last = max(key for key in present if key in _OPTION_LETTERS) if present & set(_OPTION_LETTERS) else None
     if last is None:
@@ -2920,6 +2949,7 @@ def _snapshot(question: Question) -> dict:
             "segmentation_flags": [
                 flag for flag in (question.flags or [])
                 if str(flag).startswith("书本切题范围超过")
+                or str(flag).startswith(MERGED_QUESTION_FLAG_PREFIX)
                 or flag == FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
             ]}
 

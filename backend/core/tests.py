@@ -1073,6 +1073,10 @@ class PipelineTests(TestCase):
         self.assertIn("x^2", cards[3].stem)
         self.assertNotIn(("arbiter", 3, "minimax"), chat.calls)
         self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
+        # Question 4 was never found: the card that holds it says so, and the
+        # locator got a second look before giving up.
+        self.assertIn(pipeline.merged_question_flag(4), cards[3].flags)
+        self.assertEqual([call for call in chat.calls if call[0] == "locate"], [("locate", 4, "minimax")] * 2)
         # Card 5's text is backed by MinerU, so the failing checker is never
         # needed; the primary reader's sighting of question 6 is still shown.
         self.assertEqual((cards[5].state, cards[5].text_source), ("yellow", "witness"))
