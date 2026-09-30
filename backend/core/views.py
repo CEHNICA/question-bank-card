@@ -372,7 +372,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
 def _reading(value: dict) -> dict:
     value = fix_reading_symbols(value)
     return {k: value.get(k) for k in ("engine", "stem", "options", "error", "witness", "chosen", "objections", "answers",
-                                      "figures_verified", "spotwise")
+                                      "spotwise")
             if k in value}
 
 

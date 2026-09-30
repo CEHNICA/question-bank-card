@@ -682,8 +682,7 @@ class ScriptedChat:
         number = int(match.group(1)) if match else 1
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
             "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
-            "classify" if "上次没有判断编号" in prompt else "verify" if "编号=本题" in prompt else \
-            "a" if "蓝色框" in prompt else "b"
+            "classify" if "上次没有判断编号" in prompt else "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
@@ -727,7 +726,7 @@ class PipelineTests(TestCase):
         self.paper.refresh_from_db()
         return chat
 
-    def read_policy_card(self, stem, *, figure_role="无", candidates=True, verified=None):
+    def read_policy_card(self, stem, *, figure_role="无", candidates=True):
         primary = readers.parse_reading(tagged(stem, figures=figure_role), 9)
         checker = readers.parse_reading(tagged(stem), 9)
         snapshot = {
@@ -744,8 +743,7 @@ class PipelineTests(TestCase):
                 readers, "read_question",
                 side_effect=lambda _engine, _url, _number, with_figures: primary if with_figures else checker,
         ) as read_mock, \
-                mock.patch.object(readers, "arbitrate") as arbitrate_mock, \
-                mock.patch.object(readers, "verify_printed_figures", return_value=verified or {}):
+                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
             result = pipeline.read_card(snapshot, store)
         return result, read_mock, arbitrate_mock
 
@@ -916,23 +914,6 @@ class PipelineTests(TestCase):
         self.assertEqual(result["state"], Question.State.YELLOW)
         self.assertEqual(result["figure_review"]["status"], "conflict")
         self.assertEqual(result["figure_review"]["source"], "automatic")
-        # A separate question that calls it another question's figure, or a
-        # sketch, keeps the conflict: the plausible wrong binding stays yellow.
-        for verdict in ("other", "handwritten"):
-            result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干",
-                                                 verified={"1": verdict})
-            self.assertEqual(result["figure_review"]["status"], "conflict", verdict)
-
-    def test_separate_figure_question_naming_this_questions_figure_clears_the_conflict(self):
-        # A deliberate change to the guard pinned in test_figure_policy_claim:
-        # the reader's claim alone still never clears it; one separate,
-        # narrower question has to name the box as this question's printed figure.
-        result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干",
-                                             verified={"1": "printed"})
-        self.assertEqual(result["state"], Question.State.GREEN, result["flags"])
-        self.assertEqual(result["figure_review"]["status"], "ok")
-        self.assertIn("printed_figure_confirmed", result["figure_review"]["signals"])
-        self.assertEqual(result["read_a"]["figures_verified"], {"1": "printed"})
 
     def test_missing_checker_key_keeps_primary_reading_for_review(self):
         primary = readers.Engine("minimax", readers.MINIMAX_MODEL)

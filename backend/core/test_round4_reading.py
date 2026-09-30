@@ -1,8 +1,8 @@
 """Fewer false yellow cards without letting real reading errors through.
 
 - The arbiter may take each reader's word at different spots (two votes each).
-- A choice question whose options skip a letter is never green.
-- A bound figure the text never mentions is confirmed by one narrow question.
+- A choice question whose options skip a letter, or repeat one, is never green.
+- Follow-up figure judgements survive a later edit of the card.
 """
 
 from __future__ import annotations
@@ -118,15 +118,6 @@ class OptionGapTests(SimpleTestCase):
         self.assertEqual(pipeline._option_gaps(restored["options"], []), ["A"])
 
 
-class PrintedFigureParsingTests(SimpleTestCase):
-    def test_answers_are_read_per_box(self):
-        chat = mock.Mock(return_value="1=本题\n2＝手写\n3=别题\n4=看不清")
-        with mock.patch.object(readers, "chat", chat):
-            result = readers.verify_printed_figures(mock.Mock(), "data:,", 5, ["1", "2", "3", "4"])
-        self.assertEqual(result, {"1": "printed", "2": "handwritten", "3": "other"})
-        self.assertIn("编号=本题", chat.call_args.args[1])
-
-
 class ReadingPipelineTests(TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
@@ -220,35 +211,6 @@ class ReadingPipelineTests(TestCase):
                                  ("b", 1): tagged("已知二元函数，则", options)})
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertIn("选项 A 没有读出来，请对照原卷补上", question.flags)
-
-    def uncued_figure_card(self, verdict):
-        question = self.card(candidates=[1])
-        stem = "在平行四边形ABCD中，作线段AC的垂直平分线，求四边形ANCM的面积。"
-        chat = self.run_card(question, {
-            ("a", 1): tagged(stem, figures="1=题干"),
-            ("b", 1): tagged(stem),
-            ("verify", 1): verdict,
-        })
-        return question, chat
-
-    def test_a_confirmed_printed_figure_without_a_text_cue_is_green(self):
-        question, chat = self.uncued_figure_card("1=本题")
-        self.assertEqual([call[0] for call in chat.calls].count("verify"), 1)
-        self.assertEqual((question.state, len(question.figures)), (Question.State.GREEN, 1), question.flags)
-        self.assertEqual(question.read_a["figures_verified"], {"1": "printed"})
-        self.assertIn("printed_figure_confirmed", question.figure_review["signals"])
-        # An unrelated later edit must not bring the warning back.
-        question.stem = question.stem + "（改一个字）"
-        question.figure_review = {}
-        review = figure_policy.stored_or_derived_review(question)
-        self.assertEqual(review["status"], figure_policy.OK)
-
-    def test_a_sketch_or_another_questions_figure_keeps_the_card_for_a_person(self):
-        for verdict in ("1=手写", "1=别题", "看不清"):
-            Question.objects.all().delete()
-            question, _chat = self.uncued_figure_card(verdict)
-            self.assertEqual(question.state, Question.State.YELLOW, verdict)
-            self.assertIn(figure_policy.FLAG_UNCUED_FIGURE, question.flags)
 
     def test_followup_judgements_survive_a_later_edit(self):
         question = self.card(candidates=[1, 2])

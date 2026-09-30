@@ -413,7 +413,6 @@ def _automatic_input_hash(
     figures: list[dict],
     reader_missing: bool,
     described_slots: set[str] | None,
-    printed_labels: set[str] | None = None,
 ) -> str:
     """Identify the saved inputs behind an automatic decision.
 
@@ -429,8 +428,6 @@ def _automatic_input_hash(
         "reader_missing": bool(reader_missing),
         "described_slots": sorted(str(value) for value in (described_slots or set())),
     }
-    if printed_labels:
-        payload["printed_labels"] = sorted(str(value) for value in printed_labels)
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
     ).encode("utf-8")
@@ -455,13 +452,8 @@ def automatic_review(
     figures: list[dict],
     reader_missing: bool = False,
     described_slots: set[str] | None = None,
-    printed_labels: set[str] | None = None,
 ) -> dict:
-    """Combine existing text/reader results without doing any additional recognition.
-
-    ``printed_labels`` are boxes a separate, narrower check confirmed as
-    printed figures; they settle a bound figure that the text never mentions.
-    """
+    """Combine existing text/reader results without doing any additional recognition."""
     input_hash = _automatic_input_hash(
         stem=stem,
         options=options,
@@ -470,7 +462,6 @@ def automatic_review(
         figures=figures,
         reader_missing=reader_missing,
         described_slots=described_slots,
-        printed_labels=printed_labels,
     )
     cues = cue_matches(stem, options)
     if figures:
@@ -552,14 +543,6 @@ def automatic_review(
             "cue_matches": cues,
             "excluded_count": excluded_count,
             "unclassified_count": len(unclassified),
-        }, input_hash=input_hash)
-    if figures and not cues and bound_labels and bound_labels <= set(printed_labels or ()):
-        return _versioned_automatic_review({
-            "status": OK,
-            "reason": "题目文字没有图像提示词，但单独核对确认绑定的是印刷配图",
-            "signals": [*signals, "printed_figure_confirmed"],
-            "cue_matches": [],
-            "excluded_count": excluded_count,
         }, input_hash=input_hash)
     if figures and not cues:
         return _versioned_automatic_review({
@@ -652,13 +635,6 @@ def _apply_automatic_upgrade_in_memory(question, review: dict) -> dict:
             question.state = "yellow" if flags else "green"
 
     return review
-
-
-def printed_figure_labels(reading: dict | None) -> set[str]:
-    verified = (reading or {}).get("figures_verified") if isinstance(reading, dict) else None
-    if not isinstance(verified, dict):
-        return set()
-    return {str(label) for label, kind in verified.items() if kind == "printed"}
 
 
 def stored_or_derived_review(question, *, ignored_candidates: list[str] | None = None) -> dict:
@@ -760,7 +736,6 @@ def stored_or_derived_review(question, *, ignored_candidates: list[str] | None =
             figures=review_figures,
             reader_missing=bool(primary.get("missing_figure") or missing_option_slots),
             described_slots=described_slots | missing_option_slots,
-            printed_labels=printed_figure_labels(primary),
         )
     else:
         # If the original raw reads have already been compacted away, retain

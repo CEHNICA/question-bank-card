@@ -24,7 +24,7 @@ from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag, has_figure_cue,
-    candidate_key, missing_choice_figure_slots, printed_figure_labels, recheck_automatic_review,
+    candidate_key, missing_choice_figure_slots, recheck_automatic_review,
     resolve_automatic_figure_assignments, stored_or_derived_review,
     without_automatic_textbook_badges,
 )
@@ -2873,7 +2873,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     choice_missing = bool(choice_missing_slots)
     policy_stem = snapshot.get("stem", "") if snapshot.get("edited") else final.get("stem", "")
     policy_options = snapshot.get("options", {}) if snapshot.get("edited") else final.get("options") or {}
-    review_inputs = dict(
+    review = automatic_review(
         stem=policy_stem,
         options=policy_options,
         candidate_labels=set(labels),
@@ -2882,21 +2882,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         reader_missing=bool(figure_source.get("missing_figure") or choice_missing),
         described_slots=described_slots | choice_missing_slots,
     )
-    review = automatic_review(**review_inputs)
-    if a and review["status"] == CONFLICT and "bound_figure_without_text_cue" in review.get("signals", []):
-        # The text never mentions a figure but the reader attached one.  Most
-        # are real printed figures (a parallelogram beside “在▱ABCD中……”);
-        # some are a student's sketch.  Ask that one narrow question.
-        bound = sorted((label for label, role in figure_assignments.items()
-                        if label in labels and role in {"stem", "A", "B", "C", "D"}), key=int)
-        try:
-            verified = readers.verify_printed_figures(primary, marked_url, number, bound) if bound else {}
-        except readers.ReaderError:
-            verified = {}
-        if verified:
-            if isinstance(update.get("read_a"), dict):
-                update["read_a"] = {**update["read_a"], "figures_verified": verified}
-            review = automatic_review(**review_inputs, printed_labels=printed_figure_labels(update["read_a"]))
     if review["status"] == BLOCKED_MISSING:
         if choice_missing:
             flags.append("选择题没有读出选项；如果选项是图，请点“配图”把 A–D 各框一下")

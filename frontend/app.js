@@ -1650,7 +1650,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text: (review.signals || []).includes("candidate_unclassified")
         ? `当前已选配图不一定有错；另有 ${unclassifiedCandidates(q).length || Number(review.unclassified_count) || 1} 张候选图尚未归类${candidatePageLabel(unclassifiedCandidates(q))}。请检查它们、修正过长的题目范围，或明确确认其余候选均与本题无关。`
         : (review.signals || []).includes("bound_figure_without_text_cue")
-          ? `题目文字没有提到图，但 AI 给本题配了图${sketchHint(q)}。是试卷上印的图就点“确认当前配图及归属”；是学生的草稿、答案或别题的图就点“这些图与本题无关”。`
+          ? `题目文字没有提到图，但 AI 给本题配了图。是试卷上印的图就点“确认当前配图及归属”；是学生的草稿、答案或别题的图就点“这些图与本题无关”。`
           : (review.reason || "程序无法确定候选内容是正式配图还是手写痕迹，请对照原卷确认。")
     };
     if (review.status === "auto_excluded") return {
@@ -1663,16 +1663,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     if (review.status === "ok") return null;
     return review.reason ? { title: "配图检查说明", text: review.reason } : null;
-  }
-
-  function sketchHint(q) {
-    // read_a.figures_verified: a narrower second look at the attached boxes.
-    const verified = q?.reads?.a?.figures_verified || q?.read_a?.figures_verified || {};
-    const boxes = (kind) => Object.keys(verified).filter((label) => verified[label] === kind);
-    const notes = [];
-    if (boxes("handwritten").length) notes.push(`框 ${boxes("handwritten").join("、")} 更像学生手写`);
-    if (boxes("other").length) notes.push(`框 ${boxes("other").join("、")} 像是别题的图`);
-    return notes.length ? `（单独再看一次：${notes.join("，")}）` : "";
   }
 
   function openFigureEditor(q) {

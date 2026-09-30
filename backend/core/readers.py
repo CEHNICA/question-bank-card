@@ -847,37 +847,5 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
     return result
 
 
-def verify_printed_prompt(number: int, labels: list[str]) -> str:
-    listed = "、".join(labels)
-    return (
-        f"图中用蓝色框和编号标出了一些区域。这是第 {number} 题的截图。请只看编号 {listed} 的框，"
-        "判断框里是什么：\n"
-        f"编号=本题（试卷上印好的、属于第 {number} 题的配图：几何图形、函数图象、数轴、统计图、表格、实物图等）、"
-        "编号=别题（印好的图，但属于别的题，或只是别的图的一角）、"
-        "编号=手写（学生写上去的草图、演算、答案、勾画、涂改）。\n"
-        "每个编号一行，例如：1=本题。不要输出别的内容。"
-    )
-
-
-def verify_printed_figures(engine: Engine, image_url: str, number: int, labels: list[str]) -> dict[str, str]:
-    """``printed`` (this question's printed figure), ``other`` or ``handwritten`` per box.
-
-    A reader attaches boxes while transcribing the whole question and now and
-    then takes a student's sketch (a triangle, a number line drawn beside the question) or a
-    corner of the neighbouring figure for this question's figure.  When the
-    text never mentions a figure, this one narrow question is asked on its
-    own; boxes it does not answer stay unknown.
-    """
-    raw = chat(engine, verify_printed_prompt(number, labels), [image_url], max_tokens=200)
-    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
-    wanted = set(labels)
-    kinds = {"本题": "printed", "别题": "other", "手写": "handwritten"}
-    result: dict[str, str] = {}
-    for label, kind in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(本题|别题|手写)", raw):
-        if label in wanted and label not in result:
-            result[label] = kinds[kind]
-    return result
-
-
 def locate_band(engine: Engine, image_url: str, number: int) -> int | None:
     return parse_band(chat(engine, locate_prompt(number), [image_url], max_tokens=200))
