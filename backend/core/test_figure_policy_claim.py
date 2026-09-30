@@ -27,6 +27,17 @@ Only a human can tell 「求阴影部分的面积。」 (a plausible wrong bindi
 These tests pin the guard on both sides of the reader's answer, so a future
 attempt to trust the reader here has to change them on purpose rather than by
 accident.
+
+2026-09-30, changed on purpose: the reader's claim still never clears the
+conflict.  What can clear it is a *separate* question asked only about the
+attached boxes — “this question's printed figure, another question's figure,
+or handwriting?” (``readers.verify_printed_figures``).  Over the 11 such cards
+of the 2026-09-30 benchmark (sample labels), 5 were real printed figures
+(lingxing #19, pxsbx #11, shengli10 #15, wenyuan9 #21, zuobiao #28) and 6 were
+wrong bindings — five students' sketches (fengcheng10 #5 #11, shengli7 #9 #25,
+shengli8 #8) and one corner of a neighbouring figure (shengli7 #11).  So the guard was right
+about half the time; only the separate answer “本题” turns a card green, and
+“别题”, “手写” or no answer keep it yellow as before.
 """
 
 from __future__ import annotations
@@ -90,3 +101,18 @@ class BoundFigureWithoutTextCueIsAReviewConflictTests(SimpleTestCase):
             stem, assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"],
         )
         self.assertEqual(review["status"], figure_policy.CONFLICT)
+
+    def test_only_a_separate_check_naming_this_questions_figure_clears_it(self):
+        for stem in REAL_STEMS:
+            with self.subTest(stem=stem[:20]):
+                cleared = figure_policy.automatic_review(
+                    stem=stem, options={}, candidate_labels={"1"}, assignments={"1": "stem"},
+                    figures=[FIGURE], reader_missing=False, printed_labels={"1"},
+                )
+                self.assertEqual(cleared["status"], figure_policy.OK)
+                self.assertIn("printed_figure_confirmed", cleared["signals"])
+                kept = figure_policy.automatic_review(
+                    stem=stem, options={}, candidate_labels={"1"}, assignments={"1": "stem"},
+                    figures=[FIGURE], reader_missing=False, printed_labels=set(),
+                )
+                self.assertEqual(kept["status"], figure_policy.CONFLICT)

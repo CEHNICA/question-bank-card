@@ -420,6 +420,46 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
     return spots
 
 
+def disputed_spots(first: dict | None, second: dict | None, judge: dict | None, *,
+                   context: int = 3, longest: int = 8) -> list[dict] | None:
+    """Where two readings differ, which side the judge's reading took.
+
+    Each spot is ``{"reading": judge's text, "mineru": the other text,
+    "before", "after", "side": "a"/"b"}`` (the keys match the spot check).
+    ``None`` when a difference is too long, or the judge's reading matches
+    neither side there, so no short either/or question can settle it.
+    """
+    if not first or not second or not judge:
+        return None
+    ka = witness_key(reading_witness_text(first))
+    kb = witness_key(reading_witness_text(second))
+    kc = witness_key(reading_witness_text(judge))
+    if ka == kb:
+        return []
+    regions: list[list[int]] = []
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kb, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if regions and i1 - regions[-1][1] <= 2 and j1 - regions[-1][3] <= 2:
+            regions[-1][1], regions[-1][3] = i2, j2
+        else:
+            regions.append([i1, i2, j1, j2])
+    spots = []
+    for i1, i2, j1, j2 in regions:
+        left, right = ka[max(0, i1 - context):i1], ka[i2:i2 + context]
+        a_part, b_part = ka[i1:i2], kb[j1:j2]
+        if len(a_part) > longest or len(b_part) > longest or not (left or right):
+            return None
+        a_hit = (left + a_part + right) in kc
+        b_hit = (left + b_part + right) in kc
+        if a_hit == b_hit:
+            return None
+        chosen, other = (a_part, b_part) if a_hit else (b_part, a_part)
+        spots.append({"reading": chosen, "mineru": other, "before": left, "after": right,
+                      "side": "a" if a_hit else "b"})
+    return spots
+
+
 def witness_choice(first: dict | None, second: dict | None, witness: str, *, context: int = 3) -> str | None:
     """Settle a disagreement between two vision readings with MinerU's text.
 

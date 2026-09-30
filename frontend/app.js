@@ -1668,8 +1668,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function sketchHint(q) {
     // read_a.figures_verified: a narrower second look at the attached boxes.
     const verified = q?.reads?.a?.figures_verified || q?.read_a?.figures_verified || {};
-    const handwritten = Object.keys(verified).filter((label) => verified[label] === "handwritten");
-    return handwritten.length ? `（再次核对时，框 ${handwritten.join("、")} 更像手写）` : "";
+    const boxes = (kind) => Object.keys(verified).filter((label) => verified[label] === kind);
+    const notes = [];
+    if (boxes("handwritten").length) notes.push(`框 ${boxes("handwritten").join("、")} 更像学生手写`);
+    if (boxes("other").length) notes.push(`框 ${boxes("other").join("、")} 像是别题的图`);
+    return notes.length ? `（单独再看一次：${notes.join("，")}）` : "";
   }
 
   function openFigureEditor(q) {
@@ -1901,9 +1904,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     difference.observedOnly.forEach((item) => {
       const row = el("li");
       const text = el("span", "reading-difference-text");
-      if (item.before) text.append(el("span", "reading-difference-context", `…${item.before}`));
-      text.append(el("mark", "reading-difference-extra", shortDifferenceText(item.text)));
-      if (item.after) text.append(el("span", "reading-difference-context", `${item.after}…`));
+      let before = item.before || "";
+      let after = item.after || "";
+      let extra = shortDifferenceText(item.text);
+      // Inside a formula: typeset the extra part instead of showing “$ … $” source.
+      if (((before.match(/\$/g) || []).length % 2) === 1) {
+        extra = `$${extra}$`;
+        before = before.replace(/\$\s*$/, "");
+        after = after.replace(/^\s*\$/, "");
+      }
+      if (before) text.append(el("span", "reading-difference-context", `…${before}`));
+      const mark = el("mark", "reading-difference-extra");
+      R.renderTypeset(mark, extra);
+      text.append(mark);
+      if (after) text.append(el("span", "reading-difference-context", `${after}…`));
       row.append(el("span", "reading-difference-source", `${item.readerName} · ${item.fieldName}`), text);
       list.append(row);
     });

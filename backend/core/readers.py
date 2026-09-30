@@ -324,10 +324,10 @@ def spot_check_prompt(spots: list[dict]) -> tuple[str, list[dict]]:
         reading_first = sum(map(ord, spot["before"] + spot["after"] + str(index))) % 2 == 0
         first, second = (spot["reading"], spot["mineru"]) if reading_first else (spot["mineru"], spot["reading"])
         order.append({"甲": "reading" if reading_first else "mineru", "乙": "mineru" if reading_first else "reading"})
-        lines.append(f"第{index}处：…{spot['before']}＿{spot['after']}…　甲：{first}　乙：{second}")
+        lines.append(f"第{index}处：…{spot['before']}＿{spot['after']}…　甲：{first or '（空）'}　乙：{second or '（空）'}")
     prompt = (
         "请只看图片中的印刷体（忽略手写和涂画），判断下面每一处空位上印的是甲还是乙。"
-        "文字已去掉空格、标点和 LaTeX 写法，只比较字符本身。两种写法都可能是对的，请放大看清，"
+        "文字已去掉空格、标点和 LaTeX 写法，只比较字符本身；“（空）”表示那里什么也没印。两种写法都可能是对的，请放大看清，"
         "不要根据常识、上下文或哪种更通顺来猜。\n"
         + "\n".join(lines)
         + "\n\n每处一行，只写序号和甲或乙，例如“1=乙”。看不清就写“1=不确定”。"
@@ -852,27 +852,30 @@ def verify_printed_prompt(number: int, labels: list[str]) -> str:
     return (
         f"图中用蓝色框和编号标出了一些区域。这是第 {number} 题的截图。请只看编号 {listed} 的框，"
         "判断框里是什么：\n"
-        "编号=印刷（试卷上印好的配图：几何图形、函数图象、数轴、统计图、表格、实物图等）、"
+        f"编号=本题（试卷上印好的、属于第 {number} 题的配图：几何图形、函数图象、数轴、统计图、表格、实物图等）、"
+        "编号=别题（印好的图，但属于别的题，或只是别的图的一角）、"
         "编号=手写（学生写上去的草图、演算、答案、勾画、涂改）。\n"
-        "每个编号一行，例如：1=印刷。不要输出别的内容。"
+        "每个编号一行，例如：1=本题。不要输出别的内容。"
     )
 
 
 def verify_printed_figures(engine: Engine, image_url: str, number: int, labels: list[str]) -> dict[str, str]:
-    """``printed`` or ``handwritten`` per box, asked on its own.
+    """``printed`` (this question's printed figure), ``other`` or ``handwritten`` per box.
 
     A reader attaches boxes while transcribing the whole question and now and
-    then takes a student's sketch for a printed figure.  When the question
-    text never mentions a figure this narrower question decides whether the
-    attached boxes are really printed; boxes it does not answer stay unknown.
+    then takes a student's sketch (a triangle, a number line drawn beside the question) or a
+    corner of the neighbouring figure for this question's figure.  When the
+    text never mentions a figure, this one narrow question is asked on its
+    own; boxes it does not answer stay unknown.
     """
     raw = chat(engine, verify_printed_prompt(number, labels), [image_url], max_tokens=200)
     raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
     wanted = set(labels)
+    kinds = {"本题": "printed", "别题": "other", "手写": "handwritten"}
     result: dict[str, str] = {}
-    for label, kind in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(印刷|手写)", raw):
+    for label, kind in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(本题|别题|手写)", raw):
         if label in wanted and label not in result:
-            result[label] = "printed" if kind == "印刷" else "handwritten"
+            result[label] = kinds[kind]
     return result
 
 

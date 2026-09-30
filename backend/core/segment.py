@@ -39,6 +39,12 @@ START_PAD = 9      # 题号上方留白
 # 截图因此会带上上一题的最后一行，读题时由 clean_stem 去掉题号行之前的内容；
 # 上一题的范围不变。
 LOCATED_EXTRA_PAD = 20
+# A number found partway down a MinerU box (“D. 3\n10. 如图…”) gets its y from
+# an evenly spaced line estimate.  On a photographed page the line also tilts:
+# chenyi #10’s first line rose about 20 units across the column, so the crop
+# cut off “且 AE=4，BD=6，分别连” at its top right and both readers agreed on
+# the shortened question.  Leave a little more above such an estimate.
+MID_BLOCK_EXTRA_PAD = 12
 END_GAP = 2        # 下一题起点上方留白
 COLUMN_GAP = 120   # 两栏左边距至少相差多少才算不同栏
 BOOK_MAX_CARD_PAGES = 4
@@ -1496,7 +1502,8 @@ def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[d
         slot_key = (slot["page"], slot["col"])
         if stop is not None and slot_key > (stop[0], stop[1]):
             break
-        pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else 0)
+        pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else
+                           MID_BLOCK_EXTRA_PAD if not start.at_start else 0)
         top = max(slot["top"], start.y - pad) if index == begin else slot["top"]
         bottom = slot["bottom"]
         if stop is not None and slot_key == (stop[0], stop[1]):

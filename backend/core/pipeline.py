@@ -2495,6 +2495,45 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     return final, source
 
 
+SECOND_LOOK_FLAG_PREFIX = "两次识读不一致，第三次识读选了其中一种，单独再看仍有疑问："
+
+
+def _second_look_flag(spots: list[dict]) -> str:
+    shown = "；".join(
+        f"…{s['before']}【{s['reading'] or '（空）'}】{s['after']}…（另一次识读：{s['mineru'] or '（空）'}）"
+        for s in spots[:3])
+    more = f" 等 {len(spots)} 处" if len(spots) > 3 else ""
+    return f"{SECOND_LOOK_FLAG_PREFIX}{shown}{more}，请对照原卷"
+
+
+def _second_look(update: dict, flags: list[str], *, a_text: dict, b_text: dict, c_text: dict,
+                 image_url: str, primary, checker) -> None:
+    """Ask about each disputed spot neutrally after the arbiter decided.
+
+    The arbiter is shown both readings and rewrites the question.  Checked
+    against reference transcriptions, every one of its wrong decisions went
+    to the first reading (a student's “±” in a blank, 单价 for the printed 定价,
+    a dropped 小 or minus sign).  One either/or look per spot, with the sides
+    in no fixed order, keeps those cards for a person; nothing is rewritten.
+    """
+    spots = textnorm.disputed_spots(a_text, b_text, c_text)
+    if not spots or len(spots) > 4:
+        return
+    try:
+        engine = readers.arbiter_engine(primary, checker)
+        if engine is None:
+            raise readers.ReaderError("没有可用的核对模型")
+        answers = readers.spot_check(engine, image_url, spots)
+    except readers.ReaderError as error:
+        update["read_c"] = {**update["read_c"], "second_look": {"spots": spots, "error": str(error)}}
+        flags.append(_second_look_flag(spots))
+        return
+    update["read_c"] = {**update["read_c"], "second_look": {"spots": spots, "answers": answers}}
+    doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
+    if doubtful:
+        flags.append(_second_look_flag(doubtful))
+
+
 _OPTION_LETTERS = "ABCDEFGH"
 
 
@@ -2511,6 +2550,23 @@ def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
         return []
     last = _OPTION_LETTERS.index(max(letters))
     return [letter for letter in _OPTION_LETTERS[:last] if letter not in letters]
+
+
+def _identical_options(options: dict) -> list[str]:
+    """The first pair of options with the same text (B and C both “-1/2024”).
+
+    A printed paper does not repeat an option; one of the two was misread
+    (the printed B was “-2024”), and both readers made the same slip.
+    """
+    seen: dict[str, str] = {}
+    for letter in sorted(options or {}):
+        value = textnorm.canon(str(options[letter] or ""))
+        if not value:
+            continue
+        if value in seen:
+            return [seen[value], letter]
+        seen[value] = letter
+    return []
 
 
 def _restore_skipped_options(final: dict, readings: list[dict], witness: str) -> tuple[dict, dict[str, bool]]:
@@ -2706,6 +2762,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             else:
                 final, source = c_text, "arbiter"
                 flags.append("两次识读不一致，已由第三次识读裁决")
+            if source == "majority":
+                _second_look(update, flags, a_text=a_text, b_text=b_text, c_text=c_text,
+                             image_url=clean_url, primary=primary, checker=checker)
         except readers.ReaderError as error:
             final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}
@@ -2774,6 +2833,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     figures = without_automatic_textbook_badges(figures)
     if gaps := _option_gaps(final.get("options") or {}, figures):
         flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
+    if twins := _identical_options(final.get("options") or {}):
+        flags.append(f"选项 {'和'.join(twins)} 读成了一模一样的内容，请对照原卷核对")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])

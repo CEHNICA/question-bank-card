@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from . import figure_policy, pipeline, readers, textnorm
 from .models import Paper, Question
-from .tests import PAGES, ScriptedChat, fake_page_pdf, tagged
+from .tests import PAGES, ScriptedChat, fake_page_pdf, spot_answer, tagged
 
 
 def reading(stem, **options):
@@ -65,12 +65,35 @@ class EchoedNumberTests(SimpleTestCase):
         self.assertEqual(decimal["stem"], "9.5米长的绳子")
 
 
+class DisputedSpotTests(SimpleTestCase):
+    def test_each_spot_names_the_side_the_judge_took(self):
+        a = reading("交x轴于点E，y≥0时，是否为定值？如果是，请求出")
+        b = reading("交x轴于点E，当y≥0时，是否为定值？若是，请求出")
+        c = reading("交x轴于点E，当y≥0时，是否为定值？如果是，请求出")
+        spots = textnorm.disputed_spots(a, b, c)
+        self.assertEqual([(s["reading"], s["mineru"], s["side"]) for s in spots], [("当", "", "b"), ("如果", "若", "a")])
+
+    def test_a_judge_matching_neither_side_gives_no_spots(self):
+        a, b = reading("AF=2\\sqrt{3}"), reading("AF=3\\sqrt{3}")
+        self.assertIsNone(textnorm.disputed_spots(a, b, reading("AF=5\\sqrt{3}")))
+        self.assertEqual(textnorm.disputed_spots(a, a, a), [])
+
+    def test_empty_side_is_shown_as_empty_in_the_question(self):
+        prompt, _order = readers.spot_check_prompt([{"reading": "±", "mineru": "", "before": "方根是", "after": ""}])
+        self.assertIn("（空）", prompt)
+
+
 class OptionGapTests(SimpleTestCase):
     def test_a_skipped_letter_is_reported(self):
         self.assertEqual(pipeline._option_gaps({"A": "1", "C": "3", "D": "4"}, []), ["B"])
         self.assertEqual(pipeline._option_gaps({"B": "1", "C": "3", "D": "4"}, []), ["A"])
         self.assertEqual(pipeline._option_gaps({"A": "1", "B": "2", "C": "3"}, []), [])
         self.assertEqual(pipeline._option_gaps({}, []), [])
+
+    def test_two_identical_options_are_reported(self):
+        options = {"A": "$\\dfrac{1}{2024}$", "B": "$-\\dfrac{1}{2024}$", "C": "$-\\frac{1}{2024}$", "D": "2024"}
+        self.assertEqual(pipeline._identical_options(options), ["B", "C"])
+        self.assertEqual(pipeline._identical_options({"A": "1", "B": "2", "C": "", "D": ""}), [])
 
     def test_option_images_fill_their_letter(self):
         figures = [{"slot": "B", "page_idx": 0, "bbox": [0, 0, 1, 1]}]
@@ -97,11 +120,11 @@ class OptionGapTests(SimpleTestCase):
 
 class PrintedFigureParsingTests(SimpleTestCase):
     def test_answers_are_read_per_box(self):
-        chat = mock.Mock(return_value="1=印刷\n2＝手写\n3=看不清")
+        chat = mock.Mock(return_value="1=本题\n2＝手写\n3=别题\n4=看不清")
         with mock.patch.object(readers, "chat", chat):
-            result = readers.verify_printed_figures(mock.Mock(), "data:,", 5, ["1", "2", "3"])
-        self.assertEqual(result, {"1": "printed", "2": "handwritten"})
-        self.assertIn("编号=印刷", chat.call_args.args[1])
+            result = readers.verify_printed_figures(mock.Mock(), "data:,", 5, ["1", "2", "3", "4"])
+        self.assertEqual(result, {"1": "printed", "2": "handwritten", "3": "other"})
+        self.assertIn("编号=本题", chat.call_args.args[1])
 
 
 class ReadingPipelineTests(TestCase):
@@ -147,9 +170,26 @@ class ReadingPipelineTests(TestCase):
             ("a", 1): tagged("交x轴于点E，y≥0时，是否为定值？如果是，请求出"),
             ("b", 1): tagged("交x轴于点E，当y≥0时，是否为定值？若是，请求出"),
             ("arbiter", 1): tagged("交x轴于点E，当y≥0时，是否为定值？如果是，请求出"),
+            ("spotcheck", 1): spot_answer("当", "如果"),
         })
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "majority"), question.flags)
         self.assertTrue(question.read_c["spotwise"])
+        self.assertEqual(question.read_c["second_look"]["answers"], ["reading", "reading"])
+
+    def test_an_arbiter_choice_the_second_look_doubts_stays_yellow(self):
+        # 胜利十中第 21 题：裁决跟了读法甲的“单价”，原卷印的是“定价”。
+        question = self.card()
+        self.run_card(question, {
+            ("a", 1): tagged("通过前几天的销售发现，当销售单价为15元时，每天可售出700本"),
+            ("b", 1): tagged("通过前几天的销售发现，当销售定价为15元时，每天可售出700本"),
+            ("arbiter", 1): tagged("通过前几天的销售发现，当销售单价为15元时，每天可售出700本"),
+            ("spotcheck", 1): spot_answer("定"),
+        })
+        self.assertEqual((question.state, question.text_source), (Question.State.YELLOW, "majority"))
+        self.assertIn("单价", question.stem)            # never rewritten by the check
+        flag = next(f for f in question.flags if f.startswith(pipeline.SECOND_LOOK_FLAG_PREFIX))
+        self.assertIn("【单】", flag)
+        self.assertIn("另一次识读：定", flag)
 
     def test_arbiter_inventing_a_spot_stays_yellow(self):
         question = self.card()
@@ -181,7 +221,7 @@ class ReadingPipelineTests(TestCase):
         return question, chat
 
     def test_a_confirmed_printed_figure_without_a_text_cue_is_green(self):
-        question, chat = self.uncued_figure_card("1=印刷")
+        question, chat = self.uncued_figure_card("1=本题")
         self.assertEqual([call[0] for call in chat.calls].count("verify"), 1)
         self.assertEqual((question.state, len(question.figures)), (Question.State.GREEN, 1), question.flags)
         self.assertEqual(question.read_a["figures_verified"], {"1": "printed"})
@@ -192,10 +232,12 @@ class ReadingPipelineTests(TestCase):
         review = figure_policy.stored_or_derived_review(question)
         self.assertEqual(review["status"], figure_policy.OK)
 
-    def test_a_sketch_keeps_the_card_for_a_person(self):
-        question, _chat = self.uncued_figure_card("1=手写")
-        self.assertEqual(question.state, Question.State.YELLOW)
-        self.assertIn(figure_policy.FLAG_UNCUED_FIGURE, question.flags)
+    def test_a_sketch_or_another_questions_figure_keeps_the_card_for_a_person(self):
+        for verdict in ("1=手写", "1=别题", "看不清"):
+            Question.objects.all().delete()
+            question, _chat = self.uncued_figure_card(verdict)
+            self.assertEqual(question.state, Question.State.YELLOW, verdict)
+            self.assertIn(figure_policy.FLAG_UNCUED_FIGURE, question.flags)
 
     def test_followup_judgements_survive_a_later_edit(self):
         question = self.card(candidates=[1, 2])

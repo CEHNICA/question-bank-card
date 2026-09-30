@@ -31,4 +31,6 @@ python tools\benchmark\qb_bench.py --repo . --out D:\qb-bench\runs\v1 --secrets 
 - `runs\v1\events.json` 记录每次 API 调用的起止时间、状态码和用量；`summary.txt` 是每份卷的耗时与红黄绿统计。
 - `--env KEY=VALUE` 可临时改配置，例如 `--env QB_MINIMAX_ACCOUNT_CONCURRENCY=8`、`--env QB_HEDGE_AFTER=0`。
 
+- `--worker`：像应用的后台工作者那样，先把所有卷一起排队，再用主车道、提前解析车道和“重叠读题”车道处理，测的是一批卷的总耗时。加 `--no-overlap` 可以关掉重叠读题做对照。
+
 比较两个版本时，对同一批样卷分别用两个仓库目录（`--repo`）各跑一次，再逐题对照 `result.json` 与截图。
