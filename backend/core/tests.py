@@ -664,7 +664,8 @@ class ScriptedChat:
         number = int(match.group(1)) if match else 1
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
             "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
-            "classify" if "上次没有判断编号" in prompt else "a" if "蓝色框" in prompt else "b"
+            "classify" if "上次没有判断编号" in prompt else "verify" if "编号=印刷" in prompt else \
+            "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):

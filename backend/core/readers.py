@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
 import random
 import re
@@ -640,7 +641,8 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     if not delay:
         return _chat_once(engine, prompt, image_urls, max_tokens)
     started = threading.Event()
-    first = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens, started)
+    first = _HEDGE_EXECUTOR.submit(contextvars.copy_context().run, _chat_once, engine, prompt,
+                                   image_urls, max_tokens, started)
     # The clock starts when the request is on the wire.  Counting the time it
     # waited for a free account slot duplicated requests that were merely
     # queued; the duplicates took the slots, and a 30-page book ran with 20
@@ -654,7 +656,8 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
         pass
     if not _has_spare_slot(engine):
         return first.result()
-    second = _HEDGE_EXECUTOR.submit(_chat_once, engine, prompt, image_urls, max_tokens)
+    second = _HEDGE_EXECUTOR.submit(contextvars.copy_context().run, _chat_once, engine, prompt,
+                                    image_urls, max_tokens)
     pending = {first, second}
     failure: BaseException | None = None
     while pending:
@@ -841,6 +844,35 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
             result[label] = "stem" if other == number else f"q{other}"
         else:
             result[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤ", "ABCD")))
+    return result
+
+
+def verify_printed_prompt(number: int, labels: list[str]) -> str:
+    listed = "、".join(labels)
+    return (
+        f"图中用蓝色框和编号标出了一些区域。这是第 {number} 题的截图。请只看编号 {listed} 的框，"
+        "判断框里是什么：\n"
+        "编号=印刷（试卷上印好的配图：几何图形、函数图象、数轴、统计图、表格、实物图等）、"
+        "编号=手写（学生写上去的草图、演算、答案、勾画、涂改）。\n"
+        "每个编号一行，例如：1=印刷。不要输出别的内容。"
+    )
+
+
+def verify_printed_figures(engine: Engine, image_url: str, number: int, labels: list[str]) -> dict[str, str]:
+    """``printed`` or ``handwritten`` per box, asked on its own.
+
+    A reader attaches boxes while transcribing the whole question and now and
+    then takes a student's sketch for a printed figure.  When the question
+    text never mentions a figure this narrower question decides whether the
+    attached boxes are really printed; boxes it does not answer stay unknown.
+    """
+    raw = chat(engine, verify_printed_prompt(number, labels), [image_url], max_tokens=200)
+    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
+    wanted = set(labels)
+    result: dict[str, str] = {}
+    for label, kind in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(印刷|手写)", raw):
+        if label in wanted and label not in result:
+            result[label] = "printed" if kind == "印刷" else "handwritten"
     return result
 
 

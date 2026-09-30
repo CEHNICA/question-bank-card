@@ -246,6 +246,7 @@ const QBReviewDiff = (() => {
 
   const FIELD_NAMES = { stem: "题干", A: "选项 A", B: "选项 B", C: "选项 C", D: "选项 D" };
   const READER_NAMES = { a: "读法甲", b: "读法乙", c: "第三次裁决" };
+  const CONTEXT = 10;
 
   function readingOk(reading) {
     return reading && !reading.error && typeof reading.stem === "string";
@@ -285,9 +286,13 @@ const QBReviewDiff = (() => {
           if (!value) return;
           const signature = `${field}:${value}`;
           if (observedOnly.some((item) => item.signature === signature)) return;
+          // A lone “、” or “和” means nothing without the words around it.
+          const around = (text) => text.replace(/\s+/g, " ");
           observedOnly.push({
             signature, field, fieldName: FIELD_NAMES[field], reader: readerKey,
             readerName: READER_NAMES[readerKey] || readerKey, text: value,
+            before: around(observed.slice(Math.max(0, hunk.observed.start - CONTEXT), hunk.observed.start)),
+            after: around(observed.slice(hunk.observed.end, hunk.observed.end + CONTEXT)),
           });
         });
       });
@@ -1644,7 +1649,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       title: "配图判断有冲突，暂时不能通过",
       text: (review.signals || []).includes("candidate_unclassified")
         ? `当前已选配图不一定有错；另有 ${unclassifiedCandidates(q).length || Number(review.unclassified_count) || 1} 张候选图尚未归类${candidatePageLabel(unclassifiedCandidates(q))}。请检查它们、修正过长的题目范围，或明确确认其余候选均与本题无关。`
-        : (review.reason || "程序无法确定候选内容是正式配图还是手写痕迹，请对照原卷确认。")
+        : (review.signals || []).includes("bound_figure_without_text_cue")
+          ? `题目文字没有提到图，但 AI 给本题配了图${sketchHint(q)}。是试卷上印的图就点“确认当前配图及归属”；是学生的草稿、答案或别题的图就点“这些图与本题无关”。`
+          : (review.reason || "程序无法确定候选内容是正式配图还是手写痕迹，请对照原卷确认。")
     };
     if (review.status === "auto_excluded") return {
       title: "已自动排除疑似多余图",
@@ -1656,6 +1663,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     if (review.status === "ok") return null;
     return review.reason ? { title: "配图检查说明", text: review.reason } : null;
+  }
+
+  function sketchHint(q) {
+    // read_a.figures_verified: a narrower second look at the attached boxes.
+    const verified = q?.reads?.a?.figures_verified || q?.read_a?.figures_verified || {};
+    const handwritten = Object.keys(verified).filter((label) => verified[label] === "handwritten");
+    return handwritten.length ? `（再次核对时，框 ${handwritten.join("、")} 更像手写）` : "";
   }
 
   function openFigureEditor(q) {
@@ -1817,7 +1831,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return (q.flags || []).filter((flag) => {
       if (!review) return true;
       if (flag === review.reason) return false;
-      return !(FIGURE_REVIEW_BLOCKS.has(review.status) && /还没有配图|原卷可能有图没有被找到|选项是图/.test(String(flag)));
+      // The figure panel above the text already says this, with the buttons to settle it.
+      return !(FIGURE_REVIEW_BLOCKS.has(review.status)
+        && /还没有配图|原卷可能有图没有被找到|选项是图|没有发现图像提示词/.test(String(flag)));
     });
   }
 
@@ -1880,12 +1896,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const difference = reviewDiff(q);
     if (!difference.observedOnly.length) return null;
     const panel = el("section", "reading-difference");
-    panel.append(el("strong", "reading-difference-title", "另一读法多出了以下内容，当前稿没有对应文字可标黄"));
+    panel.append(el("strong", "reading-difference-title", "另一次识读在下面标出的位置多读了文字，当前题面没有，请对照原卷"));
     const list = el("ul", "reading-difference-list");
     difference.observedOnly.forEach((item) => {
       const row = el("li");
-      row.append(el("span", "reading-difference-source", `${item.readerName} · ${item.fieldName}`),
-        el("span", "reading-difference-text", shortDifferenceText(item.text)));
+      const text = el("span", "reading-difference-text");
+      if (item.before) text.append(el("span", "reading-difference-context", `…${item.before}`));
+      text.append(el("mark", "reading-difference-extra", shortDifferenceText(item.text)));
+      if (item.after) text.append(el("span", "reading-difference-context", `${item.after}…`));
+      row.append(el("span", "reading-difference-source", `${item.readerName} · ${item.fieldName}`), text);
       list.append(row);
     });
     const show = button("查看三次原始读法", "small", () => toggleReadsNear(panel, q));

@@ -73,6 +73,42 @@ def same_reading(first: dict, second: dict) -> bool:
                for k in keys)
 
 
+def _reading_key(reading: dict) -> str:
+    options = reading.get("options") or {}
+    return canon(reading.get("stem", "")) + "".join(
+        f"\u241f{key}:{canon(options[key])}" for key in sorted(options)
+    )
+
+
+def _differing_spans(source: str, target: str) -> list[tuple[int, int]]:
+    """Spans of ``target`` that differ from ``source``; an insertion point is (j, j)."""
+    matcher = SequenceMatcher(None, source, target, autojunk=False)
+    return [(j1, j2) for op, _i1, _i2, j1, j2 in matcher.get_opcodes() if op != "equal"]
+
+
+def spotwise_majority(first: dict, second: dict, judge: dict) -> bool:
+    """Whether every spot of the judge's reading agrees with at least one reader.
+
+    The arbiter sees both readings and decides each disputed spot.  When it
+    takes the first reader's word in one place and the second reader's in
+    another, every character still has two of three votes.  Only a spot where
+    it differs from both readers (something neither of them read) is a real
+    three-way disagreement.  Touching spans count as the same spot.
+    """
+    target = _reading_key(judge)
+    if not target:
+        return False
+    spans_first = _differing_spans(_reading_key(first), target)
+    spans_second = _differing_spans(_reading_key(second), target)
+    if not spans_first or not spans_second:
+        return not spans_first or not spans_second
+    for start_a, end_a in spans_first:
+        for start_b, end_b in spans_second:
+            if start_a <= end_b and start_b <= end_a:
+                return False
+    return True
+
+
 # 平行四边形符号 ▱：模型有时写成 \square、\Box、\parallelogram 或方框字符。
 # 只在后面紧跟 2–5 个顶点字母（如 ABCD）时才改；填空框和运算中的 \square 不动。
 _PARALLELOGRAM_TOKEN = (

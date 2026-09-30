@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -23,7 +24,7 @@ from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag, has_figure_cue,
-    candidate_key, missing_choice_figure_slots, recheck_automatic_review,
+    candidate_key, missing_choice_figure_slots, printed_figure_labels, recheck_automatic_review,
     resolve_automatic_figure_assignments, stored_or_derived_review,
     without_automatic_textbook_badges,
 )
@@ -2494,6 +2495,73 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     return final, source
 
 
+_OPTION_LETTERS = "ABCDEFGH"
+
+
+def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
+    """Letters missing before the last option (“A、C、D” lacks B).
+
+    A student's tick or cross over an option label made a reader skip that
+    option, and the card still went green.  Option images count as present.
+    """
+    letters = {key for key, value in (options or {}).items()
+               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    if len(letters) < 2:
+        return []
+    last = _OPTION_LETTERS.index(max(letters))
+    return [letter for letter in _OPTION_LETTERS[:last] if letter not in letters]
+
+
+def _restore_skipped_options(final: dict, readings: list[dict], witness: str) -> tuple[dict, dict[str, bool]]:
+    """Take an option the chosen reading skipped from a reading that has it.
+
+    Returns the reading and, per restored letter, whether MinerU's text also
+    contains it.  An option whose text equals one the chosen reading already
+    has is a shifted label (B read as A), not a skipped option, and is ignored.
+    """
+    options = dict(final.get("options") or {})
+    present = {key for key, value in options.items() if str(value or "").strip()}
+    if len(present) < 2:
+        return final, {}
+    last = max(key for key in present if key in _OPTION_LETTERS) if present & set(_OPTION_LETTERS) else None
+    if last is None:
+        return final, {}
+    existing = {textnorm.canon(str(value)) for value in options.values() if str(value or "").strip()}
+    witness_text = textnorm.witness_key(witness) if witness else ""
+    restored: dict[str, bool] = {}
+    for letter in _OPTION_LETTERS[:_OPTION_LETTERS.index(last)]:
+        if letter in present:
+            continue
+        for reading in readings:
+            text = str((reading.get("options") or {}).get(letter) or "").strip()
+            if not text or textnorm.canon(text) in existing:
+                continue
+            key = textnorm.witness_key(text)
+            options[letter] = text
+            existing.add(textnorm.canon(text))
+            restored[letter] = bool(witness_text) and len(key) >= 4 and key in witness_text
+            break
+    if not restored:
+        return final, {}
+    return {**final, "options": dict(sorted(options.items()))}, restored
+
+
+def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
+    """Drop a question number the arbiter copied into the stem (“9如图，……”).
+
+    Only when neither reader's stem starts with it, so a stem that really
+    begins with that figure (“9 个同学……” on question 9) is left alone.
+    """
+    stem = str(reading.get("stem") or "")
+    match = re.match(rf"\s*{int(number)}\s*[．.、，,]?\s*(?=[^\d.．])", stem)
+    if not match:
+        return reading
+    if any(re.match(rf"\s*{int(number)}(?!\d)", str((other or {}).get("stem") or "")) for other in others):
+        return reading
+    return {**reading, "stem": stem[match.end():]}
+
+
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
     number = snapshot["number"]
@@ -2565,7 +2633,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     else:
         # 主读和复核彼此独立；两个提供商或同提供商多账号时可同时进行。
         with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
-            futures = [executor.submit(run_reader, job) for job in jobs]
+            futures = [executor.submit(contextvars.copy_context().run, run_reader, job) for job in jobs]
             completed = [future.result() for future in futures]
     quota_errors: list[readers.ReaderQuotaExhausted] = []
     for name, result, error, quota_error in completed:
@@ -2622,6 +2690,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 raise readers.ReaderError("没有可用的分歧裁决模型")
             c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text, witness) if witness \
                 else readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
+            c = _without_echoed_number(c, number, (a_text, b_text))
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
             normalized_results.append(c_text)
@@ -2629,6 +2698,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 final, source = a_text, "majority"
             elif same_reading(c_text, b_text):
                 final, source = b_text, "majority"
+            elif textnorm.spotwise_majority(a_text, b_text, c_text):
+                # The arbiter took one reader's word at some spots and the
+                # other's elsewhere; nothing in it lacks a second vote.
+                final, source = c_text, "majority"
+                update["read_c"] = {**c, "spotwise": True}
             else:
                 final, source = c_text, "arbiter"
                 flags.append("两次识读不一致，已由第三次识读裁决")
@@ -2640,6 +2714,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final = a_text or b_text
         source = "single"
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
+
+    final, restored_options = _restore_skipped_options(
+        final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness)
+    for letter, supported in restored_options.items():
+        if not supported:
+            flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
 
     # This is a zero-extra-call guardrail.  Page structure remains the source
     # of truth for explicit 例题/练习 anchors, while model classifications are
@@ -2692,6 +2772,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 **box,
             })   # 属于同一题组内别的题的图，交给那道题
     figures = without_automatic_textbook_badges(figures)
+    if gaps := _option_gaps(final.get("options") or {}, figures):
+        flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
@@ -2721,7 +2803,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     choice_missing = bool(choice_missing_slots)
     policy_stem = snapshot.get("stem", "") if snapshot.get("edited") else final.get("stem", "")
     policy_options = snapshot.get("options", {}) if snapshot.get("edited") else final.get("options") or {}
-    review = automatic_review(
+    review_inputs = dict(
         stem=policy_stem,
         options=policy_options,
         candidate_labels=set(labels),
@@ -2730,6 +2812,21 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         reader_missing=bool(figure_source.get("missing_figure") or choice_missing),
         described_slots=described_slots | choice_missing_slots,
     )
+    review = automatic_review(**review_inputs)
+    if a and review["status"] == CONFLICT and "bound_figure_without_text_cue" in review.get("signals", []):
+        # The text never mentions a figure but the reader attached one.  Most
+        # are real printed figures (a parallelogram beside “在▱ABCD中……”);
+        # some are a student's sketch.  Ask that one narrow question.
+        bound = sorted((label for label, role in figure_assignments.items()
+                        if label in labels and role in {"stem", "A", "B", "C", "D"}), key=int)
+        try:
+            verified = readers.verify_printed_figures(primary, marked_url, number, bound) if bound else {}
+        except readers.ReaderError:
+            verified = {}
+        if verified:
+            if isinstance(update.get("read_a"), dict):
+                update["read_a"] = {**update["read_a"], "figures_verified": verified}
+            review = automatic_review(**review_inputs, printed_labels=printed_figure_labels(update["read_a"]))
     if review["status"] == BLOCKED_MISSING:
         if choice_missing:
             flags.append("选择题没有读出选项；如果选项是图，请点“配图”把 A–D 各框一下")
@@ -2810,6 +2907,26 @@ def _reader_parallelism() -> int:
         except AccountPoolError:
             continue
     return max(1, min(readers.MAX_PARALLEL_CARDS, max(base, capacity)))
+
+
+# Cards of each paper not yet handed to a reading thread.  Zero means the
+# paper is in its tail: the last few cards are finishing and the reading
+# slots are going idle, so the worker may start the next paper beside it.
+_READ_BACKLOG_LOCK = threading.Lock()
+_READ_BACKLOG: dict = {}
+
+
+def reading_tail(paper_pk) -> bool:
+    with _READ_BACKLOG_LOCK:
+        return _READ_BACKLOG.get(paper_pk) == 0
+
+
+def _set_backlog(paper_pk, value: int | None) -> None:
+    with _READ_BACKLOG_LOCK:
+        if value is None:
+            _READ_BACKLOG.pop(paper_pk, None)
+        else:
+            _READ_BACKLOG[paper_pk] = value
 
 
 def read_questions(paper: Paper, questions: list[Question]) -> None:
@@ -2929,31 +3046,39 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     # after the pause signal, so they remain safely resumable as READING.
     quota_error: readers.ReaderQuotaExhausted | None = None
     snapshot_iter = iter(snapshots)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        pending = set()
-        for _ in range(min(workers, len(snapshots))):
-            pending.add(pool.submit(work, next(snapshot_iter)))
-        while pending:
-            done, pending = wait(pending, return_when=FIRST_COMPLETED)
-            completed: list[tuple[int, dict]] = []
-            for future in done:
-                try:
-                    completed.append(future.result())
-                except readers.ReaderQuotaExhausted as error:
-                    quota_error = error
+    unsubmitted = len(snapshots)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending = set()
+            for _ in range(min(workers, len(snapshots))):
+                pending.add(pool.submit(contextvars.copy_context().run, work, next(snapshot_iter)))
+                unsubmitted -= 1
+            _set_backlog(paper.pk, unsubmitted)
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                completed: list[tuple[int, dict]] = []
+                for future in done:
+                    try:
+                        completed.append(future.result())
+                    except readers.ReaderQuotaExhausted as error:
+                        quota_error = error
+                        break
+                if quota_error is not None:
+                    for future in pending:
+                        future.cancel()
                     break
-            if quota_error is not None:
-                for future in pending:
-                    future.cancel()
-                break
-            for question_id, fields in completed:
-                persist(question_id, fields)
-            for _ in completed:
-                try:
-                    snapshot = next(snapshot_iter)
-                except StopIteration:
-                    break
-                pending.add(pool.submit(work, snapshot))
+                for question_id, fields in completed:
+                    persist(question_id, fields)
+                for _ in completed:
+                    try:
+                        snapshot = next(snapshot_iter)
+                    except StopIteration:
+                        break
+                    pending.add(pool.submit(contextvars.copy_context().run, work, snapshot))
+                    unsubmitted -= 1
+                _set_backlog(paper.pk, unsubmitted)
+    finally:
+        _set_backlog(paper.pk, None)
     assign_foreign_figures(paper, foreign)
     distribute_figure_rows(paper)
     if quota_error is not None:

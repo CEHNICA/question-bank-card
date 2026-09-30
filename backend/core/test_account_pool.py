@@ -157,14 +157,14 @@ class AccountConcurrencyTests(SimpleTestCase):
                 lease.cooldown(0)
         self.assertEqual(pool.capacity, 1)
         # A burst limit passes: clean requests give the slots back, one at a time.
-        for _ in range(account_pool.RECOVER_AFTER_SUCCESSES - 1):
+        for _ in range(account_pool.recover_after(1) - 1):
             with pool.lease():
                 pass
         self.assertEqual(pool.capacity, 1)
         with pool.lease():
             pass
         self.assertEqual(pool.capacity, 2)
-        for _ in range(3 * account_pool.RECOVER_AFTER_SUCCESSES):
+        for _ in range(3 * account_pool.recover_after(3)):
             with pool.lease():
                 pass
         self.assertEqual(pool.capacity, 3)          # never above the configured limit
@@ -172,6 +172,23 @@ class AccountConcurrencyTests(SimpleTestCase):
             lease.cooldown(0)
         self.assertEqual(pool.capacity, 2)
         self.assertEqual(pool.spare, 2)
+
+    def test_one_burst_of_429s_removes_one_slot_not_all_of_them(self):
+        # Eight requests in flight hit the limit together (measured on MiniMax).
+        pool = account_pool.AccountPool("test", ("only",), per_account=8)
+        leases = [pool._acquire() for _ in range(8)]
+        for lease in leases:
+            lease.cooldown(0)
+            pool._release(lease)
+        self.assertEqual(pool.capacity, 7)
+        # A request sent after that cut can cut again.
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 6)
+
+    def test_recovery_takes_about_the_same_time_at_any_level(self):
+        self.assertLess(account_pool.recover_after(1), account_pool.recover_after(6))
+        self.assertEqual(account_pool.recover_after(1) * 6, account_pool.recover_after(6))
 
     def test_configured_concurrency_is_validated_and_clamped(self):
         cases = (("", 6), ("2", 2), ("0", 1), ("99", 8), ("x", 6))

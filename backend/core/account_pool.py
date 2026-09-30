@@ -13,6 +13,7 @@ adapts downward for the rest of the run whenever the provider answers 429.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import threading
@@ -99,8 +100,34 @@ def account_concurrency(service: str) -> int:
     return max(1, min(MAX_ACCOUNT_CONCURRENCY, value))
 
 
-# Clean requests on an account before a throttled parallel slot is given back.
-RECOVER_AFTER_SUCCESSES = 20
+# Clean requests per parallel slot before a throttled slot is given back.  At
+# about five seconds a request this returns one slot every ~20 s whatever the
+# current level; a flat count of 20 left a pool knocked down to one slot
+# crawling back for minutes (measured: 8 → 1 in one burst, 200 s at 1).
+RECOVER_SUCCESSES_PER_SLOT = 4
+
+
+def recover_after(capacity: int) -> int:
+    return RECOVER_SUCCESSES_PER_SLOT * max(1, int(capacity))
+
+# Lower is more urgent.  The worker tags each paper's reading with the
+# paper's upload time, so when two papers overlap the older one gets every
+# slot it asks for and the newer one only fills the gaps.  Untagged work
+# (single-card rereads a user is waiting on, tests) is the most urgent.
+_PRIORITY: contextvars.ContextVar[float] = contextvars.ContextVar("qb_lease_priority", default=0.0)
+
+
+@contextmanager
+def lease_priority(value: float) -> Iterator[None]:
+    token = _PRIORITY.set(float(value))
+    try:
+        yield
+    finally:
+        _PRIORITY.reset(token)
+
+
+def current_priority() -> float:
+    return _PRIORITY.get()
 
 
 @dataclass
@@ -112,6 +139,7 @@ class _State:
     disabled_reason: str = ""
     limit: int = 1           # configured per-account concurrency
     successes: int = 0       # clean releases since the last throttle
+    epoch: int = 0           # bumped whenever a throttle removes a slot
 
     @property
     def in_use(self) -> bool:
@@ -123,12 +151,13 @@ class _State:
 class AccountLease:
     """One opaque account reservation.  Its repr intentionally hides the value."""
 
-    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay", "_throttled")
+    __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay", "_throttled", "_epoch")
 
-    def __init__(self, pool: "AccountPool", secret: str, slot: int) -> None:
+    def __init__(self, pool: "AccountPool", secret: str, slot: int, epoch: int = 0) -> None:
         self._pool = pool
         self._secret = secret
         self._slot = slot
+        self._epoch = epoch
         self._disable = False
         self._disable_reason = ""
         self._delay = 0.0
@@ -172,6 +201,8 @@ class AccountPool:
         self._states = {secret: _State(capacity=capacity, limit=capacity) for secret in secrets}
         self._condition = threading.Condition()
         self._cursor = 0
+        # priority -> number of requests currently waiting for a slot
+        self._waiting: dict[float, int] = {}
 
     @property
     def capacity(self) -> int:
@@ -200,44 +231,71 @@ class AccountPool:
             )
 
     def _acquire(self, exclude: frozenset[int] = frozenset()) -> AccountLease:
+        priority = current_priority()
         with self._condition:
-            while True:
-                now = time.monotonic()
-                enabled = [
-                    (index, secret) for index, secret in enumerate(self._secrets)
-                    if not self._states[secret].disabled
-                ]
-                if not enabled:
-                    raise AccountPoolError(f"{self.service} 账号池中没有可用账号")
-                if not any(index not in exclude for index, _secret in enabled):
-                    raise AccountPoolError(f"{self.service} 本次请求已尝试所有可用账号")
-                # Least-loaded account first; the rotating cursor breaks ties so
-                # equally idle accounts still share work round-robin.
-                best: tuple[int, int, int] | None = None
-                for offset in range(len(self._secrets)):
-                    index = (self._cursor + offset) % len(self._secrets)
-                    if index in exclude:
-                        continue
-                    state = self._states[self._secrets[index]]
-                    if state.disabled or state.active >= state.capacity or state.ready_at > now:
-                        continue
-                    rank = (state.active, offset, index)
-                    if best is None or rank < best:
-                        best = rank
-                if best is not None:
-                    index = best[2]
-                    secret = self._secrets[index]
-                    self._states[secret].active += 1
-                    self._cursor = (index + 1) % len(self._secrets)
-                    return AccountLease(self, secret, index)
-                ready_times = [
-                    self._states[secret].ready_at for index, secret in enabled
-                    if index not in exclude
-                    and self._states[secret].active < self._states[secret].capacity
-                    and self._states[secret].ready_at > now
-                ]
-                timeout = max(0.01, min(ready_times) - now) if ready_times else None
-                self._condition.wait(timeout=timeout)
+            self._waiting[priority] = self._waiting.get(priority, 0) + 1
+            try:
+                return self._acquire_locked(exclude, priority)
+            finally:
+                left = self._waiting[priority] - 1
+                if left:
+                    self._waiting[priority] = left
+                else:
+                    del self._waiting[priority]
+                # A more urgent request leaving the queue may unblock others.
+                self._condition.notify_all()
+
+    def _free_slots(self, exclude: frozenset[int], now: float) -> int:
+        return sum(
+            max(0, state.capacity - state.active)
+            for index, secret in enumerate(self._secrets)
+            for state in (self._states[secret],)
+            if index not in exclude and not state.disabled and state.ready_at <= now
+        )
+
+    def _acquire_locked(self, exclude: frozenset[int], priority: float) -> AccountLease:
+        while True:
+            now = time.monotonic()
+            enabled = [
+                (index, secret) for index, secret in enumerate(self._secrets)
+                if not self._states[secret].disabled
+            ]
+            if not enabled:
+                raise AccountPoolError(f"{self.service} 账号池中没有可用账号")
+            if not any(index not in exclude for index, _secret in enabled):
+                raise AccountPoolError(f"{self.service} 本次请求已尝试所有可用账号")
+            # Leave free slots to more urgent requests that are waiting.
+            ahead = sum(count for level, count in self._waiting.items() if level < priority)
+            if ahead and self._free_slots(exclude, now) <= ahead:
+                self._condition.wait(timeout=0.5)
+                continue
+            # Least-loaded account first; the rotating cursor breaks ties so
+            # equally idle accounts still share work round-robin.
+            best: tuple[int, int, int] | None = None
+            for offset in range(len(self._secrets)):
+                index = (self._cursor + offset) % len(self._secrets)
+                if index in exclude:
+                    continue
+                state = self._states[self._secrets[index]]
+                if state.disabled or state.active >= state.capacity or state.ready_at > now:
+                    continue
+                rank = (state.active, offset, index)
+                if best is None or rank < best:
+                    best = rank
+            if best is not None:
+                index = best[2]
+                secret = self._secrets[index]
+                self._states[secret].active += 1
+                self._cursor = (index + 1) % len(self._secrets)
+                return AccountLease(self, secret, index, self._states[secret].epoch)
+            ready_times = [
+                self._states[secret].ready_at for index, secret in enabled
+                if index not in exclude
+                and self._states[secret].active < self._states[secret].capacity
+                and self._states[secret].ready_at > now
+            ]
+            timeout = max(0.01, min(ready_times) - now) if ready_times else None
+            self._condition.wait(timeout=timeout)
 
     def _release(self, lease: AccountLease) -> None:
         with self._condition:
@@ -249,14 +307,18 @@ class AccountPool:
             else:
                 if lease._throttled:
                     state.successes = 0
-                    if state.capacity > 1:
+                    # Requests already in flight when the limit hit all come
+                    # back 429 together; that is one signal, not eight.  Only
+                    # a request sent after the last cut can cut again.
+                    if lease._epoch == state.epoch and state.capacity > 1:
                         state.capacity -= 1
+                        state.epoch += 1
                 else:
                     # A throttle is usually a burst limit, not a permanent one:
                     # without recovery one bad minute left a long-running worker
                     # (and a 300-page book) on a single request at a time.
                     state.successes += 1
-                    if state.capacity < state.limit and state.successes >= RECOVER_AFTER_SUCCESSES:
+                    if state.capacity < state.limit and state.successes >= recover_after(state.capacity):
                         state.capacity += 1
                         state.successes = 0
                 if lease._delay:
