@@ -73,4 +73,9 @@ assert.equal(App.nextToReview(list, "2").id, "4");
 assert.equal(App.nextToReview(list, "4"), null);
 assert.match(js, /下一份：\$\{paperDisplayName\(next\)\}/);
 
+
+// A textbook example is headed “例 N”: its printed label is no longer in the stem.
+assert.match(js, /q\?\.source_kind === "example" \? `例 \$\{q\.number\}` : `第 \$\{q\.number\} 题`/);
+assert.match(js, /el\("span", "qnum", questionLabel\(q\)\)/);
+
 console.log("round 4 interaction checks: OK");

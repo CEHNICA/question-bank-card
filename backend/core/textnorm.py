@@ -181,6 +181,29 @@ _TRAILING_SECTION = re.compile(
 )
 
 
+# A textbook example's printed label: “例1”“例 2．”“例题3”“【例4】”“**例5**”.
+# It names the card, like a question number, and is never part of the task
+# (the card itself records that it is an example).  “例2中的函数……” is an
+# exercise that refers back to an example: that label is content and stays.
+_EXAMPLE_LABEL = re.compile(
+    r"^\s*(?:\*{1,2}\s*)?[【\[]?\s*(?:例题|例)\s*(?:\d{1,3}|[一二三四五六七八九十]{1,3})(?!\d)"
+    r"\s*[】\]]?\s*(?:\*{1,2}\s*)?(?:[.．、:：，,]\s*)?"
+)
+_EXAMPLE_REFERENCE = re.compile(r"^(?:中(?:的|命题)?|的(?:结果|证明|解法|结论)|参见|见上?例|[和与及]\s*例)")
+
+
+def strip_example_label(text: str) -> str:
+    """Drop a leading example label; anything else is returned unchanged."""
+    value = str(text or "")
+    match = _EXAMPLE_LABEL.match(value)
+    if not match:
+        return value
+    rest = value[match.end():]
+    if not rest.strip() or _EXAMPLE_REFERENCE.match(rest):
+        return value
+    return rest
+
+
 def _is_own_number(value: str, number: int | None) -> bool:
     """Whether a printed number is this card's, allowing a binding edge that
     clipped its leading digits (“9.” for 19, “0.” for 20)."""
@@ -190,8 +213,8 @@ def _is_own_number(value: str, number: int | None) -> bool:
 
 
 def clean_stem(stem: str, number: int | None = None) -> str:
-    """去掉模型偶尔带上的题号和分值。"""
-    text = str(stem or "").strip()
+    """去掉模型偶尔带上的题号、例题标号和分值。"""
+    text = strip_example_label(str(stem or "").strip()).strip()
     # 截图顶部带进了上一段的尾巴（“合题目要求的。\n1．经过点……”）：
     # 从本题自己的题号那一行开始。
     if number is not None:
@@ -278,7 +301,7 @@ def witness_key(value: str) -> str:
     text = _HTML_SCRIPT.sub(_html_script, str(value or ""))
     text = _INLINE_TAG.sub("", text)
     text = _WITNESS_ANSWER.sub("（ ）", text)
-    text = _WITNESS_LEAD.sub("", text, count=1)
+    text = _WITNESS_LEAD.sub("", strip_example_label(text), count=1)
     text = _WITNESS_SCORE.sub("", text)
     text = _BAR.sub(r"\\overline", text)
     text = _STYLE.sub(" ", text)

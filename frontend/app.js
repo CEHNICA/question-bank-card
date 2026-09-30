@@ -644,6 +644,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return parts.join(" · ");
   }
 
+  // A textbook example is called what the book calls it: the printed “例 1”
+  // no longer sits in its task text, so the header carries it.
+  function questionLabel(q) {
+    return q?.source_kind === "example" ? `例 ${q.number}` : `第 ${q.number} 题`;
+  }
+
   function paperDisplayName(paper) {
     const name = typeof paper?.name === "string" ? paper.name.trim() : "";
     return name || paper?.filename || "未命名试卷";
@@ -1464,7 +1470,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!q) { $("viewerDialog").close(); return; }
     const list = viewerList();
     const index = list.findIndex((item) => item.id === q.id);
-    $("viewerTitle").textContent = `第 ${q.number} 题 · 原卷对照`;
+    $("viewerTitle").textContent = `${questionLabel(q)} · 原卷对照`;
     $("viewerChip").replaceChildren(stateChip(q));
     const crop = $("viewerCrop");
     const regions = q.regions || [];
@@ -2062,14 +2068,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     card.dataset.id = q.id;
     card.id = `q-${q.id}`;
     card.tabIndex = -1;
-    card.setAttribute("aria-label", `第 ${q.number} 题`);
+    card.setAttribute("aria-label", questionLabel(q));
     card.setAttribute("aria-selected", String(state.selected.has(q.id)));
     card.addEventListener("pointerdown", () => { if (state.current !== q.id) setCurrent(q.id); });
     card.addEventListener("click", (event) => handleCardSelectionClick(event, q));
 
     if (approvedCompact) {
       const row = el("div", "compact-row");
-      row.append(cardSelectionControl(q), el("span", "qnum", `第 ${q.number} 题`), stateChip(q));
+      row.append(cardSelectionControl(q), el("span", "qnum", questionLabel(q)), stateChip(q));
       const preview = el("span", "compact-text");
       R.renderTypeset(preview, firstLine(q.stem));
       row.append(preview);
@@ -2101,7 +2107,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const head = el("header", "card-head");
     head.append(cardSelectionControl(q));
     if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
-    head.append(el("span", "qnum", `第 ${q.number} 题`), el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type), stateChip(q));
+    head.append(el("span", "qnum", questionLabel(q)), el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
     body.append(head);
 

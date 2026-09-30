@@ -20,6 +20,7 @@ from .figure_policy import (
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
 from .models import Paper, PublishedQuestion, Question, QuestionGroup
+from .textnorm import strip_example_label
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
 OPTION_KEYS = ("A", "B", "C", "D")
@@ -304,3 +305,60 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
         "content": publication.content,
     }
+
+
+def strip_saved_example_labels() -> dict[str, int]:
+    """Remove a leading “例1”-style label that older reads saved in the stem.
+
+    Before 1.5.1 the reader could copy a textbook example's label into the
+    task text (“例1用列举法表示……”).  Only the label goes; every other word,
+    figure and range stays.  A card whose approval was current keeps it: the
+    reviewer approved that task, and the label is not part of the task.
+    Published snapshots are updated in place, the same way a task rename
+    updates their file name.  Safe to run on every start: once nothing
+    starts with a label it changes nothing.
+    """
+
+    counts = {"questions": 0, "publications": 0}
+    with transaction.atomic():
+        candidates = (
+            Question.all_objects.select_for_update()
+            .select_related("paper", "group")
+            .filter(stem__contains="例")
+        )
+        for question in candidates:
+            stem = strip_example_label(question.stem)
+            if stem == question.stem:
+                continue
+            approval_was_current = approval_is_current(question)
+            question.stem = stem
+            for field in ("read_a", "read_b", "read_c"):
+                reading = getattr(question, field)
+                if isinstance(reading, dict) and isinstance(reading.get("stem"), str):
+                    cleaned = strip_example_label(reading["stem"])
+                    if cleaned != reading["stem"]:
+                        setattr(question, field, {**reading, "stem": cleaned})
+            if approval_was_current:
+                question.approved_content_hash = approval_hash(question)
+            question.save(update_fields=[
+                "stem", "read_a", "read_b", "read_c", "approved_content_hash", "updated_at",
+            ])
+            counts["questions"] += 1
+
+        for publication in PublishedQuestion.objects.select_for_update().filter(search_text__contains="例"):
+            content = deepcopy(publication.content)
+            stem = strip_example_label(content.get("stem") or "")
+            if stem == (content.get("stem") or ""):
+                continue
+            old_hash = publication.content_hash
+            content["stem"] = stem
+            new_hash = content_hash(content)
+            review = content.get("review")
+            if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:
+                review["approved_content_hash"] = new_hash
+            publication.content = content
+            publication.content_hash = new_hash
+            publication.search_text = _search_text(content)
+            publication.save(update_fields=["content", "content_hash", "search_text"])
+            counts["publications"] += 1
+    return counts

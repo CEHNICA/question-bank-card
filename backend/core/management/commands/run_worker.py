@@ -269,6 +269,21 @@ class SingleInstance:
             raise SystemExit("已有一个题有据工作者在运行，本进程退出。")
 
 
+def clean_saved_example_labels(out=None) -> None:
+    """One-time tidy of cards read before 1.5.1 (see library.strip_saved_example_labels).
+
+    A failure here must never stop the worker from reading papers."""
+    try:
+        from core.library import strip_saved_example_labels
+
+        counts = strip_saved_example_labels()
+    except Exception:
+        logging.getLogger("core").exception("example label cleanup failed")
+        return
+    if (counts["questions"] or counts["publications"]) and out is not None:
+        out.write(f"已去掉题面开头的例题标号：{counts['questions']} 张题卡、{counts['publications']} 条已入库题目")
+
+
 class Command(BaseCommand):
     help = "处理排队的试卷和重读请求"
 
@@ -281,6 +296,7 @@ class Command(BaseCommand):
         # owns the lock, its startup configuration is authoritative even when
         # there is currently no queued work.
         apply_saved_settings()
+        clean_saved_example_labels(self.stdout)
         stop = threading.Event()
         if not once:
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
