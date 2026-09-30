@@ -2506,51 +2506,6 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     return final, source
 
 
-SECOND_LOOK_FLAG_PREFIX = "两次识读不一致，第三次识读选了其中一种，单独再看仍有疑问："
-
-
-def _second_look_flag(spots: list[dict]) -> str:
-    shown = "；".join(
-        f"…{s['before']}【{s['reading'] or '（空）'}】{s['after']}…（另一次识读：{s['mineru'] or '（空）'}）"
-        for s in spots[:3])
-    more = f" 等 {len(spots)} 处" if len(spots) > 3 else ""
-    return f"{SECOND_LOOK_FLAG_PREFIX}{shown}{more}，请对照原卷"
-
-
-def _second_look(update: dict, flags: list[str], *, a_text: dict, b_text: dict, c_text: dict,
-                 image_url: str, primary, checker) -> None:
-    """Ask about each disputed spot neutrally after the arbiter decided.
-
-    The arbiter is shown both readings and rewrites the question.  Checked
-    against reference transcriptions, every one of its wrong decisions went
-    to the first reading (a student's “±” in a blank, 单价 for the printed 定价,
-    a dropped 小 or minus sign).  One either/or look per spot, with the sides
-    in no fixed order, keeps those cards for a person; nothing is rewritten.
-    """
-    spots = textnorm.disputed_spots(a_text, b_text, c_text)
-    if spots is None:
-        return
-    # Punctuation and brackets (“()” / nothing, ′ / ', . / ;) are not worth a
-    # question: in the benchmark the answers there were noise and turned
-    # correct cards yellow.  A decimal point between digits still counts.
-    spots = [spot for spot in spots if not textnorm.punctuation_only_spot(spot)]
-    if not spots or len(spots) > 4:
-        return
-    try:
-        engine = readers.arbiter_engine(primary, checker)
-        if engine is None:
-            raise readers.ReaderError("没有可用的核对模型")
-        answers = readers.spot_check(engine, image_url, spots)
-    except readers.ReaderError as error:
-        update["read_c"] = {**update["read_c"], "second_look": {"spots": spots, "error": str(error)}}
-        flags.append(_second_look_flag(spots))
-        return
-    update["read_c"] = {**update["read_c"], "second_look": {"spots": spots, "answers": answers}}
-    doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
-    if doubtful:
-        flags.append(_second_look_flag(doubtful))
-
-
 _OPTION_LETTERS = "ABCDEFGH"
 
 
@@ -2761,8 +2716,13 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             arbiter = readers.arbiter_engine(primary, checker)
             if arbiter is None:
                 raise readers.ReaderError("没有可用的分歧裁决模型")
-            c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text, witness) if witness \
-                else readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
+            # The checker's reading is shown first.  Against the reference
+            # transcriptions every wrong arbiter decision had followed the
+            # reading shown first (then the primary's, taken from the image with
+            # candidate boxes drawn over it), while the checker — reading the
+            # clean image — was right more often where the two differed.
+            c = readers.arbitrate(arbiter, clean_url, number, b_text, a_text, witness) if witness \
+                else readers.arbitrate(arbiter, clean_url, number, b_text, a_text)
             c = _without_echoed_number(c, number, (a_text, b_text))
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
@@ -2780,8 +2740,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 final, source = c_text, "arbiter"
                 flags.append("两次识读不一致，已由第三次识读裁决")
             if source == "majority":
-                _second_look(update, flags, a_text=a_text, b_text=b_text, c_text=c_text,
-                             image_url=clean_url, primary=primary, checker=checker)
                 # The arbiter saw MinerU's text but can still keep a slip both
                 # readers made (shengli7 #16 “器补” for the printed 添补).
                 final, source = _settle_objections(

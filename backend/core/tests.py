@@ -691,18 +691,6 @@ class ScriptedChat:
         return value(prompt) if callable(value) else value
 
 
-def spot_answer(*printed):
-    """A scripted spot check answering, per spot, the side showing one of ``printed``."""
-    import re as _re
-
-    def answer(prompt: str) -> str:
-        lines = []
-        for index, first, second in _re.findall(r"第(\d+)处：.*?甲：(\S+)　乙：(\S+)", prompt):
-            lines.append(f"{index}={'甲' if first in printed else '乙' if second in printed else '不确定'}")
-        return "\n".join(lines)
-    return answer
-
-
 def tagged(stem, options=None, figures="无", others="无", number=None):
     lines = ([f"【题号】{number}"] if number else []) + ["【题型】单选题" if options else "【题型】解答题", "【题干】", stem]
     for key, value in (options or {}).items():
@@ -928,14 +916,14 @@ class PipelineTests(TestCase):
         self.assertEqual(result["state"], Question.State.YELLOW)
         self.assertEqual(result["figure_review"]["status"], "conflict")
         self.assertEqual(result["figure_review"]["source"], "automatic")
-        # A second look that calls it another question's figure, or a
+        # A separate question that calls it another question's figure, or a
         # sketch, keeps the conflict: the plausible wrong binding stays yellow.
         for verdict in ("other", "handwritten"):
             result, _, _ = self.read_policy_card("求阴影部分的面积。", figure_role="1=题干",
                                                  verified={"1": verdict})
             self.assertEqual(result["figure_review"]["status"], "conflict", verdict)
 
-    def test_second_look_naming_this_questions_printed_figure_clears_the_conflict(self):
+    def test_separate_figure_question_naming_this_questions_figure_clears_the_conflict(self):
         # A deliberate change to the guard pinned in test_figure_policy_claim:
         # the reader's claim alone still never clears it; one separate,
         # narrower question has to name the box as this question's printed figure.
@@ -1061,8 +1049,6 @@ class PipelineTests(TestCase):
             ("a", 2): tagged("如图，在三角形 $ABC$ 中，求角 $A$", {"A": "30°", "B": "60°"}, figures="1=题干", number=2),
             ("b", 2): tagged("如图，在三角形 ABC 中，求角 B", {"A": "30°", "B": "60°"}),
             ("arbiter", 2): tagged("如图，在三角形 $ABC$ 中，求角 $A$", {"A": "$30^\\circ$", "B": "60°"}),
-            # The arbiter's choice gets one neutral look; here it holds.
-            ("spotcheck", 1): spot_answer("A"),
             ("a", 3): tagged("已知函数 $f(x)=x^2$，\n(1) 求 $f(2)$；\n(2) 求最小值。", figures="1=题干", number=4),
             ("b", 3): tagged("已知函数 $f(x)=x^3$，\n(1) 求 $f(2)$；\n(2) 求最小值。"),
             ("arbiter", 3): tagged("已知函数 $f(x)=x^4$，\n(1) 求 $f(2)$；\n(2) 求最小值。"),

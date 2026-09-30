@@ -324,10 +324,10 @@ def spot_check_prompt(spots: list[dict]) -> tuple[str, list[dict]]:
         reading_first = sum(map(ord, spot["before"] + spot["after"] + str(index))) % 2 == 0
         first, second = (spot["reading"], spot["mineru"]) if reading_first else (spot["mineru"], spot["reading"])
         order.append({"甲": "reading" if reading_first else "mineru", "乙": "mineru" if reading_first else "reading"})
-        lines.append(f"第{index}处：…{spot['before']}＿{spot['after']}…　甲：{first or '（空）'}　乙：{second or '（空）'}")
+        lines.append(f"第{index}处：…{spot['before']}＿{spot['after']}…　甲：{first}　乙：{second}")
     prompt = (
         "请只看图片中的印刷体（忽略手写和涂画），判断下面每一处空位上印的是甲还是乙。"
-        "文字已去掉空格、标点和 LaTeX 写法，只比较字符本身；“（空）”表示那里什么也没印。两种写法都可能是对的，请放大看清，"
+        "文字已去掉空格、标点和 LaTeX 写法，只比较字符本身。两种写法都可能是对的，请放大看清，"
         "不要根据常识、上下文或哪种更通顺来猜。\n"
         + "\n".join(lines)
         + "\n\n每处一行，只写序号和甲或乙，例如“1=乙”。看不清就写“1=不确定”。"

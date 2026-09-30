@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from . import figure_policy, pipeline, readers, textnorm
 from .models import Paper, Question
-from .tests import PAGES, ScriptedChat, fake_page_pdf, spot_answer, tagged
+from .tests import PAGES, ScriptedChat, fake_page_pdf, tagged
 
 
 def reading(stem, **options):
@@ -72,30 +72,12 @@ class EchoedNumberTests(SimpleTestCase):
         self.assertEqual(decimal["stem"], "9.5米长的绳子")
 
 
-class DisputedSpotTests(SimpleTestCase):
-    def test_each_spot_names_the_side_the_judge_took(self):
-        a = reading("交x轴于点E，y≥0时，是否为定值？如果是，请求出")
-        b = reading("交x轴于点E，当y≥0时，是否为定值？若是，请求出")
-        c = reading("交x轴于点E，当y≥0时，是否为定值？如果是，请求出")
-        spots = textnorm.disputed_spots(a, b, c)
-        self.assertEqual([(s["reading"], s["mineru"], s["side"]) for s in spots], [("当", "", "b"), ("如果", "若", "a")])
-
-    def test_a_judge_matching_neither_side_gives_no_spots(self):
-        a, b = reading("AF=2\\sqrt{3}"), reading("AF=3\\sqrt{3}")
-        self.assertIsNone(textnorm.disputed_spots(a, b, reading("AF=5\\sqrt{3}")))
-        self.assertEqual(textnorm.disputed_spots(a, a, a), [])
-
-    def test_punctuation_differences_are_not_worth_a_question(self):
-        spot = lambda a, b, before="xx", after="yy": {"reading": a, "mineru": b, "before": before, "after": after}
-        for a, b in (("()", ""), ("'", "′"), (".", ";"), ("_", "()"), ("", ".")):
-            self.assertTrue(textnorm.punctuation_only_spot(spot(a, b)), (a, b))
-        self.assertFalse(textnorm.punctuation_only_spot(spot("", ".", before="2", after="5")))  # 2.5 / 25
-        for a, b in (("6", "5"), ("∴", "∵"), ("", "sqrt"), ("-", ""), ("定", "单")):
-            self.assertFalse(textnorm.punctuation_only_spot(spot(a, b)), (a, b))
-
-    def test_empty_side_is_shown_as_empty_in_the_question(self):
-        prompt, _order = readers.spot_check_prompt([{"reading": "±", "mineru": "", "before": "方根是", "after": ""}])
-        self.assertIn("（空）", prompt)
+class LetterCaseObjectionTests(SimpleTestCase):
+    def test_a_case_only_difference_in_mineru_is_no_objection(self):
+        reading = {"stem": "如图，边长为 $c$ 的大正方形由四个直角三角形拼成"}
+        self.assertEqual(textnorm.witness_objections(reading, "如图,边长为C的大正方形由四个直角三角形拼成"), [])
+        # A different letter still is.
+        self.assertTrue(textnorm.witness_objections(reading, "如图,边长为b的大正方形由四个直角三角形拼成"))
 
 
 class OptionGapTests(SimpleTestCase):
@@ -185,26 +167,20 @@ class ReadingPipelineTests(TestCase):
             ("a", 1): tagged("交x轴于点E，y≥0时，是否为定值？如果是，请求出"),
             ("b", 1): tagged("交x轴于点E，当y≥0时，是否为定值？若是，请求出"),
             ("arbiter", 1): tagged("交x轴于点E，当y≥0时，是否为定值？如果是，请求出"),
-            ("spotcheck", 1): spot_answer("当", "如果"),
         })
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "majority"), question.flags)
         self.assertTrue(question.read_c["spotwise"])
-        self.assertEqual(question.read_c["second_look"]["answers"], ["reading", "reading"])
 
-    def test_an_arbiter_choice_the_second_look_doubts_stays_yellow(self):
-        # 胜利十中第 21 题：裁决跟了读法甲的“单价”，原卷印的是“定价”。
+    def test_the_arbiter_sees_the_checkers_reading_first(self):
         question = self.card()
-        self.run_card(question, {
-            ("a", 1): tagged("通过前几天的销售发现，当销售单价为15元时，每天可售出700本"),
-            ("b", 1): tagged("通过前几天的销售发现，当销售定价为15元时，每天可售出700本"),
-            ("arbiter", 1): tagged("通过前几天的销售发现，当销售单价为15元时，每天可售出700本"),
-            ("spotcheck", 1): spot_answer("定"),
+        chat = self.run_card(question, {
+            ("a", 1): tagged("通过前几天的销售发现，当销售单价为15元时"),
+            ("b", 1): tagged("通过前几天的销售发现，当销售定价为15元时"),
+            ("arbiter", 1): tagged("通过前几天的销售发现，当销售定价为15元时"),
         })
-        self.assertEqual((question.state, question.text_source), (Question.State.YELLOW, "majority"))
-        self.assertIn("单价", question.stem)            # never rewritten by the check
-        flag = next(f for f in question.flags if f.startswith(pipeline.SECOND_LOOK_FLAG_PREFIX))
-        self.assertIn("【单】", flag)
-        self.assertIn("另一次识读：定", flag)
+        self.assertEqual(question.text_source, "majority")
+        self.assertIn("定价", question.stem)
+        self.assertTrue(any(call[0] == "arbiter" for call in chat.calls))
 
     def test_arbiter_inventing_a_spot_stays_yellow(self):
         question = self.card()
