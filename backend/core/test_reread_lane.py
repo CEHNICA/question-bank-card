@@ -81,3 +81,74 @@ class RereadLaneTests(TestCase):
         self.assertEqual(stop.turns, 1)
         self.assertFalse(card.reread_requested)
         self.assertFalse(run_worker.REREAD_LOCK.locked())
+
+
+class ParseLaneTests(TestCase):
+    """While one paper is read, the next queued paper is already parsed."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        override = override_settings(DATA_ROOT=self.temp)
+        override.enable()
+        self.addCleanup(override.disable)
+        self.addCleanup(run_worker.release_main_lane)
+
+    def paper(self, status: str, name: str) -> Paper:
+        return Paper.objects.create(filename=f"{name}.pdf", kind="pdf", sha256=name[0] * 64, status=status)
+
+    class Turns:
+        def __init__(self, turns):
+            self.left = turns
+
+        def is_set(self):
+            return self.left <= 0
+
+        def wait(self, _interval):
+            self.left -= 1
+
+    def test_next_queued_paper_is_parsed_while_the_main_lane_reads(self):
+        reading = self.paper(Paper.Status.READING, "reading")
+        queued = self.paper(Paper.Status.QUEUED, "queued")
+        parsed = []
+
+        def fake_parse(paper):
+            parsed.append(paper.pk)
+            self.assertIn(paper.pk, run_worker.PARSING_AHEAD)
+            Paper.objects.filter(pk=paper.pk).update(status=Paper.Status.SEGMENTING)
+
+        self.assertTrue(run_worker.claim_for_main_lane(reading))
+        with mock.patch.object(pipeline, "parse", side_effect=fake_parse), \
+                mock.patch.object(run_worker, "close_old_connections"):
+            run_worker.parse_lane(self.Turns(1), 0)
+        queued.refresh_from_db()
+        self.assertEqual(parsed, [queued.pk])
+        self.assertEqual(queued.status, Paper.Status.SEGMENTING)
+        self.assertEqual(run_worker.PARSING_AHEAD, set())
+
+    def test_lane_waits_while_the_main_lane_is_idle(self):
+        self.paper(Paper.Status.QUEUED, "queued")
+        with mock.patch.object(pipeline, "parse") as parse, \
+                mock.patch.object(run_worker, "close_old_connections"):
+            run_worker.parse_lane(self.Turns(1), 0)
+        parse.assert_not_called()
+
+    def test_main_lane_skips_a_paper_being_parsed_ahead(self):
+        queued = self.paper(Paper.Status.QUEUED, "queued")
+        run_worker.PARSING_AHEAD.add(queued.pk)
+        self.addCleanup(run_worker.PARSING_AHEAD.discard, queued.pk)
+        self.assertFalse(run_worker.claim_for_main_lane(queued))
+        run_worker.PARSING_AHEAD.discard(queued.pk)
+        self.assertTrue(run_worker.claim_for_main_lane(queued))
+
+    def test_a_failed_parse_ahead_is_recorded_like_any_failure(self):
+        queued = self.paper(Paper.Status.QUEUED, "queued")
+        with mock.patch.object(pipeline, "parse", side_effect=pipeline.MineruError("MinerU 文件上传失败")):
+            self.assertFalse(pipeline.parse_ahead(queued))
+        queued.refresh_from_db()
+        self.assertEqual(queued.status, Paper.Status.FAILED)
+        self.assertIn("MinerU", queued.error)
+        ready = self.paper(Paper.Status.READY, "ready")
+        with mock.patch.object(pipeline, "parse") as parse:
+            self.assertFalse(pipeline.parse_ahead(ready))
+        parse.assert_not_called()

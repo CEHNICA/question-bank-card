@@ -41,6 +41,20 @@ class ProcessingProgressTests(TestCase):
         self.assertNotIn("task_started_at", progress)
         self.assertNotIn("eta_seconds", progress)
 
+    def test_a_paper_parsed_ahead_says_it_is_waiting_for_its_turn(self):
+        now = timezone.now()
+        reading = make_paper("reading.pdf", Paper.Status.READING)
+        parsed = make_paper("parsed.pdf", Paper.Status.SEGMENTING)
+        Paper.objects.filter(pk=reading.pk).update(created_at=now - timedelta(minutes=5))
+        parsed.refresh_from_db()
+        progress = paper_json(parsed, with_counts=False)["processing"]
+        self.assertTrue(progress["parsed_ahead"])
+        self.assertEqual(progress["queue_ahead"], 1)
+        # Alone in the queue, segmenting is just segmenting.
+        Paper.objects.filter(pk=reading.pk).update(status=Paper.Status.READY)
+        progress = paper_json(parsed, with_counts=False)["processing"]
+        self.assertNotIn("parsed_ahead", progress)
+
     def test_chunked_mineru_progress_comes_from_persisted_chunk_states(self):
         paper = make_paper("book.pdf", Paper.Status.PARSING)
         for sequence, status in enumerate(

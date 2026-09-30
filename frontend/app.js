@@ -160,7 +160,11 @@ const QBProgress = (() => {
     if (stage === "queued") {
       headline = queueAhead ? `排队中 · 前面还有 ${queueAhead} 项任务` : "排队中 · 即将开始";
       parts.push("程序会按任务创建顺序开始处理");
+    } else if (stage === "segmenting" && raw.parsed_ahead) {
+      headline = queueAhead ? `MinerU 已解析完 · 等前面 ${queueAhead} 项任务读完` : "MinerU 已解析完 · 即将读题";
+      parts.push("排队时已提前完成解析，轮到它时直接切题读题");
     } else if (stage === "parsing") {
+      if (raw.parsed_ahead) parts.push(`提前解析中，前面还有 ${queueAhead} 项任务`);
       if (raw.chunks && total > 0) {
         headline = `MinerU 解析中 · 已完成 ${completed}/${total} 个分片`;
         const activePages = pageRanges(raw.chunks);
@@ -189,7 +193,7 @@ const QBProgress = (() => {
     parts.push(`本任务状态最近更新 ${formatAge(idle)}`);
     // 排队任务在前一份任务结束前不会改写自己的 updated_at。
     // 队列数正在下降时把这叫作“后台停滞”会误导用户，因此排队阶段不报 stale。
-    const stale = stage !== "queued" && idle >= 240
+    const stale = stage !== "queued" && !(raw.parsed_ahead && stage === "segmenting") && idle >= 240
       ? `已有 ${formatDuration(idle)}没有新的本任务状态更新；程序仍在等待${stage === "parsing" ? " MinerU 或本机处理" : stage === "reading" ? "模型或后台处理" : "后台处理"}，这不等同于失败。`
       : "";
     const determinate = Boolean(raw.determinate && total > 0 && ["parsing", "reading"].includes(stage));

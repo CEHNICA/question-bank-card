@@ -249,11 +249,19 @@ def _processing_json(paper: Paper) -> dict | None:
         "total": None,
         "unit": "",
     }
+    ahead = Paper.objects.filter(
+        status__in=_ACTIVE_PAPER_STATUSES,
+        created_at__lt=paper.created_at,
+    ).exclude(pk=paper.pk).count()
     if paper.status == Paper.Status.QUEUED:
-        progress["queue_ahead"] = Paper.objects.filter(
-            status__in=_ACTIVE_PAPER_STATUSES,
-            created_at__lt=paper.created_at,
-        ).exclude(pk=paper.pk).count()
+        progress["queue_ahead"] = ahead
+    elif ahead and paper.status in (Paper.Status.PARSING, Paper.Status.SEGMENTING):
+        # The worker's parse lane sends later papers to MinerU while an
+        # earlier one is read; such a paper then waits for its turn.
+        progress["queue_ahead"] = ahead
+        progress["parsed_ahead"] = True
+    if paper.status == Paper.Status.QUEUED:
+        pass
     elif paper.status == Paper.Status.PARSING:
         chunks = list(paper.import_chunks.order_by("sequence"))
         if chunks:

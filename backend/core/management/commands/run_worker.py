@@ -14,7 +14,7 @@ from django.db import close_old_connections
 from core import credential_settings, preferences
 from core.account_pool import reset_account_pools
 from core.models import Paper, Question
-from core.pipeline import process_paper, process_rereads
+from core.pipeline import parse_ahead, process_paper, process_rereads
 
 ACTIVE = [Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING]
 # One reread batch at a time, whichever lane runs it.
@@ -42,6 +42,63 @@ def reread_lane(stop: threading.Event, interval: float = 1.5) -> None:
         finally:
             close_old_connections()
         stop.wait(interval)
+
+
+# The main lane's current paper and the papers the parse lane is working on.
+LANES_LOCK = threading.Lock()
+MAIN_CURRENT: dict = {"paper": None}
+PARSING_AHEAD: set = set()
+
+
+def parse_lane(stop: threading.Event, interval: float = 2.0) -> None:
+    """Send the next queued papers to MinerU while the main lane reads.
+
+    A batch of papers used to run strictly one after another: MinerU for
+    paper 2 started only after every card of paper 1 was read.  Parsing
+    uses no reading-model quota, so it can run ahead.  Only papers still
+    QUEUED are taken, and never the one the main lane is on.
+    """
+    logger = logging.getLogger("core")
+    while not stop.is_set():
+        claimed = None
+        try:
+            close_old_connections()
+            with LANES_LOCK:
+                current = MAIN_CURRENT["paper"]
+            if current is not None:
+                candidate = (Paper.objects.filter(status=Paper.Status.QUEUED).exclude(pk=current)
+                             .order_by("created_at").first())
+                if candidate is not None:
+                    with LANES_LOCK:
+                        if MAIN_CURRENT["paper"] != candidate.pk:
+                            PARSING_AHEAD.add(candidate.pk)
+                            claimed = candidate
+            if claimed is not None:
+                parse_ahead(claimed)
+        except Exception:  # the lane must never take the worker down
+            logger.exception("parse lane error")
+        finally:
+            if claimed is not None:
+                with LANES_LOCK:
+                    PARSING_AHEAD.discard(claimed.pk)
+            close_old_connections()
+        if claimed is None:
+            stop.wait(interval)
+
+
+def claim_for_main_lane(paper) -> bool:
+    """The main lane takes a paper unless the parse lane is on it right now."""
+    key = getattr(paper, "pk", None)
+    with LANES_LOCK:
+        if key is not None and key in PARSING_AHEAD:
+            return False
+        MAIN_CURRENT["paper"] = key
+        return True
+
+
+def release_main_lane() -> None:
+    with LANES_LOCK:
+        MAIN_CURRENT["paper"] = None
 
 
 def apply_saved_credentials():
@@ -120,17 +177,28 @@ class Command(BaseCommand):
         stop = threading.Event()
         if not once:
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
+            threading.Thread(target=parse_lane, args=(stop,), name="parse-lane", daemon=True).start()
         while True:
             close_old_connections()
             worked = False
             try:
                 for paper in Paper.objects.filter(status__in=ACTIVE).order_by("created_at"):
-                    apply_saved_credentials()
-                    apply_saved_model_preferences()
-                    self.stdout.write(f"处理试卷 {paper.display_name}（{paper.get_status_display()}）")
-                    sys.stdout.flush()
-                    process_paper(paper)
-                    worked = True
+                    if not claim_for_main_lane(paper):
+                        continue
+                    try:
+                        # The parse lane may have moved it on since the query ran.
+                        if hasattr(paper, "refresh_from_db"):
+                            paper.refresh_from_db()
+                            if paper.status not in ACTIVE:
+                                continue
+                        apply_saved_credentials()
+                        apply_saved_model_preferences()
+                        self.stdout.write(f"处理试卷 {paper.display_name}（{paper.get_status_display()}）")
+                        sys.stdout.flush()
+                        process_paper(paper)
+                        worked = True
+                    finally:
+                        release_main_lane()
                 if rereads_pending():
                     apply_saved_credentials()
                     apply_saved_model_preferences()

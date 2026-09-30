@@ -3151,6 +3151,28 @@ def process_paper(paper: Paper) -> None:
         _set(paper, status=Paper.Status.FAILED, error=message[:500])
 
 
+def parse_ahead(paper: Paper) -> bool:
+    """Run only the MinerU step of a queued paper (the worker's look-ahead lane).
+
+    While one paper is being read, the next one can already be uploaded,
+    parsed by MinerU and stored.  The main lane later continues it from
+    SEGMENTING without waiting for MinerU.  Failures are recorded exactly as
+    ``process_paper`` records them.
+    """
+    try:
+        paper.refresh_from_db()
+        if paper.status != Paper.Status.QUEUED:
+            return False
+        parse(paper)
+        return True
+    except Exception as error:
+        logger.exception("paper failed while parsing ahead")
+        message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
+            f"处理出错：{type(error).__name__}"
+        _set(paper, status=Paper.Status.FAILED, error=message[:500])
+        return False
+
+
 ACTIVE_PAPER_STATUSES = (
     Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
 )

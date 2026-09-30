@@ -23,6 +23,13 @@ const longQueued = Progress.processingPresentation({
 });
 assert.equal(longQueued.stale, "", "排队不更新自身状态时不应误报后台停滞");
 
+const parsedAhead = Progress.processingPresentation({
+  status: "segmenting",
+  processing: { stage: "segmenting", parsed_ahead: true, queue_ahead: 2, elapsed_seconds: 400, idle_seconds: 380 }
+});
+assert.equal(parsedAhead.headline, "MinerU 已解析完 · 等前面 2 项任务读完");
+assert.equal(parsedAhead.stale, "", "提前解析完等待读题时不应误报后台停滞");
+
 const chunks = Progress.processingPresentation({
   status: "parsing",
   processing: {
