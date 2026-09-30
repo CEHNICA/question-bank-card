@@ -328,10 +328,11 @@
     const answers = [];
     ordered.forEach(([name, group], index) => {
       ui.paper.append(node("h3", "print-section", `${chinese[index] || index + 1}、${name}`));
-      group.forEach((item) => {
+      group.forEach((item, position) => {
         number += 1;
         const block = node("div", "print-question");
         QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
+        block.append(printTools(items, group, position));
         ui.paper.append(block);
         answers.push([number, item]);
       });
@@ -358,6 +359,48 @@
       ui.paper.append(key);
     }
     ui.paper.append(node("p", "print-footer", `共 ${number} 题 · 题目来自本机正式题库，均为题卡审核页中已标记通过的版本；正式使用前请按场景复核`));
+  }
+
+  // Move up / down within the same section, or take the question out of the
+  // basket, without leaving the preview.  Hidden when printing.
+  function printTools(items, group, position) {
+    const tools = node("div", "print-question-tools no-print");
+    const item = group[position];
+    const move = (step) => {
+      const other = group[position + step];
+      if (!other) return;
+      const from = state.basket.indexOf(item.id);
+      const to = state.basket.indexOf(other.id);
+      if (from < 0 || to < 0) return;
+      [state.basket[from], state.basket[to]] = [state.basket[to], state.basket[from]];
+      saveBasket();
+      const a = items.indexOf(item);
+      const b = items.indexOf(other);
+      [items[a], items[b]] = [items[b], items[a]];
+      renderPrint(items);
+    };
+    const up = node("button", "", "↑");
+    up.type = "button";
+    up.title = "上移";
+    up.disabled = position === 0;
+    up.addEventListener("click", () => move(-1));
+    const down = node("button", "", "↓");
+    down.type = "button";
+    down.title = "下移";
+    down.disabled = position === group.length - 1;
+    down.addEventListener("click", () => move(1));
+    const remove = node("button", "remove", "×");
+    remove.type = "button";
+    remove.title = "移出试题篮";
+    remove.addEventListener("click", () => {
+      state.basket = state.basket.filter((id) => id !== item.id);
+      saveBasket();
+      items.splice(items.indexOf(item), 1);
+      renderPrint(items);
+      render();
+    });
+    tools.append(up, down, remove);
+    return tools;
   }
 
   function closePrint() {

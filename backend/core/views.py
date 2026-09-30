@@ -20,6 +20,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from PIL import Image
 
+from .version import APP_VERSION
 from . import credential_settings, imaging, import_planning, library, m3import, mineru, photos, preferences, readers
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -593,6 +594,7 @@ def status(request):
         "independent_checker": bool(checker and primary and checker.provider != primary.provider),
         "engines": engines,
         "m3_available": m3import.m3_backend() is not None,
+        "app_version": APP_VERSION,
     })
 
 

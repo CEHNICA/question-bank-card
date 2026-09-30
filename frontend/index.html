@@ -53,12 +53,14 @@
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
         <strong>上传资料</strong>
-        <span>PDF、Word 或照片；可拖入，也可复制文件后按 Ctrl+V</span>
+        <span>PDF、Word 或照片；拖进窗口任意处，或复制后按 Ctrl+V</span>
       </label>
       <fieldset class="material-type" aria-label="上传资料类型">
         <legend>这次上传的是</legend>
-        <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
-        <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
+        <div class="material-options">
+          <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
+          <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
+        </div>
         <small id="bookChunkHint" class="material-hint">书籍 PDF 会先在本机按每 100 页稳定分片，再逐片解析；原文件不会改动。</small>
       </fieldset>
       <p id="uploadNote" class="side-note" hidden></p>
@@ -109,13 +111,14 @@
         <p id="paperError" class="paper-error" hidden></p>
         <p id="orderCheck" class="order-check" hidden></p>
         <div id="reviewMeter" class="review-meter" hidden>
-          <div class="meter-top">
-            <span class="meter-figure" id="meterFigure"></span>
-            <span class="meter-percent" id="meterPercent"></span>
-          </div>
+          <span class="meter-figure" id="meterFigure"></span>
           <div class="meter-bar" id="meterBar" role="img"></div>
-          <div class="meter-legend" id="meterLegend"></div>
-          <p class="review-boundary">绿卡表示机器识读彼此一致（两次识读一致，或与 MinerU 文字逐字一致）；“标记通过”表示你接受当前题面版本，并不自动证明已经逐题对照原卷。</p>
+          <span class="meter-percent" id="meterPercent"></span>
+          <details class="meter-note">
+            <summary title="绿卡和“标记通过”分别代表什么"><svg class="icon" aria-hidden="true"><use href="#i-question"/></svg>绿卡≠已核对</summary>
+            <p class="review-boundary">绿卡表示机器识读彼此一致（两次识读一致，或与 MinerU 文字逐字一致）；“标记通过”表示你接受当前题面版本，并不自动证明已经逐题对照原卷。</p>
+          </details>
+          <div class="meter-legend" id="meterLegend" hidden></div>
         </div>
         <div id="doneBanner" class="done-banner" hidden></div>
         <div id="toolbar" class="toolbar">
@@ -259,7 +262,7 @@
         <section id="settingsAbout" class="settings-section" aria-labelledby="settingsAboutTitle">
           <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
           <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
-          <div class="about-row"><span>版本</span><strong>题有据 1.2.0（本机安装）</strong></div>
+          <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
           <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
           <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
         </section>
@@ -345,13 +348,14 @@
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
       <strong>这张图属于</strong>
       <div class="figure-slot-options">
-        <button type="button" role="menuitem" data-figure-slot="stem">题干</button>
-        <button type="button" role="menuitem" data-figure-slot="A">A</button>
-        <button type="button" role="menuitem" data-figure-slot="B">B</button>
-        <button type="button" role="menuitem" data-figure-slot="C">C</button>
-        <button type="button" role="menuitem" data-figure-slot="D">D</button>
-        <button type="button" role="menuitem" class="irrelevant" data-figure-slot="irrelevant">无关</button>
+        <button type="button" role="menuitem" data-figure-slot="stem" aria-keyshortcuts="S">题干<kbd>S</kbd></button>
+        <button type="button" role="menuitem" data-figure-slot="A" aria-keyshortcuts="A">A</button>
+        <button type="button" role="menuitem" data-figure-slot="B" aria-keyshortcuts="B">B</button>
+        <button type="button" role="menuitem" data-figure-slot="C" aria-keyshortcuts="C">C</button>
+        <button type="button" role="menuitem" data-figure-slot="D" aria-keyshortcuts="D">D</button>
+        <button type="button" role="menuitem" class="irrelevant" data-figure-slot="irrelevant" aria-keyshortcuts="X">无关<kbd>X</kbd></button>
       </div>
+      <small class="figure-slot-keys">按 S、A–D 或 X 直接选</small>
       <button type="button" class="figure-slot-cancel" data-figure-slot-cancel>取消</button>
     </div>
   </dialog>
@@ -375,7 +379,8 @@
       <div id="viewerText" class="viewer-text"></div>
     </div>
     <div class="viewer-foot">
-      <span class="key-hints"><kbd>←</kbd><kbd>→</kbd> 上下题<span class="sep"></span><kbd>Enter</kbd> 通过并下一题<span class="sep"></span><kbd>0</kbd> 全题<span class="sep"></span><kbd>W</kbd> 适宽<span class="sep"></span><kbd>Ctrl</kbd>+滚轮 放大<span class="sep"></span>左键拖动原卷 / 题面</span>
+      <span class="key-hints"><kbd>←</kbd><kbd>→</kbd> 上下题<span class="sep"></span><kbd>Enter</kbd> 通过并下一题<span class="sep"></span><kbd>0</kbd> 全题<span class="sep"></span><kbd>W</kbd> 适宽<span class="sep"></span><kbd>E</kbd> 改字<span class="sep"></span><kbd>R</kbd><kbd>F</kbd> 范围 / 配图<span class="sep"></span><kbd>Ctrl</kbd>+滚轮 放大</span>
+      <button id="viewerEdit" class="button" type="button" title="关闭放大窗口并改这道题（E）">改字</button>
       <button id="viewerPrev" class="button" type="button"><svg class="icon"><use href="#i-left"/></svg>上一题</button>
       <button id="viewerNext" class="button" type="button">下一题<svg class="icon"><use href="#i-right"/></svg></button>
       <button id="viewerApprove" class="button primary" type="button"><svg class="icon"><use href="#i-check"/></svg>通过</button>
@@ -557,6 +562,14 @@
       <div class="key-row"><span>打开这张说明</span><span><kbd>?</kbd></span></div>
     </div>
   </dialog>
+
+  <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
+    <div class="drop-overlay-card">
+      <svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>
+      <strong>松开即可上传</strong>
+      <span id="dropOverlayType"></span>
+    </div>
+  </div>
 
   <div id="lens" class="lens" aria-hidden="true"></div>
 

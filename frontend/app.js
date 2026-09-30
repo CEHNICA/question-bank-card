@@ -345,8 +345,37 @@ const QBResegment = (() => {
   return { CATEGORIES, normalizeReport, itemTitle };
 })();
 
+const QBNotify = (() => {
+  "use strict";
+
+  const ACTIVE = new Set(["queued", "parsing", "segmenting", "reading"]);
+
+  // Papers that were being processed at the last look and no longer are.
+  // The open paper is left out: its own view already shows the change.
+  function justFinished(previousStatus, papers, openId) {
+    return (papers || []).filter((paper) => {
+      const before = previousStatus.get(paper.id);
+      return Boolean(before) && ACTIVE.has(before) && !ACTIVE.has(paper.status) && paper.id !== openId;
+    });
+  }
+
+  function finishedMessage(paper, name) {
+    const c = paper.counts || {};
+    const todo = (c.yellow || 0) + (c.red || 0);
+    if (paper.status === "failed") return `“${name}”处理失败`;
+    if (paper.status === "needs_grouping") return `“${name}”需要确认资料结构`;
+    return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读一致"}`;
+  }
+
+  function title(base, unseen) {
+    return unseen ? `（${unseen} 份读完）${base}` : base;
+  }
+
+  return { justFinished, finishedMessage, title };
+})();
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment };
+  module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify };
 }
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -366,6 +395,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { key: "approved", label: "已标记通过" }
   ];
   const ACTIVE_STATUS = new Set(["queued", "parsing", "segmenting", "reading"]);
+  // Papers that finished in the background while another one was open.  The
+  // window title counts them, so a reviewer who uploaded a batch sees from
+  // the taskbar when the next paper is ready.
+  const finishedUnseen = new Set();
+  const BASE_TITLE = document.title;
 
   const state = {
     status: null, papers: [], paperId: null, paper: null, questions: [], filter: "all",
@@ -575,6 +609,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("fileInput").disabled = false;
     }
     $("m3Button").hidden = !s.m3_available;
+    if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}（本机安装）`;
     renderSettingsModels();
     return true;
   }
@@ -590,8 +625,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const parts = [`${c.total || 0} 题`];
     const todo = (c.yellow || 0) + (c.red || 0);
     if (todo) parts.push(`${todo} 张要看`);
-    if (c.approved) parts.push(`已通过 ${c.approved}`);
-    if (c.published) parts.push(`已入库 ${c.published}`);
+    if (c.published && c.published >= (c.approved || 0)) parts.push(`已入库 ${c.published}`);
+    else if (c.approved) parts.push(`通过 ${c.approved}${c.published ? ` · 入库 ${c.published}` : ""}`);
     return parts.join(" · ");
   }
 
@@ -631,6 +666,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       link.append(el("span", "paper-file", paperDisplayName(paper)));
       const meta = el("span", "paper-meta", paperSummary(paper));
       if (ACTIVE_STATUS.has(paper.status)) meta.classList.add("busy");
+      if (finishedUnseen.has(paper.id)) {
+        item.classList.add("fresh");
+        link.append(el("span", "fresh-dot", "新"));
+      }
       link.append(meta, miniMeter(paper));
       if (paper.id === state.paperId) link.setAttribute("aria-current", "true");
       link.addEventListener("click", () => selectPaper(paper.id));
@@ -639,10 +678,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
   }
 
+  function noteFinishedPapers(previous, papers) {
+    QBNotify.justFinished(previous, papers, state.paperId).forEach((paper) => {
+      finishedUnseen.add(paper.id);
+      toast(QBNotify.finishedMessage(paper, paperDisplayName(paper)), paper.status === "failed" ? "error" : "success",
+        { label: "去看看", onClick: () => selectPaper(paper.id) });
+    });
+    const known = new Set(papers.map((paper) => paper.id));
+    [...finishedUnseen].forEach((id) => { if (!known.has(id) || id === state.paperId) finishedUnseen.delete(id); });
+    document.title = QBNotify.title(BASE_TITLE, finishedUnseen.size);
+  }
+
   async function loadPapers() {
     try {
       const data = await api("/api/papers");
+      const previous = new Map(state.papers.map((paper) => [paper.id, paper.status]));
       state.papers = data.papers;
+      noteFinishedPapers(previous, state.papers);
       renderPaperList();
     } catch (error) {
       toast(error.message, "error");
@@ -661,6 +713,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function selectPaper(id) {
+    if (finishedUnseen.delete(id)) document.title = QBNotify.title(BASE_TITLE, finishedUnseen.size);
     if (state.paperId !== id) {
       clearQuestionSelection({ render: false });
       state.paperId = id;
@@ -764,7 +817,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return part;
     }));
     bar.setAttribute("aria-label", segments.filter(([, n]) => n).map(([, n, label]) => `${label} ${n}`).join("，"));
-    $("meterFigure").replaceChildren(el("strong", "", String(c.approved)), document.createTextNode(` / ${c.all} 题已标记通过`));
+    $("meterFigure").replaceChildren(el("strong", "", String(c.approved)), document.createTextNode(` / ${c.all} 已通过`));
+    $("meterFigure").title = `${c.approved} / ${c.all} 题已标记通过`;
     $("meterPercent").textContent = `${Math.round((c.approved / c.all) * 100)}%`;
     $("meterLegend").replaceChildren(...segments.filter(([, n]) => n > 0).map(([, n, label, color]) => {
       const item = el("span");
@@ -816,7 +870,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (!c.all) {
       statusText.textContent = "没有题卡";
     } else if (c.todo) {
-      statusText.textContent = `${c.all} 道题：${c.todo} 张黄/红卡或内容变更需逐题核对，${c.green} 张为机器识读一致，已标记通过 ${c.approved}。`;
+      // What to do next, not a second copy of the counts shown in the bar and tabs.
+      statusText.replaceChildren(
+        document.createTextNode(`${c.all} 道题。先处理 ${c.todo} 张需核对的卡（按 `),
+        el("kbd", "", "N"),
+        document.createTextNode(c.green ? ` 逐张跳过去），再核对 ${c.green} 张识读一致的绿卡。` : " 逐张跳过去）。"),
+      );
     } else if (c.green) {
       statusText.textContent = `${c.all} 道题：剩下 ${c.green} 张 AI 识读一致的绿卡；它们仍需按你的审核标准确认。`;
     } else {
@@ -917,7 +976,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       tab.setAttribute("aria-controls", "cards");
       tab.tabIndex = active ? 0 : -1;
       tab.append(el("span", "", filter.label), el("span", "filter-count", String(c[filter.key])));
-      tab.addEventListener("click", () => setFilter(filter.key));
+      tab.addEventListener("click", (event) => {
+        setFilter(filter.key);
+        // A mouse click leaves focus on the tab, where Space and Enter would
+        // press the tab again; hand it to the first card so the review keys work.
+        if (event.detail > 0) {
+          const first = state.questions.find(visible);
+          if (first) requestAnimationFrame(() => setCurrent(first.id, { focus: true }));
+        }
+      });
       tab.addEventListener("keydown", (event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
@@ -1475,17 +1542,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else if (key === "-" || key === "_") { event.preventDefault(); zoomBy(0.8); }
     else if (key === "0") { event.preventDefault(); requestViewerFit(); }
     else if (key.toLowerCase() === "w") { event.preventDefault(); setViewerWidth(); }
-    else if (key.toLowerCase() === "e") {
+    else if (key.toLowerCase() === "e") { event.preventDefault(); editFromViewer(); }
+    else if (key.toLowerCase() === "r" || key.toLowerCase() === "f") {
       event.preventDefault();
       const q = questionById(viewer.id);
       $("viewerDialog").close();
-      if (q) {
-        const card = document.querySelector(`.card[data-id="${q.id}"]`);
-        if (card?.classList.contains("compact")) { state.expanded.add(q.id); renderCards(); }
-        const fresh = document.querySelector(`.card[data-id="${q.id}"]`);
-        if (fresh) { fresh.scrollIntoView({ block: "start" }); openEditor(fresh, q); }
-      }
+      if (q) openPageDialog(key.toLowerCase() === "r" ? "regions" : "figures", q);
     }
+  }
+
+  function editFromViewer() {
+    const q = questionById(viewer.id);
+    $("viewerDialog").close();
+    if (!q) return;
+    const card = document.querySelector(`.card[data-id="${q.id}"]`);
+    if (card?.classList.contains("compact")) { state.expanded.add(q.id); renderCards(); }
+    const fresh = document.querySelector(`.card[data-id="${q.id}"]`);
+    if (fresh) { fresh.scrollIntoView({ block: "start" }); openEditor(fresh, q); }
   }
 
   function zoomBy(factor) {
@@ -1505,6 +1578,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("zoomOut").addEventListener("click", () => zoomBy(0.8));
   $("zoomFit").addEventListener("click", requestViewerFit);
   $("zoomWidth").addEventListener("click", setViewerWidth);
+  $("viewerEdit").addEventListener("click", editFromViewer);
   $("viewerPrev").addEventListener("click", () => viewerStep(-1));
   $("viewerNext").addEventListener("click", () => viewerStep(1));
   $("viewerApprove").addEventListener("click", viewerApprove);
@@ -1650,7 +1724,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text: (review.signals || []).includes("candidate_unclassified")
         ? `当前已选配图不一定有错；另有 ${unclassifiedCandidates(q).length || Number(review.unclassified_count) || 1} 张候选图尚未归类${candidatePageLabel(unclassifiedCandidates(q))}。请检查它们、修正过长的题目范围，或明确确认其余候选均与本题无关。`
         : (review.signals || []).includes("bound_figure_without_text_cue")
-          ? `题目文字没有提到图，但 AI 给本题配了图。是试卷上印的图就点“确认当前配图及归属”；是学生的草稿、答案或别题的图就点“这些图与本题无关”。`
+          ? ((q.figures || []).length
+            ? "题目文字没有提到图，但 AI 给本题配了图。是试卷上印的图就点“确认当前配图及归属”；是学生的草稿、答案或别题的图就点“这些图与本题无关”。"
+            : "题目文字没有提到图，但 AI 认为这里有本题的配图。需要配图就点“调整配图或归属”把它框出来；原卷没有就点“这些图与本题无关”。")
           : (review.reason || "程序无法确定候选内容是正式配图还是手写痕迹，请对照原卷确认。")
     };
     if (review.status === "auto_excluded") return {
@@ -2943,6 +3019,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     function close(rerender = true) {
       state.editing.delete(q.id);
+      card.classList.remove("editing", "editing-pinned");
       editor.remove();
       card.querySelector(".rendered").hidden = false;
       card.querySelector(".card-actions").hidden = false;
@@ -2955,8 +3032,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     card.querySelector(".card-actions").hidden = true;
     card.querySelector(".reads")?.remove();
     card.querySelector(".card-body").append(editor);
+    // Keep the original in sight while typing: a wide crop that fits in the
+    // upper part of the window stays pinned under the toolbar as the fields
+    // scroll past it.  A tall crop would leave no room to type, so it scrolls.
+    card.classList.add("editing");
+    const crop = card.querySelector(".card-source");
+    if (card.classList.contains("wide-source") && crop && crop.offsetHeight <= window.innerHeight * 0.42) {
+      card.classList.add("editing-pinned");
+    }
     update();
-    stem.focus();
+    stem.focus({ preventScroll: true });
+    card.scrollIntoView({ block: "start" });
   }
 
   // ---------------------------------------------------------------- 原卷页面上拖框（调整范围 / 配图 / 补一题）
@@ -2995,9 +3081,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogTitle").textContent = mode === "regions" ? `调整第 ${q.number} 题的原卷范围`
       : mode === "figures" ? `第 ${q.number} 题的配图` : "手动补一道题";
     $("pageDialogHint").textContent = mode === "regions"
-      ? "拖动框的边角改大小，拖框内部移动；选中框后也可用方向键移动、Delete 删除。在空白处拖出新框可补上跨栏/跨页的部分。保存后 AI 会按新范围重读并撤销旧审批。"
+      ? "拖边角改大小 · 拖框内部移动 · 空白处拖出新框补上跨栏/跨页部分 · 选中后方向键微调、Delete 删除 · 保存后 AI 按新范围重读"
       : mode === "figures"
-        ? "橙色实线框是已选配图；点标签可改归属，拖标签只移动标签。点击蓝色候选图或直接画新框后，再选择题干、选项或无关；未选择归属的新框不会保存。修改后需重新审核题卡。"
+        ? "点蓝色候选图或画新框，再选归属（S 题干 · A–D 选项 · X 无关）· 点橙色标签改归属，拖标签只挪标签 · 保存后需重新审核"
         : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
     $("numberField").hidden = mode !== "new";
     const groups = state.paper.question_groups || [];
@@ -3351,10 +3437,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("figureSlotMenu").querySelector("[data-figure-slot-cancel]").addEventListener("click", () => {
     closeFigureSlotMenu({ cancelPending: true, rerender: true });
   });
+  const SLOT_KEYS = { s: "stem", a: "A", b: "B", c: "C", d: "D", x: "irrelevant" };
   $("figureSlotMenu").addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFigureSlotMenu({ cancelPending: true, rerender: true });
+      return;
+    }
+    const slot = !event.ctrlKey && !event.metaKey && !event.altKey && SLOT_KEYS[event.key.toLowerCase()];
+    if (!slot) return;
     event.preventDefault();
-    closeFigureSlotMenu({ cancelPending: true, rerender: true });
+    chooseFigureSlot(slot);
   });
   $("figureSlotMenu").addEventListener("toggle", (event) => {
     if (event.newState !== "closed" || !dialog.slotTarget) return;
@@ -3969,10 +4062,39 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     event.preventDefault();
     handleFiles(event.dataTransfer.files);
   });
-  // 拖到页面其他地方也不要让浏览器直接打开文件
-  ["dragover", "drop"].forEach((name) => window.addEventListener(name, (event) => {
+  // Files dropped anywhere in the window are uploaded, not only on the small
+  // box in the sidebar; an overlay says so while they are dragged over.
+  let windowDrags = 0;
+  const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+  const showDropOverlay = (show) => {
+    $("dropOverlay").hidden = !show;
+    if (show) {
+      $("dropOverlayType").textContent = selectedMaterialType() === "book"
+        ? "作为“一本书 / 讲义”上传（可在左侧改成“一份试卷”）"
+        : "作为“一份试卷”上传；几张照片会合成一份（可在左侧改成“一本书 / 讲义”）";
+    }
+  };
+  window.addEventListener("dragenter", (event) => {
+    if (!carriesFiles(event) || anyDialogOpen()) return;
+    windowDrags += 1;
+    showDropOverlay(true);
+  });
+  window.addEventListener("dragleave", (event) => {
+    if (!carriesFiles(event)) return;
+    windowDrags = Math.max(0, windowDrags - 1);
+    if (!windowDrags) showDropOverlay(false);
+  });
+  window.addEventListener("dragover", (event) => {
     if (!event.target.closest?.("#dropZone")) event.preventDefault();
-  }));
+  });
+  window.addEventListener("drop", (event) => {
+    windowDrags = 0;
+    showDropOverlay(false);
+    if (event.target.closest?.("#dropZone")) return;
+    event.preventDefault();
+    if (!carriesFiles(event) || anyDialogOpen()) return;
+    handleFiles(event.dataTransfer.files);
+  });
 
   document.addEventListener("paste", async (event) => {
     if (!QBUpload.shouldInterceptPaste(event.target, event.clipboardData)) return;

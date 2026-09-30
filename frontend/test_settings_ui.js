@@ -15,7 +15,8 @@ for (const page of [html, libraryHtml]) {
   assert.match(page, /class="brand-mark"[^>]*src="\/favicon\.png"/);
   assert.doesNotMatch(page, /题库题卡版/);
 }
-assert.match(html, /题有据 1\.2\.0（本机安装）/);
+assert.match(html, /id="aboutVersion"/);
+assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
 // 顶栏只有一个带文字的设置入口，抽屉包含约定的五个分区。
 assert.match(html, /id="settingsButton"[^>]*>[\s\S]*?<use href="#i-gear"\/>[\s\S]*?设置<\/button>/);
