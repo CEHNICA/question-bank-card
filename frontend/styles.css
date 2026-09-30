@@ -360,6 +360,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .reading-difference-source { color: #8a6422; font-size: 11.5px; font-weight: 700; }
 .reading-difference-text { color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .reading-difference .button { justify-self: start; }
+.flags .flag-spot { margin: 0 2px; padding: 0 4px; border-radius: 3px; background: #f6d27a; color: var(--ink); font-weight: 700; }
 .reading-difference-context { color: var(--muted, #7a746a); }
 .reading-difference-extra { margin: 0 1px; padding: 0 3px; border-radius: 3px; background: #f6d27a; color: var(--ink); font-weight: 600; }
 .figure-review { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); color: var(--ink-2); }

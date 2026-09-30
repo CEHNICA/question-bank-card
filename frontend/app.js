@@ -1851,8 +1851,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!flags.length && !q.error) return null;
     const list = el("ul", "flags");
     if (q.error) list.append(el("li", "", q.error));
-    flags.forEach((flag) => list.append(el("li", "", flag)));
+    flags.forEach((flag) => list.append(flagItem(flag)));
     return list;
+  }
+
+  // “…当销售【单】价为1…（MinerU：定）”: the disputed characters stand out.
+  function flagItem(flag) {
+    const item = el("li");
+    String(flag).split(/(【[^】]{1,40}】)/).forEach((part) => {
+      if (!part) return;
+      if (/^【[^】]+】$/.test(part)) item.append(el("mark", "flag-spot", part.slice(1, -1)));
+      else item.append(document.createTextNode(part));
+    });
+    return item;
   }
 
   function stateChip(q) {

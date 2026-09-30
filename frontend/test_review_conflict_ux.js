@@ -77,4 +77,7 @@ assert.match(comma.after, /^从左面看/);
 assert.match(js, /reading-difference-extra/);
 // 配图面板已经说明“没有图像提示词”，下面的提示列表不再重复一遍。
 assert.match(js, /没有发现图像提示词\/\.test/);
+// 提示里【】中的字是有争议的那一处，单独突出显示。
+assert.match(js, /function flagItem/);
+assert.match(css, /\.flags \.flag-spot/);
 console.log("review conflict UX regression checks: OK");
