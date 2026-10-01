@@ -554,6 +554,11 @@ def tidy_saved_cards() -> dict[str, int]:
         for question in Question.all_objects.select_for_update().select_related("paper", "group"):
             stem, options, kind, origin = tidy_text(
                 question.stem, question.options, question.question_type, question.origin, switches=switches)
+            if not (question.approved or question.edited or question.type_locked):
+                # 1.10.1: a choice card under “…有多项符合题目要求…” is multiple
+                # choice, whatever the reader said.  Only cards nobody has
+                # approved, edited or typed by hand.
+                kind = qtypes.with_section(kind, question.section)
             answer = prose.tidy_value(question.answer, switches=switches)
             analysis = prose.tidy_value(question.analysis, switches=switches)
             flags, state = qtypes.sync(question.flags, question.state, kind)

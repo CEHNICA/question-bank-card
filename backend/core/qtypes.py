@@ -47,6 +47,49 @@ _SUBQUESTION_LINE = re.compile(r"(?:^|\n)[ \t　]*[（(]\s*(\d{1,2})\s*[)）]")
 _MULTIPLE_CUE = re.compile(r"多选|多项选择|不定项|有多项符合|多个选项")
 
 
+# What a section heading says about every question in it.  “选择题” alone says
+# nothing about one answer or several; the instruction under it does.
+_SECTION_SINGLE = re.compile(r"只有一[项个]|单选题|单项选择")
+# Not a bare “多选”: single-choice rules say “多选、错选、不选均不得分”.
+_SECTION_MULTIPLE = re.compile(r"有多项符合|多选题|多项选择|不定项|部分选对|有多个选项")
+# “第 1~8 题只有一项…，第 9~11 题有多项…”: the rule depends on the number, and
+# a heading cut short (headings are kept to 80 characters) may show one half.
+_SECTION_NUMBER_RANGE = re.compile(r"第\s*\$?\s*\d|\d+\s*\$?\s*(?:[~～—–-]|\\sim|至|到)\s*\$?\s*\d+\s*\$?\s*题")
+
+
+def section_kind(text: str | None) -> str:
+    """single_choice / multiple_choice when a heading fixes it unambiguously, else unknown.
+
+    “二、选择题：…在每小题给出的选项中，有多项符合题目要求…” is multiple
+    choice although its name is only “选择题”.  A heading that mentions both,
+    or ties the rule to question numbers, fixes nothing.
+    """
+    value = str(text or "")
+    if _SECTION_NUMBER_RANGE.search(value):
+        return "unknown"
+    single, multiple = bool(_SECTION_SINGLE.search(value)), bool(_SECTION_MULTIPLE.search(value))
+    if multiple and not single:
+        return "multiple_choice"
+    if single and not multiple:
+        return "single_choice"
+    return "unknown"
+
+
+def with_section(kind: str | None, section: str | None) -> str:
+    """A choice question's type as its section heading states it.
+
+    Readers judge single or multiple from one question and often say 单选 for
+    every choice question; the printed instruction of the section is the
+    better evidence.  Only choice types move; a section never turns a fill-in
+    or free-response reading into a choice question.
+    """
+    current = str(kind or "unknown")
+    fixed = section_kind(section)
+    if fixed != "unknown" and current in CHOICE_TYPES:
+        return fixed
+    return current
+
+
 def label(kind: str | None) -> str:
     return TYPE_LABELS.get(str(kind or "unknown"), str(kind or ""))
 

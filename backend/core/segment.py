@@ -1483,10 +1483,79 @@ def _slot_index(layout: Layout, page: int, col: int) -> int | None:
 
 
 def _section_type(text: str) -> str:
+    # “二、选择题：…有多项符合题目要求…”是多选题，虽然标题只写了“选择题”。
+    fixed = qtypes.section_kind(text)
+    if fixed != "unknown":
+        return fixed
     for word, kind in SECTION_TYPES:
         if word in text:
             return kind
     return "unknown"
+
+
+_MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$[^$]*\$|\\\(.*?\\\)|\\\[.*?\\\]", re.S)
+_HAN_RE = re.compile(r"[一-鿿]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]{3,}")
+# “A.”“（2）”，also inside MinerU's LaTeX: “$\mathrm{A}.\ \frac12$”“$A.\ 1$”.
+_PRINTED_LABEL_RE = re.compile(
+    r"^[\s$]*(?:\\(?:mathrm|text|textbf|mathbf|rm)\s*\{\s*)?(?:[A-EＡ-Ｅ]\s*\}?\s*(?:[.．、:]|\\[.,])"
+    r"|[（(]\s*\d{1,2}\s*[)）])"
+)
+_OPTION_LABEL_RE = re.compile(r"(?:^|[\s$}（()）,，。;；:：])(?:\\(?:mathrm|text)\s*\{\s*)?([A-D])\s*\}?\s*[.．、]")
+
+
+def _looks_printed(block: dict) -> bool:
+    """Whether a MinerU box can be printed question text rather than working.
+
+    Printed lines of a Chinese exam carry Chinese or English words or an
+    option / sub-question label; a student's working in the margin is
+    formulas only (“$\\frac{3(y+1)}{(x+1)(y+1)}$ …”, “$(x-10)(-2x+60)$”).
+    Pictures count as printed: a figure can belong to the question above.
+    """
+    if block.get("type") in FIGURE_TYPES:
+        return True
+    text = _plain_block_text(block.get("text"))
+    if _PRINTED_LABEL_RE.match(text):
+        return True
+    words = _MATH_SPAN_RE.sub(" ", text)
+    return len(_HAN_RE.findall(words)) >= 2 or len(_LATIN_WORD_RE.findall(words)) >= 2
+
+
+def _drop_scratch_spill(regions: list[dict], blocks: list[dict]) -> tuple[list[dict], int]:
+    """Leave out continuation slots that hold only formulas without words.
+
+    A question runs on to the top of the next column or page until the next
+    number.  When nothing there looks printed, it is usually a student's
+    working above the next question (2025级高一质量检测一：第 7 题拼上了右栏
+    顶上的手写分式，第 16 题拼上了“(x-10)(-2x+60)”), not the rest of this
+    one.  Returns the kept regions and how many slots were left out, so the
+    caller can say so (a printed formula on its own would look the same).
+    The first slot, where the number is, always stays; an empty slot is left
+    to the blank trim.
+    """
+    kept = regions[:1]
+    dropped = 0
+    for region in regions[1:]:
+        inside = [
+            block for block in blocks
+            if block.get("bbox") and block.get("type") not in NON_CONTENT
+            and center_in_regions(int(block.get("page_idx", -1)), block["bbox"], [region])
+        ]
+        if inside and not any(_looks_printed(block) for block in inside):
+            dropped += 1
+            continue
+        kept.append(region)
+    return kept, dropped
+
+
+def _options_complete(regions: list[dict], blocks: list[dict]) -> bool:
+    """Whether the kept range already shows option labels A, B, C and D."""
+    seen: set[str] = set()
+    for block in blocks:
+        if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES \
+                and center_in_regions(int(block.get("page_idx", -1)), block["bbox"], regions):
+            seen.update(_OPTION_LABEL_RE.findall(_plain_block_text(block.get("text"))))
+    return {"A", "B", "C", "D"} <= seen
 
 
 def _heading_floor(layout: Layout, start: Start) -> float:
@@ -1809,7 +1878,13 @@ def build_questions(
                 solution_trimmed = True
                 solution_boundary_seq = solution_boundary[1]
         regions = question_regions(layout, start, stop) or _fallback_regions(layout, start, stop)
+        segmentation_notes: list[str] = []
         if not textbook:
+            regions, dropped = _drop_scratch_spill(regions, blocks)
+            if dropped and not _options_complete(regions, blocks):
+                segmentation_notes.append(
+                    f"第 {start.number} 题：下一栏（页）开头有一段只有算式、没有文字，像是草稿，没有拼进这道题；"
+                    "如果它是题目的一部分，请在题卡上调整原卷范围。")
             regions = _cover_own_lines(regions, blocks)
         if start.source_kind in {"example", "exercise"}:
             regions = _tighten_book_local_left_column(layout, start, regions, blocks)
@@ -1883,7 +1958,9 @@ def build_questions(
                 "page": start.page,
                 "col": start.col,
                 "y": round(start.y, 1),
+                "x": round(start.x, 1),
                 "source": start.source,
+                "at_start": start.at_start,
                 "source_kind": start.source_kind,
                 "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
             },
@@ -1891,6 +1968,7 @@ def build_questions(
             "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
             "source_marker": start.marker_text,
             "segmentation_flags": segmentation_flags,
+            "segmentation_notes": segmentation_notes,
             "segmentation": {
                 "source_kind": start.source_kind,
                 "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,

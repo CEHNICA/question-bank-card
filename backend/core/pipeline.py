@@ -19,7 +19,7 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import features, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm
+from . import cuts, features, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -1434,6 +1434,40 @@ def _source_anchor(item: dict) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+SNAP_TOLERANCE = 12.0
+
+
+def _snap_only_change(old: list[dict] | None, new: list[dict] | None) -> bool:
+    """Whether two crops differ only by the few units cuts.snap_cuts moves an edge.
+
+    1.10.1 started moving cuts off ink.  Re-segmenting a paper read by an
+    older version must not take an approved or hand-checked card back to
+    yellow for that alone.
+    """
+    if not old or not new or len(old) != len(new):
+        return False
+    for before, after in zip(old, new):
+        if before.get("page_idx") != after.get("page_idx"):
+            return False
+        a, b = before.get("bbox") or [], after.get("bbox") or []
+        if len(a) != 4 or len(b) != 4:
+            return False
+        if abs(a[0] - b[0]) > 1 or abs(a[2] - b[2]) > 1 \
+                or abs(a[1] - b[1]) > SNAP_TOLERANCE or abs(a[3] - b[3]) > SNAP_TOLERANCE:
+            return False
+    return True
+
+
+def _keeps_protected_range(question: Question, regions: list[dict], blocks: list[dict]) -> bool:
+    """A protected card whose new crop moved only by snapping keeps its old crop."""
+    return bool(
+        question.regions
+        and _snap_only_change(question.regions, regions)
+        and segment.text_blocks_in(blocks, question.regions) == segment.text_blocks_in(blocks, regions)
+        and _question_range_is_human_protected(question)
+    )
+
+
 def _question_range_is_human_protected(question: Question) -> bool:
     """Whether automatic re-segmentation may replace the text/source crop.
 
@@ -1863,6 +1897,11 @@ def _collect_segmentation_items(
                 "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
             })
         items = segment.build_questions(layout, starts, group_blocks)
+        # 切线压在字上（照片里 MinerU 的框偏大）时，挪到两题之间的空白行。
+        cuts.snap_cuts(items, page_store.load, layout)
+        for item in items:
+            notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
+                          for note in item.get("segmentation_notes") or []])
         for number, previous_number in unresolved:
             holder = next((item for item in items if item.get("number") == previous_number), None)
             if holder is not None:
@@ -1999,6 +2038,8 @@ def preview_resegment(paper: Paper) -> dict:
                 item, question, reason="人工范围保持不变",
             ))
             continue
+        if _keeps_protected_range(question, item["regions"], blocks):
+            item = {**item, "regions": question.regions}
         regions_changed = question.regions != item["regions"]
         text_changed = segment.text_blocks_in(blocks, question.regions) != \
             segment.text_blocks_in(blocks, item["regions"])
@@ -2120,6 +2161,8 @@ def segment_paper(paper: Paper) -> None:
                 if fields:
                     question.save(update_fields=[*fields, "updated_at"])
                 continue  # 人工框的范围优先
+            if _keeps_protected_range(question, regions, blocks):
+                regions = question.regions
             regions_changed = question.regions != regions
             text_changed = segment.text_blocks_in(blocks, question.regions) != \
                 segment.text_blocks_in(blocks, regions)
@@ -2176,6 +2219,9 @@ def segment_paper(paper: Paper) -> None:
                 if question.edited or unchanged
                 else item["question_type"]
             )
+            if unchanged and not (question.edited or question.type_locked or question.approved):
+                # A section that says “有多项符合题目要求” fixes single → multiple.
+                new_question_type = qtypes.with_section(new_question_type, new_section)
             question.regions = regions
             question.regions_auto = regions
             question.section = new_section
@@ -2599,7 +2645,9 @@ def assistant_draft(snapshot: dict) -> dict:
     tidied = prose.tidy_fields({"stem": stem, "options": options,
                                 "question_type": snapshot.get("question_type") or "unknown"})
     stem, options, origin = tidied["stem"], tidied["options"], tidied["origin"]
-    kind = qtypes.infer(tidied.get("question_type") or snapshot.get("question_type") or "unknown", stem, options)
+    kind = qtypes.with_section(
+        qtypes.infer(tidied.get("question_type") or snapshot.get("question_type") or "unknown", stem, options),
+        snapshot.get("section"))
     candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
     labels = {str(candidate["label"]): candidate for candidate in candidates}
     assignments = _draft_figure_guess(stem, options, candidates)
@@ -3039,7 +3087,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         candidates=snapshot["candidates"],
         figures=figures,
     )
-    kind = qtypes.infer(kind, final.get("stem"), final.get("options"))
+    kind = qtypes.with_section(qtypes.infer(kind, final.get("stem"), final.get("options")),
+                               snapshot.get("section"))
     choice_missing_slots = missing_choice_figure_slots(
         kind=kind,
         options=final.get("options") or {},
@@ -3109,6 +3158,7 @@ def _snapshot(question: Question) -> dict:
     return {"id": question.id, "number": question.number, "group_id": question.group_id,
             "start_source": question.start_source, "regions": question.regions,
             "candidates": question.figure_candidates, "question_type": question.question_type,
+            "section": question.section,
             "stem": question.stem, "options": question.options, "edited": question.edited,
             "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
             "segmentation_flags": [
