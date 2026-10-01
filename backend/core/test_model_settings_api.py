@@ -88,6 +88,7 @@ class ModelSettingsApiTests(TestCase):
                 "minimax": "MiniMax-M3",
                 "siliconflow": "Qwen/Qwen3-VL-30B-A3B-Instruct",
             },
+            "plans": {"minimax": "auto"},
         })
         self.assertFalse(response.json()["restart_required"])
         self.assertIn("下一份任务", response.json()["message"])
@@ -105,6 +106,7 @@ class ModelSettingsApiTests(TestCase):
                 "minimax": "MiniMax-M3",
                 "siliconflow": "Qwen/Qwen3-VL-30B-A3B-Instruct",
             },
+            "plans": {"minimax": "auto"},
         })
         serialized = self.preference_file.read_text(encoding="utf-8")
         self.assertNotIn("API_KEY", serialized)
@@ -126,6 +128,7 @@ class ModelSettingsApiTests(TestCase):
                 "minimax": "MiniMax-M3",
                 "siliconflow": "Qwen/Qwen3-VL-30B-A3B-Instruct",
             },
+            "plans": {"minimax": "auto"},
         })
         self.assertTrue(status["pending_change"])
 
@@ -203,3 +206,62 @@ class ModelSettingsApiTests(TestCase):
         self.assertEqual(after["reader"], "NewApplied")
         self.assertEqual(after["checker"], "MiniMax-New")
         self.assertEqual(after["arbiter"], "MiniMax-New")
+
+
+class MinimaxPlanSettingsTests(TestCase):
+    """MiniMax concurrency follows the membership the user picks."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        self.preference_file = self.temp / "model-preferences.json"
+        self.env = {
+            "QB_MODEL_PREFERENCES_FILE": str(self.preference_file),
+            "QB_MINIMAX_CONFIGURED": "1",
+            "QB_SILICONFLOW_CONFIGURED": "1",
+        }
+
+    def post(self, body: dict):
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            return Client().post("/api/settings/models", data=json.dumps(body),
+                                 content_type="application/json", HTTP_X_QB_REQUEST="1")
+
+    def test_plan_is_saved_kept_by_later_saves_and_applied_by_the_worker(self):
+        roles = {"primary": "minimax_m3", "checker": "auto", "arbiter": "primary"}
+        response = self.post({**roles, "plans": {"minimax": "plus"}})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["saved"]["plans"], {"minimax": "plus"})
+        # Changing a model later does not reset the membership.
+        response = self.post({**roles, "models": {"minimax": "MiniMax-M3", "siliconflow": "Qwen/x"}})
+        self.assertEqual(response.json()["saved"]["plans"], {"minimax": "plus"})
+
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            status = Client().get("/api/status").json()["engines"]
+            self.assertEqual(status["saved"]["plans"], {"minimax": "plus"})
+            self.assertEqual(status["plans"], {"minimax": "auto"})
+            self.assertTrue(status["pending_change"])
+            self.assertEqual(status["plan_concurrency"]["plus"], [3, 4])
+            run_worker.apply_saved_model_preferences()
+            self.assertEqual(os.environ["QB_MINIMAX_PLAN"], "plus")
+            from . import account_pool
+            self.assertEqual(account_pool.concurrency_range("minimax"), (3, 4))
+            after = Client().get("/api/status").json()["engines"]
+        self.assertEqual(after["plans"], {"minimax": "plus"})
+        self.assertFalse(after["pending_change"])
+
+    def test_unknown_plan_is_refused_and_a_stored_unknown_plan_falls_back(self):
+        response = self.post({"primary": "minimax_m3", "checker": "auto", "arbiter": "primary",
+                              "plans": {"minimax": "gold"}})
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("会员档位", response.json()["error"])
+        self.assertFalse(self.preference_file.exists())
+
+        from . import preferences
+        self.preference_file.write_text(json.dumps({
+            "version": 2,
+            "roles": dict(preferences.DEFAULTS),
+            "models": dict(preferences.DEFAULT_MODELS),
+            "plans": {"minimax": "from-a-newer-version"},
+        }), encoding="utf-8")
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(preferences.load_configuration()["plans"], {"minimax": "auto"})

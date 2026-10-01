@@ -4,16 +4,17 @@ Secrets arrive only in the worker process environment.  This module never
 logs, persists, or exposes them through Django responses.
 
 Each account may carry a small, bounded number of simultaneous leases.
-Measured against a single MiniMax Token Plan key, eight concurrent vision
-requests completed without a single HTTP 429 while per-request latency only
-rose from ~3.7 s to ~5 s, so one-request-per-account left most of the paid
-throughput unused.  The per-account limit is configurable per service and
-adapts downward for the rest of the run whenever the provider answers 429.
+How many a MiniMax key tolerates depends on its membership (Token Plan
+tier), on the time of day (peak-hour throttling) and on how long each
+request takes, so it is not one fixed number.  The user's plan gives a
+starting level and a ceiling; between the two each account finds its own
+level: it climbs while requests succeed and steps down on HTTP 429.
 """
 
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import os
 import threading
@@ -28,6 +29,18 @@ MAX_ACCOUNT_CONCURRENCY = 8
 # Conservative defaults: vision providers tolerate a few parallel requests per
 # key; MinerU tasks are long-running uploads and stay at one per token.
 DEFAULT_ACCOUNT_CONCURRENCY = {"minimax": 6, "siliconflow": 2, "mineru": 1}
+# MiniMax Token Plan concurrency follows the membership tier.  MiniMax's own
+# guide (peak hours): Plus about 3-4, Max about 4-5, Ultra about 6-7 agents at
+# once.  (start, ceiling) per plan; off-peak an account may go higher, which
+# "auto" and pay-as-you-go keys find by probing up to the hard maximum.
+MINIMAX_PLANS = {
+    "auto": (3, MAX_ACCOUNT_CONCURRENCY),
+    "plus": (3, 4),
+    "max": (4, 5),
+    "ultra": (6, 7),
+    "payg": (6, MAX_ACCOUNT_CONCURRENCY),
+}
+DEFAULT_MINIMAX_PLAN = "auto"
 SERVICE_ENVIRONMENT = {
     "mineru": ("MINERU_TOKENS_JSON", "MINERU_TOKEN"),
     "minimax": ("MINIMAX_API_KEYS_JSON", "MINIMAX_API_KEY"),
@@ -84,20 +97,39 @@ def secrets_from_environment(service: str) -> tuple[str, ...]:
     return tuple(result)
 
 
-def account_concurrency(service: str) -> int:
-    """Simultaneous requests allowed on one account of ``service``.
+def minimax_plan() -> str:
+    """The MiniMax membership the user chose in Settings (``QB_MINIMAX_PLAN``)."""
 
-    ``QB_<SERVICE>_ACCOUNT_CONCURRENCY`` overrides the default.  Invalid values
-    fall back to the default; valid ones are clamped to 1..8.
+    value = os.environ.get("QB_MINIMAX_PLAN", "").strip().lower()
+    return value if value in MINIMAX_PLANS else DEFAULT_MINIMAX_PLAN
+
+
+def concurrency_range(service: str) -> tuple[int, int]:
+    """(start, ceiling) of simultaneous requests on one account of ``service``.
+
+    An explicit ``QB_<SERVICE>_ACCOUNT_CONCURRENCY`` fixes both (clamped to
+    1..8; invalid values are ignored).  Otherwise MiniMax follows the plan in
+    Settings and the other services use their fixed defaults.
     """
 
-    default = DEFAULT_ACCOUNT_CONCURRENCY.get(service, 1)
     raw = os.environ.get(f"QB_{service.upper()}_ACCOUNT_CONCURRENCY", "").strip()
     try:
-        value = int(raw) if raw else default
+        explicit = int(raw) if raw else None
     except ValueError:
-        value = default
-    return max(1, min(MAX_ACCOUNT_CONCURRENCY, value))
+        explicit = None
+    if explicit is not None:
+        value = max(1, min(MAX_ACCOUNT_CONCURRENCY, explicit))
+        return value, value
+    if service == "minimax":
+        return MINIMAX_PLANS[minimax_plan()]
+    value = DEFAULT_ACCOUNT_CONCURRENCY.get(service, 1)
+    return value, value
+
+
+def account_concurrency(service: str) -> int:
+    """The most simultaneous requests one account of ``service`` may reach."""
+
+    return concurrency_range(service)[1]
 
 
 # Clean requests per parallel slot before a throttled slot is given back.  At
@@ -109,6 +141,41 @@ RECOVER_SUCCESSES_PER_SLOT = 4
 
 def recover_after(capacity: int) -> int:
     return RECOVER_SUCCESSES_PER_SLOT * max(1, int(capacity))
+
+
+def probe_after(capacity: int) -> int:
+    """Clean requests before an account that has not been throttled yet climbs.
+
+    One full round at the current level: from 3 an account reaches 6 after
+    about a dozen requests, instead of the ~50 the cautious recovery needs.
+    """
+
+    return max(1, int(capacity))
+
+
+# The level each account settled at, per (service, start, ceiling), so the
+# next paper starts there instead of at the plan's opening level.  Keys are
+# digests; the secrets themselves stay only in the pools.
+_LEARNED: dict[tuple[str, int, int], dict[str, int]] = {}
+
+
+def _digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()[:16]
+
+
+def learned_levels(service: str) -> list[int]:
+    """Current per-account levels of ``service`` (non-secret, for reports)."""
+
+    with _POOL_LOCK:
+        pools = [pool for (name, *_rest), pool in _POOLS.items() if name == service]
+    return [level for pool in pools for level in pool.levels()]
+
+
+def forget_learned_concurrency() -> None:
+    """Start every account from its plan's opening level again (tests, plan changes)."""
+
+    with _POOL_LOCK:
+        _LEARNED.clear()
 
 # Lower is more urgent.  The worker tags each paper's reading with the
 # paper's upload time, so when two papers overlap the older one gets every
@@ -137,9 +204,10 @@ class _State:
     capacity: int = 1
     disabled: bool = False
     disabled_reason: str = ""
-    limit: int = 1           # configured per-account concurrency
+    limit: int = 1           # configured per-account concurrency (ceiling)
     successes: int = 0       # clean releases since the last throttle
     epoch: int = 0           # bumped whenever a throttle removes a slot
+    probing: bool = True     # no 429 yet in this pool: climb quickly
 
     @property
     def in_use(self) -> bool:
@@ -194,11 +262,19 @@ class AccountLease:
 
 
 class AccountPool:
-    def __init__(self, service: str, secrets: tuple[str, ...], per_account: int = 1) -> None:
+    def __init__(self, service: str, secrets: tuple[str, ...], per_account: int = 1,
+                 ceiling: int | None = None, memory: dict[str, int] | None = None) -> None:
         self.service = service
         self._secrets = secrets
-        capacity = max(1, min(MAX_ACCOUNT_CONCURRENCY, int(per_account)))
-        self._states = {secret: _State(capacity=capacity, limit=capacity) for secret in secrets}
+        start = max(1, min(MAX_ACCOUNT_CONCURRENCY, int(per_account)))
+        limit = max(start, min(MAX_ACCOUNT_CONCURRENCY, int(ceiling))) if ceiling is not None else start
+        # Only a pool with room to move remembers where its accounts settled.
+        self._memory = memory if limit > start else None
+        self._states = {}
+        for secret in secrets:
+            level = (self._memory or {}).get(_digest(secret), start)
+            level = max(1, min(limit, int(level)))
+            self._states[secret] = _State(capacity=level, limit=limit)
         self._condition = threading.Condition()
         self._cursor = 0
         # priority -> number of requests currently waiting for a slot
@@ -210,6 +286,21 @@ class AccountPool:
 
         with self._condition:
             return sum(state.capacity for state in self._states.values() if not state.disabled)
+
+    @property
+    def ceiling(self) -> int:
+        """Total simultaneous leases the enabled accounts may climb to."""
+
+        with self._condition:
+            return sum(state.limit for state in self._states.values() if not state.disabled)
+
+    def levels(self) -> list[int]:
+        with self._condition:
+            return [state.capacity for state in self._states.values() if not state.disabled]
+
+    def _remember(self, secret: str, state: _State) -> None:
+        if self._memory is not None:
+            self._memory[_digest(secret)] = state.capacity
 
     @property
     def size(self) -> int:
@@ -307,20 +398,26 @@ class AccountPool:
             else:
                 if lease._throttled:
                     state.successes = 0
+                    state.probing = False
                     # Requests already in flight when the limit hit all come
                     # back 429 together; that is one signal, not eight.  Only
                     # a request sent after the last cut can cut again.
                     if lease._epoch == state.epoch and state.capacity > 1:
                         state.capacity -= 1
                         state.epoch += 1
+                        self._remember(lease._secret, state)
                 else:
                     # A throttle is usually a burst limit, not a permanent one:
                     # without recovery one bad minute left a long-running worker
                     # (and a 300-page book) on a single request at a time.
+                    # Until the first 429 the account is still finding its
+                    # level and climbs one slot per full round of requests.
                     state.successes += 1
-                    if state.capacity < state.limit and state.successes >= recover_after(state.capacity):
+                    needed = probe_after(state.capacity) if state.probing else recover_after(state.capacity)
+                    if state.capacity < state.limit and state.successes >= needed:
                         state.capacity += 1
                         state.successes = 0
+                        self._remember(lease._secret, state)
                 if lease._delay:
                     state.ready_at = max(state.ready_at, time.monotonic() + lease._delay)
             self._condition.notify_all()
@@ -346,25 +443,30 @@ class AccountPool:
 
 
 _POOL_LOCK = threading.Lock()
-_POOLS: dict[tuple[str, tuple[str, ...], int], AccountPool] = {}
+_POOLS: dict[tuple[str, tuple[str, ...], int, int], AccountPool] = {}
 
 
 def account_pool(service: str) -> AccountPool:
     secrets = secrets_from_environment(service)
     if not secrets:
         raise AccountPoolError(f"未配置 {service} 账号")
-    per_account = account_concurrency(service)
-    identity = (service, secrets, per_account)
+    start, ceiling = concurrency_range(service)
+    identity = (service, secrets, start, ceiling)
     with _POOL_LOCK:
         pool = _POOLS.get(identity)
         if pool is None:
-            pool = AccountPool(service, secrets, per_account)
+            memory = _LEARNED.setdefault((service, start, ceiling), {})
+            pool = AccountPool(service, secrets, start, ceiling, memory)
             _POOLS[identity] = pool
         return pool
 
 
 def reset_account_pools() -> None:
-    """Forget process-local leases; used after settings changes and in tests."""
+    """Forget process-local leases; used after settings changes and in tests.
+
+    The level each account settled at is kept (see ``_LEARNED``), so a new
+    paper does not start over from the plan's opening level.
+    """
 
     with _POOL_LOCK:
         _POOLS.clear()

@@ -335,10 +335,12 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 /* ---------------------------------------------------------------- 题卡 */
 .cards { display: grid; gap: 14px; min-width: 0; }
 /* 专注：正在看的这道题正常显示，其余题暗下来，题与题之间也拉开一点。 */
+/* 只有正在看一张展开的整卡时才变暗；收起的已通过题是看完的，挨在一起时也不必拉开。 */
 .cards.focus-mode { gap: 26px; }
+.cards.focus-mode .card.compact + .card.compact { margin-top: -14px; }
 .cards.focus-mode .card { transition: opacity .22s ease, filter .22s ease, box-shadow .18s, border-color .18s; }
-.cards.focus-mode.has-current:not(.selecting) .card:not(.is-current) { opacity: .34; filter: saturate(.4); box-shadow: none; }
-.cards.focus-mode.has-current:not(.selecting) .card:not(.is-current):hover { opacity: .62; }
+.cards.focus-mode.reading:not(.selecting) .card:not(.is-current) { opacity: .34; filter: saturate(.4); box-shadow: none; }
+.cards.focus-mode.reading:not(.selecting) .card:not(.is-current):hover { opacity: .62; }
 @media (prefers-reduced-motion: reduce) { .cards.focus-mode .card { transition: none; } }
 .cards-empty { display: grid; justify-items: center; gap: 6px; color: var(--muted); padding: 48px 0; text-align: center; }
 .cards-empty strong { color: var(--ink); font-size: 15px; }
@@ -485,8 +487,11 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .option-inputs input { font-family: var(--mono); font-size: 14px; }
 .extra summary { cursor: pointer; font-size: 13px; color: var(--ink-2); padding: 4px 0; }
 .extra { display: grid; gap: 8px; }
-.preview-label { font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
-.editor-preview { border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 10px 14px; background: var(--surface-2); }
+.editor-preview-box { display: grid; gap: 5px; }
+.editor-preview-box.beside { margin-top: 14px; }
+.preview-label { margin: 0; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
+.editor-preview { border: 1px dashed rgba(31, 107, 95, .45); border-radius: var(--radius); padding: 10px 14px; background: #fff; }
+.editor-preview-box.beside .editor-preview { max-height: var(--preview-room); overflow: auto; overscroll-behavior: contain; }
 .editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .card.editing .editor-actions { position: sticky; bottom: 0; z-index: 4; margin-bottom: -16px; padding: 10px 0 14px; background: var(--surface);
   border-top: 1px solid #efede6; box-shadow: 0 -10px 12px -12px rgba(22, 44, 39, .35); }
@@ -498,6 +503,9 @@ dialog { border: 0; border-radius: 16px; padding: 0; color: var(--ink); backgrou
 dialog[open] { animation: dialog-in .18s cubic-bezier(.2,.8,.2,1); }
 dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px); }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+/* 教学卡片挪进对话框时只淡入：位移动画会让卡片跟着对话框跑一下。 */
+dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animation-name: dialog-fade; }
+@keyframes dialog-fade { from { opacity: 0; } to { opacity: 1; } }
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 .dialog-head h3 { font-size: 16px; font-weight: 700; }
 .hint { font-size: 12.5px; color: var(--muted); margin-top: 4px; line-height: 1.6; max-width: 760px; }
@@ -740,6 +748,12 @@ dialog::backdrop { background: rgba(16, 28, 25, .42); backdrop-filter: blur(2px)
 .api-state.ready { color: var(--green); }
 .api-state.missing { color: var(--amber); }
 .api-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plan-setting { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.plan-field { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 13px; }
+.plan-field > span { display: grid; gap: 1px; }
+.plan-field small { color: var(--muted); font-size: 11.5px; }
+.plan-field select { flex: none; min-width: 11em; border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 8px; background: #fff; color: var(--ink); }
+.plan-field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .api-settings-actions .settings-footnote { flex: 1; }
 .api-settings-actions .button { flex: none; }
 .model-settings-form { display: grid; gap: 11px; margin-top: 16px; padding-top: 15px; border-top: 1px solid var(--line); }
@@ -1057,4 +1071,6 @@ mark.qb-mark-math { padding: 0 2px; }
 .settings-help-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 #emptyLearn { margin: 4px 0 14px; }
 :root.review-fullscreen .teach-panel { left: auto; right: 20px; bottom: 132px; width: min(320px, calc(100vw - 32px)); }
+/* 放大对照窗口里，左下角是“改字 / 上一题”等按钮：卡片挪到右下，按钮上方。 */
+.viewer-dialog > .teach-panel { left: auto; right: 20px; bottom: 78px; }
 @media (max-width: 760px) { .teach-panel { left: 12px; right: 12px; width: auto; } }

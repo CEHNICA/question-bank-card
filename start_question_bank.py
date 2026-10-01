@@ -73,8 +73,10 @@ CREDENTIAL_STATUS_NAMES = {
     for _legacy_name, _pool_name, configured_name, size_name in POOL_ENVIRONMENT_NAMES.values()
     for name in (configured_name, size_name)
 }
-# Mirrors backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY: simultaneous
-# requests one account may carry.  QB_<PROVIDER>_ACCOUNT_CONCURRENCY overrides.
+# A start-up estimate of simultaneous requests one account may carry
+# (backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY).  MiniMax really
+# follows the membership chosen in Settings; the worker raises its reading
+# threads to the accounts' ceiling.  QB_<PROVIDER>_ACCOUNT_CONCURRENCY overrides.
 ACCOUNT_CONCURRENCY_DEFAULTS = {"minimax": 6, "siliconflow": 2}
 MAX_PARALLEL_CARDS = 16
 MODEL_PROVIDER_BY_ENGINE = {

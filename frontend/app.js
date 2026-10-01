@@ -566,8 +566,35 @@ const QBFigureJoin = (() => {
   return { readingOrder, joinHost, figuresFromBoxes };
 })();
 
+// 专注模式里“正在看哪张卡”：阅读线平时在屏幕上方三分之一处；滚到顶时
+// 贴着顶部，滚到底时一路落到底部，所以第一张和最后一张都轮得到。
+const QBFocus = (() => {
+  "use strict";
+
+  // top/bottom: the visible band; scrollY: how far the page is scrolled;
+  // below: how much page is left under the bottom of the screen.
+  function readingLine({ top, bottom, scrollY, below }) {
+    const height = bottom - top;
+    const third = height / 3;
+    return Math.min(bottom - 1, top + Math.min(Math.max(scrollY, 0), third) + Math.max(0, height - third - Math.max(below, 0)));
+  }
+
+  // The card under the line, or the one nearest to it.  rects: [{top, bottom}].
+  function nearestToLine(rects, line) {
+    let best = -1;
+    let nearest = Infinity;
+    rects.forEach((rect, index) => {
+      const distance = rect.top > line ? rect.top - line : rect.bottom <= line ? line - rect.bottom : 0;
+      if (distance < nearest) { nearest = distance; best = index; }
+    });
+    return best;
+  }
+
+  return { readingLine, nearestToLine };
+})();
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify, ...QBFigureJoin,
+  module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify, ...QBFigureJoin, ...QBFocus,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
     TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint };
 }
@@ -1389,8 +1416,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     R.fitOptions(container);
     renderSelectionState();
     const currentShown = state.current !== null && shown.some((q) => q.id === state.current);
-    container.classList.toggle("has-current", currentShown);
-    if (!currentShown && state.focus) requestAnimationFrame(followReading);
+    markReading();
+    // Opening, collapsing or filtering moves cards: pick the card being read again.
+    if (state.focus) requestAnimationFrame(currentShown ? markReading : followReading);
   }
 
   // ---------------------------------------------------------------- 当前题卡与键盘
@@ -1406,31 +1434,49 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function setCurrent(id, { scroll = false, focus = false } = {}) {
     state.current = id;
     cardNodes().forEach((card) => card.classList.toggle("is-current", Number(card.dataset.id) === id));
-    $("cards").classList.toggle("has-current", id !== null && cardNodes().some((card) => Number(card.dataset.id) === id));
     const card = id !== null ? document.querySelector(`.card[data-id="${id}"]`) : null;
     // A card the reader jumped to (J/K, N, 通过后下一张) stays lit until they scroll themselves.
     if (card && scroll) state.followHold = true;
+    markReading();
     if (card && scroll) card.scrollIntoView({ behavior: "smooth", block: "start" });
     if (card && focus) card.focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- 专注
 
-  // 专注：正在看的这道题正常显示，其余题暗下来。“正在看的”跟着滚动走：
-  // 屏幕上露出最多的那张卡（一样多时取上面那张）。已通过收起的一行题
-  // 很矮，不会抢走旁边整张卡的位置。
+  // 专注：正在看的这道题正常显示，其余题暗下来。只有展开的整张卡才算
+  // “在看”；已通过收起的一行题是看完的，不会被点亮，也不会让别的题变暗。
+  function viewTop() {
+    // 全屏时顶栏收起，高度是 0，不能当成没取到。
+    const bar = document.querySelector(".topbar");
+    return (bar ? bar.offsetHeight : 56) + ($("toolbar")?.offsetHeight || 0);
+  }
+
+  function onScreen(card) {
+    const rect = card.getBoundingClientRect();
+    return rect.bottom > viewTop() && rect.top < window.innerHeight;
+  }
+
+  // “正在看的”跟着滚动走：取压在阅读线上的那张整卡（见 QBFocus）；
+  // 阅读线落在空隙或收起的题上，就取离它最近的整卡。
   function readingCard() {
-    const cards = cardNodes();
-    if (!cards.length) return null;
-    const top = (document.querySelector(".topbar")?.offsetHeight || 56) + ($("toolbar")?.offsetHeight || 0);
-    let best = null;
-    let most = 0;
-    cards.forEach((card) => {
-      const rect = card.getBoundingClientRect();
-      const shown = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, top);
-      if (shown > most + 1) { most = shown; best = card; }
-    });
-    return best;
+    const top = viewTop();
+    const bottom = window.innerHeight;
+    const height = bottom - top;
+    const cards = cardNodes().filter((card) => !card.classList.contains("compact") && onScreen(card));
+    if (!cards.length || height <= 0) return null;
+    const page = document.scrollingElement || document.documentElement;
+    const line = QBFocus.readingLine({ top, bottom, scrollY: window.scrollY, below: page.scrollHeight - bottom - window.scrollY });
+    return cards[QBFocus.nearestToLine(cards.map((card) => card.getBoundingClientRect()), line)] || null;
+  }
+
+  // 变暗只在“正在看一张整卡”时：当前卡收起了、滚出屏幕了（又没在跳过去
+  // 的路上），或者屏幕上只剩收起的题，就都正常显示。
+  function markReading() {
+    const container = $("cards");
+    const card = state.current !== null ? container.querySelector(`.card[data-id="${state.current}"]`) : null;
+    const reading = Boolean(state.focus && card && !card.classList.contains("compact") && (state.followHold || onScreen(card)));
+    container.classList.toggle("reading", reading);
   }
 
   // 自己滚动（滚轮、触摸、翻页键、拖滚动条）之后才跟着换；跳到某张卡的平滑滚动不算。
@@ -1446,10 +1492,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function followReading() {
     if (!state.focus || $("paperView").hidden || anyDialogOpen() || state.selecting) return;
-    if (state.followHold) return;
-    const card = readingCard();
-    const id = card ? Number(card.dataset.id) : null;
-    if (id !== null && id !== state.current) setCurrent(id);
+    if (!state.followHold) {
+      const card = readingCard();
+      const id = card ? Number(card.dataset.id) : null;
+      if (id !== null && id !== state.current) setCurrent(id);
+    }
+    markReading();
   }
 
   function setFocus(on) {
@@ -1458,7 +1506,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("focusToggle").setAttribute("aria-pressed", String(on));
     if ($("settingsFocus")) $("settingsFocus").checked = on;
     $("cards").classList.toggle("focus-mode", on);
-    if (on && state.current === null) followReading();
+    const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
+    if (on && !(card && onScreen(card))) followReading();
+    markReading();
   }
 
   // 全屏审核：收起顶栏、试卷列表和试卷信息，窗口也尽量铺满屏幕。浏览器不让
@@ -1500,14 +1550,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function moveCurrent(step) {
     const cards = cardNodes();
     if (!cards.length) return;
-    const top = (document.querySelector(".topbar")?.offsetHeight || 56) + ($("toolbar")?.offsetHeight || 0);
+    const top = viewTop();
     const index = cards.findIndex((card) => Number(card.dataset.id) === state.current);
     let next;
-    if (index >= 0) {
-      const rect = cards[index].getBoundingClientRect();
-      const onScreen = rect.bottom > top && rect.top < window.innerHeight;
-      next = onScreen ? index + step : -1;
-    } else next = -1;
+    if (index >= 0) next = onScreen(cards[index]) ? index + step : -1;
+    else next = -1;
     if (next === -1 && !(index >= 0 && index + step === -1)) {
       next = cards.findIndex((card) => card.getBoundingClientRect().bottom > top + 24);
       if (next < 0) next = cards.length - 1;
@@ -2471,19 +2518,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else rendered.append(el("p", "hint", "还没有题面"));
     body.append(rendered);
 
+    // 通过和撤销通过都在题号左边的方框里（也可以按 Enter / U），这里不再放
+    // 一个同样作用的按钮。配图没处理好时，这里放一个去处理的按钮。
     const actions = el("div", "card-actions");
-    if (!approved) {
-      const blocked = figureBlocksApproval(q);
+    if (!approved && figureBlocksApproval(q)) {
       const blockedLabel = figureReview(q)?.status === "conflict" ? "处理配图冲突" : "处理漏图提醒";
-      const approve = button(blocked ? blockedLabel : approvalNeedsReview(q) ? "重新标记通过" : "标记通过", "primary",
-        () => blocked ? focusFigureReview(q) : approveQuestion(q, true), "", { iconName: blocked ? "image" : "check", key: "Enter" });
-      approve.disabled = blocked ? false : !canApprove(q);
-      approve.title = blocked ? "在黄色区域选择保留、调整或移除配图"
-        : canApprove(q) ? "对照原卷确认无误后通过（Enter），会自动跳到下一张"
-          : q.state === "red" ? "识读失败的题需先修改或重读，不能直接通过" : "请等待识读完成并确认题面";
-      actions.append(approve);
-    } else {
-      actions.append(button("撤销通过", "", () => approveQuestion(q, false), "撤销通过（U）"));
+      const fixFigures = button(blockedLabel, "primary", () => focusFigureReview(q), "", { iconName: "image", key: "Enter" });
+      fixFigures.title = "在黄色区域选择保留、调整或移除配图";
+      actions.append(fixFigures);
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
@@ -3068,6 +3110,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       status.arbiter && `裁决 ${status.arbiter}`
     ].filter(Boolean).join("；");
     $("settingsModelSummary").textContent = summary ? `现在实际使用：${summary}。` : "现在没有可用的读题模型：请先在“常用”里填写密钥。";
+    renderMinimaxPlan(engines);
+  }
+
+  // MiniMax 的并发跟会员档位走：档位给出起步和上限，中间按实际限流自动调。
+  const PLAN_NOTES = {
+    auto: "每个密钥先同时读 3 道，顺利就逐步加到最多 8 道，遇到限流再退回来。不知道自己是哪一档就选这个。",
+    plus: "MiniMax 说 Plus 高峰期大约能同时跑 3–4 个；每个密钥同时读 3–4 道。",
+    max: "MiniMax 说 Max 高峰期大约能同时跑 4–5 个；每个密钥同时读 4–5 道。",
+    ultra: "MiniMax 说 Ultra 高峰期大约能同时跑 6–7 个；每个密钥同时读 6–7 道。",
+    payg: "按量付费的密钥按每分钟请求数限流；每个密钥同时读 6 道起，最多 8 道。"
+  };
+
+  function renderMinimaxPlan(engines) {
+    const select = $("settingsMinimaxPlan");
+    const plan = engines.saved?.plans?.minimax || engines.plans?.minimax || "auto";
+    select.value = PLAN_NOTES[plan] ? plan : "auto";
+    const pending = engines.plans?.minimax && engines.plans.minimax !== select.value;
+    $("settingsMinimaxPlanNote").textContent = `${PLAN_NOTES[select.value]}遇到限流会自动放慢，不会出错。${
+      pending ? "改动从下一份新资料开始生效。" : ""}`;
   }
 
   const CREDENTIAL_FIELDS = {
@@ -3298,7 +3359,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     modelSaving = modelSaving.then(saveModelSettingsNow, saveModelSettingsNow);
     return modelSaving;
   }
-  ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel", "settingsSiliconflowModel"]
+  ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel", "settingsSiliconflowModel",
+    "settingsMinimaxPlan"]
     .forEach((id) => $(id).addEventListener("change", () => { void saveModelSettings(); }));
   $("modelSettingsForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3317,7 +3379,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           models: {
             minimax: $("settingsMinimaxModel").value.trim(),
             siliconflow: $("settingsSiliconflowModel").value.trim()
-          }
+          },
+          plans: { minimax: $("settingsMinimaxPlan").value }
         }
       });
       const message = "已保存；从下一项新任务或重新识读开始生效，不会改写现有题卡。";
@@ -3393,8 +3456,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     typeRow.append(el("span", "", "题型"), typeSelect);
     const stem = el("textarea", "stem-input");
     stem.value = q.stem;
-    stem.rows = Math.min(14, Math.max(4, q.stem.split("\n").length + 2));
+    stem.rows = 2;
     stem.spellcheck = false;
+    // The box is as tall as the text in it (up to 40% of the window), so the
+    // live preview right under it stays in sight.
+    const fitStem = () => {
+      stem.style.height = "auto";
+      stem.style.height = `${Math.min(stem.scrollHeight + 2, Math.round(window.innerHeight * 0.4))}px`;
+    };
     const stemRow = el("label", "field");
     stemRow.append(el("span", "", "题干（公式用 $…$ 包住的 LaTeX）"), stem);
     // Tables are text: pipe rows under the stem, previewed as a real table.
@@ -3405,14 +3474,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       stem.value = next.value;
       stem.focus();
       stem.setSelectionRange(next.cursor, next.cursor);
-      stem.rows = Math.min(18, Math.max(stem.rows, stem.value.split("\n").length + 1));
       stem.dispatchEvent(new Event("input", { bubbles: true }));
     };
     tableTools.append(
       button("插入表格", "small", () => editTable(QBTableText.insert)),
       button("表格加一行", "small", () => editTable((value, cursor) => QBTableText.grow(value, cursor, "row") || (toast("先把光标放在要加行的表格里", "error"), null))),
       button("表格加一列", "small", () => editTable((value, cursor) => QBTableText.grow(value, cursor, "col") || (toast("先把光标放在要加列的表格里", "error"), null))),
-      el("small", "hint", "表格每行一行，格子用 | 隔开；第二行的 |---| 表示第一行是表头；空格子留空，下面的预览会排成表格")
+      el("small", "hint", "表格每行一行，格子用 | 隔开；第二行的 |---| 表示第一行是表头；空格子留空，预览里会排成表格")
     );
 
     const optionBox = el("div", "option-inputs");
@@ -3444,13 +3512,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const analysisRow = el("label", "field");
     analysisRow.append(el("span", "", "解析"), analysis);
     extra.append(answerRow, analysisRow);
+    // 实时预览：边打字边排版成保存后的样子。并排布局时放在左栏原卷截图
+    // 下面，和原卷上下对照；截图太高、上下堆叠或窄屏时放在题干输入框下面。
+    const previewBox = el("div", "editor-preview-box");
     const preview = el("div", "editor-preview");
+    previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), preview);
     const saveButton = el("button", "button primary", "保存");
     saveButton.type = "submit";
     const cancel = button("取消", "", () => close());
     const bar = el("div", "editor-actions");
     bar.append(saveButton, cancel, el("p", "hint", "Ctrl+Enter 保存 · Esc 取消"));
-    editor.append(title, typeRow, stemRow, tableTools, optionBox, extra, el("p", "preview-label", "预览"), preview, bar);
+    editor.append(title, typeRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
 
     const collect = () => ({
       stem: stem.value,
@@ -3459,16 +3531,32 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       answer: answer.value,
       analysis: analysis.value
     });
-    let timer = null;
+    // One typeset per frame however fast the typing is.
+    let frame = 0;
     const update = () => {
       optionBox.hidden = !CHOICE.has(typeSelect.value) && !OPTION_KEYS.some((k) => optionInputs[k].value.trim());
-      clearTimeout(timer);
-      timer = setTimeout(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
         const data = collect();
         R.renderQuestion(preview, { ...content(q), ...data, options: optionBox.hidden ? {} : data.options }, { showNumber: false, showAnswer: "open" });
-      }, 150);
+      });
     };
+    const placePreview = () => {
+      const source = card.querySelector(".source-sticky");
+      const shot = source?.querySelector(".crop, .crop-missing");
+      const room = window.innerHeight - viewTop() - 48 - (shot?.offsetHeight || 0);
+      const beside = Boolean(source && !card.classList.contains("wide-source")
+        && getComputedStyle(source).position === "sticky" && room >= 180);
+      if (beside && previewBox.parentNode !== source) source.append(previewBox);
+      else if (!beside && previewBox.previousElementSibling !== stemRow) stemRow.after(previewBox);
+      previewBox.classList.toggle("beside", beside);
+      previewBox.style.setProperty("--preview-room", beside ? `${Math.round(room - 30)}px` : "none");
+    };
+    const relayout = () => { fitStem(); placePreview(); };
     editor.addEventListener("input", update);
+    stem.addEventListener("input", fitStem);
+    window.addEventListener("resize", relayout);
     editor.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); close(); }
       else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); editor.requestSubmit(); }
@@ -3493,6 +3581,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     function close(rerender = true) {
       state.editing.delete(q.id);
       card.classList.remove("editing", "editing-pinned");
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", relayout);
+      previewBox.remove();
       editor.remove();
       card.querySelector(".rendered").hidden = false;
       card.querySelector(".card-actions").hidden = false;
@@ -3513,6 +3604,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (card.classList.contains("wide-source") && crop && crop.offsetHeight <= window.innerHeight * 0.42) {
       card.classList.add("editing-pinned");
     }
+    fitStem();
+    placePreview();
     update();
     stem.focus({ preventScroll: true });
     card.scrollIntoView({ block: "start" });
@@ -5196,6 +5289,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       default: break;
     }
   }
+
+  // 教学卡片和“指给我看”的圈一直浮在最上面。对话框（放大对照、配图、确认框）
+  // 打开后在浏览器的最顶层，外面的东西会被它盖住、也点不到，所以把这两样挪进
+  // 最后打开的那个对话框里，关掉后再挪回来。
+  const openDialogs = [];
+  function liftGuides() {
+    for (let index = openDialogs.length - 1; index >= 0; index -= 1) {
+      if (!openDialogs[index].open) openDialogs.splice(index, 1);
+    }
+    document.querySelectorAll("dialog[open]").forEach((node) => { if (!openDialogs.includes(node)) openDialogs.push(node); });
+    const host = openDialogs[openDialogs.length - 1] || document.body;
+    [$("tour"), $("teachPanel")].forEach((node) => { if (node.parentNode !== host) host.append(node); });
+    if (!$("tour").hidden) requestAnimationFrame(placeTour);
+  }
+  new MutationObserver(liftGuides).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
 
   $("teachShow").addEventListener("click", showLesson);
   $("teachSkip").addEventListener("click", advanceTeaching);

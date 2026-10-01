@@ -50,4 +50,7 @@ assert.doesNotMatch(css, /\.toast \{[^}]*translateX\(-50%\)/);
 // The shortcut sheet tells the new meaning.
 assert.match(html, /打勾通过 \/ 再点撤销/);
 
+// The tick is the one place to approve: no second 标记通过 / 撤销通过 button on the card.
+assert.doesNotMatch(js, /button\(blocked \? blockedLabel : approvalNeedsReview\(q\) \? "重新标记通过" : "标记通过"/);
+assert.doesNotMatch(js, /actions\.append\(button\("撤销通过"/);
 console.log("review tick and selection mode checks: OK");

@@ -154,4 +154,4 @@ class ModelPreferenceTests(SimpleTestCase):
             durable = preferences.load_applied_configuration()
 
         self.assertEqual(restored, old)
-        self.assertEqual(durable, old)
+        self.assertEqual(durable, {**old, "plans": preferences.DEFAULT_PLANS})

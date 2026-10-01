@@ -54,7 +54,9 @@ assert.match(css, /z-index:\s*2147483647/);
 
 // 配图冲突不再留下灰色死按钮；操作按冲突信号分流，未分类候选不能误走“确认无图”。
 assert.match(js, /"处理配图冲突"/);
-assert.match(js, /approve\.disabled = blocked \? false : !canApprove\(q\)/);
+// A card whose figures block approval offers the way to fix them where the
+// (removed) approve button used to be; approving itself is the tick's job.
+assert.match(js, /if \(!approved && figureBlocksApproval\(q\)\) \{[\s\S]*?button\(blockedLabel, "primary", \(\) => focusFigureReview\(q\)/);
 for (const action of ["张候选图", "题目范围切多了 · 调整范围", "当前配图正确，其余"]) {
   assert.match(js, new RegExp(action));
 }

@@ -599,8 +599,9 @@ def status(request):
             "checker": saved_roles["checker_engine"],
             "arbiter": saved_roles["arbiter_engine"],
             "models": saved_preferences["models"],
+            "plans": saved_preferences["plans"],
         }
-        current = {**engines["selected"], "models": engines["models"]}
+        current = {**engines["selected"], "models": engines["models"], "plans": engines["plans"]}
         engines["pending_change"] = engines["saved"] != current
     return JsonResponse({
         "upload_enabled": readers.configured("mineru") and primary is not None,
@@ -688,18 +689,22 @@ def model_settings(request):
     try:
         current = preferences.load_configuration()
     except preferences.PreferenceError:
-        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS)}
+        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS),
+                   "plans": dict(preferences.DEFAULT_PLANS)}
     raw_models = payload.get("models", current["models"])
     normalized_models = preferences.normalize_models(raw_models, defaults=current["models"])
     if normalized_models is None:
         return _error("模型 ID 格式不正确：只能使用 1–160 位字母、数字及 . _ : / + -，且不能填写网址")
+    normalized_plans = preferences.normalize_plans(payload.get("plans"), defaults=current["plans"])
+    if normalized_plans is None:
+        return _error("MiniMax 会员档位不受支持")
     selected = set(normalized.values())
     if "minimax_m3" in selected and not readers.configured("minimax"):
         return _error("所选模型需要先配置 MiniMax API Key")
     if "siliconflow_qwen3" in selected and not readers.configured("siliconflow"):
         return _error("所选模型需要先配置硅基流动 API Key")
     try:
-        saved = preferences.save_configuration(normalized, normalized_models)
+        saved = preferences.save_configuration(normalized, normalized_models, normalized_plans)
     except preferences.PreferenceError as exc:
         return _error(str(exc), 500)
     saved_roles = saved["roles"]
@@ -709,6 +714,7 @@ def model_settings(request):
             "checker": saved_roles["checker_engine"],
             "arbiter": saved_roles["arbiter_engine"],
             "models": saved["models"],
+            "plans": saved["plans"],
         },
         "restart_required": False,
         "message": "模型选择已保存；下一份任务或下一次重读开始时生效，正在处理的任务不会中途换模型。",

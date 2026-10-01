@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 import requests
 
 from . import preferences
-from .account_pool import AccountPoolError, account_pool, secrets_from_environment
+from .account_pool import MINIMAX_PLANS, AccountPoolError, account_pool, minimax_plan, secrets_from_environment
 from .textnorm import clean_option, clean_stem, fix_symbols, strip_type_label
 
 MINIMAX_MODEL = preferences.DEFAULT_MODELS["minimax"]  # legacy public constant
@@ -206,9 +206,16 @@ def engine_settings(configuration: dict | None = None) -> dict:
     checker = checker_engine(configuration)
     arbiter = arbiter_engine(primary, checker, configuration)
     models = {provider: provider_model(provider, configuration) for provider in preferences.DEFAULT_MODELS}
+    if isinstance(configuration, dict):
+        plans = preferences.normalize_plans(configuration.get("plans")) or dict(preferences.DEFAULT_PLANS)
+    else:
+        plans = {"minimax": minimax_plan()}
     return {
         "selected": selected,
         "models": models,
+        "plans": plans,
+        # (start, ceiling) of simultaneous requests per MiniMax key for each plan.
+        "plan_concurrency": {key: list(value) for key, value in MINIMAX_PLANS.items()},
         "primary": primary.key if primary else None,
         "checker": checker.key if checker else None,
         "arbiter": arbiter.key if arbiter else None,

@@ -206,6 +206,19 @@
               <p class="settings-footnote">密钥只加密保存在这台电脑上，保存后不再显示出来。</p>
               <button id="settingsCredentialOpen" class="button" type="button">填写或更换密钥</button>
             </div>
+            <div class="plan-setting">
+              <label class="plan-field" for="settingsMinimaxPlan">
+                <span><strong>MiniMax 会员档位</strong><small>决定每个 MiniMax 密钥同时读几道题</small></span>
+                <select id="settingsMinimaxPlan" aria-describedby="settingsMinimaxPlanNote">
+                  <option value="auto">不确定（自动摸索）</option>
+                  <option value="plus">Plus</option>
+                  <option value="max">Max</option>
+                  <option value="ultra">Ultra</option>
+                  <option value="payg">按量付费的 API Key</option>
+                </select>
+              </label>
+              <p id="settingsMinimaxPlanNote" class="settings-footnote">正在读取…</p>
+            </div>
           </section>
           <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
             <h3 id="settingsInterfaceTitle">审核界面</h3>
@@ -260,7 +273,7 @@
               <div><dt>AI 两次一致</dt><dd>和 MinerU 的文字有出入（有手写的卷子常见）时，复核模型又独立读了一遍，两次读出的题面相同。</dd></div>
               <div><dt>AI 三读多数一致</dt><dd>前两次读的不一样；MinerU 的文字在每处分歧上支持其中一次，或者第三次读和其中一次相同，就采用多数的读法。</dd></div>
               <div><dt>一致不等于正确</dt><dd>以上都只是机器之间的一致，不代表已经和原卷人工核对过。</dd></div>
-              <div><dt>未人工审核</dt><dd>需要你对照原卷确认；点“标记通过”或题号左边的方框打勾，才记录为你接受了当前版本。</dd></div>
+              <div><dt>未人工审核</dt><dd>需要你对照原卷确认；在题号左边的方框里打勾（或按 Enter），才记录为你接受了当前版本。</dd></div>
               <div><dt>处理记录</dt><dd>程序在切题、页序、配图等环节注意到的情况，不等于出错。在试卷标题旁的“试卷操作”里可以看到。</dd></div>
             </dl>
             <div class="settings-help-actions">

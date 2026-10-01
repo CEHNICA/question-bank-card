@@ -2979,8 +2979,10 @@ def _reader_parallelism() -> int:
     """How many cards to read at once.
 
     The launcher's figure is computed once at start-up.  Accounts saved later
-    in Settings reach the worker through hot reload, so the live pool capacity
-    may raise it; an explicit user setting (QB_PARALLEL_EXPLICIT=1) never moves.
+    in Settings reach the worker through hot reload, so the pools may raise
+    it; an explicit user setting (QB_PARALLEL_EXPLICIT=1) never moves.  The
+    pools' ceiling counts, not their current level: an account that starts
+    low and climbs needs cards waiting for the slots it gains.
     """
     base = PARALLEL
     if os.environ.get("QB_PARALLEL_EXPLICIT") == "1":
@@ -2992,7 +2994,7 @@ def _reader_parallelism() -> int:
             continue
         seen.add(engine.provider)
         try:
-            capacity += account_pool(engine.provider).capacity
+            capacity += account_pool(engine.provider).ceiling
         except AccountPoolError:
             continue
     return max(1, min(readers.MAX_PARALLEL_CARDS, max(base, capacity)))

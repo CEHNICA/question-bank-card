@@ -191,13 +191,95 @@ class AccountConcurrencyTests(SimpleTestCase):
         self.assertEqual(account_pool.recover_after(1) * 6, account_pool.recover_after(6))
 
     def test_configured_concurrency_is_validated_and_clamped(self):
-        cases = (("", 6), ("2", 2), ("0", 1), ("99", 8), ("x", 6))
+        # An explicit number fixes the level; otherwise MiniMax follows the plan.
+        cases = (("", (3, 8)), ("2", (2, 2)), ("0", (1, 1)), ("99", (8, 8)), ("x", (3, 8)))
         for raw, expected in cases:
             with self.subTest(raw=raw), mock.patch.dict(
-                    "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw}):
-                self.assertEqual(account_pool.account_concurrency("minimax"), expected)
+                    "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw, "QB_MINIMAX_PLAN": ""}):
+                self.assertEqual(account_pool.concurrency_range("minimax"), expected)
+                self.assertEqual(account_pool.account_concurrency("minimax"), expected[1])
         with mock.patch.dict("os.environ", {"QB_MINERU_ACCOUNT_CONCURRENCY": ""}):
-            self.assertEqual(account_pool.account_concurrency("mineru"), 1)
+            self.assertEqual(account_pool.concurrency_range("mineru"), (1, 1))
+        with mock.patch.dict("os.environ", {"QB_SILICONFLOW_ACCOUNT_CONCURRENCY": "", "QB_MINIMAX_PLAN": "max"}):
+            self.assertEqual(account_pool.concurrency_range("siliconflow"), (2, 2))
+
+    def test_minimax_membership_sets_the_start_and_the_ceiling(self):
+        cases = {"plus": (3, 4), "max": (4, 5), "ultra": (6, 7), "payg": (6, 8), "auto": (3, 8),
+                 "": (3, 8), "unknown": (3, 8), "PLUS": (3, 4)}
+        for plan, expected in cases.items():
+            with self.subTest(plan=plan), mock.patch.dict(
+                    "os.environ", {"QB_MINIMAX_PLAN": plan, "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}):
+                self.assertEqual(account_pool.concurrency_range("minimax"), expected)
+        with mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": "plus", "QB_MINIMAX_ACCOUNT_CONCURRENCY": "6"}):
+            self.assertEqual(account_pool.concurrency_range("minimax"), (6, 6))
+
+    def test_an_account_climbs_quickly_until_its_first_429_then_carefully(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3, ceiling=8)
+        self.assertEqual((pool.capacity, pool.ceiling), (3, 8))
+        for _ in range(3):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)          # one full round at 3
+        for _ in range(4):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 5)
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 4)
+        # After a 429 the way back up is the cautious one.
+        for _ in range(account_pool.recover_after(4) - 1):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)
+        with pool.lease():
+            pass
+        self.assertEqual(pool.capacity, 5)
+
+    def test_climbing_stops_at_the_plan_ceiling(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3, ceiling=4)
+        for _ in range(50):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)
+
+    def test_the_next_paper_starts_where_each_account_settled(self):
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        env = {"MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]), "QB_MINIMAX_PLAN": "auto",
+               "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}
+        with mock.patch.dict("os.environ", env):
+            pool = account_pool.account_pool("minimax")
+            self.assertEqual(pool.capacity, 6)            # 3 + 3
+            self.assertEqual(pool.ceiling, 16)
+            for _ in range(20):
+                with pool.lease():
+                    pass
+            climbed = sorted(pool.levels())
+            self.assertGreater(sum(climbed), 6)
+            account_pool.reset_account_pools()            # a new paper
+            fresh = account_pool.account_pool("minimax")
+            self.assertIsNot(fresh, pool)
+            self.assertEqual(sorted(fresh.levels()), climbed)
+            self.assertEqual(sorted(account_pool.learned_levels("minimax")), climbed)
+            # Another plan starts from its own opening level.
+            with mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": "plus"}):
+                self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+            account_pool.forget_learned_concurrency()
+            account_pool.reset_account_pools()
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+
+    def test_a_fixed_number_is_not_carried_between_papers(self):
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        with mock.patch.dict("os.environ", {"MINIMAX_API_KEYS_JSON": json.dumps(["k1"]),
+                                            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3"}):
+            pool = account_pool.account_pool("minimax")
+            with pool.lease() as lease:
+                lease.cooldown(0)
+            self.assertEqual(pool.capacity, 2)
+            account_pool.reset_account_pools()
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
 
     def test_shared_pool_uses_service_concurrency(self):
         with mock.patch.dict("os.environ", {
@@ -205,6 +287,18 @@ class AccountConcurrencyTests(SimpleTestCase):
             "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3",
         }):
             self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+
+    def test_reading_threads_cover_the_plan_ceiling_not_the_opening_level(self):
+        from . import pipeline
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        with mock.patch.dict("os.environ", {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["k1"]), "QB_MINIMAX_PLAN": "auto",
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "", "QB_PARALLEL_EXPLICIT": "0",
+            "QB_PRIMARY_ENGINE": "minimax_m3", "QB_CHECKER_ENGINE": "minimax_m3",
+        }), mock.patch.object(pipeline, "PARALLEL", 4):
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
+            self.assertEqual(pipeline._reader_parallelism(), 8)
 
 
 class VisionPoolTests(SimpleTestCase):

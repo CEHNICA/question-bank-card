@@ -1,7 +1,9 @@
 """Non-secret model routing and provider model preferences.
 
 Version 1 files contained only ``roles``.  Version 2 adds a concrete model ID
-for each provider while keeping the legacy engine keys as provider slots.
+for each provider while keeping the legacy engine keys as provider slots, and
+optionally ``plans``: the user's MiniMax membership, which sets how many
+requests one key may carry at once.  Older readers ignore ``plans``.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
+
+from .account_pool import DEFAULT_MINIMAX_PLAN, MINIMAX_PLANS
 
 
 DEFAULTS = {
@@ -38,6 +42,7 @@ CHOICES = {
     "arbiter_engine": {"primary", "checker", "minimax_m3", "siliconflow_qwen3"},
 }
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
+DEFAULT_PLANS = {"minimax": DEFAULT_MINIMAX_PLAN}
 
 
 class PreferenceError(RuntimeError):
@@ -96,18 +101,37 @@ def normalize_models(values, *, defaults: dict[str, str] | None = None) -> dict[
     return result
 
 
-def normalize_configuration(roles, models=None) -> dict[str, dict[str, str]] | None:
+def normalize_plans(values, *, defaults: dict[str, str] | None = None) -> dict[str, str] | None:
+    """Validate the membership choices; ``None`` keeps ``defaults``."""
+    fallback = defaults or DEFAULT_PLANS
+    if values is None:
+        return dict(fallback)
+    if not isinstance(values, dict):
+        return None
+    value = values.get("minimax", fallback["minimax"])
+    if value not in MINIMAX_PLANS:
+        return None
+    return {"minimax": value}
+
+
+def _stored_plans(values) -> dict[str, str]:
+    """Plans read from a file: a choice this version does not know falls back."""
+    return normalize_plans(values) or dict(DEFAULT_PLANS)
+
+
+def normalize_configuration(roles, models=None, plans=None) -> dict[str, dict[str, str]] | None:
     normalized_roles = normalize(roles)
     normalized_models = normalize_models(models)
-    if normalized_roles is None or normalized_models is None:
+    normalized_plans = normalize_plans(plans)
+    if normalized_roles is None or normalized_models is None or normalized_plans is None:
         return None
-    return {"roles": normalized_roles, "models": normalized_models}
+    return {"roles": normalized_roles, "models": normalized_models, "plans": normalized_plans}
 
 
 def load_configuration() -> dict[str, dict[str, str]]:
     path = preference_path()
     if not path.is_file():
-        return {"roles": dict(DEFAULTS), "models": dict(DEFAULT_MODELS)}
+        return {"roles": dict(DEFAULTS), "models": dict(DEFAULT_MODELS), "plans": dict(DEFAULT_PLANS)}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
@@ -115,7 +139,8 @@ def load_configuration() -> dict[str, dict[str, str]]:
     version = value.get("version") if isinstance(value, dict) else None
     roles = value.get("roles") if version in {1, 2} else None
     models = value.get("models") if version == 2 else None
-    normalized = normalize_configuration(roles, models)
+    plans = _stored_plans(value.get("plans") if version == 2 else None)
+    normalized = normalize_configuration(roles, models, plans)
     if normalized is None:
         raise PreferenceError("模型设置文件格式不正确，请重新保存")
     return normalized
@@ -134,6 +159,7 @@ def load_applied_configuration() -> dict[str, dict[str, str]] | None:
     normalized = normalize_configuration(
         value.get("roles") if version == 2 else None,
         value.get("models") if version == 2 else None,
+        _stored_plans(value.get("plans") if version == 2 else None),
     )
     if normalized is None:
         raise PreferenceError("已应用的模型设置状态格式不正确")
@@ -145,8 +171,14 @@ def load() -> dict[str, str]:
     return load_configuration()["roles"]
 
 
-def save_configuration(roles: dict[str, str], models=None) -> dict[str, dict[str, str]]:
-    normalized = normalize_configuration(roles, models)
+def save_configuration(roles: dict[str, str], models=None, plans=None) -> dict[str, dict[str, str]]:
+    if plans is None:
+        # Saving models must not reset the membership chosen earlier.
+        try:
+            plans = load_configuration()["plans"]
+        except PreferenceError:
+            plans = None
+    normalized = normalize_configuration(roles, models, plans)
     if normalized is None:
         raise PreferenceError("模型选择不受支持")
     path = preference_path()
@@ -171,8 +203,9 @@ def save_configuration(roles: dict[str, str], models=None) -> dict[str, dict[str
 
 def save_applied_configuration(configuration: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     """Atomically record the exact non-secret snapshot used by the worker."""
-    normalized = normalize_configuration(configuration.get("roles"), configuration.get("models")) \
-        if isinstance(configuration, dict) else None
+    normalized = normalize_configuration(
+        configuration.get("roles"), configuration.get("models"), configuration.get("plans"),
+    ) if isinstance(configuration, dict) else None
     if normalized is None:
         raise PreferenceError("已应用的模型设置格式不正确")
     path = applied_path()
@@ -209,21 +242,23 @@ def apply_to_environment(configuration: dict[str, dict[str, str]] | None = None)
     selected = configuration or load_configuration()
     roles = selected["roles"]
     models = selected["models"]
+    plans = _stored_plans(selected.get("plans"))
     os.environ.update({
         "QB_PRIMARY_ENGINE": roles["primary_engine"],
         "QB_CHECKER_ENGINE": roles["checker_engine"],
         "QB_ARBITER_ENGINE": roles["arbiter_engine"],
         "QB_MINIMAX_MODEL": models["minimax"],
         "QB_SILICONFLOW_MODEL": models["siliconflow"],
+        "QB_MINIMAX_PLAN": plans["minimax"],
     })
-    return {"roles": dict(roles), "models": dict(models)}
+    return {"roles": dict(roles), "models": dict(models), "plans": dict(plans)}
 
 
 def apply_and_record(configuration: dict[str, dict[str, str]] | None = None) -> dict[str, dict[str, str]]:
     """Apply a task snapshot and publish it only if both operations succeed."""
     keys = (
         "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE",
-        "QB_MINIMAX_MODEL", "QB_SILICONFLOW_MODEL",
+        "QB_MINIMAX_MODEL", "QB_SILICONFLOW_MODEL", "QB_MINIMAX_PLAN",
     )
     previous = {key: os.environ.get(key) for key in keys}
     try:

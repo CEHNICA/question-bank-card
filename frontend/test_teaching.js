@@ -30,6 +30,7 @@ assert.ok(!lessonDone("card", { type: "approve" }), "a reading step moves on onl
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 // Entry points: welcome, empty page, settings → 帮助.
 assert.match(html, /id="welcomeLearn"[^>]*>用示例试卷学一遍<\/button>/);
 assert.match(html, /id="emptyLearn"[^>]*>先用示例试卷学一遍（不用密钥）<\/button>/);
@@ -44,5 +45,14 @@ assert.match(js, /if \(state\.paper\?\.demo\) \{\s*teach\(\{ type: "publish" \}\
 // “指给我看” does not block the page, and Esc still closes an open window first.
 assert.match(js, /if \(event\.key === "Escape" && !anyDialogOpen\(\)\) \{ endTour\(\);/);
 assert.match(js, /clearTimeout\(tour\.pending\);/);
+
+// The lesson card and the pointer stay on top: an open window (zoom viewer,
+// figure picker, confirm box) sits in the browser's top layer, so they move
+// into the window opened last and come back when it closes.
+assert.match(js, /const host = openDialogs\[openDialogs\.length - 1\] \|\| document\.body;/);
+assert.match(js, /\[\$\("tour"\), \$\("teachPanel"\)\]\.forEach\(\(node\) => \{ if \(node\.parentNode !== host\) host\.append\(node\); \}\);/);
+assert.match(js, /new MutationObserver\(liftGuides\)\.observe\(document\.body, \{ subtree: true, attributes: true, attributeFilter: \["open"\] \}\);/);
+assert.match(css, /dialog\[open\]:has\(> \.teach-panel:not\(\[hidden\]\), > \.tour:not\(\[hidden\]\)\) \{ animation-name: dialog-fade; \}/);
+assert.match(css, /\.viewer-dialog > \.teach-panel \{ left: auto; right: 20px; bottom: 78px; \}/);
 
 console.log("teaching checks: OK");
