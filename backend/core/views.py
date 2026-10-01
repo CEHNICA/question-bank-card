@@ -331,20 +331,24 @@ def _processing_json(paper: Paper) -> dict | None:
 # readings and took a second or more each time.  Any change to the row, the
 # paper's name or the card's group gives a new fingerprint, so a stale answer
 # is never reused.
-_VERDICTS: "OrderedDict[int, tuple[str, bool, bool]]" = OrderedDict()
+_VERDICTS: "OrderedDict[int, tuple[str, str, bool, bool]]" = OrderedDict()
 _VERDICTS_LIMIT = 50_000
 _VERDICTS_LOCK = threading.Lock()
 
 
-def _verdict(row: Question) -> tuple[bool, bool]:
-    return library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+def _verdict(row: Question) -> tuple[str, bool, bool]:
+    """(state, approval current, figures block approval).  The state is read after
+    the figure review: a review saved under an older rule can turn a yellow card
+    green on screen (“已自动排除疑似多余图”), and the counts must say the same."""
+    approved, blocked = library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+    return row.state, approved, blocked
 
 
 def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tuple[int, str, bool, bool]]:
     """(id, state, approval current, figures block approval) for each card of the paper."""
     if rows is not None:
         with reusing_reviews():
-            return [(row.pk, row.state, *_verdict(row)) for row in rows]
+            return [(row.pk, *_verdict(row)) for row in rows]
     json_fields = [field.attname for field in Question._meta.concrete_fields if isinstance(field, models.JSONField)]
     plain_fields = [field.attname for field in Question._meta.concrete_fields
                     if not isinstance(field, models.JSONField)]
@@ -353,12 +357,12 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
         .values_list(*plain_fields, *[f"raw_{name}" for name in json_fields])
     )
     groups = {group.pk: (group.title, group.sequence) for group in paper.question_groups.all()}
-    pk_at, state_at, group_at = (plain_fields.index(name) for name in ("id", "state", "group_id"))
+    pk_at, group_at = (plain_fields.index(name) for name in ("id", "group_id"))
     fingerprints = {
         row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name)).encode()).hexdigest()
         for row in raw
     }
-    known: dict[int, tuple[bool, bool]] = {}
+    known: dict[int, tuple[str, bool, bool]] = {}
     with _VERDICTS_LOCK:
         for pk, fingerprint in fingerprints.items():
             held = _VERDICTS.get(pk)
@@ -378,7 +382,7 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
                     _VERDICTS.move_to_end(pk)
             while len(_VERDICTS) > _VERDICTS_LIMIT:
                 _VERDICTS.popitem(last=False)
-    return [(row[pk_at], row[state_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
+    return [(row[pk_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
 
 
 def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] | None = None) -> dict:
@@ -1635,22 +1639,32 @@ def approve_green(request, paper_id):
     now = timezone.now()
     changed = []
     with transaction.atomic():
+        # Yellow too: a figure review saved under an older rule can make a card
+        # green on screen (“已自动排除疑似多余图”) while the database still says
+        # yellow.  Such cards were shown as green and left out here (1.10.4).
         questions = list(paper.questions.select_for_update().select_related("paper").filter(
-            state=Question.State.GREEN,
+            state__in=[Question.State.GREEN, Question.State.YELLOW],
         ))
-        for question in questions:
-            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)) \
-                    or library.type_blocks_approval(question):
-                continue
-            # Already passed by the same kind of reviewer (or by a person): nothing to do.
-            if library.approval_is_current(question) and library.approval_source(question) in {approver[0], "human"}:
-                continue
-            if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
-                continue
-            question.updated_at = now
-            changed.append(question)
+        # Approving changes nothing the figure review reads, so each card's is worked out once.
+        with reusing_reviews():
+            for question in questions:
+                review = stored_or_derived_review(question)
+                if question.state != Question.State.GREEN:
+                    continue
+                if not question.stem.strip() or blocks_approval(review) or library.type_blocks_approval(question):
+                    continue
+                # Already passed by the same kind of reviewer (or by a person): nothing to do.
+                if library.approval_is_current(question) \
+                        and library.approval_source(question) in {approver[0], "human"}:
+                    continue
+                if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
+                    continue
+                question.updated_at = now
+                changed.append(question)
         Question.objects.bulk_update(changed, [
             "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "updated_at",
+            # the review as shown (and approved), so the card stays green
+            "figure_review", "flags", "state",
         ])
         for question in changed:
             library.confirm_published_review(question)
