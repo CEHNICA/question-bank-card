@@ -16,10 +16,10 @@ assert.match(js, /row\.append\(approvalTick\(q\), cardSelectionControl\(q\)/);
 assert.match(js, /head\.append\(approvalTick\(q\), cardSelectionControl\(q\)\)/);
 // Ticking approves, ticking an approved card revokes, a figure block routes to the figure panel.
 const tick = js.slice(js.indexOf("function approvalTick(q)"), js.indexOf("function handleCardSelectionClick"));
-assert.match(tick, /tick\.setAttribute\("aria-pressed", String\(approved\)\)/);
+assert.match(tick, /tick\.setAttribute\("aria-pressed", byAi \? "mixed" : String\(approved\)\)/);
 assert.match(tick, /if \(approved\) approveQuestion\(q, false\);\s*else if \(blocked\) focusFigureReview\(q\);\s*else approveQuestion\(q, true\);/);
 assert.match(tick, /event\.stopPropagation\(\)/, "ticking a collapsed row must not also expand it");
-assert.match(tick, /tick\.disabled = !\(approved \|\| blocked \|\| canApprove\(q\)\)/);
+assert.match(tick, /tick\.disabled = !\(approved \|\| byAi \|\| blocked \|\| canApprove\(q\)\)/);
 // A revoke by mistake is one click to undo.
 assert.match(js, /\{ label: "恢复通过", onClick: \(\) => approveQuestion\(fresh, true, \{ advance: false \}\) \}/);
 

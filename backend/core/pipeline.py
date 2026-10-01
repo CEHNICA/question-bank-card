@@ -81,6 +81,8 @@ def _invalidate_approval(question: Question) -> None:
     question.approved = False
     question.approved_at = None
     question.approved_content_hash = ""
+    question.approval_source = ""
+    question.approval_agent = ""
 
 
 def _normalise_unlabelled_numeric_choice_type(
@@ -2513,6 +2515,111 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
 
 
 FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目开头可能被切掉了，请点“调整范围”检查"
+# AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
+FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
+FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
+FLAG_READERS_DOWN = ("看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
+                     "额度恢复后点“重新识读”，或者对照原卷直接改字")
+# Saving the text answers these; they must not survive an edit.
+TEXT_DRAFT_FLAGS = (FLAG_MINERU_DRAFT, FLAG_MINERU_DRAFT_EMPTY, FLAG_READERS_DOWN)
+_LEADING_NUMBER = r"^\s*(?:第\s*)?{number}\s*(?:题)?\s*[.．、,，:：)）]\s*"
+
+
+def _reading_order(blocks: list[dict], regions: list[dict]) -> list[dict]:
+    """The card's content blocks as a reader sees them: region by region, top
+    to bottom, and left to right within a line.  MinerU's own order (seq) is
+    sometimes wrong inside one question (a sub-question before the question's
+    first line), and a single question crop is laid out as plain lines."""
+    placed = []
+    for block in blocks:
+        kind, bbox = block.get("type"), block.get("bbox")
+        if not bbox or kind in segment.NON_CONTENT or kind in {"image", "chart"}:
+            continue
+        index = next((position for position, region in enumerate(regions)
+                      if segment.center_in_regions(int(block["page_idx"]), bbox, [region])), None)
+        if index is not None:
+            placed.append((index, block))
+    placed.sort(key=lambda item: (item[0], item[1]["bbox"][1], item[1]["bbox"][0]))
+    rows: list[list] = []          # [region index, top, bottom, blocks]
+    for index, block in placed:
+        top, bottom = block["bbox"][1], block["bbox"][3]
+        if rows and rows[-1][0] == index:
+            row = rows[-1]
+            overlap = min(bottom, row[2]) - max(top, row[1])
+            if overlap > 0.5 * max(1.0, min(bottom - top, row[2] - row[1])):
+                row[1], row[2] = min(row[1], top), max(row[2], bottom)
+                row[3].append(block)
+                continue
+        rows.append([index, top, bottom, [block]])
+    return [block for row in rows for block in sorted(row[3], key=lambda item: item["bbox"][0])]
+
+
+def mineru_draft(blocks: list[dict], table_html: dict[int, str], regions: list[dict]) -> str:
+    """MinerU's own text for a card, in reading order: prose as is, display
+    formulas as $…$, tables as Markdown.  The draft an AI assistant (or the
+    teacher) checks against the crop when no vision model reads."""
+    lines = []
+    for block in _reading_order(blocks, regions):
+        kind = block.get("type")
+        if kind == "table":
+            html = table_html.get(block.get("seq"))
+            text = tables.to_text(html) if html else ""
+        elif kind == "equation":
+            formula = " ".join(str(block.get("text") or "").replace("$$", " ").split())
+            text = f"${formula}$" if formula else ""
+        else:
+            text = str(block.get("text") or "").strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+_BARE_OPTION_LETTERS = re.compile(r"(?:^|\s)[A-E]\s*[.．、:：]\s*(?=[A-E]\s*[.．、:：]|$)", re.M)
+
+
+def _draft_figure_guess(stem: str, options: dict, candidates: list[dict]) -> dict[str, str]:
+    """Without a vision model, attach a figure only in the plain case: the
+    wording asks for one (如图…), the crop holds exactly one picture, and every
+    option is printed as text.  Anything else is left for the reviewer."""
+    if len(candidates) != 1 or not has_figure_cue(stem, options):
+        return {}
+    # “A. B. C. D.” with nothing after the letters: the options are pictures.
+    if _BARE_OPTION_LETTERS.search(stem) or (options and not all(str(value).strip() for value in options.values())):
+        return {}
+    return {str(candidates[0]["label"]): "stem"}
+
+
+def assistant_draft(snapshot: dict) -> dict:
+    """A card for AI-assistant reading: MinerU's text, split into stem and
+    options, yellow until someone checks it against the crop."""
+    number = snapshot["number"]
+    text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
+    text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
+    stem, options = readers.split_inline_options(text)
+    kind = snapshot.get("question_type") or "unknown"
+    if kind == "unknown" and options:
+        kind = "single_choice"
+    candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
+    labels = {str(candidate["label"]): candidate for candidate in candidates}
+    assignments = _draft_figure_guess(stem, options, candidates)
+    if assignments:
+        assignments = _resolve_automatic_figure_assignments(
+            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments)
+    figures = without_automatic_textbook_badges([
+        {"slot": role, "page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"], "source": "auto"}
+        for label, role in assignments.items() if label in labels and role == "stem"
+    ])
+    review = automatic_review(stem=stem, options=options, candidate_labels=set(labels),
+                              assignments=assignments, figures=figures)
+    flags = list(snapshot.get("segmentation_flags") or [])
+    flags.append(FLAG_MINERU_DRAFT if stem else FLAG_MINERU_DRAFT_EMPTY)
+    return {
+        "read_a": {"engine": "MinerU", "stem": stem, "options": options, "draft": True, "figures": assignments},
+        "read_b": {}, "read_c": {},
+        "stem": stem, "options": options, "question_type": kind, "text_source": "mineru",
+        "figures": figures, "figure_review": review, "foreign_figures": [],
+        "flags": flags, "error": "", "state": Question.State.YELLOW,
+    }
 OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
 
 
@@ -2651,6 +2758,8 @@ def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
 
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
+    if "draft" in snapshot:
+        return assistant_draft(snapshot)
     number = snapshot["number"]
     source_kind = snapshot.get("source_kind") or Question.SourceKind.UNKNOWN
     primary, checker = readers.primary_engine(), readers.checker_engine()
@@ -2678,6 +2787,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if checker is None:
         errors["b"] = "所选复核模型没有可用的 API Key"
 
+    unavailable: set[str] = set()
+
     def run_reader(
         job: tuple[str, readers.Engine, str, bool],
     ) -> tuple[str, dict | None, str, readers.ReaderQuotaExhausted | None]:
@@ -2699,6 +2810,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             # only a card with no usable result escalates the quota signal.
             return name, None, str(error), error
         except readers.ReaderError as error:
+            if isinstance(error, readers.ReaderUnavailable):
+                unavailable.add(name)
             return name, None, str(error), None
 
     # 有 MinerU 旁证时先只读一次：主读与另一引擎的文字逐字一致，就不必再花一次
@@ -2737,6 +2850,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                     "read_b": results.get("b", {"error": errors.get("b", "")}), "read_c": {}}
     if not results and quota_errors:
         raise quota_errors[0]
+    asked = {name for name, *_rest in jobs}
+    if not results and asked and asked <= unavailable and snapshot.get("fallback_draft") is not None:
+        # No service could answer at all (free quota used up, outage): start
+        # from MinerU's text like AI-assistant reading, and say why.
+        card = assistant_draft({**snapshot, "draft": snapshot["fallback_draft"]})
+        card["flags"] = [*card["flags"], FLAG_READERS_DOWN]
+        card["read_a"] = {**card["read_a"], "error": errors.get("a", "")}
+        return card
     if not results:
         return {**update, "state": Question.State.RED, "error": errors.get("a") or errors.get("b") or "识读失败",
                 "flags": []}
@@ -3036,12 +3157,27 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     # MinerU's own reading of each printed table, to check a table the reader
     # wrote out as text.
     table_list = [item for item in tables.table_blocks(paper) if item["html"]]
+    # AI-assistant reading: no vision model; each card starts as MinerU's text.
+    # Vision reading keeps the same draft in reserve for a card no service
+    # could read (the free quota used up): MinerU's text beats a red card.
+    assistant = readers.assistant_mode()
+    all_by_page: dict[int, list[dict]] = defaultdict(list)
+    for block in _block_dicts(paper):
+        all_by_page[int(block["page_idx"])].append(block)
+    table_html = {item["seq"]: item["html"] for item in table_list}
     for snapshot in snapshots:
         regions = snapshot.get("regions") or []
         # Only the pages this card touches: a long book has thousands of blocks.
         nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
                   for block in blocks_by_page.get(page, [])]
         snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
+        if regions:
+            pages = sorted({int(r["page_idx"]) for r in regions})
+            draft = mineru_draft([block for page in pages for block in all_by_page.get(page, [])],
+                                 table_html, regions)
+            snapshot["draft" if assistant else "fallback_draft"] = draft
+        elif assistant:
+            snapshot["draft"] = ""
         snapshot["witness_tables"] = [
             item["html"] for item in table_list
             if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)

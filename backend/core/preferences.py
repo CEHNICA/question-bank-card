@@ -16,6 +16,7 @@ from pathlib import Path
 
 from django.conf import settings
 
+from . import provider_catalog
 from .account_pool import DEFAULT_MINIMAX_PLAN, MINIMAX_PLANS
 
 
@@ -24,22 +25,15 @@ DEFAULTS = {
     "checker_engine": "auto",
     "arbiter_engine": "primary",
 }
-DEFAULT_MODELS = {
-    "minimax": "MiniMax-M3",
-    "siliconflow": "Qwen/Qwen3-VL-32B-Instruct",
-}
-SUGGESTED_MODELS = {
-    "minimax": ["MiniMax-M3"],
-    "siliconflow": [
-        "Qwen/Qwen3-VL-30B-A3B-Instruct",
-        "Qwen/Qwen3-VL-30B-A3B-Thinking",
-        "Qwen/Qwen3-VL-32B-Instruct",
-    ],
-}
+DEFAULT_MODELS = {key: spec["default_model"] for key, spec in provider_catalog.VISION.items()}
+SUGGESTED_MODELS = {key: list(spec["suggested"]) for key, spec in provider_catalog.VISION.items()}
+FREE_MODELS = {key: list(spec["free_models"]) for key, spec in provider_catalog.VISION.items()}
+_ENGINES = set(provider_catalog.ENGINES)
 CHOICES = {
-    "primary_engine": {"minimax_m3", "siliconflow_qwen3"},
-    "checker_engine": {"auto", "minimax_m3", "siliconflow_qwen3"},
-    "arbiter_engine": {"primary", "checker", "minimax_m3", "siliconflow_qwen3"},
+    # "assistant": no vision model; MinerU's text is the draft and an AI assistant checks it.
+    "primary_engine": _ENGINES | {provider_catalog.ASSISTANT_ENGINE},
+    "checker_engine": {"auto", *_ENGINES},
+    "arbiter_engine": {"primary", "checker", *_ENGINES},
 }
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
 DEFAULT_PLANS = {"minimax": DEFAULT_MINIMAX_PLAN}
@@ -86,11 +80,12 @@ def normalize_models(values, *, defaults: dict[str, str] | None = None) -> dict[
     metacharacters are rejected.  A provider may
     publish a new model without requiring an application release.
     """
+    # Files saved before a service existed lack its model: it gets the default.
+    fallback = {**DEFAULT_MODELS, **(defaults or {})}
     if values is None:
-        return dict(defaults or DEFAULT_MODELS)
+        return {provider: fallback[provider] for provider in DEFAULT_MODELS}
     if not isinstance(values, dict):
         return None
-    fallback = defaults or DEFAULT_MODELS
     result: dict[str, str] = {}
     for provider in DEFAULT_MODELS:
         value = values.get(provider, fallback[provider])
@@ -241,14 +236,14 @@ def apply_to_environment(configuration: dict[str, dict[str, str]] | None = None)
     """Apply one immutable preference snapshot at a worker task boundary."""
     selected = configuration or load_configuration()
     roles = selected["roles"]
-    models = selected["models"]
+    # A snapshot written before a service existed lacks its model: use the default.
+    models = normalize_models(selected.get("models")) or dict(DEFAULT_MODELS)
     plans = _stored_plans(selected.get("plans"))
     os.environ.update({
         "QB_PRIMARY_ENGINE": roles["primary_engine"],
         "QB_CHECKER_ENGINE": roles["checker_engine"],
         "QB_ARBITER_ENGINE": roles["arbiter_engine"],
-        "QB_MINIMAX_MODEL": models["minimax"],
-        "QB_SILICONFLOW_MODEL": models["siliconflow"],
+        **{provider_catalog.model_environment(provider): models[provider] for provider in DEFAULT_MODELS},
         "QB_MINIMAX_PLAN": plans["minimax"],
     })
     return {"roles": dict(roles), "models": dict(models), "plans": dict(plans)}
@@ -257,8 +252,8 @@ def apply_to_environment(configuration: dict[str, dict[str, str]] | None = None)
 def apply_and_record(configuration: dict[str, dict[str, str]] | None = None) -> dict[str, dict[str, str]]:
     """Apply a task snapshot and publish it only if both operations succeed."""
     keys = (
-        "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE",
-        "QB_MINIMAX_MODEL", "QB_SILICONFLOW_MODEL", "QB_MINIMAX_PLAN",
+        "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE", "QB_MINIMAX_PLAN",
+        *(provider_catalog.model_environment(provider) for provider in DEFAULT_MODELS),
     )
     previous = {key: os.environ.get(key) for key in keys}
     try:

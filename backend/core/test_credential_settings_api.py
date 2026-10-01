@@ -92,6 +92,7 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.assertEqual(response.json()["services"], {
             "mineru": {"configured": True, "count": 2},
             "minimax": {"configured": True, "count": 1},
+            "modelscope": {"configured": False, "count": 0},
             "siliconflow": {"configured": False, "count": 0},
         })
         self.assertEqual(response.json()["max_accounts"], 8)

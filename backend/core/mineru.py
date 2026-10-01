@@ -28,7 +28,7 @@ MAX_PDF_PAGES = 600
 logger = logging.getLogger(__name__)
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
-    "A0211": "Token 已过期，请在 MinerU API 管理页更换 Token",
+    "A0211": "Token 已过期（MinerU 的 Token 14 天过期一次）：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 填写或更换密钥”里换上",
     "-500": "请求参数不正确，请检查文件类型与接口设置",
     "-10001": "MinerU 服务暂时异常，请稍后重试",
     "-10002": "请求参数格式不正确，请检查接口设置",

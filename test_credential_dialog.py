@@ -190,7 +190,8 @@ class ModelPreferenceStoreTests(unittest.TestCase):
 
             stored = load_model_configuration(path)
             self.assertEqual(stored["roles"], changed_roles)
-            self.assertEqual(stored["models"], models)
+            # Services added later read with their default model.
+            self.assertEqual({key: stored["models"][key] for key in models}, models)
 
     def test_environment_contract_contains_only_allowlisted_nonsecrets(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(

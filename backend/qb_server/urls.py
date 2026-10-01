@@ -40,6 +40,7 @@ urlpatterns = [
     path("api/documents/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
     path("api/questions/<int:question_id>", views.question_delete),
     path("api/questions/<int:question_id>/figures/<int:index>", views.question_figure),
+    path("api/questions/<int:question_id>/crop", views.question_crop),
     path("api/questions/<int:question_id>/<str:action>", views.question_action),
     path("api/m3/papers", views.m3_papers),
     path("api/library", views.library_list),

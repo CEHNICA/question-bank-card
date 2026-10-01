@@ -167,6 +167,54 @@ def approval_hash(question: Question) -> str:
     return content_hash(final_content(question))
 
 
+# 谁打的勾。人对照原卷确认是 human；AI 助手（tiyouju 命令行、MCP）打的勾是 ai。
+APPROVAL_SOURCES = ("human", "ai")
+DEFAULT_AGENT = "AI 助手"
+
+
+def agent_name(value) -> str:
+    """A short, printable name for the AI assistant that approved a card."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = "".join(character if character.isprintable() else " " for character in text)
+    return " ".join(text.split())[:40] or DEFAULT_AGENT
+
+
+def approval_source(question: Question) -> str:
+    """human / ai for an approved card ("" when not approved); old approvals are human."""
+    if not question.approved:
+        return ""
+    return question.approval_source if question.approval_source in APPROVAL_SOURCES else "human"
+
+
+def approve(question: Question, *, now, source: str = "human", agent: str = "") -> bool:
+    """Approve the version on screen.  An AI tick never replaces a person's.
+
+    Returns whether anything changed.  The caller has already checked that the
+    card can be approved and saves it.
+    """
+    if source not in APPROVAL_SOURCES:
+        raise ValueError("approval source must be human or ai")
+    if source == "ai" and approval_is_current(question) and approval_source(question) == "human":
+        return False
+    question.approved = True
+    question.approved_at = now
+    question.approved_content_hash = approval_hash(question)
+    question.approval_source = source
+    question.approval_agent = agent_name(agent) if source == "ai" else ""
+    return True
+
+
+def confirm_published_review(question: Question) -> int:
+    """A person confirmed a card an AI had passed and published: the library
+    copy of that same version now counts as human-reviewed (no new version)."""
+    if approval_source(question) != "human" or not question.approved_content_hash:
+        return 0
+    return question.publications.filter(
+        status=PublishedQuestion.Status.PUBLISHED, review_source="ai",
+        content_hash=content_hash(final_content(question)),
+    ).update(review_source="human", review_agent="")
+
+
 def approval_is_current(question: Question) -> bool:
     if blocks_approval(stored_or_derived_review(question)):
         return False
@@ -234,8 +282,14 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
         digest = content_hash(content)
         if not question.approved_content_hash or question.approved_content_hash != digest:
             raise ValueError(f"第 {question.number} 题通过后内容已变化，请重新终审")
+        source = approval_source(question) or "human"
+        agent = question.approval_agent if source == "ai" else ""
         latest = question.publications.order_by("-version").first()
         if latest and latest.status == PublishedQuestion.Status.PUBLISHED and latest.content_hash == digest:
+            # A person confirmed what an AI assistant had passed: same version, now human-reviewed.
+            if latest.review_source == "ai" and source == "human":
+                latest.review_source, latest.review_agent = "human", ""
+                latest.save(update_fields=["review_source", "review_agent"])
             return latest, False
         publication_id = uuid.uuid4()
         folder = settings.DATA_ROOT / "library" / str(publication_id)
@@ -251,6 +305,7 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 source_filename=paper.display_name, number=question.number,
                 question_type=question.question_type, version=(latest.version if latest else 0) + 1,
                 content=content, content_hash=digest, search_text=_search_text(content),
+                review_source=source, review_agent=agent,
             )
             question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
@@ -354,6 +409,7 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "question_type": publication.question_type,
         "version": publication.version,
         "status": publication.status,
+        "review": {"source": publication.review_source or "human", "agent": publication.review_agent},
         "published_at": publication.published_at.isoformat(),
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
         "content": publication.content,

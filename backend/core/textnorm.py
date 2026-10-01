@@ -33,7 +33,10 @@ PUNCT = {"。": ".", "．": ".", "，": ",", "：": ":", "；": ";", "、": ",",
 SPACING = re.compile(r"\\(?:left|right|big|Big|bigg|Bigg|displaystyle|textstyle|limits|nolimits|quad|qquad)(?![A-Za-z])|\\[,;:! ]")
 COMMAND = re.compile(r"\\([A-Za-z]+|[{}])")
 SCORE = re.compile(r"[(（]\s*\d{1,2}\s*分\s*[)）]")
-BLANK = re.compile(r"_{2,}|\\underline\{\s*(?:\\quad|\\qquad|~|\s)*\}|(?:\\_)+")
+BLANK = re.compile(r"_{2,}|\\underline\{\s*(?:\\quad|\\qquad|\\hspace\*?\{[^{}]{0,12}\}|~|\s)*\}|(?:\\_)+")
+# 魔搭 Qwen writes a fill-in blank as $\underline{\hspace{2em}}$: shown as ____.  Only a
+# span that is nothing but the blank: inside a formula, _ would start a subscript.
+_BLANK_ONLY = re.compile(r"\s*\\underline\{\s*(?:\\hspace\*?\{[^{}]{0,12}\}|\\quad|\\qquad|~|\\ |\s)*\}\s*")
 SUPERSCRIPTS = str.maketrans({
     "⁰": "^0", "¹": "^1", "²": "^2", "³": "^3", "⁴": "^4",
     "⁵": "^5", "⁶": "^6", "⁷": "^7", "⁸": "^8", "⁹": "^9",
@@ -141,7 +144,9 @@ def fix_symbols(value: str) -> str:
         result.append(_TOKEN_BEFORE_VERTICES.sub("▱", text[start:match.start()]))
         delimiter, body = match.group(1), match.group(2)
         whole = _ONLY_PARALLELOGRAM.fullmatch(body)
-        if whole:
+        if _BLANK_ONLY.fullmatch(body):
+            result.append("____")
+        elif whole:
             result.append("▱" + re.sub(r"\s+", "", whole.group(1)))
         else:
             body = _TOKEN_BEFORE_VERTICES.sub(r"\\text{▱}", body)

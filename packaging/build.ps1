@@ -220,6 +220,13 @@ if ($writtenCorrespondingSource -ne $correspondingSource -or
     throw 'CORRESPONDING_SOURCE.txt failed its UTF-8 or version-substitution check.'
 }
 
+# The command line for AI assistants must start and report this version.
+$cliExe = Join-Path $BundleRoot 'tiyouju.exe'
+$cliVersion = (& $cliExe --version) -join ''
+if ($LASTEXITCODE -ne 0 -or $cliVersion.Trim() -ne "tiyouju $Version") {
+    throw "tiyouju.exe --version reported '$cliVersion' instead of 'tiyouju $Version'."
+}
+
 Write-Host "[4/6] Auditing the bundle for private data and runtime files..."
 Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot)
 

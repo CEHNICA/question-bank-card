@@ -156,6 +156,18 @@ class LauncherTests(unittest.TestCase):
             {"QB_PARALLEL": "16", "QB_PARALLEL_EXPLICIT": "0"},
         )
 
+    def test_free_keys_alone_set_who_reads_and_how_many_at_once(self):
+        preferences = dict(launcher.DEFAULT_MODEL_PREFERENCES)      # MiniMax chosen, but no MiniMax key
+        pools = {"mineru": ["m1"], "modelscope": ["s1"]}
+        self.assertEqual(launcher._effective_primary(preferences, pools), "modelscope")
+        # 魔搭 reads and checks: up to 2 at once per key.
+        self.assertEqual(launcher._parallel_environment({}, pools, preferences),
+                         {"QB_PARALLEL": "2", "QB_PARALLEL_EXPLICIT": "0"})
+        self.assertEqual(launcher._effective_primary(preferences, {**pools, "minimax": ["mm"]}), "minimax")
+        assistant = {**preferences, "primary_engine": "assistant"}
+        self.assertIsNone(launcher._effective_primary(assistant, pools))
+        self.assertIsNone(launcher._effective_primary(preferences, {"mineru": ["m1"]}))
+
     def test_custom_model_roles_reach_web_and_worker_from_trusted_preferences(self):
         selected = {
             "primary_engine": "siliconflow_qwen3",
@@ -176,6 +188,22 @@ class LauncherTests(unittest.TestCase):
         environments = self.run_main({"mineru_token": "m-token", "minimax_key": "mm-key"})
         self.assertEqual(environments["web.log"]["QB_SILICONFLOW_CONFIGURED"], "0")
         self.assertNotIn("SILICONFLOW_API_KEY", environments["worker.log"])
+
+    def test_free_keys_only_start_reading_with_them(self):
+        environments = self.run_main({"mineru_token": "m-token", "modelscope_key": "s-key"})
+        worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual(json.loads(worker["MODELSCOPE_API_KEYS_JSON"]), ["s-key"])
+        self.assertNotIn("MODELSCOPE_API_KEYS_JSON", web)
+        self.assertEqual(web["QB_MODELSCOPE_CONFIGURED"], "1")
+        self.assertIn("主读 魔搭 Qwen3.5-35B-A3B；复核 魔搭 Qwen3.5-35B-A3B", environments["_stdout"])
+        self.assertEqual(worker["QB_PARALLEL"], "2")
+
+    def test_assistant_reading_needs_no_reading_key(self):
+        preferences = {**launcher.DEFAULT_MODEL_PREFERENCES, "primary_engine": "assistant"}
+        environments = self.run_main({"mineru_token": "m-token"}, preferences)
+        self.assertEqual(environments["worker.log"]["QB_PRIMARY_ENGINE"], "assistant")
+        self.assertIn("模型分工：AI 助手", environments["_stdout"])
+        self.assertNotIn("还没有填看图读题的密钥", environments["_stdout"])
 
     def test_no_credentials_still_opens_in_app_settings_without_prompting(self):
         environments = self.run_main({})

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import start_question_bank as launcher
 from credential_dialog import show_credential_dialog
-from credential_store import CredentialStoreError, credential_pool, load_credentials
+from credential_store import CredentialStoreError, credential_pool, load_credentials, provider_catalog
 
 ROOT = launcher.ROOT
 ASSETS = ROOT / "assets"
@@ -111,11 +111,13 @@ def credentials_ready(
         or credential_pool(saved, "mineru")
     )
     primary_name = preferences.get("primary_engine", "minimax_m3")
-    model_accounts = credential_pool(
-        saved, "siliconflow" if primary_name == "siliconflow_qwen3" else "minimax",
+    # AI 助手读题不需要看图模型的密钥；其余情况下任何一家看图服务有密钥就能读题
+    # （所选那家没有密钥时，后台按顺序换用有密钥的那家）。
+    model_ready = primary_name == provider_catalog.ASSISTANT_ENGINE or any(
+        credential_pool(saved, service) for service in provider_catalog.VISION
     )
     # 只有环境变量、没有保存时仍转交命令行，让人明确选择本次使用方式。
-    return has_token and bool(model_accounts)
+    return has_token and model_ready
 
 
 def resolve_credentials_quietly() -> tuple[list[str], list[str]]:

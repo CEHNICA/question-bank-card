@@ -85,9 +85,9 @@ class ModelPreferenceTests(SimpleTestCase):
             ("甲-处理中", "MiniMax-old"),
             ("乙-开始", "MiniMax-new"),
         ])
-        self.assertEqual(active_statuses[0]["models"], old_models)
+        self.assertEqual(active_statuses[0]["models"], {**preferences.DEFAULT_MODELS, **old_models})
         self.assertTrue(active_statuses[0]["pending_change"])
-        self.assertEqual(final_status["models"], new_models)
+        self.assertEqual(final_status["models"], {**preferences.DEFAULT_MODELS, **new_models})
         self.assertFalse(final_status["pending_change"])
 
     def test_worker_startup_replaces_stale_snapshot_even_without_queued_work(self):
@@ -110,8 +110,8 @@ class ModelPreferenceTests(SimpleTestCase):
             status = Client().get("/api/status").json()["engines"]
             applied = preferences.load_applied_configuration()
 
-        self.assertEqual(applied["models"], new)
-        self.assertEqual(status["models"], new)
+        self.assertEqual(applied["models"], {**preferences.DEFAULT_MODELS, **new})
+        self.assertEqual(status["models"], {**preferences.DEFAULT_MODELS, **new})
         self.assertFalse(status["pending_change"])
 
     def test_failed_snapshot_write_restores_old_applied_not_new_startup_environment(self):
@@ -154,4 +154,5 @@ class ModelPreferenceTests(SimpleTestCase):
             durable = preferences.load_applied_configuration()
 
         self.assertEqual(restored, old)
-        self.assertEqual(durable, {**old, "plans": preferences.DEFAULT_PLANS})
+        self.assertEqual(durable, {**old, "models": {**preferences.DEFAULT_MODELS, **old["models"]},
+                                   "plans": preferences.DEFAULT_PLANS})

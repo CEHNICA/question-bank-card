@@ -145,6 +145,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .chip.red { background: var(--red-soft); color: var(--red); font-weight: 600; }
 .chip.approved { background: var(--accent); color: #fff; font-weight: 600; }
 .chip.approved::before { content: "✓"; width: auto; height: auto; background: none; font-size: 11px; }
+/* AI 助手打的勾：虚线、浅底，和人工通过一眼分得开。 */
+.chip.ai-approved { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
+.chip.ai-approved::before { content: "AI"; width: auto; height: auto; padding: 0 3px; border-radius: 3px; background: var(--accent); color: #fff; font-size: 9.5px; line-height: 1.5; opacity: 1; }
 .chip.published { background: var(--blue-soft); color: var(--blue); }
 .chip.stale { background: var(--violet-soft); color: var(--violet); }
 .chip.waiting { background: var(--bg-sunken); color: var(--muted); }
@@ -352,6 +355,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .card.state-red::before { background: var(--red); }
 .card.state-green::before { background: var(--green-bar); }
 .card.state-approved::before { background: var(--accent); }
+.card.state-ai::before { background: repeating-linear-gradient(180deg, var(--accent) 0 6px, transparent 6px 10px); }
 .card.state-waiting::before, .card.state-reading::before { background: #cfd6cf; }
 .card.state-red { border-color: var(--red-line); }
 .card:hover { box-shadow: var(--shadow); }
@@ -400,6 +404,8 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .card-tick:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .card-tick[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
 .card-tick[aria-pressed="true"]:hover { border-color: var(--accent-dark); background: var(--accent-dark); color: #fff; }
+.card-tick.ai { border: 1.5px dashed var(--accent); background: var(--accent-soft); color: var(--accent); }
+.card-tick.ai:hover { border-style: solid; background: var(--accent); color: #fff; }
 .card-select:hover:not(:disabled) { border-color: var(--red); background: var(--red-soft); color: var(--red); }
 .card-select[aria-pressed="true"] { border-color: var(--red); background: var(--red); color: #fff; }
 .card-tick:disabled, .card-select:disabled { background: var(--bg-sunken); cursor: not-allowed; box-shadow: none; }
@@ -744,6 +750,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .settings-footnote { color: var(--muted); font-size: 12px; line-height: 1.55; }
 .api-status-list { display: grid; gap: 7px; margin: 13px 0 9px; }
 .api-status-list > div, .about-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); font-size: 13px; }
+.free-plan { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.65; color: var(--ink-2); }
+.free-plan > summary { cursor: pointer; color: var(--ink); font-weight: 700; }
+.free-plan[open] > summary { margin-bottom: 6px; }
+.free-plan ol { margin: 0 0 6px; padding-left: 20px; }
+.free-plan li + li { margin-top: 4px; }
+.free-plan p { margin: 6px 0 0; }
+.free-plan a, .credential-service label a { color: var(--accent); }
 .api-state { color: var(--muted); font-size: 12.5px; }
 .api-state.ready { color: var(--green); }
 .api-state.missing { color: var(--amber); }
@@ -760,6 +773,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .model-settings-form .field { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 10px; }
 .model-settings-form select, .model-settings-form input { width: 100%; min-height: 36px; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); }
 .model-settings-form select { padding-right: 30px; }
+.model-settings-form select:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
 .model-id-settings { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
 .model-id-settings legend, .model-role-heading { color: var(--ink); font-size: 13px; font-weight: 700; }
 .model-id-settings > .settings-footnote { margin: -2px 0 10px; }

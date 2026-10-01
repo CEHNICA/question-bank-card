@@ -44,7 +44,7 @@ assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="
 for (const id of ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
-for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel"]) {
+for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel", "settingsModelscopeModel"]) {
   assert.match(html, new RegExp(`id="${id}"[^>]*list="${id}s"`));
 }
 assert.match(js, /api\("\/api\/settings\/models"/);
@@ -94,5 +94,19 @@ assert.match(html, /<select id="settingsMinimaxPlan"[^>]*>\s*<option value="auto
 assert.match(js, /"settingsMinimaxPlan"\]\s*\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\);/);
 assert.match(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
 assert.match(js, /const plan = engines\.saved\?\.plans\?\.minimax \|\| engines\.plans\?\.minimax \|\| "auto";/);
+
+// 完全免费：常用里有“怎么配”的说明（MinerU + 魔搭），不能上传时自动展开；主读可以选“AI 助手读题”。
+assert.match(html, /<details id="settingsFreePlan" class="free-plan">[\s\S]*?mineru\.net[\s\S]*?modelscope\.cn[\s\S]*?AI 助手读题[\s\S]*?<\/details>/);
+assert.match(js, /if \(state\.freePlanReady !== s\.upload_enabled\) \{[\s\S]*?\$\("settingsFreePlan"\)\.open = !s\.upload_enabled;/);
+assert.match(css, /\.free-plan \{/);
+assert.match(js, /\{ value: "assistant", label: "AI 助手读题/);
+assert.match(js, /const assistant = \$\("settingsPrimaryModel"\)\.value === "assistant";\s*\$\("settingsCheckerModel"\)\.disabled = assistant;\s*\$\("settingsArbiterModel"\)\.disabled = assistant;/);
+assert.match(js, /models:\s*\{[\s\S]*?modelscope:\s*\$\("settingsModelscopeModel"\)\.value\.trim\(\)/);
+for (const id of ["settingsModelscopeState"]) {
+  assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(js, new RegExp(`setApiState\\("${id}"`));
+}
+// 选的那家没填密钥时显示实际读题的那家，而不是一个读不了的选项。
+assert.match(js, /if \(chosen && chosen\.available === false && engines\.primary\) primary = engines\.primary;/);
 
 console.log("settings UI static checks: OK");

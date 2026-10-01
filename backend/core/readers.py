@@ -19,8 +19,11 @@ from urllib.parse import urlsplit
 
 import requests
 
-from . import preferences
-from .account_pool import MINIMAX_PLANS, AccountPoolError, account_pool, minimax_plan, secrets_from_environment
+from . import preferences, provider_catalog
+from .account_pool import (
+    MINIMAX_PLANS, AccountPoolError, account_pool, minimax_plan, provider_answered, provider_resting, rest_provider,
+    secrets_from_environment,
+)
 from .textnorm import clean_option, clean_stem, fix_symbols, strip_type_label
 
 MINIMAX_MODEL = preferences.DEFAULT_MODELS["minimax"]  # legacy public constant
@@ -28,11 +31,15 @@ MINIMAX_DEFAULT_URL = "https://api.minimax.cn/v1/chat/completions"
 MINIMAX_HOSTS = frozenset({"api.minimax.cn", "api.minimax.io", "api.minimaxi.com"})
 SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SILICONFLOW_MODEL = preferences.DEFAULT_MODELS["siliconflow"]  # legacy public constant
+MODELSCOPE_URL = "https://api-inference.modelscope.cn/v1/chat/completions"
 # 529 is MiniMax's "overloaded" answer (seen live during benchmarking); 520-524
 # are CDN-edge failures.  All are transient server-side conditions.
 SERVER_RETRYABLE = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524, 529})
 BACKOFF = (2.0, 5.0, 12.0)
 RATE_LIMIT_ROUNDS = 3
+# With no other service to hand the question to, a busy free model is waited
+# out longer before the card is given up on.
+PATIENT_RATE_LIMIT_ROUNDS = 8
 MAX_RESPONSE_BYTES = 200_000
 OPTION_KEYS = ("A", "B", "C", "D", "E")
 TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|配图|其他题号|刻度)\s*】")
@@ -59,7 +66,14 @@ class ReaderError(RuntimeError):
     """可以直接给用户看的失败原因（不含密钥、不含原始返回）。"""
 
 
-class ReaderQuotaExhausted(ReaderError):
+class ReaderUnavailable(ReaderError):
+    """The service could not answer now (rate limit, outage, no working key).
+
+    Another configured service may still answer: ``chat`` then tries it.
+    """
+
+
+class ReaderQuotaExhausted(ReaderUnavailable):
     """The provider confirmed a non-transient plan quota exhaustion.
 
     This is deliberately separate from an ordinary HTTP 429.  Callers use it
@@ -70,7 +84,7 @@ class ReaderQuotaExhausted(ReaderError):
 
 @dataclass(frozen=True)
 class Engine:
-    provider: str   # minimax | siliconflow
+    provider: str   # a provider_catalog.VISION key: minimax | modelscope | siliconflow
     model: str
 
     @property
@@ -81,11 +95,13 @@ class Engine:
     def key(self) -> str:
         # Engine keys are stable provider slots.  The concrete model ID is a
         # separate preference and may change without breaking stored roles.
-        if self.provider == "minimax":
-            return "minimax_m3"
-        if self.provider == "siliconflow":
-            return "siliconflow_qwen3"
-        return f"{self.provider}:{self.model}"
+        spec = provider_catalog.VISION.get(self.provider)
+        return spec["engine"] if spec else f"{self.provider}:{self.model}"
+
+    @property
+    def vendor(self) -> str:
+        spec = provider_catalog.VISION.get(self.provider)
+        return spec["label"] if spec else self.provider
 
 
 def configured(service: str) -> bool:
@@ -105,18 +121,13 @@ def _reported_pool_size(service: str) -> int:
         return 0
 
 
-ENGINE_CHOICES = {
-    "minimax_m3": "minimax",
-    "siliconflow_qwen3": "siliconflow",
-}
+ENGINE_CHOICES = dict(provider_catalog.ENGINES)
+ASSISTANT = provider_catalog.ASSISTANT_ENGINE
 
 
 def provider_model(provider: str, configuration: dict | None = None) -> str:
     """Read the current task snapshot from the environment with safe fallback."""
-    environment_key = {
-        "minimax": "QB_MINIMAX_MODEL",
-        "siliconflow": "QB_SILICONFLOW_MODEL",
-    }[provider]
+    environment_key = provider_catalog.model_environment(provider)
     if configuration is not None:
         models = configuration.get("models") if isinstance(configuration, dict) else None
         value = models.get(provider) if isinstance(models, dict) else None
@@ -149,28 +160,48 @@ def engine_by_key(key: str, configuration: dict | None = None) -> Engine | None:
     return Engine(provider, provider_model(provider, configuration)) if configured(provider) else None
 
 
-def primary_engine(configuration: dict | None = None) -> Engine | None:
-    selected = _configured_selection(
-        configuration, "primary_engine", "QB_PRIMARY_ENGINE", "minimax_m3", set(ENGINE_CHOICES),
+def _primary_selection(configuration: dict | None = None) -> str:
+    return _configured_selection(
+        configuration, "primary_engine", "QB_PRIMARY_ENGINE", "minimax_m3", {ASSISTANT, *ENGINE_CHOICES},
     )
-    return engine_by_key(selected, configuration)
+
+
+def assistant_mode(configuration: dict | None = None) -> bool:
+    """No vision model: cards start as MinerU's text and an AI assistant checks them."""
+    return _primary_selection(configuration) == ASSISTANT
+
+
+def _first_configured(order, configuration: dict | None = None, *, skip: str = "") -> Engine | None:
+    for provider in order:
+        if provider != skip and configured(provider):
+            return Engine(provider, provider_model(provider, configuration))
+    return None
+
+
+def primary_engine(configuration: dict | None = None) -> Engine | None:
+    """The first reader.  When the chosen service has no key, the first one in
+    provider_catalog.PRIMARY_ORDER that has a key reads instead, so a teacher
+    who only filled the free 魔搭 key never meets “没有配置主读模型”."""
+    selected = _primary_selection(configuration)
+    if selected == ASSISTANT:
+        return None
+    return engine_by_key(selected, configuration) or _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
 
 
 def checker_engine(configuration: dict | None = None) -> Engine | None:
-    """第二位读者：优先用另一家（硅基流动 Qwen-VL），没有就用 MiniMax 再独立读一遍。"""
+    """第二位读者：优先用另一家（独立复核），没有就用主读的模型再独立读一遍。"""
+    if assistant_mode(configuration):
+        return None
     selected = _configured_selection(
         configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES},
     )
     if selected != "auto":
         return engine_by_key(selected, configuration)
     primary = primary_engine(configuration)
-    # “自动”按提供商选择另一家，而不是把 SiliconFlow 写死成唯一候选。
-    # 这样主读改为 SiliconFlow 且 MiniMax 已配置时，复核会真正来自 MiniMax。
-    for key in ENGINE_CHOICES:
-        other = engine_by_key(key, configuration)
-        if other is not None and (primary is None or other.provider != primary.provider):
-            return other
-    return primary
+    # “自动”按提供商选择另一家，而不是写死某一家。
+    other = _first_configured(provider_catalog.CHECKER_ORDER, configuration,
+                              skip=primary.provider if primary is not None else "")
+    return other or primary
 
 
 def arbiter_engine(
@@ -191,9 +222,7 @@ def arbiter_engine(
 def engine_settings(configuration: dict | None = None) -> dict:
     """给本机设置页的非秘密模型信息。"""
     selected = {
-        "primary": _configured_selection(
-            configuration, "primary_engine", "QB_PRIMARY_ENGINE", "minimax_m3", set(ENGINE_CHOICES),
-        ),
+        "primary": _primary_selection(configuration),
         "checker": _configured_selection(
             configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES},
         ),
@@ -219,23 +248,19 @@ def engine_settings(configuration: dict | None = None) -> dict:
         "primary": primary.key if primary else None,
         "checker": checker.key if checker else None,
         "arbiter": arbiter.key if arbiter else None,
-        "configured": {
-            "minimax": configured("minimax"),
-            "siliconflow": configured("siliconflow"),
-        },
-        "pool_sizes": {
-            "minimax": _reported_pool_size("minimax"),
-            "siliconflow": _reported_pool_size("siliconflow"),
-        },
+        "assistant": assistant_mode(configuration),
+        "configured": {provider: configured(provider) for provider in provider_catalog.VISION},
+        "pool_sizes": {provider: _reported_pool_size(provider) for provider in provider_catalog.VISION},
         "choices": [
-            {"key": "minimax_m3", "provider": "MiniMax", "provider_key": "minimax",
-             "model": models["minimax"],
-             "available": configured("minimax")},
-            {"key": "siliconflow_qwen3", "provider": "硅基流动", "provider_key": "siliconflow",
-             "model": models["siliconflow"],
-             "available": configured("siliconflow")},
+            {"key": spec["engine"], "provider": spec["label"], "provider_key": provider,
+             "model": models[provider], "available": configured(provider),
+             "free": models[provider] in spec["free_models"], "note": spec["note"]}
+            for provider, spec in provider_catalog.VISION.items()
         ],
         "suggested_models": preferences.SUGGESTED_MODELS,
+        "free_models": preferences.FREE_MODELS,
+        "signup": {"mineru": provider_catalog.MINERU["signup"],
+                   **{provider: spec["signup"] for provider, spec in provider_catalog.VISION.items()}},
     }
 
 
@@ -581,7 +606,7 @@ def _post(url: str, key: str, payload: dict, timeout=(10, 150)) -> requests.Resp
                                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         except (requests.Timeout, requests.ConnectionError):
             if attempt == len(BACKOFF):
-                raise ReaderError("连接模型服务超时或中断") from None
+                raise ReaderUnavailable("连接模型服务超时或中断") from None
             time.sleep(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
             continue
         # 429 belongs to one account, not the whole provider.  Return it at
@@ -647,7 +672,67 @@ def _hedge_after() -> float:
 _HEDGE_EXECUTOR = ThreadPoolExecutor(max_workers=64, thread_name_prefix="qb-reader")
 
 
+# The engine that actually answered the last ``chat`` in this context (a
+# fallback service may have stood in for the chosen one).
+_ANSWERED_BY: contextvars.ContextVar[Engine | None] = contextvars.ContextVar("qb_answered_by", default=None)
+
+
+def answered_by(default: Engine) -> Engine:
+    return _ANSWERED_BY.get() or default
+
+
+def _fallback_enabled() -> bool:
+    return os.environ.get("QB_PROVIDER_FALLBACK", "1").strip() != "0"
+
+
+def fallback_engines(engine: Engine) -> list[Engine]:
+    """Other services with a key, in provider_catalog.CHECKER_ORDER."""
+    return [Engine(provider, provider_model(provider)) for provider in provider_catalog.CHECKER_ORDER
+            if provider != engine.provider and configured(provider)]
+
+
 def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
+    """One model answer.  When the service is unavailable (persistent rate
+    limits, an outage, a used-up free quota, no working key), the other
+    configured services answer instead, so a free tier running dry does not
+    turn the rest of the paper red.  A content error (HTTP 400…) is not retried
+    elsewhere.  ``QB_PROVIDER_FALLBACK=0`` turns this off."""
+    _ANSWERED_BY.set(None)
+    if not _fallback_enabled():
+        text = _chat_hedged(engine, prompt, image_urls, max_tokens)
+        _ANSWERED_BY.set(engine)
+        return text
+    # A service that just failed rests a few minutes (account_pool.rest_provider)
+    # and is not asked meanwhile: the rest of the paper goes to another service,
+    # or, when there is none (only 魔搭, its free quota used up), fails at once
+    # so the card starts as MinerU's draft instead of sitting through retries.
+    candidates = [engine, *fallback_engines(engine)]
+    errors: dict[str, ReaderUnavailable] = {}
+    for candidate in candidates:
+        if provider_resting(candidate.provider) and candidate.provider in _REST_ERRORS:
+            last = _REST_ERRORS[candidate.provider]
+            errors[candidate.provider] = type(last)(str(last))
+            continue
+        try:
+            text = _chat_hedged(candidate, prompt, image_urls, max_tokens)
+        except ReaderUnavailable as error:
+            errors[candidate.provider] = error
+            _REST_ERRORS[candidate.provider] = error
+            rest_provider(candidate.provider)
+            continue
+        provider_answered(candidate.provider)
+        _ANSWERED_BY.set(candidate)
+        return text
+    # Nobody could answer: report the asked service's reason (a used-up
+    # MiniMax plan pauses the paper, see pipeline).
+    raise errors.get(engine.provider) or next(iter(errors.values()))
+
+
+# Why each resting service last failed, so a skipped call reports the same.
+_REST_ERRORS: dict[str, ReaderUnavailable] = {}
+
+
+def _chat_hedged(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
     """One model answer, with a duplicate request for rare stragglers.
 
     Measured on MiniMax: median 4.3 s, p90 ~8 s, but about one call in thirty
@@ -690,6 +775,47 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     raise failure
 
 
+def _request(engine: Engine, messages: list[dict], max_tokens: int) -> tuple[str, dict, tuple[str, ...]]:
+    """(URL, payload, optional payload keys) for one service.
+
+    Every service is asked for plain, deterministic answers without a
+    reasoning phase: thinking roughly triples the time and the free quota a
+    transcription takes, and it does not make the copy more faithful.
+    """
+    base = {"model": engine.model, "messages": messages, "stream": False}
+    if engine.provider == "minimax":
+        return _minimax_url(), {**base, "temperature": 0, "thinking": {"type": "disabled"}, "reasoning_split": True,
+                                "max_completion_tokens": max_tokens}, ()
+    if engine.provider == "modelscope":
+        return MODELSCOPE_URL, {**base, "temperature": 0, "max_tokens": max_tokens,
+                                "enable_thinking": False}, ("enable_thinking",)
+    return SILICONFLOW_URL, {**base, "temperature": 0, "max_tokens": max_tokens}, ()
+
+
+_OUTPUT_LIMITS: dict[tuple[str, str], int] = {}
+_OUTPUT_LIMIT = re.compile(r"max_(?:completion_)?tokens[^\[\]]{0,40}\[\s*\d+\s*,\s*(\d+)\s*\]", re.I)
+
+
+def _output_limit(response) -> int | None:
+    """The largest max_tokens a service accepts, when its 400 says so
+    (e.g. “max_tokens参数非法：限制数值范围[1,1024]”)."""
+    try:
+        text = response.text[:2000]
+    except (AttributeError, TypeError, ValueError):
+        return None
+    match = _OUTPUT_LIMIT.search(text or "")
+    return int(match.group(1)) if match and int(match.group(1)) > 0 else None
+
+
+def _max_tokens(payload: dict) -> int:
+    return int(payload.get("max_tokens") or payload.get("max_completion_tokens") or 0)
+
+
+def _with_max_tokens(payload: dict, limit: int) -> dict:
+    key = "max_completion_tokens" if "max_completion_tokens" in payload else "max_tokens"
+    return {**payload, key: min(_max_tokens(payload) or limit, limit)}
+
+
 def _has_spare_slot(engine: Engine) -> bool:
     try:
         return account_pool(engine.provider).spare > 0
@@ -703,20 +829,21 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
         {"type": "image_url", "image_url": {"url": url}} for url in image_urls
     ]
     messages = [{"role": "user", "content": content}]
-    if engine.provider == "minimax":
-        name = "MiniMax"
-        url = _minimax_url()
-        payload = {"model": engine.model, "messages": messages, "temperature": 0, "stream": False,
-                   "thinking": {"type": "disabled"}, "reasoning_split": True, "max_completion_tokens": max_tokens}
-    else:
-        name = "硅基流动"
-        url = SILICONFLOW_URL
-        payload = {"model": engine.model, "messages": messages, "temperature": 0, "stream": False,
-                   "max_tokens": max_tokens}
+    name = engine.vendor
+    url, payload, optional = _request(engine, messages, max_tokens)
+    if (known := _OUTPUT_LIMITS.get((engine.provider, engine.model))) is not None:
+        payload = _with_max_tokens(payload, known)
+    # Free services change their parameters often.  When one answers HTTP 400,
+    # retry without the optional switches.
+    variants = [payload]
+    if optional:
+        variants.append({key: value for key, value in payload.items() if key not in optional})
+    variant = 0
+    rounds = RATE_LIMIT_ROUNDS if _fallback_enabled() and fallback_engines(engine) else PATIENT_RATE_LIMIT_ROUNDS
     try:
         pool = account_pool(engine.provider)
     except AccountPoolError as exc:
-        raise ReaderError(str(exc)) from None
+        raise ReaderUnavailable(str(exc)) from None
     response = None
     attempted: set[int] = set()
     plan_exhausted_slots: set[int] = set()
@@ -728,7 +855,17 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
             with pool.lease(exclude=attempted) as lease:
                 if started is not None:
                     started.set()
-                response = _post(url, lease.secret, payload)
+                response = _post(url, lease.secret, variants[variant])
+                if response.status_code == 400 and (limit := _output_limit(response)) is not None \
+                        and limit < _max_tokens(variants[variant]):
+                    # Some free models answer at most 1024 tokens.  Remembered,
+                    # so the next question does not pay for the same refusal.
+                    _OUTPUT_LIMITS[(engine.provider, engine.model)] = limit
+                    variants = [_with_max_tokens(item, limit) for item in variants]
+                    continue
+                if response.status_code == 400 and variant < len(variants) - 1:
+                    variant += 1
+                    continue
                 if response.status_code in (401, 403):
                     attempted.add(lease.slot)
                     lease.disable()
@@ -764,7 +901,7 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
             # single-key pool cannot wake a herd of concurrent HTTP requests.
             if round_had_rate_limit and pool.enabled_size > 0:
                 rate_limit_round += 1
-                if rate_limit_round >= RATE_LIMIT_ROUNDS:
+                if rate_limit_round >= rounds:
                     rate_limit_exhausted = True
                     break
                 attempted.clear()
@@ -772,9 +909,11 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
                 continue
             break
     if response is None or response.status_code in (401, 403):
-        raise ReaderError(f"{name} 账号池中没有可用密钥")
+        raise ReaderUnavailable(f"{name} 账号池中没有可用密钥")
     if rate_limit_exhausted:
-        raise ReaderError(f"{name} 接口持续限流，已自动等待并重试")
+        raise ReaderUnavailable(f"{name} 接口持续限流，已自动等待并重试")
+    if response.status_code >= 500:
+        raise ReaderUnavailable(f"{name} 接口返回 HTTP {response.status_code}")
     if response.status_code != 200:
         raise ReaderError(f"{name} 接口返回 HTTP {response.status_code}")
     if len(response.content) > MAX_RESPONSE_BYTES:
@@ -785,6 +924,8 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
         text = choice["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
         raise ReaderError(f"{name} 返回格式不正确") from None
+    if isinstance(text, list):  # some services answer in content parts
+        text = "".join(part.get("text", "") for part in text if isinstance(part, dict))
     if not isinstance(text, str) or not text.strip():
         raise ReaderError(f"{name} 没有返回内容")
     if choice.get("finish_reason") == "length":
@@ -809,7 +950,7 @@ def read_question(
         except ValueError as error:
             last_error = str(error)
             continue
-        reading["engine"] = engine.label
+        reading["engine"] = answered_by(engine).label
         reading["raw"] = raw[:6000]
         return reading
     raise ReaderError(f"{engine.label} 两次输出都不合格式")
@@ -827,7 +968,7 @@ def arbitrate(
         # raw parser ValueError would otherwise escape the per-card policy and
         # incorrectly turn the whole card red in the worker's outer guard.
         raise ReaderError(f"{engine.label} 裁决输出不合格式：{error}") from None
-    reading["engine"] = engine.label
+    reading["engine"] = answered_by(engine).label
     reading["raw"] = raw[:6000]
     return reading
 

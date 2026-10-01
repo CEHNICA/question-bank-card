@@ -59,7 +59,7 @@
 .library-card.in-basket::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
 .library-card.focused { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow); }
 .library-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 12px 20px 0; font-size: 12px; color: var(--muted); }
-.library-card-meta > span:not(:first-child):not(.library-type)::before { content: "·"; margin-right: 10px; color: var(--faint); }
+.library-card-meta > span:not(:first-child):not(.library-type):not(.library-review)::before { content: "·"; margin-right: 10px; color: var(--faint); }
 .library-source { font-weight: 600; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-type { padding: 3px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 11.5px; line-height: 1.2; }
 .library-card .paper { padding: 10px 22px 14px; color: #1a2321; }
@@ -155,3 +155,6 @@ body.printing { overflow: hidden; }
   .print-paper { box-shadow: none; max-width: none; padding: 0; }
   @page { margin: 18mm 16mm; }
 }
+
+/* AI 助手审核入库、还没人工核对的题。 */
+.library-review.ai { padding: 1px 7px; border-radius: 999px; background: #e4f1ec; color: #1f6b5f; font-weight: 600; box-shadow: inset 0 0 0 1px #1f6b5f; }

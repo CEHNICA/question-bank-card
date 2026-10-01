@@ -65,10 +65,13 @@ class ModelRoutingTests(SimpleTestCase):
             self.assertEqual(settings["models"]["minimax"], "MiniMax-M3.1+vision")
             self.assertEqual(settings["choices"][0]["provider_key"], "minimax")
 
-    def test_unconfigured_explicit_engine_is_not_silently_mislabelled(self):
+    def test_unconfigured_explicit_engine_falls_back_and_says_so(self):
+        # The chosen service has no key: the first one that has a key reads,
+        # and the status names the engine that really reads.
         with self.env(QB_PRIMARY_ENGINE="siliconflow_qwen3"):
-            self.assertIsNone(readers.primary_engine())
+            self.assertEqual(readers.primary_engine().key, "minimax_m3")
             status = readers.engine_settings()
+            self.assertEqual((status["selected"]["primary"], status["primary"]), ("siliconflow_qwen3", "minimax_m3"))
             qwen = next(item for item in status["choices"] if item["key"] == "siliconflow_qwen3")
             self.assertFalse(qwen["available"])
 

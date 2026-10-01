@@ -70,6 +70,7 @@ Name: "{localappdata}\QuestionBankCard"; Flags: uninsneveruninstall
 ; 绝不触碰 {localappdata}\QuestionBankCard 下的题库和用户文件。
 Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\{#MyAppExeName}"
+Type: files; Name: "{app}\tiyouju.exe"
 Type: files; Name: "{app}\INSTALLATION-NOTICE.txt"
 Type: files; Name: "{app}\THIRD_PARTY_NOTICES.txt"
 Type: files; Name: "{app}\LICENSE"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import models, transaction
-from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -31,7 +32,7 @@ from .figure_policy import (
 from .models import (
     Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
 )
-from .pipeline import PageStore, candidates_in, preview_resegment, reorder_photo_pages
+from .pipeline import TEXT_DRAFT_FLAGS, PageStore, candidates_in, preview_resegment, reorder_photo_pages
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
@@ -440,6 +441,9 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         "edited": question.edited, "approved": approval_valid,
         "approval_valid": approval_valid,
         "approval_stale": bool(question.approved and not approval_valid),
+        # human = 人对照原卷打的勾；ai = AI 助手打的勾（显示成“AI 已通过 · 待你核对”）。
+        "approved_by": library.approval_source(question),
+        "approval_agent": question.approval_agent if library.approval_source(question) == "ai" else "",
         "approved_at": question.approved_at.isoformat() if question.approved_at else None,
         "answer": question.answer, "analysis": question.analysis,
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
@@ -604,7 +608,11 @@ def status(request):
         current = {**engines["selected"], "models": engines["models"], "plans": engines["plans"]}
         engines["pending_change"] = engines["saved"] != current
     return JsonResponse({
-        "upload_enabled": readers.configured("mineru") and primary is not None,
+        # AI 助手读题只需要 MinerU：题卡先用 MinerU 的文字，再由 AI 助手对照原卷核对。
+        # Both follow the saved choice, which the next paper will use.
+        "upload_enabled": readers.configured("mineru") and _reading_ready(),
+        "assistant_mode": readers.assistant_mode(saved_preferences)
+        if saved_preferences is not None else readers.assistant_mode(applied_preferences),
         "mineru": readers.configured("mineru"),
         "reader": primary.label if primary else None,
         "checker": checker.label if checker else None,
@@ -698,11 +706,8 @@ def model_settings(request):
     normalized_plans = preferences.normalize_plans(payload.get("plans"), defaults=current["plans"])
     if normalized_plans is None:
         return _error("MiniMax 会员档位不受支持")
-    selected = set(normalized.values())
-    if "minimax_m3" in selected and not readers.configured("minimax"):
-        return _error("所选模型需要先配置 MiniMax API Key")
-    if "siliconflow_qwen3" in selected and not readers.configured("siliconflow"):
-        return _error("所选模型需要先配置硅基流动 API Key")
+    # A service without a key may still be chosen: the worker then reads with
+    # the first service that has one, and the status page says which.
     try:
         saved = preferences.save_configuration(normalized, normalized_models, normalized_plans)
     except preferences.PreferenceError as exc:
@@ -734,8 +739,10 @@ def papers(request):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请在“设置 → 常用”里点“填写或更换密钥”）")
+    if not readers.configured("mineru") or not _reading_ready():
+        return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
+                      "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
+                      "密钥在“设置 → 常用 → 填写或更换密钥”里填写")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -1545,6 +1552,9 @@ def approve_green(request, paper_id):
     paper = get_object_or_404(Paper, pk=paper_id)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再标记题卡通过")
+    approver = _approver(_body(request) or {})
+    if approver is None:
+        return _error("by 只能是 human 或 ai")
     now = timezone.now()
     changed = []
     with transaction.atomic():
@@ -1552,15 +1562,20 @@ def approve_green(request, paper_id):
             state=Question.State.GREEN,
         ))
         for question in questions:
-            if (not question.stem.strip() or library.approval_is_current(question)
-                    or blocks_approval(stored_or_derived_review(question))):
+            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)):
                 continue
-            question.approved = True
-            question.approved_at = now
-            question.approved_content_hash = library.approval_hash(question)
+            # Already passed by the same kind of reviewer (or by a person): nothing to do.
+            if library.approval_is_current(question) and library.approval_source(question) in {approver[0], "human"}:
+                continue
+            if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
+                continue
             question.updated_at = now
             changed.append(question)
-        Question.objects.bulk_update(changed, ["approved", "approved_at", "approved_content_hash", "updated_at"])
+        Question.objects.bulk_update(changed, [
+            "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "updated_at",
+        ])
+        for question in changed:
+            library.confirm_published_review(question)
     count = len(changed)
     return JsonResponse({"approved": count, "paper": paper_json(paper)})
 
@@ -1667,10 +1682,40 @@ def _question(question_id) -> Question:
     return get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
 
 
+def _reading_ready() -> bool:
+    """A new paper can be read: some vision service has a key (the worker
+    falls back to it), or the saved choice is AI-assistant reading."""
+    try:
+        configuration = preferences.load_configuration() if preferences.preference_path().is_file() else None
+    except preferences.PreferenceError:
+        configuration = None
+    return readers.primary_engine(configuration) is not None or readers.assistant_mode(configuration)
+
+
 def _clear_approval(question: Question) -> None:
     question.approved = False
     question.approved_at = None
     question.approved_content_hash = ""
+    question.approval_source = ""
+    question.approval_agent = ""
+
+
+def _decided_by(review: dict, actor: tuple[str, str]) -> dict:
+    """A figure decision made through the API stays a manual decision (so the
+    automatic check never overrides it); an AI assistant's is labelled as such."""
+    if actor[0] != "ai":
+        return review
+    reason = review.get("reason", "")
+    reason = reason.replace("已人工确认", f"{actor[1]}确认").replace("由人工设置", f"由{actor[1]}设置")
+    return {**review, "reason": reason, "decided_by": "ai", "agent": actor[1]}
+
+
+def _approver(payload: dict) -> tuple[str, str] | None:
+    """Who is approving: the page is a person; tiyouju/MCP say ``by: "ai"``."""
+    source = payload.get("by", "human")
+    if source not in library.APPROVAL_SOURCES:
+        return None
+    return source, library.agent_name(payload.get("agent")) if source == "ai" else ""
 
 
 def _apply_figure_review(question: Question, review: dict) -> None:
@@ -1704,12 +1749,16 @@ def question_action(request, question_id, action: str):
         question = get_object_or_404(
             Question.objects.select_for_update().select_related("paper"), pk=question_id,
         )
+        actor = _approver(payload)
+        if actor is None:
+            return _error("by 只能是 human 或 ai")
         if action == "approve":
             if question.paper.status == Paper.Status.NEEDS_GROUPING:
                 return _error("请先确认资料结构或拆分任务，再标记题卡通过")
             value = payload.get("approved", True)
             if type(value) is not bool:
                 return _error("approved 必须是 true 或 false")
+            approver = actor
             if value and question.state not in library.REVIEWABLE_STATES:
                 return _error("这道题尚未进入可审核状态，请先完成识读或人工修正")
             if value and not question.stem.strip():
@@ -1718,9 +1767,10 @@ def question_action(request, question_id, action: str):
             if value and blocks_approval(review):
                 return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
             if value:
-                question.approved = True
-                question.approved_at = now
-                question.approved_content_hash = library.approval_hash(question)
+                library.approve(question, now=now, source=approver[0], agent=approver[1])
+                library.confirm_published_review(question)
+            elif approver[0] == "ai" and library.approval_source(question) == "human":
+                return _error("这道题是人工通过的，AI 助手不能撤销；需要的话请使用者自己在题卡上取消", 409)
             else:
                 _clear_approval(question)
         elif action == "text":
@@ -1744,8 +1794,11 @@ def question_action(request, question_id, action: str):
             question.answer = fix_symbols(payload.get("answer", question.answer).strip())
             question.analysis = fix_symbols(payload.get("analysis", question.analysis).strip())
             question.edited = True
-            question.text_source = "human"
-            question.flags = [f for f in question.flags if not figure_flag(f) and "截图" in f]
+            # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
+            question.text_source = "assistant" if actor[0] == "ai" else "human"
+            # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
+            question.flags = [f for f in question.flags
+                              if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS]
             question.figure_review = {}
             review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
             if previous_ignored:
@@ -1933,7 +1986,7 @@ def question_action(request, question_id, action: str):
                     "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
                 }
-            _apply_figure_review(question, review)
+            _apply_figure_review(question, _decided_by(review, actor))
             _clear_approval(question)
         elif action == "figure-review":
             decision = payload.get("decision")
@@ -1945,7 +1998,7 @@ def question_action(request, question_id, action: str):
                 previous_figures = list(question.figures or [])
                 previous_ignored = _saved_ignored_candidates(question)
                 question.figures = []
-                _apply_figure_review(question, {
+                _apply_figure_review(question, _decided_by({
                     "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
                     "signals": ["human_confirmed_no_figure"],
                     "cue_matches": cue_matches(question.stem, question.options),
@@ -1953,7 +2006,7 @@ def question_action(request, question_id, action: str):
                     "ignored_candidates": sorted(_candidate_keys(question)),
                     "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
-                })
+                }, actor))
             else:
                 current_review = stored_or_derived_review(question)
                 if current_review.get("status") != CONFIRMED_NO_FIGURE:
@@ -2016,6 +2069,38 @@ def question_delete(request, question_id):
     })
 
 
+def question_crop(request, question_id):
+    """This question's original crop as one PNG, for AI assistants (tiyouju show).
+
+    ``?marks=1`` draws the figure candidates as blue boxes numbered 1, 2…
+    (tiyouju calls them 图1、图2…), so an assistant can name one by number.
+    The labels are plain digits: the label font may have no Chinese glyphs.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    question = _question(question_id)
+    if not question.regions:
+        return _error("这道题还没有原卷范围", 404)
+    marks = None
+    if request.GET.get("marks") == "1":
+        marks = [
+            {"label": str(index + 1), "page_idx": candidate["page_idx"], "bbox": candidate["bbox"]}
+            for index, candidate in enumerate(question.figure_candidates or [])
+            if isinstance(candidate, dict) and _valid_bbox(candidate.get("bbox")) is not None
+        ]
+    store = PageStore(question.paper)
+    try:
+        image, _layout = imaging.stack_regions(question.regions, store.load, marks or None)
+    except (OSError, ValueError, KeyError):
+        return _error("原卷截图暂时生成不了，请稍后再试", 409)
+    image.thumbnail((2000, 2000))
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, "PNG", optimize=True)
+    response = HttpResponse(buffer.getvalue(), content_type="image/png")
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 def question_figure(request, question_id, index: int):
     question = _question(question_id)
     if not 0 <= index < len(question.figures):
@@ -2057,6 +2142,9 @@ def _library_rows(request):
     kind = request.GET.get("type", "").strip()
     if kind:
         rows = rows.filter(question_type=kind)
+    review = request.GET.get("review", "").strip()
+    if review in library.APPROVAL_SOURCES:
+        rows = rows.filter(review_source=review)
     for term in request.GET.get("q", "").split()[:8]:
         key = library.search_key(term)
         if key:
@@ -2072,16 +2160,19 @@ def library_list(request):
         return _error("limit 与 offset 必须是整数")
     rows = _library_rows(request).order_by("source_filename", "number", "-version")
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-    sources, types = {}, {}
-    for row in live.values("paper_id", "source_filename", "question_type"):
+    sources, types, reviews = {}, {}, {"human": 0, "ai": 0}
+    for row in live.values("paper_id", "source_filename", "question_type", "review_source"):
         key = str(row["paper_id"]) if row["paper_id"] else ""
         entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"], "count": 0})
         entry["count"] += 1
         types[row["question_type"]] = types.get(row["question_type"], 0) + 1
+        review_key = row["review_source"] if row["review_source"] in reviews else "human"
+        reviews[review_key] += 1
     return JsonResponse({
         "total": rows.count(),
         "items": [library.publication_json(item) for item in rows[offset:offset + limit]],
-        "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types},
+        "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types,
+                   "reviews": reviews},
     })
 
 

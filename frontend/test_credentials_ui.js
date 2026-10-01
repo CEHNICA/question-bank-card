@@ -11,7 +11,7 @@ assert.match(html, /id="settingsCredentialOpen"[^>]*>填写或更换密钥<\/but
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 
-for (const provider of ["Mineru", "Minimax", "Siliconflow"]) {
+for (const provider of ["Mineru", "Modelscope", "Minimax", "Siliconflow"]) {
   assert.match(html, new RegExp(`id="credential${provider}Input"[^>]*type="password"`));
   assert.match(html, new RegExp(`id="credential${provider}Clear"[^>]*type="checkbox"`));
   assert.match(html, new RegExp(`id="credential${provider}State"`));
@@ -31,5 +31,15 @@ assert.match(html, /已经保存的密钥不会再显示出来/);
 assert.match(html, /不写入题库、日志或项目文件/);
 assert.match(html, /不上传文件、不消耗额度的官网验证/);
 assert.match(html, />验证并加密保存<\/button>/);
+
+// 完全免费：MinerU、魔搭都直接给出去哪里申请，并说清 MinerU Token 会过期。
+assert.match(html, /for="credentialMineruInput">[^<]*<a href="https:\/\/mineru\.net\/apiManage\/token"[^>]*>免费生成<\/a>（14 天过期一次）/);
+assert.match(html, /for="credentialModelscopeInput">[^<]*<a href="https:\/\/www\.modelscope\.cn\/my\/myaccesstoken"/);
+for (const service of ["mineru", "modelscope", "minimax", "siliconflow"]) {
+  assert.match(js, new RegExp(`const CREDENTIAL_FIELDS = \\{[\\s\\S]*?${service}: \\{ input: "credential`));
+}
+// 免费的魔搭排在付费服务前面；智谱已经去掉（免费模型高峰期常拒绝，实测不可用）。
+assert.ok(html.indexOf('id="credentialModelscopeInput"') < html.indexOf('id="credentialMinimaxInput"'));
+assert.doesNotMatch(html + js, /zhipu|智谱|bigmodel/i);
 
 console.log("credential settings UI static checks: OK");

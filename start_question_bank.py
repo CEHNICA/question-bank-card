@@ -24,7 +24,9 @@ from pathlib import Path
 
 from credential_store import (
     DEFAULT_MODEL_PREFERENCES,
+    ENGINE_NAMES,
     MODEL_ENVIRONMENT_KEYS,
+    provider_catalog,
     CredentialStoreError,
     credential_path,
     credential_pool,
@@ -55,13 +57,11 @@ INSTANCE_FILE = RUNTIME / "instance.json"
 MIGRATION_MARKER = RUNTIME / ".migration-schema.sha256"
 BACKUPS = USER_ROOT / "backups"
 PREFERRED_PORT = 8768
+# service -> (singular secret, JSON pool secret, configured flag, pool size), for
+# MinerU and every reading service in backend/core/provider_catalog.py.
 POOL_ENVIRONMENT_NAMES = {
-    "mineru": ("MINERU_TOKEN", "MINERU_TOKENS_JSON", "QB_MINERU_CONFIGURED", "QB_MINERU_POOL_SIZE"),
-    "minimax": ("MINIMAX_API_KEY", "MINIMAX_API_KEYS_JSON", "QB_MINIMAX_CONFIGURED", "QB_MINIMAX_POOL_SIZE"),
-    "siliconflow": (
-        "SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS_JSON",
-        "QB_SILICONFLOW_CONFIGURED", "QB_SILICONFLOW_POOL_SIZE",
-    ),
+    service: (single, pool, f"QB_{service.upper()}_CONFIGURED", f"QB_{service.upper()}_POOL_SIZE")
+    for service, (pool, single) in provider_catalog.environment_names().items()
 }
 SECRET_NAMES = {
     name
@@ -77,12 +77,9 @@ CREDENTIAL_STATUS_NAMES = {
 # (backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY).  MiniMax really
 # follows the membership chosen in Settings; the worker raises its reading
 # threads to the accounts' ceiling.  QB_<PROVIDER>_ACCOUNT_CONCURRENCY overrides.
-ACCOUNT_CONCURRENCY_DEFAULTS = {"minimax": 6, "siliconflow": 2}
+ACCOUNT_CONCURRENCY_DEFAULTS = {key: spec["concurrency"][1] for key, spec in provider_catalog.VISION.items()}
 MAX_PARALLEL_CARDS = 16
-MODEL_PROVIDER_BY_ENGINE = {
-    "minimax_m3": "minimax",
-    "siliconflow_qwen3": "siliconflow",
-}
+MODEL_PROVIDER_BY_ENGINE = dict(provider_catalog.ENGINES)
 STAGED_DELETE_NAME = re.compile(
     r"^\.deleting-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[0-9a-f]{32}$",
     re.IGNORECASE,
@@ -148,6 +145,19 @@ def _credential_status_environment(pools: dict[str, list[str]]) -> dict[str, str
     return result
 
 
+def _effective_primary(preferences: dict[str, str], pools: dict[str, list[str]]) -> str | None:
+    """The service that will read first (readers.primary_engine's rule): the
+    chosen one if it has a key, else the first in PRIMARY_ORDER that has one.
+    None in AI-assistant mode or when no reading service has a key."""
+    choice = preferences.get("primary_engine", DEFAULT_MODEL_PREFERENCES["primary_engine"])
+    if choice == provider_catalog.ASSISTANT_ENGINE:
+        return None
+    chosen = MODEL_PROVIDER_BY_ENGINE.get(choice)
+    if chosen and pools.get(chosen):
+        return chosen
+    return next((provider for provider in provider_catalog.PRIMARY_ORDER if pools.get(provider)), None)
+
+
 def _parallel_environment(
     source: dict[str, str],
     pools: dict[str, list[str]],
@@ -170,10 +180,7 @@ def _parallel_environment(
     if 1 <= explicit <= MAX_PARALLEL_CARDS:
         return {"QB_PARALLEL": str(explicit), "QB_PARALLEL_EXPLICIT": "1"}
 
-    primary = MODEL_PROVIDER_BY_ENGINE.get(
-        preferences.get("primary_engine", DEFAULT_MODEL_PREFERENCES["primary_engine"]),
-        "minimax",
-    )
+    primary = _effective_primary(preferences, pools) or "minimax"
     providers = {primary} if pools.get(primary) else set()
 
     checker_choice = preferences.get(
@@ -182,7 +189,7 @@ def _parallel_environment(
     if checker_choice == "auto":
         checker = next(
             (
-                provider for provider in ("minimax", "siliconflow")
+                provider for provider in provider_catalog.CHECKER_ORDER
                 if provider != primary and pools.get(provider)
             ),
             primary,
@@ -798,37 +805,29 @@ def main() -> int:
         worker_env = _worker_credential_environment(base_env, credential_pools)
         worker_env.update(model_env)
         del model_env
-        primary_available = (
-            bool(credential_pools["siliconflow"])
-            if preferences["primary_engine"] == "siliconflow_qwen3"
-            else bool(credential_pools["minimax"])
-        )
-        if not primary_available:
-            print("所选主读模型没有可用的 API Key：只能查看已有题卡，不能读新题。")
+        assistant = preferences["primary_engine"] == provider_catalog.ASSISTANT_ENGINE
+        primary_provider = _effective_primary(preferences, credential_pools)
+        if not assistant and primary_provider is None:
+            print("还没有填看图读题的密钥：只能查看已有题卡，不能读新题。"
+                  "魔搭有免费的；也可以在设置里选“AI 助手读题”。")
         elif not credential_pools["mineru"]:
             print("未配置 MinerU Token：不能上传新卷；已有试卷、从 M3 导入、单题重读照常可用。")
-        effective_checker = preferences["checker_engine"]
-        if effective_checker == "auto":
-            if preferences["primary_engine"] == "minimax_m3" and credential_pools["siliconflow"]:
-                effective_checker = "siliconflow_qwen3"
-            elif preferences["primary_engine"] == "siliconflow_qwen3" and credential_pools["minimax"]:
-                effective_checker = "minimax_m3"
-            else:
-                effective_checker = preferences["primary_engine"]
-        engine_names = {
-            "minimax_m3": "MiniMax-M3",
-            "siliconflow_qwen3": "硅基流动 Qwen3-VL",
-        }
-        arbiter_names = {
-            "primary": "跟随主读",
-            "checker": "跟随复核",
-            **engine_names,
-        }
-        print(
-            f"模型分工：主读 {engine_names[preferences['primary_engine']]}；"
-            f"复核 {engine_names[effective_checker]}；"
-            f"裁决 {arbiter_names[preferences['arbiter_engine']]}。"
-        )
+        if assistant:
+            print(f"模型分工：{ENGINE_NAMES[provider_catalog.ASSISTANT_ENGINE]}。")
+        elif primary_provider is not None:
+            primary_engine = provider_catalog.VISION[primary_provider]["engine"]
+            checker_choice = preferences["checker_engine"]
+            if checker_choice == "auto":
+                checker_provider = next((provider for provider in provider_catalog.CHECKER_ORDER
+                                         if provider != primary_provider and credential_pools.get(provider)),
+                                        primary_provider)
+                checker_choice = provider_catalog.VISION[checker_provider]["engine"]
+            arbiter_names = {"primary": "跟随主读", "checker": "跟随复核", **ENGINE_NAMES}
+            print(
+                f"模型分工：主读 {ENGINE_NAMES[primary_engine]}；"
+                f"复核 {ENGINE_NAMES.get(checker_choice, checker_choice)}；"
+                f"裁决 {arbiter_names.get(preferences['arbiter_engine'], preferences['arbiter_engine'])}。"
+            )
         del preferences
         del credential_pools
         port = _available_port()

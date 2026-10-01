@@ -15,6 +15,8 @@
     q: params.get("q") || "",
     document: params.get("document") || "",
     type: params.get("type") || "",
+    // human = 人对照原卷核对过；ai = AI 助手审核入库，还没人工核对。
+    review: ["human", "ai"].includes(params.get("review")) ? params.get("review") : "",
     focus: params.get("focus") || "",
     items: [],
     total: 0,
@@ -102,7 +104,7 @@
 
   function syncUrl() {
     const url = new URL(window.location.href);
-    for (const [key, value] of [["q", state.q], ["document", state.document], ["type", state.type]]) {
+    for (const [key, value] of [["q", state.q], ["document", state.document], ["type", state.type], ["review", state.review]]) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
@@ -117,6 +119,7 @@
     if (state.q.trim()) query.set("q", state.q.trim());
     if (state.document) query.set("document", state.document);
     if (state.type) query.set("type", state.type);
+    if (state.review) query.set("review", state.review);
     if (!append) ui.status.textContent = "正在读取题库…";
     try {
       const response = await fetch(`/api/library?${query}`, { cache: "no-store" });
@@ -154,6 +157,26 @@
         button.addEventListener("click", () => { state.type = key; syncUrl(); load(); });
         ui.types.append(button);
       });
+    renderReviewFilters(facets.reviews || {});
+  }
+
+  // 只在题库里有 AI 审核入库的题时出现：可以只看人工核对过的，或把 AI 审核的挑出来抽查。
+  function renderReviewFilters(reviews) {
+    const box = $("reviewFilters");
+    const ai = Number(reviews.ai) || 0;
+    const human = Number(reviews.human) || 0;
+    box.hidden = !ai && !state.review;
+    box.replaceChildren();
+    if (box.hidden) return;
+    [["", "全部", ai + human], ["human", "人工核对", human], ["ai", "AI 审核", ai]].forEach(([key, label, count]) => {
+      const button = node("button", `draft-filter${state.review === key ? " active" : ""}`);
+      button.append(node("span", "", label), node("span", "count", count));
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(state.review === key));
+      if (key === "ai") button.title = "AI 助手审核后入库、还没人工核对的题";
+      button.addEventListener("click", () => { state.review = key; syncUrl(); load(); });
+      box.append(button);
+    });
   }
 
   function formatDate(value) {
@@ -171,6 +194,11 @@
       node("span", "library-type", QB.TYPE_NAMES[item.question_type] || item.question_type),
       node("span", "", `第 ${item.version} 版 · ${formatDate(item.published_at)} 入库`)
     );
+    if (item.review?.source === "ai") {
+      const badge = node("span", "library-review ai", `${item.review.agent || "AI"} 审核`);
+      badge.title = "这道题是 AI 助手对照原卷后审核入库的，还没人工核对。回到题卡确认后会变成人工核对。";
+      meta.append(badge);
+    }
     const paper = node("div", "paper");
     QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: ui.answers.checked ? "open" : "collapsed" });
     const actions = node("footer", "library-card-actions");

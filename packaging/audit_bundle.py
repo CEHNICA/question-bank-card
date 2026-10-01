@@ -218,9 +218,10 @@ def find_forbidden_files(bundle: Path) -> list[str]:
 
 def audit_bundle(bundle: Path) -> None:
     """Validate a complete PyInstaller directory or raise a useful error."""
-    executable = bundle / "QuestionBankCard.exe"
-    if not executable.is_file():
-        raise BundleAuditError(f"缺少主程序：{executable}")
+    for name in ("QuestionBankCard.exe", "tiyouju.exe"):
+        executable = bundle / name
+        if not executable.is_file():
+            raise BundleAuditError(f"缺少主程序：{executable}")
     findings = find_forbidden_files(bundle)
     if findings:
         details = "\n".join(f"  - {path}" for path in findings)

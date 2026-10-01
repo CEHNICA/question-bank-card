@@ -328,6 +328,53 @@
     return /[A-Za-z0-9Ａ-Ｚａ-ｚ０-９()[\]{}]/.test(character) || RUN_SYMBOLS.includes(character);
   }
 
+  function qualifiesAsMath(segment) {
+    const qualifies = segment && (/[A-Za-zＡ-Ｚａ-ｚα-ωΔΩ]/.test(segment) ||
+      Array.from(segment).some((c) => OPERATOR_SET.has(c) && c !== "/" && c !== ":" && c !== "!" && c !== "%" && c !== "'"));
+    const plainWord = /^[a-z]{3,}$/.test(segment) && !FUNCTIONS.has(segment);
+    const subLabel = /^\(\d+\)$/.test(segment);
+    return Boolean(qualifies && !plainWord && !subLabel);
+  }
+
+  // 英文句子里的单词（The、graph、temperature，以及 at、of、if 这些常用短词）。
+  // sin、cm 这类函数名和单位、ABC 这类点名不算。
+  const SHORT_WORDS = new Set(["at", "of", "if", "is", "in", "on", "to", "be", "by", "or", "as", "an", "it", "we",
+    "so", "do", "no", "up", "am"]);
+  function isProseWord(token) {
+    const word = token.replace(/[.,;:?!]+$/, "");
+    if (SHORT_WORDS.has(word.toLowerCase()) && /^[A-Za-z][a-z]?$/.test(word)) return true;
+    return /^[A-Za-z][a-z]{2,}$/.test(word) && !FUNCTIONS.has(word.toLowerCase()) && !UNITS.test(word);
+  }
+
+  function proseWordCount(segment) {
+    return segment.split(/\s+/).filter(isProseWord).length;
+  }
+
+  // 一句英文：只把里面的数学（18°C、x+1=3、AB）排成公式，单词照常显示，空格保留。
+  function proseRuns(segment, offset) {
+    const runs = [];
+    const tokens = Array.from(segment.matchAll(/\S+/g));
+    let group = null;
+    const flush = () => {
+      if (group && qualifiesAsMath(group.text)) runs.push(group);
+      group = null;
+    };
+    tokens.forEach((match, position) => {
+      const token = match[0];
+      const next = tokens[position + 1]?.[0] || "";
+      // 冠词 a / A 后面跟着名词时是英文（a number），不是字母变量（Let a be …）。
+      const article = /^(?:a|A)$/.test(token) && /^[A-Za-z][a-z]{2,}/.test(next) && isProseWord(next)
+        && !/^(?:and|are|was|has|had|the)$/i.test(next.replace(/[.,;:?!]+$/, ""));
+      if (isProseWord(token) || article) { flush(); return; }
+      const start = offset + match.index;
+      const end = start + token.length;
+      if (group) group = { start: group.start, end, text: segment.slice(group.start - offset, end - offset) };
+      else group = { start, end, text: token };
+    });
+    flush();
+    return runs;
+  }
+
   // 在未标记的文字中找出数学片段。只识别，不改写存储。
   function detectRuns(text) {
     const runs = [];
@@ -363,11 +410,8 @@
       }
       const label = /^\(\d+\)\s+/.exec(segment);
       if (label && segment.length > label[0].length) { segment = segment.slice(label[0].length); index += label[0].length; }
-      const qualifies = segment && (/[A-Za-zＡ-Ｚａ-ｚα-ωΔΩ]/.test(segment) ||
-        Array.from(segment).some((c) => OPERATOR_SET.has(c) && c !== "/" && c !== ":" && c !== "!" && c !== "%" && c !== "'"));
-      const plainWord = /^[a-z]{3,}$/.test(segment) && !FUNCTIONS.has(segment);
-      const subLabel = /^\(\d+\)$/.test(segment);
-      if (qualifies && !plainWord && !subLabel) runs.push({ start: index, end: index + segment.length, text: segment });
+      if (proseWordCount(segment) >= 1 && /\s/.test(segment)) runs.push(...proseRuns(segment, index));
+      else if (qualifiesAsMath(segment)) runs.push({ start: index, end: index + segment.length, text: segment });
       index = Math.max(end, index + 1);
     }
     return runs;
@@ -387,6 +431,8 @@
         if (FUNCTIONS.has(value)) out += `\\${value === "lg" ? "lg" : value} `;
         else if (UNITS.test(value) && /\d$/.test(previous)) out += `\\,\\mathrm{${value}}`;
         else if (value === "Rt") out += "\\mathrm{Rt}";
+        // 18°C、32°F：温度单位用正体。
+        else if (/^[CF]$/.test(value) && /°\s*$/.test(previous)) out += `\\mathrm{${value}}`;
         else out += value;
         index += value.length; continue;
       }

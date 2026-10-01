@@ -613,7 +613,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { key: "all", label: "全部" },
     { key: "todo", label: "需逐题核对" },
     { key: "green", label: "识读一致" },
-    { key: "approved", label: "已标记通过" }
+    { key: "approved", label: "已标记通过" },
+    // AI 助手（tiyouju 命令行）打的勾：只在有这样的题时出现，方便人抽查。
+    { key: "ai", label: "AI 通过", optional: true }
   ];
   const ACTIVE_STATUS = new Set(["queued", "parsing", "segmenting", "reading"]);
   // Papers that finished in the background while another one was open.  The
@@ -785,6 +787,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return Boolean(q.approved && q.approval_valid !== false && !q.approval_stale && !figureBlocksApproval(q));
   }
 
+  // AI 助手打的勾照常算通过（能入库），但还等人核对；人点一下方框就变成人工通过。
+  function isAiApproved(q) {
+    return isApproved(q) && q.approved_by === "ai";
+  }
+
+  function isHumanApproved(q) {
+    return isApproved(q) && q.approved_by !== "ai";
+  }
+
+  function agentLabel(q) {
+    return q.approval_agent || "AI";
+  }
+
   function canApprove(q) {
     return Boolean(q.stem && !figureBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
   }
@@ -821,7 +836,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!s.upload_enabled) {
       note.hidden = false;
       note.replaceChildren(document.createTextNode(!s.mineru ? "还没有填写 MinerU 密钥，暂时不能上传新资料；已有的题卡照常可以审核。"
-        : "所选的读题模型还没有密钥，暂时不能上传新资料。"),
+        : "还没有看图读题的密钥，暂时不能上传新资料（魔搭有免费的，也可以选“AI 助手读题”）。"),
       button("去填写密钥", "small", () => { openSettings(); }));
       $("dropZone").classList.add("disabled");
       $("dropZone").setAttribute("aria-disabled", "true");
@@ -1030,6 +1045,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (busy) state.pollTimer = setTimeout(refreshPaper, 2500);
   }
 
+  // AI 助手通过、还等你核对的题数，接在“全部通过”后面说一句。
+  function aiNote(c) {
+    return c.ai ? `其中 ${c.ai} 题是 AI 通过的，在“AI 通过”里核对。` : "";
+  }
+
   function counts() {
     const qs = state.questions;
     return {
@@ -1037,6 +1057,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       todo: qs.filter(needsCheck).length,
       green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green").length,
       approved: qs.filter(isApproved).length,
+      ai: qs.filter(isAiApproved).length,
       waiting: qs.filter((q) => q.state === "waiting" || q.state === "reading").length,
       red: qs.filter((q) => !isApproved(q) && q.state === "red").length,
       unpublished: qs.filter((q) => isApproved(q) && !(q.publication && q.publication.up_to_date)).length
@@ -1084,9 +1105,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     banner.hidden = !done;
     if (!done) return;
     const text = el("span");
-    text.append(icon("check"), document.createTextNode(c.unpublished
+    text.append(icon("check"), document.createTextNode((c.unpublished
       ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。`
-      : `全部 ${c.all} 题已标记通过并入库。`));
+      : `全部 ${c.all} 题已标记通过并入库。`) + aiNote(c)));
     banner.replaceChildren(text);
     const actions = el("span", "done-actions");
     if (c.unpublished) actions.append(button(`入库（${c.unpublished} 题）`, "primary", publish, "", { iconName: "archive" }));
@@ -1138,7 +1159,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (c.green) {
       statusText.textContent = `${c.all} 道题：剩下 ${c.green} 张 AI 识读一致的绿卡；它们仍需按你的审核标准确认。`;
     } else {
-      statusText.textContent = c.unpublished ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。` : `全部 ${c.all} 题已标记通过并入库。`;
+      statusText.textContent = (c.unpublished ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。` : `全部 ${c.all} 题已标记通过并入库。`) + aiNote(c);
     }
     const processingPanel = $("processingPanel");
     processingPanel.hidden = !isProcessing;
@@ -1226,6 +1247,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.replaceChildren();
     FILTERS.forEach((filter, index) => {
       const active = state.filter === filter.key;
+      if (filter.optional && !c[filter.key] && !active) return;
       const tab = el("button", `filter${active ? " active" : ""}${filter.key === "todo" && c.todo ? " attention" : ""}`);
       tab.type = "button";
       tab.setAttribute("role", "tab");
@@ -1265,6 +1287,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (state.filter === "todo") return needsCheck(q);
     if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green";
     if (state.filter === "approved") return isApproved(q);
+    if (state.filter === "ai") return isAiApproved(q);
     return true;
   }
 
@@ -1351,17 +1374,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // 题号左边的方框：打勾就是“标记通过”，已通过的再点一下就是撤销。
   function approvalTick(q) {
-    const approved = isApproved(q);
-    const blocked = !approved && figureBlocksApproval(q);
-    const tick = el("button", "card-tick");
+    const approved = isHumanApproved(q);
+    const byAi = isAiApproved(q);
+    const blocked = !approved && !byAi && figureBlocksApproval(q);
+    const tick = el("button", `card-tick${byAi ? " ai" : ""}`);
     tick.type = "button";
-    tick.setAttribute("aria-pressed", String(approved));
-    tick.setAttribute("aria-label", approved ? `撤销第 ${q.number} 题的通过` : `第 ${q.number} 题标记通过`);
+    tick.setAttribute("aria-pressed", byAi ? "mixed" : String(approved));
+    tick.setAttribute("aria-label", approved ? `撤销第 ${q.number} 题的通过`
+      : byAi ? `确认第 ${q.number} 题（${agentLabel(q)} 已通过）` : `第 ${q.number} 题标记通过`);
     tick.title = approved ? "已标记通过；再点一下撤销（U）"
-      : blocked ? "配图还没处理好，点一下去处理"
-        : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
-          : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
-    tick.disabled = !(approved || blocked || canApprove(q));
+      : byAi ? `${agentLabel(q)} 对照原卷后打的勾，你还没核对。核对无误就点一下，变成你的通过（Enter）；不对就按 U 撤销`
+        : blocked ? "配图还没处理好，点一下去处理"
+          : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
+            : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
+    tick.disabled = !(approved || byAi || blocked || canApprove(q));
     tick.append(icon("check"));
     tick.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1564,7 +1590,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function nextToReview(fromQuestion, { onlyCheck = false } = {}) {
-    const candidates = state.questions.filter((q) => visible(q) && !isApproved(q) && (!onlyCheck || needsCheck(q)));
+    const candidates = state.questions.filter((q) => visible(q) && !isHumanApproved(q) && (!onlyCheck || needsCheck(q)));
     if (!candidates.length) return null;
     const after = fromQuestion ? candidates.find((q) => q.number > fromQuestion.number) : null;
     return after || candidates[0];
@@ -1595,8 +1621,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "Enter":
         if (onControl || !q) return;
         event.preventDefault();
-        if (isApproved(q)) toast(`第 ${q.number} 题已经是通过状态；按 U 可撤销`);
-        else if (canApprove(q)) approveQuestion(q, true);
+        if (isHumanApproved(q)) toast(`第 ${q.number} 题已经是通过状态；按 U 可撤销`);
+        else if (isAiApproved(q) || canApprove(q)) approveQuestion(q, true);
         else if (figureBlocksApproval(q)) focusFigureReview(q);
         else toast(q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
         break;
@@ -1871,7 +1897,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("viewerPrev").disabled = index <= 0;
     $("viewerNext").disabled = index < 0 || index >= list.length - 1;
     const approve = $("viewerApprove");
-    if (isApproved(q)) {
+    if (isAiApproved(q)) {
+      approve.replaceChildren(icon("check"), document.createTextNode("确认通过并下一题"), el("span", "kbd-hint", "Enter"));
+      approve.className = "button primary";
+      approve.disabled = false;
+      approve.title = `${agentLabel(q)} 已通过；你核对无误就确认，变成你的通过`;
+    } else if (isApproved(q)) {
       approve.replaceChildren(document.createTextNode("撤销通过"));
       approve.className = "button";
       approve.disabled = false;
@@ -1916,7 +1947,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function viewerApprove() {
     const q = questionById(viewer.id);
     if (!q) return;
-    if (isApproved(q)) { await approveQuestion(q, false, { advance: false }); return; }
+    if (isHumanApproved(q)) { await approveQuestion(q, false, { advance: false }); return; }
     if (figureBlocksApproval(q)) { focusFigureReview(q); return; }
     if (!canApprove(q)) {
       toast("这道题还不能通过", "error");
@@ -1927,7 +1958,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!ok) return;
     // 通过后跳到下一张没通过的卡；没有了就停在这张并提示。
     const position = before.indexOf(q.id);
-    const pending = state.questions.filter((item) => visible(item) && !isApproved(item));
+    const pending = state.questions.filter((item) => visible(item) && !isHumanApproved(item));
     const next = pending.find((item) => before.indexOf(item.id) > position) || pending[0];
     if (next) { viewer.id = next.id; viewer.zoom = 1; viewer.mode = "fit"; setCurrent(next.id); }
     hideLens();
@@ -2352,11 +2383,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (review?.status === "blocked_missing") return el("span", "chip yellow", "可能漏图 · 待处理");
     if (review?.status === "conflict") return el("span", "chip yellow", "配图冲突 · 待确认");
     if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
+    if (isAiApproved(q)) {
+      const chip = el("span", "chip ai-approved", `${agentLabel(q)} 已通过 · 待你核对`);
+      chip.title = "AI 助手对照原卷后打的勾，可以入库，题库里会标着“AI 审核”。你核对无误就点题号左边的方框确认。";
+      return chip;
+    }
     if (isApproved(q)) return el("span", "chip approved", "已标记通过");
     if (q.state === "green") {
       const copy = {
         majority: ["AI 三读多数一致 · 未人工审核", "前两次 AI 识读不同，第三次与其中一次相同；仍需人工对照原卷。"],
         human: ["已人工修改 · 未人工审核", "题面经过人工修改，但当前版本尚未标记通过。"],
+        assistant: ["AI 助手改过 · 未人工审核", "AI 助手（tiyouju 命令行）对照原卷改过题面；请再对照原卷核对。"],
+        mineru: ["MinerU 初稿 · 未核对", "题面是 MinerU 自己识别的文字，还没有看图核对（AI 助手读题模式）。"],
         witness: ["两种引擎一致 · 未人工审核",
           "视觉模型的誊录与 MinerU 自己识别的文字逐字一致（两套独立引擎）；一致不等于正确，仍需人工对照原卷。"],
       }[q.text_source] || ["AI 两次一致 · 未人工审核", "两次独立 AI 识读相同；一致不等于正确，仍需人工对照原卷。"];
@@ -2447,8 +2485,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function renderCard(q) {
     const approved = isApproved(q);
-    const approvedCompact = approved && !state.expanded.has(q.id);
-    const displayState = approved ? "approved has-toggle" : (figureBlocksApproval(q) || approvalNeedsReview(q)) ? "yellow" : q.state;
+    // AI 通过的题还等人核对，不收起。
+    const approvedCompact = approved && !isAiApproved(q) && !state.expanded.has(q.id);
+    const displayState = isAiApproved(q) ? "ai" : approved ? "approved has-toggle"
+      : (figureBlocksApproval(q) || approvalNeedsReview(q)) ? "yellow" : q.state;
     const card = el("article", `card state-${displayState}${approvedCompact ? " compact" : ""}`);
     card.dataset.id = q.id;
     card.id = `q-${q.id}`;
@@ -2544,7 +2584,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     actions.append(more);
     body.append(actions);
     card.append(source, body);
-    if (approved) card.append(expandToggle(q, false));
+    if (approved && !isAiApproved(q)) card.append(expandToggle(q, false));
     return card;
   }
 
@@ -2662,6 +2702,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function approveQuestion(q, approved, { advance = true } = {}) {
+    const confirming = approved && isAiApproved(q);
     try {
       const data = await api(`/api/questions/${q.id}/approve`, { method: "POST", body: { approved } });
       state.expanded.delete(q.id);
@@ -2670,7 +2711,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (approved) {
         const c = counts();
         const left = c.todo + c.green;
-        toast(left ? `第 ${q.number} 题已标记通过` : "本卷已全部标记通过，可以点“入库”了",
+        toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
+          : left ? `第 ${q.number} 题已标记通过` : "本卷已全部标记通过，可以点“入库”了",
           left ? "" : "success", { label: "撤销", onClick: () => approveQuestion(fresh, false, { advance: false }) });
         teach({ type: "approve", number: q.number });
         if (advance) focusNext(q);
@@ -3083,15 +3125,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     setApiState("settingsMineruState", Boolean(status.mineru || configured.mineru));
     setApiState("settingsMinimaxState", Boolean(configured.minimax));
     setApiState("settingsSiliconflowState", Boolean(configured.siliconflow));
+    setApiState("settingsModelscopeState", Boolean(configured.modelscope));
 
     const choices = settingsEngineChoices(engines);
     const modelEntries = choices.map((choice) => ({
       value: choice.key,
-      label: `${choice.provider} · ${choice.model}${choice.available === false ? "（API 未配置）" : ""}`
+      label: `${choice.provider} · ${choice.model}${choice.free ? "（免费）" : ""}${choice.available === false ? "（未填密钥）" : ""}`
     }));
     const defaultPrimary = modelEntries[0]?.value || "";
-    fillModelSelect($("settingsPrimaryModel"), modelEntries,
-      selectedEngine(engines, "primary", defaultPrimary));
+    // 所选那家没有密钥时，后台会换用有密钥的那家读题；这里直接显示实际读题的那家。
+    let primary = selectedEngine(engines, "primary", defaultPrimary);
+    const chosen = choices.find((choice) => choice.key === primary);
+    if (chosen && chosen.available === false && engines.primary) primary = engines.primary;
+    fillModelSelect($("settingsPrimaryModel"), [
+      ...modelEntries,
+      { value: "assistant", label: "AI 助手读题（只要 MinerU，不用看图密钥）" }
+    ], primary);
     fillModelSelect($("settingsCheckerModel"), [
       { value: "auto", label: "自动（优先使用另一家已配置模型）" }, ...modelEntries
     ], selectedEngine(engines, "checker", "auto"));
@@ -3104,12 +3153,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       "settingsMinimaxModels", "settingsMinimaxModelState");
     renderProviderModelSetting(engines, choices, "siliconflow", "settingsSiliconflowModel",
       "settingsSiliconflowModels", "settingsSiliconflowModelState");
+    renderProviderModelSetting(engines, choices, "modelscope", "settingsModelscopeModel",
+      "settingsModelscopeModels", "settingsModelscopeModelState");
+    const assistant = $("settingsPrimaryModel").value === "assistant";
+    $("settingsCheckerModel").disabled = assistant;
+    $("settingsArbiterModel").disabled = assistant;
+    // 模型名前面写上是哪一家：只看“Qwen3.5-35B-A3B”，老师认不出是谁家的。
+    const named = (key, label) => [choices.find((choice) => choice.key === key)?.provider, label].filter(Boolean).join(" ");
     const summary = [
-      status.reader && `主读 ${status.reader}`,
-      status.checker && `复核 ${status.checker}`,
-      status.arbiter && `裁决 ${status.arbiter}`
+      status.reader && `主读 ${named(engines.primary, status.reader)}`,
+      status.checker && `复核 ${named(engines.checker, status.checker)}`,
+      status.arbiter && `裁决 ${named(engines.arbiter, status.arbiter)}`
     ].filter(Boolean).join("；");
-    $("settingsModelSummary").textContent = summary ? `现在实际使用：${summary}。` : "现在没有可用的读题模型：请先在“常用”里填写密钥。";
+    $("settingsModelSummary").textContent = status.assistant_mode
+      ? "现在是 AI 助手读题：新资料的题卡先用 MinerU 的文字，需要 AI 助手或你对照原卷截图核对。"
+      : summary ? `现在实际使用：${summary}。` : "现在没有可用的读题模型：请先在“常用”里填写密钥（魔搭有免费的），或选“AI 助手读题”。";
     renderMinimaxPlan(engines);
   }
 
@@ -3133,6 +3191,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const CREDENTIAL_FIELDS = {
     mineru: { input: "credentialMineruInput", clear: "credentialMineruClear", state: "credentialMineruState", label: "MinerU" },
+    modelscope: { input: "credentialModelscopeInput", clear: "credentialModelscopeClear", state: "credentialModelscopeState", label: "魔搭" },
     minimax: { input: "credentialMinimaxInput", clear: "credentialMinimaxClear", state: "credentialMinimaxState", label: "MiniMax" },
     siliconflow: { input: "credentialSiliconflowInput", clear: "credentialSiliconflowClear", state: "credentialSiliconflowState", label: "硅基流动" }
   };
@@ -3252,12 +3311,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const node = $("settingsReady");
     if (!s || !node) return;
     const configured = s.configured || s.engines?.configured || {};
-    const vision = Boolean(configured.minimax || configured.siliconflow);
-    const missing = [!s.mineru && "MinerU", !vision && "MiniMax 或硅基流动"].filter(Boolean);
+    const vision = Boolean(configured.minimax || configured.siliconflow || configured.modelscope);
+    const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务（魔搭免费）"].filter(Boolean);
     node.className = `settings-ready ${s.upload_enabled ? "ready" : "missing"}`;
-    node.textContent = s.upload_enabled ? "可以上传新资料并自动读题。"
-      : missing.length ? `还不能上传新资料：请先填写 ${missing.join("、")} 的密钥。已有的题卡照常可以审核。`
+    node.textContent = s.upload_enabled
+      ? (s.assistant_mode ? "可以上传新资料：AI 助手读题，题卡先用 MinerU 的文字。" : "可以上传新资料并自动读题。")
+      : missing.length ? `还不能上传新资料：请先填写 ${missing.join("、")} 的密钥。已有的题卡照常可以审核。下面有免费的配法。`
         : "所选的主读模型还没有密钥，暂时不能上传新资料；可以在“读题模型”里换一个已填写密钥的模型。";
+    // 只在“能不能上传”变了的时候自动展开或收起，不跟用户自己的开合较劲。
+    if (state.freePlanReady !== s.upload_enabled) {
+      state.freePlanReady = s.upload_enabled;
+      $("settingsFreePlan").open = !s.upload_enabled;
+    }
   }
 
   function openSettings() {
@@ -3360,7 +3425,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return modelSaving;
   }
   ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel", "settingsSiliconflowModel",
-    "settingsMinimaxPlan"]
+    "settingsModelscopeModel", "settingsMinimaxPlan"]
     .forEach((id) => $(id).addEventListener("change", () => { void saveModelSettings(); }));
   $("modelSettingsForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3378,7 +3443,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           arbiter: $("settingsArbiterModel").value,
           models: {
             minimax: $("settingsMinimaxModel").value.trim(),
-            siliconflow: $("settingsSiliconflowModel").value.trim()
+            siliconflow: $("settingsSiliconflowModel").value.trim(),
+            modelscope: $("settingsModelscopeModel").value.trim()
           },
           plans: { minimax: $("settingsMinimaxPlan").value }
         }
@@ -4530,7 +4596,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!acknowledged) {
       const accepted = await confirmDialog({
         title: "隐私提示",
-        text: "上传新卷会把整份原卷发送给 MinerU，切出的题目截图还会发送给 MiniMax；配置了硅基流动时也会发送给硅基流动。系统不会先擦除姓名、手写或批改痕迹。\n\n请确认你有权按此方式处理这些卷面，再继续上传。",
+        text: "上传新卷会把整份原卷发送给 MinerU，切出的题目截图还会发送给你填了密钥的看图读题服务（魔搭、MiniMax、硅基流动）；选了“AI 助手读题”时，截图由你让它操作的 AI 助手读取。系统不会先擦除姓名、手写或批改痕迹。\n\n请确认你有权按此方式处理这些卷面，再继续上传。",
         ok: "我已确认，继续上传"
       });
       if (!accepted) return;
@@ -4964,7 +5030,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     node.className = `settings-ready ${s.upload_enabled ? "ready" : "missing"}`;
     node.textContent = s.upload_enabled ? "读题服务已经准备好，可以直接上传。"
-      : "开始前还要填一次读题服务的密钥（MinerU，以及 MiniMax 或硅基流动）。";
+      : "开始前还要填一次读题服务的密钥：MinerU，以及一家看图读题服务。都有免费的（魔搭），在“设置”里有申请网址。";
     $("welcomeKeys").hidden = Boolean(s.upload_enabled);
   }
 

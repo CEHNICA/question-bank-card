@@ -23,12 +23,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
 
+from . import provider_catalog
+
 
 MAX_ACCOUNTS = 8
 MAX_ACCOUNT_CONCURRENCY = 8
 # Conservative defaults: vision providers tolerate a few parallel requests per
 # key; MinerU tasks are long-running uploads and stay at one per token.
-DEFAULT_ACCOUNT_CONCURRENCY = {"minimax": 6, "siliconflow": 2, "mineru": 1}
+DEFAULT_ACCOUNT_CONCURRENCY = {
+    "mineru": 1, **{key: spec["concurrency"][0] for key, spec in provider_catalog.VISION.items()},
+}
 # MiniMax Token Plan concurrency follows the membership tier.  MiniMax's own
 # guide (peak hours): Plus about 3-4, Max about 4-5, Ultra about 6-7 agents at
 # once.  (start, ceiling) per plan; off-peak an account may go higher, which
@@ -41,11 +45,7 @@ MINIMAX_PLANS = {
     "payg": (6, MAX_ACCOUNT_CONCURRENCY),
 }
 DEFAULT_MINIMAX_PLAN = "auto"
-SERVICE_ENVIRONMENT = {
-    "mineru": ("MINERU_TOKENS_JSON", "MINERU_TOKEN"),
-    "minimax": ("MINIMAX_API_KEYS_JSON", "MINIMAX_API_KEY"),
-    "siliconflow": ("SILICONFLOW_API_KEYS_JSON", "SILICONFLOW_API_KEY"),
-}
+SERVICE_ENVIRONMENT = provider_catalog.environment_names()
 
 
 class AccountPoolError(RuntimeError):
@@ -122,6 +122,10 @@ def concurrency_range(service: str) -> tuple[int, int]:
         return value, value
     if service == "minimax":
         return MINIMAX_PLANS[minimax_plan()]
+    spec = provider_catalog.VISION.get(service)
+    if spec is not None:
+        # Free tiers publish no fixed numbers: start low, climb while calls succeed.
+        return spec["concurrency"]
     value = DEFAULT_ACCOUNT_CONCURRENCY.get(service, 1)
     return value, value
 
@@ -470,3 +474,40 @@ def reset_account_pools() -> None:
 
     with _POOL_LOCK:
         _POOLS.clear()
+        _RESTING.clear()
+
+
+# A service that just could not answer (rate limited through every retry, its
+# free quota used up, no working key) is asked last for a while.  Otherwise
+# every remaining question of the paper would sit through the same retries
+# before moving on to the next service.  A successful answer, and the next
+# paper or reread batch (the worker calls reset_account_pools), end it early.
+_RESTING: dict[str, float] = {}
+
+
+def provider_rest_seconds() -> float:
+    try:
+        return max(0.0, float(os.environ.get("QB_PROVIDER_REST", "180")))
+    except ValueError:
+        return 180.0
+
+
+def rest_provider(service: str) -> None:
+    with _POOL_LOCK:
+        _RESTING[service] = time.monotonic() + provider_rest_seconds()
+
+
+def provider_resting(service: str) -> bool:
+    with _POOL_LOCK:
+        until = _RESTING.get(service)
+        if until is None:
+            return False
+        if until <= time.monotonic():
+            del _RESTING[service]
+            return False
+        return True
+
+
+def provider_answered(service: str) -> None:
+    with _POOL_LOCK:
+        _RESTING.pop(service, None)

@@ -535,7 +535,8 @@ class VisionPoolTests(SimpleTestCase):
                 ) as post, self.assertRaises(readers.ReaderError) as raised:
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
-        self.assertEqual(post.call_count, readers.RATE_LIMIT_ROUNDS)
+        # No other service is configured, so it waits longer, but still stops.
+        self.assertEqual(post.call_count, readers.PATIENT_RATE_LIMIT_ROUNDS)
         self.assertIn("持续限流", str(raised.exception))
         self.assertNotIn(secret, str(raised.exception))
 
