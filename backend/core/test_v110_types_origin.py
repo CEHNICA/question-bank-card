@@ -147,6 +147,23 @@ class ReadCardTypeTests(TempDataMixin, TestCase):
         self.assertEqual(result["text_source"], "arbiter")
         self.assertEqual(result["question_type"], "free_response")
 
+    def test_the_chosen_text_and_the_reading_records_are_tidied_alike(self):
+        stem = USER_STEM.split("]", 1)[1]
+        result = self.read(f"【题型】解答题\n【题干】\n{USER_STEM}", f"【题型】解答题\n【题干】\n{USER_STEM}")
+        self.assertEqual(result["origin"], "2026山东枣庄滕州二中月考")
+        self.assertEqual(result["stem"], TIDY_STEM)
+        # The review page compares readings with the stem: they must not differ only by the tidying.
+        self.assertEqual(result["read_a"]["stem"], TIDY_STEM)
+        self.assertEqual(result["read_b"]["stem"], TIDY_STEM)
+        self.assertIn("“", result["read_a"]["stem"])
+        self.assertTrue(stem)
+
+    def test_switches_off_leave_the_text_as_read(self):
+        features.save({"origin_split": False, "chinese_quotes": False})
+        result = self.read(f"【题型】解答题\n【题干】\n{USER_STEM}", f"【题型】解答题\n【题干】\n{USER_STEM}")
+        self.assertEqual(result["stem"], USER_STEM)
+        self.assertEqual(result["origin"], "")
+
     def test_untyped_readings_with_numbered_parts_become_free_response(self):
         stem = "已知集合 $A$.\n(1)求 $A\\cap B$；\n(2)求 $m$ 的取值范围."
         result = self.read(f"【题干】\n{stem}", f"【题干】\n{stem}")
@@ -166,13 +183,13 @@ class PersistTests(TempDataMixin, TestCase):
         return question
 
     def reading(self, **extra):
-        values = {"stem": USER_STEM, "options": {}, "question_type": "unknown", "text_source": "agree",
-                  "figures": [], "figure_review": {}, "foreign_figures": [], "flags": [], "error": "",
-                  "state": Question.State.GREEN, "read_a": {}, "read_b": {}, "read_c": {}}
+        values = {"stem": TIDY_STEM, "origin": "2026山东枣庄滕州二中月考", "options": {}, "question_type": "unknown",
+                  "text_source": "agree", "figures": [], "figure_review": {}, "foreign_figures": [], "flags": [],
+                  "error": "", "state": Question.State.GREEN, "read_a": {}, "read_b": {}, "read_c": {}}
         values.update(extra)
         return values
 
-    def test_new_reading_moves_the_source_note_converts_quotes_and_flags_an_undecided_type(self):
+    def test_new_reading_stores_the_origin_and_flags_an_undecided_type(self):
         question = self.card(self.paper, state=Question.State.WAITING, stem="")
         question = self.persist(question, self.reading())
         self.assertEqual(question.origin, "2026山东枣庄滕州二中月考")
@@ -180,20 +197,26 @@ class PersistTests(TempDataMixin, TestCase):
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertIn(qtypes.FLAG_TYPE_UNKNOWN, question.flags)
 
-    def test_switches_off_leave_the_text_as_read(self):
-        features.save({"origin_split": False, "chinese_quotes": False})
-        question = self.card(self.paper, state=Question.State.WAITING, stem="")
+    def test_a_reread_of_an_unedited_card_takes_the_new_origin(self):
+        question = self.card(self.paper, question_type="free_response", stem=TIDY_STEM, origin="旧的题源")
         question = self.persist(question, self.reading(question_type="free_response"))
-        self.assertEqual(question.stem, USER_STEM)
+        self.assertEqual(question.origin, "2026山东枣庄滕州二中月考")
+        question = self.persist(question, self.reading(question_type="free_response", origin="", stem=USER_STEM))
         self.assertEqual(question.origin, "")
         self.assertEqual(question.state, Question.State.GREEN)
-        self.assertEqual(question.flags, [])
 
-    def test_a_persons_type_survives_a_new_reading_of_an_edited_card(self):
-        question = self.card(self.paper, question_type="free_response", edited=True, stem=TIDY_STEM)
+    def test_a_persons_type_and_origin_survive_a_new_reading_of_an_edited_card(self):
+        question = self.card(self.paper, question_type="free_response", edited=True, stem=TIDY_STEM, origin="人填的")
         question = self.persist(question, self.reading(question_type="unknown"))
         self.assertEqual(question.question_type, "free_response")
+        self.assertEqual(question.origin, "人填的")
         self.assertNotIn(qtypes.FLAG_TYPE_UNKNOWN, question.flags)
+
+    def test_a_chosen_type_survives_a_reread_even_when_the_text_is_read_again(self):
+        question = self.card(self.paper, question_type="free_response", type_locked=True, stem=TIDY_STEM)
+        question = self.persist(question, self.reading(question_type="single_choice"))
+        self.assertEqual(question.question_type, "free_response")
+        self.assertEqual(question.state, Question.State.GREEN)
 
 
 # ---------------------------------------------------------------- 审核与入库
@@ -235,13 +258,23 @@ class TypeGateApiTests(TempDataMixin, TestCase):
         response = self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["question"]["approved"])
+        self.q.refresh_from_db()
+        self.assertTrue(self.q.type_locked)
+        response = self.post(f"/api/questions/{self.q.id}/regions",
+                             {"regions": [{"page_idx": 0, "bbox": [50, 100, 480, 320]}]})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.q.refresh_from_db()
+        self.assertFalse(self.q.type_locked)
 
     def test_type_action_rejects_undecided_or_unknown_values_and_cards_still_reading(self):
         for value in ("unknown", "essay", None):
             response = self.post(f"/api/questions/{self.q.id}/type", {"question_type": value})
             self.assertEqual(response.status_code, 400)
-        Question.objects.filter(pk=self.q.pk).update(state=Question.State.READING)
+        Question.objects.filter(pk=self.q.pk).update(state=Question.State.RED)
         response = self.post(f"/api/questions/{self.q.id}/type", {"question_type": "free_response"})
+        self.assertEqual(response.status_code, 200, response.content)
+        Question.objects.filter(pk=self.q.pk).update(state=Question.State.READING)
+        response = self.post(f"/api/questions/{self.q.id}/type", {"question_type": "fill_blank"})
         self.assertEqual(response.status_code, 400)
 
     def test_publish_refuses_an_approved_card_whose_type_is_undecided(self):
@@ -273,6 +306,12 @@ class TypeGateApiTests(TempDataMixin, TestCase):
         card = response.json()["question"]
         self.assertEqual(card["state"], "yellow")
         self.assertIn(qtypes.FLAG_TYPE_UNKNOWN, card["flags"])
+        # A different note in front of the stem is not thrown away when the card already has an origin.
+        response = self.post(f"/api/questions/{self.q.id}/text", {
+            "stem": "（2022·海淀期末）已知 $a>0$", "options": {}, "question_type": "free_response"})
+        card = response.json()["question"]
+        self.assertEqual(card["stem"], "（2022·海淀期末）已知 $a>0$")
+        self.assertEqual(card["origin"], "2026·滕州二中·10月月考")
 
 
 class OriginHashTests(TempDataMixin, TestCase):
@@ -335,6 +374,17 @@ class TidySavedCardsTests(TempDataMixin, TestCase):
         self.assertIn(qtypes.FLAG_TYPE_UNKNOWN, question.flags)
         self.assertFalse(library.approval_is_current(question))
 
+    def test_two_notes_in_front_keep_the_second_and_tidying_again_changes_nothing(self):
+        stem = "[2023北京期中]（2022·海淀期末）已知 $a>0$，求 $a$."
+        question = self.approve(self.card(self.paper, question_type="free_response", stem=stem))
+        publication, _created = library.publish(question)
+        self.assertEqual(library.tidy_saved_cards(), {"questions": 1, "publications": 1})
+        question.refresh_from_db()
+        self.assertEqual((question.origin, question.stem), ("2023北京期中", "（2022·海淀期末）已知 $a>0$，求 $a$."))
+        self.assertEqual(library.tidy_saved_cards(), {"questions": 0, "publications": 0})
+        publication.refresh_from_db()
+        self.assertEqual(publication.content["stem"], "（2022·海淀期末）已知 $a>0$，求 $a$.")
+
     def test_switched_off_tidy_leaves_text_alone(self):
         features.save({"origin_split": False, "chinese_quotes": False})
         question = self.card(self.paper, question_type="free_response")
@@ -353,9 +403,12 @@ class TextRuleTests(SimpleTestCase):
         }
         for text, expected in cases.items():
             self.assertEqual(textnorm.split_origin(text), expected, text)
+        self.assertEqual(textnorm.split_origin("（2023·北京卷）已知"), ("已知", "2023·北京卷"))
+        self.assertEqual(textnorm.split_origin("(2021浙江卷)已知"), ("已知", "2021浙江卷"))
         for text in ("（本小题满分12分）已知", "（12分）已知", "(2023)年的", "（多选）下列", "（1）若",
                      "已知(2023·北京卷)", "（2025·北京海淀·期中）", "（改编）已知", "(第15题图)已知",
-                     "（$x>0$ 时 2023 年）已知", "[2026山东月考)已知"):
+                     "（$x>0$ 时 2023 年）已知", "[2026山东月考)已知", "（2022年北京冬奥会期间）某商店",
+                     "(2020年第七次全国人口普查数据)下表是", "(2023年5分)已知"):
             self.assertEqual(textnorm.split_origin(text), (text, ""), text)
 
     def test_quotes_only_in_chinese_text_and_outside_formulas(self):
@@ -414,6 +467,10 @@ class KnowledgeCatalogueTests(SimpleTestCase):
             ["集合间的基本关系", "全称量词与存在量词", "函数的应用（一）"],
         )
         self.assertEqual(knowledge.match_tags("无", points), [])
+        # Names with 、 inside, and the longer name wins over a shorter one inside it.
+        self.assertEqual(knowledge.match_tags("二次函数与一元二次方程、不等式；空间直线、平面的平行", points),
+                         ["二次函数与一元二次方程、不等式", "空间直线、平面的平行"])
+        self.assertEqual(knowledge.match_tags("【知识点】指数函数", points), ["指数函数"])
 
 
 class LibraryExtrasTests(TempDataMixin, TestCase):
@@ -501,6 +558,25 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         self.assertEqual(newer.extras["tags"], ["集合间的基本关系", "全称量词与存在量词"])
         self.assertIn("ai_answer", newer.extras)
         self.assertEqual(self.client.get("/api/library?tag=全称量词与存在量词").json()["total"], 1)
+
+    def test_a_waiting_job_moves_to_the_new_version(self):
+        features.save({"ai_answer": True})
+        question, publication = self.published(2)
+        library_jobs.enqueue(publication, "answer")
+        question = Question.objects.select_related("paper").get(pk=question.pk)
+        question.analysis = "人补的解析"
+        question.approved_content_hash = library.approval_hash(question)
+        question.save()
+        newer, created = library.publish(question)
+        self.assertTrue(created)
+        self.assertEqual(LibraryJob.objects.get().publication_id, newer.id)
+        chat = lambda *_args, **_kwargs: "【答案】(1) [3,4]\n【解析】略"  # noqa: E731
+        with mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test"}), mock.patch.object(readers, "chat", chat):
+            library_jobs.process_pending()
+        newer.refresh_from_db()
+        publication.refresh_from_db()
+        self.assertEqual(newer.extras["ai_answer"]["answer"], "(1) [3,4]")
+        self.assertNotIn("ai_answer", publication.extras)
 
     def test_a_job_without_any_reading_service_fails_with_a_reason(self):
         features.save({"ai_answer": True})

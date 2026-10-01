@@ -19,7 +19,7 @@ from . import features, imaging, prose, qtypes
 from .figure_policy import (
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
-from .models import Paper, PublishedQuestion, Question, QuestionGroup
+from .models import LibraryJob, Paper, PublishedQuestion, Question, QuestionGroup
 from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = set(qtypes.CHOICE_TYPES)
@@ -360,6 +360,11 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             )
             question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
+            # 还在排队的知识点、AI 答案跟着到新的一版上做。
+            LibraryJob.objects.filter(
+                publication__question=question,
+                status__in=(LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING),
+            ).exclude(publication=publication).update(publication=publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise
@@ -498,12 +503,9 @@ def tidy_text(stem: str, options: dict | None, question_type: str, origin: str =
     new_type = question_type or "unknown"
     if labelled and new_type in _LABEL_SETS_TYPE:
         new_type = labelled
-    new_stem, found, labelled = prose.tidy_stem(new_stem, switches=switches)
+    new_stem, new_origin, labelled = prose.tidy_stem(new_stem, origin=origin or "", switches=switches)
     if labelled and new_type in _LABEL_SETS_TYPE:
         new_type = labelled
-    new_origin = origin or ""
-    if found and not new_origin.strip():
-        new_origin = found
     new_options = dict(options or {})
     fourth = new_options.get("D")
     if isinstance(fourth, str) and _E_TAG.search(fourth) and not str(new_options.get("E") or "").strip():
@@ -516,13 +518,13 @@ def tidy_text(stem: str, options: dict | None, question_type: str, origin: str =
     return new_stem, new_options, new_type, new_origin
 
 
-def _tidy_reading(reading, switches: dict | None = None):
+def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
     if not isinstance(reading, dict):
         return reading
     stem, options, _kind, _origin = tidy_text(
         reading.get("stem") if isinstance(reading.get("stem"), str) else "",
         reading.get("options") if isinstance(reading.get("options"), dict) else {},
-        "unknown", switches=switches,
+        "unknown", origin, switches=switches,
     )
     changed = dict(reading)
     if isinstance(reading.get("stem"), str):
@@ -564,7 +566,7 @@ def tidy_saved_cards() -> dict[str, int]:
             question.origin, question.answer, question.analysis = origin, answer, analysis
             question.flags, question.state = flags, state
             for field in ("read_a", "read_b", "read_c"):
-                setattr(question, field, _tidy_reading(getattr(question, field), switches))
+                setattr(question, field, _tidy_reading(getattr(question, field), switches, origin))
             if approval_was_current and approval_is_current_ignoring_hash(question):
                 question.approved_content_hash = approval_hash(question)
             question.save(update_fields=[

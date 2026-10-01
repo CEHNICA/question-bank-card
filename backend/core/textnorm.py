@@ -239,7 +239,10 @@ _ORIGIN_WORDS = re.compile(
     r"检测|竞赛|期初|开学考|会考|学考|学业水平|适应性|诊断|摸底|新课标|新高考|全国[甲乙丙]?卷|"
     r"考试|测试|测评"
 )
-_ORIGIN_SCORE = re.compile(r"满分|^\s*(?:本小?题|共)?\s*\d{1,3}\s*分\s*$")
+_ORIGIN_SCORE = re.compile(r"满分|\d\s*分(?![校类析])")
+# A year alone is not a source: “（2022年北京冬奥会期间）某商店……” is task text.
+# With a year, a source also names its paper: “·”-separated parts, a 卷, or a school.
+_ORIGIN_PAPER = re.compile(r"·|卷|[一二三四五六七八九十\d]中|中学|附中|高中|学校|外国语|实验学校")
 _ORIGIN_CJK = re.compile(r"[一-鿿]")
 
 
@@ -256,7 +259,7 @@ def split_origin(text: str) -> tuple[str, str]:
         return value, ""
     if len(_ORIGIN_CJK.findall(inner)) < 2 or _ORIGIN_SCORE.search(inner):
         return value, ""
-    if not (_ORIGIN_YEAR.search(inner) or _ORIGIN_WORDS.search(inner)):
+    if not (_ORIGIN_WORDS.search(inner) or (_ORIGIN_YEAR.search(inner) and _ORIGIN_PAPER.search(inner))):
         return value, ""
     return rest.lstrip(), inner
 

@@ -1805,12 +1805,15 @@ def question_action(request, question_id, action: str):
                 "answer": fix_symbols(payload.get("answer", question.answer).strip()),
                 "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
             }, origin=origin)
+            previous_type = question.question_type
             question.stem = tidied["stem"].strip()
             question.options = tidied["options"]
             question.question_type = tidied.get("question_type", kind)
             question.answer = tidied["answer"]
             question.analysis = tidied["analysis"]
-            question.origin = tidied.get("origin", origin)
+            question.origin = tidied["origin"]
+            if question.question_type != previous_type and qtypes.decided(question.question_type):
+                question.type_locked = True
             question.edited = True
             # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
             question.text_source = "assistant" if actor[0] == "ai" else "human"
@@ -1837,12 +1840,13 @@ def question_action(request, question_id, action: str):
             kind = payload.get("question_type")
             if kind not in qtypes.DECIDED_TYPES:
                 return _error("请选单选、多选、填空、判断或解答")
-            if question.state not in library.REVIEWABLE_STATES:
+            if question.state in {Question.State.WAITING, Question.State.READING}:
                 return _error("这道题还在识读，读完再选题型")
             if kind != question.question_type:
                 question.question_type = kind
                 question.flags, question.state = qtypes.sync(question.flags, question.state, kind)
                 _clear_approval(question)
+            question.type_locked = True
         elif action == "regions":
             regions = _valid_regions(question.paper, payload.get("regions"))
             if regions is None:
@@ -1852,6 +1856,7 @@ def question_action(request, question_id, action: str):
             question.figures = []
             question.figure_review = {}
             question.edited = False
+            question.type_locked = False
             _clear_approval(question)
             question.flags = []
             question.state = Question.State.WAITING

@@ -123,9 +123,9 @@
     const token = ++state.token;
     state.loading = true;
     window.clearTimeout(state.poll);
-    // A quiet refresh (jobs finishing) keeps everything already shown.
-    const limit = quiet ? Math.min(100, Math.max(40, state.items.length)) : 40;
-    const query = new URLSearchParams({ limit: String(limit), offset: String(append ? state.items.length : 0) });
+    // A quiet refresh (jobs finishing) reloads everything already shown, page by page.
+    const wanted = quiet ? Math.max(40, state.items.length) : 40;
+    const query = new URLSearchParams({ limit: String(Math.min(100, wanted)), offset: String(append ? state.items.length : 0) });
     if (state.q.trim()) query.set("q", state.q.trim());
     if (state.document) query.set("document", state.document);
     if (state.type) query.set("type", state.type);
@@ -137,6 +137,13 @@
       const response = await fetch(`/api/library?${query}`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "读取题库失败");
+      while (quiet && body.items.length < Math.min(wanted, body.total)) {
+        query.set("offset", String(body.items.length));
+        const more = await fetch(`/api/library?${query}`, { cache: "no-store" });
+        const page = await more.json();
+        if (!more.ok || !page.items.length) break;
+        body.items = body.items.concat(page.items);
+      }
       if (token !== state.token) return;
       state.total = body.total;
       state.facets = body.facets;
@@ -408,7 +415,16 @@
         node("p", "helper", "在“录入终审”页核对并标记题卡通过后，点“入库”，题目就会出现在这里。"));
       ui.list.append(empty);
     }
-    state.items.forEach((item) => ui.list.append(card(item)));
+    // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
+    const previous = state.cards || new Map();
+    state.cards = new Map();
+    state.items.forEach((item) => {
+      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, ui.answers.checked, state.tag]);
+      const kept = previous.get(item.id);
+      const node = kept && kept.signature === signature ? kept.node : card(item);
+      state.cards.set(item.id, { signature, node });
+      ui.list.append(node);
+    });
     ui.status.textContent = state.total
       ? `共 ${state.total} 道已入库题目${state.q ? `，匹配“${state.q}”` : ""}。每道题都是标记通过时的版本快照。`
       : "";

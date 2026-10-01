@@ -417,7 +417,7 @@ def missing_choice_figure_slots(
         for reading in (readings or []) if isinstance(reading, dict)
     }
     choice_types = {"single_choice", "multiple_choice"}
-    non_choice_types = {"fill_blank", "free_response"}
+    non_choice_types = {"fill_blank", "true_false", "free_response"}
     if has_stem_figure and not bound and declared & choice_types and declared & non_choice_types:
         return set()
     return option_slots - bound

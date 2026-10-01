@@ -130,8 +130,7 @@ DEFAULT_TEXT = """\
 """
 
 MAX_TAGS = 3
-_SPLIT = re.compile(r"[；;，,、\n|]+")
-_NUMBERING = re.compile(r"^\s*(?:\d+\s*[.．、)）]|[-*•·]\s*)")
+_NONE = re.compile(r"^\s*(?:无|没有|none)\s*[。.]?\s*$", re.I)
 
 
 def path() -> Path:
@@ -181,14 +180,31 @@ def _key(value: str) -> str:
 
 
 def match_tags(raw: str, points: list[dict]) -> list[str]:
-    """The catalogue points a model's answer names, in its order, at most three."""
-    by_key = {_key(item["point"]): item["point"] for item in points}
+    """The catalogue points a model's answer names, in the order it names them, at most three.
+
+    Points are looked up inside the answer rather than split out of it: some
+    names contain 、 or ，（“二次函数与一元二次方程、不等式”）.  Longer names win, so
+    “指数函数” is not also counted as “指数”.
+    """
+    if _NONE.match(str(raw or "")):
+        return []
+    text = _key(raw)
+    taken: list[tuple[int, int]] = []
+    found: list[tuple[int, str]] = []
+    for item in sorted(points, key=lambda entry: -len(_key(entry["point"]))):
+        key = _key(item["point"])
+        if not key:
+            continue
+        start = text.find(key)
+        while start >= 0:
+            end = start + len(key)
+            if not any(start < other_end and other_start < end for other_start, other_end in taken):
+                taken.append((start, end))
+                found.append((start, item["point"]))
+                break
+            start = text.find(key, start + 1)
     chosen: list[str] = []
-    for piece in _SPLIT.split(str(raw or "")):
-        piece = _NUMBERING.sub("", piece).strip().strip("“”\"'《》")
-        point = by_key.get(_key(piece))
-        if point and point not in chosen:
+    for _position, point in sorted(found):
+        if point not in chosen:
             chosen.append(point)
-        if len(chosen) >= MAX_TAGS:
-            break
-    return chosen
+    return chosen[:MAX_TAGS]

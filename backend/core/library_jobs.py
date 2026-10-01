@@ -178,6 +178,17 @@ def run_tags(publication: PublishedQuestion) -> tuple[list[str], str]:
     return knowledge.match_tags(named, points), readers.answered_by(engine).label
 
 
+def live_version(publication: PublishedQuestion) -> PublishedQuestion | None:
+    """The version of this question now in the library (a job may outlive the one it was queued on)."""
+    if publication.status == PublishedQuestion.Status.PUBLISHED:
+        return publication
+    if not publication.question_id:
+        return None
+    return PublishedQuestion.objects.filter(
+        question_id=publication.question_id, status=PublishedQuestion.Status.PUBLISHED,
+    ).order_by("-version").first()
+
+
 def _finish(job: LibraryJob, status: str, error: str = "") -> None:
     job.status = status
     job.error = error[:300]
@@ -197,8 +208,13 @@ def process_pending(limit: int = 5) -> int:
             job.status = LibraryJob.Status.RUNNING
             job.save(update_fields=["status", "updated_at"])
         handled += 1
-        publication = job.publication
         try:
+            publication = live_version(job.publication)
+            if publication is None:
+                raise JobError("这道题已不在正式题库里")
+            if publication.pk != job.publication_id:
+                job.publication = publication
+                job.save(update_fields=["publication", "updated_at"])
             if not features.enabled(FEATURE_OF[job.kind]):
                 raise JobError("这个功能已在设置里关掉")
             if job.kind == LibraryJob.Kind.ANSWER:

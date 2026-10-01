@@ -19,7 +19,7 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm
+from . import features, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -2596,7 +2596,10 @@ def assistant_draft(snapshot: dict) -> dict:
     text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
     text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
     stem, options = readers.split_inline_options(text)
-    kind = qtypes.infer(snapshot.get("question_type") or "unknown", stem, options)
+    tidied = prose.tidy_fields({"stem": stem, "options": options,
+                                "question_type": snapshot.get("question_type") or "unknown"})
+    stem, options, origin = tidied["stem"], tidied["options"], tidied["origin"]
+    kind = qtypes.infer(tidied.get("question_type") or snapshot.get("question_type") or "unknown", stem, options)
     candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
     labels = {str(candidate["label"]): candidate for candidate in candidates}
     assignments = _draft_figure_guess(stem, options, candidates)
@@ -2614,7 +2617,7 @@ def assistant_draft(snapshot: dict) -> dict:
     return {
         "read_a": {"engine": "MinerU", "stem": stem, "options": options, "draft": True, "figures": assignments},
         "read_b": {}, "read_c": {},
-        "stem": stem, "options": options, "question_type": kind, "text_source": "mineru",
+        "stem": stem, "options": options, "origin": origin, "question_type": kind, "text_source": "mineru",
         "figures": figures, "figure_review": review, "foreign_figures": [],
         "flags": flags, "error": "", "state": Question.State.YELLOW,
     }
@@ -2752,6 +2755,18 @@ def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
     if any(re.match(rf"\s*{int(number)}(?!\d)", str((other or {}).get("stem") or "")) for other in others):
         return reading
     return {**reading, "stem": stem[match.end():]}
+
+
+def _tidy_final(final: dict) -> tuple[dict, str]:
+    """The chosen reading with its source note taken off and quotes tidied (see prose)."""
+    if not isinstance(final, dict) or not isinstance(final.get("stem"), str):
+        return final, ""
+    tidied = prose.tidy_fields({"stem": final["stem"], "options": final.get("options") or {},
+                                "question_type": final.get("type") or "unknown"})
+    result = {**final, "stem": tidied["stem"], "options": tidied["options"]}
+    if tidied.get("question_type"):
+        result["type"] = tidied["question_type"]
+    return result, tidied["origin"]
 
 
 def read_card(snapshot: dict, store: PageStore) -> dict:
@@ -2940,6 +2955,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         agreed = qtypes.consensus(r.get("type") for r in (a_text, b_text) if isinstance(r, dict))
         if qtypes.decided(agreed):
             final = {**final, "type": agreed}
+    # 题源、中文引号（设置里可关）：在这里整理，配图检查和疑点都按整理后的题面来。
+    final, origin = _tidy_final(final)
     for letter, supported in restored_options.items():
         if not supported:
             flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
@@ -3069,10 +3086,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # in the crop: the opening line is probably above it (口镇第 8 题只剩
         # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
         flags.append(FLAG_LOCATED_WITHOUT_NUMBER)
+    switches = features.load()
+    for name in ("read_a", "read_b", "read_c"):
+        update[name] = prose.tidy_reading(update.get(name), switches=switches)
     return {
         **update,
         "stem": final.get("stem", ""),
         "options": final.get("options") or {},
+        "origin": origin,
         "question_type": kind,
         "text_source": source,
         "figures": figures,
@@ -3242,12 +3263,16 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             )
             if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
                 fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
+        # 人选定的题型（题号旁的下拉、改字、tiyouju fix --type）重读也不变。
+        kept = {"question_type"} if question.type_locked and qtypes.decided(question.question_type) else set()
         if question.edited:
-            # 人工改过的文字不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
-            kept = {"stem", "options", "text_source"}
+            # 人工改过的文字（连同题源）不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
+            kept |= {"stem", "options", "text_source", "origin"}
             if qtypes.decided(question.question_type):
                 kept.add("question_type")
+        if kept:
             fields = {k: v for k, v in fields.items() if k not in kept}
+        if question.edited:
             fields["flags"] = [f for f in fields.get("flags", []) if "识读" not in f and "[?]" not in f]
             if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
                 fields["state"] = Question.State.GREEN
@@ -3269,9 +3294,6 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             fields["figures"] = []
             fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
             fields["figure_review"] = stored_or_derived_review(question)
-        if "stem" in fields:
-            # 题源拆分、中文引号（设置里可关）。只挪格式、不改字，和人改字时一样。
-            fields.update(prose.tidy_fields(fields, origin=question.origin))
         if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
             kind = fields.get("question_type", question.question_type)
             fields["flags"] = qtypes.with_flag(fields.get("flags", []), kind)

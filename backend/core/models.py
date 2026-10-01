@@ -226,6 +226,8 @@ class Question(models.Model):
     # 题源：教辅里印在题前的出处（“2026山东枣庄滕州二中月考”）。不是题目文字，
     # 组卷打印时不印；为空时不参与审批校验，老题的审批因此不受影响。
     origin = models.CharField(max_length=120, blank=True, default="")
+    # 题型是人（或 AI 助手）选定的：重新识读不改它。调整原卷范围时清掉。
+    type_locked = models.BooleanField(default=False)
     reread_requested = models.BooleanField(default=False)
     # Review-time deletion is deliberately reversible.  The card itself stays
     # intact so manual edits, approval evidence and publication links survive
