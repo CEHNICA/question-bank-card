@@ -554,6 +554,9 @@
     let value = `${before}${text}${after}`;
     value = value.replace(/[ \t\u00a0]+/g, " ");
     value = value.replace(/ ?\n ?/g, "\n");
+    // A blank line before a sub-question “(1)” / “（2）” is just its own line:
+    // the paper prints the parts one under another, not a paragraph apart.
+    value = value.replace(/\n{2,}(?=[（(]\d{1,2}[)）]|[①②③④⑤⑥⑦⑧⑨⑩])/g, "\n");
     value = value.replace(/([^\n])\n(?=([^\n]))/g, (all, a, b, offset) => {
       const rest = value.slice(offset + 2);
       const hard = /^[（(]?\d+[)）.．、]/.test(rest) || /^[（(][一二三四五六七八九十]/.test(rest) || /^[①②③④⑤⑥⑦⑧⑨⑩]/.test(rest);
@@ -949,7 +952,7 @@
   }
 
   const TYPE_NAMES = {
-    single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", free_response: "解答题",
+    single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", true_false: "判断题", free_response: "解答题",
     short_answer: "解答题", unknown: "题型待核对"
   };
 
@@ -1055,6 +1058,6 @@
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables
+    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText
   };
 });

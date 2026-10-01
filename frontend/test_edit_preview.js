@@ -16,7 +16,7 @@ assert.doesNotMatch(js, /timer = setTimeout\(\(\) => \{\s*const data = collect\(
 // Side by side: under the original crop in the left column; otherwise under the stem box.
 assert.match(js, /if \(beside && previewBox\.parentNode !== source\) source\.append\(previewBox\);/);
 assert.match(js, /else if \(!beside && previewBox\.previousElementSibling !== stemRow\) stemRow\.after\(previewBox\);/);
-assert.match(js, /editor\.append\(title, typeRow, stemRow, previewBox, tableTools, optionBox, extra, bar\);/);
+assert.match(js, /editor\.append\(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar\);/);
 assert.match(css, /\.editor-preview-box\.beside \.editor-preview \{ max-height: var\(--preview-room\); overflow: auto;/);
 // The stem box grows with its text so the preview under it stays in sight.
 assert.match(js, /stem\.style\.height = `\$\{Math\.min\(stem\.scrollHeight \+ 2, Math\.round\(window\.innerHeight \* 0\.4\)\)\}px`;/);

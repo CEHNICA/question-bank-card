@@ -615,7 +615,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const R = window.QBRender;
   const OPTION_KEYS = ["A", "B", "C", "D", "E"];
   const CHOICE = new Set(["single_choice", "multiple_choice"]);
-  const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", free_response: "解答题", unknown: "题型未定" };
+  const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", true_false: "判断题", free_response: "解答题", unknown: "题型未定" };
   const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D", E: "选项E" };
   const FILTERS = [
     { key: "all", label: "全部" },
@@ -811,11 +811,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function canApprove(q) {
-    return Boolean(q.stem && !figureBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
+    return Boolean(q.stem && !figureBlocksApproval(q) && !typeBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
+  }
+
+  // 题型没读出来（题型未定）的题不能通过：先在题号旁边选题型。
+  function typeBlocksApproval(q) {
+    return Boolean(q.type_blocked) && (q.state === "green" || q.state === "yellow");
   }
 
   function needsCheck(q) {
-    return !isApproved(q) && (figureBlocksApproval(q) || approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
+    return !isApproved(q) && (figureBlocksApproval(q) || typeBlocksApproval(q) || approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
   }
 
   function anyDialogOpen() {
@@ -1067,7 +1072,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return {
       all: qs.length,
       todo: qs.filter(needsCheck).length,
-      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green").length,
+      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && !typeBlocksApproval(q) && q.state === "green").length,
       approved: qs.filter(isApproved).length,
       ai: qs.filter(isAiApproved).length,
       waiting: qs.filter((q) => q.state === "waiting" || q.state === "reading").length,
@@ -1144,6 +1149,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("emptyState").hidden = true;
     $("paperView").hidden = false;
     $("paperName").textContent = paperDisplayName(paper);
+    $("renameNudge").hidden = !looksLikeFileName(paperDisplayName(paper));
     const c = counts();
     const statusText = $("paperStatus");
     const isProcessing = ACTIVE_STATUS.has(paper.status);
@@ -1297,7 +1303,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function visible(q) {
     if (state.filter === "todo") return needsCheck(q);
-    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green";
+    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && !typeBlocksApproval(q) && q.state === "green";
     if (state.filter === "approved") return isApproved(q);
     if (state.filter === "ai") return isAiApproved(q);
     return true;
@@ -1389,6 +1395,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const approved = isHumanApproved(q);
     const byAi = isAiApproved(q);
     const blocked = !approved && !byAi && figureBlocksApproval(q);
+    const typeBlocked = !approved && !byAi && !blocked && typeBlocksApproval(q);
     const tick = el("button", `card-tick${byAi ? " ai" : ""}`);
     tick.type = "button";
     tick.setAttribute("aria-pressed", byAi ? "mixed" : String(approved));
@@ -1397,18 +1404,69 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     tick.title = approved ? "已标记通过；再点一下撤销（U）"
       : byAi ? `${agentLabel(q)} 对照原卷后打的勾，你还没核对。核对无误就点一下，变成你的通过（Enter）；不对就按 U 撤销`
         : blocked ? "配图还没处理好，点一下去处理"
+          : typeBlocked ? "题型还没定，点一下去选题型"
           : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
             : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
-    tick.disabled = !(approved || byAi || blocked || canApprove(q));
+    tick.disabled = !(approved || byAi || blocked || typeBlocked || canApprove(q));
     tick.append(icon("check"));
     tick.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (approved) approveQuestion(q, false);
       else if (blocked) focusFigureReview(q);
+      else if (typeBlocked) focusTypePicker(q);
       else approveQuestion(q, true);
     });
     return tick;
+  }
+
+  // 题号旁边的题型：读完的题可以直接改（只改题型，改了要重新标记通过）。
+  function typePicker(q) {
+    if (!(q.state === "green" || q.state === "yellow")) return el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type);
+    const undecided = typeBlocksApproval(q);
+    const select = el("select", `qtype qtype-select${undecided ? " undecided" : ""}`);
+    select.setAttribute("aria-label", `第 ${q.number} 题的题型`);
+    select.title = undecided ? "题型没读出来：选一下题型才能通过" : "改题型（改了要重新标记通过）";
+    if (undecided) {
+      const placeholder = new Option("题型未定 · 请选", "unknown");
+      placeholder.disabled = true;
+      select.append(placeholder);
+    }
+    Object.entries(TYPE_NAMES).forEach(([value, label]) => {
+      if (value !== "unknown") select.append(new Option(label, value));
+    });
+    select.value = undecided ? "unknown" : q.question_type;
+    select.addEventListener("click", (event) => event.stopPropagation());
+    select.addEventListener("keydown", (event) => event.stopPropagation());
+    select.addEventListener("change", () => setQuestionType(q, select.value));
+    return select;
+  }
+
+  async function setQuestionType(q, kind) {
+    const wasApproved = isApproved(q) || isAiApproved(q);
+    try {
+      const data = await api(`/api/questions/${q.id}/type`, { method: "POST", body: { question_type: kind } });
+      applyQuestion(data);
+      toast(wasApproved ? `第 ${q.number} 题改成了${TYPE_NAMES[kind]}；题目内容变了，请重新标记通过`
+        : `第 ${q.number} 题是${TYPE_NAMES[kind]}了，核对无误就可以打勾通过`, "success");
+      setCurrent(q.id, { focus: true });
+    } catch (error) {
+      toast(error.message, "error");
+      renderCards();
+    }
+  }
+
+  function focusTypePicker(q) {
+    if ($("viewerDialog").open) $("viewerDialog").close();
+    const select = document.querySelector(`.card[data-id="${q.id}"] .qtype-select`);
+    if (!select) { toast("这道题读完以后才能选题型", "error"); return; }
+    setCurrent(q.id);
+    select.scrollIntoView({ block: "center", behavior: "smooth" });
+    select.focus({ preventScroll: true });
+    select.classList.remove("attention");
+    requestAnimationFrame(() => select.classList.add("attention"));
+    window.setTimeout(() => select.classList.remove("attention"), 1400);
+    toast("题型没读出来：在题号旁边选一下题型（单选、多选、填空、判断或解答）");
   }
 
   function handleCardSelectionClick(event, q) {
@@ -1702,6 +1760,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (isHumanApproved(q)) toast(`第 ${q.number} 题已经是通过状态；按 U 可撤销`);
         else if (isAiApproved(q) || canApprove(q)) approveQuestion(q, true);
         else if (figureBlocksApproval(q)) focusFigureReview(q);
+        else if (typeBlocksApproval(q)) focusTypePicker(q);
         else toast(q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
         break;
       case " ":
@@ -1987,12 +2046,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       approve.disabled = false;
     } else {
       const blocked = figureBlocksApproval(q);
+      const typeBlocked = !blocked && typeBlocksApproval(q);
       const blockedLabel = figureReview(q)?.status === "conflict" ? "处理配图冲突" : "处理漏图提醒";
       approve.replaceChildren(icon(blocked ? "image" : "check"), document.createTextNode(blocked ? blockedLabel
-        : approvalNeedsReview(q) ? "重新标记通过" : "通过并下一题"), el("span", "kbd-hint", "Enter"));
+        : typeBlocked ? "先选题型" : approvalNeedsReview(q) ? "重新标记通过" : "通过并下一题"), el("span", "kbd-hint", "Enter"));
       approve.className = "button primary";
-      approve.disabled = blocked ? false : !canApprove(q);
+      approve.disabled = blocked || typeBlocked ? false : !canApprove(q);
       approve.title = blocked ? "前往黄色区域，选择保留、调整或移除配图"
+        : typeBlocked ? "题型没读出来：回到题卡，在题号旁边选题型"
         : canApprove(q) ? "对照原卷确认无误后通过，并跳到下一题" : "请等待识读完成并确认题面";
     }
     if (viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
@@ -2028,6 +2089,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!q) return;
     if (isHumanApproved(q)) { await approveQuestion(q, false, { advance: false }); return; }
     if (figureBlocksApproval(q)) { focusFigureReview(q); return; }
+    if (typeBlocksApproval(q)) { focusTypePicker(q); return; }
     if (!canApprove(q)) {
       toast("这道题还不能通过", "error");
       return;
@@ -2421,9 +2483,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return panel;
   }
 
+  // The type picker beside the number already asks for the type (and the button below it).
+  const TYPE_REMINDER = /^题型没读出来/;
+
   function questionFlags(q) {
     const review = figureReview(q);
     return (q.flags || []).filter((flag) => {
+      if (TYPE_REMINDER.test(String(flag)) && typeBlocksApproval(q)) return false;
       if (!review) return true;
       if (flag === review.reason) return false;
       // The figure panel above the text already says this, with the buttons to settle it.
@@ -2462,7 +2528,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const review = figureReview(q);
     if (review?.status === "blocked_missing") return el("span", "chip yellow", "可能漏图 · 待处理");
     if (review?.status === "conflict") return el("span", "chip yellow", "配图冲突 · 待确认");
-    if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
+    if (approvalNeedsReview(q) && !typeBlocksApproval(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
     if (isAiApproved(q)) {
       const chip = el("span", "chip ai-approved", `${agentLabel(q)} 已通过 · 待你核对`);
       chip.title = "AI 助手对照原卷后打的勾，可以入库，题库里会标着“AI 审核”。你核对无误就点题号左边的方框确认。";
@@ -2617,7 +2683,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const head = el("header", "card-head");
     head.append(approvalTick(q), cardSelectionControl(q));
     if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
-    head.append(el("span", "qnum", questionLabel(q)), el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type), stateChip(q));
+    head.append(el("span", "qnum", questionLabel(q)), typePicker(q), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
     body.append(head);
 
@@ -2637,6 +2703,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const disagreement = disagreementPanel(q);
     if (disagreement) body.append(disagreement);
 
+    if (q.origin) {
+      const origin = el("p", "card-origin");
+      origin.append(el("span", "card-origin-label", "题源"), document.createTextNode(q.origin));
+      origin.title = "题干前印的出处，单独存放；组卷打印时默认不印。在“改字”里可以修改";
+      body.append(origin);
+    }
     const rendered = el("div", "rendered");
     if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed",
       figureAction: (figure) => tableAction(q, figure) });
@@ -2651,6 +2723,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const fixFigures = button(blockedLabel, "primary", () => focusFigureReview(q), "", { iconName: "image", key: "Enter" });
       fixFigures.title = "在黄色区域选择保留、调整或移除配图";
       actions.append(fixFigures);
+    } else if (!approved && typeBlocksApproval(q)) {
+      const pick = button("选题型", "primary", () => focusTypePicker(q), "", { key: "Enter" });
+      pick.title = "题型没读出来：在题号旁边选单选、多选、填空、判断或解答";
+      actions.append(pick);
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
@@ -3027,6 +3103,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       loadPapers();
       toast(data.message || "已重试处理");
     } catch (error) { toast(error.message, "error"); }
+  }
+
+  // 名字还是照片、截图的文件名（微信图片_2026…、IMG_1234）：题库里按它找不到这份卷子。
+  function looksLikeFileName(name) {
+    const text = String(name || "").trim();
+    return /^(微信图片|mmexport|wx_camera|IMG[_-]|DSC|DCIM|PXL_|Screenshot|屏幕截图|截图|Image[_ -]?\d|photo[_-]?\d|CamScanner|扫描全能王|未命名)/i.test(text)
+      || /^\d{8,}/.test(text);
   }
 
   function openRenameDialog() {
@@ -3410,7 +3493,52 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
+  // 设置 → 常用 → 功能开关（存在数据目录的 features.json，网页和后台共用）。
+  async function loadFeatureSwitches() {
+    const box = $("featureSwitches");
+    try {
+      const data = await api("/api/settings/features");
+      renderFeatureSwitches(data);
+    } catch (error) {
+      box.replaceChildren(el("p", "settings-footnote", `没读到功能开关：${error.message}`));
+    }
+  }
+
+  function renderFeatureSwitches(data) {
+    const box = $("featureSwitches");
+    box.replaceChildren();
+    (data.features || []).forEach((item) => {
+      const label = el("label", "settings-switch");
+      const text = el("span");
+      text.append(el("strong", "", item.label), el("small", "", item.help));
+      const input = el("input");
+      input.type = "checkbox";
+      input.setAttribute("role", "switch");
+      input.checked = Boolean(item.enabled);
+      input.addEventListener("change", async () => {
+        input.disabled = true;
+        try {
+          const saved = await api("/api/settings/features", { method: "POST", body: { features: { [item.key]: input.checked } } });
+          renderFeatureSwitches(saved);
+          toast(saved.message || "已保存", "success");
+        } catch (error) {
+          input.checked = !input.checked;
+          toast(error.message, "error");
+        } finally {
+          input.disabled = false;
+        }
+      });
+      label.append(text, input);
+      box.append(label);
+    });
+    const note = $("featureNote");
+    const tags = (data.features || []).find((item) => item.key === "knowledge_tags");
+    note.hidden = !(tags?.enabled && data.knowledge_file);
+    if (!note.hidden) note.textContent = `知识点目录在 ${data.knowledge_file}，可以用记事本改：每行一个知识点，# 开头的是章名。`;
+  }
+
   function openSettings() {
+    void loadFeatureSwitches();
     renderSettingsModels();
     renderSettingsReady();
     $("settingsLens").checked = state.lens;
@@ -3433,6 +3561,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
+  $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
   $("settingsArchive").addEventListener("click", () => closeSettingsThen(archivePaper));
@@ -3610,6 +3739,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     const typeRow = el("label", "field inline");
     typeRow.append(el("span", "", "题型"), typeSelect);
+    const origin = el("input", "origin-input");
+    origin.value = q.origin || "";
+    origin.maxLength = 120;
+    origin.placeholder = "题干前印的出处，例如 2026山东枣庄滕州二中月考；没有就留空";
+    origin.spellcheck = false;
+    const originRow = el("label", "field inline");
+    originRow.append(el("span", "", "题源"), origin);
     const stem = el("textarea", "stem-input");
     stem.value = q.stem;
     stem.rows = 2;
@@ -3678,14 +3814,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const cancel = button("取消", "", () => close());
     const bar = el("div", "editor-actions");
     bar.append(saveButton, cancel, el("p", "hint", "Ctrl+Enter 保存 · Esc 取消"));
-    editor.append(title, typeRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
+    editor.append(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
 
     const collect = () => ({
       stem: stem.value,
       options: Object.fromEntries(OPTION_KEYS.map((k) => [k, optionInputs[k].value]).filter(([, v]) => v.trim())),
       question_type: typeSelect.value,
       answer: answer.value,
-      analysis: analysis.value
+      analysis: analysis.value,
+      origin: origin.value
     });
     // One typeset per frame however fast the typing is.
     let frame = 0;
@@ -3750,6 +3887,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (toggle) toggle.hidden = true;
     card.querySelector(".rendered").hidden = true;
     card.querySelector(".card-actions").hidden = true;
+    const originLine = card.querySelector(".card-origin");
+    if (originLine) originLine.hidden = true;
     card.querySelector(".reads")?.remove();
     card.querySelector(".card-body").append(editor);
     // Keep the original in sight while typing: a wide crop that fits in the
@@ -5494,6 +5633,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (isApproved(questionById(draft))) { state.expanded.add(draft); renderCards(); }
         setCurrent(draft, { focus: true });
         document.querySelector(`[data-id="${draft}"]`)?.scrollIntoView({ block: "start" });
+        // 从题库里“题型待核对”点过来：直接去选题型。
+        if (params.get("fix") === "type" && typeBlocksApproval(questionById(draft))) {
+          requestAnimationFrame(() => focusTypePicker(questionById(draft)));
+        }
       }
     } else if (state.papers.length) {
       await selectPaper(state.papers[0].id);
