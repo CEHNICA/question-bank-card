@@ -184,7 +184,7 @@ def _finish(job: LibraryJob, status: str, error: str = "") -> None:
     job.save(update_fields=["status", "error", "updated_at"])
 
 
-def process_pending(limit: int = 20) -> int:
+def process_pending(limit: int = 5) -> int:
     """Run queued jobs (worker only).  Returns how many were handled."""
     handled = 0
     for _ in range(limit):

@@ -46,9 +46,12 @@ APP_EXE = "QuestionBankCard.exe"
 OPTION_KEYS = ("A", "B", "C", "D", "E")
 SLOTS = ("stem", *OPTION_KEYS)
 TYPES = {
-    "single_choice": "单选题", "multiple_choice": "多选题", "fill_blank": "填空题",
+    "single_choice": "单选题", "multiple_choice": "多选题", "fill_blank": "填空题", "true_false": "判断题",
     "free_response": "解答题", "unknown": "题型未定",
 }
+# 题型没读出来的题不能通过、不能入库（1.10）：先 fix --type 选一个。
+TYPE_BLOCKED = "题型还没定：用 fix --type 选题型（single_choice/multiple_choice/fill_blank/true_false/free_response）后才能通过"
+DECIDED_TYPES = [key for key in TYPES if key != "unknown"]
 STATES = {
     "waiting": "等待识读", "reading": "识读中", "green": "识读一致", "yellow": "需核对", "red": "识读失败",
 }
@@ -239,17 +242,26 @@ def issues(question: dict) -> list[str]:
         found.append(f"{FIGURE_BLOCKS[review['status']]}：{review.get('reason', '')}".rstrip("："))
     if question.get("approval_stale"):
         found.append("通过以后内容变了，需要重新核对")
+    blocked = type_blocked(question)
+    if blocked:
+        found.append(TYPE_BLOCKED)
     for flag in question.get("flags") or []:
+        if blocked and str(flag).startswith("题型没读出来"):
+            continue
         if flag not in found and not any(flag in item for item in found):
             found.append(flag)
     return found
+
+
+def type_blocked(question: dict) -> bool:
+    return bool(question.get("type_blocked")) and question.get("state") in {"green", "yellow"}
 
 
 def needs_check(question: dict) -> bool:
     review = question.get("figure_review") or {}
     return not approval(question) and (
         question.get("state") in {"yellow", "red"} or review.get("status") in FIGURE_BLOCKS
-        or bool(question.get("approval_stale"))
+        or bool(question.get("approval_stale")) or type_blocked(question)
     )
 
 
@@ -274,6 +286,8 @@ def card_summary(question: dict) -> dict:
         "number": question.get("number"),
         "group": group_title(question),
         "type": question.get("question_type"),
+        "type_blocked": type_blocked(question),
+        "origin": question.get("origin") or "",
         "state": question.get("state"),
         "approved_by": approval(question),
         "approval_agent": question.get("approval_agent") or "",
@@ -681,6 +695,8 @@ def cmd_show(client: Client, args) -> dict:
 def show_card(result: dict) -> str:
     lines = [f"第 {result['number']} 题 #{result['id']}  {TYPES.get(result['type'], result['type'])}  "
              f"{approval_label(result) or STATES.get(result['state'], result['state'])}"]
+    if result.get("origin"):
+        lines.append(f"题源：{result['origin']}（题干前印的出处，单独存放）")
     lines += [f"题干：{result['stem'] or '（空）'}"]
     for key, value in result["options"].items():
         lines.append(f"  {key}. {value}")
@@ -743,6 +759,16 @@ def cmd_fix(client: Client, args) -> dict:
     kind = args.type or question.get("question_type")
     if kind not in TYPES:
         raise CliError("--type 只能是 " + "、".join(TYPES))
+    origin = getattr(args, "origin", None)
+    text_given = any(value is not None for value in (stem, args.answer, args.analysis, origin)) \
+        or bool(args.option or args.clear_option)
+    if args.type and not text_given:
+        # Only the type: keep the text, its reading record and the other reminders.
+        if args.type == "unknown":
+            raise CliError("请选一个题型：" + "、".join(DECIDED_TYPES))
+        saved = client.post(f"/api/questions/{question['id']}/type",
+                            {"question_type": args.type, "by": "ai", "agent": client.agent})["question"]
+        return {"saved": True, **card_summary(saved), "options": saved.get("options") or {}}
     body = {
         "stem": stem if stem is not None else question.get("stem", ""),
         "options": {key: value for key, value in options.items() if str(value).strip()},
@@ -751,6 +777,8 @@ def cmd_fix(client: Client, args) -> dict:
         "analysis": read_text_arg(args.analysis, None) if args.analysis is not None else question.get("analysis", ""),
         "approve": False, "by": "ai", "agent": client.agent,
     }
+    if origin is not None:
+        body["origin"] = origin
     saved = client.post(f"/api/questions/{question['id']}/text", body)["question"]
     return {"saved": True, **card_summary(saved), "options": saved.get("options") or {}}
 
@@ -906,13 +934,21 @@ def cmd_library(client: Client, args) -> dict:
         query["type"] = args.type
     if args.review:
         query["review"] = args.review
+    if getattr(args, "answer", None):
+        query["answer"] = args.answer
+    if getattr(args, "tag", None):
+        query["tag"] = args.tag
     result = client.get("/api/library?" + urllib.parse.urlencode(query))
     items = [{
         "id": item["id"], "source": item.get("source_filename"), "number": item.get("number"),
         "type": item.get("question_type"), "version": item.get("version"),
         "review": (item.get("review") or {}).get("source", "human"),
+        "origin": item.get("origin") or "",
         "stem": (item.get("content") or {}).get("stem", ""),
         "options": (item.get("content") or {}).get("options") or {},
+        "answer": (item.get("content") or {}).get("answer", ""),
+        "tags": item.get("tags") or [],
+        "subquestions": item.get("subquestions") or 0,
     } for item in result.get("items", [])]
     return {"total": result.get("total", 0), "items": items}
 
@@ -921,7 +957,10 @@ def show_library(result: dict) -> str:
     lines = [f"题库里找到 {result['total']} 道" + (f"，下面是前 {len(result['items'])} 道：" if result["items"] else "。")]
     for item in result["items"]:
         review = "（AI 审核）" if item["review"] == "ai" else ""
-        lines.append(f"  {item['source']} 第 {item['number']} 题{review}：{first_line(item['stem'], 50)}")
+        origin = f"〔{item['origin']}〕" if item.get("origin") else ""
+        lines.append(f"  {item['source']} 第 {item['number']} 题{review}{origin}：{first_line(item['stem'], 50)}")
+        if item.get("tags"):
+            lines.append(f"      知识点：{'、'.join(item['tags'])}")
     return "\n".join(lines)
 
 
@@ -942,6 +981,7 @@ MCP_INSTRUCTIONS = (
     "你打的勾记成“AI 通过”，使用者会再核对。不要碰密钥；缺密钥请使用者在软件“设置 → 常用”里填写"
     "（MinerU 和魔搭都免费，status 会给出申请网址）。题卡写着“MinerU 初稿”时（AI 助手读题），"
     "题面还没人看图核对过：每一道都要对照截图逐字核对。"
+    "题型没读出来（type_blocked）的题不能通过：先用 fix_card 只传 type 选好题型。"
 )
 
 
@@ -976,7 +1016,9 @@ MCP_TOOLS = [
         "paper": PAPER, "card": CARD, "stem": {"type": "string"},
         "options": {"type": "object", "description": "要改的选项，例如 {\"B\": \"-3\"}；值为空字符串表示删掉该选项",
                     "additionalProperties": {"type": "string"}},
-        "type": {"type": "string", "enum": list(TYPES)}, "answer": {"type": "string"}, "analysis": {"type": "string"},
+        "type": {"type": "string", "enum": list(TYPES), "description": "只传 type 时只改题型"},
+        "answer": {"type": "string"}, "analysis": {"type": "string"},
+        "origin": {"type": "string", "description": "题源：题干前印的出处，如“2026××中学月考”"},
     }, ["paper", "card"])),
     ("set_figures", "处理一道题的配图：use 选候选图（编号见 show_card，如 [\"1\", \"2:A\"]）、keep 保留现有配图、none 确认无图。",
      _schema({"paper": PAPER, "card": CARD, "use": {"type": "array", "items": {"type": "string"}},
@@ -987,8 +1029,10 @@ MCP_TOOLS = [
     ("unapprove_card", "撤销自己（AI）打的勾。人工通过的不能撤。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("reread_card", "让题有据的读题模型重读一道题。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("publish_paper", "把已通过的题入库（AI 通过的题在题库里标着“AI 审核”）。", _schema({"paper": PAPER}, ["paper"])),
-    ("search_library", "在正式题库里搜题。", _schema({
+    ("search_library", "在正式题库里搜题（可按题源、知识点、有无答案找）。", _schema({
         "keywords": {"type": "string"}, "review": {"type": "string", "enum": ["human", "ai"]},
+        "answer": {"type": "string", "enum": ["yes", "no"], "description": "yes 只要有答案的，no 只要原卷没答案的"},
+        "tag": {"type": "string", "description": "知识点标签（设置里打开“知识点标签”后才有）"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
     })),
 ]
@@ -1028,7 +1072,7 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
             paper=a.get("paper", ""), card=a.get("card", ""), stem=a.get("stem"), stem_file=None,
             option=[f"{key}={value}" for key, value in options.items() if str(value).strip()],
             clear_option=[key for key, value in options.items() if not str(value).strip()],
-            type=a.get("type"), answer=a.get("answer"), analysis=a.get("analysis"))), []
+            type=a.get("type"), answer=a.get("answer"), analysis=a.get("analysis"), origin=a.get("origin"))), []
     if name == "set_figures":
         return cmd_figures(client, _ns(paper=a.get("paper", ""), card=a.get("card", ""), use=a.get("use") or [],
                                        keep=bool(a.get("keep")), none=bool(a.get("none")))), []
@@ -1043,7 +1087,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_publish(client, _ns(paper=a.get("paper", ""))), []
     if name == "search_library":
         return cmd_library(client, _ns(keywords=str(a.get("keywords") or "").split(), paper=None, type=None,
-                                       review=a.get("review"), limit=int(a.get("limit") or 20))), []
+                                       review=a.get("review"), answer=a.get("answer"), tag=a.get("tag"),
+                                       limit=int(a.get("limit") or 20))), []
     raise CliError(f"没有这个工具：{name}")
 
 
@@ -1185,7 +1230,8 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--stem-file", help="从 UTF-8 文本文件读题干（中文和公式多时推荐）")
     fix.add_argument("--option", action="append", help="改选项：A=内容，可写多次")
     fix.add_argument("--clear-option", action="append", help="删掉一个选项，例如 E")
-    fix.add_argument("--type", choices=list(TYPES))
+    fix.add_argument("--type", choices=list(TYPES), help="只给 --type 时只改题型（题型没读出来的题要先选题型才能通过）")
+    fix.add_argument("--origin", help="题源（题干前印的出处，如 2026××中学月考）；写空字符串清掉")
     fix.add_argument("--answer")
     fix.add_argument("--analysis")
     fix.add_argument("--force", action="store_true", help="使用者已人工通过的题也改（只在使用者要求时用）")
@@ -1221,6 +1267,8 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--paper")
     library.add_argument("--type", choices=list(TYPES))
     library.add_argument("--review", choices=["human", "ai"])
+    library.add_argument("--answer", choices=["yes", "no"], help="yes 只要有答案的，no 只要原卷没答案的")
+    library.add_argument("--tag", help="知识点标签（设置里打开“知识点标签”后才有）")
     library.add_argument("--limit", type=int, default=20)
 
     sub.add_parser("mcp", parents=[common], help="作为 MCP 服务器运行（stdio），给支持 MCP 的 AI 用")

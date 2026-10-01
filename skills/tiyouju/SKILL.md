@@ -92,6 +92,9 @@ tiyouju publish latest                       # 入库
 5. **表格**：逐格对照，空格子也要对得上。
 6. **配图**：原卷上有图，题卡上也要有图，而且是这道题的图，放在对的位置（题干还是某个选项）。
 
+7. **题型**：单选、多选、填空、判断、解答，和原卷对得上。疑点写着“题型还没定”的题**不能打勾**，先用 `fix --type` 选好题型。
+8. **题源**：题干前印的出处（“[2026××中学月考]”“（2025·北京海淀·期中）”）不属于题目，题有据会自动放进“题源”；`show` 里单独列出。没拆出来就用 `fix --origin` 填上，并把它从题干里删掉。
+
 疑点里的“两次识读不一致”“可能漏图”“配图冲突”要重点看。`show` 会列出几次识读的写法，以原卷为准。写法不同（例如 `$\triangle ABC$` 和 `△ABC`）不算错。
 
 ## 改字
@@ -102,13 +105,14 @@ tiyouju publish latest                       # 入库
 tiyouju fix latest 9 --stem-file 9.txt
 tiyouju fix latest 9 --option B=-3 --option D=7
 tiyouju fix latest 9 --clear-option E
-tiyouju fix latest 9 --type single_choice    # single_choice 单选 / multiple_choice 多选 / fill_blank 填空 / free_response 解答
+tiyouju fix latest 9 --type free_response    # 只改题型：single_choice 单选 / multiple_choice 多选 / fill_blank 填空 / true_false 判断 / free_response 解答
+tiyouju fix latest 9 --origin "2026山东枣庄滕州二中月考"   # 题源（题干前印的出处）
 ```
 
 格式：
 
 - 数学式用 LaTeX，行内用 `$...$` 包住：`$\frac{1}{2}$`、`$x^2$`、`$\sqrt{3}$`、`$\angle ABC$`、`$AB \parallel CD$`。
-- 中文和中文标点照原卷写。填空的横线写 `____`，选择题的括号写 `（  ）`。
+- 中文和中文标点照原卷写。填空的横线写 `____`，选择题的括号写 `（  ）`。中文句子里的引号写 “”（题有据也会自动把 "…" 换成 “…”）。
 - 文字和数字组成的表格写成 Markdown 表格，每行一行，第二行是 `|---|---|`。
 - 选项只写内容，不写“A.”。
 

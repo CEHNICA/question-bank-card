@@ -146,6 +146,28 @@ class TiyoujuCliTests(LiveServerTestCase):
         code, found = run_json("library", "--review", "ai")
         self.assertEqual(found["total"], 3)
 
+    def test_an_undecided_type_is_chosen_before_approving_and_origin_is_shown(self):
+        Question.objects.filter(pk=self.q1.pk).update(question_type="unknown", origin="2025·北京海淀·期中")
+        code, cards = run_json("cards", "期中", "--filter", "todo")
+        card = next(item for item in cards["cards"] if item["number"] == 1)
+        self.assertTrue(card["type_blocked"])
+        self.assertTrue(card["issues"][0].startswith("题型还没定"))
+        code, approved = run_json("approve", "期中", "1")
+        self.assertEqual(approved["approved"], 0)
+        self.assertIn("题型还没定", approved["results"][0]["error"])
+        code, text, _err = run("show", "期中", "1", "--no-images")
+        self.assertIn("题源：2025·北京海淀·期中", text)
+        # Only --type: the type action, nothing else touched.
+        code, fixed = run_json("fix", "期中", "1", "--type", "single_choice", "--agent", "豆包")
+        self.assertEqual(code, 0, fixed)
+        self.q1.refresh_from_db()
+        self.assertEqual((self.q1.question_type, self.q1.edited, self.q1.text_source), ("single_choice", False, ""))
+        code, approved = run_json("approve", "期中", "1")
+        self.assertEqual(approved["approved"], 1)
+        code, fixed = run_json("fix", "期中", "2", "--origin", "【2026·滕州二中月考】")
+        self.q2.refresh_from_db()
+        self.assertEqual(self.q2.origin, "2026·滕州二中月考")
+
     def test_a_persons_approval_is_left_alone(self):
         self.client.post(f"/api/questions/{self.q1.pk}/approve", data=json.dumps({"approved": True}),
                          content_type="application/json", HTTP_X_QB_REQUEST="1")
