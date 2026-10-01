@@ -75,7 +75,19 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-tag:hover { border-color: var(--accent); color: var(--accent); }
 .library-tag.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .qb-answer.ai-answer { border-top-style: dotted; }
-.qb-answer.ai-answer > summary { color: #7a5314; }
+/* 1.10.5: 每道题单独“看答案” */
+.library-answer { margin-top: 12px; }
+.library-answer > summary { list-style: none; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 13px;
+  border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface); color: #7a6a44;
+  font-family: var(--ui-font); font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none; }
+.library-answer > summary::-webkit-details-marker { display: none; }
+.library-answer > summary::after { content: "▾"; font-size: 11px; }
+.library-answer[open] > summary::after { content: "▴"; }
+.library-answer > summary:hover { border-color: #b9a77a; background: var(--surface-2); }
+.library-answer > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.library-answer .when-open, .library-answer[open] .when-closed { display: none; }
+.library-answer[open] .when-open { display: inline; }
+.library-answer-label { margin: 0; color: #7a5314; font-family: var(--ui-font); font-size: 12px; font-weight: 700; }
 .library-job-error { margin: 0; font-size: 12px; color: var(--amber); }
 .library-extra-tools { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .library-extra-tools .helper { margin: 0; }

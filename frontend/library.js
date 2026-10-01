@@ -4,7 +4,7 @@
   const QB = window.QBRender;
   const $ = (id) => document.getElementById(id);
   const ui = {
-    search: $("searchInput"), source: $("sourceSelect"), types: $("typeFilters"), answers: $("answerToggle"),
+    search: $("searchInput"), source: $("sourceSelect"), types: $("typeFilters"),
     status: $("libraryStatus"), list: $("libraryList"), more: $("moreButton"),
     basketButton: $("basketButton"), basketCount: $("basketCount"),
     sourceDialog: $("sourceDialog"), sourceTitle: $("sourceTitle"), sourcePages: $("sourcePages"), sourceReviewLink: $("sourceReviewLink"),
@@ -21,6 +21,8 @@
     review: ["human", "ai"].includes(params.get("review")) ? params.get("review") : "",
     answer: ["yes", "no"].includes(params.get("answer")) ? params.get("answer") : "",
     tag: params.get("tag") || "",
+    // 1.10.5: 翻开了答案的题（每题单独翻开，不再一键全部展开）。
+    opened: new Set(),
     features: {},
     poll: null,
     focus: params.get("focus") || "",
@@ -300,7 +302,9 @@
       meta.append(badge);
     }
     const paper = node("div", "paper");
-    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: ui.answers.checked ? "open" : "collapsed" });
+    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
+    const reveal = answerReveal(item);
+    if (reveal) paper.append(reveal);
     const extras = extrasNode(item);
     if (extras) paper.append(extras);
     const actions = node("footer", "library-card-actions");
@@ -341,7 +345,39 @@
     return link;
   }
 
-  // 知识点标签和 AI 参考答案：不属于题面快照，单独显示。
+  // 每道题单独“看答案”：几百道题不会一下全摊开（1.10.5）。原卷的答案与解析、
+  // AI 参考答案（打开了这个功能时）都在里面；没有答案的题不出这个按钮。
+  function answerReveal(item) {
+    const content = item.content || {};
+    const original = Boolean(String(content.answer ?? "").trim() || String(content.analysis ?? "").trim());
+    const ai = item.ai_answer && state.features.ai_answer ? item.ai_answer : null;
+    if (!original && !ai) return null;
+    const box = node("details", "library-answer");
+    box.open = state.opened.has(item.id);
+    const summary = node("summary", "library-answer-toggle");
+    summary.append(node("span", "when-closed", "看答案"), node("span", "when-open", "收起答案"));
+    box.append(summary);
+    box.addEventListener("toggle", () => {
+      if (box.open) state.opened.add(item.id); else state.opened.delete(item.id);
+    });
+    if (original) {
+      const part = node("div", "qb-answer");
+      part.append(...QB.answerRows(document, content));
+      box.append(part);
+    }
+    if (ai) {
+      const part = node("div", "qb-answer ai-answer");
+      const label = node("p", "library-answer-label", "AI 参考答案 · 未核对");
+      label.title = `${ai.engine || "读题模型"} 做的，没有人核对过；用之前请自己算一遍`;
+      const rows = QB.answerRows(document, ai, { empty: "（空）" });
+      if (!String(ai.analysis || "").trim()) rows.pop();
+      part.append(label, ...rows);
+      box.append(part);
+    }
+    return box;
+  }
+
+  // 知识点标签：不属于题面快照，单独显示。
   function extrasNode(item) {
     const box = node("div", "library-extras");
     if ((item.tags || []).length) {
@@ -355,28 +391,6 @@
         row.append(chip);
       });
       box.append(row);
-    }
-    if (item.ai_answer && state.features.ai_answer) {
-      const details = node("details", "qb-answer ai-answer");
-      if (ui.answers.checked) details.open = true;
-      const summary = node("summary", "", "AI 参考答案 · 未核对");
-      summary.title = `${item.ai_answer.engine || "读题模型"} 做的，没有人核对过；用之前请自己算一遍`;
-      details.append(summary);
-      const answer = node("p", "qb-answer-row");
-      answer.append(node("strong", "", "答案"));
-      const answerBody = node("span");
-      QB.renderTypeset(answerBody, item.ai_answer.answer, { empty: "（空）" });
-      answer.append(answerBody);
-      details.append(answer);
-      if (String(item.ai_answer.analysis || "").trim()) {
-        const analysis = node("div", "qb-answer-row");
-        analysis.append(node("strong", "", "解析"));
-        const body = node("div", "qb-analysis");
-        QB.renderTypeset(body, item.ai_answer.analysis);
-        analysis.append(body);
-        details.append(analysis);
-      }
-      box.append(details);
     }
     Object.entries(item.job_errors || {})
       .filter(([kind]) => (kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer))
@@ -419,7 +433,7 @@
     const previous = state.cards || new Map();
     state.cards = new Map();
     state.items.forEach((item) => {
-      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, ui.answers.checked, state.tag]);
+      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.opened.has(item.id), state.tag]);
       const kept = previous.get(item.id);
       const node = kept && kept.signature === signature ? kept.node : card(item);
       state.cards.set(item.id, { signature, node });
@@ -645,7 +659,6 @@
     searchTimer = window.setTimeout(() => { state.q = ui.search.value; syncUrl(); load(); }, 250);
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
-  ui.answers.addEventListener("change", render);
   ui.more.addEventListener("click", () => load({ append: true }));
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => window.print());

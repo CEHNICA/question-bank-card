@@ -1080,25 +1080,36 @@
     if (mode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || opts.showEmptyAnswer)) {
       const box = make("details", "qb-answer");
       if (mode === "open") box.open = true;
-      box.append(make("summary", "", "答案与解析"));
-      const answer = make("p", "qb-answer-row");
-      answer.append(make("strong", "", "答案"));
-      const answerBody = make("span");
-      // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
-      if (!opts.literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
-        answerBody.className = "qb-choice-answer";
-        answerBody.textContent = String(content.answer).trim();
-      } else view(answerBody, content.answer, { empty: "原卷未提供" });
-      answer.append(answerBody);
-      const analysis = make("div", "qb-answer-row");
-      analysis.append(make("strong", "", "解析"));
-      const analysisBody = make("div", "qb-analysis");
-      view(analysisBody, content.analysis, { empty: "原卷未提供" });
-      analysis.append(analysisBody);
-      box.append(answer, analysis);
+      box.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal }));
       container.append(box);
     }
     return container;
+  }
+
+  /* “答案”“解析”两行（题卡、题库的“看答案”共用）。empty：没有时写什么。 */
+  function answerRows(doc, content, { literal = false, empty = "原卷未提供" } = {}) {
+    const make = (tag, className, text) => {
+      const element = doc.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined) element.textContent = text;
+      return element;
+    };
+    const view = literal ? renderLiteral : renderTypeset;
+    const answer = make("p", "qb-answer-row");
+    answer.append(make("strong", "", "答案"));
+    const answerBody = make("span");
+    // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
+    if (!literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
+      answerBody.className = "qb-choice-answer";
+      answerBody.textContent = String(content.answer).trim();
+    } else view(answerBody, content.answer, { empty });
+    answer.append(answerBody);
+    const analysis = make("div", "qb-answer-row");
+    analysis.append(make("strong", "", "解析"));
+    const analysisBody = make("div", "qb-analysis");
+    view(analysisBody, content.analysis, { empty });
+    analysis.append(analysisBody);
+    return [answer, analysis];
   }
 
   // 在给定边界内寻找最大的可用缩放。measure(scale) 可以测量由多段截图、
@@ -1128,7 +1139,7 @@
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
+    renderTypeset, renderLiteral, renderQuestion, answerRows, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
     tidiedMarks
   };
 });
