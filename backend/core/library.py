@@ -440,8 +440,27 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
     return paper, True
 
 
+LIVE_PUBLICATION_FIELDS = ("id", "question_id", "version", "content_hash", "status")
+
+
+def live_publications_prefetch():
+    """For a list of cards: each card's published versions in one query (``publication_state`` uses it)."""
+    from django.db.models import Prefetch
+
+    return Prefetch(
+        "publications",
+        queryset=PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+        .only(*LIVE_PUBLICATION_FIELDS).order_by("-version"),
+        to_attr="live_publications",
+    )
+
+
 def publication_state(question: Question) -> dict | None:
-    live = question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).order_by("-version").first()
+    prefetched = getattr(question, "live_publications", None)
+    if prefetched is not None:
+        live = prefetched[0] if prefetched else None
+    else:
+        live = question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).order_by("-version").first()
     if live is None:
         return None
     return {"id": str(live.id), "version": live.version,

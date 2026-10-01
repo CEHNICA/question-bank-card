@@ -1481,14 +1481,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const container = $("cards");
     const shown = state.questions.filter(visible);
     const keep = new Set(shown.map((q) => q.id));
+    // Look each card up in a map: a selector search per card is slow for a 600-card book.
+    const existing = new Map();
     [...container.children].forEach((child) => {
       const id = Number(child.dataset.id);
       if (!keep.has(id) && !state.editing.has(id)) { child.remove(); state.rendered.delete(id); }
+      else if (child.dataset.id && !existing.has(id)) existing.set(id, child);
     });
     let previous = null;
     shown.forEach((q) => {
       const signature = JSON.stringify([q, state.expanded.has(q.id), state.paper?.pages_version]);
-      let card = container.querySelector(`[data-id="${q.id}"]`);
+      let card = existing.get(q.id) || null;
       if (!card || (state.rendered.get(q.id) !== signature && !state.editing.has(q.id))) {
         const fresh = renderCard(q);
         if (card) card.replaceWith(fresh); else container.append(fresh);

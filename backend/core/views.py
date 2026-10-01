@@ -8,12 +8,16 @@ import os
 import re
 import shutil
 import unicodedata
+import threading
 import uuid
+from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import models, transaction
+from django.db.models.functions import Cast
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -31,7 +35,7 @@ from .figure_policy import (
     FLAG_ROW_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
     cue_matches, figure_flag,
-    stored_or_derived_review,
+    reusing_reviews, stored_or_derived_review,
 )
 from .models import (
     Block, ImportChunk, LibraryJob, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
@@ -320,7 +324,64 @@ def _processing_json(paper: Paper) -> dict | None:
     return progress
 
 
-def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
+# Whether each card's approval still holds and whether its figures block it,
+# remembered per card against the card's raw database row (1.10.3).  The paper
+# list is fetched every 15 seconds and every tick returns the paper's counts;
+# for a 600-card textbook working these out again decoded every card's saved
+# readings and took a second or more each time.  Any change to the row, the
+# paper's name or the card's group gives a new fingerprint, so a stale answer
+# is never reused.
+_VERDICTS: "OrderedDict[int, tuple[str, bool, bool]]" = OrderedDict()
+_VERDICTS_LIMIT = 50_000
+_VERDICTS_LOCK = threading.Lock()
+
+
+def _verdict(row: Question) -> tuple[bool, bool]:
+    return library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+
+
+def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tuple[int, str, bool, bool]]:
+    """(id, state, approval current, figures block approval) for each card of the paper."""
+    if rows is not None:
+        with reusing_reviews():
+            return [(row.pk, row.state, *_verdict(row)) for row in rows]
+    json_fields = [field.attname for field in Question._meta.concrete_fields if isinstance(field, models.JSONField)]
+    plain_fields = [field.attname for field in Question._meta.concrete_fields
+                    if not isinstance(field, models.JSONField)]
+    raw = list(
+        paper.questions.annotate(**{f"raw_{name}": Cast(name, models.TextField()) for name in json_fields})
+        .values_list(*plain_fields, *[f"raw_{name}" for name in json_fields])
+    )
+    groups = {group.pk: (group.title, group.sequence) for group in paper.question_groups.all()}
+    pk_at, state_at, group_at = (plain_fields.index(name) for name in ("id", "state", "group_id"))
+    fingerprints = {
+        row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name)).encode()).hexdigest()
+        for row in raw
+    }
+    known: dict[int, tuple[bool, bool]] = {}
+    with _VERDICTS_LOCK:
+        for pk, fingerprint in fingerprints.items():
+            held = _VERDICTS.get(pk)
+            if held and held[0] == fingerprint:
+                known[pk] = held[1:]
+                _VERDICTS.move_to_end(pk)
+    missing = [pk for pk in fingerprints if pk not in known]
+    if missing:
+        with reusing_reviews():
+            for start in range(0, len(missing), 500):
+                for row in paper.questions.select_related("paper", "group").filter(pk__in=missing[start:start + 500]):
+                    known[row.pk] = _verdict(row)
+        with _VERDICTS_LOCK:
+            for pk in missing:
+                if pk in known:
+                    _VERDICTS[pk] = (fingerprints[pk], *known[pk])
+                    _VERDICTS.move_to_end(pk)
+            while len(_VERDICTS) > _VERDICTS_LIMIT:
+                _VERDICTS.popitem(last=False)
+    return [(row[pk_at], row[state_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
+
+
+def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] | None = None) -> dict:
     info = paper.photos or {}
     quota_paused = (
         paper.status == Paper.Status.FAILED
@@ -361,11 +422,11 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
         } if info else None,
     }
     if with_counts:
-        rows = list(paper.questions.select_related("paper", "group"))
-        approved_ids = {row.pk for row in rows if library.approval_is_current(row)}
-        figure_blocked_ids = {
-            row.pk for row in rows if blocks_approval(stored_or_derived_review(row))
-        }
+        # ``rows``: the cards the caller already loaded (the review page), so they are not read twice.
+        verdicts = card_verdicts(paper, rows)
+        rows = [SimpleNamespace(pk=pk, state=state) for pk, state, _approved, _blocked in verdicts]
+        approved_ids = {pk for pk, _state, approved, _blocked in verdicts if approved}
+        figure_blocked_ids = {pk for pk, _state, _approved, blocked in verdicts if blocked}
         published = PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)\
             .values("question_id").distinct().count()
         data["counts"] = {
@@ -1336,14 +1397,17 @@ def paper_detail(request, paper_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
     paper_tables = tables.table_blocks(paper)
-    return JsonResponse({
-        "paper": paper_json(paper),
-        "questions": [
-            question_json(q, paper_tables)
-            for q in paper.questions.select_related("group").prefetch_related("region_reads")
-            .order_by("group__sequence", "number", "id")
-        ],
-    })
+    rows = list(
+        paper.questions.select_related("group")
+        .prefetch_related("region_reads", library.live_publications_prefetch())
+        .order_by("group__sequence", "number", "id")
+    )
+    # A textbook has 600+ cards: each card's figure review is derived once for
+    # the card, its approval, its publication and the counts (1.10.3).
+    with reusing_reviews():
+        questions = [question_json(q, paper_tables) for q in rows]
+        data = paper_json(paper, rows=rows)
+    return JsonResponse({"paper": data, "questions": questions})
 
 
 @csrf_exempt

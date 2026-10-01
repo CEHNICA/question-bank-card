@@ -984,15 +984,19 @@
    * “∠ABD=∠CBD” 这类选项会被硬折行。渲染后按容器宽度逐级降为 2 列或 1 列。
    */
   function fitOptions(root) {
-    const lists = root?.querySelectorAll ? root.querySelectorAll(".qb-options[data-widest]") : [];
-    lists.forEach((list) => {
-      const width = list.clientWidth;
+    const lists = root?.querySelectorAll ? [...root.querySelectorAll(".qb-options[data-widest]")] : [];
+    // Measure every list first, then set the classes: measuring after each change
+    // made the browser lay out the whole page again for every list (slow on a 600-card book).
+    const sizes = lists.map((list) => [list.clientWidth, parseFloat(getComputedStyle(list).fontSize) || 16]);
+    lists.forEach((list, index) => {
+      const [width, fontSize] = sizes[index];
       if (!width) return;
       const preferred = Number(list.dataset.cols || 1);
       const widest = Number(list.dataset.widest || 0);
-      const fontSize = parseFloat(getComputedStyle(list).fontSize) || 16;
       const need = (cols) => cols * (widest * fontSize * 0.5 + fontSize * 2.4) + (cols - 1) * fontSize;
       const fitted = [5, 4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
+      const set = ["cols-1", "cols-2", "cols-4", "cols-5"].filter((name) => list.classList.contains(name));
+      if (set.length === 1 && set[0] === `cols-${fitted}`) return;  // already so: no style change
       list.classList.remove("cols-1", "cols-2", "cols-4", "cols-5");
       list.classList.add(`cols-${fitted}`);
     });

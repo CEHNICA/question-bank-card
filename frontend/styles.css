@@ -350,7 +350,12 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .cards-empty strong { color: var(--ink); font-size: 15px; }
 .card { position: relative; display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 23fr) minmax(0, 20fr);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-  overflow: clip; transition: box-shadow .18s, border-color .18s; }
+  overflow: clip; transition: box-shadow .18s, border-color .18s;
+  /* 1.10.3: a 600-card textbook laid out every card before showing the first.  Cards off
+     screen are now laid out when they come near (the card already clips its content). */
+  content-visibility: auto; contain-intrinsic-size: auto 320px; }
+.card.compact { contain-intrinsic-size: auto 52px; }
+.card.is-current, .card.editing { content-visibility: visible; }
 .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; z-index: 1; }
 .card.state-yellow::before { background: var(--amber-bar); }
 .card.state-red::before { background: var(--red); }

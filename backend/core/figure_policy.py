@@ -7,6 +7,8 @@ the candidate assignments returned by the existing first reader.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 from copy import deepcopy
 import hashlib
 import json
@@ -660,7 +662,38 @@ def _apply_automatic_upgrade_in_memory(question, review: dict) -> dict:
     return review
 
 
+# A page of 600+ cards asks for each card's review several times (the card,
+# its approval, its publication, the counts); deriving it runs the cue rules
+# every time.  Read-only views wrap their work in ``reusing_reviews()`` so each
+# loaded card is derived once.  Outside it nothing is remembered, so code that
+# changes a card and asks again always gets a fresh answer.
+_REVIEW_MEMO: contextvars.ContextVar[dict | None] = contextvars.ContextVar("figure_review_memo", default=None)
+
+
+@contextlib.contextmanager
+def reusing_reviews():
+    if _REVIEW_MEMO.get() is not None:
+        yield
+        return
+    token = _REVIEW_MEMO.set({})
+    try:
+        yield
+    finally:
+        _REVIEW_MEMO.reset(token)
+
+
 def stored_or_derived_review(question, *, ignored_candidates: list[str] | None = None) -> dict:
+    memo = _REVIEW_MEMO.get()
+    if memo is None or ignored_candidates is not None:
+        return _stored_or_derived_review(question, ignored_candidates=ignored_candidates)
+    held = memo.get(id(question))
+    if held is None or held[0] is not question:
+        held = (question, _stored_or_derived_review(question))
+        memo[id(question)] = held
+    return deepcopy(held[1])
+
+
+def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None = None) -> dict:
     """Return a human decision or the current deterministic automatic decision.
 
     Human confirmations are immutable here.  An automatic (or legacy
