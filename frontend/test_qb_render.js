@@ -58,3 +58,29 @@ assert.ok(joinedFit > 0.49 && joinedFit <= 0.501);
 assert.equal(QB.fitScale(() => ({ width: 900, height: 9000 }), 900, 100, { min: 0.04 }), 0.04);
 
 console.log("qb-render regression checks: OK");
+
+// A fifth option is shown only when printed; short ones sit on one row.
+assert.deepEqual(QB.shownOptionKeys({ A: "1", B: "2", C: "3", D: "4" }), ["A", "B", "C", "D"]);
+assert.deepEqual(QB.shownOptionKeys({ A: "0个", B: "1个", C: "2个", D: "3个", E: "4个" }), ["A", "B", "C", "D", "E"]);
+assert.deepEqual(QB.shownOptionKeys({}, [{ slot: "E" }]), ["A", "B", "C", "D", "E"]);
+assert.equal(QB.optionColumns({ A: "0个", B: "1个", C: "2个", D: "3个", E: "4个" }), 5);
+assert.equal(QB.optionColumns({ A: "1", B: "2", C: "3", D: "4" }), 4);
+
+// English stems: words stay text (with their spaces); only the maths inside is typeset.
+{
+  const runs = (text) => QB.detectRuns(text).map((run) => run.text);
+  assert.deepEqual(runs("The graph below shows the temperature during a morning experiment."), []);
+  assert.deepEqual(runs("At what time did the temperature first reach 18°C?"), ["18°C"]);
+  assert.deepEqual(runs("Find the value of x when x + 1 = 3."), ["x", "x + 1 = 3"]);
+  assert.deepEqual(runs("If AB = 5 and BC = 3, find AC."), ["AB = 5", "BC = 3", "AC"]);
+  assert.deepEqual(runs("Let a be a number and a + b = 2"), ["a", "a + b = 2"]);
+  // Chinese stems keep their old behaviour.
+  assert.deepEqual(runs("在Rt△ABC中，AB=5"), ["Rt△ABC", "AB=5"]);
+  assert.deepEqual(runs("sin A + cos B"), ["sin A + cos B"]);
+  const segments = QB.typesetSegments("The graph below shows the temperature.");
+  assert.ok(segments.every((segment) => segment.type !== "math"), JSON.stringify(segments));
+}
+console.log("english prose checks: OK");
+assert.match(QB.runToLatex("18°C"), /\\mathrm\{C\}$/);
+assert.doesNotMatch(QB.runToLatex("∠ACB"), /mathrm/);
+console.log("temperature unit checks: OK");

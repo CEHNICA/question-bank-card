@@ -1,0 +1,1682 @@
+{
+ "version": 1,
+ "name": "示例试卷（新手练习用）",
+ "filename": "示例试卷.pdf",
+ "pages": [
+  {
+   "page_idx": 0,
+   "width": 595.28,
+   "height": 841.89
+  },
+  {
+   "page_idx": 1,
+   "width": 595.28,
+   "height": 841.89
+  },
+  {
+   "page_idx": 2,
+   "width": 595.28,
+   "height": 841.89
+  }
+ ],
+ "blocks": [
+  {
+   "seq": 0,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    87.0,
+    58.0,
+    347.0,
+    84.0
+   ],
+   "text": "题有据功能演示卷"
+  },
+  {
+   "seq": 1,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    73.0,
+    131.0,
+    213.0,
+    146.0
+   ],
+   "text": "代数 · 几何 · 统计"
+  },
+  {
+   "seq": 2,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    68.0,
+    167.0,
+    757.0,
+    229.0
+   ],
+   "text": "1. 已知集合 $A = \\{ x \\vert x ^ { 2 } - 5 x + 6 = 0 \\}$ ，则 A 的元素个数是（　）。A. 0 B. 1 C. 2 D. 3"
+  },
+  {
+   "seq": 3,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    67.0,
+    282.0,
+    660.0,
+    380.0
+   ],
+   "text": "2. 如图，在 △ABC 中， $A D \\bot B C$ $\\mathsf { A B } { = } \\mathsf { A C } _ { \\circ }$ 下列结论一定成立的是（　）。A. BD=CD B. $\\angle B = 9 0 ^ { \\circ }$ C. AB=BC D. $A D = B C$"
+  },
+  {
+   "seq": 4,
+   "type": "image",
+   "page_idx": 0,
+   "bbox": [
+    613.0,
+    317.0,
+    808.0,
+    435.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 5,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    68.0,
+    469.0,
+    620.0,
+    486.0
+   ],
+   "text": "3. 某小组记录了课外阅读时长，数据如下表。平均阅读时长为（　）。"
+  },
+  {
+   "seq": 6,
+   "type": "table",
+   "page_idx": 0,
+   "bbox": [
+    90.0,
+    521.0,
+    764.0,
+    630.0
+   ],
+   "text": "",
+   "html": "<table><tr><td>阅读时长/分钟</td><td>20</td><td>30</td><td>40</td><td>50</td></tr><tr><td>人数</td><td>3</td><td>7</td><td>8</td><td>2</td></tr></table>"
+  },
+  {
+   "seq": 7,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    68.0,
+    689.0,
+    586.0,
+    705.0
+   ],
+   "text": "4. 一辆自行车以 12 km/h 的速度行驶 45 分钟，共行驶多少千米？"
+  },
+  {
+   "seq": 8,
+   "type": "text",
+   "page_idx": 0,
+   "bbox": [
+    102.0,
+    730.0,
+    368.0,
+    745.0
+   ],
+   "text": "请写出计算过程，并说明单位换算。"
+  },
+  {
+   "seq": 9,
+   "type": "header",
+   "page_idx": 0,
+   "bbox": [
+    705.0,
+    65.0,
+    910.0,
+    79.0
+   ],
+   "text": "原创演示数据 · 可公开使用"
+  },
+  {
+   "seq": 10,
+   "type": "footer",
+   "page_idx": 0,
+   "bbox": [
+    764.0,
+    959.0,
+    818.0,
+    972.0
+   ],
+   "text": "题有据"
+  },
+  {
+   "seq": 11,
+   "type": "page_number",
+   "page_idx": 0,
+   "bbox": [
+    828.0,
+    959.0,
+    929.0,
+    972.0
+   ],
+   "text": "第 1 页 / 共 3 页"
+  },
+  {
+   "seq": 12,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    87.0,
+    58.0,
+    347.0,
+    85.0
+   ],
+   "text": "题有据功能演示卷"
+  },
+  {
+   "seq": 13,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    48.0,
+    131.0,
+    240.0,
+    146.0
+   ],
+   "text": "函数 · English · 空间图形"
+  },
+  {
+   "seq": 14,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    68.0,
+    168.0,
+    638.0,
+    187.0
+   ],
+   "text": "5. As shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3)."
+  },
+  {
+   "seq": 15,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    99.0,
+    198.0,
+    396.0,
+    303.0
+   ],
+   "text": "Which equation represents line ℓ? A. $y = x + 1$ B. $y = 1 / 2 x + 2$ C. $y = 2 x + 1$ D. $y = - x + 1$"
+  },
+  {
+   "seq": 16,
+   "type": "image",
+   "page_idx": 1,
+   "bbox": [
+    608.0,
+    180.0,
+    884.0,
+    316.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 17,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    68.0,
+    376.0,
+    705.0,
+    394.0
+   ],
+   "text": "6. The graph below shows the temperature during a morning experiment."
+  },
+  {
+   "seq": 18,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    102.0,
+    409.0,
+    507.0,
+    425.0
+   ],
+   "text": "At what time did the temperature first reach $1 8 ^ { \\circ } \\mathsf { C } ?$"
+  },
+  {
+   "seq": 19,
+   "type": "image",
+   "page_idx": 1,
+   "bbox": [
+    573.0,
+    414.0,
+    880.0,
+    529.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 20,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    68.0,
+    592.0,
+    668.0,
+    609.0
+   ],
+   "text": "7. Solve $3 ( x - 2 ) = 2 x + 5$ . Show each transformation and verify the result."
+  },
+  {
+   "seq": 21,
+   "type": "text",
+   "page_idx": 1,
+   "bbox": [
+    68.0,
+    678.0,
+    633.0,
+    728.0
+   ],
+   "text": "8. 参照右侧三棱柱示意图，若底面三角形面积为 $1 2 \\thinspace { \\mathsf { c m } } ^ { 2 }$ ，棱柱高为 8 cm，求该三棱柱的体积。"
+  },
+  {
+   "seq": 22,
+   "type": "image",
+   "page_idx": 1,
+   "bbox": [
+    650.0,
+    674.0,
+    892.0,
+    794.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 23,
+   "type": "header",
+   "page_idx": 1,
+   "bbox": [
+    705.0,
+    65.0,
+    910.0,
+    80.0
+   ],
+   "text": "原创演示数据 · 可公开使用"
+  },
+  {
+   "seq": 24,
+   "type": "footer",
+   "page_idx": 1,
+   "bbox": [
+    764.0,
+    959.0,
+    816.0,
+    972.0
+   ],
+   "text": "题有据"
+  },
+  {
+   "seq": 25,
+   "type": "page_number",
+   "page_idx": 1,
+   "bbox": [
+    828.0,
+    959.0,
+    929.0,
+    972.0
+   ],
+   "text": "第 2 页 / 共 3 页"
+  },
+  {
+   "seq": 26,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    85.0,
+    58.0,
+    347.0,
+    84.0
+   ],
+   "text": "题有据功能演示卷"
+  },
+  {
+   "seq": 27,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    73.0,
+    131.0,
+    215.0,
+    146.0
+   ],
+   "text": "数轴 · 规律 · 综合"
+  },
+  {
+   "seq": 28,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    67.0,
+    168.0,
+    675.0,
+    185.0
+   ],
+   "text": "9. 如图，数轴上点 P 表示的数为 -2。将点 P 向右移动 5 个单位后表示（　）。"
+  },
+  {
+   "seq": 29,
+   "type": "image",
+   "page_idx": 2,
+   "bbox": [
+    142.0,
+    233.0,
+    843.0,
+    294.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 30,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    307.0,
+    323.0,
+    349.0,
+    340.0
+   ],
+   "text": "B. -3"
+  },
+  {
+   "seq": 31,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    512.0,
+    323.0,
+    549.0,
+    338.0
+   ],
+   "text": "C. 3"
+  },
+  {
+   "seq": 32,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    717.0,
+    323.0,
+    756.0,
+    340.0
+   ],
+   "text": "D. 7"
+  },
+  {
+   "seq": 33,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    68.0,
+    398.0,
+    396.0,
+    414.0
+   ],
+   "text": "10. 观察下表中的规律，填写第 5 列空格。"
+  },
+  {
+   "seq": 34,
+   "type": "table",
+   "page_idx": 2,
+   "bbox": [
+    127.0,
+    431.0,
+    855.0,
+    502.0
+   ],
+   "text": "",
+   "html": "<table><tr><td>n</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr><tr><td>2n+1</td><td>3</td><td>5</td><td>7</td><td>9</td><td>____</td></tr></table>"
+  },
+  {
+   "seq": 35,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    68.0,
+    592.0,
+    485.0,
+    608.0
+   ],
+   "text": "11. 如图，函数 $y = x ^ { 2 } - 4$ 的图像与 x 轴交于 A、B 两点。"
+  },
+  {
+   "seq": 36,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    102.0,
+    620.0,
+    248.0,
+    636.0
+   ],
+   "text": "求线段 AB 的长度。"
+  },
+  {
+   "seq": 37,
+   "type": "image",
+   "page_idx": 2,
+   "bbox": [
+    559.0,
+    640.0,
+    885.0,
+    775.0
+   ],
+   "text": ""
+  },
+  {
+   "seq": 38,
+   "type": "text",
+   "page_idx": 2,
+   "bbox": [
+    68.0,
+    824.0,
+    566.0,
+    841.0
+   ],
+   "text": "12. 已知 $a + b = 1 0$ ，ab=21。求 $a ^ { 2 } + b ^ { 2 }$ ，并说明所使用的恒等式。"
+  },
+  {
+   "seq": 39,
+   "type": "header",
+   "page_idx": 2,
+   "bbox": [
+    705.0,
+    65.0,
+    910.0,
+    80.0
+   ],
+   "text": "原创演示数据 · 可公开使用"
+  },
+  {
+   "seq": 40,
+   "type": "footer",
+   "page_idx": 2,
+   "bbox": [
+    764.0,
+    959.0,
+    816.0,
+    972.0
+   ],
+   "text": "题有据"
+  },
+  {
+   "seq": 41,
+   "type": "page_number",
+   "page_idx": 2,
+   "bbox": [
+    828.0,
+    959.0,
+    929.0,
+    972.0
+   ],
+   "text": "第 3 页 / 共 3 页"
+  }
+ ],
+ "questions": [
+  {
+   "number": 1,
+   "section": "",
+   "question_type": "single_choice",
+   "regions": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      158.0,
+      828.0,
+      233.1
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      158.0,
+      828.0,
+      233.1
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "452c3687e5aae074f14d57c681493999dd6abaf1f1243c899f977eb0c2dcecd2"
+   },
+   "read_a": {
+    "stem": "已知集合 A={x | x²-5x+6=0}，则 A 的元素个数是（ ）。",
+    "options": {
+     "A": "0",
+     "B": "1",
+     "C": "2",
+     "D": "3"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 1,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】1\n【题型】单选题\n【题干】\n已知集合 A={x | x²-5x+6=0}，则 A 的元素个数是（ ）。\n【A】0\n【B】1\n【C】2\n【D】3\n【配图】无\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MinerU",
+    "witness": "1. 已知集合 $A = \\{ x \\vert x ^ { 2 } - 5 x + 6 = 0 \\}$ ，则 A 的元素个数是（　）。A. 0 B. 1 C. 2 D. 3",
+    "skipped": "witness"
+   },
+   "read_c": {},
+   "stem": "已知集合 A={x | x²-5x+6=0}，则 A 的元素个数是（ ）。",
+   "options": {
+    "A": "0",
+    "B": "1",
+    "C": "2",
+    "D": "3"
+   },
+   "text_source": "witness",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 2,
+   "section": "",
+   "question_type": "single_choice",
+   "regions": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      273.0,
+      828.0,
+      467.0
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      273.0,
+      828.0,
+      467.0
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 4,
+     "page_idx": 0,
+     "bbox": [
+      613.0,
+      317.0,
+      808.0,
+      435.0
+     ]
+    }
+   ],
+   "figures": [],
+   "figure_review": {},
+   "read_a": {
+    "stem": "如图，在△ABC中，AD⊥BC，AB=AC。下列结论一定成立的是（  ）。",
+    "options": {
+     "A": "BD=CD",
+     "B": "∠B=90°",
+     "C": "AB=BC",
+     "D": "AD=BC"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 2,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】2\n【题型】单选题\n【题干】\n如图，在△ABC中，AD⊥BC，AB=AC。下列结论一定成立的是（  ）。\n【A】BD=CD\n【B】∠B=90°\n【C】AB=BC\n【D】AD=BC\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "如图，在 $\\triangle ABC$ 中，$AD \\perp BC$，$AB=AC$。下列结论一定成立的是（  ）。",
+    "options": {
+     "A": "BD=CD",
+     "B": "$\\angle B=90°$",
+     "C": "AB=BC",
+     "D": "AD=BC"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 2,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】2\n【题型】单选题\n【题干】如图，在 $\\triangle ABC$ 中，$AD \\perp BC$，$AB=AC$。下列结论一定成立的是（  ）。\n【A】BD=CD\n【B】$\\angle B=90°$\n【C】AB=BC\n【D】AD=BC\n【其他题号】无"
+   },
+   "read_c": {},
+   "stem": "如图，在△ABC中，AD⊥BC，AB=AC。下列结论一定成立的是（  ）。",
+   "options": {
+    "A": "BD=CD",
+    "B": "∠B=90°",
+    "C": "AB=BC",
+    "D": "AD=BC"
+   },
+   "text_source": "agree",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 3,
+   "section": "",
+   "question_type": "single_choice",
+   "regions": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      460.0,
+      828.0,
+      634.9
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      460.0,
+      828.0,
+      634.9
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 6,
+     "page_idx": 0,
+     "bbox": [
+      90.0,
+      521.0,
+      764.0,
+      630.0
+     ]
+    }
+   ],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "candidate_text_table"
+    ],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "8af53c6b6079b20fd5d7da3632f2c5ffc8968341de631c7c77273fa5ba484074"
+   },
+   "read_a": {
+    "stem": "某小组记录了课外阅读时长，数据如下表。平均阅读时长为（    ）。\n\n| 阅读时长/分钟 | 20 | 30 | 40 | 50 |\n|---|---|---|---|---|\n| 人数 | 3 | 7 | 8 | 2 |",
+    "options": {
+     "A": "30",
+     "B": "34",
+     "C": "36",
+     "D": "40"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "table"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 3,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】3\n【题型】单选题\n【题干】\n某小组记录了课外阅读时长，数据如下表。平均阅读时长为（    ）。\n\n| 阅读时长/分钟 | 20 | 30 | 40 | 50 |\n|---|---|---|---|---|\n| 人数 | 3 | 7 | 8 | 2 |\n\n【A】30\n【B】34\n【C】36\n【D】40\n【配图】1=表格\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "某小组记录了课外阅读时长，数据如下表。平均阅读时长为（ ）。\n\n| 阅读时长/分钟 | 20 | 30 | 40 | 50 |\n|---|---|---|---|---|\n| 人数 | 3 | 7 | 8 | 2 |",
+    "options": {
+     "A": "30",
+     "B": "34",
+     "C": "36",
+     "D": "40"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 3,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】3\n【题型】单选题\n【题干】\n某小组记录了课外阅读时长，数据如下表。平均阅读时长为（ ）。\n\n| 阅读时长/分钟 | 20 | 30 | 40 | 50 |\n|---|---|---|---|---|\n| 人数 | 3 | 7 | 8 | 2 |\n\n【A】30\n【B】34\n【C】36\n【D】40\n【其他题号】无"
+   },
+   "read_c": {},
+   "stem": "某小组记录了课外阅读时长，数据如下表。平均阅读时长为（    ）。\n\n| 阅读时长/分钟 | 20 | 30 | 40 | 50 |\n|---|---|---|---|---|\n| 人数 | 3 | 7 | 8 | 2 |",
+   "options": {
+    "A": "30",
+    "B": "34",
+    "C": "36",
+    "D": "40"
+   },
+   "text_source": "agree",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 4,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      680.0,
+      828.0,
+      749.0
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 0,
+     "bbox": [
+      47.0,
+      680.0,
+      828.0,
+      749.0
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "d118c12044a4cf952a406e14af3a0506f695f4c4dee642c4b51310aa51638803"
+   },
+   "read_a": {
+    "stem": "一辆自行车以 12 km/h 的速度行驶 45 分钟，共行驶多少千米？\n\n请写出计算过程，并说明单位换算。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 4,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】4\n【题型】解答题\n【题干】\n一辆自行车以 12 km/h 的速度行驶 45 分钟，共行驶多少千米？\n\n请写出计算过程，并说明单位换算。\n【配图】无\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "一辆自行车以 $12\\text{ km/h}$ 的速度行驶 $45$ 分钟，共行驶多少千米？\n\n请写出计算过程，并说明单位换算。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 4,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】4\n【题型】解答题\n【题干】\n一辆自行车以 $12\\text{ km/h}$ 的速度行驶 $45$ 分钟，共行驶多少千米？\n\n请写出计算过程，并说明单位换算。\n【A】\n【B】\n【C】\n【D】\n【E】\n【其他题号】无"
+   },
+   "read_c": {},
+   "stem": "一辆自行车以 12 km/h 的速度行驶 45 分钟，共行驶多少千米？\n\n请写出计算过程，并说明单位换算。",
+   "options": {},
+   "text_source": "agree",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 5,
+   "section": "",
+   "question_type": "single_choice",
+   "regions": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      159.0,
+      912.0,
+      323.3
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      159.0,
+      912.0,
+      323.3
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 16,
+     "page_idx": 1,
+     "bbox": [
+      608.0,
+      180.0,
+      884.0,
+      316.0
+     ]
+    }
+   ],
+   "figures": [
+    {
+     "slot": "stem",
+     "page_idx": 1,
+     "bbox": [
+      608.0,
+      180.0,
+      884.0,
+      316.0
+     ],
+     "source": "auto"
+    }
+   ],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "text_cue",
+     "bound_figure"
+    ],
+    "cue_matches": [
+     "As shown in the figure"
+    ],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "d5269fe420eef0c5a2c1b64aa775ef87e2c39bb61479dcc86e599bffd19826b7"
+   },
+   "read_a": {
+    "stem": "As shown in the figure, line $\\ell$ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line $\\ell$?",
+    "options": {
+     "A": "y=x+1",
+     "B": "y=½x+2",
+     "C": "y=2x+1",
+     "D": "y=-x+1"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "stem"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 5,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】5\n【题型】单选题\n【题干】\nAs shown in the figure, line $\\ell$ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line $\\ell$?\n\nA. y=x+1\nB. y=½x+2\nC. y=2x+1\nD. y=-x+1\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "As shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line ℓ?",
+    "options": {
+     "A": "$y=x+1$",
+     "B": "$y=\\frac{1}{2}x+2$",
+     "C": "$y=2x+1$",
+     "D": "$y=-x+1$"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 5,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】5\n【题型】单选题\n【题干】\nAs shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line ℓ?\n【A】$y=x+1$\n【B】$y=\\frac{1}{2}x+2$\n【C】$y=2x+1$\n【D】$y=-x+1$\n【其他题号】无"
+   },
+   "read_c": {
+    "stem": "As shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line ℓ?",
+    "options": {
+     "A": "$y=x+1$",
+     "B": "$y=\\frac{1}{2}x+2$",
+     "C": "$y=2x+1$",
+     "D": "$y=-x+1$"
+    },
+    "type": "unknown",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": null,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题干】\nAs shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line ℓ?\n【A】$y=x+1$\n【B】$y=\\frac{1}{2}x+2$\n【C】$y=2x+1$\n【D】$y=-x+1$"
+   },
+   "stem": "As shown in the figure, line ℓ passes through A(-2, 1) and B(2, 3).\n\nWhich equation represents line ℓ?",
+   "options": {
+    "A": "$y=x+1$",
+    "B": "$y=\\frac{1}{2}x+2$",
+    "C": "$y=2x+1$",
+    "D": "$y=-x+1$"
+   },
+   "text_source": "majority",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 6,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      367.0,
+      912.0,
+      536.6
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      367.0,
+      912.0,
+      536.6
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 19,
+     "page_idx": 1,
+     "bbox": [
+      573.0,
+      414.0,
+      880.0,
+      529.0
+     ]
+    }
+   ],
+   "figures": [
+    {
+     "slot": "stem",
+     "page_idx": 1,
+     "bbox": [
+      573.0,
+      414.0,
+      880.0,
+      529.0
+     ],
+     "source": "auto"
+    }
+   ],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "text_cue",
+     "bound_figure"
+    ],
+    "cue_matches": [
+     "graph below"
+    ],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "b8952b145624057f3421484fecd7b1e48def9c75f66d227546d49d55956184d2"
+   },
+   "read_a": {
+    "stem": "The graph below shows the temperature during a morning experiment.\n\nAt what time did the temperature first reach 18°C?",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "stem"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 6,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】6\n【题型】解答题\n【题干】\nThe graph below shows the temperature during a morning experiment.\n\nAt what time did the temperature first reach 18°C?\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "The graph below shows the temperature during a morning experiment.\n\nAt what time did the temperature first reach 18°C?",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 6,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】6\n【题型】解答题\n【题干】\nThe graph below shows the temperature during a morning experiment.\n\nAt what time did the temperature first reach 18°C?\n【其他题号】无"
+   },
+   "read_c": {},
+   "stem": "The graph below shows the temperature during a morning experiment.\n\nAt what time did the temperature first reach 18°C?",
+   "options": {},
+   "text_source": "agree",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 7,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      583.0,
+      912.0,
+      616.7
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      583.0,
+      912.0,
+      616.7
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "6a8515561f0c68d6a632147da22cb635cd149b328186e55e219ffae4441eeb3d"
+   },
+   "read_a": {
+    "stem": "Solve $3(x-2)=2x+5$. Show each transformation and verify the result.",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 7,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】7\n【题型】解答题\n【题干】Solve $3(x-2)=2x+5$. Show each transformation and verify the result.\n【配图】无\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MinerU",
+    "witness": "7. Solve $3 ( x - 2 ) = 2 x + 5$ . Show each transformation and verify the result.",
+    "skipped": "witness"
+   },
+   "read_c": {},
+   "stem": "Solve $3(x-2)=2x+5$. Show each transformation and verify the result.",
+   "options": {},
+   "text_source": "witness",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 8,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      669.0,
+      912.0,
+      798.0
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 1,
+     "bbox": [
+      28.0,
+      669.0,
+      912.0,
+      798.0
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 22,
+     "page_idx": 1,
+     "bbox": [
+      650.0,
+      674.0,
+      892.0,
+      794.0
+     ]
+    }
+   ],
+   "figures": [
+    {
+     "slot": "stem",
+     "page_idx": 1,
+     "bbox": [
+      650.0,
+      674.0,
+      892.0,
+      794.0
+     ],
+     "source": "auto"
+    }
+   ],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "text_cue",
+     "bound_figure"
+    ],
+    "cue_matches": [
+     "参照右侧三棱柱示意图"
+    ],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "376af41f06574bf150e6f1e426ef52387d22f14c120084118f572aedce5d1c29"
+   },
+   "read_a": {
+    "stem": "参照右侧三棱柱示意图，若底面三角形面积为 $12\\text{ cm}^2$，棱柱高为 $8\\text{ cm}$，\n\n求该三棱柱的体积。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "stem"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 8,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】8\n【题型】解答题\n【题干】\n参照右侧三棱柱示意图，若底面三角形面积为 $12\\text{ cm}^2$，棱柱高为 $8\\text{ cm}$，\n\n求该三棱柱的体积。\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "stem": "参照右侧三棱柱示意图，若底面三角形面积为 $12\\text{ cm}^2$，棱柱高为 $8\\text{ cm}$，求该三棱柱的体积。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 8,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】8\n【题型】解答题\n【题干】\n参照右侧三棱柱示意图，若底面三角形面积为 $12\\text{ cm}^2$，棱柱高为 $8\\text{ cm}$，求该三棱柱的体积。\n【其他题号】无"
+   },
+   "read_c": {},
+   "stem": "参照右侧三棱柱示意图，若底面三角形面积为 $12\\text{ cm}^2$，棱柱高为 $8\\text{ cm}$，\n\n求该三棱柱的体积。",
+   "options": {},
+   "text_source": "agree",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 9,
+   "section": "",
+   "question_type": "single_choice",
+   "regions": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      159.0,
+      905.0,
+      347.8
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      159.0,
+      905.0,
+      347.8
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 29,
+     "page_idx": 2,
+     "bbox": [
+      142.0,
+      233.0,
+      843.0,
+      294.0
+     ]
+    }
+   ],
+   "figures": [
+    {
+     "slot": "stem",
+     "page_idx": 2,
+     "bbox": [
+      142.0,
+      233.0,
+      843.0,
+      294.0
+     ],
+     "source": "auto"
+    }
+   ],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "text_cue",
+     "bound_figure"
+    ],
+    "cue_matches": [
+     "如图"
+    ],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "2ac323c18c22bf76858d9333c2fc064e811155bda3b0a42bf22000651ade7610"
+   },
+   "read_a": {
+    "stem": "如图，数轴上点 P 表示的数为 -2。将点 P 向右移动 3 个单位后表示（  ）。",
+    "options": {
+     "A": "-7",
+     "B": "-3",
+     "C": "3",
+     "D": "7"
+    },
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "stem"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 9,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】9\n【题型】单选题\n【题干】\n如图，数轴上点 P 表示的 -2。将点 P 向右移动 3 个单位后表示（ ）。\n【A】-7\n【B】-3\n【C】3\n【D】7\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MiniMax-M3",
+    "stem": "如图，数轴上点 P 表示的数为 -2。将点 P 向右移动 5 个单位后表示（  ）。",
+    "options": {
+     "A": "-7",
+     "B": "-3",
+     "C": "3",
+     "D": "7"
+    },
+    "type": "single_choice"
+   },
+   "read_c": {},
+   "stem": "如图，数轴上点 P 表示的数为 -2。将点 P 向右移动 3 个单位后表示（  ）。",
+   "options": {
+    "A": "-7",
+    "B": "-3",
+    "C": "3",
+    "D": "7"
+   },
+   "text_source": "a",
+   "state": "yellow",
+   "flags": [
+    "两次识读不一致，请核对题面中标黄的位置"
+   ],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 10,
+   "section": "",
+   "question_type": "fill_blank",
+   "regions": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      389.0,
+      905.0,
+      504.2
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      389.0,
+      905.0,
+      504.2
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 34,
+     "page_idx": 2,
+     "bbox": [
+      127.0,
+      431.0,
+      855.0,
+      502.0
+     ]
+    }
+   ],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "candidate_text_table"
+    ],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "57fb908e075a079956bd9c2b1a244d51ac725f84aff766df87d21c2ccc753b52"
+   },
+   "read_a": {
+    "stem": "观察下表中的规律，填写第5列空格。\n\n| n | 1 | 2 | 3 | 4 | 5 |\n|---|---|---|---|---|---|\n| 2n+1 | 3 | 5 | 7 | 9 | ____ |",
+    "options": {},
+    "type": "fill_blank",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "table"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 10,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】10\n【题型】填空题\n【题干】\n观察下表中的规律，填写第5列空格。\n\n| n | 1 | 2 | 3 | 4 | 5 |\n|---|---|---|---|---|---|\n| 2n+1 | 3 | 5 | 7 | 9 | ____ |\n\n【配图】1=表格\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MinerU",
+    "witness": "10. 观察下表中的规律，填写第 5 列空格。",
+    "skipped": "witness"
+   },
+   "read_c": {},
+   "stem": "观察下表中的规律，填写第5列空格。\n\n| n | 1 | 2 | 3 | 4 | 5 |\n|---|---|---|---|---|---|\n| 2n+1 | 3 | 5 | 7 | 9 | ____ |",
+   "options": {},
+   "text_source": "witness",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 11,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      583.0,
+      905.0,
+      783.3
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      583.0,
+      905.0,
+      783.3
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [
+    {
+     "label": "1",
+     "seq": 37,
+     "page_idx": 2,
+     "bbox": [
+      559.0,
+      640.0,
+      885.0,
+      775.0
+     ]
+    }
+   ],
+   "figures": [
+    {
+     "slot": "stem",
+     "page_idx": 2,
+     "bbox": [
+      559.0,
+      640.0,
+      885.0,
+      775.0
+     ],
+     "source": "auto"
+    }
+   ],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [
+     "text_cue",
+     "bound_figure"
+    ],
+    "cue_matches": [
+     "如图"
+    ],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "14c7f64770790f6917f6cccb65ba4e6b172c10b1feee48a5dfbbadefca65e4e2"
+   },
+   "read_a": {
+    "stem": "如图，函数 $y=x^2-4$ 的图像与 $x$ 轴交于 A、B 两点。\n求线段 AB 的长度。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {
+     "1": "stem"
+    },
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 11,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】11\n【题型】解答题\n【题干】\n如图，函数 $y=x^2-4$ 的图像与 $x$ 轴交于 A、B 两点。\n求线段 AB 的长度。\n【配图】1=题干\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MinerU",
+    "witness": "11. 如图，函数 $y = x ^ { 2 } - 4$ 的图像与 x 轴交于 A、B 两点。\n求线段 AB 的长度。",
+    "skipped": "witness"
+   },
+   "read_c": {},
+   "stem": "如图，函数 $y=x^2-4$ 的图像与 $x$ 轴交于 A、B 两点。\n求线段 AB 的长度。",
+   "options": {},
+   "text_source": "witness",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  },
+  {
+   "number": 12,
+   "section": "",
+   "question_type": "free_response",
+   "regions": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      815.0,
+      905.0,
+      845.0
+     ]
+    }
+   ],
+   "regions_auto": [
+    {
+     "page_idx": 2,
+     "bbox": [
+      47.0,
+      815.0,
+      905.0,
+      845.0
+     ]
+    }
+   ],
+   "start_source": "mineru",
+   "source_kind": "unknown",
+   "figure_candidates": [],
+   "figures": [],
+   "figure_review": {
+    "status": "ok",
+    "reason": "配图检查未发现矛盾",
+    "signals": [],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "source": "automatic",
+    "policy_version": 10,
+    "input_hash": "9b6dbeac98e57b1e36483900a89dedbee40fa3b3510c0f7a7f15171440fdc21e"
+   },
+   "read_a": {
+    "stem": "已知 a+b=10，ab=21。求 $a^2+b^2$，并说明所使用的恒等式。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": false,
+    "others": [],
+    "number_seen": 12,
+    "figure_descriptions": [],
+    "unclear": false,
+    "engine": "MiniMax-M3",
+    "raw": "【内容类型】练习题\n【题号】12\n【题型】解答题\n【题干】\n已知 a+b=10，ab=21。求 $a^2+b^2$，并说明所使用的恒等式。\n【配图】无\n【其他题号】无"
+   },
+   "read_b": {
+    "engine": "MinerU",
+    "witness": "12. 已知 $a + b = 1 0$ ，ab=21。求 $a ^ { 2 } + b ^ { 2 }$ ，并说明所使用的恒等式。",
+    "skipped": "witness"
+   },
+   "read_c": {},
+   "stem": "已知 a+b=10，ab=21。求 $a^2+b^2$，并说明所使用的恒等式。",
+   "options": {},
+   "text_source": "witness",
+   "state": "green",
+   "flags": [],
+   "answer": "",
+   "analysis": ""
+  }
+ ]
+}

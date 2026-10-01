@@ -45,6 +45,12 @@ class ImportStructureMigrationTests(TransactionTestCase):
     migrate_from = [("core", "0008_question_figure_review")]
     migrate_to = [("core", "0009_import_structure")]
 
+    def tearDown(self):
+        # Leave the latest schema behind for the test classes that run later.
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
     def setUp(self):
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_from)

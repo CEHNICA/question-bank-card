@@ -60,6 +60,36 @@ def to_pixels(bbox: list[float], size: tuple[int, int]) -> tuple[int, int, int, 
     return box
 
 
+def stack_figure_pieces(pieces: list[tuple[Image.Image, tuple[int, int, int, int]]]) -> Image.Image:
+    """Join the pieces of one figure (a table cut by a page break) into one image.
+
+    pieces: (page image, pixel box) in reading order.  Each crop keeps its
+    horizontal position on the page, so the columns of a table split across
+    two pages line up again; pages of a different pixel width are scaled to
+    the first one.  No gap: the halves meet like the uncut table.
+    """
+    if not pieces:
+        raise ValueError("没有可拼接的配图")
+    base_width = pieces[0][0].width
+    placed = []
+    for page, box in pieces:
+        crop = page.crop(box).convert("RGB")
+        scale = base_width / max(1, page.width)
+        if abs(scale - 1) > 0.02:
+            crop = crop.resize((max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
+                               Image.Resampling.LANCZOS)
+        placed.append((crop, round(box[0] * scale)))
+    left_most = min(left for _, left in placed)
+    width = max(left - left_most + crop.width for crop, left in placed)
+    height = sum(crop.height for crop, _ in placed)
+    canvas = Image.new("RGB", (width, height), "white")
+    y = 0
+    for crop, left in placed:
+        canvas.paste(crop, (left - left_most, y))
+        y += crop.height
+    return canvas
+
+
 def stack_regions(regions: list[dict], page_loader, marks: list[dict] | None = None) -> tuple[Image.Image, list[dict]]:
     """把一道题的若干原卷矩形自上而下拼成一张图。
 
@@ -107,27 +137,36 @@ def stack_regions(regions: list[dict], page_loader, marks: list[dict] | None = N
     return canvas, layout
 
 
+TRIM_MIN_BLANK = 30.0   # 页面坐标（0–1000）：底部空白至少这么高才裁掉
+
+
 def trim_regions(regions: list[dict], page_loader) -> list[dict]:
-    """去掉每段范围底部的大片空白（解答题的作答空间）。有字迹（含手写）处保留。"""
+    """去掉每段范围底部的大片空白（解答题的作答空间）。有字迹（含手写）处保留。
+
+    先二值化再缩小：直接缩小灰度图会把分式分母、下标这类细笔画平均成浅灰，
+    被误判为空白而裁掉（实测：高考卷 V甲/V乙 的“乙”被切掉半截）。小段空白
+    不值得冒险，只有底部空白足够大时才裁。
+    """
     trimmed = []
     for region in regions:
         page = page_loader(region["page_idx"])
         box = to_pixels(region["bbox"], page.size)
-        gray = page.crop(box).convert("L")
-        width, height = gray.size
-        small = gray.resize((max(1, width // 4), max(1, height // 4)))
+        ink = page.crop(box).convert("L").point(lambda value: 255 if value < 170 else 0)
+        width, height = ink.size
+        small = ink.resize((max(1, width // 4), max(1, height // 4)), Image.Resampling.BOX)
         sw, sh = small.size
         pixels = small.load()
         last_ink = -1
         for y in range(sh):
-            dark = sum(1 for x in range(sw) if pixels[x, y] < 150)
+            dark = sum(1 for x in range(sw) if pixels[x, y] > 40)
             if dark >= max(2, sw // 300):
                 last_ink = y
         x0, y0, x1, y1 = region["bbox"]
         if last_ink < 0:
             continue  # 整段空白
-        keep = min(sh, last_ink + 1 + max(3, sh // 40)) / sh
-        if keep < 0.85:
+        keep = min(sh, last_ink + 1 + max(6, sh // 25)) / sh
+        blank = (y1 - y0) * (1 - keep)
+        if keep < 0.85 and blank >= TRIM_MIN_BLANK:
             y1 = y0 + (y1 - y0) * keep
         trimmed.append({"page_idx": region["page_idx"], "bbox": [x0, y0, x1, round(y1, 1)]})
     return trimmed or regions

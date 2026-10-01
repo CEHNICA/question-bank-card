@@ -121,7 +121,7 @@ def verify_mineru_replacement(changes: Mapping[str, object]) -> str:
     invalid = sum(result is False for result in results)
     if invalid:
         raise CredentialValidationError(
-            f"有 {invalid} 个 MinerU Token 未通过官网验证，未保存本次更改。"
+            f"有 {invalid} 个 MinerU Token 未通过官网验证，未保存本次更改。请确认复制完整；Token 14 天过期一次，过期了到 mineru.net 重新生成。"
         )
     return "verified" if all(result is True for result in results) else "unavailable"
 

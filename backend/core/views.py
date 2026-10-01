@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
@@ -13,14 +14,15 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import models, transaction
-from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from PIL import Image
 
-from . import credential_settings, imaging, import_planning, library, m3import, mineru, photos, preferences, readers
+from .version import APP_VERSION
+from . import credential_settings, demo, imaging, import_planning, library, m3import, mineru, photos, preferences, readers, tables
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
@@ -30,13 +32,13 @@ from .figure_policy import (
 from .models import (
     Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
 )
-from .pipeline import PageStore, candidates_in, preview_resegment, reorder_photo_pages
-from .textnorm import fix_reading_symbols, fix_symbols
+from .pipeline import TEXT_DRAFT_FLAGS, PageStore, candidates_in, preview_resegment, reorder_photo_pages
+from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
 TYPES = {"single_choice", "multiple_choice", "fill_blank", "free_response", "unknown"}
-SLOTS = {"stem", "A", "B", "C", "D"}
+SLOTS = {"stem", "A", "B", "C", "D", "E"}
 
 
 # ---------------------------------------------------------------- 工具
@@ -129,13 +131,16 @@ def _selected_candidate_keys(question: Question, figures: list[dict] | None = No
     for figure in figures if isinstance(figures, list) else (question.figures or []):
         if not isinstance(figure, dict):
             continue
-        explicit = figure.get("candidate_key")
-        if isinstance(explicit, str) and explicit in available:
-            selected.add(explicit)
-            continue
-        exact = _candidate_key(figure)
-        if exact in available:
-            selected.add(exact)
+        # The lower half of a table joined to a figure is as used as the figure.
+        pieces = [figure, *[part for part in (figure.get("parts") or []) if isinstance(part, dict)]]
+        for piece in pieces:
+            explicit = piece.get("candidate_key")
+            if isinstance(explicit, str) and explicit in available:
+                selected.add(explicit)
+                continue
+            exact = _candidate_key(piece)
+            if exact in available:
+                selected.add(exact)
     return selected
 
 
@@ -160,7 +165,7 @@ def _unclassified_candidate_details(
     } if isinstance(primary.get("figures"), dict) else {}
     resolved_elsewhere_labels = {
         label for label, role in assignments.items()
-        if role == "none" or (role.startswith("q") and role[1:].isdigit())
+        if role in {"none", "table"} or (role.startswith("q") and role[1:].isdigit())
     }
     selected = _selected_candidate_keys(question, figures)
     ignored = set(ignored_candidates if isinstance(ignored_candidates, list)
@@ -249,11 +254,19 @@ def _processing_json(paper: Paper) -> dict | None:
         "total": None,
         "unit": "",
     }
+    ahead = Paper.objects.filter(
+        status__in=_ACTIVE_PAPER_STATUSES,
+        created_at__lt=paper.created_at,
+    ).exclude(pk=paper.pk).count()
     if paper.status == Paper.Status.QUEUED:
-        progress["queue_ahead"] = Paper.objects.filter(
-            status__in=_ACTIVE_PAPER_STATUSES,
-            created_at__lt=paper.created_at,
-        ).exclude(pk=paper.pk).count()
+        progress["queue_ahead"] = ahead
+    elif ahead and paper.status in (Paper.Status.PARSING, Paper.Status.SEGMENTING):
+        # The worker's parse lane sends later papers to MinerU while an
+        # earlier one is read; such a paper then waits for its turn.
+        progress["queue_ahead"] = ahead
+        progress["parsed_ahead"] = True
+    if paper.status == Paper.Status.QUEUED:
+        pass
     elif paper.status == Paper.Status.PARSING:
         chunks = list(paper.import_chunks.order_by("sequence"))
         if chunks:
@@ -286,6 +299,17 @@ def _processing_json(paper: Paper) -> dict | None:
             "total": paper.total,
             "unit": "question",
         })
+        # A measured estimate, not a promise: the pace between the first and
+        # the latest finished card of this run.  Needs a few finished cards.
+        finished = paper.questions.exclude(
+            state__in=[Question.State.WAITING, Question.State.READING],
+        ).aggregate(first=models.Min("updated_at"), last=models.Max("updated_at"), count=models.Count("id"))
+        remaining = max(0, paper.total - paper.progress)
+        if remaining and finished["count"] >= 4 and finished["first"] and finished["last"]:
+            span = (finished["last"] - finished["first"]).total_seconds()
+            if span > 0:
+                pace = span / (finished["count"] - 1)
+                progress["eta_seconds"] = int(min(24 * 3600, remaining * pace))
     return progress
 
 
@@ -305,6 +329,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
         "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
+        "demo": demo.is_demo(paper),
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
         "suggested_groups": (paper.structure or {}).get("suggested_groups") or [],
         "question_groups": [
@@ -352,11 +377,15 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
 
 def _reading(value: dict) -> dict:
     value = fix_reading_symbols(value)
-    return {k: value.get(k) for k in ("engine", "stem", "options", "error") if k in value}
+    return {k: value.get(k) for k in ("engine", "stem", "options", "error", "witness", "chosen", "objections", "answers",
+                                      "spotwise")
+            if k in value}
 
 
-def question_json(question: Question) -> dict:
+def question_json(question: Question, table_blocks: list[dict] | None = None) -> dict:
     figure_review = stored_or_derived_review(question)
+    if table_blocks is None and question.figures:
+        table_blocks = tables.table_blocks(question.paper)
     valid_candidate_keys = _candidate_keys(question)
     if isinstance(figure_review, dict) and "ignored_candidates" in figure_review:
         ignored = sorted({
@@ -381,10 +410,21 @@ def question_json(question: Question) -> dict:
     approval_valid = library.approval_is_current(question)
     figures = []
     for index, figure in enumerate(question.figures):
-        digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:10]
+        digest = hashlib.sha1(library.figure_identity(figure).encode()).hexdigest()[:10]
         shown_figure = {**figure}
         if shown_figure.get("candidate_key") not in valid_candidate_keys:
             shown_figure.pop("candidate_key", None)
+        if "parts" in shown_figure:
+            shown_figure["parts"] = [
+                {"page_idx": part["page_idx"], "bbox": part["bbox"],
+                 **({"candidate_key": part["candidate_key"]}
+                    if part.get("candidate_key") in valid_candidate_keys else {})}
+                for part in (figure.get("parts") or [])
+                if isinstance(part, dict) and "page_idx" in part and "bbox" in part
+            ]
+        # MinerU read this crop as a table: it can become a text table.
+        if table_blocks and tables.table_for_figure(question.paper, figure, table_blocks):
+            shown_figure["table"] = True
         figures.append({**shown_figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
     return {
         "id": question.id, "source_key": str(question.source_key), "number": question.number,
@@ -401,6 +441,9 @@ def question_json(question: Question) -> dict:
         "edited": question.edited, "approved": approval_valid,
         "approval_valid": approval_valid,
         "approval_stale": bool(question.approved and not approval_valid),
+        # human = 人对照原卷打的勾；ai = AI 助手打的勾（显示成“AI 已通过 · 待你核对”）。
+        "approved_by": library.approval_source(question),
+        "approval_agent": question.approval_agent if library.approval_source(question) == "ai" else "",
         "approved_at": question.approved_at.isoformat() if question.approved_at else None,
         "answer": question.answer, "analysis": question.analysis,
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
@@ -560,11 +603,16 @@ def status(request):
             "checker": saved_roles["checker_engine"],
             "arbiter": saved_roles["arbiter_engine"],
             "models": saved_preferences["models"],
+            "plans": saved_preferences["plans"],
         }
-        current = {**engines["selected"], "models": engines["models"]}
+        current = {**engines["selected"], "models": engines["models"], "plans": engines["plans"]}
         engines["pending_change"] = engines["saved"] != current
     return JsonResponse({
-        "upload_enabled": readers.configured("mineru") and primary is not None,
+        # AI 助手读题只需要 MinerU：题卡先用 MinerU 的文字，再由 AI 助手对照原卷核对。
+        # Both follow the saved choice, which the next paper will use.
+        "upload_enabled": readers.configured("mineru") and _reading_ready(),
+        "assistant_mode": readers.assistant_mode(saved_preferences)
+        if saved_preferences is not None else readers.assistant_mode(applied_preferences),
         "mineru": readers.configured("mineru"),
         "reader": primary.label if primary else None,
         "checker": checker.label if checker else None,
@@ -572,6 +620,7 @@ def status(request):
         "independent_checker": bool(checker and primary and checker.provider != primary.provider),
         "engines": engines,
         "m3_available": m3import.m3_backend() is not None,
+        "app_version": APP_VERSION,
     })
 
 
@@ -648,18 +697,19 @@ def model_settings(request):
     try:
         current = preferences.load_configuration()
     except preferences.PreferenceError:
-        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS)}
+        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS),
+                   "plans": dict(preferences.DEFAULT_PLANS)}
     raw_models = payload.get("models", current["models"])
     normalized_models = preferences.normalize_models(raw_models, defaults=current["models"])
     if normalized_models is None:
         return _error("模型 ID 格式不正确：只能使用 1–160 位字母、数字及 . _ : / + -，且不能填写网址")
-    selected = set(normalized.values())
-    if "minimax_m3" in selected and not readers.configured("minimax"):
-        return _error("所选模型需要先配置 MiniMax API Key")
-    if "siliconflow_qwen3" in selected and not readers.configured("siliconflow"):
-        return _error("所选模型需要先配置硅基流动 API Key")
+    normalized_plans = preferences.normalize_plans(payload.get("plans"), defaults=current["plans"])
+    if normalized_plans is None:
+        return _error("MiniMax 会员档位不受支持")
+    # A service without a key may still be chosen: the worker then reads with
+    # the first service that has one, and the status page says which.
     try:
-        saved = preferences.save_configuration(normalized, normalized_models)
+        saved = preferences.save_configuration(normalized, normalized_models, normalized_plans)
     except preferences.PreferenceError as exc:
         return _error(str(exc), 500)
     saved_roles = saved["roles"]
@@ -669,6 +719,7 @@ def model_settings(request):
             "checker": saved_roles["checker_engine"],
             "arbiter": saved_roles["arbiter_engine"],
             "models": saved["models"],
+            "plans": saved["plans"],
         },
         "restart_required": False,
         "message": "模型选择已保存；下一份任务或下一次重读开始时生效，正在处理的任务不会中途换模型。",
@@ -688,8 +739,10 @@ def papers(request):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请在“设置 → API 与模型”中配置）")
+    if not readers.configured("mineru") or not _reading_ready():
+        return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
+                      "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
+                      "密钥在“设置 → 常用 → 填写或更换密钥”里填写")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -1270,10 +1323,11 @@ def paper_detail(request, paper_id):
         return JsonResponse({"deleted": paper_id_text, "warning": warning})
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
+    paper_tables = tables.table_blocks(paper)
     return JsonResponse({
         "paper": paper_json(paper),
         "questions": [
-            question_json(q)
+            question_json(q, paper_tables)
             for q in paper.questions.select_related("group").order_by("group__sequence", "number", "id")
         ],
     })
@@ -1498,6 +1552,9 @@ def approve_green(request, paper_id):
     paper = get_object_or_404(Paper, pk=paper_id)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再标记题卡通过")
+    approver = _approver(_body(request) or {})
+    if approver is None:
+        return _error("by 只能是 human 或 ai")
     now = timezone.now()
     changed = []
     with transaction.atomic():
@@ -1505,15 +1562,20 @@ def approve_green(request, paper_id):
             state=Question.State.GREEN,
         ))
         for question in questions:
-            if (not question.stem.strip() or library.approval_is_current(question)
-                    or blocks_approval(stored_or_derived_review(question))):
+            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)):
                 continue
-            question.approved = True
-            question.approved_at = now
-            question.approved_content_hash = library.approval_hash(question)
+            # Already passed by the same kind of reviewer (or by a person): nothing to do.
+            if library.approval_is_current(question) and library.approval_source(question) in {approver[0], "human"}:
+                continue
+            if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
+                continue
             question.updated_at = now
             changed.append(question)
-        Question.objects.bulk_update(changed, ["approved", "approved_at", "approved_content_hash", "updated_at"])
+        Question.objects.bulk_update(changed, [
+            "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "updated_at",
+        ])
+        for question in changed:
+            library.confirm_published_review(question)
     count = len(changed)
     return JsonResponse({"approved": count, "paper": paper_json(paper)})
 
@@ -1526,6 +1588,8 @@ def publish_paper(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if demo.is_demo(paper):
+        return JsonResponse({"error": demo.PUBLISH_REFUSED, "demo": True}, status=409)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再入库")
     created, unchanged, problems = 0, 0, []
@@ -1539,6 +1603,22 @@ def publish_paper(request, paper_id):
         unchanged += int(not is_new)
     return JsonResponse({"created": created, "unchanged": unchanged, "problems": problems,
                          "paper": paper_json(paper)})
+
+
+@csrf_exempt
+def demo_paper(request):
+    """Open the practice paper for 新手教学 (``reset`` starts it over)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    try:
+        paper = demo.create_demo_paper(reset=payload.get("reset") is True)
+    except FileNotFoundError as error:
+        return _error(str(error), 500)
+    return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
 @csrf_exempt
@@ -1602,10 +1682,40 @@ def _question(question_id) -> Question:
     return get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
 
 
+def _reading_ready() -> bool:
+    """A new paper can be read: some vision service has a key (the worker
+    falls back to it), or the saved choice is AI-assistant reading."""
+    try:
+        configuration = preferences.load_configuration() if preferences.preference_path().is_file() else None
+    except preferences.PreferenceError:
+        configuration = None
+    return readers.primary_engine(configuration) is not None or readers.assistant_mode(configuration)
+
+
 def _clear_approval(question: Question) -> None:
     question.approved = False
     question.approved_at = None
     question.approved_content_hash = ""
+    question.approval_source = ""
+    question.approval_agent = ""
+
+
+def _decided_by(review: dict, actor: tuple[str, str]) -> dict:
+    """A figure decision made through the API stays a manual decision (so the
+    automatic check never overrides it); an AI assistant's is labelled as such."""
+    if actor[0] != "ai":
+        return review
+    reason = review.get("reason", "")
+    reason = reason.replace("已人工确认", f"{actor[1]}确认").replace("由人工设置", f"由{actor[1]}设置")
+    return {**review, "reason": reason, "decided_by": "ai", "agent": actor[1]}
+
+
+def _approver(payload: dict) -> tuple[str, str] | None:
+    """Who is approving: the page is a person; tiyouju/MCP say ``by: "ai"``."""
+    source = payload.get("by", "human")
+    if source not in library.APPROVAL_SOURCES:
+        return None
+    return source, library.agent_name(payload.get("agent")) if source == "ai" else ""
 
 
 def _apply_figure_review(question: Question, review: dict) -> None:
@@ -1639,12 +1749,16 @@ def question_action(request, question_id, action: str):
         question = get_object_or_404(
             Question.objects.select_for_update().select_related("paper"), pk=question_id,
         )
+        actor = _approver(payload)
+        if actor is None:
+            return _error("by 只能是 human 或 ai")
         if action == "approve":
             if question.paper.status == Paper.Status.NEEDS_GROUPING:
                 return _error("请先确认资料结构或拆分任务，再标记题卡通过")
             value = payload.get("approved", True)
             if type(value) is not bool:
                 return _error("approved 必须是 true 或 false")
+            approver = actor
             if value and question.state not in library.REVIEWABLE_STATES:
                 return _error("这道题尚未进入可审核状态，请先完成识读或人工修正")
             if value and not question.stem.strip():
@@ -1653,9 +1767,10 @@ def question_action(request, question_id, action: str):
             if value and blocks_approval(review):
                 return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
             if value:
-                question.approved = True
-                question.approved_at = now
-                question.approved_content_hash = library.approval_hash(question)
+                library.approve(question, now=now, source=approver[0], agent=approver[1])
+                library.confirm_published_review(question)
+            elif approver[0] == "ai" and library.approval_source(question) == "human":
+                return _error("这道题是人工通过的，AI 助手不能撤销；需要的话请使用者自己在题卡上取消", 409)
             else:
                 _clear_approval(question)
         elif action == "text":
@@ -1679,8 +1794,11 @@ def question_action(request, question_id, action: str):
             question.answer = fix_symbols(payload.get("answer", question.answer).strip())
             question.analysis = fix_symbols(payload.get("analysis", question.analysis).strip())
             question.edited = True
-            question.text_source = "human"
-            question.flags = [f for f in question.flags if not figure_flag(f) and "截图" in f]
+            # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
+            question.text_source = "assistant" if actor[0] == "ai" else "human"
+            # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
+            question.flags = [f for f in question.flags
+                              if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS]
             question.figure_review = {}
             review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
             if previous_ignored:
@@ -1723,6 +1841,51 @@ def question_action(request, question_id, action: str):
             _clear_approval(question)
             question.state = Question.State.WAITING
             question.reread_requested = True
+        elif action == "figure-table":
+            # A crop MinerU read as a table becomes a text table in the stem.
+            index = payload.get("figure")
+            if type(index) is not int or not 0 <= index < len(question.figures or []):
+                return _error("找不到这张配图")
+            blocks = tables.table_blocks(question.paper)
+            block = tables.table_for_figure(question.paper, question.figures[index], blocks)
+            table_text = tables.to_text(block["html"]) if block else ""
+            if not table_text:
+                return _error("这张图没有可用的表格文字；请用“改字”手动输入表格")
+            pieces = [block, *tables.continuations(block, blocks)]
+            removed, kept = [], []
+            for figure in question.figures:
+                figure_pieces = [figure, *[p for p in (figure.get("parts") or []) if isinstance(p, dict)]]
+                target = kept
+                if figure is question.figures[index] or any(
+                        tables.covers(piece, item) for piece in pieces for item in figure_pieces):
+                    target = removed
+                target.append(figure)
+            before = [
+                text for text in Block.objects.filter(paper=question.paper, seq__lt=block["seq"])
+                .exclude(type__in=["image", "table", "chart", "header", "footer", "page_number",
+                                   "page_footnote", "aside_text"])
+                .order_by("-seq").values_list("text", flat=True)[:2]
+                if text and text.strip()
+            ]
+            question.stem = tables.insert_table(question.stem, table_text, before, key=witness_key)
+            candidate_keys = _candidate_keys(question)
+            resolved = {
+                key for piece in pieces
+                for candidate in (question.figure_candidates or [])
+                if tables.covers(piece, candidate) and (key := _candidate_key(candidate)) in candidate_keys
+            } | _selected_candidate_keys(question, removed)
+            previous_ignored = _saved_ignored_candidates(question)
+            ignored = sorted(set(previous_ignored) | resolved)
+            question.figures = kept
+            question.edited = True
+            question.text_source = "human"
+            question.figure_review = {}
+            review = stored_or_derived_review(question, ignored_candidates=ignored)
+            review = {**review, "ignored_candidates": ignored, "excluded_count": len(ignored)}
+            _apply_figure_review(question, review)
+            if question.state in library.REVIEWABLE_STATES:
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+            _clear_approval(question)
         elif action == "figures":
             figures = payload.get("figures")
             if not isinstance(figures, list) or len(figures) > 12:
@@ -1760,9 +1923,33 @@ def question_action(request, question_id, action: str):
                     candidate_identity = _candidate_key(cleaned_item)
                     if candidate_identity in candidate_keys:
                         cleaned_item["candidate_key"] = candidate_identity
+                # A table cut by a page break: the pieces below are joined to
+                # this figure and shown as one image.
+                if "parts" in item:
+                    raw_parts = item.get("parts")
+                    if not isinstance(raw_parts, list) or len(raw_parts) > library.MAX_FIGURE_PARTS:
+                        return _error("拼接配图格式不正确")
+                    parts = []
+                    for raw_part in raw_parts:
+                        part_bbox = _valid_bbox(raw_part.get("bbox")) if isinstance(raw_part, dict) else None
+                        if part_bbox is None or raw_part.get("page_idx") not in pages:
+                            return _error("拼接配图格式不正确")
+                        part = {"page_idx": raw_part["page_idx"], "bbox": part_bbox}
+                        part_key = raw_part.get("candidate_key")
+                        if part_key is not None:
+                            if not isinstance(part_key, str) or part_key not in candidate_keys:
+                                return _error("配图候选来源格式不正确")
+                            part["candidate_key"] = part_key
+                        elif (exact_key := _candidate_key(part)) in candidate_keys:
+                            part["candidate_key"] = exact_key
+                        parts.append(part)
+                    if parts:
+                        cleaned_item["parts"] = parts
                 cleaned.append(cleaned_item)
             selected_candidate_keys = {
-                item["candidate_key"] for item in cleaned if "candidate_key" in item
+                piece["candidate_key"]
+                for item in cleaned for piece in (item, *item.get("parts", []))
+                if "candidate_key" in piece
             }
             if selected_candidate_keys.intersection(ignored_candidates):
                 return _error("同一张候选图不能同时设为配图和无关")
@@ -1799,7 +1986,7 @@ def question_action(request, question_id, action: str):
                     "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
                 }
-            _apply_figure_review(question, review)
+            _apply_figure_review(question, _decided_by(review, actor))
             _clear_approval(question)
         elif action == "figure-review":
             decision = payload.get("decision")
@@ -1811,7 +1998,7 @@ def question_action(request, question_id, action: str):
                 previous_figures = list(question.figures or [])
                 previous_ignored = _saved_ignored_candidates(question)
                 question.figures = []
-                _apply_figure_review(question, {
+                _apply_figure_review(question, _decided_by({
                     "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
                     "signals": ["human_confirmed_no_figure"],
                     "cue_matches": cue_matches(question.stem, question.options),
@@ -1819,7 +2006,7 @@ def question_action(request, question_id, action: str):
                     "ignored_candidates": sorted(_candidate_keys(question)),
                     "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
-                })
+                }, actor))
             else:
                 current_review = stored_or_derived_review(question)
                 if current_review.get("status") != CONFIRMED_NO_FIGURE:
@@ -1829,7 +2016,7 @@ def question_action(request, question_id, action: str):
                 for item in current_review.get("previous_figures") or []:
                     bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
                     if (bbox is not None and item.get("page_idx") in pages and item.get("slot") in SLOTS
-                            and item.get("source") in {"auto", "manual", "other"}):
+                            and item.get("source") in {"auto", "manual", "other", "row"}):
                         restored.append({
                             "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox,
                             "source": item["source"],
@@ -1882,6 +2069,38 @@ def question_delete(request, question_id):
     })
 
 
+def question_crop(request, question_id):
+    """This question's original crop as one PNG, for AI assistants (tiyouju show).
+
+    ``?marks=1`` draws the figure candidates as blue boxes numbered 1, 2…
+    (tiyouju calls them 图1、图2…), so an assistant can name one by number.
+    The labels are plain digits: the label font may have no Chinese glyphs.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    question = _question(question_id)
+    if not question.regions:
+        return _error("这道题还没有原卷范围", 404)
+    marks = None
+    if request.GET.get("marks") == "1":
+        marks = [
+            {"label": str(index + 1), "page_idx": candidate["page_idx"], "bbox": candidate["bbox"]}
+            for index, candidate in enumerate(question.figure_candidates or [])
+            if isinstance(candidate, dict) and _valid_bbox(candidate.get("bbox")) is not None
+        ]
+    store = PageStore(question.paper)
+    try:
+        image, _layout = imaging.stack_regions(question.regions, store.load, marks or None)
+    except (OSError, ValueError, KeyError):
+        return _error("原卷截图暂时生成不了，请稍后再试", 409)
+    image.thumbnail((2000, 2000))
+    buffer = io.BytesIO()
+    image.convert("RGB").save(buffer, "PNG", optimize=True)
+    response = HttpResponse(buffer.getvalue(), content_type="image/png")
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 def question_figure(request, question_id, index: int):
     question = _question(question_id)
     if not 0 <= index < len(question.figures):
@@ -1923,6 +2142,9 @@ def _library_rows(request):
     kind = request.GET.get("type", "").strip()
     if kind:
         rows = rows.filter(question_type=kind)
+    review = request.GET.get("review", "").strip()
+    if review in library.APPROVAL_SOURCES:
+        rows = rows.filter(review_source=review)
     for term in request.GET.get("q", "").split()[:8]:
         key = library.search_key(term)
         if key:
@@ -1938,16 +2160,19 @@ def library_list(request):
         return _error("limit 与 offset 必须是整数")
     rows = _library_rows(request).order_by("source_filename", "number", "-version")
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-    sources, types = {}, {}
-    for row in live.values("paper_id", "source_filename", "question_type"):
+    sources, types, reviews = {}, {}, {"human": 0, "ai": 0}
+    for row in live.values("paper_id", "source_filename", "question_type", "review_source"):
         key = str(row["paper_id"]) if row["paper_id"] else ""
         entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"], "count": 0})
         entry["count"] += 1
         types[row["question_type"]] = types.get(row["question_type"], 0) + 1
+        review_key = row["review_source"] if row["review_source"] in reviews else "human"
+        reviews[review_key] += 1
     return JsonResponse({
         "total": rows.count(),
         "items": [library.publication_json(item) for item in rows[offset:offset + limit]],
-        "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types},
+        "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types,
+                   "reviews": reviews},
     })
 
 

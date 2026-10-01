@@ -52,7 +52,7 @@ assert.match(js, /\/api\/papers\/\$\{paperId\}\/question-trash`/);
 assert.match(js, /\/api\/papers\/\$\{paperId\}\/question-trash\/\$\{batchId\}\/restore/);
 assert.match(js, /回收站里还有题卡；请先恢复这些题卡，再归档任务/);
 assert.match(js, /回收站里还有题卡；请先恢复这些题卡，再调整页序/);
-for (const id of ["questionTrash", "settingsTrash", "trashDialog", "trashList"]) {
+for (const id of ["questionTrash", "trashDialog", "trashList"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
 

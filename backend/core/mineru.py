@@ -28,7 +28,7 @@ MAX_PDF_PAGES = 600
 logger = logging.getLogger(__name__)
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
-    "A0211": "Token 已过期，请在 MinerU API 管理页更换 Token",
+    "A0211": "Token 已过期（MinerU 的 Token 14 天过期一次）：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 填写或更换密钥”里换上",
     "-500": "请求参数不正确，请检查文件类型与接口设置",
     "-10001": "MinerU 服务暂时异常，请稍后重试",
     "-10002": "请求参数格式不正确，请检查接口设置",
@@ -241,6 +241,30 @@ def _mineru_error(stage: str, result: dict | None, status: int | None = None) ->
     return MineruError(message, **metadata)
 
 
+# Transient network trouble (a dropped connection, a stalled upload to the
+# storage bucket) is retried a few times before the task is marked failed.
+NETWORK_RETRY_DELAYS = (2.0, 5.0)
+TRANSIENT_HTTP = frozenset({500, 502, 503, 504})
+
+
+class _TransientDownloadError(MineruError):
+    """A download failure worth retrying (network error or HTTP 5xx)."""
+
+
+def _with_network_retries(action: Callable[[], requests.Response]) -> requests.Response:
+    for attempt in range(len(NETWORK_RETRY_DELAYS) + 1):
+        try:
+            response = action()
+        except requests.RequestException:
+            if attempt == len(NETWORK_RETRY_DELAYS):
+                raise
+        else:
+            if response.status_code not in TRANSIENT_HTTP or attempt == len(NETWORK_RETRY_DELAYS):
+                return response
+        time.sleep(NETWORK_RETRY_DELAYS[attempt])
+    raise AssertionError("unreachable")
+
+
 def _api_json(
     session: requests.Session,
     token: str,
@@ -248,13 +272,13 @@ def _api_json(
     payload: dict | None = None,
 ) -> tuple[dict, str]:
     try:
-        response = session.request(
+        response = _with_network_retries(lambda: session.request(
             "POST" if payload is not None else "GET",
             f"{API_ROOT}/{endpoint.lstrip('/')}",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             json=payload,
             timeout=(10, 45),
-        )
+        ))
     except requests.RequestException:
         raise MineruError("MinerU 接口连接失败，请检查网络后重试") from None
     try:
@@ -275,6 +299,16 @@ def _api_json(
 
 
 def _download_zip(session: requests.Session, url: str, target: Path) -> None:
+    for attempt in range(len(NETWORK_RETRY_DELAYS) + 1):
+        try:
+            return _download_zip_once(session, url, target)
+        except _TransientDownloadError:
+            if attempt == len(NETWORK_RETRY_DELAYS):
+                raise
+        time.sleep(NETWORK_RETRY_DELAYS[attempt])
+
+
+def _download_zip_once(session: requests.Session, url: str, target: Path) -> None:
     if not url.startswith("https://"):
         raise MineruError("MinerU 下载地址不是 HTTPS")
     partial = target.with_name(target.name + ".part")
@@ -282,7 +316,8 @@ def _download_zip(session: requests.Session, url: str, target: Path) -> None:
     try:
         with session.get(url, stream=True, timeout=(10, 120)) as response:
             if not response.ok:
-                raise MineruError(f"MinerU 解析包下载失败（HTTP {response.status_code}）")
+                error_type = _TransientDownloadError if response.status_code in TRANSIENT_HTTP else MineruError
+                raise error_type(f"MinerU 解析包下载失败（HTTP {response.status_code}）")
             with partial.open("wb") as output:
                 size = 0
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
@@ -297,7 +332,7 @@ def _download_zip(session: requests.Session, url: str, target: Path) -> None:
         os.replace(partial, target)
     except requests.RequestException as exc:
         partial.unlink(missing_ok=True)
-        raise MineruError(f"MinerU 解析包下载失败（{type(exc).__name__}）") from None
+        raise _TransientDownloadError(f"MinerU 解析包下载失败（{type(exc).__name__}）") from None
     except (MineruError, OSError):
         partial.unlink(missing_ok=True)
         raise
@@ -332,14 +367,20 @@ def request_extract_file(
         upload_urls = batch.get("file_urls") or []
         if not batch_id or len(upload_urls) != 1:
             raise MineruError("MinerU 未返回上传地址")
-        try:
+        def upload() -> requests.Response:
+            # Reopen the file for every attempt: a retried PUT must send the
+            # whole body again, not the remainder of a half-read stream.
             with source.open("rb") as stream:
-                response = session.put(upload_urls[0], data=stream, timeout=(10, 180))
-                if not response.ok:
-                    raise MineruError(f"MinerU 文件上传失败（HTTP {response.status_code}）")
+                return session.put(upload_urls[0], data=stream, timeout=(10, 180))
+
+        try:
+            response = _with_network_retries(upload)
+            if not response.ok:
+                raise MineruError(f"MinerU 文件上传失败（HTTP {response.status_code}）")
         except requests.RequestException as exc:
             raise MineruError(f"MinerU 文件上传失败（{type(exc).__name__}）") from None
-        deadline = time.monotonic() + 20 * 60
+        started = time.monotonic()
+        deadline = started + 20 * 60
         while time.monotonic() < deadline:
             data, trace_id = _api_json(session, token, f"extract-results/batch/{batch_id}")
             if heartbeat is not None:
@@ -359,7 +400,9 @@ def request_extract_file(
                     "err_msg": task.get("err_msg"),
                     "trace_id": trace_id,
                 })
-            time.sleep(5)
+            # A short exam is usually done within 10–20 s; poll briskly at first
+            # and back off for long books so the API is not hammered.
+            time.sleep(2 if time.monotonic() - started < 60 else 5)
     raise MineruError("MinerU 解析超时")
 
 
@@ -477,8 +520,13 @@ def load_blocks(archive_path: Path, page_count: int) -> list[dict]:
         text = raw.get("text") or raw.get("content") or ""
         if not isinstance(text, str):
             text = ""
-        blocks.append({"seq": seq, "type": str(raw.get("type") or "unknown")[:40], "page_idx": page,
-                       "bbox": [float(v) for v in bbox] if bbox else None, "text": text[:4000]})
+        block = {"seq": seq, "type": str(raw.get("type") or "unknown")[:40], "page_idx": page,
+                 "bbox": [float(v) for v in bbox] if bbox else None, "text": text[:4000]}
+        # A recognised table keeps its cells: it can become a text table.
+        body = raw.get("table_body")
+        if block["type"] == "table" and isinstance(body, str) and body.strip():
+            block["html"] = body[:20000]
+        blocks.append(block)
     if not blocks:
         raise MineruError("MinerU 没有返回可用的内容块")
     return blocks

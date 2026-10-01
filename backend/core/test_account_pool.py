@@ -115,6 +115,192 @@ class AccountPoolTests(SimpleTestCase):
                 pass
 
 
+class AccountConcurrencyTests(SimpleTestCase):
+    def tearDown(self):
+        account_pool.reset_account_pools()
+
+    def test_one_account_can_carry_its_configured_number_of_leases(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3)
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def task():
+            nonlocal active, peak
+            with pool.lease():
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                time.sleep(0.03)
+                with lock:
+                    active -= 1
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            list(executor.map(lambda _index: task(), range(6)))
+        self.assertEqual(peak, 3)
+        self.assertEqual(pool.capacity, 3)
+
+    def test_leases_spread_to_the_least_loaded_account_first(self):
+        pool = account_pool.AccountPool("test", ("a", "b"), per_account=2)
+        with pool.lease() as first, pool.lease() as second:
+            self.assertNotEqual(first.secret, second.secret)
+            with pool.lease() as third:
+                self.assertIn(third.secret, {"a", "b"})
+
+    def test_rate_limit_removes_one_parallel_slot_until_requests_succeed_again(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3)
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 2)
+        for _ in range(3):
+            with pool.lease() as lease:
+                lease.cooldown(0)
+        self.assertEqual(pool.capacity, 1)
+        # A burst limit passes: clean requests give the slots back, one at a time.
+        for _ in range(account_pool.recover_after(1) - 1):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 1)
+        with pool.lease():
+            pass
+        self.assertEqual(pool.capacity, 2)
+        for _ in range(3 * account_pool.recover_after(3)):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 3)          # never above the configured limit
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 2)
+        self.assertEqual(pool.spare, 2)
+
+    def test_one_burst_of_429s_removes_one_slot_not_all_of_them(self):
+        # Eight requests in flight hit the limit together (measured on MiniMax).
+        pool = account_pool.AccountPool("test", ("only",), per_account=8)
+        leases = [pool._acquire() for _ in range(8)]
+        for lease in leases:
+            lease.cooldown(0)
+            pool._release(lease)
+        self.assertEqual(pool.capacity, 7)
+        # A request sent after that cut can cut again.
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 6)
+
+    def test_recovery_takes_about_the_same_time_at_any_level(self):
+        self.assertLess(account_pool.recover_after(1), account_pool.recover_after(6))
+        self.assertEqual(account_pool.recover_after(1) * 6, account_pool.recover_after(6))
+
+    def test_configured_concurrency_is_validated_and_clamped(self):
+        # An explicit number fixes the level; otherwise MiniMax follows the plan.
+        cases = (("", (3, 8)), ("2", (2, 2)), ("0", (1, 1)), ("99", (8, 8)), ("x", (3, 8)))
+        for raw, expected in cases:
+            with self.subTest(raw=raw), mock.patch.dict(
+                    "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw, "QB_MINIMAX_PLAN": ""}):
+                self.assertEqual(account_pool.concurrency_range("minimax"), expected)
+                self.assertEqual(account_pool.account_concurrency("minimax"), expected[1])
+        with mock.patch.dict("os.environ", {"QB_MINERU_ACCOUNT_CONCURRENCY": ""}):
+            self.assertEqual(account_pool.concurrency_range("mineru"), (1, 1))
+        with mock.patch.dict("os.environ", {"QB_SILICONFLOW_ACCOUNT_CONCURRENCY": "", "QB_MINIMAX_PLAN": "max"}):
+            self.assertEqual(account_pool.concurrency_range("siliconflow"), (2, 2))
+
+    def test_minimax_membership_sets_the_start_and_the_ceiling(self):
+        cases = {"plus": (3, 4), "max": (4, 5), "ultra": (6, 7), "payg": (6, 8), "auto": (3, 8),
+                 "": (3, 8), "unknown": (3, 8), "PLUS": (3, 4)}
+        for plan, expected in cases.items():
+            with self.subTest(plan=plan), mock.patch.dict(
+                    "os.environ", {"QB_MINIMAX_PLAN": plan, "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}):
+                self.assertEqual(account_pool.concurrency_range("minimax"), expected)
+        with mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": "plus", "QB_MINIMAX_ACCOUNT_CONCURRENCY": "6"}):
+            self.assertEqual(account_pool.concurrency_range("minimax"), (6, 6))
+
+    def test_an_account_climbs_quickly_until_its_first_429_then_carefully(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3, ceiling=8)
+        self.assertEqual((pool.capacity, pool.ceiling), (3, 8))
+        for _ in range(3):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)          # one full round at 3
+        for _ in range(4):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 5)
+        with pool.lease() as lease:
+            lease.cooldown(0)
+        self.assertEqual(pool.capacity, 4)
+        # After a 429 the way back up is the cautious one.
+        for _ in range(account_pool.recover_after(4) - 1):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)
+        with pool.lease():
+            pass
+        self.assertEqual(pool.capacity, 5)
+
+    def test_climbing_stops_at_the_plan_ceiling(self):
+        pool = account_pool.AccountPool("test", ("only",), per_account=3, ceiling=4)
+        for _ in range(50):
+            with pool.lease():
+                pass
+        self.assertEqual(pool.capacity, 4)
+
+    def test_the_next_paper_starts_where_each_account_settled(self):
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        env = {"MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]), "QB_MINIMAX_PLAN": "auto",
+               "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}
+        with mock.patch.dict("os.environ", env):
+            pool = account_pool.account_pool("minimax")
+            self.assertEqual(pool.capacity, 6)            # 3 + 3
+            self.assertEqual(pool.ceiling, 16)
+            for _ in range(20):
+                with pool.lease():
+                    pass
+            climbed = sorted(pool.levels())
+            self.assertGreater(sum(climbed), 6)
+            account_pool.reset_account_pools()            # a new paper
+            fresh = account_pool.account_pool("minimax")
+            self.assertIsNot(fresh, pool)
+            self.assertEqual(sorted(fresh.levels()), climbed)
+            self.assertEqual(sorted(account_pool.learned_levels("minimax")), climbed)
+            # Another plan starts from its own opening level.
+            with mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": "plus"}):
+                self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+            account_pool.forget_learned_concurrency()
+            account_pool.reset_account_pools()
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+
+    def test_a_fixed_number_is_not_carried_between_papers(self):
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        with mock.patch.dict("os.environ", {"MINIMAX_API_KEYS_JSON": json.dumps(["k1"]),
+                                            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3"}):
+            pool = account_pool.account_pool("minimax")
+            with pool.lease() as lease:
+                lease.cooldown(0)
+            self.assertEqual(pool.capacity, 2)
+            account_pool.reset_account_pools()
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
+
+    def test_shared_pool_uses_service_concurrency(self):
+        with mock.patch.dict("os.environ", {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]),
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3",
+        }):
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
+
+    def test_reading_threads_cover_the_plan_ceiling_not_the_opening_level(self):
+        from . import pipeline
+        account_pool.forget_learned_concurrency()
+        self.addCleanup(account_pool.forget_learned_concurrency)
+        with mock.patch.dict("os.environ", {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["k1"]), "QB_MINIMAX_PLAN": "auto",
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "", "QB_PARALLEL_EXPLICIT": "0",
+            "QB_PRIMARY_ENGINE": "minimax_m3", "QB_CHECKER_ENGINE": "minimax_m3",
+        }), mock.patch.object(pipeline, "PARALLEL", 4):
+            self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
+            self.assertEqual(pipeline._reader_parallelism(), 8)
+
+
 class VisionPoolTests(SimpleTestCase):
     def tearDown(self):
         account_pool.reset_account_pools()
@@ -349,7 +535,8 @@ class VisionPoolTests(SimpleTestCase):
                 ) as post, self.assertRaises(readers.ReaderError) as raised:
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
-        self.assertEqual(post.call_count, readers.RATE_LIMIT_ROUNDS)
+        # No other service is configured, so it waits longer, but still stops.
+        self.assertEqual(post.call_count, readers.PATIENT_RATE_LIMIT_ROUNDS)
         self.assertIn("持续限流", str(raised.exception))
         self.assertNotIn(secret, str(raised.exception))
 
@@ -377,6 +564,9 @@ class VisionPoolTests(SimpleTestCase):
         environment = {
             "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
             "MINIMAX_API_KEY": secret,
+            # This contract is about a single-slot account: a cooldown must not
+            # release a herd.  Multi-slot accounts are covered separately.
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "1",
         }
         with mock.patch.dict("os.environ", environment, clear=False), \
                 mock.patch.object(readers, "_post", side_effect=post):
@@ -402,7 +592,7 @@ class VisionPoolTests(SimpleTestCase):
         sleep.assert_not_called()
 
     def test_parallel_limit_is_always_safe(self):
-        for value, expected in (("0", 1), ("99", 8), ("bad", 4), ("3", 3)):
+        for value, expected in (("0", 1), ("99", readers.MAX_PARALLEL_CARDS), ("bad", 4), ("3", 3)):
             with self.subTest(value=value), mock.patch.dict("os.environ", {"QB_PARALLEL": value}):
                 self.assertEqual(readers._parallel_limit(), expected)
 
@@ -412,3 +602,100 @@ class VisionPoolTests(SimpleTestCase):
         self.assertEqual(readers._retry_after_seconds("garbage", fallback=2.0), 2.0)
         self.assertEqual(readers._retry_after_seconds("120"), 60.0)
         self.assertEqual(readers._retry_after_seconds("1.5"), 1.5)
+
+
+class HedgedRequestTests(SimpleTestCase):
+    engine = readers.Engine("minimax", readers.MINIMAX_MODEL)
+
+    def test_straggler_is_answered_by_a_duplicate_request(self):
+        release = threading.Event()
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            calls.append(len(calls))
+            if started is not None:
+                started.set()
+            if len(calls) == 1:
+                release.wait(5)
+                return "slow"
+            return "fast"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "fast")
+        release.set()
+        self.assertEqual(len(calls), 2)
+
+    def test_a_request_still_waiting_for_an_account_slot_is_not_duplicated(self):
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            calls.append(1)
+            time.sleep(0.3)          # queued behind other cards' requests
+            if started is not None:
+                started.set()
+            return "answer"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "answer")
+        self.assertEqual(len(calls), 1)
+
+    def test_no_duplicate_when_every_account_slot_is_busy(self):
+        release = threading.Event()
+        calls = []
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            calls.append(1)
+            if started is not None:
+                started.set()
+            release.wait(0.3)
+            return "only"
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=False), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "only")
+        self.assertEqual(len(calls), 1)
+
+    def test_fast_answer_sends_no_duplicate(self):
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "5"}), \
+                mock.patch.object(readers, "_chat_once", return_value="ok") as once:
+            self.assertEqual(readers.chat(self.engine, "p", []), "ok")
+        once.assert_called_once()
+
+    def test_a_failed_duplicate_does_not_hide_a_late_success(self):
+        release = threading.Event()
+
+        def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
+            if started is not None:
+                started.set()
+            if not release.is_set():
+                release.set()
+                time.sleep(0.2)
+                return "late but fine"
+            raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=once):
+            self.assertEqual(readers.chat(self.engine, "p", []), "late but fine")
+
+    def test_both_failing_raises_and_zero_disables_hedging(self):
+        def failing(*args, **_kwargs):
+            if len(args) > 4 and args[4] is not None:
+                args[4].set()
+            time.sleep(0.05)
+            raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
+
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.01"}), \
+                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
+                mock.patch.object(readers, "_chat_once", side_effect=failing):
+            with self.assertRaises(readers.ReaderError):
+                readers.chat(self.engine, "p", [])
+        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0"}), \
+                mock.patch.object(readers, "_chat_once", return_value="direct") as once:
+            self.assertEqual(readers.chat(self.engine, "p", []), "direct")
+        once.assert_called_once()

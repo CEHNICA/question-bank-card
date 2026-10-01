@@ -63,6 +63,83 @@ class SegmentTests(TestCase):
         self.assertEqual(q5["question_type"], "free_response")
         self.assertEqual([(n, a.number) for n, a in result["missing"]], [(4, 3)])
 
+    def test_national_paper_elective_headings_end_the_previous_question(self):
+        # 2024 全国甲卷第 21–23 题：选考说明和“[选修 4-4]”曾被截进第 21 题。
+        blocks = [
+            block(0, 0, [60, 40, 900, 70], "三、解答题：共 70 分．"),
+            block(1, 0, [60, 80, 900, 110], "（一）必考题：共 60 分．"),
+            block(2, 0, [60, 120, 900, 220], "21．已知函数 f(x)=(1-ax)ln(1+x)-x．"),
+            block(3, 0, [60, 230, 900, 270], "（二）选考题：共 10 分．请考生在第 22、23 题中任选一题作答．"),
+            block(4, 0, [60, 280, 900, 300], "[选修 4-4：坐标系与参数方程]"),
+            block(5, 0, [60, 310, 900, 400], "22．在平面直角坐标系 xOy 中，曲线 C 的极坐标方程为 ρ=ρcosθ+1．"),
+            block(6, 0, [60, 410, 900, 430], "[选修 4-5：不等式选讲]"),
+            block(7, 0, [60, 440, 900, 520], "23．已知实数 a，b 满足 a+b≥3．"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertEqual(sorted(questions), [21, 22, 23])
+        self.assertLessEqual(questions[21]["regions"][-1]["bbox"][3], 230)
+        self.assertLessEqual(questions[22]["regions"][-1]["bbox"][3], 410)
+        # The major section still names the cards.
+        self.assertTrue(all(q["section"].startswith("三、解答题") for q in questions.values()))
+        self.assertTrue(all(q["question_type"] == "free_response" for q in questions.values()))
+
+    def test_previous_option_sharing_a_block_with_the_next_number_stays_with_its_question(self):
+        # 陈毅初三照片卷：MinerU 把第 9 题的“D. 3”和第 10 题合成一个框。
+        blocks = [
+            block(39, 0, [535, 549, 904, 601], "9. 如图, 在菱形 $ABCD$ 中, $AB=13$"),
+            block(40, 0, [537, 607, 562, 623], "A. 6"),
+            block(43, 0, [537, 654, 561, 669], "C. 4"),
+            block(46, 0, [537, 680, 911, 739], "D. 3\n10. 如图, $\\triangle ABC$ 中, $\\angle ACB=90^{\\circ}$"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertGreaterEqual(questions[9]["regions"][-1]["bbox"][3], 696)   # D. 3 is inside
+        self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 704)
+        # The photo's first line of question 10 rises to about 682 at its right
+        # end (“且 AE=4，BD=6，分别连”); the estimated start leaves room for it.
+        self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 684)
+
+    def test_crop_stays_below_a_section_heading_printed_right_above(self):
+        # shengli7 #16: the padding above “16.” reached into the heading line and
+        # one reader copied “三、解答题（共 10 小题 共 90 分）” into the question.
+        blocks = [
+            block(50, 0, [36, 420, 431, 440], "14. 计算 $1+1$ 的值."),
+            block(51, 0, [36, 445, 431, 461], "15. 若 $|a|=3$，则 a-b="),
+            block(52, 0, [36, 466, 332, 482], "三、解答题（共10小题共90分）"),
+            block(53, 0, [33, 483, 579, 542], "16.（6分）小毅设计了某个产品的包装盒(如图所示)."),
+            block(57, 0, [36, 600, 835, 679], "17.（6分）把下列各数填入它所属的集合内"),
+        ]
+        result = segment.segment(PAGES[:1], blocks)
+        questions = {q["number"]: q for q in result["questions"]}
+        self.assertGreaterEqual(questions[16]["regions"][0]["bbox"][1], 482)
+        self.assertLessEqual(questions[16]["regions"][0]["bbox"][1], 484)
+
+    def test_a_line_running_past_the_column_split_keeps_its_last_character(self):
+        regions = [{"page_idx": 0, "bbox": [53.0, 93.0, 482.0, 275.0]}]
+        blocks = [
+            block(36, 0, [75, 97, 490, 147], "15. 如图 Rt△ABC，图中阴影部分在数学史上称为“希波克拉底"),
+            block(50, 0, [515, 123, 766, 149], "右栏的文字"),
+            block(51, 0, [470, 200, 530, 230], "", "image"),
+        ]
+        widened = segment._cover_own_lines(regions, blocks)
+        self.assertEqual(widened[0]["bbox"], [53.0, 93.0, 490.0, 275.0])
+        # Never more than a few units: a block reaching far into the other column is not followed.
+        far = segment._cover_own_lines(regions, [block(1, 0, [75, 97, 560, 147], "很宽的一行")])
+        self.assertEqual(far[0]["bbox"][2], 482.0)
+
+    def test_a_number_glued_to_the_stem_fills_its_gap(self):
+        # 胜利初四月考第 9 题：MinerU 读成“9如图，在△ABC中…”，没有点也没有空格。
+        blocks = [
+            block(0, 0, [529, 100, 922, 130], "7. 抛物线 y=x² 向左平移1个单位长度"),
+            block(1, 0, [529, 373, 922, 392], "8.图为某拦河坝改造前后河床的横断面示意图"),
+            block(2, 0, [527, 470, 900, 490], "3个数中最大的是多少"),
+            block(3, 0, [527, 579, 921, 607], "9如图，在 $\\triangle ABC$ 中 $\\angle B = 45^{\\circ}$"),
+            block(4, 0, [527, 779, 894, 852], "10.二次函数 y=ax²+bx+c 的图象如图所示"),
+        ]
+        layout, starts = segment.analyse(PAGES[:1], blocks)
+        self.assertEqual([(s.number, s.y) for s in starts], [(7, 100), (8, 373), (9, 579), (10, 779)])
+
     def test_suffix_repair(self):
         blocks = [block(i, 0, [60, 50 + 60 * i, 470, 80 + 60 * i], f"{n}. 题目{n}")
                   for i, n in enumerate([21, 22, 3, 24])]
@@ -601,14 +678,16 @@ class ScriptedChat:
         match = re.search(r"(?:候选显示编号为|显示编号)\s*(\d+)", prompt)
         if match is None:
             match = re.search(r"第\s*(\d+)\s*题", prompt)
-        number = int(match.group(1))
+        # The spot check names no card; scripts key it by the first card number.
+        number = int(match.group(1)) if match else 1
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
-            "a" if "蓝色框" in prompt else "b"
+            "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
+            "classify" if "上次没有判断编号" in prompt else "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
             raise value
-        return value
+        return value(prompt) if callable(value) else value
 
 
 def tagged(stem, options=None, figures="无", others="无", number=None):
@@ -963,19 +1042,32 @@ class PipelineTests(TestCase):
         self.assertEqual(self.paper.status, Paper.Status.READY, self.paper.error)
         cards = {q.number: q for q in self.paper.questions.all()}
         self.assertEqual(sorted(cards), [1, 2, 3, 5, 6])
-        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "agree"))
+        # MinerU's own text of card 1 matches the first vision reading, so the
+        # independent engine is the second witness and no checker call is made.
+        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "witness"))
+        self.assertEqual(cards[1].read_b.get("skipped"), "witness")
         self.assertEqual((cards[2].state, cards[2].text_source), ("green", "majority"), cards[2].flags)
         self.assertEqual([f["slot"] for f in cards[2].figures], ["stem"])
-        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "arbiter"))
-        self.assertIn("x^4", cards[3].stem)
+        # MinerU's text (“f(x)=x^2”) settles the x^2/x^3 disagreement for the
+        # primary reading, so the arbiter's third opinion (x^4) is not needed.
+        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "majority"))
+        self.assertIn("x^2", cards[3].stem)
+        self.assertNotIn(("arbiter", 3, "minimax"), chat.calls)
         self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
-        self.assertEqual(cards[5].state, "yellow")
-        self.assertTrue(any("只有一次" in f for f in cards[5].flags))
+        # Question 4 was never found: the card that holds it says so, and the
+        # locator got a second look before giving up.
+        self.assertIn(pipeline.merged_question_flag(4), cards[3].flags)
+        self.assertEqual([call for call in chat.calls if call[0] == "locate"], [("locate", 4, "minimax")] * 2)
+        # Card 5's text is backed by MinerU, so the failing checker is never
+        # needed; the primary reader's sighting of question 6 is still shown.
+        self.assertEqual((cards[5].state, cards[5].text_source), ("yellow", "witness"))
+        self.assertFalse(any("只有一次" in f for f in cards[5].flags))
         self.assertTrue(any("第 6 题" in f for f in cards[5].flags))
         self.assertEqual(cards[6].state, "red")
         self.assertTrue(any("没有找到第 4 题" in note or "AI 没有找到第 4 题" in note for note in self.paper.notes))
-        # 第二位读者用的是另一家
-        self.assertIn(("b", 1, "siliconflow"), chat.calls)
+        # 第二位读者用的是另一家；旁证一致的第 1 题没有再调用复核模型
+        self.assertNotIn(("b", 1, "siliconflow"), chat.calls)
+        self.assertIn(("b", 2, "siliconflow"), chat.calls)
         self.assertIn(("a", 1, "minimax"), chat.calls)
 
     def test_figure_printed_for_another_question_is_handed_over(self):
@@ -1274,8 +1366,13 @@ class PipelineTests(TestCase):
         self.assertEqual(numbers, [1, 2, 3, 4, 5, 6])
         q4 = self.paper.questions.get(number=4)
         self.assertEqual(q4.start_source, "located")
+        # The scripted readers report no printed number: the opening may be cut off.
+        self.assertIn(pipeline.FLAG_LOCATED_WITHOUT_NUMBER, q4.flags)
         q3 = self.paper.questions.get(number=3)
-        self.assertLessEqual(q3.regions[-1]["bbox"][3], q4.regions[0]["bbox"][1] + segment.START_PAD + 1)
+        # A located start's crop reaches one line higher (the band is coarse);
+        # the previous question's range still ends at the located number.
+        self.assertLessEqual(q3.regions[-1]["bbox"][3],
+                             q4.regions[0]["bbox"][1] + segment.START_PAD + segment.LOCATED_EXTRA_PAD + 1)
 
     def test_segment_pipeline_recovers_group_first_question_and_records_note(self):
         self.paper.blocks.all().delete()

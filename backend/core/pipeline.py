@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
+import os
 import re
 import shutil
 import threading
@@ -17,11 +19,11 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, readers, segment
+from . import imaging, import_planning, photos, readers, segment, tables, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
-    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag,
+    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag, has_figure_cue,
     candidate_key, missing_choice_figure_slots, recheck_automatic_review,
     resolve_automatic_figure_assignments, stored_or_derived_review,
     without_automatic_textbook_badges,
@@ -60,7 +62,7 @@ _EXAMPLE_SOLUTION_TEXT_RE = re.compile(
 # structure instead of inventing four missing image options.  This is kept
 # deliberately narrow so genuine image-choice questions are unaffected.
 _NUMERIC_SUBQUESTION_RE = re.compile(r"(?:^|\n|\s)[（(]\s*(\d{1,2})\s*[)）]")
-_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-DＡ-Ｄ]\s*[.．、:：)]", re.I)
+_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-EＡ-Ｅ]\s*[.．、:：)]", re.I)
 _EXERCISE_ACTION_RE = re.compile(
     r"(?:请|试)?(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析)"
 )
@@ -79,6 +81,8 @@ def _invalidate_approval(question: Question) -> None:
     question.approved = False
     question.approved_at = None
     question.approved_content_hash = ""
+    question.approval_source = ""
+    question.approval_agent = ""
 
 
 def _normalise_unlabelled_numeric_choice_type(
@@ -181,8 +185,15 @@ def _source_kind_has_question_support(
     )
 
 
-def _number_seen_flag(expected: int, readings: list[dict | None]) -> str | None:
-    """Warn only when neither independent reader found the expected number."""
+def _number_seen_flag(
+    expected: int, readings: list[dict | None], *, clipped_number: bool = False,
+) -> str | None:
+    """Warn only when neither independent reader found the expected number.
+
+    ``clipped_number`` marks a start the local rules recovered from a number
+    whose leading digit was cut off by the scan (“9.” read as 19): a reader
+    seeing 9 there confirms the repair rather than contradicting it.
+    """
 
     seen_numbers = {
         value for result in readings
@@ -191,6 +202,9 @@ def _number_seen_flag(expected: int, readings: list[dict | None]) -> str | None:
         if isinstance(value, int) and not isinstance(value, bool)
     }
     if not seen_numbers or expected in seen_numbers:
+        return None
+    if clipped_number and all(
+            value < expected and str(expected).endswith(str(value)) for value in seen_numbers):
         return None
     rendered = "、".join(str(value) for value in sorted(seen_numbers))
     return f"AI 看到的题号是 {rendered}，请确认"
@@ -287,7 +301,8 @@ def persist_local_text_review_upgrades(questions) -> dict[str, int]:
             flags.append(content_flag)
         if number_flag := _number_seen_flag(
                 int(getattr(question, "number", 0) or 0),
-                [getattr(question, "read_a", None), getattr(question, "read_b", None)]):
+                [getattr(question, "read_a", None), getattr(question, "read_b", None)],
+                clipped_number=getattr(question, "start_source", "") == "repaired"):
             flags.append(number_flag)
         state = Question.State.YELLOW if flags else Question.State.GREEN
         changed_fields: list[str] = []
@@ -303,6 +318,36 @@ def persist_local_text_review_upgrades(questions) -> dict[str, int]:
         question.save(update_fields=[*changed_fields, "updated_at"])
         stats["updated"] += 1
     return stats
+
+
+_CHOICE_BRACKET = re.compile(r"[（(]\s*[）)]\s*[。．.]?\s*$")
+
+
+def _row_as_choice_options(
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
+) -> dict[str, str]:
+    """Four printed pictures in one row under a choice stem are options A–D.
+
+    Readers sometimes call all four “题干” (seen on 下面四幅图中，不能证明勾股
+    定理的是（ ）), which then asks the reviewer to box every option by hand.
+    Only applies when no option has text and exactly four pictures that are not
+    already option pictures sit side by side.
+    """
+    if any(str(value).strip() for value in (options or {}).values()):
+        return assignments
+    if kind not in {"single_choice", "multiple_choice"} and not _CHOICE_BRACKET.search(stem or ""):
+        return assignments
+    if any(role in readers.OPTION_KEYS for role in assignments.values()):
+        return assignments
+    loose = [item for item in candidates or []
+             if assignments.get(item.get("label")) in {None, "stem", "none"} and item.get("bbox")]
+    row = _single_row(loose) if len(loose) == 4 else None
+    if row is None:
+        return assignments
+    updated = dict(assignments)
+    for slot, item in zip(readers.OPTION_KEYS, row):
+        updated[item["label"]] = slot
+    return updated
 
 
 def _resolve_automatic_figure_assignments(
@@ -323,8 +368,34 @@ def _resolve_automatic_figure_assignments(
         options=options,
         kind=kind,
         candidates=candidates,
-        assignments=assignments,
+        assignments=_row_as_choice_options(
+            stem=stem, options=options, kind=kind, candidates=candidates,
+            assignments=_sketches_beside_text_options(
+                stem=stem, options=options, kind=kind, assignments=assignments,
+            ),
+        ),
     )
+
+
+def _sketches_beside_text_options(*, stem: str, options: dict, kind: str, assignments: dict) -> dict:
+    """A picture tied to an option that already has printed text is a student's sketch.
+
+    On a marked photo (凤城高一) readers tied the parabolas a student drew next
+    to “A. y=-2/x” to option A.  A choice question whose options are printed
+    as text, and whose wording asks for no picture, has no option pictures;
+    such a binding is dropped instead of turning the card yellow.
+    """
+    texts = options or {}
+    all_printed_as_text = all(str(texts.get(key, "")).strip() for key in ("A", "B", "C", "D"))
+    if kind not in {"single_choice", "multiple_choice"} or not all_printed_as_text \
+            or has_figure_cue(stem, options):
+        # A lone captioned option (“A. 向右” beside an arrow) may really be a
+        # printed picture; only a question printed entirely as text is judged.
+        return assignments
+    return {
+        label: ("none" if role in readers.OPTION_KEYS else role)
+        for label, role in (assignments or {}).items()
+    }
 
 
 def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dict]) -> list[str]:
@@ -420,7 +491,7 @@ def _drop_stale_automatic_figures(question: Question, candidates: list[dict]) ->
         if not isinstance(figure, dict):
             changed = True
             continue
-        if figure.get("source") == "other" or candidate_key(figure) in valid_keys:
+        if figure.get("source") in {"other", "row"} or candidate_key(figure) in valid_keys:
             kept.append(figure)
         else:
             changed = True
@@ -1221,27 +1292,102 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
     return best_row
 
 
-def locate_missing(paper: Paper, layout, starts: list[segment.Start], store: PageStore) -> list[str]:
-    """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。"""
+_OPTION_LINE = re.compile(r"^\s*[A-EＡ-Ｅ]\s*[.．、:：]")
+LOCATE_SNAP_RANGE = 30.0   # 页面坐标：定位结果向下吸附到题干行的最大距离
+
+
+def _snap_located_start(
+    blocks: list[dict] | None, layout, page_idx: int, col: int, y: float,
+) -> float:
+    """Move an AI-located start onto the first stem line at or just below it.
+
+    The band the model names is coarse.  Landing inside the previous
+    question's option lines (“A. S  B. S/2 …”) used to cut those options off
+    the previous card.  Only MinerU text lines that do not start with an
+    option label, within a short distance, are used; otherwise ``y`` stays.
+    """
+    if not blocks:
+        return y
+    splits = layout.splits.get(page_idx, [])
+    below = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or int(block.get("page_idx", -1)) != page_idx or block.get("type") not in {"text", "title"}:
+            continue
+        if segment.column_of(splits, (bbox[0] + bbox[2]) / 2) != col:
+            continue
+        if y - 12 <= bbox[1] <= y + LOCATE_SNAP_RANGE:
+            below.append((bbox[1], str(block.get("text") or "")))
+    below.sort()
+    if not below or not _OPTION_LINE.match(below[0][1]):
+        return y   # already on (or just above) a non-option line
+    stem = next((top for top, text in below if not _OPTION_LINE.match(text)), None)
+    return stem if stem is not None else y
+
+
+FIRST_LINE_HEIGHT = 20.0
+
+
+def _inside_previous_opening(blocks: list[dict] | None, previous: segment.Start,
+                             page_idx: int, col: int, y: float) -> bool:
+    """A located number cannot sit on the previous question's own first line."""
+    if page_idx != previous.page or col != previous.col or y < previous.y:
+        return False
+    # Only the first printed line: MinerU sometimes merges the next question
+    # into the previous paragraph, and a number further down that block is real.
+    opening = next((block for block in blocks or [] if previous.seq is not None and block.get("seq") == previous.seq
+                    and block.get("bbox")), None)
+    bottom = previous.y + FIRST_LINE_HEIGHT
+    if opening:
+        bottom = min(bottom, float(opening["bbox"][3]))
+    return y < bottom - 2
+
+
+MERGED_QUESTION_FLAG_PREFIX = "这张卡里可能还有第 "
+
+
+def merged_question_flag(number: int) -> str:
+    return f"{MERGED_QUESTION_FLAG_PREFIX}{number} 题（没找到它的题号），请点“调整范围”把它分出来"
+
+
+def locate_missing(
+    paper: Paper, layout, starts: list[segment.Start], store: PageStore, blocks: list[dict] | None = None,
+    unresolved: list[tuple[int, int]] | None = None,
+) -> list[str]:
+    """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。
+
+    A number still not found is added to ``unresolved`` as (number, previous
+    number), so the card that swallowed it can say so itself: the note on
+    the paper alone was easy to miss (口镇第 4 题 silently carried 第 5 题).
+    """
     notes = []
     engine = readers.primary_engine()
+    unresolved = unresolved if unresolved is not None else []
     for number, previous in segment.missing_numbers(starts):
         ordered = sorted(starts, key=segment.Start.key)
         following = next((s for s in ordered if s.key() > previous.key() and s.number > number), None)
         regions = segment.region_regions_between(layout, previous, following)
         if engine is None or not regions:
             notes.append(f"没有找到第 {number} 题的印刷题号，它可能和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         try:
             image, placed = imaging.stack_regions(regions, store.load)
             bands = max(12, min(40, image.height // 45))
             ruled, bands = imaging.add_ruler(image, bands)
-            band = readers.locate_band(engine, imaging.jpeg_data_url(ruled, long_side=2200), number)
+            url = imaging.jpeg_data_url(ruled, long_side=2200)
+            band = readers.locate_band(engine, url, number)
+            if not band or not 1 <= band <= bands:
+                # The same question found the number on one run and not the
+                # next (口镇第 5 题); one more look is cheap next to a merged card.
+                band = readers.locate_band(engine, url, number)
         except readers.ReaderError as error:
             notes.append(f"定位第 {number} 题失败（{error}），它暂时和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         if not band or not 1 <= band <= bands:
             notes.append(f"AI 没有找到第 {number} 题的题号，它可能和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
             continue
         band_height = image.height / bands
         row = _snap_to_gap(image, int((band - 1) * band_height), band_height)
@@ -1254,8 +1400,15 @@ def locate_missing(paper: Paper, layout, starts: list[segment.Start], store: Pag
             continue
         x = region["bbox"][0] + 5
         col = segment.column_of(layout.splits.get(page_idx, []), x + 1)
+        if _inside_previous_opening(blocks, previous, page_idx, col, y):
+            notes.append(f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
+                         f"它暂时和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
+            continue
+        snapped = _snap_located_start(blocks, layout, page_idx, col, y)
         # y 是题号上方的空隙：前一题到此为止，本题从这里（再往上留一点）开始。
-        starts.append(segment.Start(number=number, page=page_idx, x=x, y=y + segment.END_GAP,
+        starts.append(segment.Start(number=number, page=page_idx, x=x,
+                                    y=(snapped if snapped != y else y + segment.END_GAP),
                                     seq=None, source="located", col=col))
         notes.append(f"第 {number} 题的题号 MinerU 没读出来，已由 AI 在原卷上定位。")
     return notes
@@ -1557,7 +1710,7 @@ def _apply_local_solution_shortening(
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
             or (
-                figure.get("source") == "other"
+                figure.get("source") in {"other", "row"}
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
         )
@@ -1696,8 +1849,9 @@ def _collect_segmentation_items(
         if leading.message:
             notes.append(f"{group.title}：{leading.message}" if len(groups) > 1 else leading.message)
         missing = segment.missing_numbers(starts)
+        unresolved: list[tuple[int, int]] = []
         if locate_gaps:
-            group_notes = locate_missing(paper, layout, starts, page_store)
+            group_notes = locate_missing(paper, layout, starts, page_store, group_blocks, unresolved)
             notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
                           for note in group_notes])
         elif missing:
@@ -1709,6 +1863,11 @@ def _collect_segmentation_items(
                 "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
             })
         items = segment.build_questions(layout, starts, group_blocks)
+        for number, previous_number in unresolved:
+            holder = next((item for item in items if item.get("number") == previous_number), None)
+            if holder is not None:
+                holder["segmentation_flags"] = [*(holder.get("segmentation_flags") or []),
+                                                merged_question_flag(number)]
         for item in items:
             regions = imaging.trim_regions(item.get("regions") or [], page_store.load)
             prepared = {
@@ -2269,6 +2428,33 @@ def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- 3. 读题
 
 
+def _table_check_flag(stem: str, mineru_tables: list[str], assignments: dict) -> str:
+    """Check a table the reader wrote out against MinerU's own table.
+
+    The prose check leaves tables out, so a written table is only trusted when
+    MinerU recognised the same cells.  Empty cells (to be filled in) and the
+    order of cells do not matter; a changed number does.
+    """
+    written = [textnorm.witness_key(cell) for cell in tables.cell_texts(stem)]
+    written = sorted(cell for cell in written if cell)
+    if not tables.has_table(stem):
+        if any(role == "table" for role in (assignments or {}).values()):
+            return "识读说原卷有表格，但题干里没有写出表格，请对照原卷补上"
+        return ""
+    printed = sorted(
+        key for value in mineru_tables for row in tables.parse_html(value) for cell in row
+        if (key := textnorm.witness_key(cell["text"]))
+    )
+    if not printed:
+        return "题干里的表格只有一次识读，请对照原卷逐格核对"
+    if written != printed:
+        from collections import Counter
+
+        differ = sum(((Counter(written) - Counter(printed)) + (Counter(printed) - Counter(written))).values())
+        return f"表格里约有 {differ} 格和 MinerU 识别的不一样，请对照原卷逐格核对"
+    return ""
+
+
 def _figure_slots(reading: dict | None) -> set[str]:
     """主读者明确归到题干或 A–D 的候选图槽位。"""
     return {
@@ -2304,7 +2490,10 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     }
     stem = reading.get("stem", "")
     table_removed = False
-    if "stem" in slots:
+    # A table the reader wrote out and marked "表格" is question text.  Only a
+    # table re-typed from a crop that is still bound as a picture is a copy.
+    wrote_tables = any(role == "table" for role in ((figure_reading or {}).get("figures") or {}).values())
+    if "stem" in slots and not wrote_tables:
         stem, table_removed = readers.strip_markdown_tables(stem)
     if not remove and not table_removed:
         return reading
@@ -2325,8 +2514,252 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     return cleaned
 
 
+FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目开头可能被切掉了，请点“调整范围”检查"
+# AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
+FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
+FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
+FLAG_READERS_DOWN = ("看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
+                     "额度恢复后点“重新识读”，或者对照原卷直接改字")
+# Saving the text answers these; they must not survive an edit.
+TEXT_DRAFT_FLAGS = (FLAG_MINERU_DRAFT, FLAG_MINERU_DRAFT_EMPTY, FLAG_READERS_DOWN)
+_LEADING_NUMBER = r"^\s*(?:第\s*)?{number}\s*(?:题)?\s*[.．、,，:：)）]\s*"
+
+
+def _reading_order(blocks: list[dict], regions: list[dict]) -> list[dict]:
+    """The card's content blocks as a reader sees them: region by region, top
+    to bottom, and left to right within a line.  MinerU's own order (seq) is
+    sometimes wrong inside one question (a sub-question before the question's
+    first line), and a single question crop is laid out as plain lines."""
+    placed = []
+    for block in blocks:
+        kind, bbox = block.get("type"), block.get("bbox")
+        if not bbox or kind in segment.NON_CONTENT or kind in {"image", "chart"}:
+            continue
+        index = next((position for position, region in enumerate(regions)
+                      if segment.center_in_regions(int(block["page_idx"]), bbox, [region])), None)
+        if index is not None:
+            placed.append((index, block))
+    placed.sort(key=lambda item: (item[0], item[1]["bbox"][1], item[1]["bbox"][0]))
+    rows: list[list] = []          # [region index, top, bottom, blocks]
+    for index, block in placed:
+        top, bottom = block["bbox"][1], block["bbox"][3]
+        if rows and rows[-1][0] == index:
+            row = rows[-1]
+            overlap = min(bottom, row[2]) - max(top, row[1])
+            if overlap > 0.5 * max(1.0, min(bottom - top, row[2] - row[1])):
+                row[1], row[2] = min(row[1], top), max(row[2], bottom)
+                row[3].append(block)
+                continue
+        rows.append([index, top, bottom, [block]])
+    return [block for row in rows for block in sorted(row[3], key=lambda item: item["bbox"][0])]
+
+
+def mineru_draft(blocks: list[dict], table_html: dict[int, str], regions: list[dict]) -> str:
+    """MinerU's own text for a card, in reading order: prose as is, display
+    formulas as $…$, tables as Markdown.  The draft an AI assistant (or the
+    teacher) checks against the crop when no vision model reads."""
+    lines = []
+    for block in _reading_order(blocks, regions):
+        kind = block.get("type")
+        if kind == "table":
+            html = table_html.get(block.get("seq"))
+            text = tables.to_text(html) if html else ""
+        elif kind == "equation":
+            formula = " ".join(str(block.get("text") or "").replace("$$", " ").split())
+            text = f"${formula}$" if formula else ""
+        else:
+            text = str(block.get("text") or "").strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+_BARE_OPTION_LETTERS = re.compile(r"(?:^|\s)[A-E]\s*[.．、:：]\s*(?=[A-E]\s*[.．、:：]|$)", re.M)
+
+
+def _draft_figure_guess(stem: str, options: dict, candidates: list[dict]) -> dict[str, str]:
+    """Without a vision model, attach a figure only in the plain case: the
+    wording asks for one (如图…), the crop holds exactly one picture, and every
+    option is printed as text.  Anything else is left for the reviewer."""
+    if len(candidates) != 1 or not has_figure_cue(stem, options):
+        return {}
+    # “A. B. C. D.” with nothing after the letters: the options are pictures.
+    if _BARE_OPTION_LETTERS.search(stem) or (options and not all(str(value).strip() for value in options.values())):
+        return {}
+    return {str(candidates[0]["label"]): "stem"}
+
+
+def assistant_draft(snapshot: dict) -> dict:
+    """A card for AI-assistant reading: MinerU's text, split into stem and
+    options, yellow until someone checks it against the crop."""
+    number = snapshot["number"]
+    text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
+    text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
+    stem, options = readers.split_inline_options(text)
+    kind = snapshot.get("question_type") or "unknown"
+    if kind == "unknown" and options:
+        kind = "single_choice"
+    candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
+    labels = {str(candidate["label"]): candidate for candidate in candidates}
+    assignments = _draft_figure_guess(stem, options, candidates)
+    if assignments:
+        assignments = _resolve_automatic_figure_assignments(
+            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments)
+    figures = without_automatic_textbook_badges([
+        {"slot": role, "page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"], "source": "auto"}
+        for label, role in assignments.items() if label in labels and role == "stem"
+    ])
+    review = automatic_review(stem=stem, options=options, candidate_labels=set(labels),
+                              assignments=assignments, figures=figures)
+    flags = list(snapshot.get("segmentation_flags") or [])
+    flags.append(FLAG_MINERU_DRAFT if stem else FLAG_MINERU_DRAFT_EMPTY)
+    return {
+        "read_a": {"engine": "MinerU", "stem": stem, "options": options, "draft": True, "figures": assignments},
+        "read_b": {}, "read_c": {},
+        "stem": stem, "options": options, "question_type": kind, "text_source": "mineru",
+        "figures": figures, "figure_review": review, "foreign_figures": [],
+        "flags": flags, "error": "", "state": Question.State.YELLOW,
+    }
+OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
+
+
+ARBITER_OBJECTION_FLAG_PREFIX = "第三次识读裁决后，MinerU 在这里读法仍不同，再看一次也不能确定："
+
+
+def _objection_flag(spots: list[dict], prefix: str = OBJECTION_FLAG_PREFIX) -> str:
+    shown = "；".join(f"…{s['before']}【{s['reading']}】{s['after']}…（MinerU：{s['mineru']}）" for s in spots[:3])
+    more = f" 等 {len(spots)} 处" if len(spots) > 3 else ""
+    return f"{prefix}{shown}{more}，请对照原卷"
+
+
+def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
+                       image_url: str, primary, checker, figure_source: dict,
+                       keep_reading: bool = False) -> tuple[dict, str]:
+    """Both vision reads agree, yet MinerU printed other characters at a few
+    clean spots (x^3 / x^2, 至少需用 / 至少需要).  The same model reading twice
+    repeats its own slips, so each spot gets one neutral either/or look.
+
+    Every spot settled for the reading keeps the card green.  Otherwise the
+    text is left as read and the card is yellow with the exact spots, so a
+    person decides; the spot check is not trusted to rewrite anything.
+    """
+    spots = textnorm.witness_objections(final, witness)
+    if not spots:
+        return final, source
+    previous = update.get("read_c") or {}
+    evidence = {"objections": spots, "witness": witness[:4000],
+                **({"chosen": previous["chosen"]} if "chosen" in previous else {})}
+
+    prefix = ARBITER_OBJECTION_FLAG_PREFIX if keep_reading else OBJECTION_FLAG_PREFIX
+
+    def record(result: dict) -> None:
+        # After an arbiter the third reading itself must stay on record.
+        update["read_c"] = {**previous, "objection_check": result} if keep_reading else result
+
+    try:
+        engine = readers.arbiter_engine(primary, checker)
+        if engine is None:
+            raise readers.ReaderError("没有可用的核对模型")
+        answers = readers.spot_check(engine, image_url, spots)
+    except readers.ReaderError as error:
+        record({**evidence, "error": str(error)})
+        flags.append(_objection_flag(spots, prefix))
+        return final, source
+    record({**evidence, "engine": engine.label, "answers": answers})
+    doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
+    if doubtful:
+        flags.append(_objection_flag(doubtful, prefix))
+    return final, source
+
+
+_OPTION_LETTERS = "ABCDEFGH"
+
+
+def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
+    """Letters missing before the last option (“A、C、D” lacks B).
+
+    A student's tick or cross over an option label made a reader skip that
+    option, and the card still went green.  Option images count as present.
+    """
+    letters = {key for key, value in (options or {}).items()
+               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    if not letters:
+        return []
+    last = _OPTION_LETTERS.index(max(letters))
+    return [letter for letter in _OPTION_LETTERS[:last] if letter not in letters]
+
+
+def _identical_options(options: dict) -> list[str]:
+    """The first pair of options with the same text (B and C both “-1/2024”).
+
+    A printed paper does not repeat an option; one of the two was misread
+    (the printed B was “-2024”), and both readers made the same slip.
+    """
+    seen: dict[str, str] = {}
+    for letter in sorted(options or {}):
+        value = textnorm.canon(str(options[letter] or ""))
+        if not value:
+            continue
+        if value in seen:
+            return [seen[value], letter]
+        seen[value] = letter
+    return []
+
+
+def _restore_skipped_options(final: dict, readings: list[dict], witness: str) -> tuple[dict, dict[str, bool]]:
+    """Take an option the chosen reading skipped from a reading that has it.
+
+    Returns the reading and, per restored letter, whether MinerU's text also
+    contains it.  An option whose text equals one the chosen reading already
+    has is a shifted label (B read as A), not a skipped option, and is ignored.
+    """
+    options = dict(final.get("options") or {})
+    present = {key for key, value in options.items() if str(value or "").strip()}
+    if not present:
+        return final, {}
+    last = max(key for key in present if key in _OPTION_LETTERS) if present & set(_OPTION_LETTERS) else None
+    if last is None:
+        return final, {}
+    existing = {textnorm.canon(str(value)) for value in options.values() if str(value or "").strip()}
+    witness_text = textnorm.witness_key(witness) if witness else ""
+    restored: dict[str, bool] = {}
+    for letter in _OPTION_LETTERS[:_OPTION_LETTERS.index(last)]:
+        if letter in present:
+            continue
+        for reading in readings:
+            text = str((reading.get("options") or {}).get(letter) or "").strip()
+            if not text or textnorm.canon(text) in existing:
+                continue
+            key = textnorm.witness_key(text)
+            options[letter] = text
+            existing.add(textnorm.canon(text))
+            restored[letter] = bool(witness_text) and len(key) >= 4 and key in witness_text
+            break
+    if not restored:
+        return final, {}
+    return {**final, "options": dict(sorted(options.items()))}, restored
+
+
+def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
+    """Drop a question number the arbiter copied into the stem (“9如图，……”).
+
+    Only when neither reader's stem starts with it, so a stem that really
+    begins with that figure (“9 个同学……” on question 9) is left alone.
+    """
+    stem = str(reading.get("stem") or "")
+    match = re.match(rf"\s*{int(number)}\s*[．.、，,]?\s*(?=[^\d.．])", stem)
+    if not match:
+        return reading
+    if any(re.match(rf"\s*{int(number)}(?!\d)", str((other or {}).get("stem") or "")) for other in others):
+        return reading
+    return {**reading, "stem": stem[match.end():]}
+
+
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
+    if "draft" in snapshot:
+        return assistant_draft(snapshot)
     number = snapshot["number"]
     source_kind = snapshot.get("source_kind") or Question.SourceKind.UNKNOWN
     primary, checker = readers.primary_engine(), readers.checker_engine()
@@ -2342,6 +2775,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
+    witness = str(snapshot.get("witness") or "")
     jobs = [
         (name, engine, url, figures)
         for name, engine, url, figures in (
@@ -2352,6 +2786,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     ]
     if checker is None:
         errors["b"] = "所选复核模型没有可用的 API Key"
+
+    unavailable: set[str] = set()
 
     def run_reader(
         job: tuple[str, readers.Engine, str, bool],
@@ -2374,15 +2810,30 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             # only a card with no usable result escalates the quota signal.
             return name, None, str(error), error
         except readers.ReaderError as error:
+            if isinstance(error, readers.ReaderUnavailable):
+                unavailable.add(name)
             return name, None, str(error), None
 
-    # 主读和复核彼此独立；两个提供商或同提供商多账号时
-    # 可同时进行。若只有一个账号，AccountPool 会在内部自动串行。
-    if len(jobs) == 1:
+    # 有 MinerU 旁证时先只读一次：主读与另一引擎的文字逐字一致，就不必再花一次
+    # 视觉调用做同模型复核（实测同一模型复读几乎总是逐字相同，旁证更独立）。
+    # 不一致或没有旁证时，照旧请复核读者独立再读一遍。
+    witness_first = bool(witness) and len(jobs) == 2 and \
+        len(textnorm.witness_key(witness)) >= textnorm.WITNESS_MIN_LENGTH
+    if witness_first:
+        first = run_reader(jobs[0])
+        name, result, _error, _quota = first
+        cleaned = _without_inferred_figure_text(result, result) if result is not None else None
+        if cleaned is not None and textnorm.witness_agrees(cleaned, witness):
+            completed = [first]
+            errors.pop("b", None)
+        else:
+            completed = [first, run_reader(jobs[1])]
+    elif len(jobs) == 1:
         completed = [run_reader(jobs[0])]
     else:
+        # 主读和复核彼此独立；两个提供商或同提供商多账号时可同时进行。
         with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
-            futures = [executor.submit(run_reader, job) for job in jobs]
+            futures = [executor.submit(contextvars.copy_context().run, run_reader, job) for job in jobs]
             completed = [future.result() for future in futures]
     quota_errors: list[readers.ReaderQuotaExhausted] = []
     for name, result, error, quota_error in completed:
@@ -2399,6 +2850,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                     "read_b": results.get("b", {"error": errors.get("b", "")}), "read_c": {}}
     if not results and quota_errors:
         raise quota_errors[0]
+    asked = {name for name, *_rest in jobs}
+    if not results and asked and asked <= unavailable and snapshot.get("fallback_draft") is not None:
+        # No service could answer at all (free quota used up, outage): start
+        # from MinerU's text like AI-assistant reading, and say why.
+        card = assistant_draft({**snapshot, "draft": snapshot["fallback_draft"]})
+        card["flags"] = [*card["flags"], FLAG_READERS_DOWN]
+        card["read_a"] = {**card["read_a"], "error": errors.get("a", "")}
+        return card
     if not results:
         return {**update, "state": Question.State.RED, "error": errors.get("a") or errors.get("b") or "识读失败",
                 "flags": []}
@@ -2407,14 +2866,44 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     a_text = _without_inferred_figure_text(a, figure_source)
     b_text = _without_inferred_figure_text(b, figure_source)
     normalized_results = [result for result in (a_text, b_text) if result]
-    if a and b and same_reading(a_text, b_text):
+    if a and not b and "b" not in errors and textnorm.witness_agrees(a_text, witness):
+        # Cross-engine agreement: the vision reading and MinerU's OCR match.
+        final, source = a_text, "witness"
+        # Kept as audit evidence and shown in the reading history; it has no
+        # ``stem`` so no code path mistakes it for a vision transcription.
+        update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
+    elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
+        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
+                                           image_url=clean_url, primary=primary, checker=checker,
+                                           figure_source=figure_source)
+    elif a and b and (textnorm.witness_agrees(b_text, witness)
+                      or textnorm.witness_choice(a_text, b_text, witness) is not None):
+        # MinerU (a different engine) settles the disagreement.  An arbiter
+        # from the readers' own model tends to repeat their slips: in testing
+        # it “confirmed” a misread repeating decimal and kept inserted words
+        # (图形的面积 for the printed 图形面积), while MinerU had copied the
+        # printed characters.  Every differing spot must side the same way.
+        chosen = "b" if textnorm.witness_agrees(b_text, witness) else textnorm.witness_choice(a_text, b_text, witness)
+        final, source = (a_text if chosen == "a" else b_text), "majority"
+        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness",
+                            "chosen": chosen}
+        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
+                                           image_url=clean_url, primary=primary, checker=checker,
+                                           figure_source=figure_source)
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)
             if arbiter is None:
                 raise readers.ReaderError("没有可用的分歧裁决模型")
-            c = readers.arbitrate(arbiter, clean_url, number, a_text, b_text)
+            # The checker's reading is shown first.  Against the reference
+            # transcriptions every wrong arbiter decision had followed the
+            # reading shown first (then the primary's, taken from the image with
+            # candidate boxes drawn over it), while the checker — reading the
+            # clean image — was right more often where the two differed.
+            c = readers.arbitrate(arbiter, clean_url, number, b_text, a_text, witness) if witness \
+                else readers.arbitrate(arbiter, clean_url, number, b_text, a_text)
+            c = _without_echoed_number(c, number, (a_text, b_text))
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
             normalized_results.append(c_text)
@@ -2422,9 +2911,20 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 final, source = a_text, "majority"
             elif same_reading(c_text, b_text):
                 final, source = b_text, "majority"
+            elif textnorm.spotwise_majority(a_text, b_text, c_text):
+                # The arbiter took one reader's word at some spots and the
+                # other's elsewhere; nothing in it lacks a second vote.
+                final, source = c_text, "majority"
+                update["read_c"] = {**c, "spotwise": True}
             else:
                 final, source = c_text, "arbiter"
                 flags.append("两次识读不一致，已由第三次识读裁决")
+            if source == "majority":
+                # The arbiter saw MinerU's text but can still keep a slip both
+                # readers made (shengli7 #16 “器补” for the printed 添补).
+                final, source = _settle_objections(
+                    final, source, update, flags, witness=witness, number=number, image_url=clean_url,
+                    primary=primary, checker=checker, figure_source=figure_source, keep_reading=True)
         except readers.ReaderError as error:
             final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}
@@ -2433,6 +2933,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final = a_text or b_text
         source = "single"
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
+
+    final, restored_options = _restore_skipped_options(
+        final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness)
+    for letter, supported in restored_options.items():
+        if not supported:
+            flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
 
     # This is a zero-extra-call guardrail.  Page structure remains the source
     # of truth for explicit 例题/练习 anchors, while model classifications are
@@ -2451,6 +2957,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     figures, foreign = [], []
     labels = {c["label"]: c for c in snapshot["candidates"]}
+    # Readers sometimes judge only some of the numbered boxes.  An unjudged box
+    # made the card yellow (“原卷可能有图没有被找到”) although nothing was
+    # missing; ask once, about just those boxes.
+    unjudged = sorted(set(labels) - set((figure_source.get("figures") or {})), key=lambda value: int(value))
+    if a and unjudged:
+        try:
+            extra = readers.classify_figures(primary, marked_url, number, unjudged)
+        except readers.ReaderError:
+            extra = {}
+        if extra:
+            figure_source = {**figure_source, "figures": {**(figure_source.get("figures") or {}), **extra}}
+            if isinstance(update.get("read_a"), dict):
+                update["read_a"] = {**update["read_a"], "figures_followup": extra}
     provisional_kind = final.get("type") or snapshot["question_type"] or "unknown"
     figure_assignments = _resolve_automatic_figure_assignments(
         stem=final.get("stem", ""),
@@ -2463,7 +2982,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         if label not in labels:
             continue
         box = {"page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"]}
-        if role in {"stem", "A", "B", "C", "D"}:
+        if role == "stem" or role in readers.OPTION_KEYS:
             figures.append({"slot": role, **box, "source": "auto"})
         elif role.startswith("q") and role[1:].isdigit():
             foreign.append({
@@ -2472,6 +2991,13 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 **box,
             })   # 属于同一题组内别的题的图，交给那道题
     figures = without_automatic_textbook_badges(figures)
+    if table_flag := _table_check_flag(str(final.get("stem") or ""), snapshot.get("witness_tables") or [],
+                                       figure_assignments):
+        flags.append(table_flag)
+    if gaps := _option_gaps(final.get("options") or {}, figures):
+        flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
+    if twins := _identical_options(final.get("options") or {}):
+        flags.append(f"选项 {'和'.join(twins)} 读成了一模一样的内容，请对照原卷核对")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
@@ -2529,8 +3055,15 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     others -= {item["number"] for item in foreign}
     if others:
         flags.append(f"截图里还露出了第 {'、'.join(map(str, sorted(others)))} 题，范围可能需要调整")
-    if number_flag := _number_seen_flag(number, [a, b]):
+    if number_flag := _number_seen_flag(
+            number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
+    elif snapshot.get("start_source") == "located" and not any(
+            isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
+        # The start came from the AI locator and nobody saw the printed number
+        # in the crop: the opening line is probably above it (口镇第 8 题只剩
+        # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
+        flags.append(FLAG_LOCATED_WITHOUT_NUMBER)
     return {
         **update,
         "stem": final.get("stem", ""),
@@ -2555,15 +3088,100 @@ def _snapshot(question: Question) -> dict:
             "segmentation_flags": [
                 flag for flag in (question.flags or [])
                 if str(flag).startswith("书本切题范围超过")
+                or str(flag).startswith(MERGED_QUESTION_FLAG_PREFIX)
                 or flag == FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
             ]}
+
+
+WITNESS_BLOCK_TYPES = frozenset({"text", "title", "list"})
+
+
+def _reader_parallelism() -> int:
+    """How many cards to read at once.
+
+    The launcher's figure is computed once at start-up.  Accounts saved later
+    in Settings reach the worker through hot reload, so the pools may raise
+    it; an explicit user setting (QB_PARALLEL_EXPLICIT=1) never moves.  The
+    pools' ceiling counts, not their current level: an account that starts
+    low and climbs needs cards waiting for the slots it gains.
+    """
+    base = PARALLEL
+    if os.environ.get("QB_PARALLEL_EXPLICIT") == "1":
+        return base
+    capacity = 0
+    seen: set[str] = set()
+    for engine in (readers.primary_engine(), readers.checker_engine()):
+        if engine is None or engine.provider in seen:
+            continue
+        seen.add(engine.provider)
+        try:
+            capacity += account_pool(engine.provider).ceiling
+        except AccountPoolError:
+            continue
+    return max(1, min(readers.MAX_PARALLEL_CARDS, max(base, capacity)))
+
+
+# Cards of each paper not yet handed to a reading thread.  Zero means the
+# paper is in its tail: the last few cards are finishing and the reading
+# slots are going idle, so the worker may start the next paper beside it.
+_READ_BACKLOG_LOCK = threading.Lock()
+_READ_BACKLOG: dict = {}
+
+
+def reading_tail(paper_pk) -> bool:
+    with _READ_BACKLOG_LOCK:
+        return _READ_BACKLOG.get(paper_pk) == 0
+
+
+def _set_backlog(paper_pk, value: int | None) -> None:
+    with _READ_BACKLOG_LOCK:
+        if value is None:
+            _READ_BACKLOG.pop(paper_pk, None)
+        else:
+            _READ_BACKLOG[paper_pk] = value
 
 
 def read_questions(paper: Paper, questions: list[Question]) -> None:
     if not questions:
         return
+    workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
+    # MinerU's own text for each range is an independent second engine.  Only
+    # prose blocks are used: on marked papers the student's working is mostly
+    # recognised as separate equation blocks, which would never match.
+    blocks_by_page: dict[int, list[dict]] = defaultdict(list)
+    for block in _block_dicts(paper):
+        if block.get("type") in WITNESS_BLOCK_TYPES:
+            blocks_by_page[int(block["page_idx"])].append(block)
+    # MinerU's own reading of each printed table, to check a table the reader
+    # wrote out as text.
+    table_list = [item for item in tables.table_blocks(paper) if item["html"]]
+    # AI-assistant reading: no vision model; each card starts as MinerU's text.
+    # Vision reading keeps the same draft in reserve for a card no service
+    # could read (the free quota used up): MinerU's text beats a red card.
+    assistant = readers.assistant_mode()
+    all_by_page: dict[int, list[dict]] = defaultdict(list)
+    for block in _block_dicts(paper):
+        all_by_page[int(block["page_idx"])].append(block)
+    table_html = {item["seq"]: item["html"] for item in table_list}
+    for snapshot in snapshots:
+        regions = snapshot.get("regions") or []
+        # Only the pages this card touches: a long book has thousands of blocks.
+        nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
+                  for block in blocks_by_page.get(page, [])]
+        snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
+        if regions:
+            pages = sorted({int(r["page_idx"]) for r in regions})
+            draft = mineru_draft([block for page in pages for block in all_by_page.get(page, [])],
+                                 table_html, regions)
+            snapshot["draft" if assistant else "fallback_draft"] = draft
+        elif assistant:
+            snapshot["draft"] = ""
+        snapshot["witness_tables"] = [
+            item["html"] for item in table_list
+            if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
+        ]
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
         state=Question.State.READING,
         reread_requested=False,
@@ -2594,7 +3212,14 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
         question = Question.objects.filter(pk=question_id).first()
         if question is None:
             return
-        borrowed = [f for f in question.figures if f.get("source") == "other"]
+        # Figures handed over from another question's range survive a reread.
+        # A row figure that lies in this question's own range is re-decided by
+        # the new reading instead.
+        own_keys = {candidate_key(item) for item in question.figure_candidates or []}
+        borrowed = [
+            f for f in question.figures
+            if f.get("source") == "other" or (f.get("source") == "row" and candidate_key(f) not in own_keys)
+        ]
         if borrowed and "figures" in fields:
             fields["figures"] = fields["figures"] + [
                 f for f in borrowed if not _same_box(f, fields["figures"])
@@ -2655,32 +3280,41 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     # after the pause signal, so they remain safely resumable as READING.
     quota_error: readers.ReaderQuotaExhausted | None = None
     snapshot_iter = iter(snapshots)
-    with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
-        pending = set()
-        for _ in range(min(PARALLEL, len(snapshots))):
-            pending.add(pool.submit(work, next(snapshot_iter)))
-        while pending:
-            done, pending = wait(pending, return_when=FIRST_COMPLETED)
-            completed: list[tuple[int, dict]] = []
-            for future in done:
-                try:
-                    completed.append(future.result())
-                except readers.ReaderQuotaExhausted as error:
-                    quota_error = error
+    unsubmitted = len(snapshots)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending = set()
+            for _ in range(min(workers, len(snapshots))):
+                pending.add(pool.submit(contextvars.copy_context().run, work, next(snapshot_iter)))
+                unsubmitted -= 1
+            _set_backlog(paper.pk, unsubmitted)
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                completed: list[tuple[int, dict]] = []
+                for future in done:
+                    try:
+                        completed.append(future.result())
+                    except readers.ReaderQuotaExhausted as error:
+                        quota_error = error
+                        break
+                if quota_error is not None:
+                    for future in pending:
+                        future.cancel()
                     break
-            if quota_error is not None:
-                for future in pending:
-                    future.cancel()
-                break
-            for question_id, fields in completed:
-                persist(question_id, fields)
-            for _ in completed:
-                try:
-                    snapshot = next(snapshot_iter)
-                except StopIteration:
-                    break
-                pending.add(pool.submit(work, snapshot))
+                for question_id, fields in completed:
+                    persist(question_id, fields)
+                for _ in completed:
+                    try:
+                        snapshot = next(snapshot_iter)
+                    except StopIteration:
+                        break
+                    pending.add(pool.submit(contextvars.copy_context().run, work, snapshot))
+                    unsubmitted -= 1
+                _set_backlog(paper.pk, unsubmitted)
+    finally:
+        _set_backlog(paper.pk, None)
     assign_foreign_figures(paper, foreign)
+    distribute_figure_rows(paper)
     if quota_error is not None:
         raise quota_error
 
@@ -2688,6 +3322,128 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
 def _same_box(figure: dict, others: list[dict]) -> bool:
     return any(o["page_idx"] == figure["page_idx"] and all(abs(a - b) < 1 for a, b in zip(o["bbox"], figure["bbox"]))
                for o in others)
+
+
+FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
+FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加上，请确认是否需要"
+
+
+def _single_row(candidates: list[dict]) -> list[dict] | None:
+    """Candidates laid out left-to-right on one line of one page, else None."""
+    if len(candidates) < 2 or len({item["page_idx"] for item in candidates}) != 1:
+        return None
+    row = sorted(candidates, key=lambda item: item["bbox"][0])
+    for left, right in zip(row, row[1:]):
+        top = max(left["bbox"][1], right["bbox"][1])
+        bottom = min(left["bbox"][3], right["bbox"][3])
+        shorter = min(left["bbox"][3] - left["bbox"][1], right["bbox"][3] - right["bbox"][1])
+        if shorter <= 0 or (bottom - top) < 0.5 * shorter or right["bbox"][0] < left["bbox"][2] - 4:
+            return None
+    return row
+
+
+def _needs_row_figure(question: Question) -> bool:
+    review = stored_or_derived_review(question)
+    return (
+        not question.figures
+        and not question.approved
+        and review.get("source") != "human"
+        and review.get("status") == BLOCKED_MISSING
+        and bool(review.get("cue_matches"))
+    )
+
+
+def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Question] | None:
+    """The consecutive questions a shared figure row serves, else None.
+
+    The row is printed either under the last of those questions (the common
+    “13、14、15 题图” layout) or under the first, with the next questions set
+    in the other column (汶源 9 月卷第 4–6 题).  Every other question must
+    mention a figure and have none.
+    """
+    if owner.number is None:
+        return None
+    count = len(row)
+    for first in (owner.number - count + 1, owner.number):
+        targets = [by_key.get((owner.group_id, first + index)) for index in range(count)]
+        others = [item for item in targets if item is not owner]
+        if all(item is not None and _needs_row_figure(item) for item in others):
+            return targets
+    return None
+
+
+def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> None:
+    """A reader's “this is question N's figure” guess loses to the row order."""
+    for question in paper.questions.exclude(id__in=keep):
+        figures = [
+            figure for figure in question.figures or []
+            if not (figure.get("source") == "other" and _same_box(figure, boxes))
+        ]
+        if len(figures) == len(question.figures or []):
+            continue
+        previous_review = stored_or_derived_review(question)
+        question.figures = figures
+        question.figure_review = recheck_automatic_review(
+            stem=question.stem, options=question.options, figures=figures, previous=previous_review,
+        )
+        flags = [flag for flag in question.flags or [] if flag != FLAG_FOREIGN_FIGURE]
+        question.flags = _flags_after_figure_review(flags, question.figure_review, figures)
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+        _invalidate_approval(question)
+        question.save()
+
+
+def distribute_figure_rows(paper: Paper) -> int:
+    """Hand out a shared row of figures to the consecutive questions it serves.
+
+    Exams often print the figures of questions 13, 14 and 15 side by side below
+    question 15.  Only question 15's range contains them, so 13 and 14 end up
+    “missing” a figure while 15 may claim the wrong one.  When the row holds
+    exactly one figure per question — the other questions of the run all
+    mention a figure yet have none — assign them left to right and flag every
+    card so a person confirms the pairing.  No model call is made.
+    """
+    changed = 0
+    questions = list(paper.questions.order_by("group_id", "number", "id"))
+    by_key = {(question.group_id, question.number): question for question in questions}
+    for owner in questions:
+        if owner.approved or any(f.get("source") == "manual" for f in owner.figures or []):
+            continue
+        row = _single_row([item for item in owner.figure_candidates or [] if item.get("bbox")])
+        if row is None:
+            continue
+        targets = _row_targets(owner, row, by_key)
+        if targets is None:
+            continue
+        # The row's order is one piece of evidence; the owner's own reader is
+        # another.  When the reader tied exactly the box the order gives the
+        # owner (and nothing else), the two agree and nobody needs to check the
+        # pairing.  A reader that picked a different box (菱形周清第 15 题 took
+        # the leftmost, the order says rightmost) or none keeps every card flagged.
+        own_box = row[targets.index(owner)]
+        claimed = {
+            label for label, role in ((owner.read_a or {}).get("figures") or {}).items()
+            if role == "stem"
+        }
+        confirmed = claimed == {str(own_box.get("label"))} and own_box.get("label") is not None
+        for question, figure in zip(targets, row):
+            box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
+            question.figures = [box]
+            question.figure_review = automatic_review(
+                stem=question.stem, options=question.options, candidate_labels=set(),
+                assignments={}, figures=question.figures,
+            )
+            flags = [flag for flag in (question.flags or []) if not figure_flag(flag) and flag != FLAG_ROW_FIGURE]
+            flags = _flags_after_figure_review(flags, question.figure_review, question.figures)
+            question.flags = flags if confirmed else [*flags, FLAG_ROW_FIGURE]
+            if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+            _invalidate_approval(question)
+            question.save()
+            changed += 1
+        _drop_borrowed_copies(paper, row, {question.id for question in targets})
+    return changed
 
 
 def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
@@ -2705,6 +3461,7 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
         if _same_box(item, target.figures):
             continue
         previous_review = stored_or_derived_review(target)
+        had_own_figures = any(f.get("source") not in {"other", "row"} for f in target.figures or [])
         target.figures = target.figures + [{"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"],
                                             "source": "other"}]
         target.figure_review = recheck_automatic_review(
@@ -2714,6 +3471,12 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             previous=previous_review,
         )
         target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
+        # Another card's reader said this picture belongs here.  That is only
+        # convincing when this question mentions a figure it does not have yet;
+        # otherwise (it already has its own figures, or never mentions one) the
+        # guess may be a mislabel, so a person confirms it.
+        if had_own_figures or not target.figure_review.get("cue_matches"):
+            target.flags = [flag for flag in target.flags if flag != FLAG_FOREIGN_FIGURE] + [FLAG_FOREIGN_FIGURE]
         if target.state in {Question.State.GREEN, Question.State.YELLOW}:
             target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
         _invalidate_approval(target)
@@ -2747,10 +3510,45 @@ def process_paper(paper: Paper) -> None:
         _set(paper, status=Paper.Status.FAILED, error=message[:500])
 
 
-def process_rereads() -> int:
-    """人工调整范围或点"重读"后的单题重读。"""
+def parse_ahead(paper: Paper) -> bool:
+    """Run only the MinerU step of a queued paper (the worker's look-ahead lane).
+
+    While one paper is being read, the next one can already be uploaded,
+    parsed by MinerU and stored.  The main lane later continues it from
+    SEGMENTING without waiting for MinerU.  Failures are recorded exactly as
+    ``process_paper`` records them.
+    """
+    try:
+        paper.refresh_from_db()
+        if paper.status != Paper.Status.QUEUED:
+            return False
+        parse(paper)
+        return True
+    except Exception as error:
+        logger.exception("paper failed while parsing ahead")
+        message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
+            f"处理出错：{type(error).__name__}"
+        _set(paper, status=Paper.Status.FAILED, error=message[:500])
+        return False
+
+
+ACTIVE_PAPER_STATUSES = (
+    Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
+)
+
+
+def process_rereads(*, idle_papers_only: bool = False) -> int:
+    """人工调整范围或点"重读"后的单题重读。
+
+    ``idle_papers_only`` lets the worker's priority lane serve rereads for
+    finished papers while a long book is still being processed, without ever
+    touching a paper the main lane is working on.
+    """
     count = 0
-    for paper in Paper.objects.filter(questions__reread_requested=True).distinct():
+    papers = Paper.objects.filter(questions__reread_requested=True)
+    if idle_papers_only:
+        papers = papers.exclude(status__in=ACTIVE_PAPER_STATUSES)
+    for paper in papers.distinct():
         questions = list(paper.questions.filter(reread_requested=True))
         try:
             read_questions(paper, questions)

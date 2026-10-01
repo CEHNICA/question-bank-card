@@ -12,10 +12,26 @@ import getpass
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 from pathlib import Path
 from typing import Mapping
+
+
+def _provider_catalog():
+    """backend/core/provider_catalog.py: the one list of reading services."""
+    try:
+        from core import provider_catalog
+    except ImportError:  # source checkout: backend/ is not on sys.path yet
+        backend = str(Path(__file__).resolve().parent / "backend")
+        if backend not in sys.path:
+            sys.path.insert(0, backend)
+        from core import provider_catalog
+    return provider_catalog
+
+
+provider_catalog = _provider_catalog()
 
 
 class CredentialStoreError(RuntimeError):
@@ -26,36 +42,34 @@ class CredentialValidationError(CredentialStoreError):
     """A new credential settings request is structurally invalid."""
 
 
-# siliconflow_key is optional: in 题有据 it makes the second reader a different vendor
-# (Qwen-VL); in M3 it does the zoomed third reading. The file is shared by both.
-CREDENTIAL_KEYS = ("mineru_token", "minimax_key", "siliconflow_key")
+# Every service in backend/core/provider_catalog.py has a singular field (kept
+# for old readers and the separately installed M3 tool) and a pool field.
+ACCOUNT_POOL_FIELDS = provider_catalog.credential_fields()
+CREDENTIAL_KEYS = tuple(legacy for legacy, _pool in ACCOUNT_POOL_FIELDS.values())
 MAX_ACCOUNT_POOL_SIZE = 8
-ACCOUNT_POOL_FIELDS = {
-    "mineru": ("mineru_token", "mineru_tokens"),
-    "minimax": ("minimax_key", "minimax_keys"),
-    "siliconflow": ("siliconflow_key", "siliconflow_keys"),
-}
+VISION_SERVICES = tuple(provider_catalog.VISION)
 
-MINIMAX_MODEL = "MiniMax-M3"
-SILICONFLOW_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
-DEFAULT_MODEL_IDS = {
-    "minimax": MINIMAX_MODEL,
-    "siliconflow": SILICONFLOW_MODEL,
-}
+MINIMAX_MODEL = provider_catalog.VISION["minimax"]["default_model"]
+SILICONFLOW_MODEL = provider_catalog.VISION["siliconflow"]["default_model"]
+DEFAULT_MODEL_IDS = {key: spec["default_model"] for key, spec in provider_catalog.VISION.items()}
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
 DEFAULT_MODEL_PREFERENCES = {
     "primary_engine": "minimax_m3",
     "checker_engine": "auto",
     "arbiter_engine": "primary",
 }
+_ENGINES = tuple(provider_catalog.ENGINES)
 MODEL_PREFERENCE_CHOICES = {
-    "primary_engine": ("minimax_m3", "siliconflow_qwen3"),
-    "checker_engine": ("auto", "minimax_m3", "siliconflow_qwen3"),
-    "arbiter_engine": ("primary", "checker", "minimax_m3", "siliconflow_qwen3"),
+    "primary_engine": (*_ENGINES, provider_catalog.ASSISTANT_ENGINE),
+    "checker_engine": ("auto", *_ENGINES),
+    "arbiter_engine": ("primary", "checker", *_ENGINES),
 }
+ENGINE_NAMES = {spec["engine"]: f"{spec['label']} {spec['default_model'].split('/')[-1]}"
+                for spec in provider_catalog.VISION.values()}
+ENGINE_NAMES[provider_catalog.ASSISTANT_ENGINE] = "AI 助手（MinerU 文字做初稿）"
 MODEL_ENVIRONMENT_KEYS = frozenset({
-    "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE",
-    "QB_MINIMAX_MODEL", "QB_SILICONFLOW_MODEL", "QB_MODEL_PREFERENCES_FILE",
+    "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE", "QB_MODEL_PREFERENCES_FILE",
+    *(provider_catalog.model_environment(provider) for provider in VISION_SERVICES),
 })
 _CREDENTIAL_UPDATE_LOCK = threading.Lock()
 
@@ -150,6 +164,13 @@ def save_model_preferences(
     document = {"version": 1, "roles": normalize_model_preferences(values)}
     if models is not None or existing_models is not None:
         document = {"version": 2, "roles": document["roles"], "models": selected_models}
+        # Keep the MiniMax membership chosen in the in-app settings page.
+        try:
+            plans = json.loads(path.read_text(encoding="utf-8")).get("plans") if path.is_file() else None
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError):
+            plans = None
+        if isinstance(plans, dict):
+            document["plans"] = plans
     payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
     temporary: Path | None = None
     try:
@@ -171,10 +192,10 @@ def save_model_preferences(
 def model_preference_environment(values: dict[str, str] | None = None) -> dict[str, str]:
     """Return the non-secret environment contract for web and worker processes.
 
-    QB_PRIMARY_ENGINE: minimax_m3 | siliconflow_qwen3
-    QB_CHECKER_ENGINE: auto | minimax_m3 | siliconflow_qwen3
-    QB_ARBITER_ENGINE: primary | checker | minimax_m3 | siliconflow_qwen3
-    QB_MINIMAX_MODEL and QB_SILICONFLOW_MODEL pin the corresponding model IDs.
+    QB_PRIMARY_ENGINE: an engine key (minimax_m3, modelscope_qwen, …) or assistant
+    QB_CHECKER_ENGINE: auto or an engine key
+    QB_ARBITER_ENGINE: primary | checker | an engine key
+    QB_<SERVICE>_MODEL pins each service's model ID.
     QB_MODEL_PREFERENCES_FILE is the shared absolute path for atomic UI updates.
     """
     roles = normalize_model_preferences(values)
@@ -188,8 +209,7 @@ def model_preference_environment(values: dict[str, str] | None = None) -> dict[s
         "QB_PRIMARY_ENGINE": roles["primary_engine"],
         "QB_CHECKER_ENGINE": roles["checker_engine"],
         "QB_ARBITER_ENGINE": roles["arbiter_engine"],
-        "QB_MINIMAX_MODEL": models["minimax"],
-        "QB_SILICONFLOW_MODEL": models["siliconflow"],
+        **{provider_catalog.model_environment(provider): models[provider] for provider in VISION_SERVICES},
         "QB_MODEL_PREFERENCES_FILE": str(model_preferences_path().resolve()),
     }
 
@@ -369,7 +389,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
         payload = json.loads(_transform(path.read_bytes(), protect=False).decode("utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise CredentialStoreError(
-                "已保存的凭据格式不受支持，请在软件的“API 与模型”中重新设置。"
+                "已保存的凭据格式不受支持，请在题有据的“设置 → 常用 → 填写或更换密钥”中重新填写。"
             )
         result: dict[str, object] = {}
         for service, (legacy_key, pool_key) in ACCOUNT_POOL_FIELDS.items():
@@ -379,7 +399,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
                 result[pool_key] = pool
         return result
     except (OSError, UnicodeError, ValueError, TypeError, CredentialStoreError) as exc:
-        raise CredentialStoreError("已保存的凭据无法读取，请先在软件的“API 与模型”中重试；若仍无法打开，再运行独立配置工具恢复。") from exc
+        raise CredentialStoreError("已保存的凭据无法读取，请先在题有据的“设置 → 常用 → 填写或更换密钥”中重试；若仍无法打开，再运行独立配置工具恢复。") from exc
 
 
 def save_credentials(values: Mapping[str, object], path: Path | None = None) -> None:

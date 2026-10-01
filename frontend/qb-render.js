@@ -14,7 +14,13 @@
 })(typeof window !== "undefined" ? window : globalThis, (root) => {
   "use strict";
 
-  const OPTION_KEYS = ["A", "B", "C", "D"];
+  const OPTION_KEYS = ["A", "B", "C", "D", "E"];
+  // A–D are always shown for a choice question (an empty one says so); E only
+  // when the paper prints it.
+  function shownOptionKeys(options, figures = []) {
+    const hasE = String(options?.E ?? "").trim() || figures.some((figure) => figure.slot === "E");
+    return hasE ? OPTION_KEYS : OPTION_KEYS.slice(0, 4);
+  }
   const EXPLICIT_MATH = /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/g;
   const BLANK = /(?:\\_){2,}|_{3,}|（[ \u3000]*）|\([ \u3000]+\)/g;
   const CJK = /[⺀-⿿　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/;
@@ -322,6 +328,53 @@
     return /[A-Za-z0-9Ａ-Ｚａ-ｚ０-９()[\]{}]/.test(character) || RUN_SYMBOLS.includes(character);
   }
 
+  function qualifiesAsMath(segment) {
+    const qualifies = segment && (/[A-Za-zＡ-Ｚａ-ｚα-ωΔΩ]/.test(segment) ||
+      Array.from(segment).some((c) => OPERATOR_SET.has(c) && c !== "/" && c !== ":" && c !== "!" && c !== "%" && c !== "'"));
+    const plainWord = /^[a-z]{3,}$/.test(segment) && !FUNCTIONS.has(segment);
+    const subLabel = /^\(\d+\)$/.test(segment);
+    return Boolean(qualifies && !plainWord && !subLabel);
+  }
+
+  // 英文句子里的单词（The、graph、temperature，以及 at、of、if 这些常用短词）。
+  // sin、cm 这类函数名和单位、ABC 这类点名不算。
+  const SHORT_WORDS = new Set(["at", "of", "if", "is", "in", "on", "to", "be", "by", "or", "as", "an", "it", "we",
+    "so", "do", "no", "up", "am"]);
+  function isProseWord(token) {
+    const word = token.replace(/[.,;:?!]+$/, "");
+    if (SHORT_WORDS.has(word.toLowerCase()) && /^[A-Za-z][a-z]?$/.test(word)) return true;
+    return /^[A-Za-z][a-z]{2,}$/.test(word) && !FUNCTIONS.has(word.toLowerCase()) && !UNITS.test(word);
+  }
+
+  function proseWordCount(segment) {
+    return segment.split(/\s+/).filter(isProseWord).length;
+  }
+
+  // 一句英文：只把里面的数学（18°C、x+1=3、AB）排成公式，单词照常显示，空格保留。
+  function proseRuns(segment, offset) {
+    const runs = [];
+    const tokens = Array.from(segment.matchAll(/\S+/g));
+    let group = null;
+    const flush = () => {
+      if (group && qualifiesAsMath(group.text)) runs.push(group);
+      group = null;
+    };
+    tokens.forEach((match, position) => {
+      const token = match[0];
+      const next = tokens[position + 1]?.[0] || "";
+      // 冠词 a / A 后面跟着名词时是英文（a number），不是字母变量（Let a be …）。
+      const article = /^(?:a|A)$/.test(token) && /^[A-Za-z][a-z]{2,}/.test(next) && isProseWord(next)
+        && !/^(?:and|are|was|has|had|the)$/i.test(next.replace(/[.,;:?!]+$/, ""));
+      if (isProseWord(token) || article) { flush(); return; }
+      const start = offset + match.index;
+      const end = start + token.length;
+      if (group) group = { start: group.start, end, text: segment.slice(group.start - offset, end - offset) };
+      else group = { start, end, text: token };
+    });
+    flush();
+    return runs;
+  }
+
   // 在未标记的文字中找出数学片段。只识别，不改写存储。
   function detectRuns(text) {
     const runs = [];
@@ -357,11 +410,8 @@
       }
       const label = /^\(\d+\)\s+/.exec(segment);
       if (label && segment.length > label[0].length) { segment = segment.slice(label[0].length); index += label[0].length; }
-      const qualifies = segment && (/[A-Za-zＡ-Ｚａ-ｚα-ωΔΩ]/.test(segment) ||
-        Array.from(segment).some((c) => OPERATOR_SET.has(c) && c !== "/" && c !== ":" && c !== "!" && c !== "%" && c !== "'"));
-      const plainWord = /^[a-z]{3,}$/.test(segment) && !FUNCTIONS.has(segment);
-      const subLabel = /^\(\d+\)$/.test(segment);
-      if (qualifies && !plainWord && !subLabel) runs.push({ start: index, end: index + segment.length, text: segment });
+      if (proseWordCount(segment) >= 1 && /\s/.test(segment)) runs.push(...proseRuns(segment, index));
+      else if (qualifiesAsMath(segment)) runs.push({ start: index, end: index + segment.length, text: segment });
       index = Math.max(end, index + 1);
     }
     return runs;
@@ -381,6 +431,8 @@
         if (FUNCTIONS.has(value)) out += `\\${value === "lg" ? "lg" : value} `;
         else if (UNITS.test(value) && /\d$/.test(previous)) out += `\\,\\mathrm{${value}}`;
         else if (value === "Rt") out += "\\mathrm{Rt}";
+        // 18°C、32°F：温度单位用正体。
+        else if (/^[CF]$/.test(value) && /°\s*$/.test(previous)) out += `\\mathrm{${value}}`;
         else out += value;
         index += value.length; continue;
       }
@@ -535,10 +587,188 @@
     if (cursor < text.length) parent.append(document.createTextNode(text.slice(cursor)));
   }
 
+  // ---------------------------------------------------------------- 表格
+  // 格子里只有文字和数字的表格是题目文字：Markdown 管道表（| a | b |，第一行后
+  // 可有 |---| 表头分隔行），有合并单元格时用只含 tr/td/th 与 rowspan/colspan 的 HTML。
+
+  const TABLE_SEPARATOR = /^\s*:?-{3,}:?\s*$/;
+  const HTML_TABLE = /<table\b[^>]*>[\s\S]*?<\/table\s*>/gi;
+
+  function isTableLine(line) {
+    const text = line.trim();
+    return text.startsWith("|") && (text.match(/\|/g) || []).length >= 2;
+  }
+
+  // 一行拆成格子，并记下每格在原文里的位置；$…$ 里的 |（如 |x|）和 \| 不算分隔。
+  function tableRowCells(line, lineStart) {
+    const cells = [];
+    let index = 0;
+    const leading = line.length - line.trimStart().length;
+    index = leading;
+    if (line[index] === "|") index += 1;
+    let end = line.trimEnd().length;
+    if (end > index && line[end - 1] === "|" && line[end - 2] !== "\\") end -= 1;
+    let cellStart = index;
+    let inMath = false;
+    const push = (from, to) => {
+      let a = from;
+      let b = to;
+      while (a < b && /\s/.test(line[a])) a += 1;
+      while (b > a && /\s/.test(line[b - 1])) b -= 1;
+      cells.push({ start: lineStart + a, end: lineStart + b, text: line.slice(a, b) });
+    };
+    for (; index < end; index += 1) {
+      const character = line[index];
+      if (character === "\\" && line[index + 1] === "|" && !inMath) { index += 1; continue; }
+      if (character === "$") inMath = !inMath;
+      if (character === "|" && !inMath) { push(cellStart, index); cellStart = index + 1; }
+    }
+    push(cellStart, end);
+    return cells;
+  }
+
+  function decodeEntities(value) {
+    return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (all, code) => {
+      const lower = code.toLowerCase();
+      if (lower === "amp") return "&";
+      if (lower === "lt") return "<";
+      if (lower === "gt") return ">";
+      if (lower === "quot") return '"';
+      if (lower === "apos") return "'";
+      if (lower === "nbsp") return " ";
+      const number = lower.startsWith("#x") ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+      return Number.isFinite(number) && number > 0 && number < 0x110000 ? String.fromCodePoint(number) : all;
+    });
+  }
+
+  function htmlTableRows(raw, offset) {
+    const rows = [];
+    for (const row of raw.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr\s*>/gi)) {
+      const rowInner = offset + row.index + row[0].indexOf(">") + 1;
+      const cells = [];
+      for (const cell of row[1].matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi)) {
+        const start = rowInner + cell.index + cell[0].indexOf(">") + 1;
+        const span = (name) => {
+          const match = new RegExp(`\\b${name}\\s*=\\s*["']?(\\d{1,2})`, "i").exec(cell[2]);
+          return match ? Math.max(1, Math.min(20, Number(match[1]))) : 1;
+        };
+        const text = decodeEntities(cell[3].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
+          .replace(/\s+/g, " ").trim();
+        cells.push({ start, end: start + cell[3].length, text, rowspan: span("rowspan"), colspan: span("colspan"),
+          header: cell[1].toLowerCase() === "th", decoded: true });
+      }
+      if (cells.length) rows.push(cells.slice(0, 20));
+      if (rows.length >= 60) break;
+    }
+    return rows;
+  }
+
+  // 文本里的全部表格：{start, end, rows: [[{start, end, text, …}]], header}
+  function findTables(source) {
+    const found = [];
+    for (const match of source.matchAll(HTML_TABLE)) {
+      const rows = htmlTableRows(match[0], match.index);
+      if (rows.length) found.push({ start: match.index, end: match.index + match[0].length, rows, header: false });
+    }
+    const lines = source.split("\n");
+    let offset = 0;
+    const starts = lines.map((line) => { const start = offset; offset += line.length + 1; return start; });
+    for (let index = 0; index < lines.length;) {
+      if (!isTableLine(lines[index]) || found.some((table) => table.start <= starts[index] && starts[index] < table.end)) {
+        index += 1;
+        continue;
+      }
+      let last = index;
+      while (last + 1 < lines.length && isTableLine(lines[last + 1])) last += 1;
+      if (last > index) {
+        let rows = lines.slice(index, last + 1).map((line, row) => tableRowCells(line, starts[index + row]));
+        const header = rows.length > 1 && rows[1].some((cell) => cell.text) && rows[1].every((cell) => !cell.text || TABLE_SEPARATOR.test(cell.text));
+        if (header) rows = [rows[0], ...rows.slice(2)];
+        found.push({ start: starts[index], end: starts[last] + lines[last].length, rows, header });
+      }
+      index = last + 1;
+    }
+    return found.sort((a, b) => a.start - b.start);
+  }
+
+  function renderTable(doc, table, marks) {
+    const wrap = doc.createElement("span");
+    wrap.className = "qb-table-wrap";
+    const element = doc.createElement("table");
+    element.className = "qb-table";
+    const width = Math.max(...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colspan || 1), 0)));
+    table.rows.forEach((row, rowIndex) => {
+      const tr = doc.createElement("tr");
+      let used = 0;
+      row.forEach((cell) => {
+        const td = doc.createElement(cell.header || (table.header && rowIndex === 0) ? "th" : "td");
+        if (cell.rowspan > 1) td.rowSpan = cell.rowspan;
+        if (cell.colspan > 1) td.colSpan = cell.colspan;
+        used += cell.colspan || 1;
+        const hits = marks.filter((mark) => mark.end > cell.start && mark.start < cell.end);
+        if (cell.decoded) {
+          renderTypesetText(td, cell.text, { empty: "" });
+          if (hits.length) td.classList.add("qb-cell-marked");
+        } else {
+          const text = cell.text.replace(/\\\|/g, "|");
+          const shifted = text === cell.text ? hits.map((mark) => ({ ...mark, start: mark.start - cell.start, end: mark.end - cell.start })) : [];
+          renderTypesetText(td, text, { marks: shifted, empty: "" });
+          if (hits.length && !shifted.length) td.classList.add("qb-cell-marked");
+        }
+        td.classList.remove("qb-typeset", "is-empty");
+        tr.append(td);
+      });
+      // 少写了格子的行补成完整的一行，表格线才对得齐。
+      if (!table.rows.some((other) => other.some((cell) => (cell.rowspan || 1) > 1))) {
+        for (; used < width; used += 1) tr.append(doc.createElement(table.header && rowIndex === 0 ? "th" : "td"));
+      }
+      element.append(tr);
+    });
+    wrap.append(element);
+    return wrap;
+  }
+
   /*
-   * 排版视图。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
+   * 排版视图。题目文字里的表格排成真正的表格，其余文字照常排版。
    */
-  function renderTypeset(node, value, { marks = [], empty = "（空）" } = {}) {
+  function renderTypeset(node, value, options = {}) {
+    const source = String(value ?? "");
+    const tables = source.includes("|") || /<table/i.test(source) ? findTables(source) : [];
+    if (!tables.length) return renderTypesetText(node, source, options);
+    const doc = node.ownerDocument || document;
+    const marks = options.marks || [];
+    node.replaceChildren();
+    node.classList.add("qb-typeset", "has-table");
+    node.classList.remove("is-empty");
+    const text = (from, to) => {
+      let start = from;
+      let end = to;
+      while (start < end && source[start] === "\n") start += 1;
+      while (end > start && source[end - 1] === "\n") end -= 1;
+      if (!source.slice(start, end).trim()) return;
+      const run = doc.createElement("span");
+      run.className = "qb-text-run";
+      renderTypesetText(run, source.slice(start, end), {
+        empty: "",
+        marks: marks.filter((mark) => mark.end > start && mark.start < end)
+          .map((mark) => ({ ...mark, start: mark.start - start, end: mark.end - start }))
+      });
+      node.append(run);
+    };
+    let cursor = 0;
+    tables.forEach((table) => {
+      text(cursor, table.start);
+      node.append(renderTable(doc, table, marks));
+      cursor = table.end;
+    });
+    text(cursor, source.length);
+    return node;
+  }
+
+  /*
+   * 排版一段文字。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
+   */
+  function renderTypesetText(node, value, { marks = [], empty = "（空）" } = {}) {
     const source = String(value ?? "");
     node.replaceChildren();
     node.classList.add("qb-typeset");
@@ -668,18 +898,38 @@
     return width;
   }
 
-  // 仿照纸质试卷：选项短就一行四个，中等两个，长则一行一个。
+  // 仿照纸质试卷：选项短就一行排完（四个或五个），中等两个，长则一行一个。
   function optionColumns(options, figures = []) {
-    const values = OPTION_KEYS.map((key) => options?.[key] ?? "");
+    const keys = shownOptionKeys(options, figures);
+    const values = keys.map((key) => options?.[key] ?? "");
     const optionFigures = figures.filter((figure) => OPTION_KEYS.includes(figure.slot));
-    if (optionFigures.length >= 3) return 4;
+    if (optionFigures.length >= 3) return keys.length;
     const widest = Math.max(0, ...values.map(displayWidth));
-    if (widest <= 10) return 4;
+    if (widest <= (keys.length === 5 ? 8 : 10)) return keys.length;
     if (widest <= 26) return 2;
     return 1;
   }
 
-  function figureElement(figure, resolveUrl) {
+  /*
+   * 选项列数还要看实际可用宽度：卡片右栏比试卷窄，按纸面规则排两列时
+   * “∠ABD=∠CBD” 这类选项会被硬折行。渲染后按容器宽度逐级降为 2 列或 1 列。
+   */
+  function fitOptions(root) {
+    const lists = root?.querySelectorAll ? root.querySelectorAll(".qb-options[data-widest]") : [];
+    lists.forEach((list) => {
+      const width = list.clientWidth;
+      if (!width) return;
+      const preferred = Number(list.dataset.cols || 1);
+      const widest = Number(list.dataset.widest || 0);
+      const fontSize = parseFloat(getComputedStyle(list).fontSize) || 16;
+      const need = (cols) => cols * (widest * fontSize * 0.5 + fontSize * 2.4) + (cols - 1) * fontSize;
+      const fitted = [5, 4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
+      list.classList.remove("cols-1", "cols-2", "cols-4", "cols-5");
+      list.classList.add(`cols-${fitted}`);
+    });
+  }
+
+  function figureElement(figure, resolveUrl, action) {
     const frame = document.createElement("figure");
     frame.className = "qb-figure";
     const image = document.createElement("img");
@@ -687,6 +937,14 @@
     image.alt = figure.slot === "stem" ? "题干配图" : `选项 ${figure.slot} 配图`;
     image.src = resolveUrl ? resolveUrl(figure) : figure.url;
     frame.append(image);
+    // The review page can offer an action under a figure (turn a table crop into text).
+    const extra = typeof action === "function" ? action(figure) : null;
+    if (extra) {
+      const caption = document.createElement("figcaption");
+      caption.className = "qb-figure-action";
+      caption.append(extra);
+      frame.append(caption);
+    }
     return frame;
   }
 
@@ -721,20 +979,26 @@
     const stemFigures = figures.filter((figure) => figure.slot === "stem");
     if (stemFigures.length) {
       const row = make("div", "qb-figures");
-      stemFigures.forEach((figure) => row.append(figureElement(figure, opts.resolveUrl)));
+      stemFigures.forEach((figure) => row.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
       container.append(row);
     }
     const options = content.options && typeof content.options === "object" ? content.options : {};
     const hasOptions = OPTION_KEYS.some((key) => String(options[key] ?? "").trim() || figures.some((figure) => figure.slot === key));
     if (hasOptions) {
-      const list = make("ol", `qb-options cols-${optionColumns(options, figures)}`);
-      OPTION_KEYS.forEach((key) => {
+      const keys = shownOptionKeys(options, figures);
+      const columns = optionColumns(options, figures);
+      const list = make("ol", `qb-options cols-${columns}`);
+      if (!figures.some((figure) => OPTION_KEYS.includes(figure.slot))) {
+        list.dataset.cols = String(columns);
+        list.dataset.widest = String(Math.max(0, ...keys.map((key) => displayWidth(options[key] ?? ""))));
+      }
+      keys.forEach((key) => {
         const item = make("li", "qb-option");
         item.append(make("span", "qb-option-label", `${key}.`));
         const body = make("span", "qb-option-body");
         view(body, options[key], { empty: figures.some((figure) => figure.slot === key) ? "" : "（空）", marks: marks[key] || [] });
         item.append(body);
-        figures.filter((figure) => figure.slot === key).forEach((figure) => item.append(figureElement(figure, opts.resolveUrl)));
+        figures.filter((figure) => figure.slot === key).forEach((figure) => item.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
         list.append(item);
       });
       container.append(list);
@@ -748,7 +1012,7 @@
       answer.append(make("strong", "", "答案"));
       const answerBody = make("span");
       // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
-      if (!opts.literal && /^\s*[A-D]{1,4}\s*$/.test(String(content.answer ?? ""))) {
+      if (!opts.literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
         answerBody.className = "qb-choice-answer";
         answerBody.textContent = String(content.answer).trim();
       } else view(answerBody, content.answer, { empty: "原卷未提供" });
@@ -788,9 +1052,9 @@
   }
 
   return {
-    OPTION_KEYS, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
+    OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale
+    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables
   };
 });

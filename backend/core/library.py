@@ -20,10 +20,48 @@ from .figure_policy import (
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
 from .models import Paper, PublishedQuestion, Question, QuestionGroup
+from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
-OPTION_KEYS = ("A", "B", "C", "D")
+OPTION_KEYS = ("A", "B", "C", "D", "E")
+# Every choice question carries A–D in its content, empty or not; E only when
+# printed.  A four-option question therefore keeps the exact content (and
+# approval hash) it had before E existed.
+BASE_OPTION_KEYS = ("A", "B", "C", "D")
+
+
+def option_content(options: dict | None) -> dict:
+    options = options or {}
+    content = {key: options.get(key, "") for key in BASE_OPTION_KEYS}
+    if str(options.get("E") or "").strip():
+        content["E"] = options["E"]
+    return content
 REVIEWABLE_STATES = {Question.State.GREEN, Question.State.YELLOW}
+
+
+# A figure may continue on the next page (a table cut by a page break): the
+# extra pieces are kept in ``parts`` and joined below the first one.
+MAX_FIGURE_PARTS = 4
+
+
+def figure_parts(figure: dict) -> list[dict]:
+    parts = figure.get("parts") if isinstance(figure, dict) else None
+    if not isinstance(parts, list):
+        return []
+    return [
+        {"page_idx": part["page_idx"], "bbox": part["bbox"]}
+        for part in parts
+        if isinstance(part, dict) and isinstance(part.get("page_idx"), int)
+        and isinstance(part.get("bbox"), list) and len(part["bbox"]) == 4
+    ]
+
+
+def figure_identity(figure: dict) -> str:
+    """What the cropped image depends on.  A one-piece figure keeps its old key."""
+    parts = figure_parts(figure)
+    if not parts:
+        return json.dumps([figure["page_idx"], figure["bbox"]])
+    return json.dumps([[figure["page_idx"], figure["bbox"]]] + [[p["page_idx"], p["bbox"]] for p in parts])
 
 
 def figure_file(question: Question, index: int) -> Path:
@@ -31,13 +69,31 @@ def figure_file(question: Question, index: int) -> Path:
     from .pipeline import PageStore, paper_dir
 
     figure = question.figures[index]
-    digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:12]
+    digest = hashlib.sha1(figure_identity(figure).encode()).hexdigest()[:12]
     target = paper_dir(question.paper) / "figures" / f"q{question.id}_{digest}.png"
     if not target.is_file():
-        page = PageStore(question.paper).load(figure["page_idx"])
+        store = PageStore(question.paper)
         target.parent.mkdir(parents=True, exist_ok=True)
-        page.crop(imaging.to_pixels(figure["bbox"], page.size)).save(target, format="PNG", optimize=True)
+        parts = figure_parts(figure)
+        if parts:
+            pieces = []
+            for piece in [{"page_idx": figure["page_idx"], "bbox": figure["bbox"]}, *parts]:
+                page = store.load(piece["page_idx"])
+                pieces.append((page, imaging.to_pixels(piece["bbox"], page.size)))
+            imaging.stack_figure_pieces(pieces).save(target, format="PNG", optimize=True)
+        else:
+            page = store.load(figure["page_idx"])
+            page.crop(imaging.to_pixels(figure["bbox"], page.size)).save(target, format="PNG", optimize=True)
     return target
+
+
+def _content_figure(figure: dict) -> dict:
+    item = {"slot": figure["slot"], "page_idx": figure["page_idx"], "bbox": figure["bbox"],
+            "source": figure.get("source", "unknown")}
+    parts = figure_parts(figure)
+    if parts:
+        item["parts"] = parts
+    return item
 
 
 def final_content(question: Question) -> dict:
@@ -49,14 +105,10 @@ def final_content(question: Question) -> dict:
         "section": question.section,
         "question_type": question.question_type,
         "stem": question.stem,
-        "options": {k: (question.options or {}).get(k, "") for k in OPTION_KEYS} if is_choice else {},
+        "options": option_content(question.options) if is_choice else {},
         "answer": question.answer or "",
         "analysis": question.analysis or "",
-        "figures": [
-            {"slot": f["slot"], "page_idx": f["page_idx"], "bbox": f["bbox"],
-             "source": f.get("source", "unknown")}
-            for f in question.figures
-        ],
+        "figures": [_content_figure(f) for f in question.figures],
         "sources": [
             {"page_idx": r["page_idx"], "bbox": r["bbox"], "type": "text", "source": source_origin}
             for r in question.regions
@@ -90,6 +142,8 @@ def content_hash(content: dict) -> str:
     )}
     material["figures"] = [
         {k: f.get(k) for k in ("slot", "page_idx", "bbox", "source")}
+        # Only a stitched figure carries parts, so every other hash is unchanged.
+        | ({"parts": figure_parts(f)} if figure_parts(f) else {})
         for f in content.get("figures", [])
     ]
     material["sources"] = [
@@ -111,6 +165,54 @@ def content_hash(content: dict) -> str:
 def approval_hash(question: Question) -> str:
     """当前草稿需要由人确认的精确内容版本。"""
     return content_hash(final_content(question))
+
+
+# 谁打的勾。人对照原卷确认是 human；AI 助手（tiyouju 命令行、MCP）打的勾是 ai。
+APPROVAL_SOURCES = ("human", "ai")
+DEFAULT_AGENT = "AI 助手"
+
+
+def agent_name(value) -> str:
+    """A short, printable name for the AI assistant that approved a card."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = "".join(character if character.isprintable() else " " for character in text)
+    return " ".join(text.split())[:40] or DEFAULT_AGENT
+
+
+def approval_source(question: Question) -> str:
+    """human / ai for an approved card ("" when not approved); old approvals are human."""
+    if not question.approved:
+        return ""
+    return question.approval_source if question.approval_source in APPROVAL_SOURCES else "human"
+
+
+def approve(question: Question, *, now, source: str = "human", agent: str = "") -> bool:
+    """Approve the version on screen.  An AI tick never replaces a person's.
+
+    Returns whether anything changed.  The caller has already checked that the
+    card can be approved and saves it.
+    """
+    if source not in APPROVAL_SOURCES:
+        raise ValueError("approval source must be human or ai")
+    if source == "ai" and approval_is_current(question) and approval_source(question) == "human":
+        return False
+    question.approved = True
+    question.approved_at = now
+    question.approved_content_hash = approval_hash(question)
+    question.approval_source = source
+    question.approval_agent = agent_name(agent) if source == "ai" else ""
+    return True
+
+
+def confirm_published_review(question: Question) -> int:
+    """A person confirmed a card an AI had passed and published: the library
+    copy of that same version now counts as human-reviewed (no new version)."""
+    if approval_source(question) != "human" or not question.approved_content_hash:
+        return 0
+    return question.publications.filter(
+        status=PublishedQuestion.Status.PUBLISHED, review_source="ai",
+        content_hash=content_hash(final_content(question)),
+    ).update(review_source="human", review_agent="")
 
 
 def approval_is_current(question: Question) -> bool:
@@ -180,8 +282,14 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
         digest = content_hash(content)
         if not question.approved_content_hash or question.approved_content_hash != digest:
             raise ValueError(f"第 {question.number} 题通过后内容已变化，请重新终审")
+        source = approval_source(question) or "human"
+        agent = question.approval_agent if source == "ai" else ""
         latest = question.publications.order_by("-version").first()
         if latest and latest.status == PublishedQuestion.Status.PUBLISHED and latest.content_hash == digest:
+            # A person confirmed what an AI assistant had passed: same version, now human-reviewed.
+            if latest.review_source == "ai" and source == "human":
+                latest.review_source, latest.review_agent = "human", ""
+                latest.save(update_fields=["review_source", "review_agent"])
             return latest, False
         publication_id = uuid.uuid4()
         folder = settings.DATA_ROOT / "library" / str(publication_id)
@@ -197,6 +305,7 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 source_filename=paper.display_name, number=question.number,
                 question_type=question.question_type, version=(latest.version if latest else 0) + 1,
                 content=content, content_hash=digest, search_text=_search_text(content),
+                review_source=source, review_agent=agent,
             )
             question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
@@ -300,7 +409,111 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "question_type": publication.question_type,
         "version": publication.version,
         "status": publication.status,
+        "review": {"source": publication.review_source or "human", "agent": publication.review_agent},
         "published_at": publication.published_at.isoformat(),
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
         "content": publication.content,
     }
+
+
+_E_TAG = re.compile(r"\s*【\s*E\s*】\s*")
+_LABEL_SETS_TYPE = {"unknown", "", "single_choice", "multiple_choice"}
+
+
+def tidy_text(stem: str, options: dict | None, question_type: str) -> tuple[str, dict, str]:
+    """Apply the saved-card fixes that only reformat, never re-read.
+
+    * a leading “例1” label is dropped (1.5.1);
+    * a leading “（多项选择题）” note is dropped and names the type, unless a
+      person already made it a fill-in or free-response question;
+    * “3个【E】4个” in option D — an E the parser did not know about — is
+      split into D “3个” and E “4个”.
+    """
+    new_stem = strip_example_label(stem or "")
+    new_stem, labelled = strip_type_label(new_stem)
+    if new_stem != (stem or ""):
+        new_stem = new_stem.lstrip()
+    new_type = question_type or "unknown"
+    if labelled and new_type in _LABEL_SETS_TYPE:
+        new_type = labelled
+    new_options = dict(options or {})
+    fourth = new_options.get("D")
+    if isinstance(fourth, str) and _E_TAG.search(fourth) and not str(new_options.get("E") or "").strip():
+        before, after = _E_TAG.split(fourth, maxsplit=1)
+        if before.strip() and after.strip():
+            new_options["D"] = before.strip()
+            new_options["E"] = after.strip()
+    return new_stem, new_options, new_type
+
+
+def _tidy_reading(reading):
+    if not isinstance(reading, dict):
+        return reading
+    stem, options, _kind = tidy_text(
+        reading.get("stem") if isinstance(reading.get("stem"), str) else "",
+        reading.get("options") if isinstance(reading.get("options"), dict) else {},
+        "unknown",
+    )
+    changed = dict(reading)
+    if isinstance(reading.get("stem"), str):
+        changed["stem"] = stem
+    if isinstance(reading.get("options"), dict):
+        changed["options"] = options
+    return changed
+
+
+def tidy_saved_cards() -> dict[str, int]:
+    """Bring cards read by older versions up to the current text rules.
+
+    Only formatting moves (see tidy_text); every word, figure and range stays.
+    A card whose approval was current keeps it: the reviewer approved that
+    task, and a label or a misplaced “【E】” is not part of it.  Published
+    snapshots get the same treatment in place, as a task rename updates
+    their file name, so publishing again does not mint a new version.  Safe
+    to run on every start: once everything is tidy it changes nothing.
+    """
+
+    counts = {"questions": 0, "publications": 0}
+    with transaction.atomic():
+        for question in Question.all_objects.select_for_update().select_related("paper", "group"):
+            stem, options, kind = tidy_text(question.stem, question.options, question.question_type)
+            if (stem, options, kind) == (question.stem, dict(question.options or {}), question.question_type):
+                continue
+            approval_was_current = approval_is_current(question)
+            question.stem, question.options, question.question_type = stem, options, kind
+            for field in ("read_a", "read_b", "read_c"):
+                setattr(question, field, _tidy_reading(getattr(question, field)))
+            if approval_was_current:
+                question.approved_content_hash = approval_hash(question)
+            question.save(update_fields=[
+                "stem", "options", "question_type", "read_a", "read_b", "read_c",
+                "approved_content_hash", "updated_at",
+            ])
+            counts["questions"] += 1
+
+        for publication in PublishedQuestion.objects.select_for_update():
+            content = deepcopy(publication.content)
+            original = (content.get("stem") or "", dict(content.get("options") or {}),
+                        content.get("question_type") or "unknown")
+            stem, options, kind = tidy_text(*original)
+            if (stem, options, kind) == original:
+                continue
+            old_hash = publication.content_hash
+            content["stem"], content["question_type"] = stem, kind
+            if content.get("options") or options:
+                content["options"] = option_content(options)
+            new_hash = content_hash(content)
+            review = content.get("review")
+            if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:
+                review["approved_content_hash"] = new_hash
+            publication.content = content
+            publication.content_hash = new_hash
+            publication.question_type = kind
+            publication.search_text = _search_text(content)
+            publication.save(update_fields=["content", "content_hash", "question_type", "search_text"])
+            counts["publications"] += 1
+    return counts
+
+
+# 1.5.1 name for the same cleanup.
+strip_saved_example_labels = tidy_saved_cards

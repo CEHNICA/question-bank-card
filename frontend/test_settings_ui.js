@@ -15,19 +15,36 @@ for (const page of [html, libraryHtml]) {
   assert.match(page, /class="brand-mark"[^>]*src="\/favicon\.png"/);
   assert.doesNotMatch(page, /题库题卡版/);
 }
-assert.match(html, /题有据 1\.2\.0（本机安装）/);
+assert.match(html, /id="aboutVersion"/);
+assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
-// 顶栏只有一个带文字的设置入口，抽屉包含约定的五个分区。
+// 顶栏只有一个带文字的设置入口；设置按分页显示：常用、读题模型、帮助、关于。
 assert.match(html, /id="settingsButton"[^>]*>[\s\S]*?<use href="#i-gear"\/>[\s\S]*?设置<\/button>/);
-for (const id of ["settingsModels", "settingsReview", "settingsTask", "settingsInterface", "settingsAbout"]) {
-  assert.match(html, new RegExp(`id="${id}"`));
+for (const id of ["settingsGeneral", "settingsModels", "settingsReview", "settingsAbout"]) {
+  assert.match(html, new RegExp(`data-settings-tab="${id}"`));
+  assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
 }
+assert.match(html, /id="settingsInterface"/);
+assert.match(js, /function showSettingsTab\(id\)/);
+assert.match(js, /showSettingsTab\("settingsGeneral"\);\s*\$\("settingsDialog"\)\.showModal\(\)/);
+// “常用”先用一句话说明能不能上传新资料；缺什么密钥就直接说出来。
+assert.match(html, /id="settingsReady"/);
+assert.match(js, /还不能上传新资料：请先填写 \$\{missing\.join\("、"\)\} 的密钥/);
+// 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
+assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
+assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);
+// 读题模型改了就保存，不再依赖单独的保存按钮。
+assert.doesNotMatch(html, /id="settingsModelSave"/);
+assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\)/);
+// 当前这份试卷的操作不属于“设置”：在试卷标题旁的“试卷操作”里。
+assert.doesNotMatch(html, /id="settingsTask"/);
+assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
 
 // 三个模型角色和保存契约必须保持一致。
 for (const id of ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
-for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel"]) {
+for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel", "settingsModelscopeModel"]) {
   assert.match(html, new RegExp(`id="${id}"[^>]*list="${id}s"`));
 }
 assert.match(js, /api\("\/api\/settings\/models"/);
@@ -70,5 +87,26 @@ assert.match(js, /body\.group_id\s*=\s*Number\(selectedGroup\)/);
 // 真正的旧任务迁移后默认仍是“试卷”；失败的 PDF 必须给人明确的教材重试入口。
 assert.match(js, /按教材重试/);
 assert.match(js, /body:\s*materialType\s*\?\s*\{\s*material_type:\s*materialType\s*\}\s*:\s*\{\}/);
+
+// MiniMax concurrency follows the membership: picked in 常用, saved with the
+// model settings, explained in plain words.
+assert.match(html, /<select id="settingsMinimaxPlan"[^>]*>\s*<option value="auto">不确定（自动摸索）<\/option>\s*<option value="plus">Plus<\/option>\s*<option value="max">Max<\/option>\s*<option value="ultra">Ultra<\/option>\s*<option value="payg">/);
+assert.match(js, /"settingsMinimaxPlan"\]\s*\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\);/);
+assert.match(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
+assert.match(js, /const plan = engines\.saved\?\.plans\?\.minimax \|\| engines\.plans\?\.minimax \|\| "auto";/);
+
+// 完全免费：常用里有“怎么配”的说明（MinerU + 魔搭），不能上传时自动展开；主读可以选“AI 助手读题”。
+assert.match(html, /<details id="settingsFreePlan" class="free-plan">[\s\S]*?mineru\.net[\s\S]*?modelscope\.cn[\s\S]*?AI 助手读题[\s\S]*?<\/details>/);
+assert.match(js, /if \(state\.freePlanReady !== s\.upload_enabled\) \{[\s\S]*?\$\("settingsFreePlan"\)\.open = !s\.upload_enabled;/);
+assert.match(css, /\.free-plan \{/);
+assert.match(js, /\{ value: "assistant", label: "AI 助手读题/);
+assert.match(js, /const assistant = \$\("settingsPrimaryModel"\)\.value === "assistant";\s*\$\("settingsCheckerModel"\)\.disabled = assistant;\s*\$\("settingsArbiterModel"\)\.disabled = assistant;/);
+assert.match(js, /models:\s*\{[\s\S]*?modelscope:\s*\$\("settingsModelscopeModel"\)\.value\.trim\(\)/);
+for (const id of ["settingsModelscopeState"]) {
+  assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(js, new RegExp(`setApiState\\("${id}"`));
+}
+// 选的那家没填密钥时显示实际读题的那家，而不是一个读不了的选项。
+assert.match(js, /if \(chosen && chosen\.available === false && engines\.primary\) primary = engines\.primary;/);
 
 console.log("settings UI static checks: OK");

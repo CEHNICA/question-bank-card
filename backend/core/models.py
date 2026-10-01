@@ -155,6 +155,8 @@ class Block(models.Model):
     page_idx = models.PositiveIntegerField()
     bbox = models.JSONField(null=True, blank=True)
     text = models.TextField(blank=True)
+    # A table MinerU recognised, as its HTML (see core/tables.py).
+    html = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["seq"]
@@ -205,7 +207,7 @@ class Question(models.Model):
     read_c = models.JSONField(default=dict)
     stem = models.TextField(blank=True)
     options = models.JSONField(default=dict)
-    text_source = models.CharField(max_length=16, blank=True)   # agree | majority | arbiter | single | human
+    text_source = models.CharField(max_length=16, blank=True)   # agree | witness | majority | arbiter | single | human
     state = models.CharField(max_length=10, choices=State.choices, default=State.WAITING)
     flags = models.JSONField(default=list)               # 请看一眼的具体原因
     error = models.CharField(max_length=300, blank=True)
@@ -215,6 +217,10 @@ class Question(models.Model):
     # 审批必须绑定到当时实际看过的题面、配图和原卷范围。
     # 只看 approved 布尔值会让“通过后再改字/换图”绕过复核。
     approved_content_hash = models.CharField(max_length=64, blank=True, default="")
+    # 谁打的勾：human（人对照原卷确认）或 ai（AI 助手用 tiyouju 命令行打的勾）。
+    # AI 通过照常能入库，但在审核页和题库里都和人工通过分开显示。
+    approval_source = models.CharField(max_length=8, blank=True, default="")
+    approval_agent = models.CharField(max_length=40, blank=True, default="")
     answer = models.TextField(blank=True, default="")
     analysis = models.TextField(blank=True, default="")
     reread_requested = models.BooleanField(default=False)
@@ -285,6 +291,9 @@ class PublishedQuestion(models.Model):
     content = models.JSONField(default=dict)
     content_hash = models.CharField(max_length=64)
     search_text = models.TextField(blank=True)
+    # 入库时这一版是谁审核通过的：human 或 ai（见 Question.approval_source）。
+    review_source = models.CharField(max_length=8, default="human")
+    review_agent = models.CharField(max_length=40, blank=True, default="")
     published_at = models.DateTimeField(auto_now_add=True)
     withdrawn_at = models.DateTimeField(null=True, blank=True)
 

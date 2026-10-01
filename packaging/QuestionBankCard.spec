@@ -44,6 +44,12 @@ for source in sorted(ASSETS_ROOT.iterdir()):
     if source.is_file() and source.suffix.lower() in {".ico", ".png", ".svg"}:
         datas.append((str(source), "assets"))
 
+# The practice paper for 新手教学: an original public demo PDF and its cards.
+DEMO_ROOT = BACKEND_ROOT / "core" / "demo_data"
+for source in sorted(DEMO_ROOT.glob("demo-paper.*")):
+    if source.suffix.lower() in {".json", ".pdf"}:
+        datas.append((str(source), "backend/core/demo_data"))
+
 # The frozen launcher uses these source files to fingerprint pending migrations.
 # The modules themselves are also included below as hidden imports.
 MIGRATIONS_ROOT = BACKEND_ROOT / "core" / "migrations"
@@ -139,10 +145,53 @@ exe = EXE(
     uac_uiaccess=False,
 )
 
+# tiyouju.exe: the console command line (and MCP server) for AI assistants.  It
+# only uses the standard library plus core.version, and shares _internal with
+# the app, so it adds a few hundred KB.
+cli_analysis = Analysis(
+    [str(PROJECT_ROOT / "tiyouju_cli.py")],
+    pathex=[str(PROJECT_ROOT), str(BACKEND_ROOT)],
+    binaries=[],
+    datas=[],
+    hiddenimports=["core.version"],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=["django", "PIL", "pymupdf", "fitz", "tkinter", "requests", "numpy"],
+    noarchive=False,
+    optimize=1,
+)
+cli_pyz = PYZ(cli_analysis.pure)
+
+cli_exe = EXE(
+    cli_pyz,
+    cli_analysis.scripts,
+    [],
+    exclude_binaries=True,
+    name="tiyouju",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=str(ASSETS_ROOT / "app.ico"),
+    version=str(version_file) if version_file.is_file() else None,
+    uac_admin=False,
+    uac_uiaccess=False,
+)
+
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    cli_exe,
+    cli_analysis.binaries,
+    cli_analysis.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

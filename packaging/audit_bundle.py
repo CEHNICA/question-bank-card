@@ -83,6 +83,8 @@ ALLOWED_EXACT_PATHS = {
     # Requests needs certifi's public CA roots for HTTPS certificate validation.  It is
     # neither a user certificate nor a private key.
     "_internal/certifi/cacert.pem",
+    # The practice paper for 新手教学: an original public demo (docs/demo), no user data.
+    "_internal/backend/core/demo_data/demo-paper.pdf",
 }
 
 # Only inspect formats which should contain readable configuration or source text.
@@ -216,9 +218,10 @@ def find_forbidden_files(bundle: Path) -> list[str]:
 
 def audit_bundle(bundle: Path) -> None:
     """Validate a complete PyInstaller directory or raise a useful error."""
-    executable = bundle / "QuestionBankCard.exe"
-    if not executable.is_file():
-        raise BundleAuditError(f"缺少主程序：{executable}")
+    for name in ("QuestionBankCard.exe", "tiyouju.exe"):
+        executable = bundle / name
+        if not executable.is_file():
+            raise BundleAuditError(f"缺少主程序：{executable}")
     findings = find_forbidden_files(bundle)
     if findings:
         details = "\n".join(f"  - {path}" for path in findings)

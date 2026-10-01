@@ -19,6 +19,12 @@ from dataclasses import dataclass, field
 
 NUMBER_RE = re.compile(r"(?<![\d.．A-Za-z\\^_{])(\d{1,2})\s*[.．、]{1,2}(?!\d)")
 HEADING_RE = re.compile(r"^\s*(?:[一二三四五六七八九十]{1,3}\s*[、.．]|第[一二三四五六七八九十]+部分|[ⅠⅡⅢⅣ]+\s*[、.．])")
+# 全国卷大题内部的“（二）选考题：……”“[选修 4-4：坐标系与参数方程]”：
+# 它们结束上一题的范围（否则会被誊录进第 21、22 题题面），但不替换
+# “三、解答题”作为题卡的大题名称。
+EXAM_SUBHEADING_RE = re.compile(
+    r"^\s*(?:[(（]\s*[一二三]\s*[)）]\s*(?:必考|选考)题|[\[【(（]?\s*选修\s*\d+\s*[-－—–]\s*\d+\s*[:：])"
+)
 NON_CONTENT = {"header", "footer", "page_number", "page_footnote", "aside_text"}
 FIGURE_TYPES = {"image", "table", "chart"}
 SECTION_TYPES = (
@@ -29,6 +35,16 @@ SECTION_TYPES = (
 )
 CJK = re.compile(r"[一-鿿（(【]")
 START_PAD = 9      # 题号上方留白
+# AI 定位的题号只精确到一条横带，常常落在题号行下面一行：多往上留一行。
+# 截图因此会带上上一题的最后一行，读题时由 clean_stem 去掉题号行之前的内容；
+# 上一题的范围不变。
+LOCATED_EXTRA_PAD = 20
+# A number found partway down a MinerU box (“D. 3\n10. 如图…”) gets its y from
+# an evenly spaced line estimate.  On a photographed page the line also tilts:
+# chenyi #10’s first line rose about 20 units across the column, so the crop
+# cut off “且 AE=4，BD=6，分别连” at its top right and both readers agreed on
+# the shortened question.  Leave a little more above such an estimate.
+MID_BLOCK_EXTRA_PAD = 12
 END_GAP = 2        # 下一题起点上方留白
 COLUMN_GAP = 120   # 两栏左边距至少相差多少才算不同栏
 BOOK_MAX_CARD_PAGES = 4
@@ -140,8 +156,19 @@ _LEADING_SOURCE_RE = re.compile(
     re.I,
 )
 _LEADING_SUBQUESTION_RE = re.compile(r"^\s*[（(]\s*([12])\s*[)）]", re.M)
-_LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-DＡ-Ｄ]\s*[.．、:]", re.I)
+_LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-EＡ-Ｅ]\s*[.．、:]", re.I)
 _LEADING_QUESTION_MARK_RE = re.compile(r"[？?]|[（(]\s*[）)]|(?:求|证明|计算|判断|选择|填空)")
+# Numbered exam instructions (“注意事项：1．答题前…”) are not questions.  Both
+# a notice header and instruction vocabulary are required, so an ordinary
+# question that merely mentions “考试” is never discarded.
+_NOTICE_HEADER_RE = re.compile(r"^\s*(?:注意事项|考生须知|答题须知|考试须知|答卷须知)\s*[：:]?")
+_INSTRUCTION_RE = re.compile(
+    r"答题前|答卷前|答题卡|答题纸|准考证|考生号|考籍号|条形码|考试结束|签字笔|2B\s*铅笔|"
+    r"试题卷|试卷上|本试卷|考试时间|草稿纸|选涂|涂黑|作答无效|答题无效|交回"
+)
+# MinerU occasionally drops the full-width dot of the very first number
+# (“1．设 z=…” comes back as “1 设 z=…”).
+_BARE_LEADING_ONE_RE = re.compile(r"^\s*1\s+(?=[\u4e00-\u9fff])")
 _LEADING_NON_QUESTION_RE = re.compile(
     r"(?:注意事项|答卷前|考试时间|满分|姓名|班级|考号|密封线|请将答案|"
     r"本题共\s*\d+\s*小题|每小题\s*\d+\s*分|选择题|填空题|解答题|参考公式)"
@@ -222,20 +249,36 @@ def _column_bounds(splits: list[float], col: int) -> tuple[float, float]:
     return edges[col], edges[col + 1]
 
 
+# MinerU sometimes wraps runs of a line in inline HTML (“<sub>12.</sub> <sub>已知…”),
+# which hides the printed number from the start-of-line test.
+_INLINE_TAG_RE = re.compile(r"</?(?:sub|sup|span|b|i|u|em|strong)\b[^>]*>", re.I)
+
+
+def _plain_block_text(value: object) -> str:
+    return _INLINE_TAG_RE.sub("", str(value or ""))
+
+
 def _candidates(blocks: list[dict]) -> list[Start]:
     found: list[Start] = []
     for block in blocks:
         bbox = block.get("bbox")
-        text = str(block.get("text") or "")
+        text = _plain_block_text(block.get("text"))
         if not bbox or not text.strip() or block.get("type") in NON_CONTENT | FIGURE_TYPES:
             continue
         stripped = text.lstrip(" $　")
         lead = len(text) - len(stripped)
         for match in NUMBER_RE.finditer(text):
             number = int(match.group(1))
-            if number == 0:
-                continue
             at_start = match.start() <= lead
+            if number == 0:
+                # A scan that clipped the binding edge turns “20.” into “0.”.
+                # Keep it only as evidence for gap repair; it never joins a chain.
+                if at_start:
+                    found.append(Start(
+                        number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                        seq=block.get("seq"), at_start=True, score=0.2,
+                    ))
+                continue
             after = text[match.end():match.end() + 6].lstrip(" $")
             looks_like_question = bool(after) and (CJK.match(after) is not None or after[:1] in "如已设若在下对")
             if not at_start and not looks_like_question:
@@ -251,7 +294,15 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 score -= 1.5
             height = bbox[3] - bbox[1]
             y = bbox[1]
-            if not at_start and height > 40 and len(text) > 0:
+            before = text[:match.start()]
+            if not at_start and "\n" in before and not before[before.rfind("\n") + 1:].strip(" $　"):
+                # 题号在框内某一行的行首（“D. 3\n10. 如图…”：上一题的选项和本题挤在
+                # 一个框里）：按行估算。短行也占一整行，按字符比例会把本题起点估得太高，
+                # 切掉上一题的最后一个选项。
+                lines = text.count("\n") + 1
+                line_height = min(24.0, max(14.0, height / lines))
+                y = min(bbox[3] - line_height, bbox[1] + before.count("\n") * line_height)
+            elif not at_start and height > 40 and len(text) > 0:
                 # 题号在框中间（常见于手写与题号挤在同一框）：按字符位置估算所在行。
                 y = bbox[1] + height * match.start() / max(1, len(text))
                 y = max(bbox[1], y - 6)
@@ -262,13 +313,93 @@ def _candidates(blocks: list[dict]) -> list[Start]:
     return found
 
 
+_UNNUMBERED_START_RE = re.compile(r"^\s*[（(]\s*(?:本题)?满分\s*\d{1,2}\s*分\s*[)）]")
+
+
+def _unnumbered_starts(blocks: list[dict]) -> list[Start]:
+    """Blocks that open like a question but lost their printed number entirely."""
+    found = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            continue
+        if _UNNUMBERED_START_RE.match(_plain_block_text(block.get("text"))):
+            found.append(Start(
+                number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                seq=block.get("seq"), at_start=True, score=0.5, source="unnumbered",
+            ))
+    return found
+
+
+_BARE_NUMBER_START_RE = re.compile(
+    r"^\s*(\d{1,2})(?:\s+(?=[\u4e00-\u9fff])"
+    # “9如图，在△ABC中…”: no dot and no space.  Only words that open a
+    # question qualify, so “3个数中” or “8米长” never become a number.
+    r"|(?=如图|如下|已知|若|设|在|计算|化简|求|解|下列|某|用|把|将|当|对于|阅读|观察|先|"
+    r"有|甲|抛物线|函数|直线|点|[△▱⊙]))"
+)
+
+
+def _bare_number_starts(blocks: list[dict]) -> list[Start]:
+    """“14 如图，…” / “9如图，…”: a printed number whose dot MinerU dropped.
+
+    These are used only to fill an exact gap in the numbering (13 → ? → 15),
+    never to start or extend a chain on their own.
+    """
+    found = []
+    for block in blocks:
+        bbox = block.get("bbox")
+        if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            continue
+        match = _BARE_NUMBER_START_RE.match(_plain_block_text(block.get("text")).lstrip(" $　"))
+        if match and int(match.group(1)) > 0:
+            found.append(Start(
+                number=int(match.group(1)), page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
+                seq=block.get("seq"), at_start=True, score=0.5, source="bare",
+            ))
+    return found
+
+
+def _drop_instruction_candidates(candidates: list[Start], blocks: list[dict]) -> list[Start]:
+    """Remove the numbered items of an exam's notice section (注意事项).
+
+    Only a leading run is removed: it must follow a notice header block (or
+    share its block) and every removed item must use instruction vocabulary.
+    """
+    if not candidates:
+        return candidates
+    headers = [
+        (int(block["page_idx"]), float(block["bbox"][1]))
+        for block in blocks
+        if block.get("bbox") and _NOTICE_HEADER_RE.match(str(block.get("text") or ""))
+    ]
+    if not headers:
+        return candidates
+    text_by_seq = {block.get("seq"): str(block.get("text") or "") for block in blocks}
+    ordered = sorted(candidates, key=lambda item: (item.page, item.y))
+    first_header = min(headers)
+    leading: list[Start] = []
+    for candidate in ordered:
+        if (candidate.page, candidate.y) < first_header:
+            continue
+        text = text_by_seq.get(candidate.seq, "")
+        if _INSTRUCTION_RE.search(text) or _NOTICE_HEADER_RE.match(text):
+            leading.append(candidate)
+            continue
+        break
+    if not leading or len(leading) == len(candidates):
+        return candidates
+    removed = {id(item) for item in leading}
+    return [item for item in candidates if id(item) not in removed]
+
+
 def _headings(blocks: list[dict]) -> list[dict]:
     result = []
     for block in blocks:
         text = str(block.get("text") or "")
         if block.get("bbox") and HEADING_RE.match(text) and block.get("type") not in NON_CONTENT | FIGURE_TYPES:
             result.append({"page": int(block["page_idx"]), "x": block["bbox"][0], "y": block["bbox"][1],
-                           "text": text.strip()[:80], "seq": block.get("seq")})
+                           "bottom": block["bbox"][3], "text": text.strip()[:80], "seq": block.get("seq")})
     return result
 
 
@@ -342,6 +473,7 @@ def _slots(pages: list[dict], blocks: list[dict], splits: dict[int, list[float]]
 
 def _chain(candidates: list[Start]) -> list[Start]:
     """在阅读顺序里挑出最可信的一串递增题号（允许缺号，缺号扣分）。"""
+    candidates = [item for item in candidates if item.number > 0]
     if not candidates:
         return []
     order = sorted(candidates, key=Start.key)
@@ -364,8 +496,16 @@ def _chain(candidates: list[Start]) -> list[Start]:
     return list(reversed(chain))
 
 
-def _repair_gaps(chain: list[Start], candidates: list[Start]) -> list[Start]:
-    """缺号时，若两题之间恰有一个候选、其数字是缺号的末位（如把"23."读成"3."），按缺号采用。"""
+def _repair_gaps(
+    chain: list[Start], candidates: list[Start], unnumbered: list[Start] | None = None,
+) -> list[Start]:
+    """补缺号。
+
+    1. 两题之间恰有一个候选、其数字是缺号的末位（把“23.”读成“3.”，或扫描裁掉
+       装订边把“20.”读成“0.”），按缺号采用。
+    2. 仍缺的号，若两题之间恰好有同样数量的“（本题满分 N 分）”开头、题号被整个
+       裁掉的块，并且按阅读顺序排进去题号仍递增，就依次补上。
+    """
     result: list[Start] = []
     for index, start in enumerate(chain):
         result.append(start)
@@ -376,19 +516,53 @@ def _repair_gaps(chain: list[Start], candidates: list[Start]) -> list[Start]:
         if not missing:
             continue
         between = [c for c in candidates if start.key() < c.key() < following.key() and c.at_start]
+        repaired: list[Start] = []
         for number in missing:
             fits = [c for c in between if str(number).endswith(str(c.number)) and c.number != number]
             if len(fits) == 1:
                 fixed = fits[0]
-                result.append(Start(number=number, page=fixed.page, x=fixed.x, y=fixed.y, seq=fixed.seq,
-                                    at_start=True, score=fixed.score, source="repaired", col=fixed.col))
+                repaired.append(Start(number=number, page=fixed.page, x=fixed.x, y=fixed.y, seq=fixed.seq,
+                                      at_start=True, score=fixed.score, source="repaired", col=fixed.col))
                 between = [c for c in between if c is not fixed and c.key() > fixed.key()]
+        remaining = [number for number in missing if number not in {item.number for item in repaired}]
+        used = {item.seq for item in repaired}
+        for number in list(remaining):
+            exact = [
+                item for item in (unnumbered or [])
+                if item.source == "bare" and item.number == number and item.seq not in used
+                and start.key() < item.key() < following.key()
+            ]
+            if len(exact) == 1:
+                item = exact[0]
+                repaired.append(Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq,
+                                      at_start=True, score=item.score, source="repaired", col=item.col))
+                used.add(item.seq)
+                remaining.remove(number)
+        repaired.sort(key=Start.key)
+        loose = [
+            item for item in (unnumbered or [])
+            if item.source == "unnumbered" and start.key() < item.key() < following.key()
+            and item.seq not in used
+        ]
+        if remaining and len(loose) == len(remaining):
+            trial = sorted(
+                repaired + [
+                    Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq, at_start=True,
+                          score=item.score, source="repaired", col=item.col)
+                    for number, item in zip(remaining, sorted(loose, key=Start.key))
+                ],
+                key=Start.key,
+            )
+            if all(a.number < b.number for a, b in zip(trial, trial[1:])):
+                repaired = trial
+        result.extend(repaired)
     return sorted(result, key=Start.key)
 
 
 def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]:
     """返回版面与题号起点（尚未补缺号）。"""
-    candidates = _candidates(blocks)
+    candidates = _drop_instruction_candidates(_candidates(blocks), blocks)
+    unnumbered = _unnumbered_starts(blocks) + _bare_number_starts(blocks)
     headings = _headings(blocks)
     strong = [c for c in candidates if c.at_start and c.score >= 3]
     splits = _splits_from(strong or candidates, pages, blocks)
@@ -415,9 +589,17 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
         for heading in headings:
             heading["col"] = column_of(splits.get(heading["page"], []), heading["x"] + 1)
         chain = _chain(candidates)
-    chain = _repair_gaps(chain, candidates)
+    assign(unnumbered)
+    chain = _repair_gaps(chain, candidates, unnumbered)
+    boundaries = [
+        {"page": int(block["page_idx"]), "col": column_of(splits.get(int(block["page_idx"]), []), block["bbox"][0] + 1),
+         "y": block["bbox"][1], "bottom": block["bbox"][3], "kind": "exam_subheading", "seq": block.get("seq")}
+        for block in blocks
+        if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES
+        and EXAM_SUBHEADING_RE.match(str(block.get("text") or ""))
+    ]
     layout = Layout(page_count=len(pages), splits=splits, slots=_slots(pages, blocks, splits),
-                    headings=headings, candidates=candidates)
+                    headings=headings, candidates=candidates, boundaries=boundaries)
     return layout, chain
 
 
@@ -958,7 +1140,8 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
         return -100, False, False
 
     source = bool(_LEADING_SOURCE_RE.search(text))
-    body = _without_source_prefix(text)
+    bare_one = bool(_BARE_LEADING_ONE_RE.match(text))
+    body = _without_source_prefix(_BARE_LEADING_ONE_RE.sub("", text, count=1))
     # MinerU sometimes separates ``[2026某地联考]`` and ``已知……`` into two
     # adjacent text blocks.  The citation is still the correct top boundary;
     # borrow only the immediately following non-empty line as scoring evidence.
@@ -971,7 +1154,7 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
     options = bool(_LEADING_OPTION_RE.search(text))
     subquestions = set(_LEADING_SUBQUESTION_RE.findall(following_text))
     score = (5 if source else 0) + (2 if stem else 0) + (2 if question_mark else 0) + \
-        (2 if options else 0) + (1 if len(body) >= 18 else 0)
+        (2 if options else 0) + (1 if len(body) >= 18 else 0) + (2 if bare_one else 0)
     if "1" in subquestions:
         score += 1
     if {"1", "2"}.issubset(subquestions):
@@ -1112,25 +1295,45 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     if not pages or not blocks:
         return []
     layout, selected = analyse(pages, blocks)
+    # A candidate the gap repair already re-read as a clipped number (“9.” used
+    # as 19) is part of the main run, not the start of a new numbering scope.
+    repaired_seqs = {item.seq for item in selected if item.source == "repaired" and item.seq is not None}
     reliable = sorted(
-        (item for item in layout.candidates if item.at_start and item.score >= 3.0),
+        (item for item in layout.candidates
+         if item.at_start and item.score >= 3.0 and item.number > 0 and item.seq not in repaired_seqs),
         key=Start.key,
     )
     if not reliable:
         reliable = sorted(selected, key=Start.key)
     if not reliable:
         return []
+    # MinerU sometimes emits the same line twice (a printed line plus an
+    # overlapping re-read that includes handwriting).  Two identical numbers a
+    # line apart in the same column are one question, not a restart.
+    deduped: list[Start] = []
+    for item in reliable:
+        previous = deduped[-1] if deduped else None
+        if (previous is not None and previous.number == item.number and previous.page == item.page
+                and previous.col == item.col and abs(item.y - previous.y) < 60):
+            continue
+        deduped.append(item)
+    reliable = deduped
 
     runs: list[list[Start]] = [[]]
     seen: set[int] = set()
     maximum: int | None = None
-    for current in reliable:
+    for index, current in enumerate(reliable):
         restart = bool(
             runs[-1]
             and maximum is not None
             and current.number <= maximum
             and (current.number in seen or current.number <= 3)
         )
+        following = reliable[index + 1] if index + 1 < len(reliable) else None
+        if restart and following is not None and maximum < following.number <= maximum + 3:
+            # “17. … 2. S=4，求 AE … 18. …”: a sub-question that lost its
+            # parentheses, while the numbering carries straight on.  Skip it.
+            continue
         if restart:
             runs.append([])
             seen = set()
@@ -1138,6 +1341,16 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         runs[-1].append(current)
         seen.add(current.number)
         maximum = current.number if maximum is None else max(maximum, current.number)
+
+    # A genuine restart begins a new numbering (1, 2 or 3).  A lone stray such
+    # as a misread “9.” in the middle of a paper is noise, not a new scope.
+    merged: list[list[Start]] = []
+    for run in runs:
+        if merged and len(run) == 1 and run[0].number > 3:
+            merged[-1].extend(run)
+            continue
+        merged.append(run)
+    runs = merged
 
     first_page = min(int(page["page_idx"]) for page in pages)
     last_page = max(int(page["page_idx"]) for page in pages)
@@ -1278,6 +1491,22 @@ def _section_type(text: str) -> str:
     return "unknown"
 
 
+def _heading_floor(layout: Layout, start: Start) -> float:
+    """Just below a section heading printed right above this question.
+
+    The padding above a number otherwise reached into “三、解答题（共 10 小题
+    共 90 分）” and one reader copied the heading into shengli7 #16.
+    """
+    floor = 0.0
+    for item in [*layout.headings, *layout.boundaries]:
+        bottom = item.get("bottom")
+        if bottom is None or item.get("page") != start.page or item.get("col", start.col) != start.col:
+            continue
+        if item.get("y", 0.0) < start.y and float(bottom) <= start.y + 2:
+            floor = max(floor, min(float(start.y), float(bottom) + 1))
+    return floor
+
+
 def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[dict]:
     """从 start 到 stop（阅读顺序中的下一个起点或标题；None 表示卷末）之间的版面矩形。"""
     begin = _slot_index(layout, start.page, start.col)
@@ -1289,7 +1518,9 @@ def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[d
         slot_key = (slot["page"], slot["col"])
         if stop is not None and slot_key > (stop[0], stop[1]):
             break
-        top = max(slot["top"], start.y - START_PAD) if index == begin else slot["top"]
+        pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else
+                           MID_BLOCK_EXTRA_PAD if not start.at_start else 0)
+        top = max(slot["top"], start.y - pad, _heading_floor(layout, start)) if index == begin else slot["top"]
         bottom = slot["bottom"]
         if stop is not None and slot_key == (stop[0], stop[1]):
             bottom = min(bottom, stop[2] - END_GAP)
@@ -1470,6 +1701,67 @@ def _tighten_book_local_left_column(
     return [tightened]
 
 
+SPILL_REGION_HEIGHT = 60.0
+
+
+def _drop_spill_candidates(questions: list[dict]) -> None:
+    """A thin spill-over strip must not claim the next question's picture.
+
+    When a question ends at the foot of a column, its range continues with a
+    thin strip at the top of the next column, above the next question's
+    number.  A picture there that belongs to the next question (its centre
+    lies in that question's range, not in the strip) used to become an
+    unclassified candidate of both, raising a false 配图冲突.
+    """
+    for index, question in enumerate(questions):
+        regions = question.get("regions") or []
+        strips = [region for region in regions[1:]
+                  if region["bbox"][3] - region["bbox"][1] < SPILL_REGION_HEIGHT]
+        if not strips:
+            continue
+        others = [other.get("regions") or [] for position, other in enumerate(questions) if position != index]
+        kept = []
+        for candidate in question.get("figure_candidates") or []:
+            page, bbox = int(candidate["page_idx"]), candidate["bbox"]
+            only_in_strip = (
+                not center_in_regions(page, bbox, regions)
+                and not overlaps_regions(page, bbox, [r for r in regions if r not in strips])
+                and overlaps_regions(page, bbox, strips)
+            )
+            if only_in_strip and any(center_in_regions(page, bbox, other) for other in others):
+                continue
+            kept.append(candidate)
+        question["figure_candidates"] = kept
+
+
+EDGE_ALLOWANCE = 12.0
+
+
+def _cover_own_lines(regions: list[dict], blocks: list[dict]) -> list[dict]:
+    """Widen a column slot to the text lines that belong to it.
+
+    A line that runs a few units past the column split (胜利初二第 15 题
+    “希波克拉底月牙”) otherwise loses its last character in the crop.
+    """
+    widened = []
+    for region in regions:
+        x0, y0, x1, y1 = region["bbox"]
+        for block in blocks:
+            bbox = block.get("bbox")
+            if not bbox or int(block["page_idx"]) != region["page_idx"] \
+                    or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+                continue
+            cx, cy = _center(bbox)
+            if not (region["bbox"][0] <= cx <= region["bbox"][2] and y0 <= cy <= y1):
+                continue
+            if region["bbox"][0] - EDGE_ALLOWANCE <= bbox[0] < x0:
+                x0 = float(bbox[0])
+            if x1 < bbox[2] <= region["bbox"][2] + EDGE_ALLOWANCE:
+                x1 = float(bbox[2])
+        widened.append({**region, "bbox": [round(x0, 1), y0, round(x1, 1), y1]})
+    return widened
+
+
 def build_questions(
     layout: Layout,
     starts: list[Start],
@@ -1519,6 +1811,8 @@ def build_questions(
                 solution_trimmed = True
                 solution_boundary_seq = solution_boundary[1]
         regions = question_regions(layout, start, stop) or _fallback_regions(layout, start, stop)
+        if not textbook:
+            regions = _cover_own_lines(regions, blocks)
         if start.source_kind in {"example", "exercise"}:
             regions = _tighten_book_local_left_column(layout, start, regions, blocks)
         segmentation_flags: list[str] = []
@@ -1615,6 +1909,7 @@ def build_questions(
             "section": section,
             "question_type": _section_type(section),
         })
+    _drop_spill_candidates(questions)
     return questions
 
 

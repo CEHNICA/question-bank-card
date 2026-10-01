@@ -27,7 +27,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 6
+FIGURE_REVIEW_POLICY_VERSION = 10
 
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
@@ -41,8 +41,11 @@ LEGACY_FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“�
 _CHINESE_CUE = re.compile(
     r"(?:"
     r"如\s*(?:下|上|左|右)?\s*图(?:\s*[甲乙丙丁①②③④⑤⑥⑦⑧⑨1-9A-Za-z])?"
-    r"(?:\s*(?:所示|显示|给出|为|是)|(?=$|[\s，,。:：；;（(]|可知|可得))|"
+    r"(?:\s*(?:所示|显示|给出|为|是)|(?=$|[\s，,。．.、:：；;（(]|可知|可得))|"
     r"(?:下|上|左|右)\s*图|"
+    # “如图将△ABC放在……”“如图在菱形中……”：紧跟动词、介词或图形符号。
+    r"(?<![例比譬诸假])如\s*图(?=\s*(?:将|把|在|中|的|点|直线|线段|已知|若|设|有|过|当|"
+    r"[△▱⊙∠$]|Rt))|"
     r"(?:下列|以下|所给)\s*[^，,。:：；;\n]{0,12}?(?:图像|图象|图形)(?:中)?"
     r"(?=$|[\s，,。:：；;（(与和])|"
     r"(?:下列|以下|所给)\s*(?:的\s*)?(?:图像|图象|图形|图示|图案|示意图|简图)|"
@@ -61,6 +64,7 @@ _CHINESE_CUE = re.compile(
     r"(?<![\u4e00-\u9fffA-Za-z0-9])图\s*为|"
     r"图\s*(?:[（(]\s*)?[①②③④⑤⑥⑦⑧⑨一二三四五六七八九1-9][A-Za-z]?\s*[)）]?|"
     r"(?<!不)如\s*表(?!格)(?:\s*所示)?(?=$|[\s，,。:：；;（(])|"
+    r"(?<![例比譬诸假不])如\s*表\s*(?=是|中|为|所列|给出)|"
     r"(?:下|上|左|右)\s*表|见\s*(?:下|上)?\s*表"
     r"(?=$|[\s，,。:：；;（(1-9]|所示|中|可知|可得)|表\s*(?:中|所示)|"
     r"(?:对应值|函数值|取值|数值)\s*表"
@@ -70,6 +74,8 @@ _CHINESE_CUE = re.compile(
     r"(?:上述|前述)\s*(?:两|三|四|各|若干)?\s*(?:个|组|幅|张)?\s*表|"
     r"(?:下列|以下)\s*(?:图形|图示|图案|示意图|简图)|"
     r"(?:图像|图象|图形)\s*(?:大致|可能)?\s*是\s*[（(]|"
+    # “……在区间 [a,b] 的大致图像为（ ）”: a choice among printed graphs.
+    r"(?:大致|可能|近似)\s*(?:的\s*)?(?:图像|图象|图形)\s*(?:为|是)\s*[（(]|"
     r"(?:[（(]\s*[一二三四五六七八九1-9]\s*[)）]\s*){2,}\s*"
     r"分别\s*(?:为|是)[^，,。:：；;\n]{0,48}?(?:图像|图象|图形)|"
     r"(?:示意图|简图|统计图|折线图|柱状图|扇形图|电路图|结构图|装置图|流程图|"
@@ -97,7 +103,10 @@ _STUDENT_DRAWING_REQUEST = re.compile(
 # phrase alone is not enough to demand an image—the values could be ordinary
 # text—so it is accepted only when a concrete crop is already bound.
 _BOUND_VISUAL_CUE = re.compile(
-    r"(?:下列|以下|如下|所给)\s*(?:的\s*)?(?:两|三|若干)?\s*(?:组\s*)?数据\s*[:：]"
+    r"(?:下列|以下|如下|所给)\s*(?:的\s*)?(?:两|三|若干)?\s*(?:组\s*)?数据\s*[:：]|"
+    # “……进行检验，数据如下：” / “填写如下列联表”: printed tables.
+    r"(?:数据|结果|信息|情况|成绩)\s*如下\s*[:：]|"
+    r"(?:列联|频数分布|频率分布|分布|统计|数据)\s*表"
 )
 
 _ENGLISH_CUE = re.compile(
@@ -133,6 +142,13 @@ _ENGLISH_CUE = re.compile(
     re.IGNORECASE,
 )
 
+# Options may run to E (some textbook multiple-choice questions print five).
+# A picture-only choice question must still bind A–D; E is only checked when
+# the paper has one.
+OPTION_SLOTS = frozenset({"A", "B", "C", "D", "E"})
+REQUIRED_OPTION_SLOTS = frozenset({"A", "B", "C", "D"})
+
+
 # Backwards-compatible public matcher used by older tests and callers.
 MENTIONS_FIGURE = re.compile(
     rf"(?:{_CHINESE_CUE.pattern}|{_ENGLISH_CUE.pattern})",
@@ -143,8 +159,16 @@ MENTIONS_FIGURE = re.compile(
 def _question_text(stem: str, options: dict | None = None) -> str:
     values = [str(stem or "")]
     if isinstance(options, dict):
-        values.extend(str(options.get(key, "") or "") for key in ("A", "B", "C", "D"))
+        values.extend(str(options.get(key, "") or "") for key in sorted(REQUIRED_OPTION_SLOTS))
+        if str(options.get("E", "") or "").strip():
+            values.append(str(options["E"]))
     return unicodedata.normalize("NFKC", "\n".join(values))
+
+
+def has_table(text: str) -> bool:
+    from .tables import has_table as _has_table
+
+    return _has_table(text)
 
 
 def cue_matches(stem: str, options: dict | None = None) -> list[str]:
@@ -158,6 +182,10 @@ def cue_matches(stem: str, options: dict | None = None) -> list[str]:
     text = _STUDENT_DRAWING_REQUEST.sub("", text)
     matches = [match.group(0).strip() for pattern in (_CHINESE_CUE, _ENGLISH_CUE)
                for match in pattern.finditer(text)]
+    # “如表”“填写下表”: once the table is written into the text, the text
+    # itself supplies it and no crop is missing.
+    if has_table(text):
+        matches = [value for value in matches if "表" not in value and "table" not in value.casefold()]
     result: list[str] = []
     for value in matches:
         if value and value.casefold() not in {item.casefold() for item in result}:
@@ -229,8 +257,8 @@ def without_automatic_textbook_badges(figures: list[dict]) -> list[dict]:
         figure for figure in (figures or [])
         if not (
             isinstance(figure, dict)
-            and figure.get("source") in {"auto", "other"}
-            and figure.get("slot") not in {"A", "B", "C", "D"}
+            and figure.get("source") in {"auto", "other", "row"}
+            and figure.get("slot") not in OPTION_SLOTS
             and _has_textbook_section_badge_geometry(figure)
         )
     ]
@@ -250,18 +278,18 @@ def _automatic_decoration_labels(
 
     choice_kind = kind in {"single_choice", "multiple_choice"}
     has_text_options = bool(options)
-    has_assigned_option = any(role in {"A", "B", "C", "D"} for role in assignments.values())
+    has_assigned_option = any(role in OPTION_SLOTS for role in assignments.values())
     labels: set[str] = set()
     for candidate in candidates:
         if not isinstance(candidate, dict) or candidate.get("label") is None:
             continue
         label = str(candidate["label"])
         assigned_role = assignments.get(label)
-        if assigned_role in {"A", "B", "C", "D"}:
+        if assigned_role in OPTION_SLOTS:
             # A genuinely image-based choice may itself be small.  Never
             # override a reader's explicit option assignment.
             continue
-        if assigned_role and assigned_role not in {"stem", "none", "decoration"}:
+        if assigned_role and assigned_role not in {"stem", "none", "decoration", "table"}:
             continue
         if choice_kind and not has_text_options and not has_assigned_option:
             continue
@@ -292,7 +320,7 @@ def resolve_automatic_figure_assignments(
             label = candidate.get("label")
             if label is not None and str(label) not in decorations:
                 resolved[str(label)] = "stem"
-        bound_roles = {"stem", "A", "B", "C", "D"}
+        bound_roles = {"stem", *OPTION_SLOTS}
         if str(kind or "unknown") not in {"single_choice", "multiple_choice"} \
                 and not any(role in bound_roles for role in resolved.values()):
             # If a free-response stem explicitly says a supplied figure exists
@@ -326,7 +354,7 @@ def repaired_automatic_figures(
             continue
         label = str(candidate.get("label"))
         role = assignments.get(label)
-        if role not in {"stem", "A", "B", "C", "D"}:
+        if role not in {"stem", *OPTION_SLOTS}:
             continue
         key = candidate_key(candidate)
         if key is None or (role, key) in existing:
@@ -374,7 +402,7 @@ def missing_choice_figure_slots(
     narrow conflict; a single reader, reader consensus, or any bound option
     figure still keeps the existing A-D completeness safeguard.
     """
-    option_slots = {"A", "B", "C", "D"}
+    option_slots = REQUIRED_OPTION_SLOTS
     if kind not in {"single_choice", "multiple_choice"} or options:
         return set()
     bound = {
@@ -461,21 +489,31 @@ def automatic_review(
             value = match.group(0).strip()
             if value and value.casefold() not in {item.casefold() for item in cues}:
                 cues.append(value)
+        # Two or more printed option crops whose option text is empty *are* the
+        # options: the paper itself supplies them, whatever the stem says.
+        option_crops = {
+            figure.get("slot") for figure in figures if figure.get("slot") in OPTION_SLOTS
+        }
+        texts = options or {}
+        if len(option_crops) >= 2 and not any(str(texts.get(slot, "")).strip() for slot in option_crops):
+            cues.append("选项为印刷图")
     bound_slots = {
         figure.get("slot") for figure in figures
-        if figure.get("slot") == "stem" or figure.get("slot") in {"A", "B", "C", "D"}
+        if figure.get("slot") == "stem" or figure.get("slot") in OPTION_SLOTS
     }
     missing_descriptions = sorted((described_slots or set()) - bound_slots)
     foreign_labels = {label for label, role in assignments.items() if role.startswith("q") and role[1:].isdigit()}
     bound_labels = {
         label for label, role in assignments.items()
-        if role == "stem" or role in {"A", "B", "C", "D"}
+        if role == "stem" or role in OPTION_SLOTS
     }
     decoration_labels = {label for label, role in assignments.items() if role == "decoration"}
+    # A table written into the stem as text is resolved, not a missing picture.
+    table_labels = {label for label, role in assignments.items() if role == "table"}
     explicitly_excluded = {
         label for label, role in assignments.items() if role in {"none", "decoration"}
     }
-    unclassified = candidate_labels - foreign_labels - bound_labels - explicitly_excluded
+    unclassified = candidate_labels - foreign_labels - bound_labels - explicitly_excluded - table_labels
     excluded_count = len(explicitly_excluded)
     drawing_request = asks_student_to_draw(stem, options)
     # ``missing_figure`` is a coarse reader boolean.  A concrete bound crop is
@@ -506,6 +544,8 @@ def automatic_review(
         signals.append("candidate_excluded")
     if decoration_labels:
         signals.append("candidate_decoration")
+    if table_labels:
+        signals.append("candidate_text_table")
     if unclassified:
         signals.append("candidate_unclassified")
 
@@ -681,12 +721,16 @@ def stored_or_derived_review(question, *, ignored_candidates: list[str] | None =
                         for value in readings)
                 and not options and not candidates and not base_figures):
             kind = "free_response"
+        # Boxes the first reading skipped were judged by a follow-up question;
+        # without them an edited card fell back to “unjudged box” warnings.
+        judged = {**(primary.get("figures_followup") or {}), **(primary.get("figures") or {})} \
+            if isinstance(primary.get("figures_followup"), dict) else (primary.get("figures") or {})
         assignments = resolve_automatic_figure_assignments(
             stem=question.stem,
             options=options,
             kind=kind,
             candidates=candidates,
-            assignments=primary.get("figures") or {},
+            assignments=judged,
         )
         assignments.update({label: "none" for label in ignored_labels})
         review_figures = repaired_automatic_figures(

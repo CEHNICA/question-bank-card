@@ -23,6 +23,7 @@ class BundleAuditTests(unittest.TestCase):
         bundle = root / "QuestionBankCard"
         (bundle / "_internal" / "frontend").mkdir(parents=True)
         (bundle / "QuestionBankCard.exe").write_bytes(b"MZ")
+        (bundle / "tiyouju.exe").write_bytes(b"MZ")
         (bundle / "_internal" / "frontend" / "app.js").write_text("safe", encoding="utf-8")
         return bundle
 
@@ -116,6 +117,22 @@ class BundleAuditTests(unittest.TestCase):
             bundle.mkdir()
             with self.assertRaisesRegex(BundleAuditError, "缺少主程序"):
                 audit_bundle(bundle)
+
+    def test_the_command_line_for_ai_assistants_ships_with_the_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            (bundle / "tiyouju.exe").unlink()
+            with self.assertRaisesRegex(BundleAuditError, "tiyouju.exe"):
+                audit_bundle(bundle)
+        root = Path(__file__).resolve().parent
+        spec = (root / "packaging" / "QuestionBankCard.spec").read_text(encoding="utf-8")
+        self.assertRegex(spec, r'cli_analysis = Analysis\(\s*\[str\(PROJECT_ROOT / "tiyouju_cli.py"\)\]')
+        self.assertRegex(spec, r'name="tiyouju",[\s\S]*?console=True,')
+        self.assertRegex(spec, r"coll = COLLECT\(\s*exe,\s*a\.binaries,\s*a\.datas,\s*cli_exe,")
+        build = (root / "packaging" / "build.ps1").read_text(encoding="utf-8")
+        self.assertIn("$cliVersion.Trim() -ne \"tiyouju $Version\"", build)
+        installer = (root / "packaging" / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn('Type: files; Name: "{app}\\tiyouju.exe"', installer)
 
     def test_installer_must_be_a_realistic_windows_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,3 +368,38 @@ class FrozenRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentDocsTests(unittest.TestCase):
+    """What an AI assistant reads to install and drive the app stays true."""
+
+    root = Path(__file__).resolve().parent
+
+    def test_installer_script_is_ascii_and_generated(self):
+        sys.path.insert(0, str(self.root / "packaging"))
+        import make_install_ps1
+
+        script = (self.root / "install.ps1").read_bytes()
+        script.decode("ascii")  # PowerShell 5.1 + irm | iex cannot know any other encoding
+        self.assertEqual(script, make_install_ps1.render().encode("ascii"), "run packaging/make_install_ps1.py")
+        text = script.decode("ascii")
+        self.assertIn("Get-FileHash -LiteralPath $setupPath -Algorithm SHA256", text)
+        self.assertIn("'/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'", text)
+        self.assertIn("before-$version-", text)
+
+    def test_skill_and_agents_name_only_real_commands(self):
+        import re
+        import tiyouju_cli
+
+        parser = tiyouju_cli.build_parser()
+        commands = set(parser._subparsers._group_actions[0].choices)  # noqa: SLF001
+        skill = (self.root / "skills" / "tiyouju" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertRegex(skill, r"\A---\nname: tiyouju\ndescription: .+\n---\n")
+        for name in ("skills/tiyouju/SKILL.md", "skills/tiyouju/references/commands.md", "AGENTS.md"):
+            text = (self.root / name).read_text(encoding="utf-8")
+            used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+)", text)) - {"latest"}
+            self.assertTrue(used, name)
+            self.assertLessEqual(used, commands, f"{name} mentions {used - commands}")
+        readme = (self.root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("releases/latest/download/install.ps1 | iex", readme)
+        self.assertIn("[AGENTS.md](AGENTS.md)", readme)

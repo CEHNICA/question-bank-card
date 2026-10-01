@@ -62,4 +62,22 @@ assert.match(js, /当前配图正确，其余 \$\{count\} 张无关/);
 assert.match(js, /slot: figure\.slot \|\| "stem"/);
 assert.match(js, /ignoreRemaining/);
 
+// 另一读法多出的一个“、”要带上前后文才看得懂在哪里。
+const punct = App.analyze({
+  state: "yellow", edited: false, stem: "其从正面看从左面看得到的形状图", options: {},
+  reads: {
+    a: { stem: "其从正面看、从左面看得到的形状图", options: {} },
+    b: { stem: "其从正面看和从左面看得到的形状图", options: {} },
+  }
+}, Render);
+const comma = punct.observedOnly.find((item) => item.text === "、");
+assert.ok(comma, JSON.stringify(punct.observedOnly));
+assert.match(comma.before, /正面看$/);
+assert.match(comma.after, /^从左面看/);
+assert.match(js, /reading-difference-extra/);
+// 配图面板已经说明“没有图像提示词”，下面的提示列表不再重复一遍。
+assert.match(js, /没有发现图像提示词\/\.test/);
+// 提示里【】中的字是有争议的那一处，单独突出显示。
+assert.match(js, /function flagItem/);
+assert.match(css, /\.flags \.flag-spot/);
 console.log("review conflict UX regression checks: OK");

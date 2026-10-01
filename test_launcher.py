@@ -105,8 +105,10 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(name, web)
         self.assertEqual((web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
                          ("2", "3", "2"))
-        self.assertEqual(worker["QB_PARALLEL"], "5")
-        self.assertEqual(web["QB_PARALLEL"], "5")
+        # 3 MiniMax accounts x 6 + 2 SiliconFlow accounts x 2, capped at 16.
+        self.assertEqual(worker["QB_PARALLEL"], "16")
+        self.assertEqual(web["QB_PARALLEL"], "16")
+        self.assertEqual(worker["QB_PARALLEL_EXPLICIT"], "0")
         for secret in ("m1", "m2", "mm1", "mm2", "mm3", "sf1", "sf2"):
             self.assertNotIn(secret, environments["_stdout"])
 
@@ -119,6 +121,7 @@ class LauncherTests(unittest.TestCase):
         environments = self.run_main(saved, parallel="7")
         self.assertEqual(environments["worker.log"]["QB_PARALLEL"], "7")
         self.assertEqual(environments["web.log"]["QB_PARALLEL"], "7")
+        self.assertEqual(environments["worker.log"]["QB_PARALLEL_EXPLICIT"], "1")
 
     def test_zero_and_invalid_parallelism_fall_back_to_provider_pool_size(self):
         pools = {
@@ -127,20 +130,43 @@ class LauncherTests(unittest.TestCase):
             "siliconflow": ["sf1", "sf2"],
         }
         preferences = dict(launcher.DEFAULT_MODEL_PREFERENCES)
-        for invalid in ("0", "-1", "abc", "9"):
+        for invalid in ("0", "-1", "abc", "17"):
             with self.subTest(invalid=invalid):
                 self.assertEqual(
                     launcher._parallel_environment(
-                        {"QB_PARALLEL": invalid}, pools, preferences,
+                        {"QB_PARALLEL": invalid, "QB_MINIMAX_ACCOUNT_CONCURRENCY": "1",
+                         "QB_SILICONFLOW_ACCOUNT_CONCURRENCY": "1"},
+                        pools, preferences,
                     ),
-                    {"QB_PARALLEL": "5"},
+                    {"QB_PARALLEL": "5", "QB_PARALLEL_EXPLICIT": "0"},
                 )
+        self.assertEqual(
+            launcher._parallel_environment({"QB_PARALLEL": "9"}, pools, preferences),
+            {"QB_PARALLEL": "9", "QB_PARALLEL_EXPLICIT": "1"},
+        )
+        # One MiniMax key alone now reads six cards at once by default.
+        self.assertEqual(
+            launcher._parallel_environment({}, {"minimax": ["mm1"]}, preferences),
+            {"QB_PARALLEL": "6", "QB_PARALLEL_EXPLICIT": "0"},
+        )
         pools["minimax"] = [f"mm{index}" for index in range(8)]
         pools["siliconflow"] = [f"sf{index}" for index in range(8)]
         self.assertEqual(
             launcher._parallel_environment({}, pools, preferences),
-            {"QB_PARALLEL": "8"},
+            {"QB_PARALLEL": "16", "QB_PARALLEL_EXPLICIT": "0"},
         )
+
+    def test_free_keys_alone_set_who_reads_and_how_many_at_once(self):
+        preferences = dict(launcher.DEFAULT_MODEL_PREFERENCES)      # MiniMax chosen, but no MiniMax key
+        pools = {"mineru": ["m1"], "modelscope": ["s1"]}
+        self.assertEqual(launcher._effective_primary(preferences, pools), "modelscope")
+        # 魔搭 reads and checks: up to 2 at once per key.
+        self.assertEqual(launcher._parallel_environment({}, pools, preferences),
+                         {"QB_PARALLEL": "2", "QB_PARALLEL_EXPLICIT": "0"})
+        self.assertEqual(launcher._effective_primary(preferences, {**pools, "minimax": ["mm"]}), "minimax")
+        assistant = {**preferences, "primary_engine": "assistant"}
+        self.assertIsNone(launcher._effective_primary(assistant, pools))
+        self.assertIsNone(launcher._effective_primary(preferences, {"mineru": ["m1"]}))
 
     def test_custom_model_roles_reach_web_and_worker_from_trusted_preferences(self):
         selected = {
@@ -163,6 +189,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(environments["web.log"]["QB_SILICONFLOW_CONFIGURED"], "0")
         self.assertNotIn("SILICONFLOW_API_KEY", environments["worker.log"])
 
+    def test_free_keys_only_start_reading_with_them(self):
+        environments = self.run_main({"mineru_token": "m-token", "modelscope_key": "s-key"})
+        worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual(json.loads(worker["MODELSCOPE_API_KEYS_JSON"]), ["s-key"])
+        self.assertNotIn("MODELSCOPE_API_KEYS_JSON", web)
+        self.assertEqual(web["QB_MODELSCOPE_CONFIGURED"], "1")
+        self.assertIn("主读 魔搭 Qwen3.5-35B-A3B；复核 魔搭 Qwen3.5-35B-A3B", environments["_stdout"])
+        self.assertEqual(worker["QB_PARALLEL"], "2")
+
+    def test_assistant_reading_needs_no_reading_key(self):
+        preferences = {**launcher.DEFAULT_MODEL_PREFERENCES, "primary_engine": "assistant"}
+        environments = self.run_main({"mineru_token": "m-token"}, preferences)
+        self.assertEqual(environments["worker.log"]["QB_PRIMARY_ENGINE"], "assistant")
+        self.assertIn("模型分工：AI 助手", environments["_stdout"])
+        self.assertNotIn("还没有填看图读题的密钥", environments["_stdout"])
+
     def test_no_credentials_still_opens_in_app_settings_without_prompting(self):
         environments = self.run_main({})
         worker, web = environments["worker.log"], environments["web.log"]
@@ -171,7 +213,7 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(name, web)
         self.assertEqual(web["QB_MINERU_CONFIGURED"], "0")
         self.assertEqual(web["QB_MINIMAX_CONFIGURED"], "0")
-        self.assertIn("设置 → API 与模型", environments["_stdout"])
+        self.assertIn("设置 → 常用 → 填写或更换密钥", environments["_stdout"])
 
     def test_console_fallback_keeps_good_saved_account_when_first_is_invalid(self):
         saved = {
