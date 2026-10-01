@@ -381,10 +381,15 @@ class LongPdfChunkPipelineTests(TestCase):
             "bbox": [20, 30, 900, 80], "text": "第1题",
         }]
 
-        def extract(_source, archive, _page_count, heartbeat=None):
+        states = []
+
+        def extract(_source, archive, _page_count, heartbeat=None, on_state=None):
             archive.write_bytes(b"mock archive")
             if heartbeat:
                 heartbeat()
+            # 1.10.6: what MinerU reports is noted beside the paper while it works.
+            on_state({"state": "running", "pages": 1, "total_pages": 1})
+            states.append(mineru.read_state(folder / mineru.MINERU_STATE_FILE))
 
         with (
             mock.patch.object(
@@ -398,6 +403,10 @@ class LongPdfChunkPipelineTests(TestCase):
         self.assertEqual(request.call_count, 1)
         self.assertEqual(request.call_args.args, (source, folder / "mineru_result.zip", 1))
         self.assertTrue(callable(request.call_args.kwargs["heartbeat"]))
+        self.assertEqual(states[0]["state"], "running")
+        self.assertEqual((states[0]["pages"], states[0]["total_pages"]), (1, 1))
+        # …and removed once parsing is over.
+        self.assertFalse((folder / mineru.MINERU_STATE_FILE).exists())
         paper.refresh_from_db()
         self.assertEqual(paper.status, Paper.Status.SEGMENTING)
         self.assertEqual(Block.objects.filter(paper=paper).count(), 1)

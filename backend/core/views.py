@@ -43,7 +43,7 @@ from .models import (
     RegionRead,
 )
 from .pipeline import (
-    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, preview_resegment, reorder_photo_pages,
+    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir, preview_resegment, reorder_photo_pages,
 )
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
@@ -304,6 +304,14 @@ def _processing_json(paper: Paper) -> dict | None:
                     "active_ranges": active,
                 },
             })
+        else:
+            # 1.10.6: one file at MinerU — show what MinerU says (queueing, page n of N…).
+            note = mineru.read_state(paper_dir(paper) / mineru.MINERU_STATE_FILE)
+            if note:
+                progress["mineru"] = note
+                if note["state"] == "running" and note.get("total_pages"):
+                    progress.update({"determinate": True, "completed": note["pages"],
+                                     "total": note["total_pages"], "unit": "page"})
     elif paper.status == Paper.Status.READING and paper.total:
         progress.update({
             "determinate": True,

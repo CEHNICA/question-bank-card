@@ -49,6 +49,26 @@ const singleMineru = Progress.processingPresentation({
 assert.equal(singleMineru.determinate, false);
 assert.match(singleMineru.detail, /MinerU 没有提供完成百分比/);
 
+// 1.10.6: MinerU's own state, when the worker has heard it.
+const mineruQueue = Progress.processingPresentation({
+  status: "parsing",
+  processing: { stage: "parsing", determinate: false, elapsed_seconds: 200, idle_seconds: 2,
+    mineru: { state: "pending", for_seconds: 130 } }
+});
+assert.equal(mineruQueue.headline, "在 MinerU 排队中 · 已等 2分10秒");
+assert.match(mineruQueue.detail, /题有据没有卡住/);
+assert.equal(mineruQueue.determinate, false);
+const mineruPages = Progress.processingPresentation({
+  status: "parsing",
+  processing: { stage: "parsing", determinate: true, completed: 3, total: 4, unit: "page",
+    elapsed_seconds: 260, idle_seconds: 1, mineru: { state: "running", for_seconds: 40, pages: 3, total_pages: 4 } }
+});
+assert.equal(mineruPages.headline, "MinerU 识别中 · 第 3/4 页");
+assert.equal(mineruPages.ratio, 3 / 4);
+assert.equal(Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", mineru: { state: "converting", for_seconds: 3 } }
+}).headline, "MinerU 识别完了，正在打包结果");
+
 const reading = Progress.processingPresentation({
   status: "reading",
   processing: {

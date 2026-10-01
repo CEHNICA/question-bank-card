@@ -172,8 +172,29 @@ const QBProgress = (() => {
         else if (completed >= total) parts.push("所有分片均已解析，正在合并结果");
         else parts.push(`尚有 ${total - completed} 个分片等待开始`);
       } else {
-        headline = "MinerU 解析中";
-        parts.push("正在准备文件或等待 MinerU 返回；MinerU 没有提供完成百分比");
+        // 1.10.6: what MinerU itself reports, so a long wait says who is slow.
+        const mineru = raw.mineru || null;
+        const state = mineru?.state || "";
+        const waited = formatDuration(safeNumber(mineru?.for_seconds));
+        if (state === "uploading") {
+          headline = "正在把文件传给 MinerU";
+          parts.push("传完后由 MinerU 识别版面和文字");
+        } else if (["submitted", "waiting-file", "pending"].includes(state)) {
+          headline = `在 MinerU 排队中 · 已等 ${waited}`;
+          parts.push("文件已经交给 MinerU，正在等它开始识别；要等多久看 MinerU 那边当时有多忙，题有据没有卡住");
+        } else if (state === "running") {
+          headline = total ? `MinerU 识别中 · 第 ${completed}/${total} 页` : "MinerU 识别中";
+          parts.push(`MinerU 已开始识别 ${waited}`);
+        } else if (state === "converting") {
+          headline = "MinerU 识别完了，正在打包结果";
+          parts.push("打包好就取回来本机切题");
+        } else if (state === "downloading") {
+          headline = "正在取回 MinerU 的结果";
+          parts.push("取回后本机切题");
+        } else {
+          headline = "MinerU 解析中";
+          parts.push("正在准备文件或等待 MinerU 返回；MinerU 没有提供完成百分比");
+        }
       }
     } else if (stage === "segmenting") {
       headline = "本机切题中";

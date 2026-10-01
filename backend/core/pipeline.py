@@ -21,7 +21,8 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, features, figure_policy, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm,
+    cuts, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
+    textnorm,
 )
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
@@ -1056,23 +1057,32 @@ def parse(paper: Paper) -> None:
         def heartbeat() -> None:
             _paper_heartbeat(paper.pk)
 
-        if not archive.is_file():
-            request_extract_file_from_pool(
-                render, archive, len(paper.pages), heartbeat=heartbeat,
-            )
+        # What MinerU says it is doing, for the page (1.10.6).
+        state_file = folder / mineru.MINERU_STATE_FILE
+
+        def on_state(info: dict) -> None:
+            mineru.record_state(state_file, info)
+
         try:
-            blocks = load_blocks(archive, len(paper.pages))
-        except MineruError:
-            # Only remove the per-paper cache we own. A failed/oversized download used
-            # to leave a file behind, causing every retry to reopen the same bad ZIP.
-            owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
-            if not owned_archive:
-                raise
-            archive.unlink(missing_ok=True)
-            request_extract_file_from_pool(
-                render, archive, len(paper.pages), heartbeat=heartbeat,
-            )
-            blocks = load_blocks(archive, len(paper.pages))
+            if not archive.is_file():
+                request_extract_file_from_pool(
+                    render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
+                )
+            try:
+                blocks = load_blocks(archive, len(paper.pages))
+            except MineruError:
+                # Only remove the per-paper cache we own. A failed/oversized download used
+                # to leave a file behind, causing every retry to reopen the same bad ZIP.
+                owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
+                if not owned_archive:
+                    raise
+                archive.unlink(missing_ok=True)
+                request_extract_file_from_pool(
+                    render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
+                )
+                blocks = load_blocks(archive, len(paper.pages))
+        finally:
+            state_file.unlink(missing_ok=True)
     if paper.photos:
         blocks = arrange_photo_pages(paper, blocks)
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])

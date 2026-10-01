@@ -26,6 +26,54 @@ MAX_SOURCE_BYTES = 200_000_000
 # 集中在这里，便于官方调整后更新。
 MAX_PDF_PAGES = 600
 logger = logging.getLogger(__name__)
+
+# 1.10.6: what MinerU says about one submitted file (its own words: pending,
+# running with pages done, converting…), written by the worker next to the
+# paper so the page can show whether MinerU is queueing or reading.
+MINERU_STATE_FILE = "mineru_state.json"
+STATE_MAX_AGE = 120  # seconds; an older note is from a run that has stopped
+QUEUE_STATES = {"submitted", "waiting-file", "pending"}
+
+
+def _phase(state) -> str:
+    return "queue" if state in QUEUE_STATES else str(state)
+
+
+def record_state(path: Path, info: dict) -> None:
+    """Write MinerU's latest state for one paper (worker only).  Never raises.
+
+    ``since`` is when this phase began; submitted / waiting-file / pending are
+    one phase (waiting in MinerU's queue)."""
+    try:
+        now = time.time()
+        previous = read_state(path, raw=True) or {}
+        same = _phase(previous.get("state")) == _phase(info.get("state"))
+        since = previous.get("since") if same else now
+        note = {**info, "since": since if isinstance(since, (int, float)) else now, "at": now}
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(json.dumps(note), encoding="utf-8")
+        temporary.replace(path)
+    except OSError:
+        pass
+
+
+def read_state(path: Path, *, raw: bool = False) -> dict | None:
+    """MinerU's state for the page: state, pages done (when it says), and how long in it."""
+    try:
+        note = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(note, dict) or not isinstance(note.get("state"), str):
+        return None
+    if raw:
+        return note
+    now = time.time()
+    if not isinstance(note.get("at"), (int, float)) or now - note["at"] > STATE_MAX_AGE:
+        return None
+    shown = {"state": note["state"][:20], "for_seconds": max(0, int(now - float(note.get("since") or now)))}
+    if isinstance(note.get("pages"), int) and isinstance(note.get("total_pages"), int) and note["total_pages"] > 0:
+        shown.update(pages=max(0, min(note["pages"], note["total_pages"])), total_pages=note["total_pages"])
+    return shown
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
     "A0211": "Token 已过期（MinerU 的 Token 14 天过期一次）：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 填写或更换密钥”里换上",
@@ -345,8 +393,12 @@ def request_extract_file(
     page_count: int,
     *,
     heartbeat: Callable[[], None] | None = None,
+    on_state: Callable[[dict], None] | None = None,
 ) -> Path:
     """解析一个已经满足页数限制的文件。
+
+    ``on_state`` hears what MinerU reports (uploading, pending, running with
+    pages done, converting, downloading) so the page can say what is slow.
 
     ``source`` 可以是原始 PDF，也可以是本机从一本书切出的临时分片；
     ``target`` 始终由调用方指定，因此多个分片不会互相覆盖。上传地址、
@@ -360,7 +412,16 @@ def request_extract_file(
     if source_size > MAX_SOURCE_BYTES:
         raise MineruError("待解析文件超过 MinerU 当前 200 MB 单文件上限，请压缩或拆分后重试")
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    def report(state: str, **extra) -> None:
+        if on_state is not None:
+            try:
+                on_state({"state": state, **extra})
+            except Exception:  # showing progress must never break parsing
+                logger.debug("mineru state callback failed", exc_info=True)
+
     with requests.Session() as session:
+        report("uploading")
         batch, _submit_trace_id = _api_json(session, token, "file-urls/batch",
                                             {"files": [{"name": source.name}], "model_version": "vlm"})
         batch_id = batch.get("batch_id")
@@ -379,6 +440,7 @@ def request_extract_file(
                 raise MineruError(f"MinerU 文件上传失败（HTTP {response.status_code}）")
         except requests.RequestException as exc:
             raise MineruError(f"MinerU 文件上传失败（{type(exc).__name__}）") from None
+        report("submitted")
         started = time.monotonic()
         deadline = started + 20 * 60
         while time.monotonic() < deadline:
@@ -392,8 +454,15 @@ def request_extract_file(
                 url = task.get("full_zip_url")
                 if not url:
                     raise MineruError("MinerU 完成任务但没有解析包")
+                report("downloading")
                 _download_zip(session, url, target)
                 return target
+            if isinstance(state, str) and state != "failed":
+                # “running” comes with {extracted_pages, total_pages}.
+                pages = task.get("extract_progress") if isinstance(task.get("extract_progress"), dict) else {}
+                done, total = pages.get("extracted_pages"), pages.get("total_pages")
+                report(state, **({"pages": done, "total_pages": total}
+                                 if isinstance(done, int) and isinstance(total, int) and total > 0 else {}))
             if state == "failed":
                 raise _mineru_error("解析", {
                     "code": task.get("err_code"),
@@ -418,6 +487,7 @@ def request_extract_file_from_pool(
     page_count: int,
     *,
     heartbeat: Callable[[], None] | None = None,
+    on_state: Callable[[dict], None] | None = None,
 ) -> Path:
     """Run one complete MinerU task with one leased account.
 
@@ -438,6 +508,7 @@ def request_extract_file_from_pool(
                 try:
                     return request_extract_file(
                         lease.secret, source, target, page_count, heartbeat=heartbeat,
+                        **({"on_state": on_state} if on_state is not None else {}),
                     )
                 except MineruError as error:
                     last_error = error
