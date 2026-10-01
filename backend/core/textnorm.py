@@ -227,6 +227,78 @@ def strip_type_label(text: str) -> tuple[str, str | None]:
     return value[match.end():], kind
 
 
+# 教辅、汇编常在题目前印上出处：“[2026山东枣庄滕州二中月考]”“（2025·北京海淀·期中）”
+# “【2024新课标Ⅰ卷】”。它说的是题从哪里来，不是题目本身；放在题干里，组卷打印时
+# 会被印出来，也没法按出处找题。只认题干最开头、成对括号里的一段，并且要像出处：
+# 有年份或考试名称，有汉字，没有公式。
+_ORIGIN_LEAD = re.compile(r"^[ \t　]*([\[【(（])([^\[\]【】()（）\n$\\]{4,60})([\]】)）])[ \t　]*")
+_ORIGIN_PAIRS = {"[": "]", "【": "】", "(": ")）", "（": ")）"}
+_ORIGIN_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_ORIGIN_WORDS = re.compile(
+    r"月考|期中|期末|模拟|联考|调研|质检|质量检测|统考|中考|高考|真题|[一二三四]模|学年|学期|"
+    r"检测|竞赛|期初|开学考|会考|学考|学业水平|适应性|诊断|摸底|新课标|新高考|全国[甲乙丙]?卷|"
+    r"考试|测试|测评"
+)
+_ORIGIN_SCORE = re.compile(r"满分|^\s*(?:本小?题|共)?\s*\d{1,3}\s*分\s*$")
+_ORIGIN_CJK = re.compile(r"[一-鿿]")
+
+
+def split_origin(text: str) -> tuple[str, str]:
+    """Take a printed source note off the front of a stem: (stem, origin) or (text, "")."""
+    value = str(text or "")
+    match = _ORIGIN_LEAD.match(value)
+    if not match:
+        return value, ""
+    opening, inner, closing = match.groups()
+    rest = value[match.end():]
+    inner = inner.strip()
+    if closing not in _ORIGIN_PAIRS[opening] or not rest.strip():
+        return value, ""
+    if len(_ORIGIN_CJK.findall(inner)) < 2 or _ORIGIN_SCORE.search(inner):
+        return value, ""
+    if not (_ORIGIN_YEAR.search(inner) or _ORIGIN_WORDS.search(inner)):
+        return value, ""
+    return rest.lstrip(), inner
+
+
+# 中文句子里的英文双引号："∀x∈B, x∈A"是真命题 → “∀x∈B, x∈A”是真命题。
+# 公式、HTML 表格标记里的引号不动；英文句子（引号两边都不是汉字）不动；
+# 引号个数是单数、或一对引号跨了行，说明认不准，整段都不动。
+_QUOTE_SKIP = re.compile(r"\$\$.+?\$\$|\$[^$\n]+?\$|\\\(.+?\\\)|\\\[.+?\\\]|<[^<>\n]+>", re.S)
+_CJK_OR_MARK = re.compile(r"[　-〿＀-￯一-鿿]")
+
+
+def chinese_quotes(text: str) -> str:
+    value = str(text or "")
+    if '"' not in value:
+        return value
+    skipped = [(match.start(), match.end()) for match in _QUOTE_SKIP.finditer(value)]
+    positions = [
+        index for index, character in enumerate(value)
+        if character == '"' and not any(start <= index < end for start, end in skipped)
+    ]
+    if not positions or len(positions) % 2:
+        return value
+    characters = list(value)
+
+    def neighbour(index: int, step: int) -> str:
+        index += step
+        while 0 <= index < len(value) and value[index] in " \t　":
+            index += step
+        return value[index] if 0 <= index < len(value) else ""
+
+    for opening, closing in zip(positions[0::2], positions[1::2]):
+        inner = value[opening + 1:closing]
+        if "\n" in inner:
+            return value
+        chinese = (_CJK_OR_MARK.match(neighbour(opening, -1) or " ")
+                   or _CJK_OR_MARK.match(neighbour(closing, 1) or " ")
+                   or _ORIGIN_CJK.search(inner))
+        if chinese:
+            characters[opening], characters[closing] = "“", "”"
+    return "".join(characters)
+
+
 def _is_own_number(value: str, number: int | None) -> bool:
     """Whether a printed number is this card's, allowing a binding edge that
     clipped its leading digits (“9.” for 19, “0.” for 20)."""

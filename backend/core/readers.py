@@ -24,6 +24,7 @@ from .account_pool import (
     MINIMAX_PLANS, AccountPoolError, account_pool, minimax_plan, provider_answered, provider_resting, rest_provider,
     secrets_from_environment,
 )
+from . import qtypes
 from .textnorm import clean_option, clean_stem, fix_symbols, strip_type_label
 
 MINIMAX_MODEL = preferences.DEFAULT_MODELS["minimax"]  # legacy public constant
@@ -296,7 +297,7 @@ FIGURE_RULES = """图中蓝色框和编号标出的是候选配图。请在【�
 OUTPUT_FORMAT = """只按下面的格式输出，不要输出别的内容：
 【内容类型】例题/练习题/教材正文/标题/不确定
 【题号】印刷题号
-【题型】单选题/多选题/填空题/解答题
+【题型】单选题/多选题/填空题/判断题/解答题
 【题干】
 题干文字
 【A】…
@@ -405,8 +406,8 @@ def split_tags(text: str) -> dict[str, str]:
     return result
 
 
-TYPE_NAMES = {"单选": "single_choice", "多选": "multiple_choice", "选择": "single_choice",
-              "填空": "fill_blank", "解答": "free_response"}
+# 读题模型写的【题型】按共用词表认（见 qtypes.TYPE_WORDS）：“计算题”“证明题”也是解答题。
+TYPE_NAMES = dict(qtypes.TYPE_WORDS)
 CONTENT_KIND_NAMES = {
     "例题": "example",
     "练习题": "exercise",
@@ -495,11 +496,7 @@ def parse_reading(text: str, number: int) -> dict:
             figure_descriptions.append(key)
         if value and value not in {"无", "…", "..."}:
             options[key] = value
-    kind = "unknown"
-    for word, value in TYPE_NAMES.items():
-        if word in tags.get("题型", ""):
-            kind = value
-            break
+    kind = qtypes.from_words(tags.get("题型", ""))
     content_kind = "unknown"
     content_kind_text = tags.get("内容类型", "")
     for word, value in CONTENT_KIND_NAMES.items():

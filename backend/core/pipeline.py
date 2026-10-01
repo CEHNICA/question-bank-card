@@ -19,7 +19,7 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, readers, segment, tables, textnorm
+from . import imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -2596,9 +2596,7 @@ def assistant_draft(snapshot: dict) -> dict:
     text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
     text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
     stem, options = readers.split_inline_options(text)
-    kind = snapshot.get("question_type") or "unknown"
-    if kind == "unknown" and options:
-        kind = "single_choice"
+    kind = qtypes.infer(snapshot.get("question_type") or "unknown", stem, options)
     candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
     labels = {str(candidate["label"]): candidate for candidate in candidates}
     assignments = _draft_figure_guess(stem, options, candidates)
@@ -2936,6 +2934,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     final, restored_options = _restore_skipped_options(
         final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness)
+    # A third reading (arbiter) has no 【题型】; when its text wins, keep the
+    # type the two readers agreed on instead of falling back to “未定”.
+    if not qtypes.decided(final.get("type")):
+        agreed = qtypes.consensus(r.get("type") for r in (a_text, b_text) if isinstance(r, dict))
+        if qtypes.decided(agreed):
+            final = {**final, "type": agreed}
     for letter, supported in restored_options.items():
         if not supported:
             flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
@@ -3018,6 +3022,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         candidates=snapshot["candidates"],
         figures=figures,
     )
+    kind = qtypes.infer(kind, final.get("stem"), final.get("options"))
     choice_missing_slots = missing_choice_figure_slots(
         kind=kind,
         options=final.get("options") or {},
@@ -3238,8 +3243,11 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
                 fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
         if question.edited:
-            # 人工改过的文字不被覆盖，只更新识读记录与配图建议。
-            fields = {k: v for k, v in fields.items() if k not in {"stem", "options", "text_source"}}
+            # 人工改过的文字不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
+            kept = {"stem", "options", "text_source"}
+            if qtypes.decided(question.question_type):
+                kept.add("question_type")
+            fields = {k: v for k, v in fields.items() if k not in kept}
             fields["flags"] = [f for f in fields.get("flags", []) if "识读" not in f and "[?]" not in f]
             if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
                 fields["state"] = Question.State.GREEN
@@ -3261,8 +3269,13 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             fields["figures"] = []
             fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
             fields["figure_review"] = stored_or_derived_review(question)
-        if fields.get("state") == Question.State.YELLOW and not fields.get("flags"):
-            fields["state"] = Question.State.GREEN
+        if "stem" in fields:
+            # 题源拆分、中文引号（设置里可关）。只挪格式、不改字，和人改字时一样。
+            fields.update(prose.tidy_fields(fields, origin=question.origin))
+        if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
+            kind = fields.get("question_type", question.question_type)
+            fields["flags"] = qtypes.with_flag(fields.get("flags", []), kind)
+            fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
         for key, value in fields.items():
             setattr(question, key, value)
         question.save()

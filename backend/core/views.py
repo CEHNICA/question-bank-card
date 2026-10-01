@@ -22,7 +22,10 @@ from django.views.decorators.csrf import csrf_exempt
 from PIL import Image
 
 from .version import APP_VERSION
-from . import credential_settings, demo, imaging, import_planning, library, m3import, mineru, photos, preferences, readers, tables
+from . import (
+    credential_settings, demo, features, imaging, import_planning, knowledge, library, library_jobs, m3import,
+    mineru, photos, preferences, prose, qtypes, readers, tables,
+)
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
@@ -30,14 +33,14 @@ from .figure_policy import (
     stored_or_derived_review,
 )
 from .models import (
-    Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
+    Block, ImportChunk, LibraryJob, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
 )
 from .pipeline import TEXT_DRAFT_FLAGS, PageStore, candidates_in, preview_resegment, reorder_photo_pages
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
-TYPES = {"single_choice", "multiple_choice", "fill_blank", "free_response", "unknown"}
+TYPES = set(qtypes.TYPES)
 SLOTS = {"stem", "A", "B", "C", "D", "E"}
 
 
@@ -445,7 +448,8 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         "approved_by": library.approval_source(question),
         "approval_agent": question.approval_agent if library.approval_source(question) == "ai" else "",
         "approved_at": question.approved_at.isoformat() if question.approved_at else None,
-        "answer": question.answer, "analysis": question.analysis,
+        "answer": question.answer, "analysis": question.analysis, "origin": question.origin,
+        "type_blocked": library.type_blocks_approval(question),
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
         "publication": library.publication_state(question),
     }
@@ -1562,7 +1566,8 @@ def approve_green(request, paper_id):
             state=Question.State.GREEN,
         ))
         for question in questions:
-            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)):
+            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)) \
+                    or library.type_blocks_approval(question):
                 continue
             # Already passed by the same kind of reviewer (or by a person): nothing to do.
             if library.approval_is_current(question) and library.approval_source(question) in {approver[0], "human"}:
@@ -1766,6 +1771,8 @@ def question_action(request, question_id, action: str):
             review = stored_or_derived_review(question)
             if value and blocks_approval(review):
                 return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
+            if value and library.type_blocks_approval(question):
+                return _error(f"这道题暂时不能通过：{qtypes.BLOCK_MESSAGE}（单选、多选、填空、判断或解答）")
             if value:
                 library.approve(question, now=now, source=approver[0], agent=approver[1])
                 library.confirm_published_review(question)
@@ -1788,11 +1795,22 @@ def question_action(request, question_id, action: str):
             for key in ("answer", "analysis"):
                 if key in payload and (not isinstance(payload[key], str) or len(payload[key]) > 20000):
                     return _error("答案或解析格式不正确")
-            question.stem = fix_symbols(stem.strip())
-            question.options = {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()}
-            question.question_type = kind
-            question.answer = fix_symbols(payload.get("answer", question.answer).strip())
-            question.analysis = fix_symbols(payload.get("analysis", question.analysis).strip())
+            if "origin" in payload and (not isinstance(payload["origin"], str) or len(payload["origin"]) > 400):
+                return _error("题源格式不正确")
+            origin = prose.clean_origin(payload["origin"]) if "origin" in payload else question.origin
+            tidied = prose.tidy_fields({
+                "stem": fix_symbols(stem.strip()),
+                "options": {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()},
+                "question_type": kind,
+                "answer": fix_symbols(payload.get("answer", question.answer).strip()),
+                "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
+            }, origin=origin)
+            question.stem = tidied["stem"].strip()
+            question.options = tidied["options"]
+            question.question_type = tidied.get("question_type", kind)
+            question.answer = tidied["answer"]
+            question.analysis = tidied["analysis"]
+            question.origin = tidied.get("origin", origin)
             question.edited = True
             # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
             question.text_source = "assistant" if actor[0] == "ai" else "human"
@@ -1808,10 +1826,23 @@ def question_action(request, question_id, action: str):
                     "excluded_count": len(previous_ignored),
                 }
             _apply_figure_review(question, review)
+            question.flags = qtypes.with_flag(question.flags, question.question_type)
             question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             question.error = ""
             # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
             _clear_approval(question)
+        elif action == "type":
+            # 只改题型（题卡头上的题型下拉、题库里“题型待核对”点进来）。改了题型，
+            # 题目内容就变了，和改字一样要重新标记通过。
+            kind = payload.get("question_type")
+            if kind not in qtypes.DECIDED_TYPES:
+                return _error("请选单选、多选、填空、判断或解答")
+            if question.state not in library.REVIEWABLE_STATES:
+                return _error("这道题还在识读，读完再选题型")
+            if kind != question.question_type:
+                question.question_type = kind
+                question.flags, question.state = qtypes.sync(question.flags, question.state, kind)
+                _clear_approval(question)
         elif action == "regions":
             regions = _valid_regions(question.paper, payload.get("regions"))
             if regions is None:
@@ -2145,6 +2176,13 @@ def _library_rows(request):
     review = request.GET.get("review", "").strip()
     if review in library.APPROVAL_SOURCES:
         rows = rows.filter(review_source=review)
+    answer = request.GET.get("answer", "").strip()
+    if answer in {"yes", "no"}:
+        missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+        rows = rows.exclude(missing) if answer == "yes" else rows.filter(missing)
+    tag = request.GET.get("tag", "").strip()
+    if tag:
+        rows = rows.filter(tags_text__contains=library.tags_text([tag]))
     for term in request.GET.get("q", "").split()[:8]:
         key = library.search_key(term)
         if key:
@@ -2161,18 +2199,39 @@ def library_list(request):
     rows = _library_rows(request).order_by("source_filename", "number", "-version")
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
     sources, types, reviews = {}, {}, {"human": 0, "ai": 0}
-    for row in live.values("paper_id", "source_filename", "question_type", "review_source"):
+    answers, tags = {"yes": 0, "no": 0}, {}
+    for row in live.values("paper_id", "source_filename", "question_type", "review_source",
+                           "content__answer", "tags_text"):
         key = str(row["paper_id"]) if row["paper_id"] else ""
         entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"], "count": 0})
         entry["count"] += 1
         types[row["question_type"]] = types.get(row["question_type"], 0) + 1
         review_key = row["review_source"] if row["review_source"] in reviews else "human"
         reviews[review_key] += 1
+        answers["yes" if str(row["content__answer"] or "").strip() else "no"] += 1
+        for tag in (row["tags_text"] or "").strip("|").split("|"):
+            if tag:
+                tags[tag] = tags.get(tag, 0) + 1
+    page = list(rows[offset:offset + limit])
+    ids = [item.id for item in page]
+    waiting = library_jobs.pending_kinds(ids)
+    failed = library_jobs.last_errors(ids)
+    items = []
+    for item in page:
+        data = library.publication_json(item)
+        data["jobs"] = waiting.get(str(item.id), [])
+        data["job_errors"] = failed.get(str(item.id), {})
+        items.append(data)
+    switches = features.load()
     return JsonResponse({
         "total": rows.count(),
-        "items": [library.publication_json(item) for item in rows[offset:offset + limit]],
+        "items": items,
         "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types,
-                   "reviews": reviews},
+                   "reviews": reviews, "answers": answers,
+                   "tags": sorted(({"tag": key, "count": value} for key, value in tags.items()),
+                                  key=lambda item: (-item["count"], item["tag"]))},
+        "features": switches,
+        "type_names": qtypes.TYPE_LABELS,
     })
 
 
@@ -2204,3 +2263,70 @@ def library_withdraw(request, publication_id):
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     library.withdraw(publication)
     return JsonResponse({"publication": library.publication_json(publication)})
+
+
+# ---------------------------------------------------------------- 功能开关与题库任务
+
+@csrf_exempt
+def feature_settings(request):
+    """GET 读、POST 改设置里的“功能开关”（没有密钥，网页和工作者共用）。"""
+    if request.method == "GET":
+        return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path())})
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["GET", "POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    try:
+        features.save((payload or {}).get("features"))
+    except features.FeatureError as error:
+        return _error(str(error))
+    except OSError:
+        return _error("开关没能保存，请检查数据目录是否可写", 500)
+    if features.enabled("knowledge_tags"):
+        try:
+            knowledge.ensure_file()
+        except OSError:
+            pass
+    return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path()),
+                         "message": "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"})
+
+
+@csrf_exempt
+def library_jobs_view(request):
+    """排队补知识点或 AI 参考答案：{kind, ids} 或 {kind, missing: true}（所有还没有的）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    kind = payload.get("kind")
+    if kind not in {LibraryJob.Kind.TAGS, LibraryJob.Kind.ANSWER}:
+        return _error("kind 只能是 tags 或 answer")
+    live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+    if payload.get("missing") is True:
+        if kind == LibraryJob.Kind.TAGS:
+            targets = [item for item in live if not library.tags_of(item.extras)
+                       and not (item.extras or {}).get("tags_at")]
+        else:
+            targets = [item for item in live if not str((item.content or {}).get("answer") or "").strip()
+                       and not (item.extras or {}).get("ai_answer")]
+    else:
+        ids = payload.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 500:
+            return _error("ids 应是 1–500 个题库条目编号")
+        try:
+            wanted = [uuid.UUID(str(value)) for value in ids]
+        except ValueError:
+            return _error("题库条目编号格式不正确")
+        targets = list(live.filter(pk__in=wanted))
+    queued = 0
+    try:
+        for publication in targets:
+            library_jobs.enqueue(publication, kind)
+            queued += 1
+    except library_jobs.JobError as error:
+        return _error(str(error), 409)
+    return JsonResponse({"queued": queued})

@@ -44,6 +44,7 @@ class QuestionRecycleBinApiTests(TestCase):
             number=1,
             stem="人工核对后的第一题",
             options={"A": "甲", "B": "乙"},
+            question_type="single_choice",
             regions=[{"page_idx": 0, "bbox": [20, 100, 900, 260]}],
             regions_auto=[{"page_idx": 0, "bbox": [20, 90, 900, 260]}],
             read_a={"stem": "第一题"},

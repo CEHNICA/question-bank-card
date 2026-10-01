@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 
-from core import credential_settings, preferences
+from core import credential_settings, library_jobs, preferences
 from core.account_pool import lease_priority, reset_account_pools
 from core.models import Paper, Question
 from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail
@@ -297,6 +297,10 @@ class Command(BaseCommand):
         # there is currently no queued work.
         apply_saved_settings()
         clean_saved_example_labels(self.stdout)
+        try:
+            library_jobs.recover_interrupted()
+        except Exception:
+            logging.getLogger("core").exception("library job recovery failed")
         stop = threading.Event()
         if not once:
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
@@ -328,6 +332,11 @@ class Command(BaseCommand):
                     with REREAD_LOCK:
                         if process_rereads():
                             worked = True
+                # 题库里排队的知识点标签、AI 参考答案（设置里默认关）。
+                if library_jobs.pending():
+                    apply_saved_settings()
+                    if library_jobs.process_pending():
+                        worked = True
             except Exception:  # 工作者不能因为一次意外就退出
                 logging.getLogger("core").exception("worker loop error")
                 time.sleep(5)

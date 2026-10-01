@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import qtypes
+
 NUMBER_RE = re.compile(r"(?<![\d.．A-Za-z\\^_{])(\d{1,2})\s*[.．、]{1,2}(?!\d)")
 HEADING_RE = re.compile(r"^\s*(?:[一二三四五六七八九十]{1,3}\s*[、.．]|第[一二三四五六七八九十]+部分|[ⅠⅡⅢⅣ]+\s*[、.．])")
 # 全国卷大题内部的“（二）选考题：……”“[选修 4-4：坐标系与参数方程]”：
@@ -27,12 +29,8 @@ EXAM_SUBHEADING_RE = re.compile(
 )
 NON_CONTENT = {"header", "footer", "page_number", "page_footnote", "aside_text"}
 FIGURE_TYPES = {"image", "table", "chart"}
-SECTION_TYPES = (
-    ("多选", "multiple_choice"), ("多项选择", "multiple_choice"), ("不定项", "multiple_choice"),
-    ("单选", "single_choice"), ("单项选择", "single_choice"), ("选择", "single_choice"),
-    ("填空", "fill_blank"), ("解答", "free_response"), ("计算", "free_response"),
-    ("证明", "free_response"), ("应用", "free_response"), ("简答", "free_response"),
-)
+# 大题标题（“三、解答题”）的题型，和读题共用一份词表。
+SECTION_TYPES = qtypes.TYPE_WORDS
 CJK = re.compile(r"[一-鿿（(【]")
 START_PAD = 9      # 题号上方留白
 # AI 定位的题号只精确到一条横带，常常落在题号行下面一行：多往上留一行。
