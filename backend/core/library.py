@@ -15,14 +15,15 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import imaging
+from . import features, imaging, prose, qtypes
 from .figure_policy import (
+    DECISION_FLAGS,
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
-from .models import Paper, PublishedQuestion, Question, QuestionGroup
+from .models import LibraryJob, Paper, PublishedQuestion, Question, QuestionGroup
 from .textnorm import strip_example_label, strip_type_label
 
-CHOICE_TYPES = {"single_choice", "multiple_choice"}
+CHOICE_TYPES = set(qtypes.CHOICE_TYPES)
 OPTION_KEYS = ("A", "B", "C", "D", "E")
 # Every choice question carries A–D in its content, empty or not; E only when
 # printed.  A four-option question therefore keeps the exact content (and
@@ -108,6 +109,7 @@ def final_content(question: Question) -> dict:
         "options": option_content(question.options) if is_choice else {},
         "answer": question.answer or "",
         "analysis": question.analysis or "",
+        "origin": question.origin or "",
         "figures": [_content_figure(f) for f in question.figures],
         "sources": [
             {"page_idx": r["page_idx"], "bbox": r["bbox"], "type": "text", "source": source_origin}
@@ -150,6 +152,9 @@ def content_hash(content: dict) -> str:
         {k: source.get(k) for k in ("page_idx", "bbox", "type", "source")}
         for source in content.get("sources", [])
     ]
+    # 题源为空时不进校验：升级前通过、入库的题，校验值和以前一模一样。
+    if str(content.get("origin") or "").strip():
+        material["origin"] = content["origin"]
     figure_review = (content.get("review") or {}).get("figure_review") or {}
     if (figure_review.get("status") == CONFIRMED_NO_FIGURE
             and figure_review.get("source") == "human"):
@@ -215,8 +220,13 @@ def confirm_published_review(question: Question) -> int:
     ).update(review_source="human", review_agent="")
 
 
+def type_blocks_approval(question: Question) -> bool:
+    """题型还没定的题不能通过、不能入库（题库里不再出现“题型待核对”）。"""
+    return not qtypes.decided(question.question_type)
+
+
 def approval_is_current(question: Question) -> bool:
-    if blocks_approval(stored_or_derived_review(question)):
+    if blocks_approval(stored_or_derived_review(question)) or type_blocks_approval(question):
         return False
     return bool(
         question.approved
@@ -252,10 +262,48 @@ def search_key(value: str) -> str:
     return text.lower()
 
 
-def _search_text(content: dict) -> str:
+def _search_text(content: dict, extras: dict | None = None) -> str:
     parts = [content["stem"], *content["options"].values(), content["answer"], content["analysis"],
-             content["source_filename"], (content.get("source_group") or {}).get("title", "")]
+             content["source_filename"], (content.get("source_group") or {}).get("title", ""),
+             str(content.get("origin") or ""), *tags_of(extras)]
     return search_key(" ".join(parts))
+
+
+def tags_of(extras: dict | None) -> list[str]:
+    tags = (extras or {}).get("tags")
+    return [str(tag) for tag in tags if str(tag).strip()] if isinstance(tags, list) else []
+
+
+def tags_text(tags) -> str:
+    """“|甲|乙|”：一个标签一段，筛选时整段匹配，“函数”不会命中“函数的应用”。"""
+    cleaned = [str(tag).replace("|", " ").strip() for tag in (tags or []) if str(tag).strip()]
+    return f"|{'|'.join(cleaned)}|" if cleaned else ""
+
+
+def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
+    """What a new version inherits: tags always; an AI answer only for the same task text."""
+    if previous is None or not isinstance(previous.extras, dict):
+        return {}
+    extras = {}
+    if tags_of(previous.extras):
+        extras["tags"] = tags_of(previous.extras)
+        if previous.extras.get("tags_source"):
+            extras["tags_source"] = previous.extras["tags_source"]
+    answer = previous.extras.get("ai_answer")
+    old = previous.content or {}
+    if isinstance(answer, dict) and old.get("stem") == content.get("stem") \
+            and (old.get("options") or {}) == (content.get("options") or {}):
+        extras["ai_answer"] = answer
+    return extras
+
+
+def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuestion:
+    """Store tags / AI answer on a library entry: no new version, no re-approval."""
+    publication.extras = extras
+    publication.tags_text = tags_text(tags_of(extras))
+    publication.search_text = _search_text(publication.content, extras)
+    publication.save(update_fields=["extras", "tags_text", "search_text"])
+    return publication
 
 
 def publish(question: Question) -> tuple[PublishedQuestion, bool]:
@@ -278,6 +326,8 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
         figure_review = stored_or_derived_review(question)
         if blocks_approval(figure_review):
             raise ValueError(f"第 {question.number} 题暂时不能入库：{blocking_message(figure_review)}")
+        if type_blocks_approval(question):
+            raise ValueError(f"第 {question.number} 题{qtypes.BLOCK_MESSAGE}，再入库")
         content = final_content(question)
         digest = content_hash(content)
         if not question.approved_content_hash or question.approved_content_hash != digest:
@@ -300,15 +350,22 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 shutil.copyfile(figure_file(question, index), folder / name)
                 figure["file"] = name
                 figure["url"] = f"/api/library/{publication_id}/figures/{name}"
+            extras = carried_extras(latest, content)
             publication = PublishedQuestion.objects.create(
                 id=publication_id, question=question, paper=paper,
                 source_filename=paper.display_name, number=question.number,
                 question_type=question.question_type, version=(latest.version if latest else 0) + 1,
-                content=content, content_hash=digest, search_text=_search_text(content),
+                content=content, content_hash=digest, search_text=_search_text(content, extras),
                 review_source=source, review_agent=agent,
+                extras=extras, tags_text=tags_text(tags_of(extras)),
             )
             question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
+            # 还在排队的知识点、AI 答案跟着到新的一版上做。
+            LibraryJob.objects.filter(
+                publication__question=question,
+                status__in=(LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING),
+            ).exclude(publication=publication).update(publication=publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise
@@ -375,7 +432,7 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             publication.source_filename = paper.display_name
             publication.content = content
             publication.content_hash = new_hash
-            publication.search_text = _search_text(content)
+            publication.search_text = _search_text(content, publication.extras)
         if publications:
             PublishedQuestion.objects.bulk_update(
                 publications, ["source_filename", "content", "content_hash", "search_text"]
@@ -413,6 +470,11 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "published_at": publication.published_at.isoformat(),
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
         "content": publication.content,
+        "origin": str((publication.content or {}).get("origin") or ""),
+        "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()),
+        "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),
+        "tags": tags_of(publication.extras),
+        "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
     }
 
 
@@ -420,20 +482,29 @@ _E_TAG = re.compile(r"\s*【\s*E\s*】\s*")
 _LABEL_SETS_TYPE = {"unknown", "", "single_choice", "multiple_choice"}
 
 
-def tidy_text(stem: str, options: dict | None, question_type: str) -> tuple[str, dict, str]:
+def tidy_text(stem: str, options: dict | None, question_type: str, origin: str = "", *,
+              switches: dict | None = None) -> tuple[str, dict, str, str]:
     """Apply the saved-card fixes that only reformat, never re-read.
 
     * a leading “例1” label is dropped (1.5.1);
     * a leading “（多项选择题）” note is dropped and names the type, unless a
       person already made it a fill-in or free-response question;
     * “3个【E】4个” in option D — an E the parser did not know about — is
-      split into D “3个” and E “4个”.
+      split into D “3个” and E “4个”;
+    * a printed source note in front (“[2026××中学月考]”) moves to the origin,
+      and "…" in Chinese text becomes “…” (1.10, both switchable).
+
+    Returns (stem, options, type, origin).  A person's origin is kept.
     """
+    switches = switches if switches is not None else features.load()
     new_stem = strip_example_label(stem or "")
     new_stem, labelled = strip_type_label(new_stem)
     if new_stem != (stem or ""):
         new_stem = new_stem.lstrip()
     new_type = question_type or "unknown"
+    if labelled and new_type in _LABEL_SETS_TYPE:
+        new_type = labelled
+    new_stem, new_origin, labelled = prose.tidy_stem(new_stem, origin=origin or "", switches=switches)
     if labelled and new_type in _LABEL_SETS_TYPE:
         new_type = labelled
     new_options = dict(options or {})
@@ -443,16 +514,18 @@ def tidy_text(stem: str, options: dict | None, question_type: str) -> tuple[str,
         if before.strip() and after.strip():
             new_options["D"] = before.strip()
             new_options["E"] = after.strip()
-    return new_stem, new_options, new_type
+    new_options = {key: prose.tidy_value(value, switches=switches) if isinstance(value, str) else value
+                   for key, value in new_options.items()}
+    return new_stem, new_options, new_type, new_origin
 
 
-def _tidy_reading(reading):
+def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
     if not isinstance(reading, dict):
         return reading
-    stem, options, _kind = tidy_text(
+    stem, options, _kind, _origin = tidy_text(
         reading.get("stem") if isinstance(reading.get("stem"), str) else "",
         reading.get("options") if isinstance(reading.get("options"), dict) else {},
-        "unknown",
+        "unknown", origin, switches=switches,
     )
     changed = dict(reading)
     if isinstance(reading.get("stem"), str):
@@ -460,6 +533,52 @@ def _tidy_reading(reading):
     if isinstance(reading.get("options"), dict):
         changed["options"] = options
     return changed
+
+
+_BRACKET_NOTE = re.compile(r"[（(【\[][^）)】\]]{0,14}[）)】\]]")
+
+
+def _without_invented_options(options: dict, figure_slots: set[str] = frozenset()) -> tuple[dict, list[str]]:
+    """Options without a model's “（原卷此处为配图…）” note, and the letters that were only that.
+
+    An option that has its picture (a picture option) just loses the note.
+    """
+    from .readers import strip_bracketed_figure_descriptions
+
+    kept, dropped = {}, []
+    for key, value in (options or {}).items():
+        text, described = strip_bracketed_figure_descriptions(str(value or ""))
+        if described and not text.strip():
+            if key not in figure_slots:
+                dropped.append(key)
+            continue
+        kept[key] = text if described else value
+    return kept, sorted(dropped)
+
+
+def _restore_from_readings(options: dict, letters: list[str], question: Question) -> tuple[dict, list[str]]:
+    """Take a dropped option from a reading that did read it (高一质量检测一第 11 题：读法甲读出了
+    “f(1,5)=f(5,1)”，裁决却写成了配图说明)."""
+    from .readers import strip_bracketed_figure_descriptions
+    from .textnorm import canon
+
+    restored: list[str] = []
+    kept = dict(options)
+    existing = {canon(str(value)) for value in kept.values() if str(value or "").strip()}
+    for letter in letters:
+        for reading in (question.read_a, question.read_b):
+            if not isinstance(reading, dict) or not isinstance(reading.get("options"), dict):
+                continue
+            text, described = strip_bracketed_figure_descriptions(str(reading["options"].get(letter) or ""))
+            # “（图片）”, “（图略）”: another note, not the option.
+            note = _BRACKET_NOTE.fullmatch(text.strip()) and "图" in text
+            if described or note or not text.strip() or canon(text) in existing:
+                continue
+            kept[letter] = text.strip()
+            existing.add(canon(text))
+            restored.append(letter)
+            break
+    return dict(sorted(kept.items())), restored
 
 
 def tidy_saved_cards() -> dict[str, int]:
@@ -471,35 +590,91 @@ def tidy_saved_cards() -> dict[str, int]:
     snapshots get the same treatment in place, as a task rename updates
     their file name, so publishing again does not mint a new version.  Safe
     to run on every start: once everything is tidy it changes nothing.
+
+    1.10: a readable card whose type is still undecided gets the “题型没读出来”
+    reminder (yellow); it cannot be approved until a type is chosen.
     """
 
+    from .pipeline import read_c_with_spots
+
+    switches = features.load()
     counts = {"questions": 0, "publications": 0}
     with transaction.atomic():
         for question in Question.all_objects.select_for_update().select_related("paper", "group"):
-            stem, options, kind = tidy_text(question.stem, question.options, question.question_type)
-            if (stem, options, kind) == (question.stem, dict(question.options or {}), question.question_type):
+            stem, options, kind, origin = tidy_text(
+                question.stem, question.options, question.question_type, question.origin, switches=switches)
+            if not (question.approved or question.edited or question.type_locked):
+                # 1.10.1: a choice card under “…有多项符合题目要求…” is multiple
+                # choice, whatever the reader said.  Only cards nobody has
+                # approved, edited or typed by hand.
+                kind = qtypes.with_section(kind, question.section)
+            invented: list[str] = []
+            if not (question.approved or question.edited):
+                # 1.10.2: an option the model wrote as “（原卷此处为配图，无印刷文字）”
+                # was not read; say so instead of keeping the note as its text.
+                figure_slots = {figure.get("slot") for figure in question.figures or [] if isinstance(figure, dict)}
+                options, invented = _without_invented_options(options, figure_slots)
+            answer = prose.tidy_value(question.answer, switches=switches)
+            analysis = prose.tidy_value(question.analysis, switches=switches)
+            current_flags = list(question.flags or [])
+            if invented:
+                options, restored = _restore_from_readings(options, invented, question)
+                current_flags.extend(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对" for letter in restored)
+                missing = [letter for letter in invented if letter not in restored]
+                if missing:
+                    current_flags.append(f"选项 {'、'.join(missing)} 没有读出来，请对照原卷补上")
+            base_state = question.state
+            review = question.figure_review if isinstance(question.figure_review, dict) else {}
+            if review.get("source") == "human" and any(flag in DECISION_FLAGS for flag in current_flags):
+                # 1.10.2: a person already settled the figures (e.g. confirmed 无图), yet
+                # “别的题认为有一张图属于本题，请确认是否需要” stayed on the card.
+                current_flags = [flag for flag in current_flags if flag not in DECISION_FLAGS]
+                if not current_flags and base_state == Question.State.YELLOW:
+                    base_state = Question.State.GREEN
+            flags, state = qtypes.sync(current_flags, base_state, kind)
+            if invented and state == Question.State.GREEN:
+                state = Question.State.YELLOW
+            before = (question.stem, dict(question.options or {}), question.question_type, question.origin,
+                      question.answer, question.analysis, list(question.flags or []), question.state)
+            if (stem, options, kind, origin, answer, analysis, flags, state) == before:
+                # 1.10.2: store where the “MinerU 读法不同” spots are, once, so the
+                # review page need not look them up again on every load.
+                spotted = read_c_with_spots(question)
+                if spotted is not None:
+                    Question.all_objects.filter(pk=question.pk).update(read_c=spotted)
                 continue
             approval_was_current = approval_is_current(question)
             question.stem, question.options, question.question_type = stem, options, kind
+            question.origin, question.answer, question.analysis = origin, answer, analysis
+            question.flags, question.state = flags, state
+            spotted = read_c_with_spots(question)
+            if spotted is not None:
+                question.read_c = spotted
             for field in ("read_a", "read_b", "read_c"):
-                setattr(question, field, _tidy_reading(getattr(question, field)))
-            if approval_was_current:
+                setattr(question, field, _tidy_reading(getattr(question, field), switches, origin))
+            if approval_was_current and approval_is_current_ignoring_hash(question):
                 question.approved_content_hash = approval_hash(question)
             question.save(update_fields=[
-                "stem", "options", "question_type", "read_a", "read_b", "read_c",
-                "approved_content_hash", "updated_at",
+                "stem", "options", "question_type", "origin", "answer", "analysis", "flags", "state",
+                "read_a", "read_b", "read_c", "approved_content_hash", "updated_at",
             ])
             counts["questions"] += 1
 
         for publication in PublishedQuestion.objects.select_for_update():
             content = deepcopy(publication.content)
             original = (content.get("stem") or "", dict(content.get("options") or {}),
-                        content.get("question_type") or "unknown")
-            stem, options, kind = tidy_text(*original)
-            if (stem, options, kind) == original:
+                        content.get("question_type") or "unknown", str(content.get("origin") or ""),
+                        content.get("answer") or "", content.get("analysis") or "")
+            stem, options, kind, origin = tidy_text(*original[:4], switches=switches)
+            answer = prose.tidy_value(original[4], switches=switches)
+            analysis = prose.tidy_value(original[5], switches=switches)
+            if (stem, options, kind, origin, answer, analysis) == original:
                 continue
             old_hash = publication.content_hash
             content["stem"], content["question_type"] = stem, kind
+            content["answer"], content["analysis"] = answer, analysis
+            if origin:
+                content["origin"] = origin
             if content.get("options") or options:
                 content["options"] = option_content(options)
             new_hash = content_hash(content)
@@ -509,10 +684,17 @@ def tidy_saved_cards() -> dict[str, int]:
             publication.content = content
             publication.content_hash = new_hash
             publication.question_type = kind
-            publication.search_text = _search_text(content)
+            publication.search_text = _search_text(content, publication.extras)
             publication.save(update_fields=["content", "content_hash", "question_type", "search_text"])
             counts["publications"] += 1
     return counts
+
+
+def approval_is_current_ignoring_hash(question: Question) -> bool:
+    """Whether the card could carry an approval at all (figures settled, type chosen…)."""
+    if blocks_approval(stored_or_derived_review(question)) or type_blocks_approval(question):
+        return False
+    return bool(question.approved and question.state in REVIEWABLE_STATES and question.stem.strip())
 
 
 # 1.5.1 name for the same cleanup.

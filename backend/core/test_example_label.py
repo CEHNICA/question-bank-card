@@ -68,6 +68,8 @@ class SavedExampleLabelCleanupTests(TestCase):
         )
 
     def card(self, stem, **extra):
+        # 1.10: an undecided type blocks approval; these cards are about labels.
+        extra.setdefault("question_type", "free_response")
         return Question.objects.create(
             paper=self.paper, group=self.group, number=extra.pop("number", 1), stem=stem,
             regions=[{"page_idx": 0, "bbox": [20, 100, 900, 260]}],

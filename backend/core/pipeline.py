@@ -11,6 +11,7 @@ import shutil
 import threading
 from collections import OrderedDict, defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
@@ -19,7 +20,9 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, readers, segment, tables, textnorm
+from . import (
+    cuts, features, figure_policy, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm,
+)
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -1434,6 +1437,40 @@ def _source_anchor(item: dict) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+SNAP_TOLERANCE = 12.0
+
+
+def _snap_only_change(old: list[dict] | None, new: list[dict] | None) -> bool:
+    """Whether two crops differ only by the few units cuts.snap_cuts moves an edge.
+
+    1.10.1 started moving cuts off ink.  Re-segmenting a paper read by an
+    older version must not take an approved or hand-checked card back to
+    yellow for that alone.
+    """
+    if not old or not new or len(old) != len(new):
+        return False
+    for before, after in zip(old, new):
+        if before.get("page_idx") != after.get("page_idx"):
+            return False
+        a, b = before.get("bbox") or [], after.get("bbox") or []
+        if len(a) != 4 or len(b) != 4:
+            return False
+        if abs(a[0] - b[0]) > 1 or abs(a[2] - b[2]) > 1 \
+                or abs(a[1] - b[1]) > SNAP_TOLERANCE or abs(a[3] - b[3]) > SNAP_TOLERANCE:
+            return False
+    return True
+
+
+def _keeps_protected_range(question: Question, regions: list[dict], blocks: list[dict]) -> bool:
+    """A protected card whose new crop moved only by snapping keeps its old crop."""
+    return bool(
+        question.regions
+        and _snap_only_change(question.regions, regions)
+        and segment.text_blocks_in(blocks, question.regions) == segment.text_blocks_in(blocks, regions)
+        and _question_range_is_human_protected(question)
+    )
+
+
 def _question_range_is_human_protected(question: Question) -> bool:
     """Whether automatic re-segmentation may replace the text/source crop.
 
@@ -1863,6 +1900,11 @@ def _collect_segmentation_items(
                 "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
             })
         items = segment.build_questions(layout, starts, group_blocks)
+        # 切线压在字上（照片里 MinerU 的框偏大）时，挪到两题之间的空白行。
+        cuts.snap_cuts(items, page_store.load, layout)
+        for item in items:
+            notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
+                          for note in item.get("segmentation_notes") or []])
         for number, previous_number in unresolved:
             holder = next((item for item in items if item.get("number") == previous_number), None)
             if holder is not None:
@@ -1999,6 +2041,8 @@ def preview_resegment(paper: Paper) -> dict:
                 item, question, reason="人工范围保持不变",
             ))
             continue
+        if _keeps_protected_range(question, item["regions"], blocks):
+            item = {**item, "regions": question.regions}
         regions_changed = question.regions != item["regions"]
         text_changed = segment.text_blocks_in(blocks, question.regions) != \
             segment.text_blocks_in(blocks, item["regions"])
@@ -2120,6 +2164,8 @@ def segment_paper(paper: Paper) -> None:
                 if fields:
                     question.save(update_fields=[*fields, "updated_at"])
                 continue  # 人工框的范围优先
+            if _keeps_protected_range(question, regions, blocks):
+                regions = question.regions
             regions_changed = question.regions != regions
             text_changed = segment.text_blocks_in(blocks, question.regions) != \
                 segment.text_blocks_in(blocks, regions)
@@ -2176,6 +2222,9 @@ def segment_paper(paper: Paper) -> None:
                 if question.edited or unchanged
                 else item["question_type"]
             )
+            if unchanged and not (question.edited or question.type_locked or question.approved):
+                # A section that says “有多项符合题目要求” fixes single → multiple.
+                new_question_type = qtypes.with_section(new_question_type, new_section)
             question.regions = regions
             question.regions_auto = regions
             question.section = new_section
@@ -2596,9 +2645,12 @@ def assistant_draft(snapshot: dict) -> dict:
     text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
     text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
     stem, options = readers.split_inline_options(text)
-    kind = snapshot.get("question_type") or "unknown"
-    if kind == "unknown" and options:
-        kind = "single_choice"
+    tidied = prose.tidy_fields({"stem": stem, "options": options,
+                                "question_type": snapshot.get("question_type") or "unknown"})
+    stem, options, origin = tidied["stem"], tidied["options"], tidied["origin"]
+    kind = qtypes.with_section(
+        qtypes.infer(tidied.get("question_type") or snapshot.get("question_type") or "unknown", stem, options),
+        snapshot.get("section"))
     candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
     labels = {str(candidate["label"]): candidate for candidate in candidates}
     assignments = _draft_figure_guess(stem, options, candidates)
@@ -2616,7 +2668,7 @@ def assistant_draft(snapshot: dict) -> dict:
     return {
         "read_a": {"engine": "MinerU", "stem": stem, "options": options, "draft": True, "figures": assignments},
         "read_b": {}, "read_c": {},
-        "stem": stem, "options": options, "question_type": kind, "text_source": "mineru",
+        "stem": stem, "options": options, "origin": origin, "question_type": kind, "text_source": "mineru",
         "figures": figures, "figure_review": review, "foreign_figures": [],
         "flags": flags, "error": "", "state": Question.State.YELLOW,
     }
@@ -2632,9 +2684,124 @@ def _objection_flag(spots: list[dict], prefix: str = OBJECTION_FLAG_PREFIX) -> s
     return f"{prefix}{shown}{more}，请对照原卷"
 
 
+def _located_spots(spots: list[dict], blocks: list[dict] | None) -> list[dict]:
+    """The spots a person must check, each with the MinerU box to look at (when found)."""
+    located = []
+    for index, spot in enumerate(spots, 1):
+        entry = {"n": index, **{key: spot[key] for key in ("reading", "mineru", "before", "after", "at") if key in spot}}
+        box = textnorm.spot_block(spot, blocks or [])
+        if box:
+            entry.update(box)
+        located.append(entry)
+    return located
+
+
+def spot_record(read_c) -> dict | None:
+    """The record that holds the checked spots (the arbiter keeps its own reading on top)."""
+    if not isinstance(read_c, dict):
+        return None
+    check = read_c.get("objection_check")
+    return check if isinstance(check, dict) else read_c
+
+
+def _mark_spot_text(update: dict, stem: str, options: dict) -> None:
+    """Where each spot to check is in the final text (field, start, end), for the card to mark."""
+    record = spot_record(update.get("read_c"))
+    if not record or not isinstance(record.get("doubtful"), list):
+        return
+    marked = []
+    for spot in record["doubtful"]:
+        entry = {key: value for key, value in dict(spot).items() if key not in ("field", "start", "end", "text")}
+        found = textnorm.spot_place(stem, options or {}, spot)
+        if found:
+            field, start, end = found
+            text = stem if field == "stem" else str((options or {}).get(field) or "")
+            entry.update(field=field, start=start, end=end, text=text[start:end])
+        marked.append(entry)
+    record["doubtful"] = marked
+
+
+OBJECTION_PREFIXES = (OBJECTION_FLAG_PREFIX, ARBITER_OBJECTION_FLAG_PREFIX)
+SPOT_KEYS = ("n", "reading", "mineru", "page_idx", "bbox", "field", "start", "end", "text")
+
+
+def _has_objection_flag(question: Question) -> bool:
+    return any(str(flag).startswith(OBJECTION_PREFIXES) for flag in question.flags or [])
+
+
+def _derived_spots(question: Question, record: dict) -> list[dict]:
+    """The spots of a card read before 1.10.2: the check's open answers, located again."""
+    objections = [spot for spot in record.get("objections") or [] if isinstance(spot, dict)]
+    answers = record.get("answers")
+    if isinstance(answers, list):
+        objections = [spot for spot, answer in zip(objections, answers) if answer != "reading"]
+    regions = question.regions or []
+    pages = sorted({int(region["page_idx"]) for region in regions})
+    blocks = [
+        {"page_idx": block.page_idx, "bbox": block.bbox, "text": block.text}
+        for block in Block.objects.filter(paper_id=question.paper_id, page_idx__in=pages,
+                                          type__in=WITNESS_BLOCK_TYPES)
+        if isinstance(block.bbox, list) and segment.center_in_regions(block.page_idx, block.bbox, regions)
+    ] if pages else []
+    holder = {"doubtful": _located_spots(objections, blocks)}
+    _mark_spot_text({"read_c": holder}, question.stem, question.options or {})
+    return holder["doubtful"]
+
+
+def read_c_with_spots(question: Question) -> dict | None:
+    """read_c with the flagged spots stored, for a card read before 1.10.2; None when nothing to add.
+
+    read_c is not part of the approved content, so this never touches an approval.
+    """
+    if not _has_objection_flag(question) or not isinstance(question.read_c, dict):
+        return None
+    record = spot_record(question.read_c)
+    if not record or isinstance(record.get("doubtful"), list):
+        return None
+    spots = _derived_spots(question, record)
+    read_c = deepcopy(question.read_c)
+    target = read_c["objection_check"] if isinstance(read_c.get("objection_check"), dict) else read_c
+    target["doubtful"] = spots
+    return read_c
+
+
+def check_spots(question: Question) -> list[dict]:
+    """The spots the card's “MinerU 读法不同” flag names, with where to compare.
+
+    Each spot carries its number (as in the flag), the MinerU box on the paper
+    (page_idx, bbox) and the characters in the card's text (field, start,
+    end).  Cards read before 1.10.2 have no stored spots: they are worked out
+    from the check's answers and MinerU's blocks.  Nothing once the flag is
+    gone (a person edited the text).
+    """
+    if not _has_objection_flag(question):
+        return []
+    record = spot_record(question.read_c)
+    if not record:
+        return []
+    spots = record.get("doubtful")
+    if not isinstance(spots, list):
+        # Normally stored once at start-up (library.tidy_saved_cards); this is the fallback.
+        spots = _derived_spots(question, record)
+    shown = []
+    for spot in spots:
+        if not isinstance(spot, dict):
+            continue
+        item = {key: spot[key] for key in SPOT_KEYS if key in spot}
+        field = item.get("field")
+        if field:
+            text = question.stem if field == "stem" else str((question.options or {}).get(field) or "")
+            start, end = item.get("start"), item.get("end")
+            if not (isinstance(start, int) and isinstance(end, int) and text[start:end] == item.get("text")):
+                for key in ("field", "start", "end", "text"):
+                    item.pop(key, None)
+        shown.append(item)
+    return shown
+
+
 def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
                        image_url: str, primary, checker, figure_source: dict,
-                       keep_reading: bool = False) -> tuple[dict, str]:
+                       keep_reading: bool = False, blocks: list[dict] | None = None) -> tuple[dict, str]:
     """Both vision reads agree, yet MinerU printed other characters at a few
     clean spots (x^3 / x^2, 至少需用 / 至少需要).  The same model reading twice
     repeats its own slips, so each spot gets one neutral either/or look.
@@ -2662,11 +2829,14 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
             raise readers.ReaderError("没有可用的核对模型")
         answers = readers.spot_check(engine, image_url, spots)
     except readers.ReaderError as error:
-        record({**evidence, "error": str(error)})
+        # “doubtful”: the spots named in the flag, in its order, with the box
+        # on the paper to compare; the card marks them (1.10.2).
+        record({**evidence, "error": str(error), "doubtful": _located_spots(spots, blocks)})
         flags.append(_objection_flag(spots, prefix))
         return final, source
-    record({**evidence, "engine": engine.label, "answers": answers})
     doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
+    record({**evidence, "engine": engine.label, "answers": answers,
+            **({"doubtful": _located_spots(doubtful, blocks)} if doubtful else {})})
     if doubtful:
         flags.append(_objection_flag(doubtful, prefix))
     return final, source
@@ -2754,6 +2924,18 @@ def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
     if any(re.match(rf"\s*{int(number)}(?!\d)", str((other or {}).get("stem") or "")) for other in others):
         return reading
     return {**reading, "stem": stem[match.end():]}
+
+
+def _tidy_final(final: dict) -> tuple[dict, str]:
+    """The chosen reading with its source note taken off and quotes tidied (see prose)."""
+    if not isinstance(final, dict) or not isinstance(final.get("stem"), str):
+        return final, ""
+    tidied = prose.tidy_fields({"stem": final["stem"], "options": final.get("options") or {},
+                                "question_type": final.get("type") or "unknown"})
+    result = {**final, "stem": tidied["stem"], "options": tidied["options"]}
+    if tidied.get("question_type"):
+        result["type"] = tidied["question_type"]
+    return result, tidied["origin"]
 
 
 def read_card(snapshot: dict, store: PageStore) -> dict:
@@ -2876,7 +3058,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final, source = a_text, "agree"
         final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
                                            image_url=clean_url, primary=primary, checker=checker,
-                                           figure_source=figure_source)
+                                           figure_source=figure_source, blocks=snapshot.get("witness_blocks"))
     elif a and b and (textnorm.witness_agrees(b_text, witness)
                       or textnorm.witness_choice(a_text, b_text, witness) is not None):
         # MinerU (a different engine) settles the disagreement.  An arbiter
@@ -2890,7 +3072,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                             "chosen": chosen}
         final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
                                            image_url=clean_url, primary=primary, checker=checker,
-                                           figure_source=figure_source)
+                                           figure_source=figure_source, blocks=snapshot.get("witness_blocks"))
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)
@@ -2924,7 +3106,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 # readers made (shengli7 #16 “器补” for the printed 添补).
                 final, source = _settle_objections(
                     final, source, update, flags, witness=witness, number=number, image_url=clean_url,
-                    primary=primary, checker=checker, figure_source=figure_source, keep_reading=True)
+                    primary=primary, checker=checker, figure_source=figure_source, keep_reading=True,
+                    blocks=snapshot.get("witness_blocks"))
         except readers.ReaderError as error:
             final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}
@@ -2936,6 +3119,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
     final, restored_options = _restore_skipped_options(
         final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness)
+    # A third reading (arbiter) has no 【题型】; when its text wins, keep the
+    # type the two readers agreed on instead of falling back to “未定”.
+    if not qtypes.decided(final.get("type")):
+        agreed = qtypes.consensus(r.get("type") for r in (a_text, b_text) if isinstance(r, dict))
+        if qtypes.decided(agreed):
+            final = {**final, "type": agreed}
+    # 题源、中文引号（设置里可关）：在这里整理，配图检查和疑点都按整理后的题面来。
+    final, origin = _tidy_final(final)
     for letter, supported in restored_options.items():
         if not supported:
             flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
@@ -3018,6 +3209,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         candidates=snapshot["candidates"],
         figures=figures,
     )
+    kind = qtypes.with_section(qtypes.infer(kind, final.get("stem"), final.get("options")),
+                               snapshot.get("section"))
     choice_missing_slots = missing_choice_figure_slots(
         kind=kind,
         options=final.get("options") or {},
@@ -3064,10 +3257,15 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # in the crop: the opening line is probably above it (口镇第 8 题只剩
         # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
         flags.append(FLAG_LOCATED_WITHOUT_NUMBER)
+    switches = features.load()
+    for name in ("read_a", "read_b", "read_c"):
+        update[name] = prose.tidy_reading(update.get(name), switches=switches)
+    _mark_spot_text(update, str(final.get("stem") or ""), final.get("options") or {})
     return {
         **update,
         "stem": final.get("stem", ""),
         "options": final.get("options") or {},
+        "origin": origin,
         "question_type": kind,
         "text_source": source,
         "figures": figures,
@@ -3083,6 +3281,7 @@ def _snapshot(question: Question) -> dict:
     return {"id": question.id, "number": question.number, "group_id": question.group_id,
             "start_source": question.start_source, "regions": question.regions,
             "candidates": question.figure_candidates, "question_type": question.question_type,
+            "section": question.section,
             "stem": question.stem, "options": question.options, "edited": question.edited,
             "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
             "segmentation_flags": [
@@ -3171,6 +3370,11 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
         nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
                   for block in blocks_by_page.get(page, [])]
         snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
+        snapshot["witness_blocks"] = [
+            {"page_idx": int(block["page_idx"]), "bbox": block["bbox"], "text": block.get("text") or ""}
+            for block in nearby
+            if regions and block.get("bbox") and segment.center_in_regions(int(block["page_idx"]), block["bbox"], regions)
+        ]
         if regions:
             pages = sorted({int(r["page_idx"]) for r in regions})
             draft = mineru_draft([block for page in pages for block in all_by_page.get(page, [])],
@@ -3237,9 +3441,16 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             )
             if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
                 fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
+        # 人选定的题型（题号旁的下拉、改字、tiyouju fix --type）重读也不变。
+        kept = {"question_type"} if question.type_locked and qtypes.decided(question.question_type) else set()
         if question.edited:
-            # 人工改过的文字不被覆盖，只更新识读记录与配图建议。
-            fields = {k: v for k, v in fields.items() if k not in {"stem", "options", "text_source"}}
+            # 人工改过的文字（连同题源）不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
+            kept |= {"stem", "options", "text_source", "origin"}
+            if qtypes.decided(question.question_type):
+                kept.add("question_type")
+        if kept:
+            fields = {k: v for k, v in fields.items() if k not in kept}
+        if question.edited:
             fields["flags"] = [f for f in fields.get("flags", []) if "识读" not in f and "[?]" not in f]
             if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
                 fields["state"] = Question.State.GREEN
@@ -3261,8 +3472,10 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             fields["figures"] = []
             fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
             fields["figure_review"] = stored_or_derived_review(question)
-        if fields.get("state") == Question.State.YELLOW and not fields.get("flags"):
-            fields["state"] = Question.State.GREEN
+        if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
+            kind = fields.get("question_type", question.question_type)
+            fields["flags"] = qtypes.with_flag(fields.get("flags", []), kind)
+            fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
         for key, value in fields.items():
             setattr(question, key, value)
         question.save()
@@ -3324,8 +3537,8 @@ def _same_box(figure: dict, others: list[dict]) -> bool:
                for o in others)
 
 
-FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
-FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加上，请确认是否需要"
+FLAG_ROW_FIGURE = figure_policy.FLAG_ROW_FIGURE
+FLAG_FOREIGN_FIGURE = figure_policy.FLAG_FOREIGN_FIGURE
 
 
 def _single_row(candidates: list[dict]) -> list[dict] | None:

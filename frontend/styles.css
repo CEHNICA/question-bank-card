@@ -376,11 +376,6 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .compact-text .qb-math { font-size: .95em; }
 
 .card-source { position: relative; background: #f8f7f3; border-right: 1px solid var(--line); padding: 14px 14px 12px 17px; min-width: 0; }
-.card.wide-source { grid-template-columns: minmax(0, 1fr); }
-.card.wide-source .card-source { border-right: 0; border-bottom: 1px solid var(--line); padding: 14px 18px 10px 20px; }
-.card.wide-source .source-sticky { position: static; }
-.card.wide-source .crop { margin: 0 auto 0 0; }
-.card.wide-source .card-body { padding: 12px 22px 16px; }
 .source-sticky { position: sticky; top: calc(var(--topbar-h) + 70px); }
 .crop { display: grid; gap: 0; }
 .crop.zoomable { cursor: zoom-in; }
@@ -390,6 +385,11 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .crop-join { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding: 5px 2px; letter-spacing: .04em; }
 .crop-join::before, .crop-join::after { content: ""; flex: 1; border-top: 1px dashed var(--line-strong); }
 .crop-figure { position: absolute; border: 2px solid rgba(31, 107, 95, .7); border-radius: 3px; background: rgba(31, 107, 95, .05); pointer-events: none; }
+/* 1.10.2：MinerU 读法不同的地方，在原卷上框出要对照的那一行，编号和提示里的①②一致 */
+.crop-spot { position: absolute; border: 2px dashed #c2410c; border-radius: 3px; background: rgba(234, 88, 12, .07); pointer-events: auto; }
+.crop-spot-label { position: absolute; left: -2px; bottom: calc(100% + 1px); padding: 0 4px; border-radius: 3px;
+  background: #c2410c; color: #fff; font: 600 11px/1.45 var(--ui-font); letter-spacing: .04em; white-space: nowrap; }
+.crop-spot.label-below .crop-spot-label { top: calc(100% + 1px); bottom: auto; }
 .source-note { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -5px; padding: 3px 7px 3px 5px; border: 0; border-radius: 6px;
   background: transparent; font: inherit; font-size: 11.5px; color: var(--muted); text-align: left; cursor: zoom-in; }
 .source-note:hover, .source-note:focus-visible { background: rgba(0, 0, 0, .045); color: var(--ink-2); outline: 0; }
@@ -397,7 +397,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .crop-missing { margin: 0; padding: 18px 14px; border: 1.5px dashed var(--red-line); border-radius: 10px; color: var(--red); font-size: 13.5px; line-height: 1.7; background: #fff; }
 
 .card-body { padding: 14px 22px 16px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* The head spans both columns, padded like the collapsed row, so the tick is always in the same place. */
+.card-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
 /* 题号左边的方框：平时是“打勾通过”；批量删除时换成圆形选择框。 */
 .card-tick, .card-select { flex: none; display: inline-grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1.5px solid var(--line-strong);
   background: var(--surface); color: transparent; box-shadow: var(--shadow-sm); cursor: pointer; }
@@ -416,6 +418,19 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .group-label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: none; color: var(--ink-2); font-size: 12px; font-weight: 500; }
 .qnum { font-weight: 700; font-size: 15px; letter-spacing: .02em; color: var(--ink); }
 .qtype { font-size: 12.5px; color: var(--muted); padding-right: 2px; }
+/* 1.10：题型可以在题号旁边直接改；没读出来时是琥珀色的“题型未定 · 请选”。 */
+.qtype-select { font: inherit; font-size: 12.5px; color: var(--ink-2); background: transparent; border: 1px solid transparent;
+  border-radius: 7px; padding: 2px 4px; cursor: pointer; max-width: 11em; }
+.qtype-select:hover, .qtype-select:focus-visible { border-color: var(--line-strong); background: var(--surface); outline: none; }
+.qtype-select.undecided { color: var(--amber); font-weight: 650; background: var(--amber-soft); border-color: var(--amber-line); }
+.qtype-select.attention { animation: figure-review-attention .9s ease-out 2; }
+.card-origin { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.card-origin-label { flex: none; font-size: 11px; font-weight: 650; color: var(--ink-2); padding: 0 6px; border-radius: 5px;
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.editor .origin-input { flex: 1; min-width: 0; }
+.rename-nudge { font: inherit; font-size: 12.5px; color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber-line);
+  border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.rename-nudge:hover { filter: brightness(.97); }
 .head-spacer { flex: 1; }
 .flags { list-style: none; margin: 0; padding: 7px 12px 7px 13px; border-radius: 0 8px 8px 0; background: var(--amber-soft);
   border: 0; border-left: 3px solid var(--amber-bar); color: #6b4a12; font-size: 13px; line-height: 1.6; display: grid; gap: 3px; }
@@ -429,6 +444,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .reading-difference-text { color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .reading-difference .button { justify-self: start; }
 .flags .flag-spot { margin: 0 1px; padding: 0 2px; background: linear-gradient(transparent 55%, var(--marker-strong) 55%); color: var(--ink); font-weight: 600; }
+.flags .flag-spot-number { margin: 0 2px 0 1px; padding: 0 4px; border-radius: 3px; background: #c2410c; color: #fff; font-size: 11px; font-weight: 600; }
 .reading-difference-context { color: var(--muted, #7a746a); }
 .reading-difference-extra { margin: 0 1px; padding: 0 2px; background: linear-gradient(transparent 55%, var(--marker-strong) 55%); color: var(--ink); font-weight: 600; }
 .figure-review { display: grid; gap: 6px; padding: 9px 12px 10px 13px; border: 0; border-left: 3px solid var(--line-strong); border-radius: 0 8px 8px 0; background: var(--surface-2); color: var(--ink-2); }
@@ -504,7 +520,6 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .card.editing .editor-actions { position: sticky; bottom: 0; z-index: 4; margin-bottom: -16px; padding: 10px 0 14px; background: var(--surface);
   border-top: 1px solid #efede6; box-shadow: 0 -10px 12px -12px rgba(22, 44, 39, .35); }
-.card.editing-pinned .card-source { position: sticky; top: calc(var(--topbar-h) + 58px); z-index: 6; box-shadow: 0 10px 14px -12px rgba(22, 44, 39, .45); }
 .editor-actions .hint { margin: 0 0 0 auto; }
 
 /* ---------------------------------------------------------------- 对话框 */
@@ -813,7 +828,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .settings-switch span { display: grid; gap: 2px; }
 .settings-switch strong { font-size: 13px; }
 .settings-switch small { color: var(--muted); font-size: 11.5px; }
-.settings-switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.settings-switch input { flex: none; width: 18px; height: 18px; accent-color: var(--accent); }
 .about-row { margin-top: 8px; }
 .settings-section#settingsAbout .button { margin-top: 12px; }
 
@@ -901,8 +916,6 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .card { grid-template-columns: 1fr; }
   .card-source { border-right: 0; border-bottom: 1px solid var(--line); }
   .source-sticky { position: static; }
-  .card.has-toggle:not(.compact) .card-source { padding-top: 48px; }
-  .card.has-toggle .card-head { padding-right: 0; }
 }
 @media (max-width: 900px) {
   .card-actions .kbd-hint { display: none; }
@@ -1033,6 +1046,9 @@ mark.qb-mark.is-change.current { background: linear-gradient(transparent 52%, va
 mark.qb-mark.is-change.observed { background: linear-gradient(transparent 52%, var(--marker-blue) 52%, var(--marker-blue) 94%, transparent 94%); }
 mark.qb-mark.is-variant { background: none; text-decoration: underline dotted var(--violet) 2px; text-underline-offset: 4px; }
 mark.qb-mark-math { padding: 0 2px; }
+/* 要对照原卷的字：整段公式加框，那个字本身标成橙色（qb-render colourLatex） */
+mark.qb-mark.spot { background: none; outline: 1.5px dashed #c2410c; outline-offset: 1px; border-radius: 2px; }
+mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .qb-bracket { white-space: pre; }
 .qb-nobr { white-space: nowrap; }
 .qb-choice-answer { font-weight: 700; letter-spacing: .08em; }
@@ -1096,3 +1112,13 @@ mark.qb-mark-math { padding: 0 2px; }
 /* 放大对照窗口里，左下角是“改字 / 上一题”等按钮：卡片挪到右下，按钮上方。 */
 .viewer-dialog > .teach-panel { left: auto; right: 20px; bottom: 78px; }
 @media (max-width: 760px) { .teach-panel { left: 12px; right: 12px; width: auto; } }
+
+/* 1.10.2 框选识读：题卡上的结果 */
+.region-read { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 8px; background: #fbfdfc; }
+.region-read.failed { border-left-color: var(--amber-bar); background: var(--amber-soft); }
+.region-read-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.region-read-text { margin: 6px 0 2px; font-size: 16px; line-height: 1.9; }
+.region-read-error { margin: 6px 0 0; color: var(--amber); font-size: 13px; }
+.region-read .hint { margin: 4px 0 0; font-size: 12px; }
+.region-read-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.editor input.prefilled { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }

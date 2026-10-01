@@ -227,6 +227,81 @@ def strip_type_label(text: str) -> tuple[str, str | None]:
     return value[match.end():], kind
 
 
+# 教辅、汇编常在题目前印上出处：“[2026山东枣庄滕州二中月考]”“（2025·北京海淀·期中）”
+# “【2024新课标Ⅰ卷】”。它说的是题从哪里来，不是题目本身；放在题干里，组卷打印时
+# 会被印出来，也没法按出处找题。只认题干最开头、成对括号里的一段，并且要像出处：
+# 有年份或考试名称，有汉字，没有公式。
+_ORIGIN_LEAD = re.compile(r"^[ \t　]*([\[【(（])([^\[\]【】()（）\n$\\]{4,60})([\]】)）])[ \t　]*")
+_ORIGIN_PAIRS = {"[": "]", "【": "】", "(": ")）", "（": ")）"}
+_ORIGIN_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_ORIGIN_WORDS = re.compile(
+    r"月考|期中|期末|模拟|联考|调研|质检|质量检测|统考|中考|高考|真题|[一二三四]模|学年|学期|"
+    r"检测|竞赛|期初|开学考|会考|学考|学业水平|适应性|诊断|摸底|新课标|新高考|全国[甲乙丙]?卷|"
+    r"考试|测试|测评"
+)
+_ORIGIN_SCORE = re.compile(r"满分|\d\s*分(?![校类析])")
+# A year alone is not a source: “（2022年北京冬奥会期间）某商店……” is task text.
+# With a year, a source also names its paper: “·”-separated parts, a 卷, or a school.
+_ORIGIN_PAPER = re.compile(r"·|卷|[一二三四五六七八九十\d]中|中学|附中|高中|学校|外国语|实验学校")
+_ORIGIN_CJK = re.compile(r"[一-鿿]")
+
+
+def split_origin(text: str) -> tuple[str, str]:
+    """Take a printed source note off the front of a stem: (stem, origin) or (text, "")."""
+    value = str(text or "")
+    match = _ORIGIN_LEAD.match(value)
+    if not match:
+        return value, ""
+    opening, inner, closing = match.groups()
+    rest = value[match.end():]
+    inner = inner.strip()
+    if closing not in _ORIGIN_PAIRS[opening] or not rest.strip():
+        return value, ""
+    if len(_ORIGIN_CJK.findall(inner)) < 2 or _ORIGIN_SCORE.search(inner):
+        return value, ""
+    if not (_ORIGIN_WORDS.search(inner) or (_ORIGIN_YEAR.search(inner) and _ORIGIN_PAPER.search(inner))):
+        return value, ""
+    return rest.lstrip(), inner
+
+
+# 中文句子里的英文双引号："∀x∈B, x∈A"是真命题 → “∀x∈B, x∈A”是真命题。
+# 公式、HTML 表格标记里的引号不动；英文句子（引号两边都不是汉字）不动；
+# 引号个数是单数、或一对引号跨了行，说明认不准，整段都不动。
+_QUOTE_SKIP = re.compile(r"\$\$.+?\$\$|\$[^$\n]+?\$|\\\(.+?\\\)|\\\[.+?\\\]|<[^<>\n]+>", re.S)
+_CJK_OR_MARK = re.compile(r"[　-〿＀-￯一-鿿]")
+
+
+def chinese_quotes(text: str) -> str:
+    value = str(text or "")
+    if '"' not in value:
+        return value
+    skipped = [(match.start(), match.end()) for match in _QUOTE_SKIP.finditer(value)]
+    positions = [
+        index for index, character in enumerate(value)
+        if character == '"' and not any(start <= index < end for start, end in skipped)
+    ]
+    if not positions or len(positions) % 2:
+        return value
+    characters = list(value)
+
+    def neighbour(index: int, step: int) -> str:
+        index += step
+        while 0 <= index < len(value) and value[index] in " \t　":
+            index += step
+        return value[index] if 0 <= index < len(value) else ""
+
+    for opening, closing in zip(positions[0::2], positions[1::2]):
+        inner = value[opening + 1:closing]
+        if "\n" in inner:
+            return value
+        chinese = (_CJK_OR_MARK.match(neighbour(opening, -1) or " ")
+                   or _CJK_OR_MARK.match(neighbour(closing, 1) or " ")
+                   or _ORIGIN_CJK.search(inner))
+        if chinese:
+            characters[opening], characters[closing] = "“", "”"
+    return "".join(characters)
+
+
 def _is_own_number(value: str, number: int | None) -> bool:
     """Whether a printed number is this card's, allowing a binding edge that
     clipped its leading digits (“9.” for 19, “0.” for 20)."""
@@ -473,8 +548,144 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
             continue
         if kw[j1 - context:j1] != left or kw[j2:j2 + context] != right:
             continue
-        spots.append({"reading": read, "mineru": seen, "before": left, "after": right})
+        # “at”: where the reading's side starts in the reading's key, so the
+        # card can mark the right one when the same context occurs twice.
+        spots.append({"reading": read, "mineru": seen, "before": left, "after": right, "at": i1})
     return spots
+
+
+def _key_offset(text: str, key_index: int) -> int:
+    """The raw index where ``witness_key(text)`` reaches ``key_index`` characters.
+
+    The key is not built character by character, so this searches prefixes
+    (it is close enough: a mark inside a formula covers the whole formula).
+    """
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high) // 2
+        if len(witness_key(text[:middle])) < key_index:
+            low = middle + 1
+        else:
+            high = middle
+    return low
+
+
+def _find_all(haystack: str, needle: str, limit: int = 20) -> list[int]:
+    hits, at = [], haystack.find(needle)
+    while at >= 0 and len(hits) < limit:
+        hits.append(at)
+        at = haystack.find(needle, at + 1)
+    return hits
+
+
+def _raw_span(value: str, first: int, last: int, reading: str) -> tuple[int, int] | None:
+    """The raw characters whose key is ``key[first:last]`` (== ``reading``), checked.
+
+    The prefix search is only close (a prefix's key is not always a prefix of
+    the key, e.g. inside a formula), so the result must key back to the
+    reading; otherwise the reading's own characters nearest to that key
+    position are taken (“3” in “x^{3}”, “定” in “销售定价”).
+    """
+    start = max(0, _key_offset(value, first + 1) - 1)
+    end = min(len(value), max(start + 1, _key_offset(value, last)))
+    if start < end and witness_key(value[start:end]) == reading:
+        return start, end
+    best = None
+    for hit in _find_all(value, reading):
+        drift = abs(len(witness_key(value[:hit])) - first)
+        if drift <= 3 and (best is None or drift < best[0]):
+            best = (drift, hit)
+    return (best[1], best[1] + len(reading)) if best else None
+
+
+def spot_range(text: str, spot: dict, *, key_at: int | None = None) -> tuple[int, int] | None:
+    """Where the reading's side of an objection spot is in ``text`` (raw, with LaTeX).
+
+    Returns (start, end) of the characters to mark, or None when the spot is
+    not in this text (another field, or the text changed since).  When the
+    same context occurs more than once, the one nearest ``key_at`` (the
+    reading's position in the key) is taken.
+    """
+    value = str(text or "")
+    before, reading, after = str(spot.get("before") or ""), str(spot.get("reading") or ""), str(spot.get("after") or "")
+    if not value or not reading:
+        return None
+    hits = _find_all(witness_key(value), before + reading + after)
+    if not hits:
+        return None
+    if key_at is not None and len(hits) > 1:
+        hits.sort(key=lambda hit: abs(hit + len(before) - key_at))
+    first = hits[0] + len(before)
+    return _raw_span(value, first, first + len(reading), reading)
+
+
+def spot_place(stem: str, options: dict, spot: dict) -> tuple[str, int, int] | None:
+    """The field (“stem”, “A”…) and raw range of a spot's reading in a card's text.
+
+    The spots were found in the stem and options read as one text (“…（ ）
+    A.3B.2…”), so a spot at the start of an option has the label and the
+    stem's end as its context: it is looked up in that same text and mapped
+    back.  A stem with a table is compared without it, so its prose is then
+    searched on its own.
+    """
+    from .tables import without_tables
+
+    stem = str(stem or "")
+    options = options or {}
+    combined, spans = "", []
+
+    def add(field: str, label: str, value: str) -> None:
+        nonlocal combined
+        combined += label
+        spans.append((field, len(combined), len(combined) + len(value)))
+        combined += value
+
+    has_table = without_tables(stem) != stem
+    if not has_table:
+        add("stem", "", stem)
+    for key in sorted(options):
+        value = str(options[key] or "")
+        if value.strip():
+            add(key, f"{key}.", value)
+    at = spot.get("at") if isinstance(spot.get("at"), int) and not has_table else None
+    found = spot_range(combined, spot, key_at=at)
+    if found:
+        for field, low, high in spans:
+            if low <= found[0] and found[1] <= high:
+                return field, found[0] - low, found[1] - low
+    if has_table:
+        found = spot_range(stem, spot)
+        if found:
+            return "stem", found[0], found[1]
+    return None
+
+
+def spot_block(spot: dict, blocks: list[dict]) -> dict | None:
+    """The MinerU box whose text holds MinerU's side of a spot: where to look on the paper."""
+    before, seen, after = str(spot.get("before") or ""), str(spot.get("mineru") or ""), str(spot.get("after") or "")
+    keyed = [(witness_key(str(block.get("text") or "")), block) for block in blocks or []
+             if isinstance(block.get("bbox"), list) and len(block["bbox"]) == 4]
+    for needle in (before + seen + after, before + seen, seen + after):
+        if len(needle) < 3:
+            continue
+        for key, block in keyed:
+            if needle in key:
+                return {"page_idx": int(block["page_idx"]), "bbox": _spot_line(block, needle)}
+    return None
+
+
+def _spot_line(block: dict, needle: str) -> list[float]:
+    """The block's box, narrowed to the line holding the spot when MinerU kept line breaks.
+
+    (“2. 设全集…为（C.）\nA. {0,1,3,4} …”: the spot is in the first of two lines.)
+    """
+    x0, y0, x1, y1 = (float(value) for value in block["bbox"])
+    lines = [line for line in str(block.get("text") or "").split("\n") if line.strip()]
+    hits = [index for index, line in enumerate(lines) if needle in witness_key(line)]
+    if len(lines) > 1 and len(hits) == 1:
+        step = (y1 - y0) / len(lines)
+        y0, y1 = y0 + step * hits[0] - 2, y0 + step * (hits[0] + 1) + 2
+    return [round(x0, 1), round(max(0.0, y0), 1), round(x1, 1), round(min(1000.0, y1), 1)]
 
 
 def witness_choice(first: dict | None, second: dict | None, witness: str, *, context: int = 3) -> str | None:

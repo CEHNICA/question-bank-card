@@ -1458,7 +1458,7 @@ class ApiTests(TestCase):
             figures=[{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250], "source": "auto"}],
         )
         self.q2 = Question.objects.create(paper=self.paper, number=2, stem="求证", regions=[{"page_idx": 0, "bbox": [50, 300, 480, 400]}],
-                                          state=Question.State.YELLOW, flags=["两次识读不一致，已由第三次识读裁决，请看标黄的地方"])
+                                          question_type="free_response", state=Question.State.YELLOW, flags=["两次识读不一致，已由第三次识读裁决，请看标黄的地方"])
 
     def post(self, path, body=None, header=True):
         headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}

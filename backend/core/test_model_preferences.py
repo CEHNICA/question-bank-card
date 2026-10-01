@@ -21,6 +21,13 @@ class ModelPreferenceTests(SimpleTestCase):
         self.temp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
         self.path = self.temp / "model-preferences.json"
+        # The worker loop also checks the library job queue (1.10); these
+        # database-free tests must not reach it, or each run logs an error
+        # and sleeps five seconds.
+        for queue in (run_worker.library_jobs, run_worker.region_reads):
+            patcher = mock.patch.object(queue, "pending", return_value=False)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def env(self):
         return mock.patch.dict(os.environ, {

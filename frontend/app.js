@@ -615,7 +615,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const R = window.QBRender;
   const OPTION_KEYS = ["A", "B", "C", "D", "E"];
   const CHOICE = new Set(["single_choice", "multiple_choice"]);
-  const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", free_response: "解答题", unknown: "题型未定" };
+  const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", true_false: "判断题", free_response: "解答题", unknown: "题型未定" };
   const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D", E: "选项E" };
   const FILTERS = [
     { key: "all", label: "全部" },
@@ -811,11 +811,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function canApprove(q) {
-    return Boolean(q.stem && !figureBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
+    return Boolean(q.stem && !figureBlocksApproval(q) && !typeBlocksApproval(q) && (q.state === "green" || q.state === "yellow"));
+  }
+
+  // 题型没读出来（题型未定）的题不能通过：先在题号旁边选题型。
+  function typeBlocksApproval(q) {
+    return Boolean(q.type_blocked) && (q.state === "green" || q.state === "yellow");
   }
 
   function needsCheck(q) {
-    return !isApproved(q) && (figureBlocksApproval(q) || approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
+    return !isApproved(q) && (figureBlocksApproval(q) || typeBlocksApproval(q) || approvalNeedsReview(q) || q.state === "yellow" || q.state === "red");
   }
 
   function anyDialogOpen() {
@@ -1053,7 +1058,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderPaper();
     if ($("viewerDialog").open) renderViewer();
     const busy = ACTIVE_STATUS.has(state.paper.status)
-      || state.questions.some((q) => q.state === "waiting" || q.state === "reading");
+      || state.questions.some((q) => q.state === "waiting" || q.state === "reading" || regionReadPending(q));
     if (busy) state.pollTimer = setTimeout(refreshPaper, 2500);
   }
 
@@ -1067,7 +1072,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return {
       all: qs.length,
       todo: qs.filter(needsCheck).length,
-      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green").length,
+      green: qs.filter((q) => !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && !typeBlocksApproval(q) && q.state === "green").length,
       approved: qs.filter(isApproved).length,
       ai: qs.filter(isAiApproved).length,
       waiting: qs.filter((q) => q.state === "waiting" || q.state === "reading").length,
@@ -1144,6 +1149,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("emptyState").hidden = true;
     $("paperView").hidden = false;
     $("paperName").textContent = paperDisplayName(paper);
+    $("renameNudge").hidden = !looksLikeFileName(paperDisplayName(paper));
     const c = counts();
     const statusText = $("paperStatus");
     const isProcessing = ACTIVE_STATUS.has(paper.status);
@@ -1297,7 +1303,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function visible(q) {
     if (state.filter === "todo") return needsCheck(q);
-    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && q.state === "green";
+    if (state.filter === "green") return !isApproved(q) && !approvalNeedsReview(q) && !figureBlocksApproval(q) && !typeBlocksApproval(q) && q.state === "green";
     if (state.filter === "approved") return isApproved(q);
     if (state.filter === "ai") return isAiApproved(q);
     return true;
@@ -1389,6 +1395,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const approved = isHumanApproved(q);
     const byAi = isAiApproved(q);
     const blocked = !approved && !byAi && figureBlocksApproval(q);
+    const typeBlocked = !approved && !byAi && !blocked && typeBlocksApproval(q);
     const tick = el("button", `card-tick${byAi ? " ai" : ""}`);
     tick.type = "button";
     tick.setAttribute("aria-pressed", byAi ? "mixed" : String(approved));
@@ -1397,18 +1404,69 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     tick.title = approved ? "已标记通过；再点一下撤销（U）"
       : byAi ? `${agentLabel(q)} 对照原卷后打的勾，你还没核对。核对无误就点一下，变成你的通过（Enter）；不对就按 U 撤销`
         : blocked ? "配图还没处理好，点一下去处理"
+          : typeBlocked ? "题型还没定，点一下去选题型"
           : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
             : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
-    tick.disabled = !(approved || byAi || blocked || canApprove(q));
+    tick.disabled = !(approved || byAi || blocked || typeBlocked || canApprove(q));
     tick.append(icon("check"));
     tick.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (approved) approveQuestion(q, false);
       else if (blocked) focusFigureReview(q);
+      else if (typeBlocked) focusTypePicker(q);
       else approveQuestion(q, true);
     });
     return tick;
+  }
+
+  // 题号旁边的题型：读完的题可以直接改（只改题型，改了要重新标记通过）。
+  function typePicker(q) {
+    if (!(q.state === "green" || q.state === "yellow")) return el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type);
+    const undecided = typeBlocksApproval(q);
+    const select = el("select", `qtype qtype-select${undecided ? " undecided" : ""}`);
+    select.setAttribute("aria-label", `第 ${q.number} 题的题型`);
+    select.title = undecided ? "题型没读出来：选一下题型才能通过" : "改题型（改了要重新标记通过）";
+    if (undecided) {
+      const placeholder = new Option("题型未定 · 请选", "unknown");
+      placeholder.disabled = true;
+      select.append(placeholder);
+    }
+    Object.entries(TYPE_NAMES).forEach(([value, label]) => {
+      if (value !== "unknown") select.append(new Option(label, value));
+    });
+    select.value = undecided ? "unknown" : q.question_type;
+    select.addEventListener("click", (event) => event.stopPropagation());
+    select.addEventListener("keydown", (event) => event.stopPropagation());
+    select.addEventListener("change", () => setQuestionType(q, select.value));
+    return select;
+  }
+
+  async function setQuestionType(q, kind) {
+    const wasApproved = isApproved(q) || isAiApproved(q);
+    try {
+      const data = await api(`/api/questions/${q.id}/type`, { method: "POST", body: { question_type: kind } });
+      applyQuestion(data);
+      toast(wasApproved ? `第 ${q.number} 题改成了${TYPE_NAMES[kind]}；题目内容变了，请重新标记通过`
+        : `第 ${q.number} 题是${TYPE_NAMES[kind]}了，核对无误就可以打勾通过`, "success");
+      setCurrent(q.id, { focus: true });
+    } catch (error) {
+      toast(error.message, "error");
+      renderCards();
+    }
+  }
+
+  function focusTypePicker(q) {
+    if ($("viewerDialog").open) $("viewerDialog").close();
+    const select = document.querySelector(`.card[data-id="${q.id}"] .qtype-select`);
+    if (!select) { toast("这道题读完以后才能选题型", "error"); return; }
+    setCurrent(q.id);
+    select.scrollIntoView({ block: "center", behavior: "smooth" });
+    select.focus({ preventScroll: true });
+    select.classList.remove("attention");
+    requestAnimationFrame(() => select.classList.add("attention"));
+    window.setTimeout(() => select.classList.remove("attention"), 1400);
+    toast("题型没读出来：在题号旁边选一下题型（单选、多选、填空、判断或解答）");
   }
 
   function handleCardSelectionClick(event, q) {
@@ -1702,6 +1760,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (isHumanApproved(q)) toast(`第 ${q.number} 题已经是通过状态；按 U 可撤销`);
         else if (isAiApproved(q) || canApprove(q)) approveQuestion(q, true);
         else if (figureBlocksApproval(q)) focusFigureReview(q);
+        else if (typeBlocksApproval(q)) focusTypePicker(q);
         else toast(q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
         break;
       case " ":
@@ -1751,10 +1810,47 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 原卷截图
 
-  const WIDE_CROP_ASPECT = 3.4;
   const PREVIEW_LONG_SIDE = 2000;
 
-  function cropView(regions, { figures = [], onZoom, capToNatural = false } = {}) {
+  const SPOT_DIGITS = "①②③④⑤⑥⑦⑧⑨⑩";
+
+  function spotNumber(n) {
+    return SPOT_DIGITS[n - 1] || String(n);
+  }
+
+  // One box per MinerU line, labelled with every spot in it (②③④ on the same line).
+  function spotBoxes(spots) {
+    const boxes = new Map();
+    (Array.isArray(spots) ? spots : []).forEach((spot) => {
+      if (!Array.isArray(spot?.bbox) || spot.bbox.length !== 4 || !Number.isInteger(spot.page_idx)) return;
+      const key = `${spot.page_idx}:${spot.bbox.join(",")}`;
+      if (!boxes.has(key)) boxes.set(key, { page_idx: spot.page_idx, bbox: spot.bbox, numbers: [], notes: [] });
+      const box = boxes.get(key);
+      box.numbers.push(spotNumber(spot.n));
+      box.notes.push(`${spotNumber(spot.n)} 读作“${spot.reading}”，MinerU 读作“${spot.mineru}”`);
+    });
+    return [...boxes.values()].map((box) => ({
+      ...box, label: box.numbers.join(""), title: `对照这一行：${box.notes.join("；")}`
+    }));
+  }
+
+  // The characters to check, marked in the text (inside a formula: the formula boxed, the character coloured).
+  function spotTextMarks(q) {
+    const marks = {};
+    (q.check_spots || []).forEach((spot) => {
+      if (!spot.field || !Number.isInteger(spot.start) || !Number.isInteger(spot.end)) return;
+      (marks[spot.field] ||= []).push({ start: spot.start, end: spot.end, kind: "spot", exact: true });
+    });
+    return marks;
+  }
+
+  function reviewMarks(q) {
+    const marks = { ...diffMarks(q) };
+    Object.entries(spotTextMarks(q)).forEach(([field, list]) => { marks[field] = [...(marks[field] || []), ...list]; });
+    return marks;
+  }
+
+  function cropView(regions, { figures = [], spots = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
       wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点右边的“调整范围”，在原卷上把它框出来，AI 会自动读题。"));
@@ -1803,6 +1899,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         box.style.width = `${((fx1 - fx0) / rw) * 100}%`;
         box.style.height = `${((fy1 - fy0) / rh) * 100}%`;
         box.title = `配图（${SLOT_NAMES[figure.slot] || figure.slot}）`;
+        segment.append(box);
+      });
+      // 1.10.2: where MinerU read the paper differently — the line to compare, numbered as in the flag.
+      spotBoxes(spots).filter((spot) => spot.page_idx === region.page_idx).forEach((spot) => {
+        const [sx0, sy0, sx1, sy1] = spot.bbox;
+        if (sx1 < x0 || sx0 > x1 || sy1 < y0 || sy0 > y1) return;
+        // The number sits just above the line it marks (below when the line is at the top of the crop).
+        const box = el("span", `crop-spot${(Math.max(sy0, y0) - y0) / rh < 0.15 ? " label-below" : ""}`);
+        box.style.left = `${((Math.max(sx0, x0) - x0) / rw) * 100}%`;
+        box.style.top = `${((Math.max(sy0, y0) - y0) / rh) * 100}%`;
+        box.style.width = `${((Math.min(sx1, x1) - Math.max(sx0, x0)) / rw) * 100}%`;
+        box.style.height = `${((Math.min(sy1, y1) - Math.max(sy0, y0)) / rh) * 100}%`;
+        box.title = spot.title;
+        box.append(el("span", "crop-spot-label", spot.label));
         segment.append(box);
       });
       if (index > 0) wrap.append(el("div", "crop-join", `接第 ${region.page_idx + 1} 页`));
@@ -1954,7 +2064,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const crop = $("viewerCrop");
     const regions = q.regions || [];
     if (!regions.length && viewer.mode === "fit") viewer.zoom = 1;
-    crop.replaceChildren(cropView(regions, { figures: q.figures || [] }));
+    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots }));
     // 又宽又矮的截图（一两行字的题）改成上下排：原卷能占满整个窗口宽度。
     $("viewerSource").parentElement.classList.toggle("stacked", cropAspect(regions) > 2.5 && window.innerWidth > 1100);
     applyZoom();
@@ -1968,7 +2078,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (disagreement) text.append(disagreement);
     if (q.stem) {
       const body = el("div");
-      R.renderQuestion(body, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed" });
+      R.renderQuestion(body, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed" });
       text.append(body);
       requestAnimationFrame(() => R.fitOptions(body));
     } else text.append(el("p", "hint", q.state === "waiting" || q.state === "reading" ? "AI 正在读这道题……" : "还没有题面"));
@@ -1987,12 +2097,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       approve.disabled = false;
     } else {
       const blocked = figureBlocksApproval(q);
+      const typeBlocked = !blocked && typeBlocksApproval(q);
       const blockedLabel = figureReview(q)?.status === "conflict" ? "处理配图冲突" : "处理漏图提醒";
       approve.replaceChildren(icon(blocked ? "image" : "check"), document.createTextNode(blocked ? blockedLabel
-        : approvalNeedsReview(q) ? "重新标记通过" : "通过并下一题"), el("span", "kbd-hint", "Enter"));
+        : typeBlocked ? "先选题型" : approvalNeedsReview(q) ? "重新标记通过" : "通过并下一题"), el("span", "kbd-hint", "Enter"));
       approve.className = "button primary";
-      approve.disabled = blocked ? false : !canApprove(q);
+      approve.disabled = blocked || typeBlocked ? false : !canApprove(q);
       approve.title = blocked ? "前往黄色区域，选择保留、调整或移除配图"
+        : typeBlocked ? "题型没读出来：回到题卡，在题号旁边选题型"
         : canApprove(q) ? "对照原卷确认无误后通过，并跳到下一题" : "请等待识读完成并确认题面";
     }
     if (viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
@@ -2028,6 +2140,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!q) return;
     if (isHumanApproved(q)) { await approveQuestion(q, false, { advance: false }); return; }
     if (figureBlocksApproval(q)) { focusFigureReview(q); return; }
+    if (typeBlocksApproval(q)) { focusTypePicker(q); return; }
     if (!canApprove(q)) {
       toast("这道题还不能通过", "error");
       return;
@@ -2421,9 +2534,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return panel;
   }
 
+  // The type picker beside the number already asks for the type (and the button below it).
+  const TYPE_REMINDER = /^题型没读出来/;
+
   function questionFlags(q) {
     const review = figureReview(q);
     return (q.flags || []).filter((flag) => {
+      if (TYPE_REMINDER.test(String(flag)) && typeBlocksApproval(q)) return false;
       if (!review) return true;
       if (flag === review.reason) return false;
       // The figure panel above the text already says this, with the buttons to settle it.
@@ -2448,12 +2565,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // “…当销售【单】价为1…（MinerU：定）”: the disputed characters stand out.
+  // 1.10.2: the spots of “MinerU 读法不同” are numbered ①② like their boxes on the crop.
+  const SPOT_FLAG = /^((?:两次识读一致|第三次识读裁决后)[^：]*：)([\s\S]*)$/;
+
   function flagItem(flag) {
     const item = el("li");
-    String(flag).split(/(【[^】]{1,40}】)/).forEach((part) => {
+    const appendMarked = (text) => String(text).split(/(【[^】]{1,40}】)/).forEach((part) => {
       if (!part) return;
       if (/^【[^】]+】$/.test(part)) item.append(el("mark", "flag-spot", part.slice(1, -1)));
       else item.append(document.createTextNode(part));
+    });
+    const spotFlag = SPOT_FLAG.exec(String(flag));
+    if (!spotFlag) { appendMarked(flag); return item; }
+    item.append(document.createTextNode(spotFlag[1]));
+    spotFlag[2].split("；").forEach((piece, index) => {
+      if (index) item.append(document.createTextNode("；"));
+      item.append(el("span", "flag-spot-number", spotNumber(index + 1)));
+      appendMarked(piece);
     });
     return item;
   }
@@ -2462,7 +2590,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const review = figureReview(q);
     if (review?.status === "blocked_missing") return el("span", "chip yellow", "可能漏图 · 待处理");
     if (review?.status === "conflict") return el("span", "chip yellow", "配图冲突 · 待确认");
-    if (approvalNeedsReview(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
+    if (approvalNeedsReview(q) && !typeBlocksApproval(q)) return el("span", "chip yellow", "内容已变 · 需重新审核");
     if (isAiApproved(q)) {
       const chip = el("span", "chip ai-approved", `${agentLabel(q)} 已通过 · 待你核对`);
       chip.title = "AI 助手对照原卷后打的勾，可以入库，题库里会标着“AI 审核”。你核对无误就点题号左边的方框确认。";
@@ -2598,10 +2726,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
-    // A long, low crop (most choice questions) is unreadably small in the left
-    // column; stack it above the text so it gets the full card width.
-    if (q.regions.length && cropAspect(q.regions) >= WIDE_CROP_ASPECT) card.classList.add("wide-source");
-    sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q), capToNatural: true }));
+    // 1.10.1：每张卡都是左图右文（以前宽的截图会改成上图下文，版式和打勾位置跟着变）。
+    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, onZoom: () => openViewer(q), capToNatural: true }));
     // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
     const sourceNote = el("button", "source-note");
     sourceNote.type = "button";
@@ -2614,19 +2740,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     source.append(sticky);
 
     const body = el("div", "card-body");
+    // 打勾方框、题号、题型、状态是整张卡最上面的一条，和收起的一行对齐，不随截图走。
     const head = el("header", "card-head");
     head.append(approvalTick(q), cardSelectionControl(q));
     if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
-    head.append(el("span", "qnum", questionLabel(q)), el("span", "qtype", TYPE_NAMES[q.question_type] || q.question_type), stateChip(q));
+    head.append(el("span", "qnum", questionLabel(q)), typePicker(q), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
-    body.append(head);
 
     if (q.state === "waiting" || q.state === "reading") {
       const placeholder = el("div", "reading-placeholder");
       placeholder.append(el("p", "", q.state === "reading" ? "AI 正在读这道题……" : "排队等待 AI 识读……"),
         el("div", "skeleton w80"), el("div", "skeleton w60"), el("div", "skeleton w40"));
       body.append(placeholder);
-      card.append(source, body);
+      card.append(head, source, body);
       return card;
     }
 
@@ -2637,8 +2763,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const disagreement = disagreementPanel(q);
     if (disagreement) body.append(disagreement);
 
+    if (q.origin) {
+      const origin = el("p", "card-origin");
+      origin.append(el("span", "card-origin-label", "题源"), document.createTextNode(q.origin));
+      origin.title = "题干前印的出处，单独存放；组卷打印时默认不印。在“改字”里可以修改";
+      body.append(origin);
+    }
+    const regionPanel = regionReadPanel(card, q);
+    if (regionPanel) body.append(regionPanel);
     const rendered = el("div", "rendered");
-    if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed",
+    if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed",
       figureAction: (figure) => tableAction(q, figure) });
     else rendered.append(el("p", "hint", "还没有题面"));
     body.append(rendered);
@@ -2651,11 +2785,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const fixFigures = button(blockedLabel, "primary", () => focusFigureReview(q), "", { iconName: "image", key: "Enter" });
       fixFigures.title = "在黄色区域选择保留、调整或移除配图";
       actions.append(fixFigures);
+    } else if (!approved && typeBlocksApproval(q)) {
+      const pick = button("选题型", "primary", () => focusTypePicker(q), "", { key: "Enter" });
+      pick.title = "题型没读出来：在题号旁边选单选、多选、填空、判断或解答";
+      actions.append(pick);
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
       button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "截图框多了或少了，拖一下；保存后 AI 自动重读（R）"),
-      button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })
+      button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" }),
+      button("框选识读", "", () => openPageDialog("read", q), "在原卷上框出一小块（比如被手写盖住的选项），让 AI 单独读这一块")
     );
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -2668,7 +2807,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     more.append(menu);
     actions.append(more);
     body.append(actions);
-    card.append(source, body);
+    card.append(head, source, body);
     if (approved && !isAiApproved(q)) card.append(expandToggle(q, false));
     return card;
   }
@@ -3027,6 +3166,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       loadPapers();
       toast(data.message || "已重试处理");
     } catch (error) { toast(error.message, "error"); }
+  }
+
+  // 名字还是照片、截图的文件名（微信图片_2026…、IMG_1234）：题库里按它找不到这份卷子。
+  function looksLikeFileName(name) {
+    const text = String(name || "").trim();
+    return /^(微信图片|mmexport|wx_camera|IMG[_-]|DSC|DCIM|PXL_|Screenshot|屏幕截图|截图|Image[_ -]?\d|photo[_-]?\d|CamScanner|扫描全能王|未命名)/i.test(text)
+      || /^\d{8,}/.test(text);
   }
 
   function openRenameDialog() {
@@ -3410,7 +3556,52 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
+  // 设置 → 常用 → 功能开关（存在数据目录的 features.json，网页和后台共用）。
+  async function loadFeatureSwitches() {
+    const box = $("featureSwitches");
+    try {
+      const data = await api("/api/settings/features");
+      renderFeatureSwitches(data);
+    } catch (error) {
+      box.replaceChildren(el("p", "settings-footnote", `没读到功能开关：${error.message}`));
+    }
+  }
+
+  function renderFeatureSwitches(data) {
+    const box = $("featureSwitches");
+    box.replaceChildren();
+    (data.features || []).forEach((item) => {
+      const label = el("label", "settings-switch");
+      const text = el("span");
+      text.append(el("strong", "", item.label), el("small", "", item.help));
+      const input = el("input");
+      input.type = "checkbox";
+      input.setAttribute("role", "switch");
+      input.checked = Boolean(item.enabled);
+      input.addEventListener("change", async () => {
+        input.disabled = true;
+        try {
+          const saved = await api("/api/settings/features", { method: "POST", body: { features: { [item.key]: input.checked } } });
+          renderFeatureSwitches(saved);
+          toast(saved.message || "已保存", "success");
+        } catch (error) {
+          input.checked = !input.checked;
+          toast(error.message, "error");
+        } finally {
+          input.disabled = false;
+        }
+      });
+      label.append(text, input);
+      box.append(label);
+    });
+    const note = $("featureNote");
+    const tags = (data.features || []).find((item) => item.key === "knowledge_tags");
+    note.hidden = !(tags?.enabled && data.knowledge_file);
+    if (!note.hidden) note.textContent = `知识点目录在 ${data.knowledge_file}，可以用记事本改：每行一个知识点，# 开头的是章名。`;
+  }
+
   function openSettings() {
+    void loadFeatureSwitches();
     renderSettingsModels();
     renderSettingsReady();
     $("settingsLens").checked = state.lens;
@@ -3433,6 +3624,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
+  $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
   $("settingsArchive").addEventListener("click", () => closeSettingsThen(archivePaper));
@@ -3594,8 +3786,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 改字
 
-  function openEditor(card, q) {
-    if (card.querySelector(".editor")) { card.querySelector(".stem-input")?.focus(); return; }
+  function openEditor(card, q, { prefill = null } = {}) {
+    if (card.querySelector(".editor")) {
+      if (prefill) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
+      card.querySelector(".stem-input")?.focus();
+      return;
+    }
     state.editing.add(q.id);
     setCurrent(q.id);
     const editor = el("form", "editor");
@@ -3610,6 +3806,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     const typeRow = el("label", "field inline");
     typeRow.append(el("span", "", "题型"), typeSelect);
+    const origin = el("input", "origin-input");
+    origin.value = q.origin || "";
+    origin.maxLength = 120;
+    origin.placeholder = "题干前印的出处，例如 2026山东枣庄滕州二中月考；没有就留空";
+    origin.spellcheck = false;
+    const originRow = el("label", "field inline");
+    originRow.append(el("span", "", "题源"), origin);
     const stem = el("textarea", "stem-input");
     stem.value = q.stem;
     stem.rows = 2;
@@ -3678,14 +3881,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const cancel = button("取消", "", () => close());
     const bar = el("div", "editor-actions");
     bar.append(saveButton, cancel, el("p", "hint", "Ctrl+Enter 保存 · Esc 取消"));
-    editor.append(title, typeRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
+    editor.append(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
 
     const collect = () => ({
       stem: stem.value,
       options: Object.fromEntries(OPTION_KEYS.map((k) => [k, optionInputs[k].value]).filter(([, v]) => v.trim())),
       question_type: typeSelect.value,
       answer: answer.value,
-      analysis: analysis.value
+      analysis: analysis.value,
+      origin: origin.value
     });
     // One typeset per frame however fast the typing is.
     let frame = 0;
@@ -3702,8 +3906,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const source = card.querySelector(".source-sticky");
       const shot = source?.querySelector(".crop, .crop-missing");
       const room = window.innerHeight - viewTop() - 48 - (shot?.offsetHeight || 0);
-      const beside = Boolean(source && !card.classList.contains("wide-source")
-        && getComputedStyle(source).position === "sticky" && room >= 180);
+      const beside = Boolean(source && getComputedStyle(source).position === "sticky" && room >= 180);
       if (beside && previewBox.parentNode !== source) source.append(previewBox);
       else if (!beside && previewBox.previousElementSibling !== stemRow) stemRow.after(previewBox);
       previewBox.classList.toggle("beside", beside);
@@ -3736,7 +3939,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     function close(rerender = true) {
       state.editing.delete(q.id);
-      card.classList.remove("editing", "editing-pinned");
+      card.classList.remove("editing");
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", relayout);
       previewBox.remove();
@@ -3750,21 +3953,98 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (toggle) toggle.hidden = true;
     card.querySelector(".rendered").hidden = true;
     card.querySelector(".card-actions").hidden = true;
+    const originLine = card.querySelector(".card-origin");
+    if (originLine) originLine.hidden = true;
     card.querySelector(".reads")?.remove();
     card.querySelector(".card-body").append(editor);
-    // Keep the original in sight while typing: a wide crop that fits in the
-    // upper part of the window stays pinned under the toolbar as the fields
-    // scroll past it.  A tall crop would leave no room to type, so it scrolls.
+    // The original stays in sight while typing: the left column is sticky.
     card.classList.add("editing");
-    const crop = card.querySelector(".card-source");
-    if (card.classList.contains("wide-source") && crop && crop.offsetHeight <= window.innerHeight * 0.42) {
-      card.classList.add("editing-pinned");
+    let prefilled = null;
+    if (prefill && optionInputs[prefill.field]) {
+      // 框选识读的结果：填进那个选项，标出来，人看过再保存。
+      prefilled = optionInputs[prefill.field];
+      prefilled.value = prefill.value;
+      prefilled.classList.add("prefilled");
+      prefilled.title = "框选识读读出来的字，请对照原卷后保存";
     }
     fitStem();
     placePreview();
     update();
-    stem.focus({ preventScroll: true });
+    (prefilled || stem).focus({ preventScroll: true });
     card.scrollIntoView({ block: "start" });
+  }
+
+  // ---------------------------------------------------------------- 框选识读（1.10.2）
+
+  // Where the read text probably goes: an option the reading missed or invented a note for, else the stem.
+  function readTargetGuess(q) {
+    if (q.region_read?.target) return q.region_read.target;
+    const options = q.options || {};
+    const letters = Object.keys(options).filter((key) => OPTION_KEYS.includes(key) && String(options[key] || "").trim());
+    if (CHOICE.has(q.question_type) || letters.length) {
+      const last = Math.max(3, ...letters.map((key) => OPTION_KEYS.indexOf(key)));
+      const missing = OPTION_KEYS.slice(0, last + 1).find((key) => !String(options[key] || "").trim()
+        && !(q.figures || []).some((figure) => figure.slot === key));
+      if (missing) return missing;
+      const spot = (q.check_spots || []).find((item) => OPTION_KEYS.includes(item.field));
+      if (spot) return spot.field;
+    }
+    return "stem";
+  }
+
+  function regionReadPending(q) {
+    return Boolean(q.region_read && ["queued", "running"].includes(q.region_read.status));
+  }
+
+  async function dismissRegionRead(q) {
+    try {
+      applyQuestion(await api(`/api/questions/${q.id}/region-read`, { method: "DELETE", body: {} }));
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  function fillRegionRead(card, q) {
+    const read = q.region_read;
+    if (!read?.text) return;
+    if (read.target !== "stem") {
+      openEditor(card, q, { prefill: { field: read.target, value: read.text } });
+      return;
+    }
+    // A piece of the stem: copy it, the person pastes it where it belongs.
+    openEditor(card, q);
+    const copied = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(read.text)
+      : Promise.reject(new Error("clipboard unavailable"));
+    copied.then(
+      () => toast("读出来的字已复制，粘贴到题干里要改的位置", "success"),
+      () => toast("没能复制，请从题卡上的识读结果里手动复制", "error"));
+  }
+
+  function regionReadPanel(card, q) {
+    const read = q.region_read;
+    if (!read) return null;
+    const panel = el("section", `region-read ${read.status}`);
+    const head = el("div", "region-read-head");
+    head.append(el("strong", "", `框选识读 · ${read.target_name || read.target}`));
+    panel.append(head);
+    if (regionReadPending(q)) {
+      panel.append(el("p", "hint", "AI 正在读框里的字……"));
+    } else if (read.status === "failed") {
+      panel.append(el("p", "region-read-error", read.error || "没读出来"));
+    } else {
+      const text = el("div", "region-read-text");
+      R.renderTypeset(text, read.text);
+      panel.append(text);
+      if (read.engine) panel.append(el("p", "hint", `${read.engine} 只读了框里的这一块；请对照原卷确认后再填入`));
+    }
+    const actions = el("div", "region-read-actions");
+    if (read.status === "done" && read.text) {
+      const label = read.target === "stem" ? "复制并打开改字" : `填入${read.target_name || read.target}（打开改字）`;
+      actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
+    }
+    actions.append(button("重新框", "small", () => openPageDialog("read", q)),
+      button(regionReadPending(q) ? "不读了" : "关闭", "small quiet", () => dismissRegionRead(q)));
+    panel.append(actions);
+    return panel;
   }
 
   // ---------------------------------------------------------------- 原卷页面上拖框（调整范围 / 配图 / 补一题）
@@ -3798,8 +4078,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }));
       return [first, ...joined];
     });
+    else if (mode === "read") dialog.boxes = q.region_read && Array.isArray(q.region_read.bbox)
+      ? [{ page_idx: q.region_read.page_idx, bbox: [...q.region_read.bbox] }] : [];
     else dialog.boxes = [];
-    const firstPage = q && q.regions.length ? q.regions[0].page_idx : state.paper.pages[0].page_idx;
+    const firstPage = mode === "read" && dialog.boxes.length ? dialog.boxes[0].page_idx
+      : q && q.regions.length ? q.regions[0].page_idx : state.paper.pages[0].page_idx;
     dialog.page = Number.isInteger(requestedPage)
       && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage : firstPage;
     dialog.scrolled = false;
@@ -3807,13 +4090,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.ignoredCandidates = new Set(Array.isArray(q?.figure_review?.ignored_candidates)
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
     $("pageDialogTitle").textContent = mode === "regions" ? `调整第 ${q.number} 题的原卷范围`
-      : mode === "figures" ? `第 ${q.number} 题的配图` : "手动补一道题";
+      : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读` : "手动补一道题";
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小 · 拖框内部移动 · 空白处拖出新框补上跨栏/跨页部分 · 选中后方向键微调、Delete 删除 · 保存后 AI 按新范围重读"
       : mode === "figures"
         ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
-        : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
+        : mode === "read"
+          ? "框住要单独识读的那一块印刷字（比如被手写盖住的选项），在右上角选好读出来的字填到哪里，再点“识读这一块”。读完显示在题卡上，你确认后再填入。"
+          : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
     $("numberField").hidden = mode !== "new";
+    $("readTargetField").hidden = mode !== "read";
+    $("pageDialogSave").textContent = mode === "read" ? "识读这一块" : "保存";
+    if (mode === "read") $("readTargetSelect").value = readTargetGuess(q);
     const groups = state.paper.question_groups || [];
     $("groupField").hidden = mode !== "new" || groups.length < 2;
     if (mode === "new") {
@@ -4244,7 +4532,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.questions.forEach((other) => {
       const own = q && other.id === q.id;
       if (dialog.mode === "regions" && own) return;
-      if (dialog.mode === "figures" && !own) return;
+      if ((dialog.mode === "figures" || dialog.mode === "read") && !own) return;
       other.regions.filter((r) => r.page_idx === dialog.page).forEach((region) => {
         const ghost = el("span", own ? "ghost own" : "ghost");
         placeBox(ghost, region.bbox);
@@ -4289,11 +4577,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       node.setAttribute("role", "group");
       const joined = dialog.mode === "figures" && box.join && joinHost(box);
       if (joined) node.classList.add("joined");
-      node.setAttribute("aria-label", `${dialog.mode === "figures" ? (joined ? "接在上一张图下面的一块" : (SLOT_NAMES[box.slot] || box.slot) + "配图") : `第 ${index + 1} 段范围`}；方向键移动，Delete 删除`);
+      node.setAttribute("aria-label", `${dialog.mode === "figures" ? (joined ? "接在上一张图下面的一块" : (SLOT_NAMES[box.slot] || box.slot) + "配图")
+        : dialog.mode === "read" ? "要识读的这一块" : `第 ${index + 1} 段范围`}；方向键移动，Delete 删除`);
       const shortLabel = joined ? "接" : box.slot === "stem" ? "题" : box.slot;
       const fullLabel = joined ? `接在上一张图下面（${SLOT_NAMES[joined.slot] || joined.slot}）` : SLOT_NAMES[box.slot] || box.slot;
       const label = el("button", "box-label", dialog.mode === "figures"
-        ? (dialog.selected === index ? fullLabel : shortLabel) : `第 ${index + 1} 段`);
+        ? (dialog.selected === index ? fullLabel : shortLabel) : dialog.mode === "read" ? "识读这一块" : `第 ${index + 1} 段`);
       label.type = "button";
       if (dialog.mode === "figures") {
         label.dataset.shortLabel = shortLabel;
@@ -4443,6 +4732,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
             openFigureSlotMenu(preview, { kind: "new", box: { page_idx: dialog.page, bbox } });
             return;
           }
+          if (dialog.mode === "read") dialog.boxes = [];
           dialog.boxes.push({ page_idx: dialog.page, bbox });
           renderPageTabs();
         }
@@ -4487,6 +4777,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         applyQuestion(data);
         toast(q.approved ? `第 ${q.number} 题配图已保存，旧审批已撤销，请重新审核` : `第 ${q.number} 题配图已保存，请审核题卡`);
         teach({ type: "figures", number: q.number, figures: (data.question?.figures || []).length });
+      } else if (dialog.mode === "read") {
+        const box = dialog.boxes[dialog.boxes.length - 1];
+        if (!box) { toast("请先在原卷上框出要识读的那一块", "error"); return; }
+        const target = $("readTargetSelect").value;
+        const data = await api(`/api/questions/${q.id}/region-read`, {
+          method: "POST", body: { page_idx: box.page_idx, bbox: box.bbox, target }
+        });
+        applyQuestion(data);
+        toast(`AI 正在读框里的字，读完显示在第 ${q.number} 题的题卡上`);
+        refreshPaper();
       } else {
         const number = Number($("numberInput").value);
         if (!Number.isInteger(number) || number < 1) { toast("请填写题号", "error"); return; }
@@ -5494,6 +5794,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (isApproved(questionById(draft))) { state.expanded.add(draft); renderCards(); }
         setCurrent(draft, { focus: true });
         document.querySelector(`[data-id="${draft}"]`)?.scrollIntoView({ block: "start" });
+        // 从题库里“题型待核对”点过来：直接去选题型。
+        if (params.get("fix") === "type" && typeBlocksApproval(questionById(draft))) {
+          requestAnimationFrame(() => focusTypePicker(questionById(draft)));
+        }
       }
     } else if (state.papers.length) {
       await selectPaper(state.papers[0].id);

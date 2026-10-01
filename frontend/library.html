@@ -53,8 +53,14 @@
         </label>
         <div id="typeFilters" class="draft-filters" role="group" aria-label="题型"></div>
         <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
+        <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
+        <label id="tagFilterBox" class="library-select" hidden>
+          <span>知识点</span>
+          <select id="tagSelect" aria-label="知识点"><option value="">全部知识点</option></select>
+        </label>
         <label class="library-toggle switch"><input id="answerToggle" type="checkbox"><span class="switch-track" aria-hidden="true"></span>展开答案与解析</label>
       </div>
+      <div id="extraTools" class="library-extra-tools" hidden></div>
     </section>
 
     <p id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</p>
@@ -97,6 +103,8 @@
     <div class="print-controls no-print">
       <label class="print-title-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
       <label class="library-toggle switch"><input id="printAnswers" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>卷末附答案与解析</label>
+      <label class="library-toggle switch" title="题号后面印上题源，例如（2025·北京海淀·期中）"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
+      <label id="printAiBox" class="library-toggle switch" title="原卷没有答案、但有 AI 参考答案的题，卷末附上并标明“AI 参考，未核对”" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考答案</label>
       <span class="print-spacer"></span>
       <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
       <button id="closePrint" class="button" type="button">返回题库</button>

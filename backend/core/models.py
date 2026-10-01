@@ -223,6 +223,11 @@ class Question(models.Model):
     approval_agent = models.CharField(max_length=40, blank=True, default="")
     answer = models.TextField(blank=True, default="")
     analysis = models.TextField(blank=True, default="")
+    # 题源：教辅里印在题前的出处（“2026山东枣庄滕州二中月考”）。不是题目文字，
+    # 组卷打印时不印；为空时不参与审批校验，老题的审批因此不受影响。
+    origin = models.CharField(max_length=120, blank=True, default="")
+    # 题型是人（或 AI 助手）选定的：重新识读不改它。调整原卷范围时清掉。
+    type_locked = models.BooleanField(default=False)
     reread_requested = models.BooleanField(default=False)
     # Review-time deletion is deliberately reversible.  The card itself stays
     # intact so manual edits, approval evidence and publication links survive
@@ -296,7 +301,69 @@ class PublishedQuestion(models.Model):
     review_agent = models.CharField(max_length=40, blank=True, default="")
     published_at = models.DateTimeField(auto_now_add=True)
     withdrawn_at = models.DateTimeField(null=True, blank=True)
+    # 题面以外、可以随时补的东西：知识点标签、AI 参考答案。它们不属于快照，
+    # 改了不出新版本、不用重审；再入库出新版本时原样带过去。
+    extras = models.JSONField(default=dict, blank=True)
+    # “|集合间的基本关系|全称量词与存在量词|”：按知识点筛选用。
+    tags_text = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["-published_at"]
         constraints = [models.UniqueConstraint(fields=["question", "version"], name="unique_question_version")]
+
+
+class LibraryJob(models.Model):
+    """题库里排队给读题模型做的事：补知识点、做 AI 参考答案。
+
+    网页进程拿不到密钥，所以网页只排队，后台工作者调用模型、写回结果。
+    """
+
+    class Kind(models.TextChoices):
+        TAGS = "tags", "知识点"
+        ANSWER = "answer", "AI 参考答案"
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "排队中"
+        RUNNING = "running", "进行中"
+        DONE = "done", "完成"
+        FAILED = "failed", "失败"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="jobs")
+    kind = models.CharField(max_length=8, choices=Kind.choices)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    error = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+
+class RegionRead(models.Model):
+    """框选识读：人在原卷上框出一小块，让读题模型单独读这一块（1.10.2）。
+
+    比如选项 A 被手写的 × 盖住、整题识读把它写错了：框住印刷的那一行，读出来
+    的文字由人确认后填进选项 A。网页只排队（网页进程拿不到密钥），后台工作者
+    读完写回 ``text``。每道题只保留最近一次。
+    """
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "排队中"
+        RUNNING = "running", "进行中"
+        DONE = "done", "完成"
+        FAILED = "failed", "失败"
+
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="region_reads")
+    page_idx = models.PositiveIntegerField()
+    bbox = models.JSONField()
+    target = models.CharField(max_length=8)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    text = models.TextField(blank=True, default="")
+    error = models.CharField(max_length=300, blank=True, default="")
+    engine = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at"]

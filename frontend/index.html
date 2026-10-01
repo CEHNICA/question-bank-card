@@ -98,6 +98,7 @@
           <div class="paper-title">
             <div class="paper-name-row">
               <h2 id="paperName"></h2>
+              <button id="renameNudge" class="rename-nudge" type="button" hidden title="名字还是照片的文件名，题库里不好找；点这里改成卷子的名字">起个好认的名字</button>
               <details class="menu paper-menu" id="paperMenu">
                 <summary class="button quiet small">试卷操作<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
                 <div class="menu-panel paper-menu-panel">
@@ -238,6 +239,12 @@
             <p class="settings-footnote">审核时还可以点工具栏上的“全屏”（Q），收起顶栏和试卷列表。</p>
             <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看全部快捷键</button>
           </section>
+          <section id="settingsFeatures" class="settings-section" aria-labelledby="settingsFeaturesTitle">
+            <h3 id="settingsFeaturesTitle">功能开关</h3>
+            <p class="settings-footnote">前两项只挪格式、不改字，默认开着；后面几项要用的时候再打开。</p>
+            <div id="featureSwitches"><p class="settings-footnote">正在读取…</p></div>
+            <p id="featureNote" class="settings-footnote" hidden></p>
+          </section>
         </div>
 
         <div id="settingsModels" class="settings-page" role="tabpanel" hidden>
@@ -376,6 +383,16 @@
         <label id="numberField" class="number-field" hidden>题号 <input id="numberInput" type="number" min="1" max="999"></label>
         <label id="groupField" class="number-field" hidden>题组
           <select id="groupSelect"></select>
+        </label>
+        <label id="readTargetField" class="number-field" hidden>读出来的字填到
+          <select id="readTargetSelect">
+            <option value="stem">题干</option>
+            <option value="A">选项 A</option>
+            <option value="B">选项 B</option>
+            <option value="C">选项 C</option>
+            <option value="D">选项 D</option>
+            <option value="E">选项 E</option>
+          </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
         <button class="button" type="button" data-close>取消</button>
