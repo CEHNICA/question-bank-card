@@ -1810,7 +1810,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 原卷截图
 
-  const WIDE_CROP_ASPECT = 3.4;
   const PREVIEW_LONG_SIDE = 2000;
 
   function cropView(regions, { figures = [], onZoom, capToNatural = false } = {}) {
@@ -2664,9 +2663,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
-    // A long, low crop (most choice questions) is unreadably small in the left
-    // column; stack it above the text so it gets the full card width.
-    if (q.regions.length && cropAspect(q.regions) >= WIDE_CROP_ASPECT) card.classList.add("wide-source");
+    // 1.10.1：每张卡都是左图右文（以前宽的截图会改成上图下文，版式和打勾位置跟着变）。
     sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q), capToNatural: true }));
     // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
     const sourceNote = el("button", "source-note");
@@ -2680,19 +2677,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     source.append(sticky);
 
     const body = el("div", "card-body");
+    // 打勾方框、题号、题型、状态是整张卡最上面的一条，和收起的一行对齐，不随截图走。
     const head = el("header", "card-head");
     head.append(approvalTick(q), cardSelectionControl(q));
     if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
     head.append(el("span", "qnum", questionLabel(q)), typePicker(q), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
-    body.append(head);
 
     if (q.state === "waiting" || q.state === "reading") {
       const placeholder = el("div", "reading-placeholder");
       placeholder.append(el("p", "", q.state === "reading" ? "AI 正在读这道题……" : "排队等待 AI 识读……"),
         el("div", "skeleton w80"), el("div", "skeleton w60"), el("div", "skeleton w40"));
       body.append(placeholder);
-      card.append(source, body);
+      card.append(head, source, body);
       return card;
     }
 
@@ -2744,7 +2741,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     more.append(menu);
     actions.append(more);
     body.append(actions);
-    card.append(source, body);
+    card.append(head, source, body);
     if (approved && !isAiApproved(q)) card.append(expandToggle(q, false));
     return card;
   }
@@ -3839,8 +3836,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const source = card.querySelector(".source-sticky");
       const shot = source?.querySelector(".crop, .crop-missing");
       const room = window.innerHeight - viewTop() - 48 - (shot?.offsetHeight || 0);
-      const beside = Boolean(source && !card.classList.contains("wide-source")
-        && getComputedStyle(source).position === "sticky" && room >= 180);
+      const beside = Boolean(source && getComputedStyle(source).position === "sticky" && room >= 180);
       if (beside && previewBox.parentNode !== source) source.append(previewBox);
       else if (!beside && previewBox.previousElementSibling !== stemRow) stemRow.after(previewBox);
       previewBox.classList.toggle("beside", beside);
@@ -3873,7 +3869,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     function close(rerender = true) {
       state.editing.delete(q.id);
-      card.classList.remove("editing", "editing-pinned");
+      card.classList.remove("editing");
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", relayout);
       previewBox.remove();
@@ -3891,14 +3887,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (originLine) originLine.hidden = true;
     card.querySelector(".reads")?.remove();
     card.querySelector(".card-body").append(editor);
-    // Keep the original in sight while typing: a wide crop that fits in the
-    // upper part of the window stays pinned under the toolbar as the fields
-    // scroll past it.  A tall crop would leave no room to type, so it scrolls.
+    // The original stays in sight while typing: the left column is sticky.
     card.classList.add("editing");
-    const crop = card.querySelector(".card-source");
-    if (card.classList.contains("wide-source") && crop && crop.offsetHeight <= window.innerHeight * 0.42) {
-      card.classList.add("editing-pinned");
-    }
     fitStem();
     placePreview();
     update();

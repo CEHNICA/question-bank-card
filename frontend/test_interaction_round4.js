@@ -33,11 +33,12 @@ assert.match(html, /<details class="meter-note">/);
 assert.match(css, /\.review-meter \{[^}]*display: flex/);
 assert.match(js, /先处理 \$\{c\.todo\} 张需核对的卡/);
 
-// Long cards keep their buttons on screen; editing pins the original.
+// Long cards keep their buttons on screen; while editing, the original stays
+// in the sticky left column (1.10.1: every card is crop left, text right).
 assert.match(css, /\.card:not\(\.compact\) \.card-actions \{[^}]*position: sticky; bottom: 0/);
-assert.match(css, /\.card\.editing-pinned \.card-source \{[^}]*position: sticky/);
-assert.match(js, /card\.classList\.add\("editing-pinned"\)/);
-assert.match(js, /card\.classList\.remove\("editing", "editing-pinned"\)/);
+assert.match(css, /\.source-sticky \{ position: sticky;/);
+assert.doesNotMatch(js, /wide-source/);
+assert.match(js, /card\.classList\.remove\("editing"\)/);
 assert.match(css, /\.toast \{ position: fixed; right: 24px; bottom: 78px;/);
 
 // After a mouse click on a filter tab the review keys work straight away.

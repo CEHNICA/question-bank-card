@@ -62,4 +62,8 @@ assert.equal(QB.tidyText(".\n\n(1)若命题"), ".\n(1)若命题");
 assert.equal(QB.tidyText("；\n\n\n（2）若"), "；\n（2）若");
 assert.equal(QB.tidyText("第一段\n\n第二段"), "第一段\n\n第二段");
 
+// 1.10.1: the head (tick, number, type, state) spans the card above the crop and the text.
+assert.match(js, /card\.append\(head, source, body\);/);
+assert.match(css, /\.card-head \{ grid-column: 1 \/ -1;/);
+
 console.log("type / origin checks: OK");
