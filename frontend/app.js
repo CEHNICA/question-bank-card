@@ -181,7 +181,7 @@ const QBProgress = (() => {
           parts.push("传完后由 MinerU 识别版面和文字");
         } else if (["submitted", "waiting-file", "pending"].includes(state)) {
           headline = `在 MinerU 排队中 · 已等 ${waited}`;
-          parts.push("文件已经交给 MinerU，正在等它开始识别；要等多久看 MinerU 那边当时有多忙，题有据没有卡住");
+          parts.push("文件已经交给 MinerU，正在等它开始识别；要等多久看 MinerU 那边当时有多忙，题有据没有卡住。重新交会从队尾重排，不用重交");
         } else if (state === "running") {
           headline = total ? `MinerU 识别中 · 第 ${completed}/${total} 页` : "MinerU 识别中";
           parts.push(`MinerU 已开始识别 ${waited}`);
@@ -218,10 +218,15 @@ const QBProgress = (() => {
       ? `已有 ${formatDuration(idle)}没有新的本任务状态更新；程序仍在等待${stage === "parsing" ? " MinerU 或本机处理" : stage === "reading" ? "模型或后台处理" : "后台处理"}，这不等同于失败。`
       : "";
     const determinate = Boolean(raw.determinate && total > 0 && ["parsing", "reading"].includes(stage));
-    // 1.10.7: one file kept waiting at MinerU for a minute or more can be sent again.
+    // 1.10.7: send one file to MinerU again when that can help: its upload was
+    // not picked up (waiting-file), it has been reading for minutes, or we have
+    // heard nothing.  Not while MinerU says it is queueing (pending): sending
+    // again only puts the file at the back of the queue (1.10.8).
+    const mineruState = raw.mineru?.state || "";
     const mineruWait = raw.mineru ? safeNumber(raw.mineru.for_seconds) : elapsed;
+    const waitNeeded = { "": 90, submitted: 60, "waiting-file": 60, running: 300 }[mineruState];
     const canReparse = stage === "parsing" && !raw.chunks && !raw.parsed_ahead
-      && !["uploading", "downloading", "converting"].includes(raw.mineru?.state || "") && mineruWait >= 60;
+      && waitNeeded !== undefined && mineruWait >= waitNeeded;
     return {
       stage,
       canReparse,
@@ -388,7 +393,7 @@ const QBNotify = (() => {
   function finishedMessage(paper, name) {
     const c = paper.counts || {};
     const todo = (c.yellow || 0) + (c.red || 0);
-    if (paper.status === "failed") return `“${name}”处理失败`;
+    if (paper.status === "failed") return paper.stopped ? `“${name}”已停止` : `“${name}”处理失败`;
     if (paper.status === "needs_grouping") return `“${name}”需要确认资料结构`;
     return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读一致"}`;
   }
@@ -902,7 +907,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return QBProgress.processingPresentation(paper).headline;
     }
     if (paper.status === "failed") return paper.recoverable_pause
-      ? (paper.status_label || "额度不足，已暂停") : "处理失败";
+      ? (paper.status_label || "额度不足，已暂停") : paper.stopped ? "已停止" : "处理失败";
     if (paper.status === "needs_grouping") return "等待确认资料结构";
     const c = paper.counts || {};
     const parts = [paper.demo ? `练习用 · ${c.total || 0} 题` : `${c.total || 0} 题`];
@@ -1195,7 +1200,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     } else if (paper.status === "failed") {
       statusText.textContent = paper.recoverable_pause
-        ? (paper.status_label || "额度不足，已暂停") : "处理失败";
+        ? (paper.status_label || "额度不足，已暂停") : paper.stopped ? "已停止" : "处理失败";
     } else if (paper.status === "needs_grouping") {
       statusText.textContent = "检测到题号重新开始或页面可能来自不同资料；确认调整页序或拆分任务后才会继续识读。";
     } else if (!c.all) {
@@ -3186,12 +3191,32 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     loadQuestionTrash();
   }
 
+  // 停止处理（1.10.8）：排队中或在等 MinerU 的任务停下来，才能删除。
+  async function stopPaper() {
+    if (!state.paper || !["queued", "parsing"].includes(state.paper.status)) return;
+    const ok = await confirmDialog({
+      title: "停止处理这份任务？",
+      text: "题有据不再等 MinerU。停下来以后，可以在“试卷操作”里永久删除，或点“重试”重新开始。",
+      ok: "停止处理", danger: true
+    });
+    if (!ok) return;
+    try {
+      const data = await api(`/api/papers/${state.paperId}/stop`, { method: "POST", body: {} });
+      toast(data.message || "已停止", "success");
+      refreshPaper();
+      loadPapers();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
   // 重新解析（1.10.7）：一份试卷在 MinerU 那里等太久时，重新上传给 MinerU。
   async function reparsePaper() {
     if (!state.paper || state.paper.status !== "parsing") return;
+    const queueing = state.paper.processing?.mineru?.state === "pending";
     const ok = await confirmDialog({
       title: "重新交给 MinerU 解析？",
-      text: "题有据不再等这一次的结果，把文件重新上传给 MinerU。MinerU 很忙的时候，重新上传后也可能要排一会儿队。",
+      text: queueing
+        ? "MinerU 说这份文件还在它那边排队。现在重新上传，会从队尾重新排起，一般不会更快。确定要重新交吗？"
+        : "题有据不再等这一次的结果，把文件重新上传给 MinerU。MinerU 很忙的时候，重新上传后也可能要排一会儿队。",
       ok: "重新交给 MinerU"
     });
     if (!ok) return;
@@ -3531,6 +3556,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsRename").disabled = active;
     $("settingsRename").title = active ? "处理完成后才能修改名称" : "";
     $("settingsReparse").hidden = !(paper.status === "parsing" && !paper.processing?.chunks && !paper.processing?.parsed_ahead);
+    // 1.10.8: a paper still queued or waiting on MinerU can be stopped, then deleted.
+    const stoppable = paper.status === "queued" || (paper.status === "parsing" && !paper.processing?.chunks);
+    $("settingsStop").hidden = !stoppable;
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -3556,6 +3584,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsDangerHint").textContent = published > 0
       ? `已有 ${published} 道正式题库记录。为保留来源追溯，只能归档，不能永久删除。`
       : isSplitTask ? "这是拆分资料的原稿或子任务；为保留双向追溯，只能归档。"
+      : active && stoppable ? "任务正在处理中：先点上面的“停止处理”，停下来以后就能删除。"
       : active ? "任务正在处理中，完成或失败后才能永久删除。"
         : "归档只从任务列表隐藏；永久删除会一并删除原文件和草稿，无法撤销。";
   }
@@ -3677,6 +3706,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
   $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
+  $("settingsStop").addEventListener("click", () => closeSettingsThen(stopPaper));
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));

@@ -400,12 +400,15 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         paper.status == Paper.Status.FAILED
         and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
     )
+    stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "material_type": paper.material_type, "archived": paper.archived,
-        "status_label": "额度不足，已暂停" if quota_paused else Paper.Status(paper.status).label,
+        "status_label": "额度不足，已暂停" if quota_paused else "已停止" if stopped
+        else Paper.Status(paper.status).label,
         "recoverable_pause": quota_paused,
+        "stopped": stopped,
         "progress": paper.progress, "total": paper.total,
         "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
@@ -1545,6 +1548,40 @@ def paper_reparse(request, paper_id):
 
 
 @csrf_exempt
+def paper_stop(request, paper_id):
+    """停止处理 (1.10.8): a paper still waiting to be parsed stops, so it can be deleted.
+
+    Queued: stopped at once.  Waiting on MinerU (one file): the worker stops at
+    its next poll and marks the paper stopped.  Either way it then shows as
+    stopped with 删除 and 重试.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    stopped = Paper.objects.filter(pk=paper.pk, status=Paper.Status.QUEUED).update(
+        status=Paper.Status.FAILED, error=mineru.STOPPED_MESSAGE, updated_at=timezone.now())
+    if stopped:
+        paper.refresh_from_db()
+        return JsonResponse({"paper": paper_json(paper), "stopped": True, "message": "已停止，可以删除了"})
+    paper.refresh_from_db()
+    if paper.status != Paper.Status.PARSING:
+        return _error("只有排队中或正在等 MinerU 的任务能停止；处理失败或已完成的任务可以直接删除", 409)
+    if paper.import_chunks.exists():
+        return _error("分片解析中的资料暂时不能停止；等它解析完或出错后再删除", 409)
+    folder = paper_dir(paper)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / mineru.CANCEL_FILE).write_text("stop", encoding="utf-8")
+    except OSError:
+        return _error("没能通知后台停止，请稍后再试", 500)
+    return JsonResponse({"paper": paper_json(paper), "stopped": False,
+                         "message": "正在停止，几秒后就能删除"})
+
+
+@csrf_exempt
 def paper_retry(request, paper_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -1594,6 +1631,8 @@ def paper_retry(request, paper_id):
             Paper.Status.READING if has_questions else Paper.Status.QUEUED
         paper.error = ""
         paper.save(update_fields=fields)
+        # A stop request the worker never saw must not stop the retry (1.10.8).
+        (paper_dir(paper) / mineru.CANCEL_FILE).unlink(missing_ok=True)
         paper.questions.filter(state=Question.State.RED).update(state=Question.State.WAITING)
     return JsonResponse({
         "paper": paper_json(paper),

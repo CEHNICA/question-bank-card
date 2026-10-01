@@ -69,11 +69,18 @@ assert.equal(Progress.processingPresentation({
   status: "parsing", processing: { stage: "parsing", mineru: { state: "converting", for_seconds: 3 } }
 }).headline, "MinerU 识别完了，正在打包结果");
 
-// 1.10.7: 重新交给 MinerU once a file has waited there a minute; not for chunks or while it is coming back.
-assert.equal(mineruQueue.canReparse, true);
-assert.equal(Progress.processingPresentation({
-  status: "parsing", processing: { stage: "parsing", elapsed_seconds: 300, mineru: { state: "pending", for_seconds: 20 } }
-}).canReparse, false);
+// 1.10.7/1.10.8: 重新交给 MinerU only where it can help — not while MinerU says it is queueing
+// (that only moves the file to the back), nor for chunks or while the result is coming back.
+assert.equal(mineruQueue.canReparse, false);
+const reparseAfter = (state, seconds) => Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", elapsed_seconds: seconds, mineru: state ? { state, for_seconds: seconds } : undefined }
+}).canReparse;
+assert.equal(reparseAfter("pending", 3600), false);
+assert.equal(reparseAfter("waiting-file", 59), false);
+assert.equal(reparseAfter("waiting-file", 60), true);
+assert.equal(reparseAfter("running", 299), false);
+assert.equal(reparseAfter("running", 300), true);
+assert.equal(reparseAfter("", 90), true);
 assert.equal(Progress.processingPresentation({
   status: "parsing", processing: { stage: "parsing", elapsed_seconds: 300, mineru: { state: "downloading", for_seconds: 90 } }
 }).canReparse, false);
@@ -129,3 +136,10 @@ assert.match(appSource, /额度不足，已暂停/);
 assert.match(appSource, /classList\.toggle\("paused"/);
 
 console.log("truthful processing progress checks: OK");
+
+// 1.10.8: 停止处理 for a queued paper or one waiting on MinerU, so it can be deleted.
+assert.match(indexHtml, /<button id="settingsStop" class="link-button" type="button" hidden/);
+assert.match(reparseSource, /api\(`\/api\/papers\/\$\{state\.paperId\}\/stop`, \{ method: "POST", body: \{\} \}\)/);
+assert.match(reparseSource, /const stoppable = paper\.status === "queued" \|\| \(paper\.status === "parsing" && !paper\.processing\?\.chunks\);/);
+assert.match(reparseSource, /先点上面的“停止处理”，停下来以后就能删除。/);
+assert.match(reparseSource, /paper\.stopped \? "已停止" : "处理失败"/);

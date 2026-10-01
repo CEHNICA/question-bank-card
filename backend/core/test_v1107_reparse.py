@@ -51,7 +51,7 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
         restart_file = folder / mineru.RESTART_FILE
         calls = []
 
-        def extract(_source, archive, _pages, heartbeat=None, on_state=None, restart=None):
+        def extract(_source, archive, _pages, heartbeat=None, on_state=None, restart=None, cancel=None):
             calls.append(restart())
             if len(calls) == 1:
                 restart_file.write_text("restart", encoding="utf-8")  # the page asks while MinerU is slow
@@ -73,7 +73,7 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
         (folder / mineru.RESTART_FILE).write_text("restart", encoding="utf-8")
         seen = []
 
-        def extract(_source, archive, _pages, heartbeat=None, on_state=None, restart=None):
+        def extract(_source, archive, _pages, heartbeat=None, on_state=None, restart=None, cancel=None):
             seen.append(restart())
             archive.write_bytes(b"zip")
 
@@ -105,3 +105,35 @@ class ReparseApiTests(v110.TempDataMixin, TestCase):
         ImportChunk.objects.create(paper=self.paper, sequence=1, source_page_start=1, source_page_end=100)
         self.assertEqual(self.post().status_code, 409)
         self.assertFalse((paper_dir(self.paper) / mineru.RESTART_FILE).exists())
+
+
+class QueueWaitTests(SimpleTestCase):
+    """1.10.8: while MinerU says the file is queued, wait up to an hour instead of 20 minutes."""
+
+    def run_with(self, states, minutes_per_poll):
+        folder = Path(tempfile.mkdtemp())
+        source = folder / "paper.pdf"
+        source.write_bytes(b"%PDF-1.4")
+        clock = {"now": 0.0}
+
+        def tick(_seconds):
+            clock["now"] += minutes_per_poll * 60
+
+        with mock.patch.object(mineru, "_api_json", side_effect=fake_api(states)), \
+                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
+                mock.patch.object(mineru, "_download_zip"), \
+                mock.patch.object(mineru.time, "monotonic", side_effect=lambda: clock["now"]), \
+                mock.patch.object(mineru.time, "sleep", side_effect=tick):
+            return mineru.request_extract_file("token", source, folder / "r.zip", 4)
+
+    def test_a_queued_file_is_waited_for_past_twenty_minutes(self):
+        states = [{"state": "pending"}] * 8 + [{"state": "done", "full_zip_url": "https://example.invalid/r.zip"}]
+        self.assertEqual(self.run_with(states, 5).name, "r.zip")  # done after 40 minutes in the queue
+
+    def test_an_hour_in_the_queue_says_so(self):
+        with self.assertRaisesRegex(mineru.MineruError, "排了一个小时还没开始识别"):
+            self.run_with([{"state": "pending"}] * 30, 5)
+
+    def test_no_word_from_minerU_still_stops_at_twenty_minutes(self):
+        with self.assertRaisesRegex(mineru.MineruError, "^MinerU 解析超时（"):
+            self.run_with([{"state": "waiting-file"}] * 30, 5)

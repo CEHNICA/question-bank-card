@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 MINERU_STATE_FILE = "mineru_state.json"
 STATE_MAX_AGE = 120  # seconds; an older note is from a run that has stopped
 QUEUE_STATES = {"submitted", "waiting-file", "pending"}
+ALIVE_STATES = {"pending", "running", "converting"}
+WAIT_SILENT = 20 * 60
+WAIT_ALIVE = 60 * 60
 # 1.10.7: the page asks to send the file to MinerU again (重新解析): the web
 # process leaves this file beside the paper and the worker, polling MinerU,
 # stops waiting for the old task and uploads again.
@@ -41,6 +44,18 @@ RESTART_FILE = "mineru_restart"
 
 class MineruRestart(Exception):
     """A person asked to send the file again; not a MinerU error."""
+
+
+# 1.10.8: 停止处理 — a person wants this paper to stop waiting (to delete it).
+CANCEL_FILE = "mineru_cancel"
+STOPPED_MESSAGE = "已按你的要求停止解析。可以删除这份任务，或点“重试”重新交给 MinerU"
+
+
+class MineruCancelled(RuntimeError):
+    """A person stopped the parse; the paper is marked stopped, not broken."""
+
+    def __init__(self, message: str = STOPPED_MESSAGE):
+        super().__init__(message)
 
 
 def _phase(state) -> str:
@@ -403,6 +418,7 @@ def request_extract_file(
     heartbeat: Callable[[], None] | None = None,
     on_state: Callable[[dict], None] | None = None,
     restart: Callable[[], bool] | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> Path:
     """解析一个已经满足页数限制的文件。
 
@@ -451,8 +467,10 @@ def request_extract_file(
             raise MineruError(f"MinerU 文件上传失败（{type(exc).__name__}）") from None
         report("submitted")
         started = time.monotonic()
-        deadline = started + 20 * 60
-        while time.monotonic() < deadline:
+        state = None
+        # 20 minutes, or an hour while MinerU says the file is queued or being
+        # read: giving up then and sending again would only start the queue over (1.10.8).
+        while time.monotonic() - started < (WAIT_ALIVE if state in ALIVE_STATES else WAIT_SILENT):
             data, trace_id = _api_json(session, token, f"extract-results/batch/{batch_id}")
             if heartbeat is not None:
                 heartbeat()
@@ -478,11 +496,15 @@ def request_extract_file(
                     "err_msg": task.get("err_msg"),
                     "trace_id": trace_id,
                 })
+            if cancel is not None and cancel():
+                raise MineruCancelled()
             if restart is not None and restart():
                 raise MineruRestart()
             # A short exam is usually done within 10–20 s; poll briskly at first
             # and back off for long books so the API is not hammered.
             time.sleep(2 if time.monotonic() - started < 60 else 5)
+    if state == "pending":
+        raise MineruError("MinerU 排了一个小时还没开始识别，多半是 MinerU 那边太忙；请过一会儿点“重试”")
     raise MineruError("MinerU 解析超时")
 
 
@@ -500,6 +522,7 @@ def request_extract_file_from_pool(
     heartbeat: Callable[[], None] | None = None,
     on_state: Callable[[dict], None] | None = None,
     restart: Callable[[], bool] | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> Path:
     """Run one complete MinerU task with one leased account.
 
@@ -522,6 +545,7 @@ def request_extract_file_from_pool(
                         lease.secret, source, target, page_count, heartbeat=heartbeat,
                         **({"on_state": on_state} if on_state is not None else {}),
                         **({"restart": restart} if restart is not None else {}),
+                        **({"cancel": cancel} if cancel is not None else {}),
                     )
                 except MineruError as error:
                     last_error = error
