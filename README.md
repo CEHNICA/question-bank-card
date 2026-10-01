@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  <sub>关键词：数学题库软件 · 免费组卷 · 错题整理 · 试卷识别与切题 · PDF / Word / 拍照转题库 · 中小学老师 · 本地运行 · 开源免费</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/CEHNICA/question-bank-card/releases/latest"><strong>下载最新版</strong></a>
   ·
   <a href="#一份试卷是怎么变成题库的">看看怎么工作</a>
