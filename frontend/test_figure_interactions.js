@@ -64,4 +64,9 @@ assert.match(js, /signals\.has\("candidate_unclassified"\)/);
 assert.doesNotMatch(js, /slot:\s*"stem"[\s\S]{0,200}ignored_candidates/);
 assert.match(js, /if \(figureBlocksApproval\(q\)\) \{ focusFigureReview\(q\); return; \}/);
 
+// 取消 is a quiet button beside the title (like Esc), not a full-width block under the hint.
+assert.match(html, /<div class="figure-slot-head">\s*<strong>这张图属于<\/strong>\s*<button type="button" class="figure-slot-cancel" data-figure-slot-cancel[^>]*>取消<kbd>Esc<\/kbd><\/button>/);
+assert.match(css, /\.figure-slot-options button\.irrelevant \{ grid-column: 1 \/ -1;/);
+assert.doesNotMatch(css, /\.figure-slot-cancel \{ width: 100%/);
+
 console.log("figure interaction regression checks: OK");

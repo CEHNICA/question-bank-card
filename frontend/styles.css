@@ -58,6 +58,7 @@
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
+/* 顶栏和工具栏挡住的高度。卡片自己不再加 scroll-margin：两个加在一起，J/K 跳到的卡会落在工具栏下面 80 多像素处，上一张卡露出一截。 */
 html { scroll-padding-top: calc(var(--topbar-h) + 72px); }
 body { margin: 0; min-width: 320px; background: var(--bg); font-size: 14px; line-height: 1.5; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -349,7 +350,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .cards-empty strong { color: var(--ink); font-size: 15px; }
 .card { position: relative; display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 23fr) minmax(0, 20fr);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-  overflow: clip; scroll-margin-top: calc(var(--topbar-h) + 70px); transition: box-shadow .18s, border-color .18s; }
+  overflow: clip; transition: box-shadow .18s, border-color .18s; }
 .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; z-index: 1; }
 .card.state-yellow::before { background: var(--amber-bar); }
 .card.state-red::before { background: var(--red); }
@@ -389,7 +390,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .crop-join { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding: 5px 2px; letter-spacing: .04em; }
 .crop-join::before, .crop-join::after { content: ""; flex: 1; border-top: 1px dashed var(--line-strong); }
 .crop-figure { position: absolute; border: 2px solid rgba(31, 107, 95, .7); border-radius: 3px; background: rgba(31, 107, 95, .05); pointer-events: none; }
-.source-note { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+.source-note { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -5px; padding: 3px 7px 3px 5px; border: 0; border-radius: 6px;
+  background: transparent; font: inherit; font-size: 11.5px; color: var(--muted); text-align: left; cursor: zoom-in; }
+.source-note:hover, .source-note:focus-visible { background: rgba(0, 0, 0, .045); color: var(--ink-2); outline: 0; }
 .source-note .icon { width: 13px; height: 13px; }
 .crop-missing { margin: 0; padding: 18px 14px; border: 1.5px dashed var(--red-line); border-radius: 10px; color: var(--red); font-size: 13.5px; line-height: 1.7; background: #fff; }
 
@@ -590,18 +593,23 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .figure-slot-menu::before { content: ""; position: absolute; left: 18px; top: -6px; width: 10px; height: 10px; transform: rotate(45deg);
   border-left: 1px solid #dfc28f; border-top: 1px solid #dfc28f; background: #fffdf8; }
 .figure-slot-menu.opens-up::before { top: auto; bottom: -6px; transform: rotate(225deg); }
-.figure-slot-menu > strong { display: block; padding: 1px 2px 9px; font-size: 13px; }
+.figure-slot-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 8px 2px; }
+.figure-slot-head > strong { font-size: 13px; }
 .figure-slot-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.figure-slot-options button, .figure-slot-cancel { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink-2); cursor: pointer; }
+.figure-slot-options button { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink-2); cursor: pointer; }
 .figure-slot-options button:hover, .figure-slot-options button:focus-visible { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); outline: 0; }
 .figure-slot-options button[aria-checked="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
-.figure-slot-options button.irrelevant { color: #7b4a35; background: #fff8f2; }
+.figure-slot-options button.irrelevant { grid-column: 1 / -1; color: #7b4a35; background: #fff8f2; }
 .figure-slot-options button.join { grid-column: 1 / -1; color: var(--blue); background: var(--blue-soft); }
 .edit-box.figure.joined { border-style: dashed; }
 .edit-box.figure.joined .box-label { background: var(--blue); }
 .figure-slot-options kbd { margin-left: 5px; padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; font: 600 10px/14px ui-monospace, Consolas, monospace; opacity: .55; }
 .figure-slot-keys { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; text-align: center; }
-.figure-slot-cancel { width: 100%; margin-top: 7px; background: transparent; }
+/* 取消是次要操作：标题右边的小字按钮，和 Esc 一样。 */
+.figure-slot-cancel { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 6px 2px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.figure-slot-cancel:hover, .figure-slot-cancel:focus-visible { background: var(--surface-2); color: var(--ink); outline: 0; }
+.figure-slot-cancel kbd { padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; font: 600 10px/14px ui-monospace, Consolas, monospace; opacity: .55; }
 .grip { position: absolute; z-index: 2; width: 12px; height: 12px; background: #fff; border: 2px solid currentColor; border-radius: 3px; color: var(--accent); }
 .edit-box.figure .grip { color: #c05621; }
 .grip-nw { left: -7px; top: -7px; cursor: nwse-resize; }

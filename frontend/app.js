@@ -590,7 +590,15 @@ const QBFocus = (() => {
     return best;
   }
 
-  return { readingLine, nearestToLine };
+  // A card counts as being read only while a fair share of it is on screen:
+  // at least ``share`` of its height, or of the visible band for a card taller
+  // than the screen.  One slid mostly under the toolbar does not.
+  function mostlyVisible(rect, top, bottom, share = 0.35) {
+    const visible = Math.min(rect.bottom, bottom) - Math.max(rect.top, top);
+    return visible > 0 && visible >= share * Math.min(rect.bottom - rect.top, bottom - top);
+  }
+
+  return { readingLine, nearestToLine, mostlyVisible };
 })();
 
 if (typeof module !== "undefined" && module.exports) {
@@ -627,6 +635,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const state = {
     status: null, papers: [], paperId: null, paper: null, questions: [], filter: "all",
     rendered: new Map(), editing: new Set(), expanded: new Set(), pollTimer: null, listTimer: null,
+    // autoExpanded：J/K 跳过去时自动展开的已通过题，离开时收回；手动展开的不在里面。
+    autoExpanded: new Set(), autoExpand: readPref("qb-auto-expand", "1") === "1",
     current: null, lens: readPref("qb-lens", "1") === "1", focus: readPref("qb-focus", "1") === "1", followHold: false,
     selected: new Set(), selectionAnchor: null, selectionBusy: false, selecting: false, trashBusy: false
   };
@@ -980,6 +990,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       state.rendered.clear();
       state.editing.clear();
       state.expanded.clear();
+      state.autoExpanded.clear();
       state.filter = "all";
       state.current = null;
       $("cards").replaceChildren();
@@ -1005,6 +1016,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.rendered.clear();
     state.editing.clear();
     state.expanded.clear();
+    state.autoExpanded.clear();
     $("cards").replaceChildren();
     $("paperView").hidden = true;
     $("emptyState").hidden = false;
@@ -1483,25 +1495,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return rect.bottom > viewTop() && rect.top < window.innerHeight;
   }
 
-  // “正在看的”跟着滚动走：取压在阅读线上的那张整卡（见 QBFocus）；
-  // 阅读线落在空隙或收起的题上，就取离它最近的整卡。
+  // “正在看的”跟着滚动走：取压在阅读线上的那张整卡（见 QBFocus）；阅读线落在
+  // 空隙或收起的题上，就取离它最近的整卡。大半已经滚到工具栏后面（或屏幕下面）、
+  // 只露出一小截的整卡不算在看：都正常显示，不变暗。
+  function wellInView(card) {
+    return QBFocus.mostlyVisible(card.getBoundingClientRect(), viewTop(), window.innerHeight);
+  }
+
   function readingCard() {
     const top = viewTop();
     const bottom = window.innerHeight;
     const height = bottom - top;
-    const cards = cardNodes().filter((card) => !card.classList.contains("compact") && onScreen(card));
+    const cards = cardNodes().filter((card) => !card.classList.contains("compact") && wellInView(card));
     if (!cards.length || height <= 0) return null;
     const page = document.scrollingElement || document.documentElement;
     const line = QBFocus.readingLine({ top, bottom, scrollY: window.scrollY, below: page.scrollHeight - bottom - window.scrollY });
     return cards[QBFocus.nearestToLine(cards.map((card) => card.getBoundingClientRect()), line)] || null;
   }
 
-  // 变暗只在“正在看一张整卡”时：当前卡收起了、滚出屏幕了（又没在跳过去
+  // 变暗只在“正在看一张整卡”时：当前卡收起了、离开了阅读线（又没在跳过去
   // 的路上），或者屏幕上只剩收起的题，就都正常显示。
   function markReading() {
     const container = $("cards");
     const card = state.current !== null ? container.querySelector(`.card[data-id="${state.current}"]`) : null;
-    const reading = Boolean(state.focus && card && !card.classList.contains("compact") && (state.followHold || onScreen(card)));
+    const reading = Boolean(state.focus && card && !card.classList.contains("compact") && (state.followHold || wellInView(card)));
     container.classList.toggle("reading", reading);
   }
 
@@ -1573,20 +1590,77 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // 键盘移动：当前卡还在屏幕里就从它往前/往后走一张；
   // 已经滚走了，就先落到屏幕里最上面那张。
+  // 刚用 J/K 跳过去、页面还在平滑滚动时，目标卡可能还没进屏幕：这时仍从它
+  // 接着走（state.followHold），否则连按会被拉回屏幕最上面那张，来回跳。
   function moveCurrent(step) {
     const cards = cardNodes();
     if (!cards.length) return;
     const top = viewTop();
     const index = cards.findIndex((card) => Number(card.dataset.id) === state.current);
     let next;
-    if (index >= 0) next = onScreen(cards[index]) ? index + step : -1;
+    if (index >= 0) next = state.followHold || onScreen(cards[index]) ? index + step : -1;
     else next = -1;
     if (next === -1 && !(index >= 0 && index + step === -1)) {
       next = cards.findIndex((card) => card.getBoundingClientRect().bottom > top + 24);
       if (next < 0) next = cards.length - 1;
     }
     next = Math.min(cards.length - 1, Math.max(0, next));
-    setCurrent(Number(cards[next].dataset.id), { scroll: true, focus: true });
+    const nextId = Number(cards[next].dataset.id);
+    autoExpandOnMove(nextId);
+    setCurrent(nextId, { scroll: true, focus: true });
+  }
+
+  // ---------------------------------------------------------------- 展开 / 收起
+
+  // 只有人工通过的题会收起；AI 通过的题等你核对，一直展开。
+  function canCollapse(q) {
+    return Boolean(q) && isApproved(q) && !isAiApproved(q);
+  }
+
+  // auto：J/K 自动展开的，离开时收回。手动展开（点“展开”、O 键、改字）的不收回。
+  function setExpanded(id, on, { auto = false } = {}) {
+    if (on) state.expanded.add(id); else state.expanded.delete(id);
+    if (on && auto) state.autoExpanded.add(id); else state.autoExpanded.delete(id);
+  }
+
+  // J/K 跳到一张收起的题：展开它；上一张自动展开的收回去，页面不会越翻越长。
+  function autoExpandOnMove(nextId) {
+    let changed = false;
+    [...state.autoExpanded].forEach((id) => {
+      if (id === nextId) return;
+      setExpanded(id, false);
+      changed = true;
+    });
+    const q = questionById(nextId);
+    if (state.autoExpand && canCollapse(q) && !state.expanded.has(nextId)) {
+      setExpanded(nextId, true, { auto: true });
+      changed = true;
+    }
+    if (changed) renderCards();
+  }
+
+  // O：展开 / 收起当前这张；Shift+O：已通过的题全部展开 / 全部收起。
+  function toggleExpanded(q) {
+    if (!q) return;
+    if (!canCollapse(q)) {
+      toast(isAiApproved(q) ? "AI 通过的题等你核对，一直是展开的" : "没通过的题一直是展开的，通过以后才会收起");
+      return;
+    }
+    setExpanded(q.id, !state.expanded.has(q.id));
+    renderCards();
+    setCurrent(q.id, { scroll: true, focus: true });
+  }
+
+  function toggleAllExpanded() {
+    const ids = state.questions.filter((item) => visible(item) && canCollapse(item)).map((item) => item.id);
+    if (!ids.length) { toast("这里还没有已通过、可以收起的题"); return; }
+    const expand = ids.some((id) => !state.expanded.has(id));
+    ids.forEach((id) => setExpanded(id, expand));
+    renderCards();
+    toast(expand ? `已展开 ${ids.length} 道已通过的题，再按 Shift+O 全部收起` : "已通过的题都收起了");
+    if (state.current !== null && document.querySelector(`.card[data-id="${state.current}"]`)) {
+      setCurrent(state.current, { scroll: true });
+    }
   }
 
   function nextToReview(fromQuestion, { onlyCheck = false } = {}) {
@@ -1618,6 +1692,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     switch (key) {
       case "j": event.preventDefault(); moveCurrent(1); break;
       case "k": event.preventDefault(); moveCurrent(-1); break;
+      case "o":
+        event.preventDefault();
+        if (event.shiftKey) toggleAllExpanded(); else toggleExpanded(q);
+        break;
       case "Enter":
         if (onControl || !q) return;
         event.preventDefault();
@@ -1638,6 +1716,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           event.preventDefault();
           const card = document.querySelector(`.card[data-id="${q.id}"]`);
           if (card?.classList.contains("compact")) { state.expanded.add(q.id); renderCards(); }
+          state.autoExpanded.delete(q.id);    // 正在改的题，离开时不收回
           const fresh = document.querySelector(`.card[data-id="${q.id}"]`);
           if (fresh) openEditor(fresh, q);
         }
@@ -1992,6 +2071,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!q) return;
     const card = document.querySelector(`.card[data-id="${q.id}"]`);
     if (card?.classList.contains("compact")) { state.expanded.add(q.id); renderCards(); }
+    state.autoExpanded.delete(q.id);
     const fresh = document.querySelector(`.card[data-id="${q.id}"]`);
     if (fresh) { fresh.scrollIntoView({ block: "start" }); openEditor(fresh, q); }
   }
@@ -2472,10 +2552,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function expandToggle(q, collapsed) {
     const toggle = button(collapsed ? "展开" : "收起", "small quiet card-toggle", (event) => {
       event.stopPropagation();
-      if (collapsed) state.expanded.add(q.id); else state.expanded.delete(q.id);
+      setExpanded(q.id, collapsed);
       setCurrent(q.id);
       renderCards();
     });
+    toggle.title = `${collapsed ? "展开" : "收起"}（O；Shift+O 全部）`;
     const chevron = icon("chevron");
     chevron.style.cssText = `width:14px;height:14px;${collapsed ? "" : "transform:rotate(180deg)"}`;
     toggle.append(chevron);
@@ -2509,7 +2590,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       card.append(row);
       card.addEventListener("click", (event) => {
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.target.closest("button")) return;
-        state.expanded.add(q.id);
+        setExpanded(q.id, true);
         renderCards();
       });
       return card;
@@ -2521,10 +2602,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // column; stack it above the text so it gets the full card width.
     if (q.regions.length && cropAspect(q.regions) >= WIDE_CROP_ASPECT) card.classList.add("wide-source");
     sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q), capToNatural: true }));
-    const sourceNote = el("p", "source-note");
+    // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
+    const sourceNote = el("button", "source-note");
+    sourceNote.type = "button";
+    sourceNote.title = "放大对照（Space）";
     sourceNote.append(icon("zoom"), document.createTextNode(q.regions_changed ? "原卷截图（范围已人工调整）· 点击放大对照"
       : q.start_source === "inferred" ? "题号由本地规则补出，请对照原卷核对 · 点击放大对照"
         : q.start_source === "located" ? "原卷截图（题号由 AI 在原卷上定位）· 点击放大对照" : "原卷截图 · 点击放大对照"));
+    sourceNote.addEventListener("click", () => openViewer(q));
     if (q.regions.length) sticky.append(sourceNote);
     source.append(sticky);
 
@@ -2705,7 +2790,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const confirming = approved && isAiApproved(q);
     try {
       const data = await api(`/api/questions/${q.id}/approve`, { method: "POST", body: { approved } });
-      state.expanded.delete(q.id);
+      setExpanded(q.id, false);
       applyQuestion(data);
       const fresh = questionById(q.id) || q;
       if (approved) {
@@ -3330,6 +3415,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderSettingsReady();
     $("settingsLens").checked = state.lens;
     $("settingsFocus").checked = state.focus;
+    $("settingsAutoExpand").checked = state.autoExpand;
     $("settingsModelResult").textContent = "";
     showSettingsTab("settingsGeneral");
     $("settingsDialog").showModal();
@@ -3341,6 +3427,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
+  $("settingsAutoExpand").addEventListener("change", (event) => {
+    state.autoExpand = event.target.checked;
+    writePref("qb-auto-expand", state.autoExpand ? "1" : "0");
+  });
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));

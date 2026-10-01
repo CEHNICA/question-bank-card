@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { readingLine, nearestToLine } = require("./app.js");
+const { readingLine, nearestToLine, mostlyVisible } = require("./app.js");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
@@ -21,11 +21,11 @@ assert.match(css, /\.cards\.focus-mode\.reading:not\(\.selecting\) \.card:not\(\
 assert.match(css, /\.cards\.focus-mode \{ gap: 26px; \}/);
 assert.match(css, /\.cards\.focus-mode \.card\.compact \+ \.card\.compact \{ margin-top: -14px; \}/);
 // Dimming needs a full card being read: a collapsed (approved) row, a card
-// scrolled away or a screen of collapsed rows dims nothing.
-assert.match(js, /const reading = Boolean\(state\.focus && card && !card\.classList\.contains\("compact"\) && \(state\.followHold \|\| onScreen\(card\)\)\);/);
+// scrolled away (or mostly under the toolbar, off the reading line) or a screen
+// of collapsed rows dims nothing.
+assert.match(js, /const reading = Boolean\(state\.focus && card && !card\.classList\.contains\("compact"\) && \(state\.followHold \|\| wellInView\(card\)\)\);/);
 assert.match(js, /container\.classList\.toggle\("reading", reading\);/);
 // Collapsed rows are never picked as the card being read.
-assert.match(js, /const cards = cardNodes\(\)\.filter\(\(card\) => !card\.classList\.contains\("compact"\) && onScreen\(card\)\);/);
 // In full screen the top bar is 0 px high, which is not "missing".
 assert.match(js, /return \(bar \? bar\.offsetHeight : 56\) \+/);
 // The card being read follows the scroll, but not while a jump scrolls past cards.
@@ -48,6 +48,15 @@ assert.equal(nearestToLine(rects, 699), 2);
 assert.equal(nearestToLine(rects, 290), 0);
 assert.equal(nearestToLine(rects, 535), 2);
 assert.equal(nearestToLine([], 300), -1);
+// A full card counts only while a fair share of it is on screen.  One slid mostly
+// under the toolbar (only its option row and buttons showing) is not being read:
+// nothing is lit and nothing is dimmed.
+assert.equal(mostlyVisible({ top: -300, bottom: 255 }, 120, 720), false);
+assert.equal(mostlyVisible({ top: -100, bottom: 420 }, 120, 720), true);
+assert.equal(mostlyVisible({ top: 348, bottom: 897 }, 115, 720), true);    // just expanded, lower half off screen
+assert.equal(mostlyVisible({ top: -2000, bottom: 2000 }, 120, 720), true); // taller than the screen
+assert.equal(mostlyVisible({ top: 650, bottom: 1300 }, 120, 720), false);  // only its top peeks in
+assert.match(js, /const cards = cardNodes\(\)\.filter\(\(card\) => !card\.classList\.contains\("compact"\) && wellInView\(card\)\);/);
 
 console.log("focus mode checks: OK");
 
@@ -61,3 +70,30 @@ assert.match(js, /document\.addEventListener\("fullscreenchange", \(\) => \{\s*i
 assert.match(js, /case "q":\s*event\.preventDefault\(\);\s*setReviewFullscreen/);
 assert.match(js, /\$\("toolbarPaper"\)\.replaceChildren\(el\("strong", "", paperDisplayName/);
 console.log("full-screen review checks: OK");
+
+// J/K pressed quickly: the card just jumped to may still be scrolling in, so keep
+// stepping from it instead of falling back to the top card on screen (it bounced).
+assert.match(js, /if \(index >= 0\) next = state\.followHold \|\| onScreen\(cards\[index\]\) \? index \+ step : -1;/);
+// A card jumped to lands just under the toolbar: html scroll-padding only, no
+// extra scroll-margin on the card (the two used to add up to an 80px gap).
+assert.match(css, /html \{ scroll-padding-top: calc\(var\(--topbar-h\) \+ 72px\); \}/);
+assert.doesNotMatch(css, /\.card \{[^}]*scroll-margin-top/);
+// “原卷截图 · 点击放大对照” is a button that opens the comparison view.
+assert.match(js, /const sourceNote = el\("button", "source-note"\);[\s\S]*?sourceNote\.addEventListener\("click", \(\) => openViewer\(q\)\);/);
+console.log("keyboard step and zoom caption checks: OK");
+
+// 展开：O 展开 / 收起这张，Shift+O 全部；J/K 跳到收起的已通过题时自动展开、
+// 离开时收回（手动展开的不收），设置里可以关，选择记在本机。
+assert.match(js, /case "o":\s*event\.preventDefault\(\);\s*if \(event\.shiftKey\) toggleAllExpanded\(\); else toggleExpanded\(q\);/);
+assert.match(js, /const nextId = Number\(cards\[next\]\.dataset\.id\);\s*autoExpandOnMove\(nextId\);\s*setCurrent\(nextId, \{ scroll: true, focus: true \}\);/);
+assert.match(js, /function autoExpandOnMove\(nextId\) \{[\s\S]*?if \(id === nextId\) return;\s*setExpanded\(id, false\);[\s\S]*?if \(state\.autoExpand && canCollapse\(q\) && !state\.expanded\.has\(nextId\)\) \{\s*setExpanded\(nextId, true, \{ auto: true \}\);/);
+assert.match(js, /function canCollapse\(q\) \{\s*return Boolean\(q\) && isApproved\(q\) && !isAiApproved\(q\);/);
+assert.match(js, /autoExpand: readPref\("qb-auto-expand", "1"\) === "1"/);
+assert.match(js, /writePref\("qb-auto-expand", state\.autoExpand \? "1" : "0"\)/);
+assert.match(html, /id="settingsAutoExpand" type="checkbox" role="switch"/);
+assert.match(html, /<span>展开 \/ 收起这张已通过的题<\/span><span><kbd>O<\/kbd><\/span>/);
+assert.match(html, /<span>已通过的题全部展开 \/ 全部收起<\/span><span><kbd>Shift<\/kbd>\+<kbd>O<\/kbd><\/span>/);
+// A click on 展开 / the row, or E, is a manual expand: it stays open when J/K moves on.
+assert.match(js, /setExpanded\(q\.id, collapsed\);/);
+assert.match(js, /state\.autoExpanded\.delete\(q\.id\);    \/\/ 正在改的题，离开时不收回/);
+console.log("expand shortcut checks: OK");

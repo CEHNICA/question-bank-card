@@ -234,6 +234,7 @@
             <h3 id="settingsInterfaceTitle">审核界面</h3>
             <label class="settings-switch"><span><strong>专注</strong><small>正在看的这道题正常显示，其余题暗下来（Z）</small></span><input id="settingsFocus" type="checkbox" role="switch"></label>
             <label class="settings-switch"><span><strong>题卡放大镜</strong><small>鼠标停在原卷截图上时放大局部（L）</small></span><input id="settingsLens" type="checkbox" role="switch"></label>
+            <label class="settings-switch"><span><strong>J/K 自动展开</strong><small>用 J、K 跳到已通过、收起的题时自动展开，离开时收回（O 展开 / 收起，Shift+O 全部）</small></span><input id="settingsAutoExpand" type="checkbox" role="switch"></label>
             <p class="settings-footnote">审核时还可以点工具栏上的“全屏”（Q），收起顶栏和试卷列表。</p>
             <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看全部快捷键</button>
           </section>
@@ -399,7 +400,10 @@
     </nav>
     <div id="pageStage" class="page-stage"></div>
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
-      <strong>这张图属于</strong>
+      <div class="figure-slot-head">
+        <strong>这张图属于</strong>
+        <button type="button" class="figure-slot-cancel" data-figure-slot-cancel aria-keyshortcuts="Escape">取消<kbd>Esc</kbd></button>
+      </div>
       <div class="figure-slot-options">
         <button type="button" role="menuitem" data-figure-slot="stem" aria-keyshortcuts="S">题干<kbd>S</kbd></button>
         <button type="button" role="menuitem" data-figure-slot="A" aria-keyshortcuts="A">A</button>
@@ -412,7 +416,6 @@
                 title="表格或图被分页切开时用：这一块接在前一张配图的下面，保存后拼成一张图">接在上一张图下面（拼成一张）<kbd>J</kbd></button>
       </div>
       <small class="figure-slot-keys">按 S、A–E、X 或 J 直接选</small>
-      <button type="button" class="figure-slot-cancel" data-figure-slot-cancel>取消</button>
     </div>
   </dialog>
 
@@ -656,6 +659,8 @@
     <div class="keys-body">
       <h4>审题</h4>
       <div class="key-row"><span>下一张 / 上一张题卡</span><span><kbd>J</kbd><kbd>K</kbd></span></div>
+      <div class="key-row"><span>展开 / 收起这张已通过的题</span><span><kbd>O</kbd></span></div>
+      <div class="key-row"><span>已通过的题全部展开 / 全部收起</span><span><kbd>Shift</kbd>+<kbd>O</kbd></span></div>
       <div class="key-row"><span>标记通过（并跳到下一张）</span><span><kbd>Enter</kbd></span></div>
       <div class="key-row"><span>撤销通过</span><span><kbd>U</kbd></span></div>
       <div class="key-row"><span>放大对照原卷</span><span><kbd>Space</kbd></span></div>
