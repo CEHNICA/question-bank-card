@@ -69,6 +69,22 @@ assert.equal(Progress.processingPresentation({
   status: "parsing", processing: { stage: "parsing", mineru: { state: "converting", for_seconds: 3 } }
 }).headline, "MinerU 识别完了，正在打包结果");
 
+// 1.10.7: 重新交给 MinerU once a file has waited there a minute; not for chunks or while it is coming back.
+assert.equal(mineruQueue.canReparse, true);
+assert.equal(Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", elapsed_seconds: 300, mineru: { state: "pending", for_seconds: 20 } }
+}).canReparse, false);
+assert.equal(Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", elapsed_seconds: 300, mineru: { state: "downloading", for_seconds: 90 } }
+}).canReparse, false);
+assert.equal(chunks.canReparse, false);
+assert.equal(queued.canReparse, false);
+const reparseSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+assert.match(reparseSource, /api\(`\/api\/papers\/\$\{state\.paperId\}\/reparse`, \{ method: "POST", body: \{\} \}\)/);
+assert.match(reparseSource, /if \(processing\.canReparse\) \{/);
+assert.match(indexHtml, /<button id="settingsReparse" class="link-button" type="button" hidden/);
+
 const reading = Progress.processingPresentation({
   status: "reading",
   processing: {

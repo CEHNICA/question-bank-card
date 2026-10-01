@@ -383,7 +383,7 @@ class LongPdfChunkPipelineTests(TestCase):
 
         states = []
 
-        def extract(_source, archive, _page_count, heartbeat=None, on_state=None):
+        def extract(_source, archive, _page_count, heartbeat=None, on_state=None, restart=None):
             archive.write_bytes(b"mock archive")
             if heartbeat:
                 heartbeat()

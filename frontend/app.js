@@ -218,8 +218,13 @@ const QBProgress = (() => {
       ? `已有 ${formatDuration(idle)}没有新的本任务状态更新；程序仍在等待${stage === "parsing" ? " MinerU 或本机处理" : stage === "reading" ? "模型或后台处理" : "后台处理"}，这不等同于失败。`
       : "";
     const determinate = Boolean(raw.determinate && total > 0 && ["parsing", "reading"].includes(stage));
+    // 1.10.7: one file kept waiting at MinerU for a minute or more can be sent again.
+    const mineruWait = raw.mineru ? safeNumber(raw.mineru.for_seconds) : elapsed;
+    const canReparse = stage === "parsing" && !raw.chunks && !raw.parsed_ahead
+      && !["uploading", "downloading", "converting"].includes(raw.mineru?.state || "") && mineruWait >= 60;
     return {
       stage,
+      canReparse,
       headline,
       detail: `${parts.join(" · ")}。`,
       stale,
@@ -1183,6 +1188,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         el("span", "processing-detail", processing.detail)
       );
       if (processing.stale) statusText.append(el("span", "processing-stale", processing.stale));
+      if (processing.canReparse) {
+        const again = button("重新交给 MinerU", "small", reparsePaper, "MinerU 久久没有结果：不再等这一次，把文件重新上传给 MinerU");
+        again.classList.add("processing-reparse");
+        statusText.append(again);
+      }
     } else if (paper.status === "failed") {
       statusText.textContent = paper.recoverable_pause
         ? (paper.status_label || "额度不足，已暂停") : "处理失败";
@@ -3176,6 +3186,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     loadQuestionTrash();
   }
 
+  // 重新解析（1.10.7）：一份试卷在 MinerU 那里等太久时，重新上传给 MinerU。
+  async function reparsePaper() {
+    if (!state.paper || state.paper.status !== "parsing") return;
+    const ok = await confirmDialog({
+      title: "重新交给 MinerU 解析？",
+      text: "题有据不再等这一次的结果，把文件重新上传给 MinerU。MinerU 很忙的时候，重新上传后也可能要排一会儿队。",
+      ok: "重新交给 MinerU"
+    });
+    if (!ok) return;
+    try {
+      const data = await api(`/api/papers/${state.paperId}/reparse`, { method: "POST", body: {} });
+      toast(data.message || "已重新交给 MinerU", "success");
+      refreshPaper();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
   async function retryPaper(materialType = null) {
     if (materialType === "book" && !(await confirmDialog({
       title: "按教材模式重试？",
@@ -3504,6 +3530,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const hasTrash = (Number(paper.trash_count) || 0) > 0;
     $("settingsRename").disabled = active;
     $("settingsRename").title = active ? "处理完成后才能修改名称" : "";
+    $("settingsReparse").hidden = !(paper.status === "parsing" && !paper.processing?.chunks && !paper.processing?.parsed_ahead);
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -3649,6 +3676,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
+  $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));

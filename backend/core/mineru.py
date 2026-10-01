@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 MINERU_STATE_FILE = "mineru_state.json"
 STATE_MAX_AGE = 120  # seconds; an older note is from a run that has stopped
 QUEUE_STATES = {"submitted", "waiting-file", "pending"}
+# 1.10.7: the page asks to send the file to MinerU again (重新解析): the web
+# process leaves this file beside the paper and the worker, polling MinerU,
+# stops waiting for the old task and uploads again.
+RESTART_FILE = "mineru_restart"
+
+
+class MineruRestart(Exception):
+    """A person asked to send the file again; not a MinerU error."""
 
 
 def _phase(state) -> str:
@@ -394,6 +402,7 @@ def request_extract_file(
     *,
     heartbeat: Callable[[], None] | None = None,
     on_state: Callable[[dict], None] | None = None,
+    restart: Callable[[], bool] | None = None,
 ) -> Path:
     """解析一个已经满足页数限制的文件。
 
@@ -469,6 +478,8 @@ def request_extract_file(
                     "err_msg": task.get("err_msg"),
                     "trace_id": trace_id,
                 })
+            if restart is not None and restart():
+                raise MineruRestart()
             # A short exam is usually done within 10–20 s; poll briskly at first
             # and back off for long books so the API is not hammered.
             time.sleep(2 if time.monotonic() - started < 60 else 5)
@@ -488,6 +499,7 @@ def request_extract_file_from_pool(
     *,
     heartbeat: Callable[[], None] | None = None,
     on_state: Callable[[dict], None] | None = None,
+    restart: Callable[[], bool] | None = None,
 ) -> Path:
     """Run one complete MinerU task with one leased account.
 
@@ -509,6 +521,7 @@ def request_extract_file_from_pool(
                     return request_extract_file(
                         lease.secret, source, target, page_count, heartbeat=heartbeat,
                         **({"on_state": on_state} if on_state is not None else {}),
+                        **({"restart": restart} if restart is not None else {}),
                     )
                 except MineruError as error:
                     last_error = error

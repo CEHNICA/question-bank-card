@@ -1059,15 +1059,28 @@ def parse(paper: Paper) -> None:
 
         # What MinerU says it is doing, for the page (1.10.6).
         state_file = folder / mineru.MINERU_STATE_FILE
+        # 重新解析 from the page: stop waiting for this MinerU task, upload again (1.10.7).
+        restart_file = folder / mineru.RESTART_FILE
 
         def on_state(info: dict) -> None:
             mineru.record_state(state_file, info)
 
+        def extract() -> None:
+            restart_file.unlink(missing_ok=True)
+            while True:
+                try:
+                    request_extract_file_from_pool(
+                        render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
+                        restart=restart_file.exists,
+                    )
+                    return
+                except mineru.MineruRestart:
+                    restart_file.unlink(missing_ok=True)
+                    logger.info("paper %s sent to MinerU again on request", paper.pk)
+
         try:
             if not archive.is_file():
-                request_extract_file_from_pool(
-                    render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
-                )
+                extract()
             try:
                 blocks = load_blocks(archive, len(paper.pages))
             except MineruError:
@@ -1077,12 +1090,11 @@ def parse(paper: Paper) -> None:
                 if not owned_archive:
                     raise
                 archive.unlink(missing_ok=True)
-                request_extract_file_from_pool(
-                    render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
-                )
+                extract()
                 blocks = load_blocks(archive, len(paper.pages))
         finally:
             state_file.unlink(missing_ok=True)
+            restart_file.unlink(missing_ok=True)
     if paper.photos:
         blocks = arrange_photo_pages(paper, blocks)
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])

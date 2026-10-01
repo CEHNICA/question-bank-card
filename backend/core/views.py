@@ -1518,6 +1518,33 @@ def page_preview(request, paper_id, page: int):
 
 
 @csrf_exempt
+def paper_reparse(request, paper_id):
+    """重新解析 (1.10.7): MinerU has been slow on this file; send it again.
+
+    Only while one file is waiting on MinerU.  The worker sees the request at
+    its next poll, stops waiting for the old task and uploads the file again.
+    A failed paper uses 重试 instead; a book in chunks retries its chunks.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status != Paper.Status.PARSING:
+        return _error("只有正在等 MinerU 的试卷能重新解析；处理失败的试卷请点“重试”", 409)
+    if paper.import_chunks.exists():
+        return _error("这份资料是分片交给 MinerU 的；某一片出错后可以单独重跑那一片", 409)
+    folder = paper_dir(paper)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / mineru.RESTART_FILE).write_text("restart", encoding="utf-8")
+    except OSError:
+        return _error("没能通知后台重新解析，请稍后再试", 500)
+    return JsonResponse({"paper": paper_json(paper), "message": "已让后台重新把文件交给 MinerU"})
+
+
+@csrf_exempt
 def paper_retry(request, paper_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])

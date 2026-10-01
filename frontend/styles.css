@@ -239,6 +239,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .processing-headline { color: var(--ink-2); font-weight: 650; }
 .processing-detail { margin-top: 2px; }
 .processing-stale { width: fit-content; margin-top: 6px; padding: 5px 9px; border-radius: 8px; background: var(--amber-soft); color: #7b5616; }
+.processing-reparse { margin-top: 8px; }
 .paper-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .paper-actions .button { min-height: 38px; padding-inline: 16px; }
 
