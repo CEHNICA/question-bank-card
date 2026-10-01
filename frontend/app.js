@@ -638,7 +638,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // autoExpanded：J/K 跳过去时自动展开的已通过题，离开时收回；手动展开的不在里面。
     autoExpanded: new Set(), autoExpand: readPref("qb-auto-expand", "1") === "1",
     current: null, lens: readPref("qb-lens", "1") === "1", focus: readPref("qb-focus", "1") === "1", followHold: false,
-    selected: new Set(), selectionAnchor: null, selectionBusy: false, selecting: false, trashBusy: false
+    selected: new Set(), selectionAnchor: null, selectionBusy: false, selecting: false, trashBusy: false,
+    // 入库进行中：{ paperId, done, total }，按钮上显示进度。
+    publishing: null
   };
 
   // ---------------------------------------------------------------- 小工具
@@ -1221,8 +1223,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("approveGreen").disabled = !c.green || structureBlocked;
     $("approveGreen").textContent = c.green ? `批量标记绿卡通过（${c.green}）` : "批量标记绿卡通过";
     $("approveGreen").title = "绿卡只表示机器识读彼此一致。批量标记前，请确认这些题符合你的审核标准。";
-    $("publishButton").disabled = !c.unpublished || structureBlocked;
-    $("publishButton").textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
+    renderPublishButton(c, structureBlocked);
     const notes = paper.notes || [];
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
     $("notesBox").hidden = true;
@@ -3762,7 +3763,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } catch (error) { toast(error.message, "error"); }
   });
 
+  function renderPublishButton(c = counts(), structureBlocked = state.paper?.status === "needs_grouping") {
+    const button = $("publishButton");
+    const running = state.publishing && state.publishing.paperId === state.paperId ? state.publishing : null;
+    button.classList.toggle("is-busy", Boolean(running));
+    button.setAttribute("aria-busy", String(Boolean(running)));
+    if (running) {
+      button.disabled = true;
+      button.textContent = `正在入库 ${running.done} / ${running.total} 题…`;
+      return;
+    }
+    button.disabled = !c.unpublished || structureBlocked;
+    button.textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
+  }
+
+  // 一次送 20 题：一本书几百题时，按钮上能看到入库到了哪里（1.10.5）。
+  const PUBLISH_BATCH = 20;
+
   async function publish() {
+    if (state.publishing) return;
     if (state.paper?.demo) {
       teach({ type: "publish" });
       await confirmDialog({
@@ -3772,17 +3791,43 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       return;
     }
+    const paperId = state.paperId;
+    const ids = state.questions.filter((q) => isApproved(q) && !(q.publication && q.publication.up_to_date)).map((q) => q.id);
+    const batches = [];
+    for (let start = 0; start < ids.length; start += PUBLISH_BATCH) batches.push(ids.slice(start, start + PUBLISH_BATCH));
+    if (!batches.length) batches.push(null);  // nothing new on screen: let the server check every approved card
+    const data = { created: 0, unchanged: 0, problems: [] };
+    state.publishing = { paperId, done: 0, total: ids.length };
+    renderPublishButton();
+    if (ids.length > PUBLISH_BATCH) toast(`正在入库 ${ids.length} 题，按钮上显示进度`);
     try {
-      const data = await api(`/api/papers/${state.paperId}/publish`, { method: "POST", body: {} });
-      const parts = [];
-      if (data.created) parts.push(`新入库 ${data.created} 题`);
-      if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
-      if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
-      toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
-        data.created && !data.problems.length ? { label: "去题库看看", onClick: () => { window.location.href = "/library"; } } : null);
-      refreshPaper();
+      for (const batch of batches) {
+        const result = await api(`/api/papers/${paperId}/publish`, { method: "POST", body: batch ? { question_ids: batch } : {} });
+        data.created += result.created;
+        data.unchanged += result.unchanged;
+        data.problems.push(...result.problems);
+        state.publishing.done += batch ? batch.length : 0;
+        if (state.paperId === paperId) renderPublishButton();
+      }
+    } catch (error) {
+      state.publishing = null;
+      toast(data.created ? `已入库 ${data.created} 题，其余没完成：${error.message}` : error.message, "error");
+      if (state.paperId === paperId) { renderPublishButton(); refreshPaper(); }
       loadPapers();
-    } catch (error) { toast(error.message, "error"); }
+      return;
+    }
+    state.publishing.done = state.publishing.total;
+    if (state.paperId === paperId) renderPublishButton();
+    state.publishing = null;
+    const parts = [];
+    if (data.created) parts.push(`新入库 ${data.created} 题`);
+    if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
+    if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
+    toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
+      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => { window.location.href = "/library"; } } : null);
+    // The button keeps its last count until the refreshed counts redraw it.
+    if (state.paperId === paperId) refreshPaper();
+    loadPapers();
   }
 
   $("publishButton").addEventListener("click", publish);

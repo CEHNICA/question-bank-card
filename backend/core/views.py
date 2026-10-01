@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import models, transaction
+from django.db.models import Prefetch
 from django.db.models.functions import Cast
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -1684,8 +1685,24 @@ def publish_paper(request, paper_id):
         return JsonResponse({"error": demo.PUBLISH_REFUSED, "demo": True}, status=409)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再入库")
+    payload = _body(request) or {}
+    # 1.10.5: the page sends the cards in small batches (question_ids) so it can
+    # show how far it got; without them every approved card is taken (tiyouju).
+    ids = payload.get("question_ids")
+    if ids is not None and (not isinstance(ids, list) or len(ids) > 200
+                            or not all(isinstance(value, int) and not isinstance(value, bool) for value in ids)):
+        return _error("question_ids 需为最多 200 个题卡编号")
+    questions = paper.questions.filter(approved=True).select_related("paper", "group").prefetch_related(
+        Prefetch("publications", queryset=PublishedQuestion.objects.only(*library.LIVE_PUBLICATION_FIELDS,
+                                                                          "review_source").order_by("-version"),
+                 to_attr="versions"))
+    if ids is not None:
+        questions = questions.filter(pk__in=ids)
     created, unchanged, problems = 0, 0, []
-    for question in paper.questions.filter(approved=True):
+    for question in questions:
+        if library.already_published(question):
+            unchanged += 1
+            continue
         try:
             _, is_new = library.publish(question)
         except ValueError as error:

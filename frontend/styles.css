@@ -131,6 +131,12 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .button .kbd-hint { margin-left: 2px; padding: 0 5px; border-radius: 4px; font: 600 10.5px/16px var(--mono); opacity: .72;
   background: rgba(0, 0, 0, .06); }
 .button.primary .kbd-hint { background: rgba(255, 255, 255, .18); opacity: .9; }
+/* 1.10.5: 入库进行中 — not dimmed like a disabled button, with a turning ring and the count. */
+.button.is-busy:disabled { opacity: 1; cursor: progress; gap: 8px; }
+.button.is-busy::before { content: ""; flex: none; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .button.is-busy::before { animation: none; border-right-color: currentColor; opacity: .6; } }
 .link-button { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; color: var(--accent); padding: 6px 2px;
   font-size: 13px; font-weight: 500; }
 .link-button:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
