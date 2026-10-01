@@ -172,8 +172,29 @@ const QBProgress = (() => {
         else if (completed >= total) parts.push("所有分片均已解析，正在合并结果");
         else parts.push(`尚有 ${total - completed} 个分片等待开始`);
       } else {
-        headline = "MinerU 解析中";
-        parts.push("正在准备文件或等待 MinerU 返回；MinerU 没有提供完成百分比");
+        // 1.10.6: what MinerU itself reports, so a long wait says who is slow.
+        const mineru = raw.mineru || null;
+        const state = mineru?.state || "";
+        const waited = formatDuration(safeNumber(mineru?.for_seconds));
+        if (state === "uploading") {
+          headline = "正在把文件传给 MinerU";
+          parts.push("传完后由 MinerU 识别版面和文字");
+        } else if (["submitted", "waiting-file", "pending"].includes(state)) {
+          headline = `在 MinerU 排队中 · 已等 ${waited}`;
+          parts.push("文件已经交给 MinerU，正在等它开始识别；要等多久看 MinerU 那边当时有多忙，题有据没有卡住。重新交会从队尾重排，不用重交");
+        } else if (state === "running") {
+          headline = total ? `MinerU 识别中 · 第 ${completed}/${total} 页` : "MinerU 识别中";
+          parts.push(`MinerU 已开始识别 ${waited}`);
+        } else if (state === "converting") {
+          headline = "MinerU 识别完了，正在打包结果";
+          parts.push("打包好就取回来本机切题");
+        } else if (state === "downloading") {
+          headline = "正在取回 MinerU 的结果";
+          parts.push("取回后本机切题");
+        } else {
+          headline = "MinerU 解析中";
+          parts.push("正在准备文件或等待 MinerU 返回；MinerU 没有提供完成百分比");
+        }
       }
     } else if (stage === "segmenting") {
       headline = "本机切题中";
@@ -197,8 +218,18 @@ const QBProgress = (() => {
       ? `已有 ${formatDuration(idle)}没有新的本任务状态更新；程序仍在等待${stage === "parsing" ? " MinerU 或本机处理" : stage === "reading" ? "模型或后台处理" : "后台处理"}，这不等同于失败。`
       : "";
     const determinate = Boolean(raw.determinate && total > 0 && ["parsing", "reading"].includes(stage));
+    // 1.10.7: send one file to MinerU again when that can help: its upload was
+    // not picked up (waiting-file), it has been reading for minutes, or we have
+    // heard nothing.  Not while MinerU says it is queueing (pending): sending
+    // again only puts the file at the back of the queue (1.10.8).
+    const mineruState = raw.mineru?.state || "";
+    const mineruWait = raw.mineru ? safeNumber(raw.mineru.for_seconds) : elapsed;
+    const waitNeeded = { "": 90, submitted: 60, "waiting-file": 60, running: 300 }[mineruState];
+    const canReparse = stage === "parsing" && !raw.chunks && !raw.parsed_ahead
+      && waitNeeded !== undefined && mineruWait >= waitNeeded;
     return {
       stage,
+      canReparse,
       headline,
       detail: `${parts.join(" · ")}。`,
       stale,
@@ -362,7 +393,7 @@ const QBNotify = (() => {
   function finishedMessage(paper, name) {
     const c = paper.counts || {};
     const todo = (c.yellow || 0) + (c.red || 0);
-    if (paper.status === "failed") return `“${name}”处理失败`;
+    if (paper.status === "failed") return paper.stopped ? `“${name}”已停止` : `“${name}”处理失败`;
     if (paper.status === "needs_grouping") return `“${name}”需要确认资料结构`;
     return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读一致"}`;
   }
@@ -638,7 +669,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // autoExpanded：J/K 跳过去时自动展开的已通过题，离开时收回；手动展开的不在里面。
     autoExpanded: new Set(), autoExpand: readPref("qb-auto-expand", "1") === "1",
     current: null, lens: readPref("qb-lens", "1") === "1", focus: readPref("qb-focus", "1") === "1", followHold: false,
-    selected: new Set(), selectionAnchor: null, selectionBusy: false, selecting: false, trashBusy: false
+    selected: new Set(), selectionAnchor: null, selectionBusy: false, selecting: false, trashBusy: false,
+    // 入库进行中：{ paperId, done, total }，按钮上显示进度。
+    publishing: null
   };
 
   // ---------------------------------------------------------------- 小工具
@@ -874,7 +907,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return QBProgress.processingPresentation(paper).headline;
     }
     if (paper.status === "failed") return paper.recoverable_pause
-      ? (paper.status_label || "额度不足，已暂停") : "处理失败";
+      ? (paper.status_label || "额度不足，已暂停") : paper.stopped ? "已停止" : "处理失败";
     if (paper.status === "needs_grouping") return "等待确认资料结构";
     const c = paper.counts || {};
     const parts = [paper.demo ? `练习用 · ${c.total || 0} 题` : `${c.total || 0} 题`];
@@ -1160,9 +1193,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         el("span", "processing-detail", processing.detail)
       );
       if (processing.stale) statusText.append(el("span", "processing-stale", processing.stale));
+      if (processing.canReparse) {
+        const again = button("重新交给 MinerU", "small", reparsePaper, "MinerU 久久没有结果：不再等这一次，把文件重新上传给 MinerU");
+        again.classList.add("processing-reparse");
+        statusText.append(again);
+      }
     } else if (paper.status === "failed") {
       statusText.textContent = paper.recoverable_pause
-        ? (paper.status_label || "额度不足，已暂停") : "处理失败";
+        ? (paper.status_label || "额度不足，已暂停") : paper.stopped ? "已停止" : "处理失败";
     } else if (paper.status === "needs_grouping") {
       statusText.textContent = "检测到题号重新开始或页面可能来自不同资料；确认调整页序或拆分任务后才会继续识读。";
     } else if (!c.all) {
@@ -1221,8 +1259,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("approveGreen").disabled = !c.green || structureBlocked;
     $("approveGreen").textContent = c.green ? `批量标记绿卡通过（${c.green}）` : "批量标记绿卡通过";
     $("approveGreen").title = "绿卡只表示机器识读彼此一致。批量标记前，请确认这些题符合你的审核标准。";
-    $("publishButton").disabled = !c.unpublished || structureBlocked;
-    $("publishButton").textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
+    renderPublishButton(c, structureBlocked);
     const notes = paper.notes || [];
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
     $("notesBox").hidden = true;
@@ -3154,6 +3191,42 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     loadQuestionTrash();
   }
 
+  // 停止处理（1.10.8）：排队中或在等 MinerU 的任务停下来，才能删除。
+  async function stopPaper() {
+    if (!state.paper || !["queued", "parsing"].includes(state.paper.status)) return;
+    const ok = await confirmDialog({
+      title: "停止处理这份任务？",
+      text: "题有据不再等 MinerU。停下来以后，可以在“试卷操作”里永久删除，或点“重试”重新开始。",
+      ok: "停止处理", danger: true
+    });
+    if (!ok) return;
+    try {
+      const data = await api(`/api/papers/${state.paperId}/stop`, { method: "POST", body: {} });
+      toast(data.message || "已停止", "success");
+      refreshPaper();
+      loadPapers();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  // 重新解析（1.10.7）：一份试卷在 MinerU 那里等太久时，重新上传给 MinerU。
+  async function reparsePaper() {
+    if (!state.paper || state.paper.status !== "parsing") return;
+    const queueing = state.paper.processing?.mineru?.state === "pending";
+    const ok = await confirmDialog({
+      title: "重新交给 MinerU 解析？",
+      text: queueing
+        ? "MinerU 说这份文件还在它那边排队。现在重新上传，会从队尾重新排起，一般不会更快。确定要重新交吗？"
+        : "题有据不再等这一次的结果，把文件重新上传给 MinerU。MinerU 很忙的时候，重新上传后也可能要排一会儿队。",
+      ok: "重新交给 MinerU"
+    });
+    if (!ok) return;
+    try {
+      const data = await api(`/api/papers/${state.paperId}/reparse`, { method: "POST", body: {} });
+      toast(data.message || "已重新交给 MinerU", "success");
+      refreshPaper();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
   async function retryPaper(materialType = null) {
     if (materialType === "book" && !(await confirmDialog({
       title: "按教材模式重试？",
@@ -3482,6 +3555,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const hasTrash = (Number(paper.trash_count) || 0) > 0;
     $("settingsRename").disabled = active;
     $("settingsRename").title = active ? "处理完成后才能修改名称" : "";
+    $("settingsReparse").hidden = !(paper.status === "parsing" && !paper.processing?.chunks && !paper.processing?.parsed_ahead);
+    // 1.10.8: a paper still queued or waiting on MinerU can be stopped, then deleted.
+    const stoppable = paper.status === "queued" || (paper.status === "parsing" && !paper.processing?.chunks);
+    $("settingsStop").hidden = !stoppable;
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -3507,6 +3584,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsDangerHint").textContent = published > 0
       ? `已有 ${published} 道正式题库记录。为保留来源追溯，只能归档，不能永久删除。`
       : isSplitTask ? "这是拆分资料的原稿或子任务；为保留双向追溯，只能归档。"
+      : active && stoppable ? "任务正在处理中：先点上面的“停止处理”，停下来以后就能删除。"
       : active ? "任务正在处理中，完成或失败后才能永久删除。"
         : "归档只从任务列表隐藏；永久删除会一并删除原文件和草稿，无法撤销。";
   }
@@ -3627,6 +3705,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
+  $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
+  $("settingsStop").addEventListener("click", () => closeSettingsThen(stopPaper));
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
@@ -3762,7 +3842,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } catch (error) { toast(error.message, "error"); }
   });
 
+  function renderPublishButton(c = counts(), structureBlocked = state.paper?.status === "needs_grouping") {
+    const button = $("publishButton");
+    const running = state.publishing && state.publishing.paperId === state.paperId ? state.publishing : null;
+    button.classList.toggle("is-busy", Boolean(running));
+    button.setAttribute("aria-busy", String(Boolean(running)));
+    if (running) {
+      button.disabled = true;
+      button.textContent = `正在入库 ${running.done} / ${running.total} 题…`;
+      return;
+    }
+    button.disabled = !c.unpublished || structureBlocked;
+    button.textContent = c.unpublished ? `入库（${c.unpublished} 题）` : "入库";
+  }
+
+  // 一次送 20 题：一本书几百题时，按钮上能看到入库到了哪里（1.10.5）。
+  const PUBLISH_BATCH = 20;
+
   async function publish() {
+    if (state.publishing) return;
     if (state.paper?.demo) {
       teach({ type: "publish" });
       await confirmDialog({
@@ -3772,17 +3870,43 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       return;
     }
+    const paperId = state.paperId;
+    const ids = state.questions.filter((q) => isApproved(q) && !(q.publication && q.publication.up_to_date)).map((q) => q.id);
+    const batches = [];
+    for (let start = 0; start < ids.length; start += PUBLISH_BATCH) batches.push(ids.slice(start, start + PUBLISH_BATCH));
+    if (!batches.length) batches.push(null);  // nothing new on screen: let the server check every approved card
+    const data = { created: 0, unchanged: 0, problems: [] };
+    state.publishing = { paperId, done: 0, total: ids.length };
+    renderPublishButton();
+    if (ids.length > PUBLISH_BATCH) toast(`正在入库 ${ids.length} 题，按钮上显示进度`);
     try {
-      const data = await api(`/api/papers/${state.paperId}/publish`, { method: "POST", body: {} });
-      const parts = [];
-      if (data.created) parts.push(`新入库 ${data.created} 题`);
-      if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
-      if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
-      toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
-        data.created && !data.problems.length ? { label: "去题库看看", onClick: () => { window.location.href = "/library"; } } : null);
-      refreshPaper();
+      for (const batch of batches) {
+        const result = await api(`/api/papers/${paperId}/publish`, { method: "POST", body: batch ? { question_ids: batch } : {} });
+        data.created += result.created;
+        data.unchanged += result.unchanged;
+        data.problems.push(...result.problems);
+        state.publishing.done += batch ? batch.length : 0;
+        if (state.paperId === paperId) renderPublishButton();
+      }
+    } catch (error) {
+      state.publishing = null;
+      toast(data.created ? `已入库 ${data.created} 题，其余没完成：${error.message}` : error.message, "error");
+      if (state.paperId === paperId) { renderPublishButton(); refreshPaper(); }
       loadPapers();
-    } catch (error) { toast(error.message, "error"); }
+      return;
+    }
+    state.publishing.done = state.publishing.total;
+    if (state.paperId === paperId) renderPublishButton();
+    state.publishing = null;
+    const parts = [];
+    if (data.created) parts.push(`新入库 ${data.created} 题`);
+    if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
+    if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
+    toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
+      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => { window.location.href = "/library"; } } : null);
+    // The button keeps its last count until the refreshed counts redraw it.
+    if (state.paperId === paperId) refreshPaper();
+    loadPapers();
   }
 
   $("publishButton").addEventListener("click", publish);

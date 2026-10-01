@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import models, transaction
+from django.db.models import Prefetch
 from django.db.models.functions import Cast
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -42,7 +43,7 @@ from .models import (
     RegionRead,
 )
 from .pipeline import (
-    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, preview_resegment, reorder_photo_pages,
+    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir, preview_resegment, reorder_photo_pages,
 )
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
@@ -303,6 +304,14 @@ def _processing_json(paper: Paper) -> dict | None:
                     "active_ranges": active,
                 },
             })
+        else:
+            # 1.10.6: one file at MinerU — show what MinerU says (queueing, page n of N…).
+            note = mineru.read_state(paper_dir(paper) / mineru.MINERU_STATE_FILE)
+            if note:
+                progress["mineru"] = note
+                if note["state"] == "running" and note.get("total_pages"):
+                    progress.update({"determinate": True, "completed": note["pages"],
+                                     "total": note["total_pages"], "unit": "page"})
     elif paper.status == Paper.Status.READING and paper.total:
         progress.update({
             "determinate": True,
@@ -331,20 +340,24 @@ def _processing_json(paper: Paper) -> dict | None:
 # readings and took a second or more each time.  Any change to the row, the
 # paper's name or the card's group gives a new fingerprint, so a stale answer
 # is never reused.
-_VERDICTS: "OrderedDict[int, tuple[str, bool, bool]]" = OrderedDict()
+_VERDICTS: "OrderedDict[int, tuple[str, str, bool, bool]]" = OrderedDict()
 _VERDICTS_LIMIT = 50_000
 _VERDICTS_LOCK = threading.Lock()
 
 
-def _verdict(row: Question) -> tuple[bool, bool]:
-    return library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+def _verdict(row: Question) -> tuple[str, bool, bool]:
+    """(state, approval current, figures block approval).  The state is read after
+    the figure review: a review saved under an older rule can turn a yellow card
+    green on screen (“已自动排除疑似多余图”), and the counts must say the same."""
+    approved, blocked = library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+    return row.state, approved, blocked
 
 
 def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tuple[int, str, bool, bool]]:
     """(id, state, approval current, figures block approval) for each card of the paper."""
     if rows is not None:
         with reusing_reviews():
-            return [(row.pk, row.state, *_verdict(row)) for row in rows]
+            return [(row.pk, *_verdict(row)) for row in rows]
     json_fields = [field.attname for field in Question._meta.concrete_fields if isinstance(field, models.JSONField)]
     plain_fields = [field.attname for field in Question._meta.concrete_fields
                     if not isinstance(field, models.JSONField)]
@@ -353,12 +366,12 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
         .values_list(*plain_fields, *[f"raw_{name}" for name in json_fields])
     )
     groups = {group.pk: (group.title, group.sequence) for group in paper.question_groups.all()}
-    pk_at, state_at, group_at = (plain_fields.index(name) for name in ("id", "state", "group_id"))
+    pk_at, group_at = (plain_fields.index(name) for name in ("id", "group_id"))
     fingerprints = {
         row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name)).encode()).hexdigest()
         for row in raw
     }
-    known: dict[int, tuple[bool, bool]] = {}
+    known: dict[int, tuple[str, bool, bool]] = {}
     with _VERDICTS_LOCK:
         for pk, fingerprint in fingerprints.items():
             held = _VERDICTS.get(pk)
@@ -378,7 +391,7 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
                     _VERDICTS.move_to_end(pk)
             while len(_VERDICTS) > _VERDICTS_LIMIT:
                 _VERDICTS.popitem(last=False)
-    return [(row[pk_at], row[state_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
+    return [(row[pk_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
 
 
 def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] | None = None) -> dict:
@@ -387,12 +400,15 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         paper.status == Paper.Status.FAILED
         and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
     )
+    stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "material_type": paper.material_type, "archived": paper.archived,
-        "status_label": "额度不足，已暂停" if quota_paused else Paper.Status(paper.status).label,
+        "status_label": "额度不足，已暂停" if quota_paused else "已停止" if stopped
+        else Paper.Status(paper.status).label,
         "recoverable_pause": quota_paused,
+        "stopped": stopped,
         "progress": paper.progress, "total": paper.total,
         "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
@@ -1505,6 +1521,67 @@ def page_preview(request, paper_id, page: int):
 
 
 @csrf_exempt
+def paper_reparse(request, paper_id):
+    """重新解析 (1.10.7): MinerU has been slow on this file; send it again.
+
+    Only while one file is waiting on MinerU.  The worker sees the request at
+    its next poll, stops waiting for the old task and uploads the file again.
+    A failed paper uses 重试 instead; a book in chunks retries its chunks.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    if paper.status != Paper.Status.PARSING:
+        return _error("只有正在等 MinerU 的试卷能重新解析；处理失败的试卷请点“重试”", 409)
+    if paper.import_chunks.exists():
+        return _error("这份资料是分片交给 MinerU 的；某一片出错后可以单独重跑那一片", 409)
+    folder = paper_dir(paper)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / mineru.RESTART_FILE).write_text("restart", encoding="utf-8")
+    except OSError:
+        return _error("没能通知后台重新解析，请稍后再试", 500)
+    return JsonResponse({"paper": paper_json(paper), "message": "已让后台重新把文件交给 MinerU"})
+
+
+@csrf_exempt
+def paper_stop(request, paper_id):
+    """停止处理 (1.10.8): a paper still waiting to be parsed stops, so it can be deleted.
+
+    Queued: stopped at once.  Waiting on MinerU (one file): the worker stops at
+    its next poll and marks the paper stopped.  Either way it then shows as
+    stopped with 删除 and 重试.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    stopped = Paper.objects.filter(pk=paper.pk, status=Paper.Status.QUEUED).update(
+        status=Paper.Status.FAILED, error=mineru.STOPPED_MESSAGE, updated_at=timezone.now())
+    if stopped:
+        paper.refresh_from_db()
+        return JsonResponse({"paper": paper_json(paper), "stopped": True, "message": "已停止，可以删除了"})
+    paper.refresh_from_db()
+    if paper.status != Paper.Status.PARSING:
+        return _error("只有排队中或正在等 MinerU 的任务能停止；处理失败或已完成的任务可以直接删除", 409)
+    if paper.import_chunks.exists():
+        return _error("分片解析中的资料暂时不能停止；等它解析完或出错后再删除", 409)
+    folder = paper_dir(paper)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / mineru.CANCEL_FILE).write_text("stop", encoding="utf-8")
+    except OSError:
+        return _error("没能通知后台停止，请稍后再试", 500)
+    return JsonResponse({"paper": paper_json(paper), "stopped": False,
+                         "message": "正在停止，几秒后就能删除"})
+
+
+@csrf_exempt
 def paper_retry(request, paper_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -1554,6 +1631,8 @@ def paper_retry(request, paper_id):
             Paper.Status.READING if has_questions else Paper.Status.QUEUED
         paper.error = ""
         paper.save(update_fields=fields)
+        # A stop request the worker never saw must not stop the retry (1.10.8).
+        (paper_dir(paper) / mineru.CANCEL_FILE).unlink(missing_ok=True)
         paper.questions.filter(state=Question.State.RED).update(state=Question.State.WAITING)
     return JsonResponse({
         "paper": paper_json(paper),
@@ -1635,22 +1714,32 @@ def approve_green(request, paper_id):
     now = timezone.now()
     changed = []
     with transaction.atomic():
+        # Yellow too: a figure review saved under an older rule can make a card
+        # green on screen (“已自动排除疑似多余图”) while the database still says
+        # yellow.  Such cards were shown as green and left out here (1.10.4).
         questions = list(paper.questions.select_for_update().select_related("paper").filter(
-            state=Question.State.GREEN,
+            state__in=[Question.State.GREEN, Question.State.YELLOW],
         ))
-        for question in questions:
-            if not question.stem.strip() or blocks_approval(stored_or_derived_review(question)) \
-                    or library.type_blocks_approval(question):
-                continue
-            # Already passed by the same kind of reviewer (or by a person): nothing to do.
-            if library.approval_is_current(question) and library.approval_source(question) in {approver[0], "human"}:
-                continue
-            if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
-                continue
-            question.updated_at = now
-            changed.append(question)
+        # Approving changes nothing the figure review reads, so each card's is worked out once.
+        with reusing_reviews():
+            for question in questions:
+                review = stored_or_derived_review(question)
+                if question.state != Question.State.GREEN:
+                    continue
+                if not question.stem.strip() or blocks_approval(review) or library.type_blocks_approval(question):
+                    continue
+                # Already passed by the same kind of reviewer (or by a person): nothing to do.
+                if library.approval_is_current(question) \
+                        and library.approval_source(question) in {approver[0], "human"}:
+                    continue
+                if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
+                    continue
+                question.updated_at = now
+                changed.append(question)
         Question.objects.bulk_update(changed, [
             "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "updated_at",
+            # the review as shown (and approved), so the card stays green
+            "figure_review", "flags", "state",
         ])
         for question in changed:
             library.confirm_published_review(question)
@@ -1670,8 +1759,24 @@ def publish_paper(request, paper_id):
         return JsonResponse({"error": demo.PUBLISH_REFUSED, "demo": True}, status=409)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再入库")
+    payload = _body(request) or {}
+    # 1.10.5: the page sends the cards in small batches (question_ids) so it can
+    # show how far it got; without them every approved card is taken (tiyouju).
+    ids = payload.get("question_ids")
+    if ids is not None and (not isinstance(ids, list) or len(ids) > 200
+                            or not all(isinstance(value, int) and not isinstance(value, bool) for value in ids)):
+        return _error("question_ids 需为最多 200 个题卡编号")
+    questions = paper.questions.filter(approved=True).select_related("paper", "group").prefetch_related(
+        Prefetch("publications", queryset=PublishedQuestion.objects.only(*library.LIVE_PUBLICATION_FIELDS,
+                                                                          "review_source").order_by("-version"),
+                 to_attr="versions"))
+    if ids is not None:
+        questions = questions.filter(pk__in=ids)
     created, unchanged, problems = 0, 0, []
-    for question in paper.questions.filter(approved=True):
+    for question in questions:
+        if library.already_published(question):
+            unchanged += 1
+            continue
         try:
             _, is_new = library.publish(question)
         except ValueError as error:

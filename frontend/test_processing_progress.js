@@ -49,6 +49,49 @@ const singleMineru = Progress.processingPresentation({
 assert.equal(singleMineru.determinate, false);
 assert.match(singleMineru.detail, /MinerU 没有提供完成百分比/);
 
+// 1.10.6: MinerU's own state, when the worker has heard it.
+const mineruQueue = Progress.processingPresentation({
+  status: "parsing",
+  processing: { stage: "parsing", determinate: false, elapsed_seconds: 200, idle_seconds: 2,
+    mineru: { state: "pending", for_seconds: 130 } }
+});
+assert.equal(mineruQueue.headline, "在 MinerU 排队中 · 已等 2分10秒");
+assert.match(mineruQueue.detail, /题有据没有卡住/);
+assert.equal(mineruQueue.determinate, false);
+const mineruPages = Progress.processingPresentation({
+  status: "parsing",
+  processing: { stage: "parsing", determinate: true, completed: 3, total: 4, unit: "page",
+    elapsed_seconds: 260, idle_seconds: 1, mineru: { state: "running", for_seconds: 40, pages: 3, total_pages: 4 } }
+});
+assert.equal(mineruPages.headline, "MinerU 识别中 · 第 3/4 页");
+assert.equal(mineruPages.ratio, 3 / 4);
+assert.equal(Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", mineru: { state: "converting", for_seconds: 3 } }
+}).headline, "MinerU 识别完了，正在打包结果");
+
+// 1.10.7/1.10.8: 重新交给 MinerU only where it can help — not while MinerU says it is queueing
+// (that only moves the file to the back), nor for chunks or while the result is coming back.
+assert.equal(mineruQueue.canReparse, false);
+const reparseAfter = (state, seconds) => Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", elapsed_seconds: seconds, mineru: state ? { state, for_seconds: seconds } : undefined }
+}).canReparse;
+assert.equal(reparseAfter("pending", 3600), false);
+assert.equal(reparseAfter("waiting-file", 59), false);
+assert.equal(reparseAfter("waiting-file", 60), true);
+assert.equal(reparseAfter("running", 299), false);
+assert.equal(reparseAfter("running", 300), true);
+assert.equal(reparseAfter("", 90), true);
+assert.equal(Progress.processingPresentation({
+  status: "parsing", processing: { stage: "parsing", elapsed_seconds: 300, mineru: { state: "downloading", for_seconds: 90 } }
+}).canReparse, false);
+assert.equal(chunks.canReparse, false);
+assert.equal(queued.canReparse, false);
+const reparseSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+assert.match(reparseSource, /api\(`\/api\/papers\/\$\{state\.paperId\}\/reparse`, \{ method: "POST", body: \{\} \}\)/);
+assert.match(reparseSource, /if \(processing\.canReparse\) \{/);
+assert.match(indexHtml, /<button id="settingsReparse" class="link-button" type="button" hidden/);
+
 const reading = Progress.processingPresentation({
   status: "reading",
   processing: {
@@ -93,3 +136,10 @@ assert.match(appSource, /额度不足，已暂停/);
 assert.match(appSource, /classList\.toggle\("paused"/);
 
 console.log("truthful processing progress checks: OK");
+
+// 1.10.8: 停止处理 for a queued paper or one waiting on MinerU, so it can be deleted.
+assert.match(indexHtml, /<button id="settingsStop" class="link-button" type="button" hidden/);
+assert.match(reparseSource, /api\(`\/api\/papers\/\$\{state\.paperId\}\/stop`, \{ method: "POST", body: \{\} \}\)/);
+assert.match(reparseSource, /const stoppable = paper\.status === "queued" \|\| \(paper\.status === "parsing" && !paper\.processing\?\.chunks\);/);
+assert.match(reparseSource, /先点上面的“停止处理”，停下来以后就能删除。/);
+assert.match(reparseSource, /paper\.stopped \? "已停止" : "处理失败"/);

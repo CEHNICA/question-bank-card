@@ -21,7 +21,8 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, features, figure_policy, imaging, import_planning, photos, prose, qtypes, readers, segment, tables, textnorm,
+    cuts, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
+    textnorm,
 )
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
@@ -1056,23 +1057,47 @@ def parse(paper: Paper) -> None:
         def heartbeat() -> None:
             _paper_heartbeat(paper.pk)
 
-        if not archive.is_file():
-            request_extract_file_from_pool(
-                render, archive, len(paper.pages), heartbeat=heartbeat,
-            )
+        # What MinerU says it is doing, for the page (1.10.6).
+        state_file = folder / mineru.MINERU_STATE_FILE
+        # 重新解析 from the page: stop waiting for this MinerU task, upload again (1.10.7).
+        restart_file = folder / mineru.RESTART_FILE
+        # 停止处理 from the page: give up on MinerU so the paper can be deleted (1.10.8).
+        cancel_file = folder / mineru.CANCEL_FILE
+
+        def on_state(info: dict) -> None:
+            mineru.record_state(state_file, info)
+
+        def extract() -> None:
+            restart_file.unlink(missing_ok=True)
+            while True:
+                try:
+                    request_extract_file_from_pool(
+                        render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
+                        restart=restart_file.exists, cancel=cancel_file.exists,
+                    )
+                    return
+                except mineru.MineruRestart:
+                    restart_file.unlink(missing_ok=True)
+                    logger.info("paper %s sent to MinerU again on request", paper.pk)
+
         try:
-            blocks = load_blocks(archive, len(paper.pages))
-        except MineruError:
-            # Only remove the per-paper cache we own. A failed/oversized download used
-            # to leave a file behind, causing every retry to reopen the same bad ZIP.
-            owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
-            if not owned_archive:
-                raise
-            archive.unlink(missing_ok=True)
-            request_extract_file_from_pool(
-                render, archive, len(paper.pages), heartbeat=heartbeat,
-            )
-            blocks = load_blocks(archive, len(paper.pages))
+            if not archive.is_file():
+                extract()
+            try:
+                blocks = load_blocks(archive, len(paper.pages))
+            except MineruError:
+                # Only remove the per-paper cache we own. A failed/oversized download used
+                # to leave a file behind, causing every retry to reopen the same bad ZIP.
+                owned_archive = archive.name == "mineru_result.zip" and archive.parent.resolve() == folder.resolve()
+                if not owned_archive:
+                    raise
+                archive.unlink(missing_ok=True)
+                extract()
+                blocks = load_blocks(archive, len(paper.pages))
+        finally:
+            state_file.unlink(missing_ok=True)
+            restart_file.unlink(missing_ok=True)
+            cancel_file.unlink(missing_ok=True)
     if paper.photos:
         blocks = arrange_photo_pages(paper, blocks)
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])
@@ -3710,6 +3735,9 @@ def process_paper(paper: Paper) -> None:
             pending = list(paper.questions.filter(state__in=[Question.State.WAITING, Question.State.READING]))
             read_questions(paper, pending)
             _set(paper, status=Paper.Status.READY)
+    except mineru.MineruCancelled as error:
+        logger.info("paper %s stopped on request", paper.pk)
+        _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
     except readers.ReaderQuotaExhausted as error:
         # Quota exhaustion is recoverable after the user replenishes the plan.
         # Unfinished cards deliberately remain READING and paper_retry resumes
@@ -3737,6 +3765,10 @@ def parse_ahead(paper: Paper) -> bool:
             return False
         parse(paper)
         return True
+    except mineru.MineruCancelled as error:
+        logger.info("paper %s stopped on request", paper.pk)
+        _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
+        return False
     except Exception as error:
         logger.exception("paper failed while parsing ahead")
         message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \

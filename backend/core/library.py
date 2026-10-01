@@ -306,6 +306,24 @@ def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuesti
     return publication
 
 
+def already_published(question: Question) -> bool:
+    """The card's newest library version is live and is exactly what was approved:
+    ``publish`` would change nothing.  Uses ``question.versions`` (all versions,
+    newest first) when the caller prefetched them.  A version an AI passed that a
+    person has since approved is left to ``publish``, which relabels it."""
+    versions = getattr(question, "versions", None)
+    if versions is None:
+        latest = question.publications.order_by("-version").first()
+    else:
+        latest = versions[0] if versions else None
+    if latest is None or latest.status != PublishedQuestion.Status.PUBLISHED:
+        return False
+    if latest.review_source == "ai" and approval_source(question) == "human":
+        return False
+    return bool(question.approved_content_hash) and latest.content_hash == question.approved_content_hash \
+        and approval_is_current(question)
+
+
 def publish(question: Question) -> tuple[PublishedQuestion, bool]:
     """入库一题。内容没变就不重复生成版本。返回 (快照, 是否新建)。"""
     with transaction.atomic():
