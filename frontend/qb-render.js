@@ -590,6 +590,36 @@
     if (cursor < text.length) parent.append(document.createTextNode(text.slice(cursor)));
   }
 
+  /*
+   * tidyText 只动空白（合并空格、去掉汉字旁的空格和软换行），字符本身不变。
+   * 把 raw 上的标记（绝对位置，raw 起点 start）按非空白字符对到 text 上；
+   * 对不上，或某个标记只盖住空白时返回 null，由调用方整段标出。
+   */
+  function tidiedMarks(raw, text, start, marks) {
+    const at = [];
+    let j = 0;
+    for (let i = 0; i < raw.length; i += 1) {
+      if (/\s/.test(raw[i])) continue;
+      while (j < text.length && /\s/.test(text[j])) j += 1;
+      if (j >= text.length || text[j] !== raw[i]) return null;
+      at[i] = j;
+      j += 1;
+    }
+    const mapped = [];
+    for (const mark of marks) {
+      let first = -1;
+      let last = -1;
+      for (let i = Math.max(0, mark.start - start); i < Math.min(raw.length, mark.end - start); i += 1) {
+        if (at[i] === undefined) continue;
+        if (first < 0) first = at[i];
+        last = at[i];
+      }
+      if (first < 0) return null;
+      mapped.push({ ...mark, start: first, end: last + 1 });
+    }
+    return mapped;
+  }
+
   // ---------------------------------------------------------------- 表格
   // 格子里只有文字和数字的表格是题目文字：Markdown 管道表（| a | b |，第一行后
   // 可有 |---| 表头分隔行），有合并单元格时用只含 tr/td/th 与 rowspan/colspan 的 HTML。
@@ -768,6 +798,33 @@
     return node;
   }
 
+  const SPOT_OPEN = "\uE000";
+  const SPOT_CLOSE = "\uE001";
+
+  /*
+   * A formula with the characters of one mark coloured (a disputed exponent in
+   * “x^{3}”).  Only for a whole $…$ / $$…$$ / \(…\) / \[…\] formula, never
+   * splitting a command or a brace group; null otherwise, and the caller falls
+   * back to boxing the whole formula.
+   */
+  function colourLatex(source, segment, mark) {
+    if (segment.auto) return null;
+    const raw = source.slice(segment.start, segment.end);
+    const delimiter = raw.startsWith("$$") || raw.startsWith("\\[") || raw.startsWith("\\(") ? 2 : raw.startsWith("$") ? 1 : 0;
+    if (!delimiter) return null;
+    const inner = raw.slice(delimiter, raw.length - delimiter);
+    const from = mark.start - segment.start - delimiter;
+    const to = mark.end - segment.start - delimiter;
+    if (from < 0 || to > inner.length || from >= to) return null;
+    const piece = inner.slice(from, to);
+    if (/[{}\\$]/.test(piece)) return null;
+    // Not inside a command name (“\\frac”, “\\infty”).
+    const before = inner.slice(0, from);
+    if (/\\[A-Za-z]*$/.test(before) && /^[A-Za-z]/.test(piece)) return null;
+    const latex = explicitToLatex(`${before}${SPOT_OPEN}${piece}${SPOT_CLOSE}${inner.slice(to)}`);
+    return latex.replace(SPOT_OPEN, "{\\textcolor{#c2410c}{").replace(SPOT_CLOSE, "}}");
+  }
+
   /*
    * 排版一段文字。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
    */
@@ -815,7 +872,11 @@
         span.className = `qb-math${segment.auto ? " is-auto" : ""}${segment.display ? " is-display" : ""}`;
         const raw = source.slice(segment.start, segment.end);
         span.dataset.raw = raw;
-        if (!renderLatex(span, segment.latex, segment.display)) {
+        const exact = overlapping.find((mark) => mark.exact);
+        const coloured = exact ? colourLatex(source, segment, exact) : null;
+        if (coloured && renderLatex(span, coloured, segment.display)) {
+          // The disputed character itself is coloured inside the formula.
+        } else if (!renderLatex(span, segment.latex, segment.display)) {
           span.className = "qb-math-fallback";
           span.textContent = raw.replace(/^\$+|\$+$/g, "");
         }
@@ -854,14 +915,19 @@
       };
       const raw = source.slice(segment.start, segment.end);
       const text = tidyText(raw, neighbour(segments[index - 1], true), neighbour(segments[index + 1], false));
-      if (!overlapping.length || text !== raw) {
-        if (overlapping.length) {
+      if (!overlapping.length) node.append(document.createTextNode(text));
+      else if (text === raw) appendMarked(node, raw, segment.start, overlapping, "qb-mark");
+      else {
+        // Spaces and soft line breaks were tidied: mark the same characters in the tidied text.
+        const mapped = tidiedMarks(raw, text, segment.start, overlapping);
+        if (mapped) appendMarked(node, text, 0, mapped, "qb-mark");
+        else {
           const mark = document.createElement("mark");
           mark.className = `qb-mark ${overlapping[0].kind || ""}`.trim();
           mark.textContent = text;
           node.append(mark);
-        } else node.append(document.createTextNode(text));
-      } else appendMarked(node, raw, segment.start, overlapping, "qb-mark");
+        }
+      }
     });
     // 公式后紧跟的中文标点不应单独折到下一行行首。
     node.querySelectorAll(".qb-math, .qb-mark-math").forEach((math) => {
@@ -1057,7 +1123,8 @@
   return {
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
-    detectRuns, runToLatex, explicitToLatex, typesetSegments,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText
+    detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
+    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
+    tidiedMarks
   };
 });

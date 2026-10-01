@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from . import features, imaging, prose, qtypes
 from .figure_policy import (
+    DECISION_FLAGS,
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
 )
 from .models import LibraryJob, Paper, PublishedQuestion, Question, QuestionGroup
@@ -534,6 +535,52 @@ def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
     return changed
 
 
+_BRACKET_NOTE = re.compile(r"[（(【\[][^）)】\]]{0,14}[）)】\]]")
+
+
+def _without_invented_options(options: dict, figure_slots: set[str] = frozenset()) -> tuple[dict, list[str]]:
+    """Options without a model's “（原卷此处为配图…）” note, and the letters that were only that.
+
+    An option that has its picture (a picture option) just loses the note.
+    """
+    from .readers import strip_bracketed_figure_descriptions
+
+    kept, dropped = {}, []
+    for key, value in (options or {}).items():
+        text, described = strip_bracketed_figure_descriptions(str(value or ""))
+        if described and not text.strip():
+            if key not in figure_slots:
+                dropped.append(key)
+            continue
+        kept[key] = text if described else value
+    return kept, sorted(dropped)
+
+
+def _restore_from_readings(options: dict, letters: list[str], question: Question) -> tuple[dict, list[str]]:
+    """Take a dropped option from a reading that did read it (高一质量检测一第 11 题：读法甲读出了
+    “f(1,5)=f(5,1)”，裁决却写成了配图说明)."""
+    from .readers import strip_bracketed_figure_descriptions
+    from .textnorm import canon
+
+    restored: list[str] = []
+    kept = dict(options)
+    existing = {canon(str(value)) for value in kept.values() if str(value or "").strip()}
+    for letter in letters:
+        for reading in (question.read_a, question.read_b):
+            if not isinstance(reading, dict) or not isinstance(reading.get("options"), dict):
+                continue
+            text, described = strip_bracketed_figure_descriptions(str(reading["options"].get(letter) or ""))
+            # “（图片）”, “（图略）”: another note, not the option.
+            note = _BRACKET_NOTE.fullmatch(text.strip()) and "图" in text
+            if described or note or not text.strip() or canon(text) in existing:
+                continue
+            kept[letter] = text.strip()
+            existing.add(canon(text))
+            restored.append(letter)
+            break
+    return dict(sorted(kept.items())), restored
+
+
 def tidy_saved_cards() -> dict[str, int]:
     """Bring cards read by older versions up to the current text rules.
 
@@ -548,6 +595,8 @@ def tidy_saved_cards() -> dict[str, int]:
     reminder (yellow); it cannot be approved until a type is chosen.
     """
 
+    from .pipeline import read_c_with_spots
+
     switches = features.load()
     counts = {"questions": 0, "publications": 0}
     with transaction.atomic():
@@ -559,17 +608,48 @@ def tidy_saved_cards() -> dict[str, int]:
                 # choice, whatever the reader said.  Only cards nobody has
                 # approved, edited or typed by hand.
                 kind = qtypes.with_section(kind, question.section)
+            invented: list[str] = []
+            if not (question.approved or question.edited):
+                # 1.10.2: an option the model wrote as “（原卷此处为配图，无印刷文字）”
+                # was not read; say so instead of keeping the note as its text.
+                figure_slots = {figure.get("slot") for figure in question.figures or [] if isinstance(figure, dict)}
+                options, invented = _without_invented_options(options, figure_slots)
             answer = prose.tidy_value(question.answer, switches=switches)
             analysis = prose.tidy_value(question.analysis, switches=switches)
-            flags, state = qtypes.sync(question.flags, question.state, kind)
+            current_flags = list(question.flags or [])
+            if invented:
+                options, restored = _restore_from_readings(options, invented, question)
+                current_flags.extend(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对" for letter in restored)
+                missing = [letter for letter in invented if letter not in restored]
+                if missing:
+                    current_flags.append(f"选项 {'、'.join(missing)} 没有读出来，请对照原卷补上")
+            base_state = question.state
+            review = question.figure_review if isinstance(question.figure_review, dict) else {}
+            if review.get("source") == "human" and any(flag in DECISION_FLAGS for flag in current_flags):
+                # 1.10.2: a person already settled the figures (e.g. confirmed 无图), yet
+                # “别的题认为有一张图属于本题，请确认是否需要” stayed on the card.
+                current_flags = [flag for flag in current_flags if flag not in DECISION_FLAGS]
+                if not current_flags and base_state == Question.State.YELLOW:
+                    base_state = Question.State.GREEN
+            flags, state = qtypes.sync(current_flags, base_state, kind)
+            if invented and state == Question.State.GREEN:
+                state = Question.State.YELLOW
             before = (question.stem, dict(question.options or {}), question.question_type, question.origin,
                       question.answer, question.analysis, list(question.flags or []), question.state)
             if (stem, options, kind, origin, answer, analysis, flags, state) == before:
+                # 1.10.2: store where the “MinerU 读法不同” spots are, once, so the
+                # review page need not look them up again on every load.
+                spotted = read_c_with_spots(question)
+                if spotted is not None:
+                    Question.all_objects.filter(pk=question.pk).update(read_c=spotted)
                 continue
             approval_was_current = approval_is_current(question)
             question.stem, question.options, question.question_type = stem, options, kind
             question.origin, question.answer, question.analysis = origin, answer, analysis
             question.flags, question.state = flags, state
+            spotted = read_c_with_spots(question)
+            if spotted is not None:
+                question.read_c = spotted
             for field in ("read_a", "read_b", "read_c"):
                 setattr(question, field, _tidy_reading(getattr(question, field), switches, origin))
             if approval_was_current and approval_is_current_ignoring_hash(question):

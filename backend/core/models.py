@@ -338,3 +338,32 @@ class LibraryJob(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class RegionRead(models.Model):
+    """框选识读：人在原卷上框出一小块，让读题模型单独读这一块（1.10.2）。
+
+    比如选项 A 被手写的 × 盖住、整题识读把它写错了：框住印刷的那一行，读出来
+    的文字由人确认后填进选项 A。网页只排队（网页进程拿不到密钥），后台工作者
+    读完写回 ``text``。每道题只保留最近一次。
+    """
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "排队中"
+        RUNNING = "running", "进行中"
+        DONE = "done", "完成"
+        FAILED = "failed", "失败"
+
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="region_reads")
+    page_idx = models.PositiveIntegerField()
+    bbox = models.JSONField()
+    target = models.CharField(max_length=8)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    text = models.TextField(blank=True, default="")
+    error = models.CharField(max_length=300, blank=True, default="")
+    engine = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at"]

@@ -896,6 +896,14 @@ def blocking_message(review: dict | None) -> str:
     return "配图状态还需要确认"
 
 
+# Questions to a person about figures another step placed on this card.  A
+# person's own figure decision (pick figures, or confirm there is none)
+# answers them; the automatic check never does.
+FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
+FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加上，请确认是否需要"
+DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE})
+
+
 def figure_flag(flag: str) -> bool:
     return flag in {FLAG_NO_FIGURE, LEGACY_FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, FLAG_UNCUED_FIGURE} \
         or "选项是图" in flag

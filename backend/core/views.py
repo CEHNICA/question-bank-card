@@ -24,18 +24,22 @@ from PIL import Image
 from .version import APP_VERSION
 from . import (
     credential_settings, demo, features, imaging, import_planning, knowledge, library, library_jobs, m3import,
-    mineru, photos, preferences, prose, qtypes, readers, tables,
+    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables,
 )
 from .figure_policy import (
-    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
+    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, DECISION_FLAGS, FLAG_FOREIGN_FIGURE, FLAG_NO_FIGURE,
+    FLAG_ROW_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
     cue_matches, figure_flag,
     stored_or_derived_review,
 )
 from .models import (
     Block, ImportChunk, LibraryJob, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
+    RegionRead,
 )
-from .pipeline import TEXT_DRAFT_FLAGS, PageStore, candidates_in, preview_resegment, reorder_photo_pages
+from .pipeline import (
+    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, preview_resegment, reorder_photo_pages,
+)
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
@@ -451,6 +455,10 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         "answer": question.answer, "analysis": question.analysis, "origin": question.origin,
         "type_blocked": library.type_blocks_approval(question),
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
+        # 1.10.2: the spots “MinerU 读法不同” names — boxed on the crop, marked in the text.
+        "check_spots": check_spots(question),
+        # 1.10.2: 框选识读 — the last region a person asked to read on its own.
+        "region_read": region_reads.latest_json(question),
         "publication": library.publication_state(question),
     }
 
@@ -1332,7 +1340,8 @@ def paper_detail(request, paper_id):
         "paper": paper_json(paper),
         "questions": [
             question_json(q, paper_tables)
-            for q in paper.questions.select_related("group").order_by("group__sequence", "number", "id")
+            for q in paper.questions.select_related("group").prefetch_related("region_reads")
+            .order_by("group__sequence", "number", "id")
         ],
     })
 
@@ -1727,6 +1736,10 @@ def _apply_figure_review(question: Question, review: dict) -> None:
     """Store a local decision and keep legacy flags/state in sync for old clients."""
     question.figure_review = review
     question.flags = [flag for flag in (question.flags or []) if not figure_flag(flag)]
+    if review.get("source") == "human":
+        # A person picked the figures or confirmed there is none: “别的题认为有一张图
+        # 属于本题，请确认是否需要” is answered (it stayed on cards confirmed 无图).
+        question.flags = [flag for flag in question.flags if flag not in DECISION_FLAGS]
     if review.get("status") == BLOCKED_MISSING:
         question.flags.append(FLAG_NO_FIGURE if review.get("cue_matches") and not question.figures
                               else FLAG_UNFOUND_FIGURE)
@@ -1737,6 +1750,48 @@ def _apply_figure_review(question: Question, review: dict) -> None:
         )
     if question.state in library.REVIEWABLE_STATES:
         question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+
+
+def _vision_ready() -> bool:
+    """Some vision service has a key (框选识读 needs one; AI-assistant reading has none)."""
+    try:
+        configuration = preferences.load_configuration() if preferences.preference_path().is_file() else None
+    except preferences.PreferenceError:
+        configuration = None
+    return readers.primary_engine(configuration) is not None
+
+
+@csrf_exempt
+def question_region_read(request, question_id):
+    """框选识读：POST 排队读原卷上框出的一小块（只读，不改题卡）；DELETE 收起结果。"""
+    if request.method not in {"POST", "DELETE"}:
+        return HttpResponseNotAllowed(["POST", "DELETE"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    question = get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
+    if request.method == "DELETE":
+        question.region_reads.all().delete()
+        return JsonResponse({"question": question_json(question)})
+    target = payload.get("target")
+    if target not in region_reads.TARGETS:
+        return _error("请选择读出来的文字填到题干还是哪个选项")
+    page_idx = payload.get("page_idx")
+    pages = {int(page["page_idx"]) for page in question.paper.pages or []}
+    if type(page_idx) is not int or page_idx not in pages:
+        return _error("页码不正确")
+    bbox = _valid_bbox(payload.get("bbox"))
+    if bbox is None or bbox[2] - bbox[0] < 4 or bbox[3] - bbox[1] < 2:
+        return _error("框太小了，请框住要识读的整行字")
+    if not _vision_ready():
+        return _error(region_reads.NO_ENGINE)
+    with transaction.atomic():
+        question.region_reads.all().delete()
+        RegionRead.objects.create(question=question, page_idx=page_idx, bbox=bbox, target=target)
+    return JsonResponse({"question": question_json(question)})
 
 
 @csrf_exempt
@@ -2076,6 +2131,12 @@ def question_action(request, question_id, action: str):
                         "excluded_count": len(previous_ignored),
                     }
                 _apply_figure_review(question, review)
+                # The figures put back still came from another card's reading or a shared row.
+                for source, flag in (("other", FLAG_FOREIGN_FIGURE), ("row", FLAG_ROW_FIGURE)):
+                    if any(item.get("source") == source for item in restored) and flag not in question.flags:
+                        question.flags.append(flag)
+                if question.state in library.REVIEWABLE_STATES:
+                    question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             _clear_approval(question)
         else:
             raise Http404()

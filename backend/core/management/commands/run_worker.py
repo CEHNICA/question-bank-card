@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 
-from core import credential_settings, library_jobs, preferences
+from core import credential_settings, library_jobs, preferences, region_reads
 from core.account_pool import lease_priority, reset_account_pools
 from core.models import Paper, Question
 from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail
@@ -37,6 +37,9 @@ def reread_lane(stop: threading.Event, interval: float = 1.5) -> None:
                     process_rereads(idle_papers_only=True)
                 finally:
                     REREAD_LOCK.release()
+            # 框选识读：人在题卡前等着，不等主线上的长任务。
+            if region_reads.pending():
+                region_reads.process_pending()
         except Exception:  # the lane must never take the worker down
             logger.exception("reread lane error")
         finally:
@@ -299,6 +302,7 @@ class Command(BaseCommand):
         clean_saved_example_labels(self.stdout)
         try:
             library_jobs.recover_interrupted()
+            region_reads.recover_interrupted()
         except Exception:
             logging.getLogger("core").exception("library job recovery failed")
         stop = threading.Event()
@@ -332,6 +336,10 @@ class Command(BaseCommand):
                     with REREAD_LOCK:
                         if process_rereads():
                             worked = True
+                if region_reads.pending():
+                    apply_saved_settings()
+                    if region_reads.process_pending():
+                        worked = True
                 # 题库里排队的知识点标签、AI 参考答案（设置里默认关）。
                 if library_jobs.pending():
                     apply_saved_settings()

@@ -385,6 +385,11 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .crop-join { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding: 5px 2px; letter-spacing: .04em; }
 .crop-join::before, .crop-join::after { content: ""; flex: 1; border-top: 1px dashed var(--line-strong); }
 .crop-figure { position: absolute; border: 2px solid rgba(31, 107, 95, .7); border-radius: 3px; background: rgba(31, 107, 95, .05); pointer-events: none; }
+/* 1.10.2：MinerU 读法不同的地方，在原卷上框出要对照的那一行，编号和提示里的①②一致 */
+.crop-spot { position: absolute; border: 2px dashed #c2410c; border-radius: 3px; background: rgba(234, 88, 12, .07); pointer-events: auto; }
+.crop-spot-label { position: absolute; left: -2px; bottom: calc(100% + 1px); padding: 0 4px; border-radius: 3px;
+  background: #c2410c; color: #fff; font: 600 11px/1.45 var(--ui-font); letter-spacing: .04em; white-space: nowrap; }
+.crop-spot.label-below .crop-spot-label { top: calc(100% + 1px); bottom: auto; }
 .source-note { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -5px; padding: 3px 7px 3px 5px; border: 0; border-radius: 6px;
   background: transparent; font: inherit; font-size: 11.5px; color: var(--muted); text-align: left; cursor: zoom-in; }
 .source-note:hover, .source-note:focus-visible { background: rgba(0, 0, 0, .045); color: var(--ink-2); outline: 0; }
@@ -439,6 +444,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .reading-difference-text { color: var(--ink); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .reading-difference .button { justify-self: start; }
 .flags .flag-spot { margin: 0 1px; padding: 0 2px; background: linear-gradient(transparent 55%, var(--marker-strong) 55%); color: var(--ink); font-weight: 600; }
+.flags .flag-spot-number { margin: 0 2px 0 1px; padding: 0 4px; border-radius: 3px; background: #c2410c; color: #fff; font-size: 11px; font-weight: 600; }
 .reading-difference-context { color: var(--muted, #7a746a); }
 .reading-difference-extra { margin: 0 1px; padding: 0 2px; background: linear-gradient(transparent 55%, var(--marker-strong) 55%); color: var(--ink); font-weight: 600; }
 .figure-review { display: grid; gap: 6px; padding: 9px 12px 10px 13px; border: 0; border-left: 3px solid var(--line-strong); border-radius: 0 8px 8px 0; background: var(--surface-2); color: var(--ink-2); }
@@ -1040,6 +1046,9 @@ mark.qb-mark.is-change.current { background: linear-gradient(transparent 52%, va
 mark.qb-mark.is-change.observed { background: linear-gradient(transparent 52%, var(--marker-blue) 52%, var(--marker-blue) 94%, transparent 94%); }
 mark.qb-mark.is-variant { background: none; text-decoration: underline dotted var(--violet) 2px; text-underline-offset: 4px; }
 mark.qb-mark-math { padding: 0 2px; }
+/* 要对照原卷的字：整段公式加框，那个字本身标成橙色（qb-render colourLatex） */
+mark.qb-mark.spot { background: none; outline: 1.5px dashed #c2410c; outline-offset: 1px; border-radius: 2px; }
+mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .qb-bracket { white-space: pre; }
 .qb-nobr { white-space: nowrap; }
 .qb-choice-answer { font-weight: 700; letter-spacing: .08em; }
@@ -1103,3 +1112,13 @@ mark.qb-mark-math { padding: 0 2px; }
 /* 放大对照窗口里，左下角是“改字 / 上一题”等按钮：卡片挪到右下，按钮上方。 */
 .viewer-dialog > .teach-panel { left: auto; right: 20px; bottom: 78px; }
 @media (max-width: 760px) { .teach-panel { left: 12px; right: 12px; width: auto; } }
+
+/* 1.10.2 框选识读：题卡上的结果 */
+.region-read { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 8px; background: #fbfdfc; }
+.region-read.failed { border-left-color: var(--amber-bar); background: var(--amber-soft); }
+.region-read-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.region-read-text { margin: 6px 0 2px; font-size: 16px; line-height: 1.9; }
+.region-read-error { margin: 6px 0 0; color: var(--amber); font-size: 13px; }
+.region-read .hint { margin: 4px 0 0; font-size: 12px; }
+.region-read-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.editor input.prefilled { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }

@@ -24,9 +24,10 @@ class ModelPreferenceTests(SimpleTestCase):
         # The worker loop also checks the library job queue (1.10); these
         # database-free tests must not reach it, or each run logs an error
         # and sleeps five seconds.
-        jobs = mock.patch.object(run_worker.library_jobs, "pending", return_value=False)
-        jobs.start()
-        self.addCleanup(jobs.stop)
+        for queue in (run_worker.library_jobs, run_worker.region_reads):
+            patcher = mock.patch.object(queue, "pending", return_value=False)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def env(self):
         return mock.patch.dict(os.environ, {

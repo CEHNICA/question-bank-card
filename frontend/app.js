@@ -1058,7 +1058,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderPaper();
     if ($("viewerDialog").open) renderViewer();
     const busy = ACTIVE_STATUS.has(state.paper.status)
-      || state.questions.some((q) => q.state === "waiting" || q.state === "reading");
+      || state.questions.some((q) => q.state === "waiting" || q.state === "reading" || regionReadPending(q));
     if (busy) state.pollTimer = setTimeout(refreshPaper, 2500);
   }
 
@@ -1812,7 +1812,45 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const PREVIEW_LONG_SIDE = 2000;
 
-  function cropView(regions, { figures = [], onZoom, capToNatural = false } = {}) {
+  const SPOT_DIGITS = "①②③④⑤⑥⑦⑧⑨⑩";
+
+  function spotNumber(n) {
+    return SPOT_DIGITS[n - 1] || String(n);
+  }
+
+  // One box per MinerU line, labelled with every spot in it (②③④ on the same line).
+  function spotBoxes(spots) {
+    const boxes = new Map();
+    (Array.isArray(spots) ? spots : []).forEach((spot) => {
+      if (!Array.isArray(spot?.bbox) || spot.bbox.length !== 4 || !Number.isInteger(spot.page_idx)) return;
+      const key = `${spot.page_idx}:${spot.bbox.join(",")}`;
+      if (!boxes.has(key)) boxes.set(key, { page_idx: spot.page_idx, bbox: spot.bbox, numbers: [], notes: [] });
+      const box = boxes.get(key);
+      box.numbers.push(spotNumber(spot.n));
+      box.notes.push(`${spotNumber(spot.n)} 读作“${spot.reading}”，MinerU 读作“${spot.mineru}”`);
+    });
+    return [...boxes.values()].map((box) => ({
+      ...box, label: box.numbers.join(""), title: `对照这一行：${box.notes.join("；")}`
+    }));
+  }
+
+  // The characters to check, marked in the text (inside a formula: the formula boxed, the character coloured).
+  function spotTextMarks(q) {
+    const marks = {};
+    (q.check_spots || []).forEach((spot) => {
+      if (!spot.field || !Number.isInteger(spot.start) || !Number.isInteger(spot.end)) return;
+      (marks[spot.field] ||= []).push({ start: spot.start, end: spot.end, kind: "spot", exact: true });
+    });
+    return marks;
+  }
+
+  function reviewMarks(q) {
+    const marks = { ...diffMarks(q) };
+    Object.entries(spotTextMarks(q)).forEach(([field, list]) => { marks[field] = [...(marks[field] || []), ...list]; });
+    return marks;
+  }
+
+  function cropView(regions, { figures = [], spots = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
       wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点右边的“调整范围”，在原卷上把它框出来，AI 会自动读题。"));
@@ -1861,6 +1899,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         box.style.width = `${((fx1 - fx0) / rw) * 100}%`;
         box.style.height = `${((fy1 - fy0) / rh) * 100}%`;
         box.title = `配图（${SLOT_NAMES[figure.slot] || figure.slot}）`;
+        segment.append(box);
+      });
+      // 1.10.2: where MinerU read the paper differently — the line to compare, numbered as in the flag.
+      spotBoxes(spots).filter((spot) => spot.page_idx === region.page_idx).forEach((spot) => {
+        const [sx0, sy0, sx1, sy1] = spot.bbox;
+        if (sx1 < x0 || sx0 > x1 || sy1 < y0 || sy0 > y1) return;
+        // The number sits just above the line it marks (below when the line is at the top of the crop).
+        const box = el("span", `crop-spot${(Math.max(sy0, y0) - y0) / rh < 0.15 ? " label-below" : ""}`);
+        box.style.left = `${((Math.max(sx0, x0) - x0) / rw) * 100}%`;
+        box.style.top = `${((Math.max(sy0, y0) - y0) / rh) * 100}%`;
+        box.style.width = `${((Math.min(sx1, x1) - Math.max(sx0, x0)) / rw) * 100}%`;
+        box.style.height = `${((Math.min(sy1, y1) - Math.max(sy0, y0)) / rh) * 100}%`;
+        box.title = spot.title;
+        box.append(el("span", "crop-spot-label", spot.label));
         segment.append(box);
       });
       if (index > 0) wrap.append(el("div", "crop-join", `接第 ${region.page_idx + 1} 页`));
@@ -2012,7 +2064,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const crop = $("viewerCrop");
     const regions = q.regions || [];
     if (!regions.length && viewer.mode === "fit") viewer.zoom = 1;
-    crop.replaceChildren(cropView(regions, { figures: q.figures || [] }));
+    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots }));
     // 又宽又矮的截图（一两行字的题）改成上下排：原卷能占满整个窗口宽度。
     $("viewerSource").parentElement.classList.toggle("stacked", cropAspect(regions) > 2.5 && window.innerWidth > 1100);
     applyZoom();
@@ -2026,7 +2078,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (disagreement) text.append(disagreement);
     if (q.stem) {
       const body = el("div");
-      R.renderQuestion(body, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed" });
+      R.renderQuestion(body, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed" });
       text.append(body);
       requestAnimationFrame(() => R.fitOptions(body));
     } else text.append(el("p", "hint", q.state === "waiting" || q.state === "reading" ? "AI 正在读这道题……" : "还没有题面"));
@@ -2513,12 +2565,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // “…当销售【单】价为1…（MinerU：定）”: the disputed characters stand out.
+  // 1.10.2: the spots of “MinerU 读法不同” are numbered ①② like their boxes on the crop.
+  const SPOT_FLAG = /^((?:两次识读一致|第三次识读裁决后)[^：]*：)([\s\S]*)$/;
+
   function flagItem(flag) {
     const item = el("li");
-    String(flag).split(/(【[^】]{1,40}】)/).forEach((part) => {
+    const appendMarked = (text) => String(text).split(/(【[^】]{1,40}】)/).forEach((part) => {
       if (!part) return;
       if (/^【[^】]+】$/.test(part)) item.append(el("mark", "flag-spot", part.slice(1, -1)));
       else item.append(document.createTextNode(part));
+    });
+    const spotFlag = SPOT_FLAG.exec(String(flag));
+    if (!spotFlag) { appendMarked(flag); return item; }
+    item.append(document.createTextNode(spotFlag[1]));
+    spotFlag[2].split("；").forEach((piece, index) => {
+      if (index) item.append(document.createTextNode("；"));
+      item.append(el("span", "flag-spot-number", spotNumber(index + 1)));
+      appendMarked(piece);
     });
     return item;
   }
@@ -2664,7 +2727,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
     // 1.10.1：每张卡都是左图右文（以前宽的截图会改成上图下文，版式和打勾位置跟着变）。
-    sticky.append(cropView(q.regions, { figures: q.figures, onZoom: () => openViewer(q), capToNatural: true }));
+    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, onZoom: () => openViewer(q), capToNatural: true }));
     // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
     const sourceNote = el("button", "source-note");
     sourceNote.type = "button";
@@ -2706,8 +2769,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       origin.title = "题干前印的出处，单独存放；组卷打印时默认不印。在“改字”里可以修改";
       body.append(origin);
     }
+    const regionPanel = regionReadPanel(card, q);
+    if (regionPanel) body.append(regionPanel);
     const rendered = el("div", "rendered");
-    if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: diffMarks(q), showAnswer: "collapsed",
+    if (q.stem) R.renderQuestion(rendered, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed",
       figureAction: (figure) => tableAction(q, figure) });
     else rendered.append(el("p", "hint", "还没有题面"));
     body.append(rendered);
@@ -2728,7 +2793,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
       button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "截图框多了或少了，拖一下；保存后 AI 自动重读（R）"),
-      button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })
+      button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" }),
+      button("框选识读", "", () => openPageDialog("read", q), "在原卷上框出一小块（比如被手写盖住的选项），让 AI 单独读这一块")
     );
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -3720,8 +3786,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 改字
 
-  function openEditor(card, q) {
-    if (card.querySelector(".editor")) { card.querySelector(".stem-input")?.focus(); return; }
+  function openEditor(card, q, { prefill = null } = {}) {
+    if (card.querySelector(".editor")) {
+      if (prefill) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
+      card.querySelector(".stem-input")?.focus();
+      return;
+    }
     state.editing.add(q.id);
     setCurrent(q.id);
     const editor = el("form", "editor");
@@ -3889,11 +3959,92 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     card.querySelector(".card-body").append(editor);
     // The original stays in sight while typing: the left column is sticky.
     card.classList.add("editing");
+    let prefilled = null;
+    if (prefill && optionInputs[prefill.field]) {
+      // 框选识读的结果：填进那个选项，标出来，人看过再保存。
+      prefilled = optionInputs[prefill.field];
+      prefilled.value = prefill.value;
+      prefilled.classList.add("prefilled");
+      prefilled.title = "框选识读读出来的字，请对照原卷后保存";
+    }
     fitStem();
     placePreview();
     update();
-    stem.focus({ preventScroll: true });
+    (prefilled || stem).focus({ preventScroll: true });
     card.scrollIntoView({ block: "start" });
+  }
+
+  // ---------------------------------------------------------------- 框选识读（1.10.2）
+
+  // Where the read text probably goes: an option the reading missed or invented a note for, else the stem.
+  function readTargetGuess(q) {
+    if (q.region_read?.target) return q.region_read.target;
+    const options = q.options || {};
+    const letters = Object.keys(options).filter((key) => OPTION_KEYS.includes(key) && String(options[key] || "").trim());
+    if (CHOICE.has(q.question_type) || letters.length) {
+      const last = Math.max(3, ...letters.map((key) => OPTION_KEYS.indexOf(key)));
+      const missing = OPTION_KEYS.slice(0, last + 1).find((key) => !String(options[key] || "").trim()
+        && !(q.figures || []).some((figure) => figure.slot === key));
+      if (missing) return missing;
+      const spot = (q.check_spots || []).find((item) => OPTION_KEYS.includes(item.field));
+      if (spot) return spot.field;
+    }
+    return "stem";
+  }
+
+  function regionReadPending(q) {
+    return Boolean(q.region_read && ["queued", "running"].includes(q.region_read.status));
+  }
+
+  async function dismissRegionRead(q) {
+    try {
+      applyQuestion(await api(`/api/questions/${q.id}/region-read`, { method: "DELETE", body: {} }));
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  function fillRegionRead(card, q) {
+    const read = q.region_read;
+    if (!read?.text) return;
+    if (read.target !== "stem") {
+      openEditor(card, q, { prefill: { field: read.target, value: read.text } });
+      return;
+    }
+    // A piece of the stem: copy it, the person pastes it where it belongs.
+    openEditor(card, q);
+    const copied = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(read.text)
+      : Promise.reject(new Error("clipboard unavailable"));
+    copied.then(
+      () => toast("读出来的字已复制，粘贴到题干里要改的位置", "success"),
+      () => toast("没能复制，请从题卡上的识读结果里手动复制", "error"));
+  }
+
+  function regionReadPanel(card, q) {
+    const read = q.region_read;
+    if (!read) return null;
+    const panel = el("section", `region-read ${read.status}`);
+    const head = el("div", "region-read-head");
+    head.append(el("strong", "", `框选识读 · ${read.target_name || read.target}`));
+    panel.append(head);
+    if (regionReadPending(q)) {
+      panel.append(el("p", "hint", "AI 正在读框里的字……"));
+    } else if (read.status === "failed") {
+      panel.append(el("p", "region-read-error", read.error || "没读出来"));
+    } else {
+      const text = el("div", "region-read-text");
+      R.renderTypeset(text, read.text);
+      panel.append(text);
+      if (read.engine) panel.append(el("p", "hint", `${read.engine} 只读了框里的这一块；请对照原卷确认后再填入`));
+    }
+    const actions = el("div", "region-read-actions");
+    if (read.status === "done" && read.text) {
+      const label = read.target === "stem" ? "复制并打开改字" : `填入${read.target_name || read.target}（打开改字）`;
+      actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
+    }
+    actions.append(button("重新框", "small", () => openPageDialog("read", q)),
+      button(regionReadPending(q) ? "不读了" : "关闭", "small quiet", () => dismissRegionRead(q)));
+    panel.append(actions);
+    return panel;
   }
 
   // ---------------------------------------------------------------- 原卷页面上拖框（调整范围 / 配图 / 补一题）
@@ -3927,8 +4078,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }));
       return [first, ...joined];
     });
+    else if (mode === "read") dialog.boxes = q.region_read && Array.isArray(q.region_read.bbox)
+      ? [{ page_idx: q.region_read.page_idx, bbox: [...q.region_read.bbox] }] : [];
     else dialog.boxes = [];
-    const firstPage = q && q.regions.length ? q.regions[0].page_idx : state.paper.pages[0].page_idx;
+    const firstPage = mode === "read" && dialog.boxes.length ? dialog.boxes[0].page_idx
+      : q && q.regions.length ? q.regions[0].page_idx : state.paper.pages[0].page_idx;
     dialog.page = Number.isInteger(requestedPage)
       && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage : firstPage;
     dialog.scrolled = false;
@@ -3936,13 +4090,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.ignoredCandidates = new Set(Array.isArray(q?.figure_review?.ignored_candidates)
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
     $("pageDialogTitle").textContent = mode === "regions" ? `调整第 ${q.number} 题的原卷范围`
-      : mode === "figures" ? `第 ${q.number} 题的配图` : "手动补一道题";
+      : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读` : "手动补一道题";
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小 · 拖框内部移动 · 空白处拖出新框补上跨栏/跨页部分 · 选中后方向键微调、Delete 删除 · 保存后 AI 按新范围重读"
       : mode === "figures"
         ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
-        : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
+        : mode === "read"
+          ? "框住要单独识读的那一块印刷字（比如被手写盖住的选项），在右上角选好读出来的字填到哪里，再点“识读这一块”。读完显示在题卡上，你确认后再填入。"
+          : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
     $("numberField").hidden = mode !== "new";
+    $("readTargetField").hidden = mode !== "read";
+    $("pageDialogSave").textContent = mode === "read" ? "识读这一块" : "保存";
+    if (mode === "read") $("readTargetSelect").value = readTargetGuess(q);
     const groups = state.paper.question_groups || [];
     $("groupField").hidden = mode !== "new" || groups.length < 2;
     if (mode === "new") {
@@ -4373,7 +4532,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.questions.forEach((other) => {
       const own = q && other.id === q.id;
       if (dialog.mode === "regions" && own) return;
-      if (dialog.mode === "figures" && !own) return;
+      if ((dialog.mode === "figures" || dialog.mode === "read") && !own) return;
       other.regions.filter((r) => r.page_idx === dialog.page).forEach((region) => {
         const ghost = el("span", own ? "ghost own" : "ghost");
         placeBox(ghost, region.bbox);
@@ -4418,11 +4577,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       node.setAttribute("role", "group");
       const joined = dialog.mode === "figures" && box.join && joinHost(box);
       if (joined) node.classList.add("joined");
-      node.setAttribute("aria-label", `${dialog.mode === "figures" ? (joined ? "接在上一张图下面的一块" : (SLOT_NAMES[box.slot] || box.slot) + "配图") : `第 ${index + 1} 段范围`}；方向键移动，Delete 删除`);
+      node.setAttribute("aria-label", `${dialog.mode === "figures" ? (joined ? "接在上一张图下面的一块" : (SLOT_NAMES[box.slot] || box.slot) + "配图")
+        : dialog.mode === "read" ? "要识读的这一块" : `第 ${index + 1} 段范围`}；方向键移动，Delete 删除`);
       const shortLabel = joined ? "接" : box.slot === "stem" ? "题" : box.slot;
       const fullLabel = joined ? `接在上一张图下面（${SLOT_NAMES[joined.slot] || joined.slot}）` : SLOT_NAMES[box.slot] || box.slot;
       const label = el("button", "box-label", dialog.mode === "figures"
-        ? (dialog.selected === index ? fullLabel : shortLabel) : `第 ${index + 1} 段`);
+        ? (dialog.selected === index ? fullLabel : shortLabel) : dialog.mode === "read" ? "识读这一块" : `第 ${index + 1} 段`);
       label.type = "button";
       if (dialog.mode === "figures") {
         label.dataset.shortLabel = shortLabel;
@@ -4572,6 +4732,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
             openFigureSlotMenu(preview, { kind: "new", box: { page_idx: dialog.page, bbox } });
             return;
           }
+          if (dialog.mode === "read") dialog.boxes = [];
           dialog.boxes.push({ page_idx: dialog.page, bbox });
           renderPageTabs();
         }
@@ -4616,6 +4777,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         applyQuestion(data);
         toast(q.approved ? `第 ${q.number} 题配图已保存，旧审批已撤销，请重新审核` : `第 ${q.number} 题配图已保存，请审核题卡`);
         teach({ type: "figures", number: q.number, figures: (data.question?.figures || []).length });
+      } else if (dialog.mode === "read") {
+        const box = dialog.boxes[dialog.boxes.length - 1];
+        if (!box) { toast("请先在原卷上框出要识读的那一块", "error"); return; }
+        const target = $("readTargetSelect").value;
+        const data = await api(`/api/questions/${q.id}/region-read`, {
+          method: "POST", body: { page_idx: box.page_idx, bbox: box.bbox, target }
+        });
+        applyQuestion(data);
+        toast(`AI 正在读框里的字，读完显示在第 ${q.number} 题的题卡上`);
+        refreshPaper();
       } else {
         const number = Number($("numberInput").value);
         if (!Number.isInteger(number) || number < 1) { toast("请填写题号", "error"); return; }
