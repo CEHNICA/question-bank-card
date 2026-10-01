@@ -44,6 +44,12 @@ for source in sorted(ASSETS_ROOT.iterdir()):
     if source.is_file() and source.suffix.lower() in {".ico", ".png", ".svg"}:
         datas.append((str(source), "assets"))
 
+# The practice paper for 新手教学: an original public demo PDF and its cards.
+DEMO_ROOT = BACKEND_ROOT / "core" / "demo_data"
+for source in sorted(DEMO_ROOT.glob("demo-paper.*")):
+    if source.suffix.lower() in {".json", ".pdf"}:
+        datas.append((str(source), "backend/core/demo_data"))
+
 # The frozen launcher uses these source files to fingerprint pending migrations.
 # The modules themselves are also included below as hidden imports.
 MIGRATIONS_ROOT = BACKEND_ROOT / "core" / "migrations"

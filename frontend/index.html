@@ -25,6 +25,8 @@
     <symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.3M12 16.8h.01"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-5-5-8.5 8.5"/></symbol>
     <symbol id="i-lens" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-focus" viewBox="0 0 24 24"><rect x="6" y="7" width="12" height="10" rx="2"/><path d="M3 4h18M3 20h18"/></symbol>
     <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l.8 13h9.4l.8-13M10 11v5M14 11v5"/></symbol>
@@ -35,7 +37,7 @@
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
-        <span id="engineLine" class="engine-line">正在读取配置…</span>
+        <span id="engineLine" class="engine-line" hidden></span>
       </span>
     </a>
     <nav class="topnav" aria-label="页面">
@@ -83,6 +85,7 @@
         </svg>
         <h2>上传试卷或教材，剩下的交给 AI</h2>
         <p>AI 会自动切题、读题、挑配图，并让两位“读者”各读一遍互相核对。</p>
+        <button id="emptyLearn" class="button primary" type="button">先用示例试卷学一遍（不用密钥）</button>
         <ol class="empty-steps">
           <li><b>1</b>左侧选择资料类型，再上传 PDF、Word 或几张照片</li>
           <li><b>2</b>AI 切题、双读核对；页面会如实显示当前阶段和完成数</li>
@@ -95,7 +98,23 @@
           <div class="paper-title">
             <div class="paper-name-row">
               <h2 id="paperName"></h2>
-              <button id="renamePaper" class="button quiet small rename-paper" type="button">修改名称</button>
+              <details class="menu paper-menu" id="paperMenu">
+                <summary class="button quiet small">试卷操作<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+                <div class="menu-panel paper-menu-panel">
+                  <p id="settingsTaskStatus" class="menu-note"></p>
+                  <button id="settingsRename" class="link-button" type="button">修改名称</button>
+                  <button id="settingsConfirmStructure" class="link-button" type="button" hidden>确认属于同一份资料并继续</button>
+                  <button id="settingsSplit" class="link-button" type="button" hidden>拆分任务</button>
+                  <details class="paper-notes">
+                    <summary>处理记录（<span id="paperNotesCount">0</span>）</summary>
+                    <ul id="settingsTaskNotes"></ul>
+                  </details>
+                  <hr class="menu-divider">
+                  <button id="settingsArchive" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档（从试卷列表隐藏）</button>
+                  <button id="settingsDelete" class="link-button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>永久删除…</button>
+                  <p id="settingsDangerHint" class="menu-note"></p>
+                </div>
+              </details>
             </div>
             <p id="paperStatus" class="paper-status"></p>
           </div>
@@ -122,10 +141,13 @@
         </div>
         <div id="doneBanner" class="done-banner" hidden></div>
         <div id="toolbar" class="toolbar">
+          <span id="toolbarPaper" class="toolbar-paper" aria-hidden="true"></span>
           <div id="filters" class="filters" role="tablist" aria-label="筛选题卡"></div>
           <span class="toolbar-spacer"></span>
           <span class="key-hints" aria-hidden="true"><kbd>J</kbd><kbd>K</kbd> 上下题<span class="sep"></span><kbd>Enter</kbd> 通过<span class="sep"></span><kbd>Space</kbd> 放大对照<span class="sep"></span><kbd>?</kbd></span>
           <div class="tool-group">
+            <button id="fullscreenToggle" class="toggle-pill" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）"><svg class="icon"><use href="#i-expand"/></svg><span id="fullscreenLabel">全屏</span></button>
+            <button id="focusToggle" class="toggle-pill" type="button" aria-pressed="true" title="专注：正在看的这道题正常显示，其余题暗下来；滚动时跟着换（Z）"><svg class="icon"><use href="#i-focus"/></svg>专注</button>
             <button id="lensToggle" class="toggle-pill" type="button" aria-pressed="true" title="鼠标停在原卷截图上时放大局部（L）"><svg class="icon"><use href="#i-lens"/></svg>放大镜</button>
             <details class="menu" id="notesBox" hidden>
               <summary class="toggle-pill"><svg class="icon"><use href="#i-note"/></svg>处理说明</summary>
@@ -137,6 +159,7 @@
                 <button id="addQuestion" class="link-button" type="button">漏了一题？手动框出</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
+                <button id="selectionStart" class="link-button" type="button">批量删除题卡…</button>
                 <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
               </div>
             </details>
@@ -145,7 +168,7 @@
         <div id="selectionBar" class="selection-bar" role="region" aria-label="批量选择题卡" hidden>
           <span class="selection-summary"><strong id="selectionCount">已选择 0 道题</strong><small id="selectionHint">删除后可以撤销。</small></span>
           <span class="selection-actions">
-            <button id="selectionCancel" class="button quiet" type="button">取消选择</button>
+            <button id="selectionCancel" class="button quiet" type="button">完成</button>
             <button id="selectionDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>移到回收站</button>
           </span>
         </div>
@@ -163,109 +186,99 @@
         </div>
         <button id="settingsClose" class="button quiet" type="button" data-close>关闭 <span class="kbd-hint">Esc</span></button>
       </header>
-      <nav class="settings-nav" aria-label="设置分区">
-        <a href="#settingsModels">API 与模型</a>
-        <a href="#settingsReview">识读说明</a>
-        <a href="#settingsTask">当前任务</a>
-        <a href="#settingsInterface">界面与快捷键</a>
-        <a href="#settingsAbout">隐私与版本</a>
-      </nav>
+      <div class="settings-nav" role="tablist" aria-label="设置分区">
+        <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">常用</button>
+        <button type="button" role="tab" data-settings-tab="settingsModels" aria-selected="false">读题模型</button>
+        <button type="button" role="tab" data-settings-tab="settingsReview" aria-selected="false">帮助</button>
+        <button type="button" role="tab" data-settings-tab="settingsAbout" aria-selected="false">关于</button>
+      </div>
       <div class="settings-scroll">
-        <section id="settingsModels" class="settings-section" aria-labelledby="settingsModelsTitle">
-          <h3 id="settingsModelsTitle">API 与模型</h3>
-          <p class="settings-description">密钥只保存在本机；此处只显示是否已经配置，不会读取或显示密钥内容。</p>
-          <div class="api-status-list" aria-label="API 配置状态">
-            <div><span>MinerU</span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
-            <div><span>MiniMax</span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
-            <div><span>硅基流动</span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
-          </div>
-          <div class="api-settings-actions">
-            <p class="settings-footnote">软件不会回显密钥或显示末尾字符。保存后，正在识别的任务继续使用原账号，下一项任务自动换用新配置。</p>
-            <button id="settingsCredentialOpen" class="button" type="button">配置 API 与账号池</button>
-          </div>
-          <form id="modelSettingsForm" class="model-settings-form">
-            <fieldset class="model-id-settings">
-              <legend>具体模型</legend>
-              <p class="settings-footnote">这里只使用能读取图片的视觉模型。可从已验证建议中选择，也可以填写服务商支持的视觉模型 model_id。</p>
-              <label class="model-id-field" for="settingsMinimaxModel">
-                <span><strong>MiniMax</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
-                <input id="settingsMinimaxModel" name="minimax_model" type="text" list="settingsMinimaxModels"
-                       autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState">
-                <datalist id="settingsMinimaxModels"></datalist>
-              </label>
-              <label class="model-id-field" for="settingsSiliconflowModel">
-                <span><strong>硅基流动</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
-                <input id="settingsSiliconflowModel" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
-                       autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState">
-                <datalist id="settingsSiliconflowModels"></datalist>
-              </label>
-            </fieldset>
-            <p class="model-role-heading">识读分工</p>
-            <label class="field" for="settingsPrimaryModel"><span>主读模型</span><select id="settingsPrimaryModel" name="primary"></select></label>
-            <label class="field" for="settingsCheckerModel"><span>复核模型</span><select id="settingsCheckerModel" name="checker"></select></label>
-            <label class="field" for="settingsArbiterModel"><span>分歧裁决模型</span><select id="settingsArbiterModel" name="arbiter"></select></label>
-            <p id="settingsModelSummary" class="settings-footnote"></p>
-            <div class="settings-form-actions">
-              <span id="settingsModelResult" class="settings-save-result" role="status"></span>
-              <button id="settingsModelSave" class="button primary" type="submit">保存模型设置</button>
+        <div id="settingsGeneral" class="settings-page" role="tabpanel">
+          <section class="settings-section" aria-labelledby="settingsServicesTitle">
+            <h3 id="settingsServicesTitle">读题服务</h3>
+            <p id="settingsReady" class="settings-ready">正在检查…</p>
+            <div class="api-status-list" aria-label="读题服务的密钥">
+              <div><span><strong>MinerU</strong><small>识别整页文字、切出每道题（必填）</small></span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
+              <div><span><strong>MiniMax</strong><small>看图读题（和硅基流动至少填一个）</small></span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
+              <div><span><strong>硅基流动</strong><small>看图读题；两家都填时互相复核</small></span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
             </div>
-          </form>
-        </section>
+            <div class="api-settings-actions">
+              <p class="settings-footnote">密钥只加密保存在这台电脑上，保存后不再显示出来。</p>
+              <button id="settingsCredentialOpen" class="button" type="button">填写或更换密钥</button>
+            </div>
+          </section>
+          <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
+            <h3 id="settingsInterfaceTitle">审核界面</h3>
+            <label class="settings-switch"><span><strong>专注</strong><small>正在看的这道题正常显示，其余题暗下来（Z）</small></span><input id="settingsFocus" type="checkbox" role="switch"></label>
+            <label class="settings-switch"><span><strong>题卡放大镜</strong><small>鼠标停在原卷截图上时放大局部（L）</small></span><input id="settingsLens" type="checkbox" role="switch"></label>
+            <p class="settings-footnote">审核时还可以点工具栏上的“全屏”（Q），收起顶栏和试卷列表。</p>
+            <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看全部快捷键</button>
+          </section>
+        </div>
 
-        <section id="settingsReview" class="settings-section" aria-labelledby="settingsReviewTitle">
-          <h3 id="settingsReviewTitle">识读与审核说明</h3>
-          <dl class="explain-list">
-            <div><dt>两种引擎一致</dt><dd>视觉模型的誊录与 MinerU 自己识别出的文字逐字一致（两套独立引擎），因此不再调用复核模型。</dd></div>
-            <div><dt>AI 两次一致</dt><dd>与 MinerU 文字有出入（常见于有手写的卷子）时，复核模型再独立读一遍，两次得到相同题面。</dd></div>
-            <div><dt>AI 三读多数一致</dt><dd>前两次结果不同；由 MinerU 文字在每处分歧上支持其中一读，或第三次识读与其中一次相同，因此采用多数结果。</dd></div>
-            <div><dt>一致不等于正确</dt><dd>以上都只是机器之间的一致，仍不代表已经和原卷人工核对。</dd></div>
-            <div><dt>未人工审核</dt><dd>需要你对照左侧原卷确认；点击“标记通过”后才记录为已人工接受当前版本。</dd></div>
-            <div><dt>处理记录</dt><dd>记录程序在切题、页序、配图等环节发现的情况，并不等于报错。</dd></div>
-          </dl>
-        </section>
-
-        <section id="settingsTask" class="settings-section" aria-labelledby="settingsTaskTitle">
-          <h3 id="settingsTaskTitle">当前任务管理</h3>
-          <p id="settingsNoTask" class="settings-description">请先从左侧选择一项任务。</p>
-          <div id="settingsTaskPanel" hidden>
-            <div class="settings-task-head"><strong id="settingsTaskName"></strong><span id="settingsTaskStatus" class="chip plain"></span></div>
-            <div class="settings-actions-grid">
-              <button id="settingsRename" class="button" type="button">修改任务名</button>
-              <button id="settingsAddQuestion" class="button" type="button">补录一道题</button>
-              <button id="settingsResegment" class="button" type="button">重新切题</button>
-              <button id="settingsPageOrder" class="button" type="button">调整页序</button>
-              <button id="settingsTrash" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="settingsTrashLabel">题卡回收站</span></button>
-              <button id="settingsConfirmStructure" class="button primary" type="button" hidden>确认属于同一份资料并继续</button>
-              <button id="settingsSplit" class="button button-outline" type="button" hidden>拆分任务</button>
-            </div>
-            <div class="settings-task-notes">
-              <h4>处理记录</h4>
-              <ul id="settingsTaskNotes"></ul>
-            </div>
-            <div class="settings-danger">
-              <h4>归档与删除</h4>
-              <p id="settingsDangerHint" class="settings-footnote"></p>
+        <div id="settingsModels" class="settings-page" role="tabpanel" hidden>
+          <section class="settings-section" aria-labelledby="settingsModelsTitle">
+            <h3 id="settingsModelsTitle">读题模型</h3>
+            <p class="settings-description">一般不用改。改了会自动保存，从下一份新资料或重新识读开始生效，已经读好的题卡不会变。</p>
+            <form id="modelSettingsForm" class="model-settings-form">
+              <p class="model-role-heading">谁来读题</p>
+              <label class="field" for="settingsPrimaryModel"><span>主读</span><select id="settingsPrimaryModel" name="primary"></select></label>
+              <label class="field" for="settingsCheckerModel"><span>有出入时复核</span><select id="settingsCheckerModel" name="checker"></select></label>
+              <label class="field" for="settingsArbiterModel"><span>两次不一致时裁决</span><select id="settingsArbiterModel" name="arbiter"></select></label>
+              <p id="settingsModelSummary" class="settings-footnote"></p>
+              <details class="model-id-details">
+                <summary>各家使用的具体模型（高级）</summary>
+                <fieldset class="model-id-settings">
+                  <legend>具体模型</legend>
+                  <p class="settings-footnote">只用能看图的视觉模型。可以从建议里选，也可以填服务商支持的其他视觉模型 model_id。</p>
+                  <label class="model-id-field" for="settingsMinimaxModel">
+                    <span><strong>MiniMax</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
+                    <input id="settingsMinimaxModel" name="minimax_model" type="text" list="settingsMinimaxModels"
+                           autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState">
+                    <datalist id="settingsMinimaxModels"></datalist>
+                  </label>
+                  <label class="model-id-field" for="settingsSiliconflowModel">
+                    <span><strong>硅基流动</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
+                    <input id="settingsSiliconflowModel" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
+                           autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState">
+                    <datalist id="settingsSiliconflowModels"></datalist>
+                  </label>
+                </fieldset>
+              </details>
               <div class="settings-form-actions">
-                <button id="settingsArchive" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档任务</button>
-                <button id="settingsDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>永久删除</button>
+                <span id="settingsModelResult" class="settings-save-result" role="status"></span>
               </div>
+            </form>
+          </section>
+        </div>
+
+        <div id="settingsReview" class="settings-page" role="tabpanel" hidden>
+          <section class="settings-section" aria-labelledby="settingsReviewTitle">
+            <h3 id="settingsReviewTitle">题卡上的标记是什么意思</h3>
+            <dl class="explain-list">
+              <div><dt>两种引擎一致</dt><dd>看图读出的题面和 MinerU 自己识别的文字逐字一致（两套独立的程序），所以没有再请复核模型读。</dd></div>
+              <div><dt>AI 两次一致</dt><dd>和 MinerU 的文字有出入（有手写的卷子常见）时，复核模型又独立读了一遍，两次读出的题面相同。</dd></div>
+              <div><dt>AI 三读多数一致</dt><dd>前两次读的不一样；MinerU 的文字在每处分歧上支持其中一次，或者第三次读和其中一次相同，就采用多数的读法。</dd></div>
+              <div><dt>一致不等于正确</dt><dd>以上都只是机器之间的一致，不代表已经和原卷人工核对过。</dd></div>
+              <div><dt>未人工审核</dt><dd>需要你对照原卷确认；点“标记通过”或题号左边的方框打勾，才记录为你接受了当前版本。</dd></div>
+              <div><dt>处理记录</dt><dd>程序在切题、页序、配图等环节注意到的情况，不等于出错。在试卷标题旁的“试卷操作”里可以看到。</dd></div>
+            </dl>
+            <div class="settings-help-actions">
+              <button id="settingsLearn" class="button primary" type="button">用示例试卷重新学一遍</button>
+              <button id="settingsWelcome" class="button" type="button">重新看一遍新手引导</button>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
-        <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
-          <h3 id="settingsInterfaceTitle">界面与快捷键</h3>
-          <label class="settings-switch"><span><strong>题卡悬停放大镜</strong><small>放大对照窗口仍使用 Ctrl＋滚轮缩放。</small></span><input id="settingsLens" type="checkbox"></label>
-          <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看完整快捷键</button>
-        </section>
-
-        <section id="settingsAbout" class="settings-section" aria-labelledby="settingsAboutTitle">
-          <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
-          <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
-          <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
-          <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
-          <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
-        </section>
+        <div id="settingsAbout" class="settings-page" role="tabpanel" hidden>
+          <section class="settings-section" aria-labelledby="settingsAboutTitle">
+            <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
+            <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
+            <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
+            <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
+            <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
+          </section>
+        </div>
       </div>
     </div>
   </dialog>
@@ -274,35 +287,39 @@
     <form id="credentialForm" class="credential-form" autocomplete="off">
       <header class="dialog-head">
         <div>
-          <p class="settings-eyebrow">本机加密设置</p>
-          <h3 id="credentialTitle">API 与账号池</h3>
-          <p class="hint">输入框始终为空，不会读取或显示已经保存的密钥。多个账号请用英文分号分隔，每项最多 8 个。</p>
+          <p class="settings-eyebrow">读题服务</p>
+          <h3 id="credentialTitle">填写或更换密钥</h3>
+          <p class="hint">为了安全，已经保存的密钥不会再显示出来，所以输入框总是空的。要更换就粘贴新的；不改的留空，原来的照常使用。</p>
         </div>
         <button class="button quiet" type="button" data-close>关闭</button>
       </header>
       <div class="credential-body">
         <section class="credential-service" data-service="mineru">
-          <div class="credential-service-head"><strong>MinerU Token</strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
-          <label for="credentialMineruInput">替换账号池</label>
+          <div class="credential-service-head"><strong>MinerU Token <small>必填 · 识别整页文字、切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
+          <label for="credentialMineruInput">新的 Token（留空就不改）</label>
           <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
-                 placeholder="留空则保持现有配置；多个 Token 用英文分号分隔">
-          <label class="credential-clear"><input id="credentialMineruClear" type="checkbox">清除 MinerU 配置</label>
+                 placeholder="粘贴 MinerU 官网里复制的 Token">
+          <label class="credential-clear"><input id="credentialMineruClear" type="checkbox">删除已保存的 MinerU Token</label>
         </section>
         <section class="credential-service" data-service="minimax">
-          <div class="credential-service-head"><strong>MiniMax API Key</strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
-          <label for="credentialMinimaxInput">替换账号池</label>
+          <div class="credential-service-head"><strong>MiniMax API Key <small>看图读题 · 和硅基流动至少填一个</small></strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
+          <label for="credentialMinimaxInput">新的 Key（留空就不改）</label>
           <input id="credentialMinimaxInput" type="password" autocomplete="off" spellcheck="false"
-                 placeholder="留空则保持现有配置；多个 Key 用英文分号分隔">
-          <label class="credential-clear"><input id="credentialMinimaxClear" type="checkbox">清除 MiniMax 配置</label>
+                 placeholder="粘贴 MiniMax 开放平台里复制的 API Key">
+          <label class="credential-clear"><input id="credentialMinimaxClear" type="checkbox">删除已保存的 MiniMax Key</label>
         </section>
         <section class="credential-service" data-service="siliconflow">
-          <div class="credential-service-head"><strong>硅基流动 API Key</strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
-          <label for="credentialSiliconflowInput">替换账号池（可选）</label>
+          <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 两家都填时互相复核</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
+          <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
           <input id="credentialSiliconflowInput" type="password" autocomplete="off" spellcheck="false"
-                 placeholder="留空则保持现有配置；多个 Key 用英文分号分隔">
-          <label class="credential-clear"><input id="credentialSiliconflowClear" type="checkbox">清除硅基流动配置</label>
+                 placeholder="粘贴硅基流动里复制的 API Key">
+          <label class="credential-clear"><input id="credentialSiliconflowClear" type="checkbox">删除已保存的硅基流动 Key</label>
         </section>
-        <p class="credential-security-note">密钥使用当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。新填的 MinerU Token 会先做一次不上传文件、不消耗额度的官网验证；网络不可用时允许保存并明确标为尚未验证。独立配置工具仅保留作故障恢复。</p>
+        <details class="credential-more">
+          <summary>有多个账号？密钥存在哪里？</summary>
+          <p>同一家有多个账号时，把它们一起粘贴进去，用英文分号 ; 隔开（每家最多 8 个）；读题时会轮流使用，一个账号额度用完会换下一个。</p>
+          <p class="credential-security-note">密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。新填的 MinerU Token 会先做一次不上传文件、不消耗额度的官网验证；网络不可用时也能保存，并标为尚未验证。</p>
+        </details>
       </div>
       <footer class="credential-actions">
         <span id="credentialResult" class="settings-save-result" role="status"></span>
@@ -355,8 +372,10 @@
         <button type="button" role="menuitem" data-figure-slot="D" aria-keyshortcuts="D">D</button>
         <button type="button" role="menuitem" data-figure-slot="E" aria-keyshortcuts="E">E</button>
         <button type="button" role="menuitem" class="irrelevant" data-figure-slot="irrelevant" aria-keyshortcuts="X">无关<kbd>X</kbd></button>
+        <button type="button" role="menuitem" class="join" data-figure-slot="join" aria-keyshortcuts="J"
+                title="表格或图被分页切开时用：这一块接在前一张配图的下面，保存后拼成一张图">接在上一张图下面（拼成一张）<kbd>J</kbd></button>
       </div>
-      <small class="figure-slot-keys">按 S、A–E 或 X 直接选</small>
+      <small class="figure-slot-keys">按 S、A–E、X 或 J 直接选</small>
       <button type="button" class="figure-slot-cancel" data-figure-slot-cancel>取消</button>
     </div>
   </dialog>
@@ -531,6 +550,65 @@
     </form>
   </dialog>
 
+  <dialog id="welcomeDialog" class="welcome-dialog" aria-labelledby="welcomeTitle">
+    <div class="welcome-body">
+      <img class="welcome-mark" src="/favicon.png" width="52" height="52" alt="" aria-hidden="true">
+      <h2 id="welcomeTitle">欢迎使用题有据</h2>
+      <p class="welcome-lead">把试卷变成能搜索、能组卷的题库，每道题都对照原卷核对过。</p>
+      <ol class="welcome-steps">
+        <li><b>1</b><span><strong>上传</strong>PDF、Word 或手机拍的照片，拖进窗口就行。AI 会自动切题、读题。</span></li>
+        <li><b>2</b><span><strong>核对</strong>每张题卡左边是原卷截图，右边是读出来的题面。对了就在题号左边打勾，错了就改字。</span></li>
+        <li><b>3</b><span><strong>入库</strong>核对完点“入库”，题目就进了“正式题库”，可以搜索、组卷。</span></li>
+      </ol>
+      <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
+      <div class="welcome-learn">
+        <strong>第一次用？先拿示例试卷练一遍</strong>
+        <span>一份 12 道题的示例试卷，已经读好了，不用密钥、不花额度。跟着提示一步步做：对照、打勾、改错字、补配图、核对表格、入库，大约 5 分钟。</span>
+        <button id="welcomeLearn" class="button primary" type="button">用示例试卷学一遍</button>
+      </div>
+    </div>
+    <footer class="welcome-actions">
+      <button id="welcomeKeys" class="button" type="button" hidden>先去填写密钥</button>
+      <span class="welcome-spacer"></span>
+      <button id="welcomeSkip" class="button quiet" type="button">直接开始</button>
+      <button id="welcomeTour" class="button" type="button">只看一遍界面</button>
+    </footer>
+  </dialog>
+
+  <div id="tour" class="tour" hidden>
+    <div id="tourSpot" class="tour-spot"></div>
+    <div id="tourCard" class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText">
+      <p id="tourStep" class="tour-step"></p>
+      <h3 id="tourTitle"></h3>
+      <p id="tourText"></p>
+      <div class="tour-actions">
+        <button id="tourSkip" class="button quiet small" type="button">跳过引导</button>
+        <span class="welcome-spacer"></span>
+        <button id="tourPrev" class="button small" type="button">上一步</button>
+        <button id="tourNext" class="button primary small" type="button">下一步</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="teachPanel" class="teach-panel" aria-live="polite" aria-labelledby="teachTitle" hidden>
+    <header class="teach-head">
+      <strong>新手教学</strong>
+      <span id="teachProgress" class="teach-progress"></span>
+      <button id="teachClose" class="teach-close" type="button" title="退出教学（以后可以在“设置 → 帮助”里重新开始）" aria-label="退出教学">×</button>
+    </header>
+    <div class="teach-bar" aria-hidden="true"><span id="teachBar"></span></div>
+    <h4 id="teachTitle"></h4>
+    <p id="teachText"></p>
+    <p id="teachHint" class="teach-hint" hidden></p>
+    <p id="teachDone" class="teach-done" hidden>✓ 做对了</p>
+    <div class="teach-actions">
+      <button id="teachShow" class="button small" type="button">指给我看</button>
+      <button id="teachSkip" class="link-button teach-skip" type="button">跳过这一步</button>
+      <span class="welcome-spacer"></span>
+      <button id="teachNext" class="button primary small" type="button">下一步</button>
+    </div>
+  </aside>
+
   <dialog id="keysDialog" class="keys-dialog" aria-labelledby="keysTitle">
     <div class="dialog-head">
       <div>
@@ -549,8 +627,11 @@
       <div class="key-row"><span>调整范围 / 配图</span><span><kbd>R</kbd><kbd>F</kbd></span></div>
       <div class="key-row"><span>下一张需核对的卡</span><span><kbd>N</kbd></span></div>
       <div class="key-row"><span>题卡放大镜开 / 关</span><span><kbd>L</kbd></span></div>
-      <div class="key-row"><span>增减选择 / 连续选择题卡</span><span><kbd>Ctrl</kbd>+点击 / <kbd>Shift</kbd>+点击</span></div>
-      <div class="key-row"><span>把已选题卡移到回收站</span><span><kbd>Delete</kbd></span></div>
+      <div class="key-row"><span>专注开 / 关（其余题暗下来）</span><span><kbd>Z</kbd></span></div>
+      <div class="key-row"><span>全屏审核 / 退出全屏</span><span><kbd>Q</kbd><kbd>Esc</kbd></span></div>
+      <div class="key-row"><span>打勾通过 / 再点撤销</span><span>点题号左边的方框</span></div>
+      <div class="key-row"><span>批量删除：选择题卡（工具 → 批量删除题卡）</span><span><kbd>Ctrl</kbd>+点击 / <kbd>Shift</kbd>+点击</span></div>
+      <div class="key-row"><span>把已选题卡移到回收站 / 退出选择</span><span><kbd>Delete</kbd><kbd>Esc</kbd></span></div>
       <h4>放大对照</h4>
       <div class="key-row"><span>完整显示整题 / 适合宽度</span><span><kbd>0</kbd><kbd>W</kbd></span></div>
       <div class="key-row"><span>缩小 / 放大原卷</span><span><kbd>−</kbd><kbd>+</kbd></span></div>

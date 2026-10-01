@@ -7,7 +7,7 @@ const path = require("node:path");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
-assert.match(html, /id="settingsCredentialOpen"[^>]*>配置 API 与账号池<\/button>/);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>填写或更换密钥<\/button>/);
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 
@@ -27,7 +27,7 @@ assert.match(js, /catch \(error\) \{[\s\S]*?resetCredentialInputs\(\);/);
 assert.match(js, /async function loadStatus\(\)[\s\S]*?return false;[\s\S]*?return true;/);
 assert.match(js, /toast\(message, "success"\);[\s\S]*?const refreshed = await loadStatus\(\);[\s\S]*?if \(!refreshed\)/);
 assert.match(js, /function openSettings\(\)[\s\S]*?\$\("settingsDialog"\)\.showModal\(\);[\s\S]*?void loadStatus\(\);/);
-assert.match(html, /不会读取或显示已经保存的密钥/);
+assert.match(html, /已经保存的密钥不会再显示出来/);
 assert.match(html, /不写入题库、日志或项目文件/);
 assert.match(html, /不上传文件、不消耗额度的官网验证/);
 assert.match(html, />验证并加密保存<\/button>/);

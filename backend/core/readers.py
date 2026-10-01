@@ -238,8 +238,9 @@ TRANSCRIBE_RULES = """你是数学资料誊录员。图片是从数学试卷或�
 只誊录印刷体内容：
 - 学生的手写字、批改符号、圈画、划线、草稿一律忽略；括号或横线里手写填的答案不要写，保留空括号（ ）或横线 ____。
 - 数学式用 LaTeX，行内公式用 $...$ 包住；中文和中文标点照原卷。
-- 数轴、函数图象、平面/立体几何图（包括棱柱）、统计图、表格、流程图等视觉内容不得改写成“[图：……]”“图片中……”或其他文字说明，也不要重排成 Markdown 表格、字符图或项目列表。只誊录图外真正印刷的题干文字。
-- 某个选项只有图时，对应的【A】【B】【C】【D】（或【E】）留空；图内的数字、字母、刻度和表格单元格仍属于配图，不要另抄成选项文字。
+- 数轴、函数图象、平面/立体几何图（包括棱柱）、统计图、流程图等视觉内容不得改写成“[图：……]”“图片中……”或其他文字说明，也不要重排成字符图或项目列表。只誊录图外真正印刷的题干文字。
+- 格子里只有文字、数字和公式的表格（数据表、列联表、分布列、填空用的空表等）是题目文字：在题干里它印的位置，按 Markdown 表格逐格照抄。每行一行，格子用 | 隔开，第一行后面加一行 |---|---|；空格子就空着，不要填；格子里的公式照样用 $...$。被分页或拼接处切成两截的同一张表，接起来写成一张表。有合并单元格的表写成 HTML：<table><tr><td rowspan="2">…</td>…</tr></table>。表格里画着图形的，仍当作配图。
+- 某个选项只有图时，对应的【A】【B】【C】【D】（或【E】）留空；图内的数字、字母和刻度仍属于配图，不要另抄成选项文字。
 - 逐字照抄印刷内容：原卷有错字、漏字、语句不通、字母顺序或大小写特别（如 FE、边长为 C）、人名书名与常识不符时也原样照抄，不要改正、补字、删字或调换顺序。
 - 原卷印的是平行四边形符号时写成 ▱（例如 ▱ABCD），不要写成 \\square、\\Box 或 □；原卷印的是汉字“平行四边形”就照写汉字。
 - 题号不要写进题干，教材里“例1”“例题2”这类例题标号也不要写进题干；分值（如"（15分）"）不要写。
@@ -253,9 +254,10 @@ TRANSCRIBE_RULES = """你是数学资料誊录员。图片是从数学试卷或�
 
 FIGURE_RULES = """图中蓝色框和编号标出的是候选配图。请在【配图】里逐个判断：
 编号=题干（属于本题题干的印刷图）、编号=A/B/C/D/E（某个选项的印刷图）、
-编号=第N题（印刷的图，但属于别的题，例如图下印着"第14题图"）、编号=无关（手写、草图、涂画）。
-例如：1=题干, 2=第14题, 3=无关。没有蓝框就写"无"。
-数轴、几何图、立体图、统计图、表格等只在【配图】里标为题干或 A/B/C/D/E；纯图片选项的文字标签必须留空，不得描述或重排图片内容。
+编号=第N题（印刷的图，但属于别的题，例如图下印着"第14题图"）、编号=无关（手写、草图、涂画）、
+编号=表格（这是一张只有文字和数字的表格，已经按上面的规则写进题干）。
+例如：1=题干, 2=第14题, 3=无关, 4=表格。没有蓝框就写"无"。
+数轴、几何图、立体图、统计图等只在【配图】里标为题干或 A/B/C/D/E；纯图片选项的文字标签必须留空，不得描述或重排图片内容。
 如果原卷本题有印刷的图，却没有被任何蓝框框住，在【配图】末尾加上"缺图"。
 几张图并排时，逐张核对图中的字母、数字标注是否与本题题干提到的点、线、数据一致；对不上的图属于别的题，写“无关”。"""
 
@@ -474,12 +476,12 @@ def parse_reading(text: str, number: int) -> dict:
             break
     figures: dict[str, str] = {}
     figure_text = tags.get("配图", "")
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", figure_text):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", figure_text):
         if role.startswith("第"):
             other = int(re.search(r"\d+", role).group(0))
             figures[label] = "stem" if other == number else f"q{other}"
         else:
-            figures[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
+            figures[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
     others = [int(v) for v in re.findall(r"\d{1,2}", tags.get("其他题号", "")) if int(v) != number]
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
@@ -846,14 +848,14 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
     raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
     wanted = set(labels)
     result: dict[str, str] = {}
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", raw):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", raw):
         if label not in wanted or label in result:
             continue
         if role.startswith("第"):
             other = int(re.search(r"\d+", role).group(0))
             result[label] = "stem" if other == number else f"q{other}"
         else:
-            result[label] = {"题干": "stem", "无关": "none"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
+            result[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
     return result
 
 

@@ -337,8 +337,13 @@ def witness_key(value: str) -> str:
 
 
 def reading_witness_text(reading: dict) -> str:
+    """The prose MinerU's text can vouch for.  MinerU keeps tables apart from
+    the text around them, so a table the reader wrote out is left out here;
+    its cells are compared with MinerU's own table instead."""
+    from .tables import without_tables
+
     options = reading.get("options") or {}
-    return str(reading.get("stem") or "") + "".join(
+    return without_tables(str(reading.get("stem") or "")) + "".join(
         f"{key}.{options[key]}" for key in sorted(options) if str(options[key]).strip()
     )
 

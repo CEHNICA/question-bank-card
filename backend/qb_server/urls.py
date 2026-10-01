@@ -17,6 +17,7 @@ urlpatterns = [
     path("api/settings/credentials", views.credential_settings_view),
     path("api/settings/models", views.model_settings),
     path("api/papers", views.papers),
+    path("api/demo", views.demo_paper),
     path("api/papers/<uuid:paper_id>", views.paper_detail),
     path("api/papers/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
     path("api/papers/<uuid:paper_id>/retry", views.paper_retry),

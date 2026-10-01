@@ -19,3 +19,13 @@ node docs/demo/capture_showcase.mjs --base-url http://127.0.0.1:8768 --paper-id 
 ```
 
 不传 `--paper-id` 时，脚本只会选择名为“题有据功能演示卷”的已完成任务，不会回退到其他资料。截图脚本需要 Playwright 与 Sharp。它只读取本机题库接口；试题篮仅写入临时浏览器的 `localStorage`。
+
+## 新手教学用的示例试卷
+
+软件里的“用示例试卷学一遍”使用 `backend/core/demo_data/` 中的示例试卷：同一份演示卷，已经用真实流程（MinerU + 视觉模型）读过一次，再故意留下两处练习（第 9 题“5 个单位”读成“3 个单位”、第 2 题的配图没有绑定）。重新生成：先用题有据或 `qb_bench.py` 读一遍演示卷，然后在仓库根目录运行
+
+```powershell
+$env:QB_DATABASE="<那次读题的 db.sqlite3>"; $env:QB_DATA_ROOT="<对应的 data 目录>"; python docs/demo/build_demo_fixture.py
+```
+
+示例试卷随安装包附带，不会进入正式题库。

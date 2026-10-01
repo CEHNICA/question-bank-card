@@ -19,7 +19,7 @@ from django.db.models import F
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, import_planning, photos, readers, segment, textnorm
+from . import imaging, import_planning, photos, readers, segment, tables, textnorm
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
@@ -2426,6 +2426,33 @@ def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- 3. 读题
 
 
+def _table_check_flag(stem: str, mineru_tables: list[str], assignments: dict) -> str:
+    """Check a table the reader wrote out against MinerU's own table.
+
+    The prose check leaves tables out, so a written table is only trusted when
+    MinerU recognised the same cells.  Empty cells (to be filled in) and the
+    order of cells do not matter; a changed number does.
+    """
+    written = [textnorm.witness_key(cell) for cell in tables.cell_texts(stem)]
+    written = sorted(cell for cell in written if cell)
+    if not tables.has_table(stem):
+        if any(role == "table" for role in (assignments or {}).values()):
+            return "识读说原卷有表格，但题干里没有写出表格，请对照原卷补上"
+        return ""
+    printed = sorted(
+        key for value in mineru_tables for row in tables.parse_html(value) for cell in row
+        if (key := textnorm.witness_key(cell["text"]))
+    )
+    if not printed:
+        return "题干里的表格只有一次识读，请对照原卷逐格核对"
+    if written != printed:
+        from collections import Counter
+
+        differ = sum(((Counter(written) - Counter(printed)) + (Counter(printed) - Counter(written))).values())
+        return f"表格里约有 {differ} 格和 MinerU 识别的不一样，请对照原卷逐格核对"
+    return ""
+
+
 def _figure_slots(reading: dict | None) -> set[str]:
     """主读者明确归到题干或 A–D 的候选图槽位。"""
     return {
@@ -2461,7 +2488,10 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     }
     stem = reading.get("stem", "")
     table_removed = False
-    if "stem" in slots:
+    # A table the reader wrote out and marked "表格" is question text.  Only a
+    # table re-typed from a crop that is still bound as a picture is a copy.
+    wrote_tables = any(role == "table" for role in ((figure_reading or {}).get("figures") or {}).values())
+    if "stem" in slots and not wrote_tables:
         stem, table_removed = readers.strip_markdown_tables(stem)
     if not remove and not table_removed:
         return reading
@@ -2840,6 +2870,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 **box,
             })   # 属于同一题组内别的题的图，交给那道题
     figures = without_automatic_textbook_badges(figures)
+    if table_flag := _table_check_flag(str(final.get("stem") or ""), snapshot.get("witness_tables") or [],
+                                       figure_assignments):
+        flags.append(table_flag)
     if gaps := _option_gaps(final.get("options") or {}, figures):
         flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
     if twins := _identical_options(final.get("options") or {}):
@@ -2998,12 +3031,19 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     for block in _block_dicts(paper):
         if block.get("type") in WITNESS_BLOCK_TYPES:
             blocks_by_page[int(block["page_idx"])].append(block)
+    # MinerU's own reading of each printed table, to check a table the reader
+    # wrote out as text.
+    table_list = [item for item in tables.table_blocks(paper) if item["html"]]
     for snapshot in snapshots:
         regions = snapshot.get("regions") or []
         # Only the pages this card touches: a long book has thousands of blocks.
         nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
                   for block in blocks_by_page.get(page, [])]
         snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
+        snapshot["witness_tables"] = [
+            item["html"] for item in table_list
+            if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
+        ]
     Question.objects.filter(pk__in=[q.id for q in questions]).update(
         state=Question.State.READING,
         reread_requested=False,

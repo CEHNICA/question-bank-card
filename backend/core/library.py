@@ -39,18 +39,61 @@ def option_content(options: dict | None) -> dict:
 REVIEWABLE_STATES = {Question.State.GREEN, Question.State.YELLOW}
 
 
+# A figure may continue on the next page (a table cut by a page break): the
+# extra pieces are kept in ``parts`` and joined below the first one.
+MAX_FIGURE_PARTS = 4
+
+
+def figure_parts(figure: dict) -> list[dict]:
+    parts = figure.get("parts") if isinstance(figure, dict) else None
+    if not isinstance(parts, list):
+        return []
+    return [
+        {"page_idx": part["page_idx"], "bbox": part["bbox"]}
+        for part in parts
+        if isinstance(part, dict) and isinstance(part.get("page_idx"), int)
+        and isinstance(part.get("bbox"), list) and len(part["bbox"]) == 4
+    ]
+
+
+def figure_identity(figure: dict) -> str:
+    """What the cropped image depends on.  A one-piece figure keeps its old key."""
+    parts = figure_parts(figure)
+    if not parts:
+        return json.dumps([figure["page_idx"], figure["bbox"]])
+    return json.dumps([[figure["page_idx"], figure["bbox"]]] + [[p["page_idx"], p["bbox"]] for p in parts])
+
+
 def figure_file(question: Question, index: int) -> Path:
     """按题卡保存的配图坐标从高清原页裁图（缓存，坐标变了文件名就变）。"""
     from .pipeline import PageStore, paper_dir
 
     figure = question.figures[index]
-    digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:12]
+    digest = hashlib.sha1(figure_identity(figure).encode()).hexdigest()[:12]
     target = paper_dir(question.paper) / "figures" / f"q{question.id}_{digest}.png"
     if not target.is_file():
-        page = PageStore(question.paper).load(figure["page_idx"])
+        store = PageStore(question.paper)
         target.parent.mkdir(parents=True, exist_ok=True)
-        page.crop(imaging.to_pixels(figure["bbox"], page.size)).save(target, format="PNG", optimize=True)
+        parts = figure_parts(figure)
+        if parts:
+            pieces = []
+            for piece in [{"page_idx": figure["page_idx"], "bbox": figure["bbox"]}, *parts]:
+                page = store.load(piece["page_idx"])
+                pieces.append((page, imaging.to_pixels(piece["bbox"], page.size)))
+            imaging.stack_figure_pieces(pieces).save(target, format="PNG", optimize=True)
+        else:
+            page = store.load(figure["page_idx"])
+            page.crop(imaging.to_pixels(figure["bbox"], page.size)).save(target, format="PNG", optimize=True)
     return target
+
+
+def _content_figure(figure: dict) -> dict:
+    item = {"slot": figure["slot"], "page_idx": figure["page_idx"], "bbox": figure["bbox"],
+            "source": figure.get("source", "unknown")}
+    parts = figure_parts(figure)
+    if parts:
+        item["parts"] = parts
+    return item
 
 
 def final_content(question: Question) -> dict:
@@ -65,11 +108,7 @@ def final_content(question: Question) -> dict:
         "options": option_content(question.options) if is_choice else {},
         "answer": question.answer or "",
         "analysis": question.analysis or "",
-        "figures": [
-            {"slot": f["slot"], "page_idx": f["page_idx"], "bbox": f["bbox"],
-             "source": f.get("source", "unknown")}
-            for f in question.figures
-        ],
+        "figures": [_content_figure(f) for f in question.figures],
         "sources": [
             {"page_idx": r["page_idx"], "bbox": r["bbox"], "type": "text", "source": source_origin}
             for r in question.regions
@@ -103,6 +142,8 @@ def content_hash(content: dict) -> str:
     )}
     material["figures"] = [
         {k: f.get(k) for k in ("slot", "page_idx", "bbox", "source")}
+        # Only a stitched figure carries parts, so every other hash is unchanged.
+        | ({"parts": figure_parts(f)} if figure_parts(f) else {})
         for f in content.get("figures", [])
     ]
     material["sources"] = [

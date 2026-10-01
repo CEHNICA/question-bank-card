@@ -38,7 +38,7 @@ assert.match(css, /\.card:not\(\.compact\) \.card-actions \{[^}]*position: stick
 assert.match(css, /\.card\.editing-pinned \.card-source \{[^}]*position: sticky/);
 assert.match(js, /card\.classList\.add\("editing-pinned"\)/);
 assert.match(js, /card\.classList\.remove\("editing", "editing-pinned"\)/);
-assert.match(css, /\.toast \{ position: fixed; left: 50%; bottom: 78px;/);
+assert.match(css, /\.toast \{ position: fixed; right: 24px; bottom: 78px;/);
 
 // After a mouse click on a filter tab the review keys work straight away.
 assert.match(js, /if \(event\.detail > 0\) \{\s*const first = state\.questions\.find\(visible\)/);
@@ -51,7 +51,7 @@ assert.match(html, /class="material-options"/);
 assert.match(css, /\.material-type:has\(input\[value="book"\]:checked\) \.material-hint \{ display: block; \}/);
 
 // Figure owners by key; the viewer offers editing.
-assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant" \}/);
+assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant", j: "join" \}/);
 assert.match(html, /data-figure-slot="irrelevant" aria-keyshortcuts="X"/);
 assert.match(html, /id="viewerEdit"/);
 assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"/);

@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from PIL import Image
 
 from .version import APP_VERSION
-from . import credential_settings, imaging, import_planning, library, m3import, mineru, photos, preferences, readers
+from . import credential_settings, demo, imaging, import_planning, library, m3import, mineru, photos, preferences, readers, tables
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
@@ -32,7 +32,7 @@ from .models import (
     Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
 )
 from .pipeline import PageStore, candidates_in, preview_resegment, reorder_photo_pages
-from .textnorm import fix_reading_symbols, fix_symbols
+from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
@@ -130,13 +130,16 @@ def _selected_candidate_keys(question: Question, figures: list[dict] | None = No
     for figure in figures if isinstance(figures, list) else (question.figures or []):
         if not isinstance(figure, dict):
             continue
-        explicit = figure.get("candidate_key")
-        if isinstance(explicit, str) and explicit in available:
-            selected.add(explicit)
-            continue
-        exact = _candidate_key(figure)
-        if exact in available:
-            selected.add(exact)
+        # The lower half of a table joined to a figure is as used as the figure.
+        pieces = [figure, *[part for part in (figure.get("parts") or []) if isinstance(part, dict)]]
+        for piece in pieces:
+            explicit = piece.get("candidate_key")
+            if isinstance(explicit, str) and explicit in available:
+                selected.add(explicit)
+                continue
+            exact = _candidate_key(piece)
+            if exact in available:
+                selected.add(exact)
     return selected
 
 
@@ -161,7 +164,7 @@ def _unclassified_candidate_details(
     } if isinstance(primary.get("figures"), dict) else {}
     resolved_elsewhere_labels = {
         label for label, role in assignments.items()
-        if role == "none" or (role.startswith("q") and role[1:].isdigit())
+        if role in {"none", "table"} or (role.startswith("q") and role[1:].isdigit())
     }
     selected = _selected_candidate_keys(question, figures)
     ignored = set(ignored_candidates if isinstance(ignored_candidates, list)
@@ -325,6 +328,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True) -> dict:
         "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
+        "demo": demo.is_demo(paper),
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
         "suggested_groups": (paper.structure or {}).get("suggested_groups") or [],
         "question_groups": [
@@ -377,8 +381,10 @@ def _reading(value: dict) -> dict:
             if k in value}
 
 
-def question_json(question: Question) -> dict:
+def question_json(question: Question, table_blocks: list[dict] | None = None) -> dict:
     figure_review = stored_or_derived_review(question)
+    if table_blocks is None and question.figures:
+        table_blocks = tables.table_blocks(question.paper)
     valid_candidate_keys = _candidate_keys(question)
     if isinstance(figure_review, dict) and "ignored_candidates" in figure_review:
         ignored = sorted({
@@ -403,10 +409,21 @@ def question_json(question: Question) -> dict:
     approval_valid = library.approval_is_current(question)
     figures = []
     for index, figure in enumerate(question.figures):
-        digest = hashlib.sha1(json.dumps([figure["page_idx"], figure["bbox"]]).encode()).hexdigest()[:10]
+        digest = hashlib.sha1(library.figure_identity(figure).encode()).hexdigest()[:10]
         shown_figure = {**figure}
         if shown_figure.get("candidate_key") not in valid_candidate_keys:
             shown_figure.pop("candidate_key", None)
+        if "parts" in shown_figure:
+            shown_figure["parts"] = [
+                {"page_idx": part["page_idx"], "bbox": part["bbox"],
+                 **({"candidate_key": part["candidate_key"]}
+                    if part.get("candidate_key") in valid_candidate_keys else {})}
+                for part in (figure.get("parts") or [])
+                if isinstance(part, dict) and "page_idx" in part and "bbox" in part
+            ]
+        # MinerU read this crop as a table: it can become a text table.
+        if table_blocks and tables.table_for_figure(question.paper, figure, table_blocks):
+            shown_figure["table"] = True
         figures.append({**shown_figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
     return {
         "id": question.id, "source_key": str(question.source_key), "number": question.number,
@@ -712,7 +729,7 @@ def papers(request):
     if rejected:
         return rejected
     if not readers.configured("mineru") or readers.primary_engine() is None:
-        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请在“设置 → API 与模型”中配置）")
+        return _error("上传新资料需要配置 MinerU Token 和所选主读模型的 API Key（请在“设置 → 常用”里点“填写或更换密钥”）")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -1293,10 +1310,11 @@ def paper_detail(request, paper_id):
         return JsonResponse({"deleted": paper_id_text, "warning": warning})
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
+    paper_tables = tables.table_blocks(paper)
     return JsonResponse({
         "paper": paper_json(paper),
         "questions": [
-            question_json(q)
+            question_json(q, paper_tables)
             for q in paper.questions.select_related("group").order_by("group__sequence", "number", "id")
         ],
     })
@@ -1549,6 +1567,8 @@ def publish_paper(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if demo.is_demo(paper):
+        return JsonResponse({"error": demo.PUBLISH_REFUSED, "demo": True}, status=409)
     if paper.status == Paper.Status.NEEDS_GROUPING:
         return _error("请先确认资料结构或拆分任务，再入库")
     created, unchanged, problems = 0, 0, []
@@ -1562,6 +1582,22 @@ def publish_paper(request, paper_id):
         unchanged += int(not is_new)
     return JsonResponse({"created": created, "unchanged": unchanged, "problems": problems,
                          "paper": paper_json(paper)})
+
+
+@csrf_exempt
+def demo_paper(request):
+    """Open the practice paper for 新手教学 (``reset`` starts it over)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    try:
+        paper = demo.create_demo_paper(reset=payload.get("reset") is True)
+    except FileNotFoundError as error:
+        return _error(str(error), 500)
+    return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
 @csrf_exempt
@@ -1746,6 +1782,51 @@ def question_action(request, question_id, action: str):
             _clear_approval(question)
             question.state = Question.State.WAITING
             question.reread_requested = True
+        elif action == "figure-table":
+            # A crop MinerU read as a table becomes a text table in the stem.
+            index = payload.get("figure")
+            if type(index) is not int or not 0 <= index < len(question.figures or []):
+                return _error("找不到这张配图")
+            blocks = tables.table_blocks(question.paper)
+            block = tables.table_for_figure(question.paper, question.figures[index], blocks)
+            table_text = tables.to_text(block["html"]) if block else ""
+            if not table_text:
+                return _error("这张图没有可用的表格文字；请用“改字”手动输入表格")
+            pieces = [block, *tables.continuations(block, blocks)]
+            removed, kept = [], []
+            for figure in question.figures:
+                figure_pieces = [figure, *[p for p in (figure.get("parts") or []) if isinstance(p, dict)]]
+                target = kept
+                if figure is question.figures[index] or any(
+                        tables.covers(piece, item) for piece in pieces for item in figure_pieces):
+                    target = removed
+                target.append(figure)
+            before = [
+                text for text in Block.objects.filter(paper=question.paper, seq__lt=block["seq"])
+                .exclude(type__in=["image", "table", "chart", "header", "footer", "page_number",
+                                   "page_footnote", "aside_text"])
+                .order_by("-seq").values_list("text", flat=True)[:2]
+                if text and text.strip()
+            ]
+            question.stem = tables.insert_table(question.stem, table_text, before, key=witness_key)
+            candidate_keys = _candidate_keys(question)
+            resolved = {
+                key for piece in pieces
+                for candidate in (question.figure_candidates or [])
+                if tables.covers(piece, candidate) and (key := _candidate_key(candidate)) in candidate_keys
+            } | _selected_candidate_keys(question, removed)
+            previous_ignored = _saved_ignored_candidates(question)
+            ignored = sorted(set(previous_ignored) | resolved)
+            question.figures = kept
+            question.edited = True
+            question.text_source = "human"
+            question.figure_review = {}
+            review = stored_or_derived_review(question, ignored_candidates=ignored)
+            review = {**review, "ignored_candidates": ignored, "excluded_count": len(ignored)}
+            _apply_figure_review(question, review)
+            if question.state in library.REVIEWABLE_STATES:
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+            _clear_approval(question)
         elif action == "figures":
             figures = payload.get("figures")
             if not isinstance(figures, list) or len(figures) > 12:
@@ -1783,9 +1864,33 @@ def question_action(request, question_id, action: str):
                     candidate_identity = _candidate_key(cleaned_item)
                     if candidate_identity in candidate_keys:
                         cleaned_item["candidate_key"] = candidate_identity
+                # A table cut by a page break: the pieces below are joined to
+                # this figure and shown as one image.
+                if "parts" in item:
+                    raw_parts = item.get("parts")
+                    if not isinstance(raw_parts, list) or len(raw_parts) > library.MAX_FIGURE_PARTS:
+                        return _error("拼接配图格式不正确")
+                    parts = []
+                    for raw_part in raw_parts:
+                        part_bbox = _valid_bbox(raw_part.get("bbox")) if isinstance(raw_part, dict) else None
+                        if part_bbox is None or raw_part.get("page_idx") not in pages:
+                            return _error("拼接配图格式不正确")
+                        part = {"page_idx": raw_part["page_idx"], "bbox": part_bbox}
+                        part_key = raw_part.get("candidate_key")
+                        if part_key is not None:
+                            if not isinstance(part_key, str) or part_key not in candidate_keys:
+                                return _error("配图候选来源格式不正确")
+                            part["candidate_key"] = part_key
+                        elif (exact_key := _candidate_key(part)) in candidate_keys:
+                            part["candidate_key"] = exact_key
+                        parts.append(part)
+                    if parts:
+                        cleaned_item["parts"] = parts
                 cleaned.append(cleaned_item)
             selected_candidate_keys = {
-                item["candidate_key"] for item in cleaned if "candidate_key" in item
+                piece["candidate_key"]
+                for item in cleaned for piece in (item, *item.get("parts", []))
+                if "candidate_key" in piece
             }
             if selected_candidate_keys.intersection(ignored_candidates):
                 return _error("同一张候选图不能同时设为配图和无关")

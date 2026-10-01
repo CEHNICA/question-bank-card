@@ -520,8 +520,13 @@ def load_blocks(archive_path: Path, page_count: int) -> list[dict]:
         text = raw.get("text") or raw.get("content") or ""
         if not isinstance(text, str):
             text = ""
-        blocks.append({"seq": seq, "type": str(raw.get("type") or "unknown")[:40], "page_idx": page,
-                       "bbox": [float(v) for v in bbox] if bbox else None, "text": text[:4000]})
+        block = {"seq": seq, "type": str(raw.get("type") or "unknown")[:40], "page_idx": page,
+                 "bbox": [float(v) for v in bbox] if bbox else None, "text": text[:4000]}
+        # A recognised table keeps its cells: it can become a text table.
+        body = raw.get("table_body")
+        if block["type"] == "table" and isinstance(body, str) and body.strip():
+            block["html"] = body[:20000]
+        blocks.append(block)
     if not blocks:
         raise MineruError("MinerU 没有返回可用的内容块")
     return blocks

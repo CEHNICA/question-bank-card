@@ -18,11 +18,27 @@ for (const page of [html, libraryHtml]) {
 assert.match(html, /id="aboutVersion"/);
 assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
-// 顶栏只有一个带文字的设置入口，抽屉包含约定的五个分区。
+// 顶栏只有一个带文字的设置入口；设置按分页显示：常用、读题模型、帮助、关于。
 assert.match(html, /id="settingsButton"[^>]*>[\s\S]*?<use href="#i-gear"\/>[\s\S]*?设置<\/button>/);
-for (const id of ["settingsModels", "settingsReview", "settingsTask", "settingsInterface", "settingsAbout"]) {
-  assert.match(html, new RegExp(`id="${id}"`));
+for (const id of ["settingsGeneral", "settingsModels", "settingsReview", "settingsAbout"]) {
+  assert.match(html, new RegExp(`data-settings-tab="${id}"`));
+  assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
 }
+assert.match(html, /id="settingsInterface"/);
+assert.match(js, /function showSettingsTab\(id\)/);
+assert.match(js, /showSettingsTab\("settingsGeneral"\);\s*\$\("settingsDialog"\)\.showModal\(\)/);
+// “常用”先用一句话说明能不能上传新资料；缺什么密钥就直接说出来。
+assert.match(html, /id="settingsReady"/);
+assert.match(js, /还不能上传新资料：请先填写 \$\{missing\.join\("、"\)\} 的密钥/);
+// 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
+assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
+assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);
+// 读题模型改了就保存，不再依赖单独的保存按钮。
+assert.doesNotMatch(html, /id="settingsModelSave"/);
+assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\)/);
+// 当前这份试卷的操作不属于“设置”：在试卷标题旁的“试卷操作”里。
+assert.doesNotMatch(html, /id="settingsTask"/);
+assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
 
 // 三个模型角色和保存契约必须保持一致。
 for (const id of ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel"]) {

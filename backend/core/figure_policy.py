@@ -165,6 +165,12 @@ def _question_text(stem: str, options: dict | None = None) -> str:
     return unicodedata.normalize("NFKC", "\n".join(values))
 
 
+def has_table(text: str) -> bool:
+    from .tables import has_table as _has_table
+
+    return _has_table(text)
+
+
 def cue_matches(stem: str, options: dict | None = None) -> list[str]:
     """Return a small, stable list of phrases proving the text refers to a visual."""
     text = _question_text(stem, options)
@@ -176,6 +182,10 @@ def cue_matches(stem: str, options: dict | None = None) -> list[str]:
     text = _STUDENT_DRAWING_REQUEST.sub("", text)
     matches = [match.group(0).strip() for pattern in (_CHINESE_CUE, _ENGLISH_CUE)
                for match in pattern.finditer(text)]
+    # “如表”“填写下表”: once the table is written into the text, the text
+    # itself supplies it and no crop is missing.
+    if has_table(text):
+        matches = [value for value in matches if "表" not in value and "table" not in value.casefold()]
     result: list[str] = []
     for value in matches:
         if value and value.casefold() not in {item.casefold() for item in result}:
@@ -279,7 +289,7 @@ def _automatic_decoration_labels(
             # A genuinely image-based choice may itself be small.  Never
             # override a reader's explicit option assignment.
             continue
-        if assigned_role and assigned_role not in {"stem", "none", "decoration"}:
+        if assigned_role and assigned_role not in {"stem", "none", "decoration", "table"}:
             continue
         if choice_kind and not has_text_options and not has_assigned_option:
             continue
@@ -498,10 +508,12 @@ def automatic_review(
         if role == "stem" or role in OPTION_SLOTS
     }
     decoration_labels = {label for label, role in assignments.items() if role == "decoration"}
+    # A table written into the stem as text is resolved, not a missing picture.
+    table_labels = {label for label, role in assignments.items() if role == "table"}
     explicitly_excluded = {
         label for label, role in assignments.items() if role in {"none", "decoration"}
     }
-    unclassified = candidate_labels - foreign_labels - bound_labels - explicitly_excluded
+    unclassified = candidate_labels - foreign_labels - bound_labels - explicitly_excluded - table_labels
     excluded_count = len(explicitly_excluded)
     drawing_request = asks_student_to_draw(stem, options)
     # ``missing_figure`` is a coarse reader boolean.  A concrete bound crop is
@@ -532,6 +544,8 @@ def automatic_review(
         signals.append("candidate_excluded")
     if decoration_labels:
         signals.append("candidate_decoration")
+    if table_labels:
+        signals.append("candidate_text_table")
     if unclassified:
         signals.append("candidate_unclassified")
 

@@ -29,7 +29,7 @@ assert.match(js, /candidate_key: box\.candidate_key/);
 assert.match(js, /const used = dialog\.boxes\.some\(\(box\) => box\.candidate_key === candidateKey/);
 assert.match(js, /ignored_candidates\)\s*\? q\.figure_review\.ignored_candidates\.filter\(\(key\) => hasFigureCandidateKey\(q, key\)\)/);
 assert.match(js, /slot === "irrelevant"[\s\S]*dialog\.boxes\.splice[\s\S]*renderPageTabs\(\)/);
-assert.match(js, /const figures = dialog\.boxes\.map/);
+assert.match(js, /const figures = figuresFromBoxes\(dialog\.boxes\)/);
 assert.match(js, /confirmCurrentFigures[\s\S]*ignored_candidates: \[\.\.\.ignoredCandidates\]/);
 assert.match(js, /slot: figure\.slot \|\| "stem"/);
 

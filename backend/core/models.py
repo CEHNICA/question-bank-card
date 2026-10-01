@@ -155,6 +155,8 @@ class Block(models.Model):
     page_idx = models.PositiveIntegerField()
     bbox = models.JSONField(null=True, blank=True)
     text = models.TextField(blank=True)
+    # A table MinerU recognised, as its HTML (see core/tables.py).
+    html = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["seq"]

@@ -26,6 +26,7 @@ credentials.dat
 *.db
 *.pdf
 !docs/demo/tiyouju-demo-paper.pdf
+!backend/core/demo_data/demo-paper.pdf
 *.docx
 *.zip
 *.tgz

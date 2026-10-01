@@ -83,6 +83,8 @@ ALLOWED_EXACT_PATHS = {
     # Requests needs certifi's public CA roots for HTTPS certificate validation.  It is
     # neither a user certificate nor a private key.
     "_internal/certifi/cacert.pem",
+    # The practice paper for 新手教学: an original public demo (docs/demo), no user data.
+    "_internal/backend/core/demo_data/demo-paper.pdf",
 }
 
 # Only inspect formats which should contain readable configuration or source text.

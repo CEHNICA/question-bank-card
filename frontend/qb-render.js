@@ -541,10 +541,188 @@
     if (cursor < text.length) parent.append(document.createTextNode(text.slice(cursor)));
   }
 
+  // ---------------------------------------------------------------- 表格
+  // 格子里只有文字和数字的表格是题目文字：Markdown 管道表（| a | b |，第一行后
+  // 可有 |---| 表头分隔行），有合并单元格时用只含 tr/td/th 与 rowspan/colspan 的 HTML。
+
+  const TABLE_SEPARATOR = /^\s*:?-{3,}:?\s*$/;
+  const HTML_TABLE = /<table\b[^>]*>[\s\S]*?<\/table\s*>/gi;
+
+  function isTableLine(line) {
+    const text = line.trim();
+    return text.startsWith("|") && (text.match(/\|/g) || []).length >= 2;
+  }
+
+  // 一行拆成格子，并记下每格在原文里的位置；$…$ 里的 |（如 |x|）和 \| 不算分隔。
+  function tableRowCells(line, lineStart) {
+    const cells = [];
+    let index = 0;
+    const leading = line.length - line.trimStart().length;
+    index = leading;
+    if (line[index] === "|") index += 1;
+    let end = line.trimEnd().length;
+    if (end > index && line[end - 1] === "|" && line[end - 2] !== "\\") end -= 1;
+    let cellStart = index;
+    let inMath = false;
+    const push = (from, to) => {
+      let a = from;
+      let b = to;
+      while (a < b && /\s/.test(line[a])) a += 1;
+      while (b > a && /\s/.test(line[b - 1])) b -= 1;
+      cells.push({ start: lineStart + a, end: lineStart + b, text: line.slice(a, b) });
+    };
+    for (; index < end; index += 1) {
+      const character = line[index];
+      if (character === "\\" && line[index + 1] === "|" && !inMath) { index += 1; continue; }
+      if (character === "$") inMath = !inMath;
+      if (character === "|" && !inMath) { push(cellStart, index); cellStart = index + 1; }
+    }
+    push(cellStart, end);
+    return cells;
+  }
+
+  function decodeEntities(value) {
+    return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (all, code) => {
+      const lower = code.toLowerCase();
+      if (lower === "amp") return "&";
+      if (lower === "lt") return "<";
+      if (lower === "gt") return ">";
+      if (lower === "quot") return '"';
+      if (lower === "apos") return "'";
+      if (lower === "nbsp") return " ";
+      const number = lower.startsWith("#x") ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+      return Number.isFinite(number) && number > 0 && number < 0x110000 ? String.fromCodePoint(number) : all;
+    });
+  }
+
+  function htmlTableRows(raw, offset) {
+    const rows = [];
+    for (const row of raw.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr\s*>/gi)) {
+      const rowInner = offset + row.index + row[0].indexOf(">") + 1;
+      const cells = [];
+      for (const cell of row[1].matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi)) {
+        const start = rowInner + cell.index + cell[0].indexOf(">") + 1;
+        const span = (name) => {
+          const match = new RegExp(`\\b${name}\\s*=\\s*["']?(\\d{1,2})`, "i").exec(cell[2]);
+          return match ? Math.max(1, Math.min(20, Number(match[1]))) : 1;
+        };
+        const text = decodeEntities(cell[3].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, ""))
+          .replace(/\s+/g, " ").trim();
+        cells.push({ start, end: start + cell[3].length, text, rowspan: span("rowspan"), colspan: span("colspan"),
+          header: cell[1].toLowerCase() === "th", decoded: true });
+      }
+      if (cells.length) rows.push(cells.slice(0, 20));
+      if (rows.length >= 60) break;
+    }
+    return rows;
+  }
+
+  // 文本里的全部表格：{start, end, rows: [[{start, end, text, …}]], header}
+  function findTables(source) {
+    const found = [];
+    for (const match of source.matchAll(HTML_TABLE)) {
+      const rows = htmlTableRows(match[0], match.index);
+      if (rows.length) found.push({ start: match.index, end: match.index + match[0].length, rows, header: false });
+    }
+    const lines = source.split("\n");
+    let offset = 0;
+    const starts = lines.map((line) => { const start = offset; offset += line.length + 1; return start; });
+    for (let index = 0; index < lines.length;) {
+      if (!isTableLine(lines[index]) || found.some((table) => table.start <= starts[index] && starts[index] < table.end)) {
+        index += 1;
+        continue;
+      }
+      let last = index;
+      while (last + 1 < lines.length && isTableLine(lines[last + 1])) last += 1;
+      if (last > index) {
+        let rows = lines.slice(index, last + 1).map((line, row) => tableRowCells(line, starts[index + row]));
+        const header = rows.length > 1 && rows[1].some((cell) => cell.text) && rows[1].every((cell) => !cell.text || TABLE_SEPARATOR.test(cell.text));
+        if (header) rows = [rows[0], ...rows.slice(2)];
+        found.push({ start: starts[index], end: starts[last] + lines[last].length, rows, header });
+      }
+      index = last + 1;
+    }
+    return found.sort((a, b) => a.start - b.start);
+  }
+
+  function renderTable(doc, table, marks) {
+    const wrap = doc.createElement("span");
+    wrap.className = "qb-table-wrap";
+    const element = doc.createElement("table");
+    element.className = "qb-table";
+    const width = Math.max(...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colspan || 1), 0)));
+    table.rows.forEach((row, rowIndex) => {
+      const tr = doc.createElement("tr");
+      let used = 0;
+      row.forEach((cell) => {
+        const td = doc.createElement(cell.header || (table.header && rowIndex === 0) ? "th" : "td");
+        if (cell.rowspan > 1) td.rowSpan = cell.rowspan;
+        if (cell.colspan > 1) td.colSpan = cell.colspan;
+        used += cell.colspan || 1;
+        const hits = marks.filter((mark) => mark.end > cell.start && mark.start < cell.end);
+        if (cell.decoded) {
+          renderTypesetText(td, cell.text, { empty: "" });
+          if (hits.length) td.classList.add("qb-cell-marked");
+        } else {
+          const text = cell.text.replace(/\\\|/g, "|");
+          const shifted = text === cell.text ? hits.map((mark) => ({ ...mark, start: mark.start - cell.start, end: mark.end - cell.start })) : [];
+          renderTypesetText(td, text, { marks: shifted, empty: "" });
+          if (hits.length && !shifted.length) td.classList.add("qb-cell-marked");
+        }
+        td.classList.remove("qb-typeset", "is-empty");
+        tr.append(td);
+      });
+      // 少写了格子的行补成完整的一行，表格线才对得齐。
+      if (!table.rows.some((other) => other.some((cell) => (cell.rowspan || 1) > 1))) {
+        for (; used < width; used += 1) tr.append(doc.createElement(table.header && rowIndex === 0 ? "th" : "td"));
+      }
+      element.append(tr);
+    });
+    wrap.append(element);
+    return wrap;
+  }
+
   /*
-   * 排版视图。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
+   * 排版视图。题目文字里的表格排成真正的表格，其余文字照常排版。
    */
-  function renderTypeset(node, value, { marks = [], empty = "（空）" } = {}) {
+  function renderTypeset(node, value, options = {}) {
+    const source = String(value ?? "");
+    const tables = source.includes("|") || /<table/i.test(source) ? findTables(source) : [];
+    if (!tables.length) return renderTypesetText(node, source, options);
+    const doc = node.ownerDocument || document;
+    const marks = options.marks || [];
+    node.replaceChildren();
+    node.classList.add("qb-typeset", "has-table");
+    node.classList.remove("is-empty");
+    const text = (from, to) => {
+      let start = from;
+      let end = to;
+      while (start < end && source[start] === "\n") start += 1;
+      while (end > start && source[end - 1] === "\n") end -= 1;
+      if (!source.slice(start, end).trim()) return;
+      const run = doc.createElement("span");
+      run.className = "qb-text-run";
+      renderTypesetText(run, source.slice(start, end), {
+        empty: "",
+        marks: marks.filter((mark) => mark.end > start && mark.start < end)
+          .map((mark) => ({ ...mark, start: mark.start - start, end: mark.end - start }))
+      });
+      node.append(run);
+    };
+    let cursor = 0;
+    tables.forEach((table) => {
+      text(cursor, table.start);
+      node.append(renderTable(doc, table, marks));
+      cursor = table.end;
+    });
+    text(cursor, source.length);
+    return node;
+  }
+
+  /*
+   * 排版一段文字。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
+   */
+  function renderTypesetText(node, value, { marks = [], empty = "（空）" } = {}) {
     const source = String(value ?? "");
     node.replaceChildren();
     node.classList.add("qb-typeset");
@@ -705,7 +883,7 @@
     });
   }
 
-  function figureElement(figure, resolveUrl) {
+  function figureElement(figure, resolveUrl, action) {
     const frame = document.createElement("figure");
     frame.className = "qb-figure";
     const image = document.createElement("img");
@@ -713,6 +891,14 @@
     image.alt = figure.slot === "stem" ? "题干配图" : `选项 ${figure.slot} 配图`;
     image.src = resolveUrl ? resolveUrl(figure) : figure.url;
     frame.append(image);
+    // The review page can offer an action under a figure (turn a table crop into text).
+    const extra = typeof action === "function" ? action(figure) : null;
+    if (extra) {
+      const caption = document.createElement("figcaption");
+      caption.className = "qb-figure-action";
+      caption.append(extra);
+      frame.append(caption);
+    }
     return frame;
   }
 
@@ -747,7 +933,7 @@
     const stemFigures = figures.filter((figure) => figure.slot === "stem");
     if (stemFigures.length) {
       const row = make("div", "qb-figures");
-      stemFigures.forEach((figure) => row.append(figureElement(figure, opts.resolveUrl)));
+      stemFigures.forEach((figure) => row.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
       container.append(row);
     }
     const options = content.options && typeof content.options === "object" ? content.options : {};
@@ -766,7 +952,7 @@
         const body = make("span", "qb-option-body");
         view(body, options[key], { empty: figures.some((figure) => figure.slot === key) ? "" : "（空）", marks: marks[key] || [] });
         item.append(body);
-        figures.filter((figure) => figure.slot === key).forEach((figure) => item.append(figureElement(figure, opts.resolveUrl)));
+        figures.filter((figure) => figure.slot === key).forEach((figure) => item.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
         list.append(item);
       });
       container.append(list);
@@ -823,6 +1009,6 @@
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments,
-    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions
+    renderTypeset, renderLiteral, renderQuestion, optionColumns, displayWidth, fitScale, fitOptions, findTables
   };
 });

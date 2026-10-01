@@ -60,6 +60,36 @@ def to_pixels(bbox: list[float], size: tuple[int, int]) -> tuple[int, int, int, 
     return box
 
 
+def stack_figure_pieces(pieces: list[tuple[Image.Image, tuple[int, int, int, int]]]) -> Image.Image:
+    """Join the pieces of one figure (a table cut by a page break) into one image.
+
+    pieces: (page image, pixel box) in reading order.  Each crop keeps its
+    horizontal position on the page, so the columns of a table split across
+    two pages line up again; pages of a different pixel width are scaled to
+    the first one.  No gap: the halves meet like the uncut table.
+    """
+    if not pieces:
+        raise ValueError("没有可拼接的配图")
+    base_width = pieces[0][0].width
+    placed = []
+    for page, box in pieces:
+        crop = page.crop(box).convert("RGB")
+        scale = base_width / max(1, page.width)
+        if abs(scale - 1) > 0.02:
+            crop = crop.resize((max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
+                               Image.Resampling.LANCZOS)
+        placed.append((crop, round(box[0] * scale)))
+    left_most = min(left for _, left in placed)
+    width = max(left - left_most + crop.width for crop, left in placed)
+    height = sum(crop.height for crop, _ in placed)
+    canvas = Image.new("RGB", (width, height), "white")
+    y = 0
+    for crop, left in placed:
+        canvas.paste(crop, (left - left_most, y))
+        y += crop.height
+    return canvas
+
+
 def stack_regions(regions: list[dict], page_loader, marks: list[dict] | None = None) -> tuple[Image.Image, list[dict]]:
     """把一道题的若干原卷矩形自上而下拼成一张图。
 
