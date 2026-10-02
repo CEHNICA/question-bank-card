@@ -35,6 +35,8 @@
 
 ![题有据逐题核对工作台](docs/assets/screenshots/review-workspace.webp)
 
+本地实际界面：`202510口镇高中数学.pdf` 第 4 题，左边是带演算笔迹的原卷，右边是已整理的题面和配图。
+
 ## 这是什么
 
 以下是源码的改进记录；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
@@ -124,9 +126,9 @@
 
 ## 看看实际界面
 
-以下画面使用虚构演示资料，不包含真实学生信息、私人试卷或 API 凭据。
+以下截图来自本地实际运行的题有据，使用维护者指定的 `202510口镇高中数学.pdf` 中已经整理的题目。这套试卷共有 19 道已入库题目；截图保留了原卷上的实际笔迹，展示现有题库中的原卷对照、选题与组卷。截图来源和选题编号见 [图片说明](docs/assets/screenshots/README.md)。
 
-想自己试一遍，可以下载仓库内的 [原创三页演示卷](docs/demo/tiyouju-demo-paper.pdf)；生成方法与字体许可证见 [演示资料说明](docs/demo/README.md)。
+想自己试一遍，可以下载仓库内供新手使用的 [原创三页演示卷](docs/demo/tiyouju-demo-paper.pdf)；生成方法与字体许可证见 [演示资料说明](docs/demo/README.md)。
 
 ### 一题一卡，原卷与文字放在一起核对
 
@@ -136,13 +138,23 @@
 
 ![放大对照：原卷与题面并排显示](docs/assets/screenshots/compare-view.webp)
 
+### 查看出处，定位到原卷上的题目与配图
+
+![真实原卷定位：第 4 题的文字范围标为橙色，配图范围标为绿色](docs/assets/screenshots/source-view.webp)
+
+可以切换本题范围与整页位置，用 Ctrl+滚轮缩放、按住左键拖动原卷。
+
 ### 审核完成后，进入正式题库与试题篮
 
 ![正式题库、搜索与试题篮](docs/assets/screenshots/library-and-basket.webp)
 
+按来源选中这套试卷，再搜索“如图”，从实际入库题目中选择需要的题。
+
 ### 选题后预览并打印试卷
 
 ![组卷与打印预览](docs/assets/screenshots/paper-preview.webp)
+
+这份选题练习使用原卷第 4、13、16 题，分别展示选择题、填空题与解答题，软件会按题型分组。
 
 ## 安装与使用
 

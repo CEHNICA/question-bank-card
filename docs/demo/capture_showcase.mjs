@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Capture the four screenshots used by README.md from a running local server.
+ * Capture four original-demo screenshots from a running local server.
  *
  * The script is intentionally read-only with respect to the question-bank API.
  * It expects at least one ready paper and at least one published question. The
@@ -35,7 +35,7 @@ try {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const defaultOutput = path.resolve(here, "../assets/screenshots");
+const defaultOutput = path.resolve(here, "../assets/screenshots/demo");
 
 function option(name, fallback) {
   const index = process.argv.indexOf(name);
