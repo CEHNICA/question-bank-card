@@ -375,7 +375,7 @@ def reading_summary(status: dict) -> dict:
     assistant = bool(status.get("assistant_mode"))
     missing = []
     if not keys["mineru"]:
-        missing.append({"what": "mineru", "label": "MinerU Token（免费，每天 1000 页；14 天过期一次）",
+        missing.append({"what": "mineru", "label": "MinerU Token（到期日和账户额度见管理页）",
                         "signup": signup.get("mineru", "")})
     if not assistant and not any(item["has_key"] for item in services):
         missing.append({

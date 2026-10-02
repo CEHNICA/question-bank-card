@@ -11,6 +11,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote, urlsplit
 
 import requests
 from django.utils import timezone
@@ -21,10 +22,11 @@ from .models import Paper
 API_ROOT = "https://mineru.net/api/v4"
 MAX_ZIP_BYTES = 250 * 1024 * 1024
 MAX_SOURCE_BYTES = 200_000_000
-# 当前官方文档对精准解析 API 标明的单文件上限：600 页、200 MB。
-# https://mineru.net/doc/docs/
+# 当前 API 管理页对精准解析接口标明的单文件上限：200 页、200 MB。
+# https://mineru.net/apiManage/docs
+# 旧文档仍列有更高上限；提交请求遵循当前管理页的保守边界。
 # 集中在这里，便于官方调整后更新。
-MAX_PDF_PAGES = 600
+MAX_PDF_PAGES = 200
 logger = logging.getLogger(__name__)
 
 # 1.10.6: what MinerU says about one submitted file (its own words: pending,
@@ -99,7 +101,7 @@ def read_state(path: Path, *, raw: bool = False) -> dict | None:
     return shown
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
-    "A0211": "Token 已过期（MinerU 的 Token 14 天过期一次）：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 填写或更换密钥”里换上",
+    "A0211": "Token 已过期：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 填写或更换密钥”里换上；有效期以管理页为准",
     "-500": "请求参数不正确，请检查文件类型与接口设置",
     "-10001": "MinerU 服务暂时异常，请稍后重试",
     "-10002": "请求参数格式不正确，请检查接口设置",
@@ -108,7 +110,7 @@ ERROR_HINTS = {
     "-60003": "云端读取文件失败，请检查文件是否损坏后重试",
     "-60004": "文件为空，请重新选择有效文件",
     "-60005": "文件超过 MinerU 的大小限制",
-    "-60006": "MinerU 返回页数超限；当前精准解析 API 文档标明单个文件最多 600 页，请拆分成较小的 PDF 后重试",
+    "-60006": f"MinerU 返回页数超限；当前精准解析 API 管理页标明单个文件最多 {MAX_PDF_PAGES} 页，请拆分成较小的 PDF 后重试",
     "-60007": "MinerU 模型服务暂时不可用，请稍后重试",
     "-60008": "MinerU 读取文件超时，请稍后重试",
     "-60009": "MinerU 任务队列已满，请稍后重试",
@@ -120,7 +122,7 @@ ERROR_HINTS = {
     "-60015": "文件转换失败，请先转换为 PDF 后重试",
     "-60016": "文件转换为指定格式失败，请换一种格式导出后重试",
     "-60017": "MinerU 重试次数已达上限，请稍后再试",
-    "-60018": "今日 MinerU 解析额度已用完，请明日重试",
+    "-60018": "今日 MinerU 解析任务数量已达上限，请查看 API 管理页的当前额度后重试",
     "-60019": "今日 MinerU HTML 解析额度已用完，请明日重试",
     "-60020": "MinerU 文件拆分失败，请稍后重试",
     "-60021": "MinerU 无法读取文件页数，请检查文件后重试",
@@ -177,6 +179,8 @@ def page_limit_message(page_count: int, subject: str = "这份文件") -> str:
 
 
 def validate_page_count(page_count: int, subject: str = "这份文件") -> None:
+    if isinstance(page_count, bool) or not isinstance(page_count, int) or page_count <= 0:
+        raise MineruError("待解析文件页数不正确，未提交给 MinerU")
     if page_count > MAX_PDF_PAGES:
         raise MineruError(page_limit_message(page_count, subject))
 
@@ -360,13 +364,32 @@ def _api_json(
     if not response.ok:
         raise _mineru_error(stage, result, response.status_code)
     if not isinstance(result, dict):
-        raise MineruError("MinerU 接口返回内容格式不正确")
-    if result.get("code") != 0:
+        raise MineruError(f"MinerU {stage}返回内容格式不正确", stage=stage)
+    if type(result.get("code")) is not int or result["code"] != 0:
         raise _mineru_error(stage, result)
     data = result.get("data")
     if not isinstance(data, dict):
-        raise MineruError("MinerU 接口没有返回预期数据")
+        raise MineruError(f"MinerU {stage}没有返回预期数据", stage=stage,
+                          trace_id=_safe_trace_id(result.get("trace_id")))
     return data, _safe_trace_id(result.get("trace_id"))
+
+
+def _https_url(value: object, stage: str, *, trace_id: str = "") -> str:
+    """Validate returned storage URLs without exposing signed URLs in errors."""
+    valid = (isinstance(value, str) and bool(value)
+             and not any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value))
+    if valid:
+        try:
+            parsed = urlsplit(value)
+            valid = (parsed.scheme == "https" and bool(parsed.hostname)
+                     and parsed.username is None and parsed.password is None and not parsed.fragment
+                     and (parsed.port is None or 0 < parsed.port <= 65535))
+        except ValueError:
+            valid = False
+    if not valid:
+        raise MineruError(f"MinerU {stage}返回的地址格式不正确，需要有效的 HTTPS 地址", stage=stage,
+                          trace_id=trace_id)
+    return value
 
 
 def _download_zip(session: requests.Session, url: str, target: Path) -> None:
@@ -380,8 +403,7 @@ def _download_zip(session: requests.Session, url: str, target: Path) -> None:
 
 
 def _download_zip_once(session: requests.Session, url: str, target: Path) -> None:
-    if not url.startswith("https://"):
-        raise MineruError("MinerU 下载地址不是 HTTPS")
+    url = _https_url(url, "解析包下载")
     partial = target.with_name(target.name + ".part")
     partial.unlink(missing_ok=True)
     try:
@@ -434,6 +456,8 @@ def request_extract_file(
         source_size = source.stat().st_size
     except OSError:
         raise MineruError("待解析文件无法读取，请检查原文件后重试") from None
+    if source_size == 0:
+        raise MineruError("待解析文件为空，未提交给 MinerU")
     if source_size > MAX_SOURCE_BYTES:
         raise MineruError("待解析文件超过 MinerU 当前 200 MB 单文件上限，请压缩或拆分后重试")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -447,17 +471,23 @@ def request_extract_file(
 
     with requests.Session() as session:
         report("uploading")
-        batch, _submit_trace_id = _api_json(session, token, "file-urls/batch",
+        batch, submit_trace_id = _api_json(session, token, "file-urls/batch",
                                             {"files": [{"name": source.name}], "model_version": "vlm"})
         batch_id = batch.get("batch_id")
-        upload_urls = batch.get("file_urls") or []
-        if not batch_id or len(upload_urls) != 1:
-            raise MineruError("MinerU 未返回上传地址")
+        if (not isinstance(batch_id, str) or not batch_id.strip()
+                or any(character.isspace() or ord(character) < 32 for character in batch_id)):
+            raise MineruError("MinerU 申请上传地址返回的批次编号格式不正确，未上传文件",
+                              stage="申请上传地址", trace_id=submit_trace_id)
+        upload_urls = batch.get("file_urls")
+        if not isinstance(upload_urls, list) or len(upload_urls) != 1:
+            raise MineruError("MinerU 申请上传地址没有返回单个文件所需的上传地址列表，未上传文件",
+                              stage="申请上传地址", trace_id=submit_trace_id)
+        upload_url = _https_url(upload_urls[0], "申请上传地址", trace_id=submit_trace_id)
         def upload() -> requests.Response:
             # Reopen the file for every attempt: a retried PUT must send the
             # whole body again, not the remainder of a half-read stream.
             with source.open("rb") as stream:
-                return session.put(upload_urls[0], data=stream, timeout=(10, 180))
+                return session.put(upload_url, data=stream, timeout=(10, 180))
 
         try:
             response = _with_network_retries(upload)
@@ -471,16 +501,21 @@ def request_extract_file(
         # 20 minutes, or an hour while MinerU says the file is queued or being
         # read: giving up then and sending again would only start the queue over (1.10.8).
         while time.monotonic() - started < (WAIT_ALIVE if state in ALIVE_STATES else WAIT_SILENT):
-            data, trace_id = _api_json(session, token, f"extract-results/batch/{batch_id}")
+            data, trace_id = _api_json(session, token, f"extract-results/batch/{quote(batch_id, safe='')}")
             if heartbeat is not None:
                 heartbeat()
-            rows = data.get("extract_result") or []
+            rows = data.get("extract_result")
+            if not isinstance(rows, list) or len(rows) > 1 or (rows and not isinstance(rows[0], dict)):
+                raise MineruError("MinerU 查询解析结果返回的单文件任务列表格式不正确",
+                                  stage="查询解析结果", trace_id=trace_id)
             task = rows[0] if rows else None
             state = task.get("state") if isinstance(task, dict) else None
+            if task is not None and (not isinstance(state, str) or not state.strip()):
+                raise MineruError("MinerU 查询解析结果没有返回有效的任务状态",
+                                  stage="查询解析结果", trace_id=trace_id)
             if state == "done":
                 url = task.get("full_zip_url")
-                if not url:
-                    raise MineruError("MinerU 完成任务但没有解析包")
+                url = _https_url(url, "解析包下载", trace_id=trace_id)
                 report("downloading")
                 _download_zip(session, url, target)
                 return target

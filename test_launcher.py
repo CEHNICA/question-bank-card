@@ -17,6 +17,11 @@ import start_question_bank as launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_mineru_precheck_does_not_contact_undocumented_api(self):
+        with patch.object(launcher.urllib.request, "urlopen") as network:
+            self.assertIsNone(launcher._mineru_token_validity("test-token"))
+        network.assert_not_called()
+
     def run_main(
         self,
         saved: dict[str, str],

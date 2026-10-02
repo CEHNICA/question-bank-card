@@ -213,9 +213,9 @@
               <div><span><strong>硅基流动</strong><small>看图读题 · 付费，可做复核和备用</small></span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
             </div>
             <details id="settingsFreePlan" class="free-plan">
-              <summary>完全免费怎么配？</summary>
+              <summary>读题服务怎么配？</summary>
               <ol>
-                <li><strong>MinerU</strong>（必填，免费，每天 1000 页）：<a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">去 MinerU 官网生成 Token</a>。Token 14 天过期一次，过期了回来换一个新的。</li>
+                <li><strong>MinerU</strong>（处理新原卷需要）：<a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">去 MinerU 官网生成 Token</a>。当前精准解析单文件最多 200 页、200 MB；超页数的 PDF 会自动分片，大小超限需先压缩或拆分。每天 1000 页为最高优先级额度，超过后可能排队更久。Token 到期日以管理页为准，到期后回来更换。</li>
                 <li><strong>魔搭</strong>（免费，每天几百次，读得准）：<a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">去魔搭复制访问令牌</a>。要先在魔搭右上角头像里“绑定阿里云”，阿里云用支付宝扫码实名一下。</li>
               </ol>
               <p>连看图读题的密钥也不想填？在“读题模型”里把“谁来读题”选成“AI 助手读题”：题卡先用 MinerU 的文字，再让豆包等 AI 助手对照原卷截图核对（见 GitHub 上的 AGENTS.md）。</p>
@@ -352,7 +352,7 @@
       <div class="credential-body">
         <section class="credential-service" data-service="mineru">
           <div class="credential-service-head"><strong>MinerU Token <small>必填 · 识别整页文字、切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
-          <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">免费生成</a>（14 天过期一次）</label>
+          <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">生成 Token</a>（到期日见管理页）</label>
           <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
           <label class="credential-clear"><input id="credentialMineruClear" type="checkbox">删除已保存的 MinerU Token</label>
@@ -381,12 +381,12 @@
         <details class="credential-more">
           <summary>有多个账号？密钥存在哪里？</summary>
           <p>同一家有多个账号时，把它们一起粘贴进去，用英文分号 ; 隔开（每家最多 8 个）；读题时会轮流使用，一个账号额度用完会换下一个。</p>
-          <p class="credential-security-note">密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。新填的 MinerU Token 会先做一次不上传文件、不消耗额度的官网验证；网络不可用时也能保存，并标为尚未验证。</p>
+          <p class="credential-security-note">密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。保存时只检查填写格式，不上传文件、不消耗识读额度。MinerU 当前未公开无需解析任务的 Token 验证接口；保存成功表示已配置，实际可用性以识读任务返回为准。</p>
         </details>
       </div>
       <footer class="credential-actions">
         <span id="credentialResult" class="settings-save-result" role="status"></span>
-        <button id="credentialSave" class="button primary" type="submit">验证并加密保存</button>
+        <button id="credentialSave" class="button primary" type="submit">加密保存</button>
         <button class="button" type="button" data-close>取消</button>
       </footer>
     </form>

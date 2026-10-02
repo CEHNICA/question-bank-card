@@ -553,25 +553,13 @@ def _health(url: str, process: subprocess.Popen) -> None:
 
 
 def _mineru_token_validity(token: str) -> bool | None:
-    """Check authorization without uploading a document or printing the response."""
-    request = urllib.request.Request(
-        "https://mineru.net/api/v4/quota",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status != 200:
-                return None
-            result = json.loads(response.read(16384))
-    except urllib.error.HTTPError as exc:
-        return False if exc.code in (401, 403) else None
-    except (urllib.error.URLError, TimeoutError, ValueError):
-        return None
-    if not isinstance(result, dict):
-        return None
-    if result.get("code") in ("A0202", "A0211"):
-        return False
-    return True if result.get("code") == 0 else None
+    """Leave authorization unverified until a user-requested parsing task.
+
+    Current public docs do not specify a quota or no-task token-check API.
+    Do not send credentials to the old, undocumented endpoint or create a
+    cloud parsing task merely to test a token. Keep the tri-state contract.
+    """
+    return None
 
 
 def _strip_bearer(value: str) -> str:
@@ -660,7 +648,7 @@ def _resolve_credentials() -> tuple[str, str]:
             entered["mineru_tokens"] = [token] if token else []
             continue
         if validity is None:
-            print("暂时无法预检 MinerU Token；上传时会显示上游状态码和错误码。")
+            print("MinerU 当前未公开无任务的 Token 验证接口；已配置但尚未验证，实际识读时会显示服务返回的状态码和错误码。")
         else:
             print("MinerU Token 已通过官网验证。")
         break

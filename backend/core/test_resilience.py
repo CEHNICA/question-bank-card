@@ -104,7 +104,7 @@ class MineruRecoveryTests(SimpleTestCase):
         message = _error_message("解析", {
             "err_msg": "PDF page count exceeds the page limit; SECRET_REMOTE_TEXT=https://signed.invalid",
         })
-        self.assertIn("600 页", message)
+        self.assertIn("200 页", message)
         self.assertIn("拆分", message)
         self.assertNotIn("SECRET_REMOTE_TEXT", message)
         self.assertNotIn("signed.invalid", message)
@@ -157,7 +157,7 @@ class MineruRecoveryTests(SimpleTestCase):
                 with self.assertRaises(MineruError) as raised:
                     request_extract(paper, "secret-token", source)
             message = str(raised.exception)
-            self.assertIn("600 页", message)
+            self.assertIn("200 页", message)
             self.assertIn("拆分", message)
             self.assertNotIn("DO_NOT_ECHO_THIS_REMOTE_TEXT", message)
 

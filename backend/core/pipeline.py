@@ -622,10 +622,88 @@ def _ensure_import_chunks(paper: Paper) -> list[ImportChunk]:
         chunks = ImportChunk.objects.bulk_create([
             ImportChunk(paper=paper, **item.as_record()) for item in plan
         ])
-    import_planning.validate_chunk_coverage(
-        chunks, expected_start=1, expected_end=len(paper.pages),
-    )
+    try:
+        import_planning.validate_chunk_coverage(
+            chunks, expected_start=1, expected_end=len(paper.pages),
+        )
+    except import_planning.ChunkCoverageError:
+        raise MineruError("历史分片的原卷页码映射不完整，未修改分片或缓存。请保留这份任务，"
+                          "从任务备份恢复后重试，或把本机诊断号交给维护者检查。") from None
+    _replan_oversized_pending_chunks(paper, chunks)
     return list(paper.import_chunks.order_by("sequence"))
+
+
+def _chunk_archive_path(folder: Path, chunk: ImportChunk) -> Path:
+    """Pin old cached filenames independently of a re-planned sequence number."""
+    archive = Path(chunk.artifact_path) if chunk.artifact_path else folder / f"chunk_{chunk.sequence:03d}.zip"
+    if (archive.parent.resolve() != folder.resolve() or archive.is_symlink()
+            or not re.fullmatch(r"chunk_[0-9]+(?:_pages_[0-9]+_[0-9]+)?\.zip", archive.name)):
+        raise MineruError("历史分片缓存位置无法安全核实，未修改任务或缓存。请保留这份任务，"
+                          "从任务备份恢复后重试，或把本机诊断号交给维护者检查。")
+    return archive
+
+
+def _replan_oversized_pending_chunks(paper: Paper, chunks: list[ImportChunk]) -> None:
+    """Split only unfinished old requests that exceed the current provider cap.
+
+    Completed archives are read in place and never renamed or rewritten. Stable
+    artifact paths also prevent a changed sequence from confusing a retained
+    cache with a new request. Planning and all record changes happen before any
+    upload, and the original PDF and original-page maps stay intact.
+    """
+    if not any(chunk.source_page_end - chunk.source_page_start + 1 > MAX_PDF_PAGES for chunk in chunks):
+        return
+    folder = paper_dir(paper) / "chunks"
+    limit = import_planning.pdf_chunk_page_limit(paper.material_type, MAX_PDF_PAGES)
+    revised: list[tuple[ImportChunk | None, dict]] = []
+    changed = False
+    for chunk in chunks:
+        archive = _chunk_archive_path(folder, chunk)
+        oversized = chunk.source_page_end - chunk.source_page_start + 1 > MAX_PDF_PAGES
+        cached = False
+        if oversized and archive.is_file():
+            try:
+                cached = bool(load_blocks(archive, len(chunk.page_map)))
+            except MineruError:
+                pass
+        if oversized and not cached:
+            if chunk.status == ImportChunk.Status.PARSED:
+                raise MineruError("历史已完成分片的解析缓存缺失或损坏，未修改已完成分片。"
+                                  "请先从任务备份恢复解析缓存，再点“重试”；也可把本机诊断号交给维护者检查。")
+            parts = import_planning.plan_pdf_chunks(
+                len(paper.pages), limit,
+                start_page=chunk.source_page_start, end_page=chunk.source_page_end,
+            )
+            for index, part in enumerate(parts):
+                values = part.as_record()
+                values["artifact_path"] = str(
+                    folder / f"chunk_{chunk.pk}_pages_{part.source_page_start:06d}_{part.source_page_end:06d}.zip"
+                )
+                values.update(status=ImportChunk.Status.QUEUED, sha256="", error="")
+                revised.append((chunk if index == 0 else None, values))
+            changed = True
+        else:
+            revised.append((chunk, {"artifact_path": str(archive)}))
+    if not changed:
+        return
+    # Move existing sequence numbers out of the way within one transaction;
+    # then assign the exact source-page order. IDs and retained cache files stay.
+    with transaction.atomic():
+        offset = max(chunk.sequence for chunk in chunks) + len(revised) + 1
+        for chunk in chunks:
+            ImportChunk.objects.filter(pk=chunk.pk).update(sequence=chunk.sequence + offset)
+        for sequence, (chunk, values) in enumerate(revised, start=1):
+            values["sequence"] = sequence
+            if chunk is None:
+                ImportChunk.objects.create(paper=paper, **values)
+            else:
+                for name, value in values.items():
+                    setattr(chunk, name, value)
+                chunk.save(update_fields=list(values))
+        import_planning.validate_chunk_coverage(
+            list(paper.import_chunks.order_by("sequence")),
+            expected_start=1, expected_end=len(paper.pages),
+        )
 
 
 def _file_sha256(path: Path) -> str:
@@ -658,8 +736,8 @@ def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
     jobs: list[dict] = []
 
     for chunk in chunks:
-        source = folder / f"chunk_{chunk.sequence:03d}.pdf"
-        archive = folder / f"chunk_{chunk.sequence:03d}.zip"
+        archive = _chunk_archive_path(folder, chunk)
+        source = archive.with_suffix(".pdf")
         page_count = chunk.source_page_end - chunk.source_page_start + 1
         blocks = None
         try:

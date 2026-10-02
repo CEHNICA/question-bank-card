@@ -2083,16 +2083,16 @@ class ApiTests(TestCase):
         self.assertEqual(len(paper.pages), 1)
         self.assertTrue(Path(paper.source_path).is_file())
 
-    def test_upload_pdf_preflight_accepts_exactly_600_pages(self):
-        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(600)]
+    def test_upload_pdf_preflight_accepts_exactly_200_pages(self):
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(200)]
         upload = io.BytesIO(b"mock PDF at the supported page limit")
-        upload.name = "600页.pdf"
+        upload.name = "200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
-        paper = Paper.objects.get(filename="600页.pdf")
-        self.assertEqual(len(paper.pages), 600)
+        paper = Paper.objects.get(filename="200页.pdf")
+        self.assertEqual(len(paper.pages), 200)
         self.assertFalse(paper.import_chunks.exists())
         self.assertTrue((self.temp / str(paper.id)).is_dir())
 
@@ -2175,22 +2175,22 @@ class ApiTests(TestCase):
         self.assertEqual(failed.status, Paper.Status.FAILED)
 
     def test_upload_pdf_over_mineru_limit_creates_lossless_chunk_plan(self):
-        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(601)]
+        pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
         upload = io.BytesIO(b"mock PDF over the supported page limit")
-        upload.name = "601页.pdf"
+        upload.name = "201页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
-        paper = Paper.objects.get(filename="601页.pdf")
+        paper = Paper.objects.get(filename="201页.pdf")
         chunks = list(ImportChunk.objects.filter(paper=paper).order_by("sequence"))
         self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-                         [(1, 600), (601, 601)])
-        self.assertEqual(chunks[0].page_map, list(range(1, 601)))
-        self.assertEqual(chunks[1].page_map, [601])
+                         [(1, 200), (201, 201)])
+        self.assertEqual(chunks[0].page_map, list(range(1, 201)))
+        self.assertEqual(chunks[1].page_map, [201])
         self.assertTrue((self.temp / str(paper.id) / "source.pdf").is_file())
 
-    def test_upload_pdf_exactly_1200_pages_creates_two_complete_chunks(self):
+    def test_upload_pdf_exactly_1200_pages_creates_six_complete_chunks(self):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(1200)]
         upload = io.BytesIO(b"mock long PDF")
         upload.name = "1200页.pdf"
@@ -2201,4 +2201,5 @@ class ApiTests(TestCase):
         paper = Paper.objects.get(filename="1200页.pdf")
         chunks = list(paper.import_chunks.order_by("sequence"))
         self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-                         [(1, 600), (601, 1200)])
+                         [(1, 200), (201, 400), (401, 600), (601, 800), (801, 1000), (1001, 1200)])
+        self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 1201)))

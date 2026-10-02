@@ -67,6 +67,91 @@ class LongPdfChunkPipelineTests(TestCase):
             ),
         ])
 
+    def _legacy_plan(self, ranges):
+        self.paper.import_chunks.all().delete()
+        self.paper.pages = [{"page_idx": page, "width": 1000, "height": 1400}
+                            for page in range(ranges[-1][1])]
+        self.paper.save(update_fields=["pages"])
+        folder = self.folder / "chunks"
+        folder.mkdir()
+        rows = []
+        for sequence, (start, end, status) in enumerate(ranges, start=1):
+            archive = folder / f"chunk_{sequence:03d}.zip"
+            archive.with_suffix(".pdf").write_bytes(f"original slice {start}-{end}".encode())
+            if status == ImportChunk.Status.PARSED:
+                archive.write_bytes(f"completed cache {start}-{end}".encode())
+            rows.append(ImportChunk.objects.create(
+                paper=self.paper, sequence=sequence, source_page_start=start, source_page_end=end,
+                page_map=list(range(start, end + 1)), status=status, artifact_path=str(archive),
+                attempts=7, sha256="d" * 64 if status == ImportChunk.Status.PARSED else "",
+            ))
+        return rows
+
+    @staticmethod
+    def _legacy_blocks(archive, pages):
+        if archive.read_bytes() == b"corrupt":
+            raise MineruError("fixture cache is corrupt")
+        return [{"seq": index, "page_idx": page, "type": "text", "bbox": [20, 30, 900, 80],
+                 "text": f"{archive.name} page {page}"}
+                for index, page in enumerate(sorted({0, pages - 1}))]
+
+    def test_legacy_failed_600_page_chunk_is_split_without_reuploading_later_completed_cache(self):
+        rows = self._legacy_plan([(1, 600, ImportChunk.Status.FAILED), (601, 800, ImportChunk.Status.PARSED)])
+        cached = rows[1]
+        archive = Path(cached.artifact_path)
+        old_cache, old_slice, original = archive.read_bytes(), archive.with_suffix(".pdf").read_bytes(), self.render.read_bytes()
+        with mock.patch.object(pipeline, "write_pdf_slice", side_effect=self._slice) as cut, \
+                mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=self._successful_extract) as extract, \
+                mock.patch.object(pipeline, "load_blocks", side_effect=self._legacy_blocks):
+            blocks = pipeline._chunk_blocks(self.paper, self.render)
+            chunks = list(self.paper.import_chunks.order_by("sequence"))
+            self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
+                             [(1, 200), (201, 400), (401, 600), (601, 800)])
+            self.assertEqual([call.args[2] for call in extract.call_args_list], [200, 200, 200])
+            self.assertEqual([(call.args[2], call.args[3]) for call in cut.call_args_list],
+                             [(0, 200), (200, 400), (400, 600)])
+            self.assertEqual([block["page_idx"] for block in blocks], [0, 199, 200, 399, 400, 599, 600, 799])
+            extract.reset_mock()
+            cut.reset_mock()
+            self.assertEqual(pipeline._chunk_blocks(self.paper, self.render), blocks)
+            extract.assert_not_called()
+            cut.assert_not_called()
+        cached.refresh_from_db()
+        self.assertEqual((cached.pk, cached.source_page_start, cached.source_page_end, cached.page_map,
+                          cached.status, cached.sha256, cached.attempts, cached.artifact_path),
+                         (rows[1].pk, 601, 800, list(range(601, 801)), ImportChunk.Status.PARSED,
+                          "d" * 64, 7, str(archive)))
+        self.assertEqual(archive.read_bytes(), old_cache)
+        self.assertEqual(archive.with_suffix(".pdf").read_bytes(), old_slice)
+        self.assertEqual(self.render.read_bytes(), original)
+
+    def test_legacy_completed_600_page_cache_is_kept_while_only_unfinished_201_pages_are_replanned(self):
+        rows = self._legacy_plan([(1, 600, ImportChunk.Status.PARSED), (601, 801, ImportChunk.Status.FAILED)])
+        archive = Path(rows[0].artifact_path)
+        before = archive.read_bytes()
+        with mock.patch.object(pipeline, "write_pdf_slice", side_effect=self._slice), \
+                mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=self._successful_extract) as extract, \
+                mock.patch.object(pipeline, "load_blocks", side_effect=self._legacy_blocks):
+            blocks = pipeline._chunk_blocks(self.paper, self.render)
+        self.assertEqual([call.args[2] for call in extract.call_args_list], [200, 1])
+        self.assertEqual([block["page_idx"] for block in blocks], [0, 599, 600, 799, 800])
+        rows[0].refresh_from_db()
+        self.assertEqual((rows[0].source_page_start, rows[0].source_page_end, rows[0].artifact_path), (1, 600, str(archive)))
+        self.assertEqual(archive.read_bytes(), before)
+
+    def test_corrupt_completed_legacy_cache_is_reported_without_replanning_or_uploading(self):
+        rows = self._legacy_plan([(1, 600, ImportChunk.Status.PARSED), (601, 801, ImportChunk.Status.FAILED)])
+        archive = Path(rows[0].artifact_path)
+        archive.write_bytes(b"corrupt")
+        before = list(self.paper.import_chunks.order_by("sequence").values())
+        with mock.patch.object(pipeline, "load_blocks", side_effect=self._legacy_blocks), \
+                mock.patch.object(pipeline, "request_extract_file_from_pool") as extract, \
+                self.assertRaisesRegex(MineruError, "任务备份恢复解析缓存"):
+            pipeline._chunk_blocks(self.paper, self.render)
+        extract.assert_not_called()
+        self.assertEqual(list(self.paper.import_chunks.order_by("sequence").values()), before)
+        self.assertEqual(archive.read_bytes(), b"corrupt")
+
     def _set_chunk_count(self, count: int) -> None:
         self.paper.import_chunks.all().delete()
         self.paper.pages = [

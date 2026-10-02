@@ -29,11 +29,13 @@ assert.match(js, /toast\(message, "success"\);[\s\S]*?const refreshed = await lo
 assert.match(js, /function openSettings\(\)[\s\S]*?\$\("settingsDialog"\)\.showModal\(\);[\s\S]*?void loadStatus\(\);/);
 assert.match(html, /已经保存的密钥不会再显示出来/);
 assert.match(html, /不写入题库、日志或项目文件/);
-assert.match(html, /不上传文件、不消耗额度的官网验证/);
-assert.match(html, />验证并加密保存<\/button>/);
+assert.match(html, /不上传文件、不消耗识读额度/);
+assert.match(html, />加密保存<\/button>/);
+assert.doesNotMatch(html, /不消耗额度的官网验证/);
 
-// 完全免费：MinerU、魔搭都直接给出去哪里申请，并说清 MinerU Token 会过期。
-assert.match(html, /for="credentialMineruInput">[^<]*<a href="https:\/\/mineru\.net\/apiManage\/token"[^>]*>免费生成<\/a>（14 天过期一次）/);
+// 密钥申请有直接入口；MinerU 当前文档没有统一的14天到期承诺。
+assert.match(html, /for="credentialMineruInput">[^<]*<a href="https:\/\/mineru\.net\/apiManage\/token"[^>]*>生成 Token<\/a>/);
+assert.doesNotMatch(html, /14 天过期一次|免费，每天 1000 页/);
 assert.match(html, /for="credentialModelscopeInput">[^<]*<a href="https:\/\/www\.modelscope\.cn\/my\/myaccesstoken"/);
 for (const service of ["mineru", "modelscope", "minimax", "siliconflow"]) {
   assert.match(js, new RegExp(`const CREDENTIAL_FIELDS = \\{[\\s\\S]*?${service}: \\{ input: "credential`));

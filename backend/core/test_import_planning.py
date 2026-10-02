@@ -64,20 +64,23 @@ class ImportStructureMigrationTests(TransactionTestCase):
 
 
 class PdfChunkPlanningTests(TestCase):
-    def test_exam_keeps_600_page_hard_limit_boundary(self):
-        self.assertEqual(pdf_chunk_page_limit("exam", 600), 600)
-        self.assertFalse(pdf_requires_chunks(600, "exam", 600))
-        self.assertTrue(pdf_requires_chunks(601, "exam", 600))
+    def test_exam_keeps_current_200_page_hard_limit_boundary(self):
+        from .mineru import MAX_PDF_PAGES
+
+        self.assertEqual(MAX_PDF_PAGES, 200)
+        self.assertEqual(pdf_chunk_page_limit("exam", MAX_PDF_PAGES), 200)
+        self.assertFalse(pdf_requires_chunks(200, "exam", MAX_PDF_PAGES))
+        self.assertTrue(pdf_requires_chunks(201, "exam", MAX_PDF_PAGES))
 
     def test_book_uses_stable_100_page_boundary(self):
         self.assertEqual(BOOK_CHUNK_PAGES, 100)
-        self.assertEqual(pdf_chunk_page_limit("book", 600), 100)
-        self.assertTrue(pdf_requires_chunks(1, "book", 600))
-        self.assertTrue(pdf_requires_chunks(100, "book", 600))
-        self.assertTrue(pdf_requires_chunks(101, "book", 600))
+        self.assertEqual(pdf_chunk_page_limit("book", 200), 100)
+        self.assertTrue(pdf_requires_chunks(1, "book", 200))
+        self.assertTrue(pdf_requires_chunks(100, "book", 200))
+        self.assertTrue(pdf_requires_chunks(101, "book", 200))
 
     def test_270_page_book_plan_is_stable_and_lossless(self):
-        chunks = plan_pdf_chunks(270, pdf_chunk_page_limit("book", 600))
+        chunks = plan_pdf_chunks(270, pdf_chunk_page_limit("book", 200))
 
         self.assertEqual(
             [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],

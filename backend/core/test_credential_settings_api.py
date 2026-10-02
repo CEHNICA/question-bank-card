@@ -8,7 +8,6 @@ covered by the root-level credential store round-trip tests.
 from __future__ import annotations
 
 import json
-import http.client
 import os
 import shutil
 import tempfile
@@ -28,19 +27,16 @@ def identity_transform(data: bytes, *, protect: bool) -> bytes:
 
 
 class MineruCredentialProbeTests(SimpleTestCase):
-    def test_transport_and_header_encoding_failures_are_unavailable_not_exceptions(self):
-        response = mock.MagicMock(status=200)
-        response.read.side_effect = http.client.IncompleteRead(b"")
-        context = mock.MagicMock()
-        context.__enter__.return_value = response
-        with mock.patch.object(credential_settings.urllib.request, "urlopen", return_value=context):
-            self.assertIsNone(credential_settings._mineru_token_validity("test-token"))
+    def test_saving_a_token_without_a_documented_probe_does_not_make_any_api_request(self):
+        import urllib.request
+        import requests
 
-        encoding_error = UnicodeEncodeError("latin-1", "密", 0, 1, "not representable")
-        with mock.patch.object(
-            credential_settings.urllib.request, "urlopen", side_effect=encoding_error,
-        ):
-            self.assertIsNone(credential_settings._mineru_token_validity("含中文的测试令牌"))
+        with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("must stay offline")), \
+                mock.patch.object(requests, "Session", side_effect=AssertionError("must not submit a task")):
+            self.assertIsNone(credential_settings._mineru_token_validity("test-token"))
+            self.assertEqual(credential_settings.verify_mineru_replacement({
+                "mineru": {"action": "replace", "accounts": ["test-token"]},
+            }), "unverified")
 
 
 class CredentialSettingsApiTests(SimpleTestCase):
@@ -138,8 +134,9 @@ class CredentialSettingsApiTests(SimpleTestCase):
                 "siliconflow": {"action": "keep"},
             })
         self.assertEqual(unavailable.status_code, 200, unavailable.content)
-        self.assertEqual(unavailable.json()["mineru_verification"], "unavailable")
-        self.assertIn("尚未验证", unavailable.json()["message"])
+        self.assertEqual(unavailable.json()["mineru_verification"], "unverified")
+        self.assertIn("尚未核验", unavailable.json()["message"])
+        self.assertNotIn("官网暂时无法连接", unavailable.json()["message"])
         self.assertNotIn(secret, unavailable.content.decode("utf-8"))
 
     def test_keep_clear_and_replace_are_explicit(self):

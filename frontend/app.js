@@ -4122,7 +4122,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const save = $("credentialSave");
     save.disabled = true;
-    $("credentialResult").textContent = "正在验证并加密保存…";
+    $("credentialResult").textContent = "正在检查填写格式并加密保存…";
     try {
       const result = await api("/api/settings/credentials", { method: "POST", body: { services } });
       resetCredentialInputs();

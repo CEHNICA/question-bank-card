@@ -10,6 +10,10 @@
 
 用户选择由 AI 助手核对时，用 `tiyouju config --reader assistant`；改回看图读题可用 `--reader modelscope` 等。改动从下一份新上传的卷子生效。`config` 不加参数只显示现状。
 
+当前精准 API 管理页规定单文件最多 200 MB / 200 页；每日 1000 页是最高优先级额度，不能当成硬停用页数。Token 到期日按本人管理页显示；免 Token 的 10 MB / 20 页轻量 API 只返回 Markdown，不能直接替代原卷定位与切题流程。鉴权、过期、限流、每日任务数和解析失败要分别报告。[当前官方文档](https://mineru.net/apiManage/docs) · [限流与收费说明](https://mineru.net/apiManage/limit)
+
+1.10.15 起，保存 MinerU Token 只做格式校验与本机加密保存，不请求未公开的额度接口验密钥。“已配置，未核验”不能当成 Token 有效或服务故障的证据；实际任务明确返回鉴权、过期等错误时，再按真实原因处理。
+
 ## AI 助手读题：题卡上的字由你来定
 
 选了 AI 助手读题，题有据就不再看图读题。每张题卡的文字是 MinerU 自己识别的**初稿**，题卡是黄色的，疑点写着“题面是 MinerU 识别的初稿”（JSON 里 `text_source` 是 `mineru`）。

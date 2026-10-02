@@ -9,12 +9,9 @@ never returned by this module.
 from __future__ import annotations
 
 import importlib.util
-import http.client
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
@@ -65,38 +62,24 @@ def save_actions(changes: Mapping[str, object]) -> dict[str, dict[str, object]]:
     return store.update_credentials(changes)
 
 
-def _mineru_token_validity(token: str) -> bool | None:
-    """Check MinerU authorization without uploading a file or exposing output."""
+def _mineru_token_validity(_token: str) -> bool | None:
+    """No documented zero-upload authorization probe is currently available.
 
-    try:
-        request = urllib.request.Request(
-            "https://mineru.net/api/v4/quota",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status != 200:
-                return None
-            result = json.loads(response.read(16_384))
-    except urllib.error.HTTPError as exc:
-        return False if exc.code in (401, 403) else None
-    except (
-        urllib.error.URLError, TimeoutError, ValueError, UnicodeError,
-        http.client.HTTPException, OSError,
-    ):
-        return None
-    if not isinstance(result, dict):
-        return None
-    if result.get("code") in ("A0202", "A0211"):
-        return False
-    return True if result.get("code") == 0 else None
+    The current API management documentation does not specify the previously
+    used ``/api/v4/quota`` endpoint. Saving a Token must not create a parse task
+    just to test authorization or invent service unavailability from a 404.
+    Local format checks remain in the credential store; a real parsing task
+    subsequently reports invalid/expired Tokens through the documented codes.
+    """
+    return None
 
 
 def verify_mineru_replacement(changes: Mapping[str, object]) -> str:
-    """Return verified/unavailable/not_requested, rejecting known-bad tokens.
+    """Return verified/unverified/not_requested, rejecting known-bad tokens.
 
     Only a replacement pool is checked.  Keeping or clearing existing values
-    does no network work.  Network uncertainty never destroys or blocks a
-    user's new value, but the API response must say that it remains unverified.
+    does no network work. An unavailable documented probe must not block a
+    user's new value, and the API response must say that it remains unverified.
     """
 
     if not isinstance(changes, Mapping):
@@ -121,9 +104,9 @@ def verify_mineru_replacement(changes: Mapping[str, object]) -> str:
     invalid = sum(result is False for result in results)
     if invalid:
         raise CredentialValidationError(
-            f"有 {invalid} 个 MinerU Token 未通过官网验证，未保存本次更改。请确认复制完整；Token 14 天过期一次，过期了到 mineru.net 重新生成。"
+            f"有 {invalid} 个 MinerU Token 未通过官网验证，未保存本次更改。请确认复制完整；过期或权限不足时到 mineru.net 的 API 管理页核对并重新生成，有效期以管理页为准。"
         )
-    return "verified" if all(result is True for result in results) else "unavailable"
+    return "verified" if all(result is True for result in results) else "unverified"
 
 
 def apply_public_environment(status: Mapping[str, Mapping[str, object]]) -> None:

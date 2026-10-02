@@ -745,8 +745,8 @@ def credential_settings_view(request):
         credential_settings.apply_public_environment(services)
         if mineru_verification == "verified":
             message = "API 配置已加密保存，MinerU Token 已通过官网验证；新任务或下一次重读开始时生效。"
-        elif mineru_verification == "unavailable":
-            message = "API 配置已加密保存；MinerU 官网暂时无法连接，本次 Token 尚未验证。新任务或下一次重读开始时生效。"
+        elif mineru_verification in {"unverified", "unavailable"}:
+            message = "API 配置已加密保存；本次 MinerU Token 尚未核验。是否有效和服务是否可用，请查看 API 管理页及下一次解析任务的实际返回。"
         else:
             message = "API 配置已加密保存；新任务或下一次重读开始时生效，当前任务不会中途换账号。"
         return JsonResponse({

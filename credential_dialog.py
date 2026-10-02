@@ -424,8 +424,8 @@ class CredentialDialog:
             self._persist(values, preferences)
             return
         self._set_busy(True)
-        # 目前只有 MinerU 提供不产生识读费用的凭据预检。
-        # 模型 Key 不冒充“已验证”，会在首次识读时由账号池隔离失效项。
+        # 只有调用方提供了明确的验证方式，才进入预检流程。
+        # 默认凭据只做格式校验，不用未公开接口冒充“已验证”。
         if self.verify_mineru and not self.verify_minimax and not self.verify_siliconflow:
             self.status.set("正在验证 MinerU Token…")
         else:

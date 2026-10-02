@@ -69,7 +69,8 @@ ASSISTANT_ENGINE = "assistant"
 
 ENGINES = {spec["engine"]: key for key, spec in VISION.items()}
 MINERU = {"credential": ("mineru_token", "mineru_tokens"), "environment": ("MINERU_TOKEN", "MINERU_TOKENS_JSON"),
-          "signup": "https://mineru.net/apiManage/token", "note": "免费，每天 1000 页；Token 14 天过期一次"}
+          "signup": "https://mineru.net/apiManage/token",
+          "note": "每天 1000 页最高优先级解析额度，超出部分降低优先级；额度和 Token 有效期以 API 管理页为准"}
 
 # Every credential service, MinerU first.
 SERVICES = ("mineru", *VISION)
