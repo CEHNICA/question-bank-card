@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+<title id="title">题有据单色图标</title><desc id="desc">青绿色翻页书本，象征整理题目、保留出处。</desc>
+<g transform="translate(-92 -92) scale(1.18)">
+  <path d="M150 254h39v487c130 0 242 51 319 141l-9 21c-100-73-216-106-349-102z" fill="#0c2a3e"/>
+  <path d="M189 244l32 11v469l-32 17z" fill="#ffffff"/>
+  <path d="M221 255c137 11 235 107 287 213v414c-83-108-189-168-287-160z" fill="#0c2a3e"/>
+  <path d="M508 468c72-175 201-283 342-294v577c-138-9-266 55-342 132z" fill="#0c2a3e"/>
+</g>
+</svg>
