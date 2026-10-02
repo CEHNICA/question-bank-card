@@ -1199,8 +1199,48 @@
   // ---------------------------------------------------------------- 组卷
 
   let printAnswersPreference = ui.printAnswers.checked;
-  const printState = { token: 0, items: [], missing: [], loading: false, returnFocus: null };
+  const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null };
   const printNames = new Map();
+
+  function normalizePrintOptions(options = {}) {
+    const document = ["questions", "answers", "combined"].includes(options.document)
+      ? options.document : options.answers === false ? "questions" : "combined";
+    return {
+      answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
+      document, font_size: [12, 14, 16].includes(Number(options.font_size)) ? Number(options.font_size) : 12,
+      answer_space: ["none", "medium", "large"].includes(options.answer_space) ? options.answer_space : "none",
+      student_info: options.student_info !== false
+    };
+  }
+
+  function currentPrintOptions() {
+    return normalizePrintOptions({
+      document: $("printDocument").value, origin: ui.printOrigin.checked,
+      ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked),
+      font_size: $("printFontSize").value, answer_space: $("printAnswerSpace").value,
+      student_info: $("printStudentInfo").checked
+    });
+  }
+
+  function applyPrintOptions(options) {
+    const restored = normalizePrintOptions(options);
+    $("printDocument").value = restored.document;
+    $("printFontSize").value = String(restored.font_size);
+    $("printAnswerSpace").value = restored.answer_space;
+    $("printStudentInfo").checked = restored.student_info;
+    printAnswersPreference = restored.answers;
+    ui.printAnswers.checked = restored.answers;
+    ui.printOrigin.checked = restored.origin;
+    ui.printAi.checked = Boolean(state.features.ai_answer && restored.ai_answers);
+  }
+
+  function syncExportButtons() {
+    const blocked = printState.exporting || printState.loading || !!printState.missing.length || !printState.items.length;
+    const answerEmpty = $("printDocument").value === "answers" && !printState.availableAnswers;
+    $("printButton").disabled = blocked || answerEmpty || !!printState.tooWide;
+    $("exportWord").disabled = blocked || answerEmpty;
+    $("exportSplit").disabled = blocked || !printState.availableAnswers;
+  }
 
   function printAnswerContent(item) {
     const original = item.content || {};
@@ -1216,11 +1256,13 @@
 
   function syncPrintAnswers(items) {
     const available = items.filter((item) => printAnswerContent(item)).length;
+    printState.availableAnswers = available;
     const aiAvailable = state.features.ai_answer && items.some((item) =>
       !String(item.content?.answer ?? "").trim()
       && (String(item.ai_answer?.answer ?? "").trim() || String(item.ai_answer?.analysis ?? "").trim()));
     ui.printAiBox.hidden = !aiAvailable;
     ui.printAnswers.disabled = available === 0;
+    printAnswersPreference = $("printDocument").value !== "questions";
     ui.printAnswers.checked = available > 0 && printAnswersPreference;
     let status = $("printAnswerStatus");
     if (!status) {
@@ -1228,28 +1270,35 @@
       status.id = "printAnswerStatus";
       status.setAttribute("role", "status");
       status.setAttribute("aria-live", "polite");
-      ui.sheet.querySelector(".print-controls").append(status);
+      ui.sheet.querySelector(".print-options-body").append(status);
       ui.printAnswers.setAttribute("aria-describedby", status.id);
     }
-    status.textContent = !items.length ? "请先加入题目，再设置卷末答案。"
+    status.textContent = !items.length ? "请先加入题目。"
       : !available ? (aiAvailable
-        ? "所选题目没有原卷答案或解析；可勾选“附 AI 参考答案”，附上未核对的参考内容。"
-        : "所选题目没有答案或解析，卷末不附参考答案。")
-      : available < items.length ? `${items.length} 题中有 ${available} 题可附答案或解析，其余题会标明原卷未提供。`
-      : `所选 ${items.length} 题都有可附的答案或解析。`;
+        ? "没有原卷答案，可选择附上明确标注的 AI 参考（未核对）。"
+        : $("printDocument").value === "answers" ? "这些题没有答案或解析，不能导出空答案卷。请改选题目卷。"
+          : "这些题没有答案或解析，仅输出题目卷。")
+      : available < items.length ? `${items.length} 题中 ${available} 题有答案或解析，其余标明原卷未提供。`
+      : `${items.length} 题均有答案或解析。`;
+    $("printDocument").querySelector('option[value="answers"]').disabled = !available;
+    syncExportButtons();
   }
 
   async function openPrint() {
     const token = ++printState.token;
     const opening = !ui.sheet.open;
     if (opening) printState.returnFocus = document.activeElement;
+    if (!printState.settingsInitialized) {
+      $("printSettings").open = !window.matchMedia("(max-width: 979px)").matches;
+      printState.settingsInitialized = true;
+    }
     ui.printAiBox.hidden = !state.features.ai_answer;
     ui.paper.replaceChildren(node("p", "helper", "正在准备…"));
     ui.sheet.hidden = false;
     if (opening) ui.sheet.showModal();
     document.body.classList.add("printing");
     printState.loading = true;
-    $("printButton").disabled = true;
+    syncExportButtons();
     $("printMissing").hidden = true;
     $("printLayoutNotice").hidden = true;
     let items = [], missing = [];
@@ -1282,11 +1331,11 @@
 
   function draftPayload() {
     return { title: ui.printTitle.value.trim() || "练习", ids: [...state.basket],
-      print_options: { answers: printAnswersPreference, origin: ui.printOrigin.checked, ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked) } };
+      print_options: currentPrintOptions() };
   }
 
   async function saveDraft({ copy = false } = {}) {
-    if (state.draftSaving) return;
+    if (state.draftSaving || printState.exporting) return;
     if (!state.basket.length) { toast("先选题，再保存组卷草稿", "error"); return; }
     const previousDraft = state.draft;
     const existing = !copy && state.draft;
@@ -1352,9 +1401,7 @@
             state.draft = current;
             state.draftDirty = false;
             ui.printTitle.value = current.title;
-            printAnswersPreference = current.print_options.answers;
-            ui.printOrigin.checked = current.print_options.origin;
-            ui.printAi.checked = Boolean(state.features.ai_answer && current.print_options.ai_answers);
+            applyPrintOptions(current.print_options);
             $("draftSaveStatus").textContent = `正在编辑“${current.title}”`;
             dialog.close();
             render();
@@ -1390,7 +1437,7 @@
     box.replaceChildren();
     box.hidden = !printState.missing.length;
     if (box.hidden) return;
-    box.append(node("p", "", `试题篮 ${state.basket.length} 题，成功载入 ${printState.items.length} 题；以下 ${printState.missing.length} 题尚未载入。处理后才能打印。`));
+    box.append(node("p", "", `试题篮 ${state.basket.length} 题，成功载入 ${printState.items.length} 题；以下 ${printState.missing.length} 题尚未载入。处理后才能导出或打印。`));
     printState.missing.forEach((item) => {
       const row = node("div", "print-missing-row");
       const remove = node("button", "button button-small", "移出试题篮");
@@ -1419,13 +1466,18 @@
     renderPrintMissing();
     syncPrintAnswers(items);
     ui.paper.replaceChildren();
+    const options = currentPrintOptions();
+    ui.paper.style.setProperty("--exam-font-size", `${options.font_size}pt`);
+    ui.paper.dataset.answerSpace = options.answer_space;
+    ui.paper.dataset.document = options.document;
     const title = node("h2", "print-title", ui.printTitle.value.trim() || "练习");
     const info = node("p", "print-info", "姓名 ____________　班级 ____________　得分 ________");
-    ui.paper.append(title, info);
+    ui.paper.append(title);
+    if (options.student_info && options.document !== "answers") ui.paper.append(info);
     if (!items.length) {
       ui.paper.append(node("p", "helper", printState.missing.length ? "选题尚未全部载入，请先重试或移出未载入题目。" : "试题篮是空的。"));
       $("printLayoutNotice").hidden = true;
-      $("printButton").disabled = true;
+      syncExportButtons();
       return;
     }
     const groups = [["single_choice", "选择题"], ["multiple_choice", "多选题"], ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]];
@@ -1441,21 +1493,25 @@
     let number = 0;
     const answers = [];
     ordered.forEach(([name, group], index) => {
-      ui.paper.append(node("h3", "print-section", `${chinese[index] || index + 1}、${name}`));
+      if (options.document !== "answers") ui.paper.append(node("h3", "print-section", `${chinese[index] || index + 1}、${name}`));
       group.forEach((item, position) => {
         number += 1;
-        const block = node("div", "print-question");
-        QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
-        const origin = item.origin || item.content?.origin;
-        if (ui.printOrigin.checked && origin) block.querySelector(".qb-stem-body")?.prepend(node("span", "print-origin", `（${origin}）`));
-        block.dataset.questionId = item.id;
-        block.append(printTools(items, group, position, number));
-        ui.paper.append(block);
+        if (options.document !== "answers") {
+          const block = node("div", "print-question");
+          QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
+          const origin = item.origin || item.content?.origin;
+          if (ui.printOrigin.checked && origin) block.querySelector(".qb-stem-body")?.prepend(node("span", "print-origin", `（${origin}）`));
+          block.dataset.questionId = item.id;
+          if (item.question_type === "free_response" && options.answer_space !== "none") block.append(node("div", "print-answer-space"));
+          block.append(printTools(items, group, position, number));
+          ui.paper.append(block);
+        }
         answers.push([number, item]);
       });
     });
-    if (ui.printAnswers.checked) {
+    if (options.document !== "questions" && ui.printAnswers.checked) {
       const key = node("section", "print-answers");
+      if (options.document === "answers") key.classList.add("print-answers-only");
       key.append(node("h3", "print-section", "参考答案与解析"));
       answers.forEach(([index, item]) => {
         const row = node("div", "print-answer-row");
@@ -1480,7 +1536,9 @@
       });
       ui.paper.append(key);
     }
-    ui.paper.append(node("p", "print-footer", `共 ${number} 题 · 题目来自本机正式题库，均为题卡审核页中已标记通过的版本；正式使用前请按场景复核`));
+    if (options.document === "answers" && !printState.availableAnswers) ui.paper.append(node("p", "helper", "这些题没有答案或解析，请改选题目卷。"));
+    ui.paper.append(node("p", "print-footer", `共 ${number} 题`));
+    ui.paper.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
     if (printState.missing.length) ui.paper.prepend(node("p", "print-incomplete-warning", "本卷尚未完整载入，有选题缺失。请返回组卷处理后再打印。"));
     preparePrintLayout();
     requestAnimationFrame(updateOverflowHints);
@@ -1507,16 +1565,17 @@
       else {
         tooWide += 1;
         const fallback = node("span", "print-formula-fallback");
-        fallback.append(node("strong", "", "公式过宽，请分行后重新打印。完整公式写法："),
+        fallback.append(node("strong", "", "公式超出当前纸张宽度。完整公式写法："),
           node("code", "", math.querySelector('annotation[encoding="application/x-tex"]')?.textContent || span.textContent));
         span.append(fallback);
       }
     });
     ui.paper.classList.remove("print-layout-check");
     const notice = $("printLayoutNotice");
-    notice.textContent = tooWide ? `${tooWide} 处公式太宽，无法在保持清晰字号的情况下放进 A4。请回到题卡，在“改字”中将公式分行后重新组卷。` : "";
+    notice.textContent = tooWide ? `${tooWide} 处公式超出 A4 正文。可调整本次正文字号，或导出 Word 继续排版；题库内容不受影响。` : "";
     notice.hidden = !tooWide;
-    $("printButton").disabled = printState.loading || !!printState.missing.length || !printState.items.length || !!tooWide;
+    printState.tooWide = tooWide;
+    syncExportButtons();
   }
 
   function updateOverflowHints() {
@@ -1568,17 +1627,18 @@
     up.title = "在本题型内上移";
     up.setAttribute("aria-label", `第 ${number} 题上移`);
     up.dataset.action = "up";
-    up.disabled = position === 0;
+    up.disabled = printState.exporting || position === 0;
     up.addEventListener("click", () => move(-1));
     const down = node("button", "", "↓ 下移");
     down.type = "button";
     down.title = "在本题型内下移";
     down.setAttribute("aria-label", `第 ${number} 题下移`);
     down.dataset.action = "down";
-    down.disabled = position === group.length - 1;
+    down.disabled = printState.exporting || position === group.length - 1;
     down.addEventListener("click", () => move(1));
     const remove = node("button", "remove", "移出");
     remove.type = "button";
+    remove.disabled = printState.exporting;
     remove.title = "移出试题篮";
     remove.setAttribute("aria-label", `第 ${number} 题移出试题篮`);
     remove.addEventListener("click", () => {
@@ -1594,7 +1654,79 @@
     return tools;
   }
 
+  async function waitForPrintAssets() {
+    let timer;
+    try {
+      const ready = Promise.all([
+        document.fonts?.ready || Promise.resolve(),
+        ...Array.from(ui.paper.querySelectorAll("img"), async (image) => {
+          // Browsing uses lazy figures; offscreen questions must load before output.
+          image.loading = "eager";
+          // decode rejects for missing figures instead of exporting an incomplete paper.
+          if (typeof image.decode === "function") await image.decode();
+          else if (!image.complete) await new Promise((resolve, reject) => {
+            image.addEventListener("load", resolve, { once: true });
+            image.addEventListener("error", () => reject(new Error("试卷配图未能载入，请重试")), { once: true });
+          });
+          if (!image.naturalWidth) throw new Error("试卷配图未能载入，请重试");
+        })
+      ]);
+      await Promise.race([ready, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("字体或配图仍未载入，请稍后重试")), 15000); })]);
+    } catch (error) {
+      throw new Error(error.message?.includes("字体") ? error.message : "试卷配图未能载入，请重试");
+    } finally { clearTimeout(timer); }
+  }
+
+  function setExportBusy(busy) {
+    if (busy) {
+      printState.disabledControls = Array.from(ui.sheet.querySelectorAll(".print-options input, .print-options select, #closePrint, #clearBasket, #saveDraft, #saveDraftAs"))
+        .map((control) => [control, control.disabled]);
+      printState.disabledControls.forEach(([control]) => { control.disabled = true; });
+    } else {
+      (printState.disabledControls || []).forEach(([control, disabled]) => { control.disabled = disabled; });
+      printState.disabledControls = [];
+    }
+    syncExportButtons();
+  }
+
+  async function exportPaper(format) {
+    if (printState.exporting || state.draftSaving) return;
+    printState.exporting = true;
+    setExportBusy(true);
+    const status = $("printExportStatus");
+    status.hidden = false;
+    status.textContent = "正在检查选题、字体与配图…";
+    try {
+      // Recheck selected publication snapshots immediately before every output.
+      await openPrint();
+      if (printState.loading || printState.missing.length || !printState.items.length) throw new Error("选题尚未完整载入，请先处理未载入题目");
+      if ((format === "split" || $("printDocument").value === "answers") && !printState.availableAnswers) throw new Error("这些题没有答案或解析，不能导出空答案卷");
+      await waitForPrintAssets();
+      preparePrintLayout();
+      const options = currentPrintOptions();
+      if (format === "print") {
+        if (printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
+        status.textContent = "在打印窗口选择“另存为 PDF”，即可保存 PDF。";
+        window.print();
+      } else {
+        if (typeof window.ExamExport?.download !== "function") throw new Error("导出组件未载入，请刷新页面后重试");
+        status.textContent = "正在生成 Word 文件…";
+        const result = await window.ExamExport.download(printState.items, { title: ui.printTitle.value.trim() || "练习", print_options: options, format });
+        status.textContent = `已导出 ${result.filename}`;
+        toast("Word 文件已生成", "success");
+      }
+    } catch (error) {
+      status.textContent = error.message || "导出失败，请重试";
+      toast(status.textContent, "error");
+    } finally {
+      printState.exporting = false;
+      setExportBusy(false);
+      renderPrint(printState.items);
+    }
+  }
+
   function closePrint() {
+    if (printState.exporting || state.draftSaving) { toast("请等待当前保存或导出完成", "error"); return; }
     ++printState.token;
     if (ui.sheet.open) ui.sheet.close();
     ui.sheet.hidden = true;
@@ -1661,13 +1793,16 @@
   document.addEventListener("library-ai-settings-saved", () => load({ quiet: true }));
   ui.more.addEventListener("click", () => load({ append: true }));
   ui.basketButton.addEventListener("click", openPrint);
-  $("printButton").addEventListener("click", () => { preparePrintLayout(); if (!$("printButton").disabled) window.print(); });
+  $("printButton").addEventListener("click", () => exportPaper("print"));
+  $("exportWord").addEventListener("click", () => exportPaper("docx"));
+  $("exportSplit").addEventListener("click", () => exportPaper("split"));
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });
   ui.printTitle.addEventListener("input", () => { const title = ui.paper.querySelector(".print-title"); if (title) title.textContent = ui.printTitle.value.trim() || "练习"; markDraftDirty(); });
-  ui.printAnswers.addEventListener("change", () => { printAnswersPreference = ui.printAnswers.checked; markDraftDirty(); openPrint(); });
-  ui.printOrigin.addEventListener("change", () => { markDraftDirty(); openPrint(); });
-  ui.printAi.addEventListener("change", () => { markDraftDirty(); openPrint(); });
+  ui.printAnswers.addEventListener("change", () => { $("printDocument").value = ui.printAnswers.checked ? "combined" : "questions"; markDraftDirty(); renderPrint(printState.items); });
+  [$("printDocument"), $("printFontSize"), $("printAnswerSpace"), $("printStudentInfo"), ui.printOrigin, ui.printAi].forEach((control) => {
+    control.addEventListener("change", () => { markDraftDirty(); $("printExportStatus").hidden = true; renderPrint(printState.items); });
+  });
   ui.sheet.addEventListener("cancel", (event) => { event.preventDefault(); closePrint(); });
   ui.sheet.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
@@ -1680,6 +1815,11 @@
   });
   window.addEventListener("resize", () => { if (ui.sheet.open) updateOverflowHints(); });
   window.addEventListener("beforeprint", () => { if (ui.sheet.open) preparePrintLayout(); });
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.draftDirty && !state.draftSaving && !printState.exporting) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   ui.tagSelect.addEventListener("change", () => { state.tag = ui.tagSelect.value; syncUrl(); load(); });
   ui.sourceDialog.addEventListener("click", (event) => {
     if (event.target === ui.sourceDialog || event.target.closest("[data-close]")) ui.sourceDialog.close();

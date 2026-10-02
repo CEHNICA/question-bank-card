@@ -6734,7 +6734,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "列表先看摘要，点“完整题目”再核对条件、选项和配图；查看出处和版本历史仍在。示例不会入库。"); break;
       case "basket": later(() => document.querySelector('.topnav a[href="/library"]'), "从这里进入题库选题", "勾选当前已显示的题，再加入试题篮。可切到“已选题目”集中检查；收起试题篮不会清空。教学不替你选择真实题目。"); break;
-      case "drafts": later(() => document.querySelector('.topnav a[href="/library"]'), "从题库继续组卷", "组卷预览里起名字、保存草稿；下次从“组卷草稿”打开。旧版本或缺题会提示处理，不会悄悄替换。教学不保存真实草稿。"); break;
+      case "drafts": later(() => document.querySelector('.topnav a[href="/library"]'), "从题库继续组卷", "组卷预览可调字号和答题留白，选题目、答案或合卷，导出 Word 或打印存 PDF；保存草稿后下次继续。旧版本、缺题先处理。教学只认识入口，不保存真实草稿或实际导出。"); break;
       case "ai": {
         later(() => $("settingsButton"), "设置 → 标签与答案", "两项默认关闭。开启后可选入库时生成，也可在题库单题或勾选批量生成。助手模式仍需当前助手处理并写回；教学不会改开关。");
         break;

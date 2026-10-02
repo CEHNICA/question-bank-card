@@ -186,22 +186,47 @@
 
   <dialog id="printSheet" class="print-sheet" hidden aria-label="组卷预览">
     <div class="print-controls no-print">
-      <label class="print-title-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
-      <label class="library-toggle switch"><input id="printAnswers" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>卷末附答案与解析</label>
-      <label class="library-toggle switch" title="题号后面印上题源，例如（2025·北京海淀·期中）"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
-      <label id="printAiBox" class="library-toggle switch" title="原卷没有答案、但有 AI 参考答案的题，卷末附上并标明“AI 参考，未核对”" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考答案</label>
-      <span class="print-spacer"></span>
-      <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
-      <button id="saveDraft" class="button" type="button">保存草稿</button>
-      <button id="saveDraftAs" class="button button-quiet" type="button">另存为</button>
       <button id="closePrint" class="button" type="button">返回题库</button>
-      <button id="printButton" class="button button-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-printer"/></svg>打印</button>
+      <details id="printDraftMenu" class="print-draft-menu">
+        <summary class="button">草稿</summary>
+        <div class="print-draft-actions">
+          <button id="saveDraft" class="button" type="button">保存草稿</button>
+          <button id="saveDraftAs" class="button button-quiet" type="button">复制为新草稿</button>
+          <p id="draftSaveStatus" class="print-draft-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+      <span class="print-spacer"></span>
+      <button id="exportWord" class="button button-primary" type="button">导出 Word</button>
+      <button id="printButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-printer"/></svg>打印 · 存 PDF</button>
     </div>
-    <p id="draftSaveStatus" class="print-draft-status no-print" role="status" aria-live="polite"></p>
-    <div id="printMissing" class="print-notice no-print" role="alert" hidden></div>
-    <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
-    <p class="print-order-hint no-print">按题型分组，同题型内可上下移动。Esc 返回题库。</p>
-    <article id="printPaper" class="print-paper"></article>
+    <p id="printExportStatus" class="print-export-status no-print" role="status" aria-live="polite" hidden></p>
+    <div class="print-workspace">
+      <details id="printSettings" class="print-options no-print" open>
+        <summary>排版与内容</summary>
+        <div class="print-options-body">
+          <label class="print-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
+          <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目卷</option><option value="answers">答案与解析卷</option><option value="combined" selected>题目卷附答案与解析</option></select></label>
+          <input id="printAnswers" type="checkbox" checked hidden aria-hidden="true" tabindex="-1">
+          <label class="library-toggle switch" title="题号后印上原有题源"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
+          <label id="printAiBox" class="library-toggle switch" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考（未核对）</label>
+          <p id="printAnswerStatus" class="print-answer-status" role="status" aria-live="polite"></p>
+          <button id="exportSplit" class="button button-quiet print-split" type="button">分别导出题目卷与答案卷</button>
+          <p class="print-options-note">Word 可继续编辑。存 PDF 时，在打印窗口选择“另存为 PDF”。</p>
+          <details class="print-advanced"><summary>更多排版</summary><div class="print-options-body">
+            <label class="print-field">正文字号 <select id="printFontSize"><option value="12" selected>12 磅</option><option value="14">14 磅</option><option value="16">16 磅</option></select></label>
+            <label class="print-field">解答题留白 <select id="printAnswerSpace"><option value="none">不留白</option><option value="medium">适中</option><option value="large">较多</option></select></label>
+            <label class="library-toggle switch"><input id="printStudentInfo" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>姓名、班级与得分栏</label>
+          </div></details>
+          <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
+        </div>
+      </details>
+      <section class="print-preview" aria-label="试卷内容预览">
+        <div id="printMissing" class="print-notice no-print" role="alert" hidden></div>
+        <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
+        <p class="print-order-hint no-print">A4 · 按题型分组，同题型内可上下移动。Esc 返回题库。</p>
+        <article id="printPaper" class="print-paper"></article>
+      </section>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" popover="manual"></div>
@@ -210,6 +235,7 @@
   <script src="/qb-render.js" defer></script>
   <script src="/library-workspace.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
+  <script src="/exam-export.js" defer></script>
   <script src="/library.js" defer></script>
 </body>
 </html>

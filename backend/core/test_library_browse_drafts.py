@@ -143,7 +143,7 @@ class LibraryBrowseDraftTests(TestCase):
         self.assertEqual(created.status_code, 201)
         draft = created.json()["draft"]
         self.assertEqual(draft["ids"], [str(second.id), str(first.id)])
-        self.assertEqual(draft["print_options"], {"answers": True, "origin": False, "ai_answers": False})
+        self.assertEqual(draft["print_options"], library_drafts.PRINT_DEFAULTS)
         self.assertTrue(draft["validity"]["valid"])
         listing = self.client.get("/api/library/drafts").json()
         self.assertEqual(listing["total"], 1)

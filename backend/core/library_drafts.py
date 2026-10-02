@@ -22,7 +22,9 @@ from .library_browse import BrowseError, normalize_ids, resolve_ids
 MAX_DRAFTS = 100
 MAX_STORE_BYTES = 2 * 1024 * 1024
 MAX_TITLE_LENGTH = 120
-PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False}
+LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
+PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False,
+                  "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True}
 INPUT_FIELDS = {"title", "ids", "print_options", "revision"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -49,10 +51,20 @@ def _title(value) -> str:
 
 def _print_options(value, defaults=None) -> dict:
     if not isinstance(value, dict) or set(value) - set(PRINT_DEFAULTS):
-        raise DraftError("打印设置只能包含 answers、origin、ai_answers")
-    if any(not isinstance(item, bool) for item in value.values()):
+        raise DraftError("打印设置包含不支持的选项")
+    if any(type(value[key]) is not bool for key in (LEGACY_PRINT_KEYS | {"student_info"}) & set(value)):
         raise DraftError("打印开关只能是 true 或 false")
-    return {**(defaults or PRINT_DEFAULTS), **value}
+    if "font_size" in value and (type(value["font_size"]) is not int or value["font_size"] not in (12, 14, 16)):
+        raise DraftError("字号只能选 12、14、16 磅")
+    if "document" in value and value["document"] not in ("questions", "answers", "combined"):
+        raise DraftError("请选择题目卷、答案解析卷或题目与答案合卷")
+    if "answer_space" in value and value["answer_space"] not in ("none", "medium", "large"):
+        raise DraftError("答题留白只能选 none、medium、large")
+    result = {**PRINT_DEFAULTS, **(defaults or {}), **value}
+    if "document" not in value and "answers" in value:
+        result["document"] = "combined" if value["answers"] else "questions"
+    result["answers"] = result["document"] != "questions"
+    return result
 
 
 def _revision(value) -> int:
@@ -88,9 +100,9 @@ def _read() -> dict:
             seen.add(key)
             if _title(draft["title"]) != draft["title"] or normalize_ids(draft["ids"]) != draft["ids"]:
                 raise ValueError()
-            if set(draft["print_options"]) != set(PRINT_DEFAULTS):
+            if not isinstance(draft["print_options"], dict) or not LEGACY_PRINT_KEYS <= set(draft["print_options"]):
                 raise ValueError()
-            _print_options(draft["print_options"])
+            draft["print_options"] = _print_options(draft["print_options"])
             _revision(draft["revision"])
             for field in ("created_at", "updated_at"):
                 if not isinstance(draft[field], str) or len(draft[field]) > 40:

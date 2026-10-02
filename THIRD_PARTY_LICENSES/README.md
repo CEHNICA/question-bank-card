@@ -12,12 +12,16 @@
 | charset-normalizer | 3.5.1 | `charset-normalizer-3.5.1/` |
 | Django | 5.2.17 | `Django-5.2.17/` |
 | idna | 3.20 | `idna-3.20/` |
+| lxml（含 libxml2/libxslt 许可） | 6.1.1 | `lxml-6.1.1/` |
+| mathml2omml | 0.0.2 | `mathml2omml-0.0.2/` |
 | Pillow | 12.3.0 | `Pillow-12.3.0/` |
 | PyMuPDF / MuPDF | 1.28.2 | `PyMuPDF-MuPDF-1.28.2/` |
 | pywin32 | 312 | `pywin32-312/` |
+| python-docx | 1.2.0 | `python-docx-1.2.0/` |
 | requests | 2.34.2 | `requests-2.34.2/` |
 | sqlparse | 0.6.0 | `sqlparse-0.6.0/` |
 | tzdata | 2026.4 | `tzdata-2026.4/` |
+| typing_extensions | 4.16.0 | `typing_extensions-4.16.0/` |
 | urllib3 | 2.8.0 | `urllib3-2.8.0/` |
 | KaTeX | 0.18.9 | `KaTeX-0.18.9/` |
 | packaging | 26.3 | `packaging-26.3/` |

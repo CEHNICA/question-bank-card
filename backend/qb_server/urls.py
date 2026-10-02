@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts
+from core import views, library_browse, library_drafts, library_export
 
 urlpatterns = [
     path("", views.index_page),
@@ -10,6 +10,7 @@ urlpatterns = [
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
     path("library-workspace.js", views.library_workspace_script),
+    path("exam-export.js", views.exam_export_script),
     path("static/library-ai-settings.js", views.library_ai_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
@@ -55,6 +56,7 @@ urlpatterns = [
     path("api/m3/papers", views.m3_papers),
     path("api/library", views.library_list),
     path("api/library/batch", library_browse.library_batch),
+    path("api/library/export-docx", library_export.export_docx_view),
     path("api/library/drafts", library_drafts.drafts_view),
     path("api/library/drafts/<uuid:draft_id>", library_drafts.draft_detail),
     path("api/library/jobs", views.library_jobs_view),

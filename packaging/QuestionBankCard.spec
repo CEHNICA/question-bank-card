@@ -9,7 +9,7 @@ backups, credentials, virtual environments, or tests.
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, get_package_paths
 
 
 PROJECT_ROOT = Path(SPEC).resolve().parent.parent
@@ -26,6 +26,11 @@ def destination_for(root: Path, path: Path, prefix: str) -> str:
 
 
 datas = []
+
+# The sole Word file shipped is python-docx's public empty document template.
+# Do not collect package sample documents or any user .docx files.
+docx_root = Path(get_package_paths("docx")[1])
+datas.append((str(docx_root / "templates" / "default.docx"), "docx/templates"))
 
 # Browser UI: use an allow-list of file extensions and explicitly omit tests.
 for source in sorted(FRONTEND_ROOT.rglob("*")):
@@ -92,6 +97,9 @@ hiddenimports = [
     "tkinter.messagebox",
     "tkinter.ttk",
     "pymupdf",
+    "docx",
+    "mathml2omml",
+    "lxml.etree",
     "pythoncom",
     "pywintypes",
     "win32api",

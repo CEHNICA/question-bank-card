@@ -85,6 +85,9 @@ ALLOWED_EXACT_PATHS = {
     "_internal/certifi/cacert.pem",
     # The practice paper for 新手教学: an original public demo (docs/demo), no user data.
     "_internal/backend/core/demo_data/demo-paper.pdf",
+    # python-docx's blank public template is required to create Word files.
+    # Only this dependency resource is allowed; user documents remain forbidden.
+    "_internal/docx/templates/default.docx",
 }
 
 # Only inspect formats which should contain readable configuration or source text.

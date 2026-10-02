@@ -3,10 +3,14 @@ certifi==2026.7.22
 charset-normalizer==3.5.1
 Django==5.2.17
 idna==3.20
+lxml==6.1.1
+mathml2omml==0.0.2
 Pillow==12.3.0
 PyMuPDF==1.28.2
 pywin32==312; platform_system == "Windows"
+python-docx==1.2.0
 requests==2.34.2
 sqlparse==0.6.0
 tzdata==2026.4
+typing_extensions==4.16.0
 urllib3==2.8.0

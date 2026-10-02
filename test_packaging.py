@@ -44,6 +44,18 @@ class BundleAuditTests(unittest.TestCase):
             )
             audit_bundle(bundle)
 
+    def test_only_blank_docx_dependency_template_is_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            template = bundle / "_internal" / "docx" / "templates" / "default.docx"
+            template.parent.mkdir(parents=True)
+            template.write_bytes(b"public-template")
+            private = template.with_name("teacher-paper.docx")
+            private.write_bytes(b"private")
+            self.assertEqual(find_forbidden_files(bundle), ["_internal/docx/templates/teacher-paper.docx"])
+            private.unlink()
+            audit_bundle(bundle)
+
     def test_private_and_runtime_files_are_rejected_case_insensitively(self):
         forbidden = (
             "db.sqlite3",

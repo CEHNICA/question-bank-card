@@ -651,6 +651,7 @@ render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
 library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
+exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")

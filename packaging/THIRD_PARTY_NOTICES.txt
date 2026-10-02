@@ -19,6 +19,13 @@ packaging/requirements-build.lock.txt 锁定。
   https://www.djangoproject.com/
 - idna 3.20 — BSD-3-Clause
   https://github.com/kjd/idna
+- lxml 6.1.1 — BSD-3-Clause（部分 ElementTree 派生代码及内嵌库另有许可）
+  https://lxml.de/
+  Windows wheel 内嵌 libxml2 2.11.9、libxslt 1.1.45（MIT 类型许可）。
+  完整许可与上游例外说明随 THIRD_PARTY_LICENSES/lxml-6.1.1 保留。
+- mathml2omml 0.0.2 — MIT
+  https://github.com/amedama41/mathml2omml
+  题有据在转换后修正平方根和 groupChr 的已知 OMML 结构问题。
 - Pillow 12.3.0 — MIT-CMU
   https://python-pillow.github.io/
 - PyMuPDF 1.28.2 — GNU Affero General Public License v3.0 或 Artifex 商业许可（双许可）
@@ -26,12 +33,17 @@ packaging/requirements-build.lock.txt 锁定。
   https://github.com/pymupdf/PyMuPDF
 - pywin32 312 — PSF
   https://github.com/mhammond/pywin32
+- python-docx 1.2.0 — MIT
+  https://github.com/python-openxml/python-docx
+  仅随程序带其公开空白模板 docx/templates/default.docx，不含用户 Word 文件。
 - requests 2.34.2 — Apache-2.0
   https://requests.readthedocs.io/
 - sqlparse 0.6.0 — BSD-3-Clause
   https://github.com/andialbrecht/sqlparse
 - tzdata 2026.4 — Apache-2.0
   https://github.com/python/tzdata
+- typing_extensions 4.16.0 — PSF-2.0
+  https://github.com/python/typing_extensions
 - urllib3 2.8.0 — MIT
   https://github.com/urllib3/urllib3
 - KaTeX（前端内置版本）— MIT

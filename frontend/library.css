@@ -299,17 +299,33 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .qb-option > .print-overflow-hint { grid-column: 1 / -1; }
 .print-incomplete-warning { padding: 10px; border: 2px solid #a65d0b; font-weight: 700; }
 .print-formula-fallback { display: none; }
-.print-controls { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: 820px; margin: 0 auto 18px;
-  padding: 10px 12px 10px 16px; border-radius: 0 0 14px 14px; background: rgba(255,255,255,.96); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop); font-size: 13px; }
-.print-title-field { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 600; }
-.print-controls input[type="text"] { min-height: 34px; width: 180px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 14px; color: var(--ink); font-weight: 500; }
-.print-controls input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.print-controls { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; max-width: 1180px; margin: 0 auto 18px;
+  padding: 10px 12px; border-radius: 0 0 12px 12px; background: rgba(255,255,255,.97); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop); font-size: 13px; }
 .print-controls > * { max-width: 100%; }
-.print-controls .library-toggle:has(input:disabled) { color: var(--muted); cursor: default; }
-.print-controls input:disabled + .switch-track { opacity: .45; }
-.print-answer-status { flex-basis: 100%; margin: 0; color: var(--muted); line-height: 1.5; font-size: 12px; }
+.print-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; max-width: 1180px; margin: 0 auto; align-items: start; }
+.print-workspace:has(.print-options:not([open])) { grid-template-columns: 140px minmax(0, 1fr); }
+.print-options { position: sticky; top: 82px; max-height: calc(100dvh - 94px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid #c6cfc8; border-radius: 10px; background: #f8faf7; overflow-wrap: anywhere; }
+.print-options > summary { padding: 14px 16px; font-weight: 700; font-size: 14px; cursor: pointer; }
+.print-options-body { display: grid; gap: 16px; padding: 0 16px 16px; }
+.print-field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.print-field input, .print-field select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--ink); font: 14px var(--ui-font); }
+.print-options .library-toggle { margin: 0; font-size: 13px; flex-wrap: wrap; gap: 8px; }
+.print-options .library-toggle input:disabled + .switch-track { opacity: .45; }
+.print-options-note, .print-answer-status { margin: 0; color: var(--muted); line-height: 1.6; font-size: 12px; }
+.print-split { padding: 6px 0; font-size: 12px; white-space: normal; text-align: left; justify-content: flex-start; }
+.print-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
+.print-advanced > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.print-advanced .print-options-body { padding: 14px 0 0; }
+.print-preview { min-width: 0; }
+.print-draft-menu { position: relative; }
+.print-draft-menu > summary { cursor: pointer; list-style: none; }
+.print-draft-menu > summary::-webkit-details-marker { display: none; }
+.print-draft-actions { position: absolute; top: calc(100% + 8px); left: 0; display: grid; gap: 10px; width: 230px; max-width: calc(100vw - 48px); padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: var(--shadow-pop); }
+.print-draft-status { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.print-export-status { max-width: 1180px; margin: -4px auto 14px; padding: 10px 14px; border-radius: 7px; background: #edf5ef; color: var(--accent); font-size: 13px; overflow-wrap: anywhere; }
+.print-options :focus-visible, .print-draft-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .print-spacer { flex: 1; }
-.print-paper { width: 100%; min-width: 0; max-width: 820px; box-sizing: border-box; margin: 0 auto; padding: 56px 64px; background: #fff; color: #111; font-family: var(--content-font);
+.print-paper { width: 210mm; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0 auto; padding: 18mm 16mm; background: #fff; color: #111; font-family: var(--content-font);
   box-shadow: 0 16px 50px -12px rgba(0,0,0,.28); border-radius: 2px; }
 .print-title { margin: 0; text-align: center; font-size: 24px; letter-spacing: .12em; font-family: var(--content-font); }
 .print-info { text-align: center; margin: 12px 0 22px; font-size: 14px; color: #333; }
@@ -322,10 +338,14 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .print-question-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .print-question-tools button:disabled { opacity: .35; cursor: default; }
 .print-question-tools .remove:hover { border-color: var(--red); color: var(--red); }
-.print-question .qb-question { font-size: 15.5px; color: #111; }
+.print-question.qb-question { font-size: var(--exam-font-size, 12pt); color: #111; }
+.print-answer-space { min-height: 30mm; }
+.print-paper[data-answer-space="large"] .print-answer-space { min-height: 60mm; }
 .print-answers { margin-top: 28px; padding-top: 12px; border-top: 1px solid #999; break-before: page; }
-.print-answer-row { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; margin: 6px 0; font-size: 14.5px; line-height: 1.85; }
+.print-answers-only { margin-top: 20px; padding-top: 0; border-top: 0; break-before: auto; }
+.print-answer-row { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; margin: 6px 0; font-size: var(--exam-font-size, 12pt); line-height: 1.85; }
 .print-answer-row > div { min-width: 0; overflow-wrap: anywhere; }
+.print-answer-row .qb-analysis { font-size: inherit; }
 .print-footer { margin-top: 30px; text-align: center; font-size: 11px; color: #777; font-family: "Microsoft YaHei", sans-serif; }
 body.printing { overflow: hidden; }
 /* KaTeX 的顶层 .base 在运算符处断行，分数和矩阵内部仍是不可分整体。 */
@@ -353,6 +373,23 @@ body.printing { overflow: hidden; }
   .qb-options.cols-4 { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 979px) {
+  .print-workspace, .print-workspace:has(.print-options:not([open])) { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .print-options { position: static; max-height: none; overflow: visible; }
+  .print-options-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .print-options-note, .print-advanced { grid-column: 1 / -1; }
+  .print-advanced .print-options-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .print-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; margin-bottom: 12px; }
+  .print-controls .button { width: 100%; box-sizing: border-box; min-height: 36px; padding: 7px 8px; font-size: 13px; white-space: nowrap; }
+  .print-spacer { display: none; }
+  .print-draft-menu { min-width: 0; }
+  .print-draft-actions { left: auto; right: 0; }
+  .print-options-body, .print-advanced .print-options-body { grid-template-columns: minmax(0, 1fr); }
+  .print-options > summary { padding: 11px 14px; }
+}
+
 @media (max-width: 760px) {
   .library-toolbar { position: static; padding-top: 14px; }
   .library-filters .library-toggle { margin-left: 0; }
@@ -366,16 +403,18 @@ body.printing { overflow: hidden; }
   .basket-button { right: 12px; bottom: 12px; left: 12px; justify-content: center; }
   .print-sheet { padding: 0 8px 24px; }
   .print-paper { padding: 28px 18px; }
-  .print-controls input[type="text"] { width: 140px; }
 }
 
 @media print {
+  :root { background: #fff; }
   .site-header, .topbar, .no-print, .toast { display: none !important; }
   body.printing > *:not(.print-sheet) { display: none !important; }
   body.printing { overflow: visible; background: #fff; }
-  .print-sheet { position: static; width: auto; height: auto; max-height: none; padding: 0; background: #fff; overflow: visible; }
+  .print-sheet { position: static; width: auto; height: auto; max-height: none; padding: 0; background: #fff; overflow: visible; border-radius: 0; box-shadow: none; animation: none; }
   .print-sheet::backdrop { display: none; }
-  .print-paper { box-shadow: none; max-width: none; padding: 0; }
+  .print-workspace { display: block; max-width: none; margin: 0; }
+  .print-preview { width: 100%; }
+  .print-paper { width: 100%; box-shadow: none; max-width: none; padding: 0; margin: 0; border-radius: 0; }
   .print-paper [data-print-overflow="1"] { outline: none; }
   .print-paper .katex { font-size: var(--print-math-size, 1.02em); }
   .print-paper .qb-analysis .katex, .print-paper .print-answer-row .katex { font-size: var(--print-math-size, 1.21em); }
@@ -383,7 +422,7 @@ body.printing { overflow: hidden; }
   .print-paper .qb-math:has(.print-formula-fallback) > .katex { display: none; }
   .print-formula-fallback { display: block; color: #111; font: 12px/1.7 var(--ui-font); white-space: normal; }
   .print-formula-fallback code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
-  @page { margin: 18mm 16mm; }
+  @page { size: A4; margin: 18mm 16mm; }
 }
 
 /* AI 助手审核入库、还没人工核对的题。 */
