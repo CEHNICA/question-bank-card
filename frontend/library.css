@@ -391,12 +391,12 @@ body.printing { overflow: hidden; }
 }
 
 @media (max-width: 760px) {
-  .library-toolbar { position: static; padding-top: 14px; }
+  .library-toolbar { position: static; padding-top: 14px; grid-template-columns: minmax(0, 1fr); }
   .library-filters .library-toggle { margin-left: 0; }
   .draft-filters { width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .draft-filter { flex: 0 0 auto; }
   .library-select, .library-select select { width: 100%; max-width: none; }
-  .library-select select { flex: 1; }
+  .library-select select { flex: 1; min-width: 0; }
   .library-card .paper { padding-inline: 16px; }
   .library-card-meta { padding-inline: 16px; }
   .library-card-meta > span:not(:first-child):not(.library-type)::before { display: none; }
