@@ -139,7 +139,7 @@ USER_PATH_PATTERNS = (
     re.compile(r"\b[A-Z]:[\\/]Users[\\/][^\\/\s\"'<>]+[\\/]", re.IGNORECASE),
     re.compile(r"(?:^|[\s\"'])/(?:home|root)/[^/\s\"'<>]+(?:/|$)", re.IGNORECASE | re.MULTILINE),
 )
-APPLICATION_INTERNAL_ROOTS = {"assets", "backend", "frontend"}
+APPLICATION_INTERNAL_ROOTS = {"assets", "backend", "frontend", "skills"}
 
 
 class BundleAuditError(RuntimeError):

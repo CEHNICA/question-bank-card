@@ -18,7 +18,8 @@ MESSAGES = {
     "finding": "正在查找题有据的最新版本……",
     "offline": "连不上 GitHub。请检查网络；国内网络可以先设置环境变量 TIYOUJU_MIRROR 为 GitHub 下载加速地址，或到 https://github.com/CEHNICA/question-bank-card/releases/latest 手动下载安装包。",
     "no_asset": "这个版本里没有找到安装包。",
-    "already": "已经是最新版：",
+    "already": "已安装这个版本：",
+    "newer": "本机版本比公开安装包更新，已保留本机版本：",
     "downloading": "正在下载：",
     "bad_hash": "安装包的 SHA-256 校验值对不上，已停止安装（可能下载不完整或被改动）。请重新运行，或到 GitHub 发布页手动下载。",
     "hash_ok": "SHA-256 校验通过。",
@@ -27,11 +28,16 @@ MESSAGES = {
     "backup": "题库已备份到：",
     "installing": "正在安装（不会弹出窗口，约半分钟）……",
     "setup_failed": "安装程序出错，退出码：",
-    "installed": "题有据已安装，版本：",
+    "verify_failed": "安装尚未通过核验：软件或 AI 命令缺失、无法运行，或版本不一致。请保留错误信息并修复后再宣告安装完成。",
+    "installed": "题有据已安装并通过核验，版本：",
     "starting": "正在打开题有据……",
     "cli": "给 AI 助手用的命令行：",
-    "cli_hint": "试试：tiyouju.exe status；处理试卷的步骤见仓库里的 skills/tiyouju/SKILL.md",
-    "keys": "第一次使用：请使用者在题有据的“设置 → 常用 → 填写或更换密钥”里填好 MinerU 和 MiniMax 的密钥（AI 助手不要代填密钥）。",
+    "cli_hint": "试试：tiyouju.exe status；安装收尾见仓库 AGENTS.md 和 skills/tiyouju/references/install-finish.md。",
+    "choices": "AI 助手下一步仅询问尚未选择、且当前客户端支持的选项：要安装题有据配套技能吗？桌面图标要显示还是隐藏？用户已给出选择就直接分别执行、核验，不重复确认；不要替用户默认选择。",
+    "setup_hint": "先运行 tiyouju.exe assistant-setup --json 查看状态；用户同意后，用 --skill-dir 指定当前助手的技能目录，用 --desktop show 或 --desktop hide 设置桌面图标。",
+    "old_cli": "这个版本尚不支持 assistant-setup，请按仓库的安装收尾说明处理，或升级到 1.10.14 及以上版本后再使用该命令。",
+    "invite": "安装收尾后请直接告诉用户：以后有题目或试卷，可以直接发给我，我会通过题有据帮你整理、核对，并保留原卷出处。",
+    "keys": "需要云识读时，再请使用者在题有据设置中自行填写所需服务密钥；云识读不可用时仍可整理现有题目和核对出处。AI 助手不要代填或读取密钥。",
 }
 
 
@@ -63,6 +69,13 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function M([string]$key) { return [regex]::Unescape($Messages[$key]) }
+function App-Version([string]$text) {
+    try {
+        $parsed = [version]$text
+        if ($parsed.Build -lt 0) { throw 'missing patch version' }
+        return [version]$parsed.ToString(3)
+    } catch { throw (M 'verify_failed') }
+}
 $Messages = @{
 @@MESSAGES@@
 }
@@ -89,8 +102,15 @@ if (-not $setup) { throw (M 'no_asset') }
 
 $installed = ''
 if (Test-Path -LiteralPath $App) { $installed = (Get-Item -LiteralPath $App).VersionInfo.ProductVersion }
-if ($installed -eq $version -and $env:TIYOUJU_REINSTALL -ne '1') {
-    Write-Output ((M 'already') + $version)
+$keepInstalled = $false
+if ($installed) {
+    $installedVersion = App-Version $installed
+    $releaseVersion = App-Version $version
+    $keepInstalled = ($installedVersion -eq $releaseVersion -and $env:TIYOUJU_REINSTALL -ne '1') -or (-not $env:TIYOUJU_VERSION -and $installedVersion -gt $releaseVersion)
+}
+if ($keepInstalled) {
+    if ($installedVersion -gt $releaseVersion) { Write-Output ((M 'newer') + $installedVersion) }
+    else { Write-Output ((M 'already') + $installedVersion) }
 } else {
     $work = Join-Path $env:TEMP "tiyouju-install-$version"
     New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -132,17 +152,30 @@ if ($installed -eq $version -and $env:TIYOUJU_REINSTALL -ne '1') {
     }
 
     Write-Output (M 'installing')
-    $process = Start-Process -FilePath $setupPath -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS' -Wait -PassThru
+    $process = Start-Process -FilePath $setupPath -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/MERGETASKS=!desktopicon' -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw ((M 'setup_failed') + $process.ExitCode) }
-    Write-Output ((M 'installed') + (Get-Item -LiteralPath $App).VersionInfo.ProductVersion)
 }
+
+if (-not (Test-Path -LiteralPath $App -PathType Leaf) -or -not (Test-Path -LiteralPath $Cli -PathType Leaf)) { throw (M 'verify_failed') }
+$verifiedVersion = App-Version ((Get-Item -LiteralPath $App).VersionInfo.ProductVersion)
+$expectedVersion = App-Version $version
+if ($keepInstalled) { $expectedVersion = $installedVersion }
+if ($verifiedVersion -ne $expectedVersion) { throw (M 'verify_failed') }
+try { $cliVersion = ((& $Cli --version 2>&1) -join '').Trim() }
+catch { throw (M 'verify_failed') }
+if ($LASTEXITCODE -ne 0 -or $cliVersion -ne "tiyouju $($verifiedVersion.ToString(3))") { throw (M 'verify_failed') }
+Write-Output ((M 'installed') + $verifiedVersion.ToString(3))
 
 if ($env:TIYOUJU_NO_START -ne '1' -and -not (Get-Process -Name 'QuestionBankCard' -ErrorAction SilentlyContinue)) {
     Write-Output (M 'starting')
-    Start-Process -FilePath $App -WorkingDirectory $AppDir
+    Start-Process -FilePath $App -WorkingDirectory $AppDir -WindowStyle Hidden
 }
 Write-Output ((M 'cli') + $Cli)
 Write-Output (M 'cli_hint')
+Write-Output (M 'choices')
+if ($verifiedVersion -ge [version]'1.10.14') { Write-Output (M 'setup_hint') }
+else { Write-Output (M 'old_cli') }
+Write-Output (M 'invite')
 Write-Output (M 'keys')
 """
 

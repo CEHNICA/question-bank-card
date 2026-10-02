@@ -31,6 +31,10 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import assistant_setup as setup
+
 try:
     from core.version import APP_VERSION as VERSION
 except ImportError:  # source checkout: backend/ is not on sys.path
@@ -522,6 +526,17 @@ def cmd_start(client: Client, args) -> dict:
             client.url = fresh.url
             return {"running": True, "started": True, "url": fresh.url}
     raise CliError(f"题有据 {args.timeout} 秒内没有启动好。请让使用者看一下电脑上的题有据窗口。", EXIT_NEEDS_USER)
+
+
+def cmd_assistant_setup(_client, args) -> dict:
+    """Installation facts and explicitly requested local finishing steps only."""
+    try:
+        return setup.assistant_setup(
+            app_executable(), skill_dir=Path(args.skill_dir) if args.skill_dir else None,
+            replace_skill=args.replace_skill, desktop=args.desktop,
+        )
+    except (setup.SetupError, OSError) as error:
+        raise CliError(str(error), EXIT_NEEDS_USER) from error
 
 
 def paper_summary(item: dict) -> dict:
@@ -1200,6 +1215,11 @@ def build_parser() -> argparse.ArgumentParser:
     config.add_argument("--minimax-plan", choices=PLANS, help="MiniMax 会员档位")
     start = sub.add_parser("start", parents=[common], help="打开题有据")
     start.add_argument("--timeout", type=int, default=90)
+    finish = sub.add_parser("assistant-setup", parents=[common],
+                            help="核实安装并给出收尾问题；技能和桌面图标只按明确选项修改")
+    finish.add_argument("--skill-dir", help="已确认的绝对技能父目录；确认安装后才填写，不猜测助手目录")
+    finish.add_argument("--replace-skill", action="store_true", help="明确同意替换不同内容的技能，先保留恢复备份")
+    finish.add_argument("--desktop", choices=["show", "hide"], help="使用者选择后显示或隐藏题有据自己的桌面图标")
     sub.add_parser("papers", parents=[common], help="列出试卷")
 
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
@@ -1279,6 +1299,7 @@ COMMANDS = {
     "status": cmd_status, "config": cmd_config, "start": cmd_start, "papers": cmd_papers, "upload": cmd_upload, "wait": cmd_wait,
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
+    "assistant-setup": cmd_assistant_setup,
 }
 
 
@@ -1299,7 +1320,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 0
-    client = Client(agent=" ".join(str(args.agent).split())[:40] or DEFAULT_AGENT)
+    # This command inspects the installed files even when the app is stopped.
+    # Do not instantiate a client or look up a runtime service for it.
+    client = None if args.command == "assistant-setup" else Client(
+        agent=" ".join(str(args.agent).split())[:40] or DEFAULT_AGENT)
     if args.command == "mcp":
         return run_mcp(client)
     try:
@@ -1313,7 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        shower = SHOWERS.get(args.command)
+        shower = setup.format_report if args.command == "assistant-setup" else SHOWERS.get(args.command)
         print(shower(result) if shower else json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

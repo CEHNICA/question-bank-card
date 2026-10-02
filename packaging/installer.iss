@@ -93,8 +93,12 @@ Type: dirifempty; Name: "{userprograms}\{#MyLegacyAppName}"
 ; SourceDir 必须在 build.ps1 中先经 audit_bundle.py 审计。
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Tasks]
+; AI 安装后再询问图标偏好；手动安装时也由用户自行勾选。
+Name: "desktopicon"; Description: "在桌面显示题有据图标"; Flags: unchecked
+
 [Icons]
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 

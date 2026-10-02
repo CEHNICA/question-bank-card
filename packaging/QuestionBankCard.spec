@@ -50,6 +50,13 @@ for source in sorted(DEMO_ROOT.glob("demo-paper.*")):
     if source.suffix.lower() in {".json", ".pdf"}:
         datas.append((str(source), "backend/core/demo_data"))
 
+# The optional AI skill must be available offline after installing the app.
+# Only the maintained public instructions are shipped, never user skill folders.
+SKILL_ROOT = PROJECT_ROOT / "skills" / "tiyouju"
+for source in sorted(SKILL_ROOT.rglob("*.md")):
+    if source.is_file():
+        datas.append((str(source), destination_for(SKILL_ROOT, source, "skills/tiyouju")))
+
 # The frozen launcher uses these source files to fingerprint pending migrations.
 # The modules themselves are also included below as hidden imports.
 MIGRATIONS_ROOT = BACKEND_ROOT / "core" / "migrations"

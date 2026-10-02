@@ -15,7 +15,9 @@
 
 **[下载 Windows 安装版](https://github.com/CEHNICA/question-bank-card/releases/latest)** · **[不用密钥，先学一遍](#try-demo)** · [安装与使用指南](docs/使用指南.md)
 
-功能介绍对应 **main 源码 1.10.13**；下载页提供已发布安装包，版本可能不同。
+**也可以让 AI 带你上手**：把 [https://github.com/CEHNICA/question-bank-card](https://github.com/CEHNICA/question-bank-card) 直接发给能操作电脑的 AI 助手。仓库的 [AI 助手入口](AGENTS.md) 会引导它安装、核实结果，再让你选择配套技能和桌面图标；以后可以直接把题目发给它处理。
+
+功能介绍对应 **main 源码 1.10.14**；下载页提供已发布安装包，版本可能不同。
 
 适用于 Windows 10/11，以数学试题为主。题库和原卷保存在自己电脑上；处理新试卷需要配置识读服务。
 
@@ -79,7 +81,7 @@
 
 **[完整安装与服务配置](docs/使用指南.md#安装与服务配置)** · [完整操作流程与快捷键](docs/使用指南.md#完整工作流程) · [让 AI 助手帮你用](docs/使用指南.md#让-ai-助手帮你用)
 
-下载安装包以 Releases 为准。截图来自 1.10.12 的实际界面，新版教学随 1.10.13 源码更新。各版改动见 [更新记录](CHANGELOG.md)。
+下载安装包以 Releases 为准。截图来自 1.10.12 的实际界面，新版教学随 1.10.13 更新，AI 安装收尾从 1.10.14 起支持。各版改动见 [更新记录](CHANGELOG.md)。
 
 ## 识读和数据怎么处理
 

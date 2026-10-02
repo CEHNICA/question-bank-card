@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import json
+import base64
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -397,7 +399,7 @@ class AgentDocsTests(unittest.TestCase):
         self.assertRegex(skill, r"\A---\nname: tiyouju\ndescription: .+\n---\n")
         for name in ("skills/tiyouju/SKILL.md", "skills/tiyouju/references/commands.md", "AGENTS.md"):
             text = (self.root / name).read_text(encoding="utf-8")
-            used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+)", text)) - {"latest"}
+            used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+(?:-[a-z]+)*)", text)) - {"latest"}
             self.assertTrue(used, name)
             self.assertLessEqual(used, commands, f"{name} mentions {used - commands}")
         readme = (self.root / "README.md").read_text(encoding="utf-8")
@@ -405,6 +407,102 @@ class AgentDocsTests(unittest.TestCase):
         guide = (self.root / "docs" / "使用指南.md").read_text(encoding="utf-8")
         self.assertIn("releases/latest/download/install.ps1 | iex", guide)
         self.assertIn("[AGENTS.md](../AGENTS.md)", guide)
-        used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+)", guide)) - {"latest"}
+        used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+(?:-[a-z]+)*)", guide)) - {"latest"}
         self.assertTrue(used)
         self.assertLessEqual(used, commands, f"usage guide mentions {used - commands}")
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("powershell"), "Windows installer verification")
+class InstallerReceiptTests(unittest.TestCase):
+    """Exercise the generated installer with private temporary app directories.
+
+    The release response is local, downloads are forbidden, and app launch is
+    disabled. Tiny test executables have actual Windows version resources.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.workspace = tempfile.TemporaryDirectory(prefix="tiyouju-installer-test-")
+        cls.root = Path(cls.workspace.name).resolve()
+        cls.stubs = {}
+        for version in ("1.10.13", "1.10.14", "1.10.15"):
+            target = cls.root / f"stub-{version}.exe"
+            source = (
+                f'[assembly:System.Reflection.AssemblyFileVersion("{version}.0")]\n'
+                f'[assembly:System.Reflection.AssemblyInformationalVersion("{version}")]\n'
+                'public class InstallerStub { public static void Main() { '
+                f'System.Console.WriteLine("tiyouju {version}"); }} }}'
+            )
+            command = (
+                "Add-Type -TypeDefinition '" + source.replace("'", "''")
+                + "' -OutputAssembly '" + str(target).replace("'", "''")
+                + "' -OutputType ConsoleApplication"
+            )
+            compiled = cls.powershell(command)
+            if compiled.returncode or not target.is_file():
+                raise AssertionError(f"cannot build isolated test executable: {compiled.stdout}")
+            cls.stubs[version] = target
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.workspace.cleanup()
+
+    @staticmethod
+    def powershell(command):
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        return subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            encoding="utf-8", errors="replace", timeout=45,
+        )
+
+    def run_case(self, installed, release="1.10.14", cli="1.10.14"):
+        with tempfile.TemporaryDirectory(dir=self.root, prefix="case-") as temporary:
+            app_root = Path(temporary) / "Programs" / "QuestionBankCard"
+            app_root.mkdir(parents=True)
+            shutil.copyfile(self.stubs[installed], app_root / "QuestionBankCard.exe")
+            if cli:
+                shutil.copyfile(self.stubs[cli], app_root / "tiyouju.exe")
+            installer = Path(__file__).resolve().parent / "install.ps1"
+            command = f"""
+$ErrorActionPreference = 'Stop'
+$env:LOCALAPPDATA = '{temporary.replace("'", "''")}'
+$env:TIYOUJU_NO_START = '1'
+$env:TIYOUJU_VERSION = ''
+$env:TIYOUJU_REINSTALL = ''
+function Invoke-RestMethod {{
+    return [pscustomobject]@{{ tag_name = 'v{release}'; assets = @([pscustomobject]@{{ name = 'TiYouJu-Setup-{release}.exe' }}) }}
+}}
+function Invoke-WebRequest {{ throw 'TEST: a download was attempted' }}
+function Start-Process {{ throw 'TEST: an app or installer was started' }}
+try {{ & '{str(installer).replace("'", "''")}' }}
+catch {{ Write-Output $_.Exception.Message; exit 9 }}
+"""
+            return self.powershell(command)
+
+    def test_verified_installation_has_choices_and_invitation(self):
+        result = self.run_case("1.10.14")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("题有据已安装并通过核验，版本：1.10.14", result.stdout)
+        self.assertIn("安装题有据配套技能", result.stdout)
+        self.assertIn("桌面图标要显示还是隐藏", result.stdout)
+        self.assertIn("以后有题目或试卷", result.stdout)
+
+    def test_newer_local_version_is_kept(self):
+        result = self.run_case("1.10.15", cli="1.10.15")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("已保留本机版本：1.10.15", result.stdout)
+        self.assertIn("已安装并通过核验，版本：1.10.15", result.stdout)
+
+    def test_missing_or_wrong_cli_never_reports_success(self):
+        for cli in (None, "1.10.13"):
+            with self.subTest(cli=cli):
+                result = self.run_case("1.10.14", cli=cli)
+                self.assertEqual(result.returncode, 9, result.stdout)
+                self.assertIn("安装尚未通过核验", result.stdout)
+                self.assertNotIn("已安装并通过核验", result.stdout)
+
+    def test_old_release_reports_unsupported_setup(self):
+        result = self.run_case("1.10.13", release="1.10.13", cli="1.10.13")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("尚不支持 assistant-setup", result.stdout)

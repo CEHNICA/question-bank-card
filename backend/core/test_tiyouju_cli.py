@@ -277,6 +277,42 @@ class TiyoujuCliTests(LiveServerTestCase):
 
 
 class TiyoujuOfflineTests(SimpleTestCase):
+    def test_assistant_setup_does_not_connect_to_the_app(self):
+        report = {
+            "software": {"installed": True, "version": "1.10.14", "version_verified": True},
+            "skill": {"verified": False, "available": True},
+            "desktop": {"changed": False, "verified": True, "status": "hidden"},
+            "questions": [{"id": "install_skill", "text": "要安装技能吗？"},
+                          {"id": "desktop_icon", "text": "桌面图标要显示还是隐藏？"}],
+            "invitation": "以后有题目可以发给我。",
+        }
+        with mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")), \
+                mock.patch.object(cli, "app_executable", return_value=Path("C:/Apps/QuestionBankCard.exe")), \
+                mock.patch.object(cli.setup, "assistant_setup", return_value=report) as finish:
+            code, result = run_json("assistant-setup")
+            self.assertEqual(code, 0)
+            self.assertEqual(result, report)
+            self.assertEqual(finish.call_args.kwargs,
+                             {"skill_dir": None, "replace_skill": False, "desktop": None})
+            code, text, _err = run("assistant-setup")
+            self.assertEqual(code, 0)
+            self.assertIn("1.10.14", text)
+            self.assertIn("要安装技能吗", text)
+            self.assertIn("桌面图标要显示还是隐藏", text)
+
+    def test_assistant_setup_passes_only_explicit_choices_and_reports_safety_failures(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")), \
+                mock.patch.object(cli, "app_executable", return_value=None), \
+                mock.patch.object(cli.setup, "assistant_setup", side_effect=cli.setup.SetupError("未覆盖用户技能")) as finish:
+            code, result = run_json("assistant-setup", "--skill-dir", folder,
+                                    "--replace-skill", "--desktop", "hide")
+        self.assertEqual(code, cli.EXIT_NEEDS_USER)
+        self.assertEqual(result["code"], cli.EXIT_NEEDS_USER)
+        self.assertIn("未覆盖", result["error"])
+        self.assertEqual(finish.call_args.kwargs,
+                         {"skill_dir": Path(folder), "replace_skill": True, "desktop": "hide"})
+
     def test_a_closed_app_is_reported_with_its_own_exit_code(self):
         with mock.patch.dict(os.environ, {"TIYOUJU_URL": "http://127.0.0.1:9"}):
             code, result = run_json("status")

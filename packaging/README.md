@@ -17,28 +17,38 @@ winget install --id JRSoftware.InnoSetup.7 --exact --source winget --accept-sour
 在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.3.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.10.14
 ```
 
 默认产物：
 
 - `packaging/dist/QuestionBankCard/QuestionBankCard.exe`
-- `packaging/dist/installer/TiYouJu-Setup-1.3.0.exe`
+- `packaging/dist/installer/TiYouJu-Setup-1.10.14.exe`
 - `packaging/dist/installer/SHA256SUMS.txt`
 
 只生成 onedir：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.3.0 -SkipInstaller
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\build.ps1 -Version 1.10.14 -SkipInstaller
 ```
 
 ## 数据边界
 
-构建只选择应用代码、前端静态文件、迁移、图标和许可文件。PyInstaller 完成后，`audit_bundle.py` 会检查最终目录；检出数据库、`backend/data`、日志、备份、凭据、PDF、ZIP/TGZ 或测试缓存时，构建立即失败。
+构建只选择应用代码、前端静态文件、迁移、图标、许可文件和维护中的公开 `skills/tiyouju` Markdown 文档。技能随软件附带，安装收尾不需要再下载；不会打包用户电脑上的技能目录。PyInstaller 完成后，`audit_bundle.py` 会检查最终目录；检出数据库、`backend/data`、日志、备份、凭据、非演示用 PDF、ZIP/TGZ 或测试缓存时，构建立即失败。
 
 安装位置为 `%LOCALAPPDATA%\Programs\QuestionBankCard`，用户数据位于 `%LOCALAPPDATA%\QuestionBankCard`。卸载会移除程序和快捷方式，但故意保留用户数据。
 
 `v1.2.0` 起产品显示名改为“题有据”，但继续使用原来的 AppId、安装目录、程序文件名和用户数据目录。直接运行新安装包即可覆盖升级；安装器会精确移除旧版桌面及开始菜单快捷方式，并在“题有据”分组中创建新快捷方式，不会迁移或删除题库数据。
+
+`v1.10.14` 起桌面图标由用户选择：手动安装时自行勾选，一键安装不新建桌面图标，结束后由 AI 询问并执行 `tiyouju assistant-setup --desktop show|hide`。已有图标可能保留；隐藏只移动本软件的快捷方式，备份留在程序目录的 `assistant-shortcut-backups`，覆盖升级不会删除它。
+
+完成构建后，可验证冻结 CLI、完整技能资源和真实 Windows 快捷方式：
+
+```powershell
+py -3.12 tools/check_assistant_setup.py --bundle packaging/dist/QuestionBankCard
+```
+
+该检查使用临时技能目录和临时桌面，不启动软件、不调用识读服务、不修改真实桌面。
 
 ## 许可证与二进制分发
 

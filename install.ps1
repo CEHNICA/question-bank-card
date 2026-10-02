@@ -21,11 +21,19 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function M([string]$key) { return [regex]::Unescape($Messages[$key]) }
+function App-Version([string]$text) {
+    try {
+        $parsed = [version]$text
+        if ($parsed.Build -lt 0) { throw 'missing patch version' }
+        return [version]$parsed.ToString(3)
+    } catch { throw (M 'verify_failed') }
+}
 $Messages = @{
     'finding' = '\u6b63\u5728\u67e5\u627e\u9898\u6709\u636e\u7684\u6700\u65b0\u7248\u672c\u2026\u2026'
     'offline' = '\u8fde\u4e0d\u4e0a GitHub\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\uff1b\u56fd\u5185\u7f51\u7edc\u53ef\u4ee5\u5148\u8bbe\u7f6e\u73af\u5883\u53d8\u91cf TIYOUJU_MIRROR \u4e3a GitHub \u4e0b\u8f7d\u52a0\u901f\u5730\u5740\uff0c\u6216\u5230 https://github.com/CEHNICA/question-bank-card/releases/latest \u624b\u52a8\u4e0b\u8f7d\u5b89\u88c5\u5305\u3002'
     'no_asset' = '\u8fd9\u4e2a\u7248\u672c\u91cc\u6ca1\u6709\u627e\u5230\u5b89\u88c5\u5305\u3002'
-    'already' = '\u5df2\u7ecf\u662f\u6700\u65b0\u7248\uff1a'
+    'already' = '\u5df2\u5b89\u88c5\u8fd9\u4e2a\u7248\u672c\uff1a'
+    'newer' = '\u672c\u673a\u7248\u672c\u6bd4\u516c\u5f00\u5b89\u88c5\u5305\u66f4\u65b0\uff0c\u5df2\u4fdd\u7559\u672c\u673a\u7248\u672c\uff1a'
     'downloading' = '\u6b63\u5728\u4e0b\u8f7d\uff1a'
     'bad_hash' = '\u5b89\u88c5\u5305\u7684 SHA-256 \u6821\u9a8c\u503c\u5bf9\u4e0d\u4e0a\uff0c\u5df2\u505c\u6b62\u5b89\u88c5\uff08\u53ef\u80fd\u4e0b\u8f7d\u4e0d\u5b8c\u6574\u6216\u88ab\u6539\u52a8\uff09\u3002\u8bf7\u91cd\u65b0\u8fd0\u884c\uff0c\u6216\u5230 GitHub \u53d1\u5e03\u9875\u624b\u52a8\u4e0b\u8f7d\u3002'
     'hash_ok' = 'SHA-256 \u6821\u9a8c\u901a\u8fc7\u3002'
@@ -34,11 +42,16 @@ $Messages = @{
     'backup' = '\u9898\u5e93\u5df2\u5907\u4efd\u5230\uff1a'
     'installing' = '\u6b63\u5728\u5b89\u88c5\uff08\u4e0d\u4f1a\u5f39\u51fa\u7a97\u53e3\uff0c\u7ea6\u534a\u5206\u949f\uff09\u2026\u2026'
     'setup_failed' = '\u5b89\u88c5\u7a0b\u5e8f\u51fa\u9519\uff0c\u9000\u51fa\u7801\uff1a'
-    'installed' = '\u9898\u6709\u636e\u5df2\u5b89\u88c5\uff0c\u7248\u672c\uff1a'
+    'verify_failed' = '\u5b89\u88c5\u5c1a\u672a\u901a\u8fc7\u6838\u9a8c\uff1a\u8f6f\u4ef6\u6216 AI \u547d\u4ee4\u7f3a\u5931\u3001\u65e0\u6cd5\u8fd0\u884c\uff0c\u6216\u7248\u672c\u4e0d\u4e00\u81f4\u3002\u8bf7\u4fdd\u7559\u9519\u8bef\u4fe1\u606f\u5e76\u4fee\u590d\u540e\u518d\u5ba3\u544a\u5b89\u88c5\u5b8c\u6210\u3002'
+    'installed' = '\u9898\u6709\u636e\u5df2\u5b89\u88c5\u5e76\u901a\u8fc7\u6838\u9a8c\uff0c\u7248\u672c\uff1a'
     'starting' = '\u6b63\u5728\u6253\u5f00\u9898\u6709\u636e\u2026\u2026'
     'cli' = '\u7ed9 AI \u52a9\u624b\u7528\u7684\u547d\u4ee4\u884c\uff1a'
-    'cli_hint' = '\u8bd5\u8bd5\uff1atiyouju.exe status\uff1b\u5904\u7406\u8bd5\u5377\u7684\u6b65\u9aa4\u89c1\u4ed3\u5e93\u91cc\u7684 skills/tiyouju/SKILL.md'
-    'keys' = '\u7b2c\u4e00\u6b21\u4f7f\u7528\uff1a\u8bf7\u4f7f\u7528\u8005\u5728\u9898\u6709\u636e\u7684\u201c\u8bbe\u7f6e \u2192 \u5e38\u7528 \u2192 \u586b\u5199\u6216\u66f4\u6362\u5bc6\u94a5\u201d\u91cc\u586b\u597d MinerU \u548c MiniMax \u7684\u5bc6\u94a5\uff08AI \u52a9\u624b\u4e0d\u8981\u4ee3\u586b\u5bc6\u94a5\uff09\u3002'
+    'cli_hint' = '\u8bd5\u8bd5\uff1atiyouju.exe status\uff1b\u5b89\u88c5\u6536\u5c3e\u89c1\u4ed3\u5e93 AGENTS.md \u548c skills/tiyouju/references/install-finish.md\u3002'
+    'choices' = 'AI \u52a9\u624b\u4e0b\u4e00\u6b65\u4ec5\u8be2\u95ee\u5c1a\u672a\u9009\u62e9\u3001\u4e14\u5f53\u524d\u5ba2\u6237\u7aef\u652f\u6301\u7684\u9009\u9879\uff1a\u8981\u5b89\u88c5\u9898\u6709\u636e\u914d\u5957\u6280\u80fd\u5417\uff1f\u684c\u9762\u56fe\u6807\u8981\u663e\u793a\u8fd8\u662f\u9690\u85cf\uff1f\u7528\u6237\u5df2\u7ed9\u51fa\u9009\u62e9\u5c31\u76f4\u63a5\u5206\u522b\u6267\u884c\u3001\u6838\u9a8c\uff0c\u4e0d\u91cd\u590d\u786e\u8ba4\uff1b\u4e0d\u8981\u66ff\u7528\u6237\u9ed8\u8ba4\u9009\u62e9\u3002'
+    'setup_hint' = '\u5148\u8fd0\u884c tiyouju.exe assistant-setup --json \u67e5\u770b\u72b6\u6001\uff1b\u7528\u6237\u540c\u610f\u540e\uff0c\u7528 --skill-dir \u6307\u5b9a\u5f53\u524d\u52a9\u624b\u7684\u6280\u80fd\u76ee\u5f55\uff0c\u7528 --desktop show \u6216 --desktop hide \u8bbe\u7f6e\u684c\u9762\u56fe\u6807\u3002'
+    'old_cli' = '\u8fd9\u4e2a\u7248\u672c\u5c1a\u4e0d\u652f\u6301 assistant-setup\uff0c\u8bf7\u6309\u4ed3\u5e93\u7684\u5b89\u88c5\u6536\u5c3e\u8bf4\u660e\u5904\u7406\uff0c\u6216\u5347\u7ea7\u5230 1.10.14 \u53ca\u4ee5\u4e0a\u7248\u672c\u540e\u518d\u4f7f\u7528\u8be5\u547d\u4ee4\u3002'
+    'invite' = '\u5b89\u88c5\u6536\u5c3e\u540e\u8bf7\u76f4\u63a5\u544a\u8bc9\u7528\u6237\uff1a\u4ee5\u540e\u6709\u9898\u76ee\u6216\u8bd5\u5377\uff0c\u53ef\u4ee5\u76f4\u63a5\u53d1\u7ed9\u6211\uff0c\u6211\u4f1a\u901a\u8fc7\u9898\u6709\u636e\u5e2e\u4f60\u6574\u7406\u3001\u6838\u5bf9\uff0c\u5e76\u4fdd\u7559\u539f\u5377\u51fa\u5904\u3002'
+    'keys' = '\u9700\u8981\u4e91\u8bc6\u8bfb\u65f6\uff0c\u518d\u8bf7\u4f7f\u7528\u8005\u5728\u9898\u6709\u636e\u8bbe\u7f6e\u4e2d\u81ea\u884c\u586b\u5199\u6240\u9700\u670d\u52a1\u5bc6\u94a5\uff1b\u4e91\u8bc6\u8bfb\u4e0d\u53ef\u7528\u65f6\u4ecd\u53ef\u6574\u7406\u73b0\u6709\u9898\u76ee\u548c\u6838\u5bf9\u51fa\u5904\u3002AI \u52a9\u624b\u4e0d\u8981\u4ee3\u586b\u6216\u8bfb\u53d6\u5bc6\u94a5\u3002'
 }
 
 $Repo = 'CEHNICA/question-bank-card'
@@ -63,8 +76,15 @@ if (-not $setup) { throw (M 'no_asset') }
 
 $installed = ''
 if (Test-Path -LiteralPath $App) { $installed = (Get-Item -LiteralPath $App).VersionInfo.ProductVersion }
-if ($installed -eq $version -and $env:TIYOUJU_REINSTALL -ne '1') {
-    Write-Output ((M 'already') + $version)
+$keepInstalled = $false
+if ($installed) {
+    $installedVersion = App-Version $installed
+    $releaseVersion = App-Version $version
+    $keepInstalled = ($installedVersion -eq $releaseVersion -and $env:TIYOUJU_REINSTALL -ne '1') -or (-not $env:TIYOUJU_VERSION -and $installedVersion -gt $releaseVersion)
+}
+if ($keepInstalled) {
+    if ($installedVersion -gt $releaseVersion) { Write-Output ((M 'newer') + $installedVersion) }
+    else { Write-Output ((M 'already') + $installedVersion) }
 } else {
     $work = Join-Path $env:TEMP "tiyouju-install-$version"
     New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -106,15 +126,28 @@ if ($installed -eq $version -and $env:TIYOUJU_REINSTALL -ne '1') {
     }
 
     Write-Output (M 'installing')
-    $process = Start-Process -FilePath $setupPath -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS' -Wait -PassThru
+    $process = Start-Process -FilePath $setupPath -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/MERGETASKS=!desktopicon' -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw ((M 'setup_failed') + $process.ExitCode) }
-    Write-Output ((M 'installed') + (Get-Item -LiteralPath $App).VersionInfo.ProductVersion)
 }
+
+if (-not (Test-Path -LiteralPath $App -PathType Leaf) -or -not (Test-Path -LiteralPath $Cli -PathType Leaf)) { throw (M 'verify_failed') }
+$verifiedVersion = App-Version ((Get-Item -LiteralPath $App).VersionInfo.ProductVersion)
+$expectedVersion = App-Version $version
+if ($keepInstalled) { $expectedVersion = $installedVersion }
+if ($verifiedVersion -ne $expectedVersion) { throw (M 'verify_failed') }
+try { $cliVersion = ((& $Cli --version 2>&1) -join '').Trim() }
+catch { throw (M 'verify_failed') }
+if ($LASTEXITCODE -ne 0 -or $cliVersion -ne "tiyouju $($verifiedVersion.ToString(3))") { throw (M 'verify_failed') }
+Write-Output ((M 'installed') + $verifiedVersion.ToString(3))
 
 if ($env:TIYOUJU_NO_START -ne '1' -and -not (Get-Process -Name 'QuestionBankCard' -ErrorAction SilentlyContinue)) {
     Write-Output (M 'starting')
-    Start-Process -FilePath $App -WorkingDirectory $AppDir
+    Start-Process -FilePath $App -WorkingDirectory $AppDir -WindowStyle Hidden
 }
 Write-Output ((M 'cli') + $Cli)
 Write-Output (M 'cli_hint')
+Write-Output (M 'choices')
+if ($verifiedVersion -ge [version]'1.10.14') { Write-Output (M 'setup_hint') }
+else { Write-Output (M 'old_cli') }
+Write-Output (M 'invite')
 Write-Output (M 'keys')

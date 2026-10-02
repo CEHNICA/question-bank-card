@@ -14,8 +14,9 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `status` | 题有据是否在运行、版本、密钥是否填好、能不能上传、有多少试卷。缺密钥时列出缺哪个、去哪里免费申请 |
-| `config [--reader R] [--checker C] [--minimax-plan P]` | 看或改读题方式（不碰密钥，改之前先问使用者）。R：`assistant`（AI 助手读题，只要 MinerU）、`modelscope`（免费）、`minimax`、`siliconflow`。C：`auto` 或同上的服务名。P：`auto`、`plus`、`max`、`ultra`、`payg`。不加参数只显示现状 |
+| `status` | 题有据是否在运行、版本、密钥是否填好、上传条件是否满足、有多少试卷。缺密钥时列出缺哪个、去哪里申请；不检测云服务当前是否可用 |
+| `config [--reader R] [--checker C] [--minimax-plan P]` | 看或改读题方式（不碰密钥，改之前取得使用者选择）。R：`assistant`（AI 助手读题，处理新原卷仍需 MinerU）、`modelscope`、`minimax`、`siliconflow`。C：`auto` 或同上的服务名。P：`auto`、`plus`、`max`、`ultra`、`payg`。不加参数只显示现状；第三方额度和费用以当前账户规则为准 |
+| `assistant-setup [--skill-dir 绝对skills父目录] [--replace-skill] [--desktop show\|hide]` | **1.10.14 起支持，先检查安装版 `--help`**。默认只读核实安装并列出技能/图标选择；用户明确选择后才安装配套技能或显示/隐藏本软件桌面图标。技能覆盖须获明确同意，`--replace-skill` 保留备份 |
 | `start [--timeout 90]` | 打开题有据，等它就绪 |
 | `papers` | 列出试卷：编号、名字、状态、题数、通过数、入库数 |
 | `upload 文件… [--book] [--wait] [--timeout 秒]` | 上传 PDF、Word，或几张照片（合成一份）。`--book` 表示书或讲义。上传过的文件不会重复处理 |
@@ -69,6 +70,24 @@
 - `readings`：几次识读各自的写法（`a`、`b`、`c`）。
 - `candidates`：候选图，每项包括 `number`（图几）、`page`（第几页）、`used_as`（用作哪里，空字符串表示没用上）。
 - `images`：`crop`（原卷截图）、`candidates`（候选图编号截图）、`figures`（配图）的文件路径。
+
+## 安装收尾的 JSON
+
+`assistant-setup --json` 不连接题库 API，默认不修改电脑。完整收尾流程见 [install-finish.md](install-finish.md)。
+
+| 字段 | 含义 |
+| --- | --- |
+| `software.installed` / `path` | 是否找到实际软件 EXE，以及其路径 |
+| `software.version` / `version_verified` | 本机 EXE 的 Windows 产品版本及是否已核实，不使用源码版本代替 |
+| `software.cli_path` | 与软件相邻的 CLI 路径，若存在 |
+| `skill.status` / `bundled_path` / `target` | 配套技能状态、本机附带资源和目标目录 |
+| `skill.backup` / `verified` | 覆盖前保留的备份与是否核实安装结果 |
+| `desktop.status` / `path` / `target` / `backup` / `verified` | 本软件快捷方式的操作状态、路径、指向、备份和核实结果 |
+| `desktop.requested` | 本次是否明确指定显示或隐藏；重复执行可核实已有状态，`changed` 为假时不宣称刚做了改动 |
+| `questions` | 仍未选择的可选项，ID 为 `install_skill`、`desktop_icon`；结合用户已给出的选择处理，不重复询问 |
+| `invitation` | 收尾时邀请用户继续发题的提示；助手应按实际能力和服务状态表达 |
+
+默认报告中的可选设置不能代替用户同意。`--skill-dir` 必须是当前客户端已确认支持的绝对 skills 父目录；命令会安装到它下面的 `tiyouju`，不能用猜测目录。执行多项设置后按各项 `verified` 核实，不把软件安装等同于识读服务可用。
 
 ## MCP 工具
 
