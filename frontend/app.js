@@ -518,7 +518,7 @@ const QBTeach = (() => {
     { key: "drafts", title: "给这份练习起个名字", manual: true,
       text: "在组卷预览里填写试卷标题，点“保存草稿”；“另存为”会保留另一份。下次从“组卷草稿”继续选题和调整顺序。题目被撤回、更新或找不到时会明确提示；先处理缺题，不会悄悄换成新版本或漏印。" },
     { key: "ai", title: "标签和答案，统一设置", manual: true,
-      text: "所有页面共用“设置 → 标签与参考答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，也可在正式题库单题或勾选批量生成。默认由当前 AI 助手通过本机工具写回，无需额外豆包 API；独立模型可选，推荐 DeepSeek。教学只认识入口，不改开关、不生成、不测试。" },
+      text: "所有页面共用“设置 → 标签与答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，也可在正式题库单题或勾选批量生成。默认由当前 AI 助手通过本机工具写回，无需额外豆包 API；独立模型可选，推荐 DeepSeek。教学只认识入口，不改开关、不生成、不测试。" },
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
@@ -915,16 +915,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function leaveFor(url) {
-    if (await discardEdits()) window.location.assign(url);
+    if (!(await prepareSettingsLeave()) || !(await discardEdits())) return false;
+    window.location.assign(url);
+    return true;
   }
 
   // Browser refresh/close cannot wait for our dialog. Use its native leave
   // warning there; in-app navigation keeps the clearer two-action dialog.
-  window.addEventListener("beforeunload", (event) => QBEdits.protectBeforeUnload(event, editGuard));
+  window.addEventListener("beforeunload", (event) => {
+    QBEdits.protectBeforeUnload(event, editGuard);
+    if (window.location.pathname === "/settings" && (modelFormDirty || window.LibraryAISettings?.hasUnsavedChanges?.() || window.LibraryAISettings?.isBusy?.())) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
   document.addEventListener("click", (event) => {
     const link = event.target.closest?.("a[href]");
     if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
-      || link.hasAttribute("download") || (link.target && link.target !== "_self") || !editGuard.hasPendingWork()) return;
+      || link.hasAttribute("download") || (link.target && link.target !== "_self")
+      || !(editGuard.hasPendingWork() || window.location.pathname === "/settings")) return;
     const url = new URL(link.href, window.location.href);
     const here = new URL(window.location.href);
     if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search && url.hash) return;
@@ -1041,8 +1050,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return false;
     }
     const s = state.status;
-    // 标题下面平时什么都不写；只有读不了新资料时才提醒一句（用哪家模型读题在“设置 → 读题模型”里）。
-    brandNotice(s.upload_enabled ? "" : "还不能读新资料：点右上角“设置”填写密钥", "warn");
+    // 标题下面平时什么都不写；只有读不了新资料时才提醒一句（读题模型在“设置 → 读题服务”里）。
+    brandNotice(s.upload_enabled || window.location.pathname === "/settings" ? "" : "还不能读新资料：点右上角“设置”填写密钥", "warn");
     const note = $("uploadNote");
     if (!s.upload_enabled) {
       note.hidden = false;
@@ -3838,7 +3847,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     ].filter(Boolean).join("；");
     $("settingsModelSummary").textContent = status.assistant_mode
       ? "现在是 AI 助手读题：新资料的题卡先用 MinerU 的文字，需要 AI 助手或你对照原卷截图核对。"
-      : summary ? `现在实际使用：${summary}。` : "现在没有可用的读题模型：请先在“常用”里填写密钥（魔搭有免费的），或选“AI 助手读题”。";
+      : summary ? `当前读题：${summary}。` : "请先配置一家读题服务，或选择 AI 助手读题。";
     renderMinimaxPlan(engines);
   }
 
@@ -3853,6 +3862,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function renderMinimaxPlan(engines) {
     const select = $("settingsMinimaxPlan");
+    if (!select || !$("settingsMinimaxPlanNote")) return;
     const plan = engines.saved?.plans?.minimax || engines.plans?.minimax || "auto";
     select.value = PLAN_NOTES[plan] ? plan : "auto";
     const pending = engines.plans?.minimax && engines.plans.minimax !== select.value;
@@ -3962,8 +3972,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestAnimationFrame(action);
   }
 
-  // 设置按分页显示，一次只看一块；打开时停在“常用”，读题服务不能用时那里会直接说明。
-  function showSettingsTab(id) {
+  const SETTINGS_HASHES = { settingsGeneral: "services", settingsAI: "ai", settingsDisplay: "display", settingsReview: "help", settingsAbout: "about" };
+  function settingsTabFromHash() {
+    const hash = window.location.hash.slice(1);
+    return Object.keys(SETTINGS_HASHES).find((id) => SETTINGS_HASHES[id] === hash) || "settingsGeneral";
+  }
+
+  function showSettingsTab(id, { updateHash = true } = {}) {
+    if (!Object.hasOwn(SETTINGS_HASHES, id)) id = "settingsGeneral";
     document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
       const active = tab.dataset.settingsTab === id;
       tab.setAttribute("aria-selected", String(active));
@@ -3972,7 +3988,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     document.querySelectorAll("#settingsDialog .settings-page").forEach((page) => { page.hidden = page.id !== id; });
     const scroller = document.querySelector("#settingsDialog .settings-scroll");
     if (scroller) scroller.scrollTop = 0;
+    if (window.location.pathname === "/settings" && updateHash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${SETTINGS_HASHES[id]}`);
+    }
   }
+  window.addEventListener("hashchange", () => {
+    if (window.location.pathname === "/settings") showSettingsTab(settingsTabFromHash(), { updateHash: false });
+  });
 
   document.querySelectorAll("[data-settings-tab]").forEach((tab, index, tabs) => {
     tab.addEventListener("click", () => showSettingsTab(tab.dataset.settingsTab));
@@ -3991,21 +4013,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!s || !node) return;
     const configured = s.configured || s.engines?.configured || {};
     const vision = Boolean(configured.minimax || configured.siliconflow || configured.modelscope);
-    const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务（魔搭免费）"].filter(Boolean);
+    const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务"].filter(Boolean);
     node.className = `settings-ready ${s.upload_enabled ? "ready" : "missing"}`;
     node.textContent = s.upload_enabled
-      ? (s.assistant_mode ? "MinerU 密钥已配置：AI 助手读题，题卡先用 MinerU 的文字。服务当前是否可用，以任务返回为准。"
-        : "所需密钥已配置，可以提交新资料。服务当前是否可用，以任务返回为准。")
-      : missing.length ? `还不能上传新资料：请先填写 ${missing.join("、")} 的密钥。已有的题卡照常可以审核。下面有免费的配法。`
-        : "所选的主读模型还没有密钥，暂时不能上传新资料；可以在“读题模型”里换一个已填写密钥的模型。";
-    // 只在“能不能上传”变了的时候自动展开或收起，不跟用户自己的开合较劲。
-    if (state.freePlanReady !== s.upload_enabled) {
-      state.freePlanReady = s.upload_enabled;
-      $("settingsFreePlan").open = !s.upload_enabled;
-    }
+      ? "新资料的密钥已配置；实际可用性以处理结果为准。已有题目可继续使用。"
+      : missing.length ? `导入新资料还需 ${missing.join("、")} 密钥。已有题目可继续使用。`
+        : "当前主读服务尚未配置。请填写密钥或调整读题模型；已有题目可继续使用。";
   }
 
-  // 设置 → 常用 → 功能开关（存在数据目录的 features.json，网页和后台共用）。
+  // 设置 → 题面与显示（存在数据目录的 features.json，网页和后台共用）。
   async function loadFeatureSwitches() {
     const box = $("featureSwitches");
     try {
@@ -4022,7 +4038,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     (data.features || []).filter((item) => !["knowledge_tags", "ai_answer"].includes(item.key)).forEach((item) => {
       const label = el("label", "settings-switch");
       const text = el("span");
-      text.append(el("strong", "", item.label), el("small", "", item.help));
+      const labels = { origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数" };
+      const descriptions = { origin_split: "将题干开头的出处移到题源字段。", chinese_quotes: "统一中文句子的引号，保留公式。", subquestions: "在题库标注题目包含的小问数量。" };
+      text.append(el("strong", "", labels[item.key] || item.label));
+      if (descriptions[item.key]) text.append(el("small", "", descriptions[item.key]));
       const input = el("input");
       input.type = "checkbox";
       input.setAttribute("role", "switch");
@@ -4050,6 +4069,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function openSettings() {
+    if (window.location.pathname !== "/settings") { void leaveFor("/settings"); return; }
     void loadFeatureSwitches();
     renderSettingsModels();
     renderSettingsReady();
@@ -4057,16 +4077,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsFocus").checked = state.focus;
     $("settingsAutoExpand").checked = state.autoExpand;
     if (!modelFormDirty) showModelSaveResult("");
-    showSettingsTab("settingsGeneral");
-    $("settingsDialog").showModal();
+    showSettingsTab(settingsTabFromHash(), { updateHash: false });
     void loadStatus();
-    requestAnimationFrame(() => $("settingsClose").focus());
+    requestAnimationFrame(() => $("settingsTitle").focus({ preventScroll: true }));
   }
 
   $("settingsButton").addEventListener("click", (event) => {
     if (window.location.pathname === "/settings") { event.preventDefault(); openSettings(); }
   });
-  $("reopenSettings").addEventListener("click", openSettings);
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
@@ -4173,7 +4191,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         siliconflow: $("settingsSiliconflowModel").value.trim(),
         modelscope: $("settingsModelscopeModel").value.trim()
       },
-      plans: { minimax: $("settingsMinimaxPlan").value }
     };
   }
 
@@ -4208,10 +4225,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   const modelSettingFields = ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel",
-    "settingsSiliconflowModel", "settingsModelscopeModel", "settingsMinimaxPlan"];
+    "settingsSiliconflowModel", "settingsModelscopeModel"];
   modelSettingFields.forEach((id) => $(id).addEventListener("input", () => {
     modelFormDirty = true;
-    showModelSaveResult("有改动待保存；离开输入框或关闭设置后会自动保存。", { retry: Boolean(lastModelSave?.failed) });
+    showModelSaveResult("有改动待保存；离开输入框后会自动保存。", { retry: Boolean(lastModelSave?.failed) });
   }));
   modelSettingFields
     .forEach((id) => $(id).addEventListener("change", () => { void saveModelSettings(); }));
@@ -4220,13 +4237,27 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     void saveModelSettings();
   });
 
-  function saveModelDraftOnClose() {
-    if (!modelFormDirty) return;
-    const signature = JSON.stringify(readModelSettings());
-    if (lastModelSave?.signature !== signature) void saveModelSettings();
+  async function prepareSettingsLeave() {
+    if (window.location.pathname !== "/settings") return true;
+    if (window.LibraryAISettings?.isBusy?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
+    if (modelFormDirty) {
+      const signature = JSON.stringify(readModelSettings());
+      if (lastModelSave?.failed && lastModelSave.signature === signature) {
+        showModelSaveResult("模型设置尚未保存，请重试保存后再离开。", { retry: true });
+        return false;
+      }
+      await saveModelSettings();
+      await modelSaving;
+      if (modelFormDirty) return false;
+    }
+    if (window.LibraryAISettings?.isBusy?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
+    if (window.LibraryAISettings?.hasUnsavedChanges?.()) {
+      const discard = await confirmDialog({ title: "标签与答案设置还没保存", text: "离开会放弃本次设置改动；已经保存的开关和密钥保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
+      if (!discard) return false;
+      await window.LibraryAISettings.discard();
+    }
+    return true;
   }
-  $("settingsDialog").addEventListener("cancel", saveModelDraftOnClose);
-  $("settingsDialog").addEventListener("close", saveModelDraftOnClose);
 
   async function saveModelSettingsNow(change) {
     try {
@@ -4236,7 +4267,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       // An uncommitted text edit is also a newer intent. A completed save must
       // not replace it with the older value before blur/change submits it.
       if (JSON.stringify(readModelSettings()) !== change.signature) {
-        showModelSaveResult("有新改动待保存；离开输入框或关闭设置后会自动保存。");
+        showModelSaveResult("有新改动待保存；离开输入框后会自动保存。");
         return;
       }
       modelFormDirty = false;
@@ -6705,16 +6736,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "basket": later(() => document.querySelector('.topnav a[href="/library"]'), "从这里进入题库选题", "勾选当前已显示的题，再加入试题篮。可切到“已选题目”集中检查；收起试题篮不会清空。教学不替你选择真实题目。"); break;
       case "drafts": later(() => document.querySelector('.topnav a[href="/library"]'), "从题库继续组卷", "组卷预览里起名字、保存草稿；下次从“组卷草稿”打开。旧版本或缺题会提示处理，不会悄悄替换。教学不保存真实草稿。"); break;
       case "ai": {
-        openSettings();
-        showSettingsTab("settingsGeneral");
-        later(() => document.querySelector('[data-library-ai-settings]'), "标签与答案都在设置里", "所有页面共用这个入口。两项默认关闭、默认手动；可选录入并入库时生成，或在题库单题、勾选批量生成。助手模式仍需当前助手处理并写回，教学不改开关、不生成、不测试。");
+        later(() => $("settingsButton"), "设置 → 标签与答案", "两项默认关闭。开启后可选入库时生成，也可在题库单题或勾选批量生成。助手模式仍需当前助手处理并写回；教学不会改开关。");
         break;
       }
       case "recovery": {
-        openSettings();
-        showSettingsTab("settingsReview");
-        document.querySelector(".teaching-help").open = true;
-        later(() => document.querySelector(".teaching-help"), "随时能回来看", "继续编辑会保留当前改动；丢弃只回到上次保存的文字。未保存的字不会自动恢复。");
+        later(() => $("settingsButton"), "设置 → 帮助", "这里可以回看操作说明。继续编辑保留当前改动；丢弃只回到上次保存的文字。教学期间不必离开这张示例卷。");
         break;
       }
       default: break;
@@ -6788,6 +6814,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();
+      if (window.LibraryAISettings?.mount) await window.LibraryAISettings.mount($("libraryAISettingsMount"));
       return;
     }
     await loadPapers();

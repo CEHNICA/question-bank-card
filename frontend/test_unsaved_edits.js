@@ -104,7 +104,8 @@ function editor(guard, id, initial) {
   // exercise the dialog; these checks catch an accidentally bypassed route.
   const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   assert.match(js, /async function selectPaper\(id\) \{\s*if \(state\.paperId !== id && !\(await discardEdits\(\)\)\) return;/);
-  assert.match(js, /window\.addEventListener\("beforeunload", \(event\) => QBEdits\.protectBeforeUnload\(event, editGuard\)\)/);
+  assert.match(js, /window\.addEventListener\("beforeunload", \(event\) => \{\s*QBEdits\.protectBeforeUnload\(event, editGuard\)/);
+  assert.match(js, /async function leaveFor\(url\) \{\s*if \(!\(await prepareSettingsLeave\(\)\) \|\| !\(await discardEdits\(\)\)\) return false;/);
   assert.match(js, /const cancel = button\("取消", "", \(\) => discardEdits\(\[q\.id\]\)\)/);
   assert.match(js, /event\.stopPropagation\(\); discardEdits\(\[q\.id\]\)/);
   assert.match(js, /label: "去题库看看", onClick: \(\) => leaveFor\("\/library"\)/);

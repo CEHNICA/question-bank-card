@@ -13,7 +13,7 @@ const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 // Nothing technical under the title; it only speaks up when reading cannot work.
 assert.match(html, /<span id="engineLine" class="engine-line" hidden><\/span>/);
 assert.doesNotMatch(js, /旁证 MinerU 文字|有出入时复核 \$\{s\.checker\}/);
-assert.match(js, /brandNotice\(s\.upload_enabled \? "" : "还不能读新资料：点右上角“设置”填写密钥", "warn"\)/);
+assert.match(js, /brandNotice\(s\.upload_enabled \|\| window\.location\.pathname === "\/settings" \? "" : "还不能读新资料：点右上角“设置”填写密钥", "warn"\)/);
 assert.match(js, /brandNotice\("连不上本机服务：请关掉题有据再重新打开", "error"\)/);
 
 // Welcome: three steps, the service check, and the way into the tour; shown once.

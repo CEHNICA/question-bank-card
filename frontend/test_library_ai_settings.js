@@ -12,8 +12,9 @@ async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve()
 function setup() {
   const elements = new Map();
   class Element {
-    constructor() {
+    constructor(tag = "div") {
       this.value = ""; this.checked = false; this.disabled = false; this.open = false;
+      this.tagName = tag.toUpperCase(); this.children = []; this.modalOpens = 0;
       this.listeners = new Map(); this.classList = { toggle() {} };
     }
     set id(value) { this._id = value; elements.set(value, this); }
@@ -27,13 +28,13 @@ function setup() {
     }
     addEventListener(name, fn) { this.listeners.set(name, [...(this.listeners.get(name) || []), fn]); }
     setAttribute() {}
-    append() {}
-    showModal() { this.open = true; }
+    append(child) { this.children.push(child); child.parentElement = this; }
+    showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
     trigger(name, detail = {}) { for (const fn of this.listeners.get(name) || []) fn({ preventDefault() {}, ...detail }); }
   }
   const document = { head: new Element(), body: new Element(), listeners: new Map(), events: [],
-    createElement: () => new Element(), getElementById: (id) => elements.get(id),
+    createElement: (tag) => new Element(tag), getElementById: (id) => elements.get(id),
     addEventListener(name, fn) { this.listeners.set(name, fn); },
     dispatchEvent(event) { this.events.push(event); } };
   const current = { mode: "assistant", provider: "deepseek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro",
@@ -43,7 +44,8 @@ function setup() {
   let respond = () => ({ ...current, features: { ...current.features } });
   let okay = true;
   let confirm = true;
-  const window = { confirm: () => confirm };
+  const window = { confirm: () => confirm, location: { hash: "" }, listeners: new Map(),
+    addEventListener(name, fn) { this.listeners.set(name, fn); } };
   const sandbox = { window, document, CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     fetch: async (url, options = {}) => {
       const payload = options.body ? JSON.parse(options.body) : undefined;
@@ -160,7 +162,17 @@ function setup() {
   assert.equal(s.calls.at(-1).payload.provider, "custom");
   assert.equal(s.calls.at(-1).payload.supports_images, true);
   assert.equal(s.get("libraryAIKey").value, "", "failed saves do not retain a password input");
-  assert.equal(s.get("libraryAIResult").textContent, "格式无效");
+  assert.match(s.get("libraryAIResult").textContent, /格式无效.*新密钥未保存.*重新填写/);
+  assert.equal(s.get("libraryAISave").disabled, true, "a failed replacement cannot become a silent keep on retry");
+  const failedSaveCount = s.calls.length;
+  s.get("libraryAISettingsForm").trigger("submit"); await flush();
+  assert.equal(s.calls.length, failedSaveCount, "retry without re-entering a failed replacement never posts keep");
+  s.get("libraryAIKey").value = "retry-offline-key"; s.get("libraryAIKey").trigger("input");
+  assert.equal(s.get("libraryAISave").disabled, false, "re-entering the key enables an explicit replacement retry");
+  s.response((_url, payload) => ({ ...s.current, ...payload, configured: true, ready: false }));
+  s.get("libraryAISettingsForm").trigger("submit"); await flush();
+  assert.deepEqual(s.calls.at(-1).payload.key, { action: "replace", value: "retry-offline-key" });
+  s.get("libraryAIBaseURL").value = "https://offline-new.example/v1"; s.get("libraryAIBaseURL").trigger("input");
   s.consentClose(false);
   s.get("libraryAICancel").trigger("click");
   assert.equal(s.get("libraryAISettingsDialog").open, true, "continue editing preserves dirty settings");
@@ -186,6 +198,15 @@ function setup() {
   legacy.get("libraryAISettingsForm").trigger("submit");await flush();
   assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "clear" });
 
+  legacy.get("libraryAIClearKey").checked = true; legacy.get("libraryAIClearKey").trigger("input");
+  legacy.response(() => ({ error: "暂时未保存" }), false);
+  legacy.get("libraryAISettingsForm").trigger("submit"); await flush();
+  assert.equal(legacy.get("libraryAIClearKey").checked, true, "failed deletion keeps the user's explicit delete intent");
+  assert.equal(legacy.get("libraryAIKey").disabled, true);
+  legacy.response((_url, payload) => ({ ...legacy.current, mode: "api", configured: false, ready: false, features: payload.features }));
+  legacy.get("libraryAISettingsForm").trigger("submit"); await flush();
+  assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "clear" }, "retry still deletes instead of retaining an old key");
+
   const pending = setup();
   let resolve;
   pending.response(() => new Promise((done) => { resolve = done; }));
@@ -209,5 +230,52 @@ function setup() {
   incompleteTiming.response(() => ({ ...incompleteTiming.current, on_intake: { tags: false } }));
   await incompleteTiming.window.LibraryAISettings.open();
   assert.equal(incompleteTiming.get("libraryAISave").disabled, true, "an incomplete timing response cannot silently reset intake preferences");
-  console.log("assistant and optional API settings dialog action checks: OK");
+
+  const inline = setup();
+  const host = inline.document.createElement("div");
+  await inline.window.LibraryAISettings.mount(host);
+  assert.equal(host.children.length, 1);
+  assert.equal(inline.get("libraryAISettingsDialog").tagName, "SECTION");
+  assert.equal(inline.get("libraryAISettingsDialog").modalOpens, 0, "the settings page never opens a nested modal");
+  assert.equal(inline.calls.length, 1, "mounting only reads stored settings");
+  assert.equal(inline.get("libraryAITags").checked, false);
+  assert.equal(inline.get("libraryAIAnswer").checked, false);
+  inline.get("libraryAITags").checked = true; inline.get("libraryAITags").trigger("input");
+  assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), true);
+  await inline.window.LibraryAISettings.mount(host);
+  assert.equal(inline.calls.length, 1, "revisiting the tab cannot overwrite an unsaved draft");
+  assert.equal(inline.get("libraryAITags").checked, true);
+  let prevented = false;
+  const unload = { preventDefault() { prevented = true; }, returnValue: undefined };
+  inline.window.listeners.get("beforeunload")(unload);
+  assert.equal(prevented, true);
+  assert.equal(unload.returnValue, "", "refresh/close protects unsaved inline settings");
+  inline.get("libraryAIKey").value = "discard-unsaved-secret";
+  assert.equal(inline.window.LibraryAISettings.discard(), true);
+  assert.equal(inline.get("libraryAIKey").value, "");
+  assert.equal(inline.get("libraryAITags").checked, false);
+  assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), false);
+  assert.equal(inline.calls.length, 1, "discard restores the read snapshot without changing stored keys or flags");
+  inline.get("libraryAITags").checked = true; inline.get("libraryAITags").trigger("input");
+  let finishSave;
+  inline.response((_url, payload) => new Promise((done) => { finishSave = () => done({ ...inline.current, features: payload.features, on_intake: payload.on_intake }); }));
+  inline.get("libraryAISettingsForm").trigger("submit");
+  assert.equal(inline.window.LibraryAISettings.isBusy(), true);
+  assert.equal(inline.window.LibraryAISettings.discard(), false, "a running save cannot be silently discarded");
+  finishSave(); await flush();
+  assert.equal(inline.window.LibraryAISettings.isBusy(), false);
+  assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), false);
+  assert.equal(inline.get("libraryAITags").checked, true);
+  assert.deepEqual(inline.calls.at(-1).payload, { mode: "assistant", features: { knowledge_tags: true, ai_answer: false }, on_intake: { tags: false, answer: false } });
+
+  const retry = setup();
+  retry.response(() => ({ ready: false }));
+  await retry.window.LibraryAISettings.mount(retry.document.createElement("div"));
+  assert.equal(retry.get("libraryAISave").disabled, true);
+  assert.equal(retry.get("libraryAICancel").textContent, "重新读取");
+  retry.response(() => ({ ...retry.current }));
+  retry.get("libraryAICancel").trigger("click"); await flush();
+  assert.equal(retry.get("libraryAISave").disabled, false, "failed reads have a safe retry without saving defaults");
+  assert.equal(retry.calls.length, 2);
+  console.log("assistant and optional API settings inline and dialog actions: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

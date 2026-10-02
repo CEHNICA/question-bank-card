@@ -18,20 +18,24 @@ for (const page of [html, libraryHtml]) {
 assert.match(html, /id="aboutVersion"/);
 assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
-// 两页指向同一个设置位置；设置按分页显示：常用、读题模型、帮助、关于。
+// 两页进入一个常规设置页：服务、AI、显示、帮助、关于。
 assert.match(html, /id="settingsButton" href="\/settings">设置<\/a>/);
 assert.match(libraryHtml, /href="\/settings">设置<\/a>/);
 assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
-for (const id of ["settingsGeneral", "settingsModels", "settingsReview", "settingsAbout"]) {
+for (const id of ["settingsGeneral", "settingsAI", "settingsDisplay", "settingsReview", "settingsAbout"]) {
   assert.match(html, new RegExp(`data-settings-tab="${id}"`));
   assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
 }
 assert.match(html, /id="settingsInterface"/);
-assert.match(js, /function showSettingsTab\(id\)/);
-assert.match(js, /showSettingsTab\("settingsGeneral"\);\s*\$\("settingsDialog"\)\.showModal\(\)/);
+assert.match(js, /function showSettingsTab\(id, \{ updateHash = true \} = \{\}\)/);
+assert.match(html, /<section id="settingsDialog" class="settings-panel"/);
+assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
+assert.match(html, /id="libraryAISettingsMount"/);
+assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAISettingsMount"\)\)/);
+assert.match(js, /settingsAI: "ai"/);
 // “常用”先用一句话说明能不能上传新资料；缺什么密钥就直接说出来。
 assert.match(html, /id="settingsReady"/);
-assert.match(js, /还不能上传新资料：请先填写 \$\{missing\.join\("、"\)\} 的密钥/);
+assert.match(js, /导入新资料还需 \$\{missing\.join\("、"\)\} 密钥/);
 // 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
 assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
 assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);
@@ -65,13 +69,16 @@ assert.match(js, /API 未配置/);
 assert.match(js, /从下一项新任务或重新识读开始生效/);
 assert.doesNotMatch(js, /重启桌面程序后生效|重新打开题库后生效/);
 
-// 打开后把键盘焦点放到关闭按钮；原生 dialog 的 Esc 与显式关闭按钮都可退出。
-assert.match(js, /\$\("settingsDialog"\)\.showModal\(\)/);
-assert.match(js, /requestAnimationFrame\(\(\) => \$\("settingsClose"\)\.focus\(\)\)/);
-assert.match(html, /id="settingsClose"[^>]*data-close/);
-
-// 窄屏设置必须占满视口，而不是保留桌面抽屉宽度。
-assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.settings-dialog\s*\{[^}]*width:\s*100vw[^}]*border-radius:\s*0/);
+// 设置直接显示在页面中，键盘焦点落在标题，正常链接经保存保护返回。
+assert.doesNotMatch(js, /\$\("settingsDialog"\)\.showModal\(\)/);
+assert.match(js, /\$\("settingsTitle"\)\.focus\(\{ preventScroll: true \}\)/);
+assert.match(html, /id="settingsReturn"[^>]*href="\/library"/);
+assert.match(js, /async function prepareSettingsLeave\(\)/);
+assert.match(js, /await modelSaving/);
+assert.match(js, /hasUnsavedChanges\?\.\(\)/);
+assert.match(js, /await window\.LibraryAISettings\.discard\(\)/);
+assert.match(css, /\.settings-home \{ max-width: 1080px/);
+assert.match(css, /\.settings-nav \{ display: flex; flex-wrap: wrap/);
 
 // 结构冲突的快捷处理以及新的审核状态文案必须保留。
 assert.match(js, /\/api\/papers\/\$\{splitPlan\.paperId\}\/split/);
@@ -90,18 +97,24 @@ assert.match(js, /body\.group_id\s*=\s*Number\(selectedGroup\)/);
 assert.match(js, /按教材重试/);
 assert.match(js, /body:\s*materialType\s*\?\s*\{\s*material_type:\s*materialType\s*\}\s*:\s*\{\}/);
 
-// MiniMax concurrency follows the membership: picked in 常用, saved with the
-// model settings, explained in plain words.
-assert.match(html, /<details class="plan-setting">\s*<summary>同时读题数量（默认自动调整）<\/summary>/);
-assert.match(html, /<select id="settingsMinimaxPlan"[^>]*>\s*<option value="auto">自动调整（推荐）<\/option>\s*<option value="plus">Plus<\/option>\s*<option value="max">Max<\/option>\s*<option value="ultra">Ultra<\/option>\s*<option value="payg">/);
-assert.match(js, /const modelSettingFields = \[[\s\S]*?"settingsMinimaxPlan"\];/);
-assert.match(js, /modelSettingFields\s*\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\);/);
-assert.match(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
-assert.match(js, /const plan = engines\.saved\?\.plans\?\.minimax \|\| engines\.plans\?\.minimax \|\| "auto";/);
+// 档位控件移除。修改读题模型只发送角色和模型ID，不能默认覆盖旧plans。
+assert.doesNotMatch(html, /settingsMinimaxPlan|同时读题数量|MiniMax 会员档位/);
+assert.doesNotMatch(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
+assert.match(js, /if \(!select \|\| !\$\("settingsMinimaxPlanNote"\)\) return;/);
+const readModelSource = js.slice(js.indexOf("  function readModelSettings()"), js.indexOf("  function showModelSaveResult"));
+const values = { settingsPrimaryModel: "assistant", settingsCheckerModel: "auto", settingsArbiterModel: "primary", settingsMinimaxModel: "ModelA", settingsSiliconflowModel: "ModelB", settingsModelscopeModel: "ModelC" };
+const payload = require("node:vm").runInNewContext(readModelSource + "\nreadModelSettings();", { $: id => {
+  assert.notEqual(id, "settingsMinimaxPlan", "removed controls must never be read");
+  return { value: values[id] };
+} });
+assert.deepEqual(JSON.parse(JSON.stringify(payload)), { primary: "assistant", checker: "auto", arbiter: "primary", models: { minimax: "ModelA", siliconflow: "ModelB", modelscope: "ModelC" } });
+assert.equal(Object.hasOwn(payload, "plans"), false);
 
-// 完全免费：常用里有“怎么配”的说明（MinerU + 魔搭），不能上传时自动展开；主读可以选“AI 助手读题”。
-assert.match(html, /<details id="settingsFreePlan" class="free-plan">[\s\S]*?mineru\.net[\s\S]*?modelscope\.cn[\s\S]*?AI 助手读题[\s\S]*?<\/details>/);
-assert.match(js, /if \(state\.freePlanReady !== s\.upload_enabled\) \{[\s\S]*?\$\("settingsFreePlan"\)\.open = !s\.upload_enabled;/);
+// 配置说明由用户主动展开；不承诺费用、额度或识读准确率。
+assert.match(html, /<details id="settingsFreePlan" class="free-plan">[\s\S]*?AI 助手读题[\s\S]*?mineru\.net[\s\S]*?modelscope\.cn[\s\S]*?<\/details>/);
+assert.doesNotMatch(js, /\$\("settingsFreePlan"\)\.open = !s\.upload_enabled/);
+assert.match(html, /id="settingsModels" class="settings-section settings-models"/);
+assert.match(js, /origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数"/);
 assert.match(css, /\.free-plan \{/);
 assert.match(js, /\{ value: "assistant", label: "AI 助手读题/);
 assert.match(js, /const assistant = \$\("settingsPrimaryModel"\)\.value === "assistant";\s*\$\("settingsCheckerModel"\)\.disabled = assistant;\s*\$\("settingsArbiterModel"\)\.disabled = assistant;/);

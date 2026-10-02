@@ -26,7 +26,7 @@ assert.match(js, /resetCredentialInputs\(\);[\s\S]*?renderCredentialStates\(resu
 assert.match(js, /catch \(error\) \{[\s\S]*?resetCredentialInputs\(\);/);
 assert.match(js, /async function loadStatus\(\)[\s\S]*?return false;[\s\S]*?return true;/);
 assert.match(js, /toast\(message, "success"\);[\s\S]*?const refreshed = await loadStatus\(\);[\s\S]*?if \(!refreshed\)/);
-assert.match(js, /function openSettings\(\)[\s\S]*?\$\("settingsDialog"\)\.showModal\(\);[\s\S]*?void loadStatus\(\);/);
+assert.match(js, /function openSettings\(\)[\s\S]*?showSettingsTab\(settingsTabFromHash\(\), \{ updateHash: false \}\);[\s\S]*?void loadStatus\(\);/);
 assert.match(html, /已经保存的密钥不会再显示出来/);
 assert.match(html, /不写入题库、日志或项目文件/);
 assert.match(html, /不上传文件、不消耗识读额度/);
