@@ -103,7 +103,7 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-card .paper { padding: 10px 22px 14px; color: #1a2321; }
 .library-card .qb-stem-body, .library-card .qb-option-body, .library-card .qb-analysis,
 .question-content .qb-stem-body, .question-content .qb-option-body, .question-content .qb-analysis {
-  max-width: 100%; overflow-x: auto; padding-bottom: 3px;
+  max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 3px;
 }
 .reading-overflow-hint { display: block; margin: 4px 0 0; color: var(--muted); font: 12px/1.5 var(--ui-font); }
 .library-card-actions { display: flex; gap: 4px; justify-content: flex-end; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid #eef0eb; background: var(--surface-2); }
