@@ -362,6 +362,9 @@ class RegionRead(models.Model):
     text = models.TextField(blank=True, default="")
     error = models.CharField(max_length=300, blank=True, default="")
     engine = models.CharField(max_length=80, blank=True, default="")
+    # 只读的框选识读定位：排队时的题面基线 + 待人确认的原文片段。
+    # 与 text 分开存，定位失败或题面后来变化时仍保留已识读的文字。
+    recommendation = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

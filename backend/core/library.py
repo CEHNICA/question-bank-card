@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from difflib import SequenceMatcher
 import hashlib
 import json
 import re
@@ -513,6 +514,229 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "tags": tags_of(publication.extras),
         "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
     }
+
+
+HISTORY_FIELDS = (
+    ("stem", "题干"), ("options", "选项"), ("answer", "答案"),
+    ("analysis", "解析"), ("origin", "题源"), ("question_type", "题型"),
+    ("figures", "配图"), ("sources", "原卷位置"),
+    ("number", "原卷题号"), ("section", "大题分组"),
+)
+
+
+def _history_value(content: dict, key: str):
+    value = content.get(key)
+    if key == "figures":
+        # Every publication gets new file names/URLs. Compare the actual crop,
+        # slot and provenance instead, including all cross-page pieces.
+        return [{name: figure.get(name) for name in ("slot", "page_idx", "bbox", "source", "parts")}
+                for figure in (value or [])]
+    if key == "sources":
+        return {"document_id": content.get("document_id"),
+                "regions": [{name: region.get(name) for name in ("page_idx", "bbox", "type", "source")}
+                            for region in (value or [])]}
+    if key == "options":
+        return {name: str(text) for name, text in (value or {}).items() if str(text).strip()}
+    return value if value is not None else ""
+
+
+def publication_changes(before: PublishedQuestion, after: PublishedQuestion, *, with_text: bool = True) -> list[dict]:
+    """Compare two stored snapshots; never read the mutable draft or AI extras."""
+    changes = []
+    for key, label in HISTORY_FIELDS:
+        old = _history_value(before.content, key)
+        new = _history_value(after.content, key)
+        if old == new:
+            continue
+        field = {"key": key, "label": label}
+        if with_text and key not in {"figures", "sources"}:
+            if key == "options":
+                old = "\n".join(f"{name}. {old[name]}" for name in sorted(old))
+                new = "\n".join(f"{name}. {new[name]}" for name in sorted(new))
+            elif key == "question_type":
+                old, new = qtypes.TYPE_LABELS.get(old, old), qtypes.TYPE_LABELS.get(new, new)
+            old, new = str(old), str(new)
+            field.update(before=old, after=new)
+            # Bound character comparison for very long textbook questions.
+            # The complete snapshot remains available in the rendered panels.
+            if len(old) + len(new) <= 20_000:
+                field["segments"] = [{"kind": kind, "before": old[a:b], "after": new[c:d]}
+                                     for kind, a, b, c, d in SequenceMatcher(None, old, new).get_opcodes()]
+        changes.append(field)
+    return changes
+
+
+def publication_history(publication: PublishedQuestion) -> list[dict]:
+    """All versions of this exact card, including the selected snapshot.
+
+    Orphan snapshots must never be grouped merely because their question FK
+    is NULL (nor by number or filename, which repeat across chapters).
+    """
+    rows = list(PublishedQuestion.objects.filter(question_id=publication.question_id).order_by("version")) \
+        if publication.question_id else [publication]
+    history = []
+    previous = None
+    for row in rows:
+        history.append({
+            "id": str(row.id), "version": row.version, "status": row.status,
+            "published_at": row.published_at.isoformat(),
+            "review": {"source": row.review_source or "human", "agent": row.review_agent},
+            "changes": [field["label"] for field in publication_changes(previous, row, with_text=False)] if previous else [],
+            "previous_id": str(previous.id) if previous else None,
+        })
+        previous = row
+    return list(reversed(history))
+
+
+# Source discovery is deliberately separate from version identity.  A similar
+# question in another paper is evidence to inspect, never a licence to move a
+# review, merge a draft or compare unrelated version numbers.
+RELATED_SOURCE_LIMIT = 20
+_SOURCE_PUNCTUATION = str.maketrans({
+    "，": ",", "。": ".", "．": ".", "；": ";", "：": ":", "！": "!", "？": "?",
+    "（": "(", "）": ")", "［": "[", "］": "]", "｛": "{", "｝": "}",
+    "“": '"', "”": '"', "＂": '"', "‘": "'", "’": "'", "＇": "'",
+})
+_SOURCE_PROTECTED = re.compile(
+    r"(`+)[\s\S]*?\1|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)"
+    r"|(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$(?:\\.|[^$])*?(?<!\\)\$"
+)
+_SOURCE_IMAGE = re.compile(r"!\[|<\s*(?:img|svg)\b|\\includegraphics\b|如图|图示|下图|右图|左图|见图|图中", re.I)
+_CJK_OR_PUNCT = r"[\u3400-\u9fff,.;:!?()\[\]{}\"'、]"
+
+
+def _source_match_text(value: str, *, possible: bool = False) -> list[list[str]]:
+    """Fold prose typography only; mathematical/code bytes remain exact.
+
+    NFKC is unsafe here: it turns squared units into ordinary digits.  Do not
+    strip symbols, rewrite LaTeX commands, change option labels or join English
+    words.  Tables and malformed math also keep their original text.
+    """
+    if re.search(r"(?m)^\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)", value):
+        return [["literal", value]]
+    pieces = []
+    start = 0
+    for match in _SOURCE_PROTECTED.finditer(value):
+        pieces.append(["prose", value[start:match.start()]])
+        pieces.append(["literal", match.group()])
+        start = match.end()
+    pieces.append(["prose", value[start:]])
+    if any(re.search(r"(?<!\\)\$|\\[([]|\||`", text) for kind, text in pieces if kind == "prose"):
+        return [["literal", value]]
+    for piece in pieces:
+        if piece[0] != "prose":
+            if possible and not piece[1].startswith("`") and not re.search(
+                r"\\(?:text\w*|mbox|hbox|operatorname)\b", piece[1],
+            ):
+                # These two TeX presentation differences only suggest an
+                # inspection.  Even a candidate never alters exact history.
+                text = re.sub(r"\\mid\b", "|", piece[1])
+                # The separator command needs a following token boundary,
+                # whereas its literal spelling does not.  Fold horizontal
+                # layout around this separator only, not other math spaces.
+                text = re.sub(r"[ \t]*\|[ \t]*", "|", text)
+                text = re.sub(r"_\{([A-Za-z])\}", r"_\1", text)
+                # A single-letter TeX subscript consumes one character; the
+                # following horizontal space is only math layout, not a name.
+                piece[1] = re.sub(r"_([A-Za-z])[ \t]+(?=[A-Za-z(\\])", r"_\1", text)
+            continue
+        text = re.sub(r"\s+", " ", piece[1].translate(_SOURCE_PUNCTUATION)).strip()
+        text = re.sub(rf"(?<={_CJK_OR_PUNCT}) +| +(?={_CJK_OR_PUNCT})", "", text)
+        piece[1] = text
+    return pieces
+
+
+def source_match_fingerprint(publication: PublishedQuestion, *, possible: bool = False) -> str | None:
+    """Conservative identity for a text-only stored question, without writes."""
+    content = publication.content
+    if not isinstance(content, dict) or content.get("figures") \
+            or ("figures" in content and not isinstance(content["figures"], list)):
+        return None
+    kind = content.get("question_type")
+    stem, options = content.get("stem"), content.get("options", {})
+    if kind != publication.question_type or kind not in qtypes.TYPE_LABELS or kind == "unknown" \
+            or not isinstance(stem, str) or not stem.strip() or not isinstance(options, dict):
+        return None
+    if any(key not in OPTION_KEYS or not isinstance(value, str) for key, value in options.items()):
+        return None
+    options = {key: value for key, value in options.items() if value.strip()}
+    if (kind in CHOICE_TYPES and len(options) < 2) or (kind not in CHOICE_TYPES and options):
+        return None
+    if any(_SOURCE_IMAGE.search(value) for value in [stem, *options.values()]):
+        return None
+    material = {"type": kind, "stem": _source_match_text(stem, possible=possible),
+                "options": {key: _source_match_text(value, possible=possible) for key, value in options.items()}}
+    return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _publication_document(publication: PublishedQuestion) -> str:
+    """Use the saved document UUID even when the original paper was deleted."""
+    content = publication.content if isinstance(publication.content, dict) else {}
+    document = publication.paper_id or content.get("document_id")
+    try:
+        return str(uuid.UUID(str(document))) if document else ""
+    except (TypeError, ValueError, AttributeError):
+        return ""
+
+
+def related_publication_sources(publication: PublishedQuestion) -> dict:
+    """Other live papers with exact text, or explicitly unconfirmed candidates.
+
+    Exact source matches and limited TeX-notation candidates are disjoint.  Each
+    result retains its own question, source, review and complete version history.
+    Missing original answers mean that paper supplied no answer.  Contradictory
+    non-empty answers or analyses are never silently treated as one question.
+    AI reference answers in mutable extras cannot decide this relation.
+    """
+    fingerprint, document = source_match_fingerprint(publication), _publication_document(publication)
+    possible_fingerprint = source_match_fingerprint(publication, possible=True)
+    result = {f"{name}{suffix}": (False if suffix == "_truncated" else 0 if suffix == "_count" else [])
+              for name in ("related_sources", "possible_sources") for suffix in ("", "_count", "_truncated")}
+    if not fingerprint or not document:
+        return result
+    candidates = PublishedQuestion.objects.filter(
+        status=PublishedQuestion.Status.PUBLISHED, question_type=publication.question_type,
+    ).exclude(pk=publication.pk).order_by("source_filename", "number", "-version", "id")
+    if publication.question_id:
+        candidates = candidates.exclude(question_id=publication.question_id)
+    if publication.paper_id:
+        candidates = candidates.exclude(paper_id=publication.paper_id)
+    seen_cards = set()
+    matches = {"related_sources": [], "possible_sources": []}
+    for candidate in candidates.iterator(chunk_size=200):
+        other_document = _publication_document(candidate)
+        if not other_document or other_document == document:
+            continue
+        other_fingerprint = source_match_fingerprint(candidate)
+        if not other_fingerprint:
+            continue
+        name = "related_sources" if other_fingerprint == fingerprint else "possible_sources"
+        if name == "possible_sources" and source_match_fingerprint(candidate, possible=True) != possible_fingerprint:
+            continue
+        if any(str(publication.content.get(key) or "").strip()
+               and str(candidate.content.get(key) or "").strip()
+               and _source_match_text(str(publication.content[key])) != _source_match_text(str(candidate.content[key]))
+               for key in ("answer", "analysis")):
+            continue
+        card_identity = candidate.question_id or str(candidate.pk)
+        if card_identity in seen_cards:
+            continue
+        seen_cards.add(card_identity)
+        result[f"{name}_count"] += 1
+        if len(matches[name]) < RELATED_SOURCE_LIMIT:
+            matches[name].append(candidate)
+    for name, rows in matches.items():
+        result[f"{name}_truncated"] = result[f"{name}_count"] > len(rows)
+    matched_rows = [row for rows in matches.values() for row in rows]
+    if matched_rows:
+        from django.db.models import Count
+
+        counts = dict(PublishedQuestion.objects.filter(
+            question_id__in=[row.question_id for row in matched_rows if row.question_id],
+        ).values("question_id").annotate(total=Count("id")).values_list("question_id", "total"))
+        for name, rows in matches.items():
+            result[name] = [publication_json(row) | {"version_count": counts.get(row.question_id, 1)} for row in rows]
+    return result
 
 
 _E_TAG = re.compile(r"\s*【\s*E\s*】\s*")

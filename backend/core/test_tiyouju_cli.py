@@ -43,6 +43,10 @@ def run_json(*argv: str):
 # The app has no static files; Django's live server still wants a STATIC_URL.
 @override_settings(STATIC_URL="/static/")
 class TiyoujuCliTests(LiveServerTestCase):
+    # Match the app's IPv4-only listener. On Windows, localhost may try ::1
+    # for a full connection timeout before falling back on every CLI request.
+    host = "127.0.0.1"
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)

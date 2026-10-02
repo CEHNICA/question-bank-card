@@ -59,7 +59,7 @@ assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"
 
 // Library: withdrawing is quiet in the list; the basket is arranged in the preview.
 assert.match(css, /\.library-withdraw \{ color: var\(--muted\) !important; \}/);
-assert.match(libraryJs, /function printTools\(items, group, position\)/);
+assert.match(libraryJs, /function printTools\(items, group, position, number\)/);
 assert.match(libraryCss, /\.print-question-tools/);
 assert.match(libraryCss, /@media \(min-width: 1600px\) \{ \.library-main \{ max-width: 1200px; \} \}/);
 

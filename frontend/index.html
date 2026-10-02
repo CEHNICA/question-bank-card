@@ -69,6 +69,7 @@
       <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
       <div class="side-footer">
+        <button id="archivedPapersButton" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>已归档的试卷</button>
         <button id="m3Button" class="link-button" type="button" hidden><svg class="icon"><use href="#i-archive"/></svg>从 M3 导入已解析的试卷</button>
       </div>
     </aside>
@@ -94,6 +95,10 @@
       </section>
 
       <section id="paperView" hidden>
+        <div id="archivedPaperNotice" class="archived-paper-notice" hidden>
+          <span>这份试卷已归档；原卷、题卡和入库历史都保留。</span>
+          <button id="restoreCurrentPaper" class="button" type="button">恢复到试卷列表</button>
+        </div>
         <div class="paper-head">
           <div class="paper-title">
             <div class="paper-name-row">
@@ -103,6 +108,7 @@
                 <summary class="button quiet small">试卷操作<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
                 <div class="menu-panel paper-menu-panel">
                   <p id="settingsTaskStatus" class="menu-note"></p>
+                  <button id="viewOriginalPaper" class="link-button" type="button">查看整份原卷</button>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
                   <button id="settingsStop" class="link-button" type="button" hidden title="不再处理这份任务；停下来以后可以删除，或点“重试”重新开始">停止处理</button>
@@ -312,7 +318,7 @@
         <div id="settingsAbout" class="settings-page" role="tabpanel" hidden>
           <section class="settings-section" aria-labelledby="settingsAboutTitle">
             <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
-            <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
+            <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。框选识读使用“自动推荐”时，还会发送当前题干和选项文字，以定位替换位置。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
             <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
             <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
             <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
@@ -375,7 +381,7 @@
     </form>
   </dialog>
 
-  <dialog id="pageDialog" class="page-dialog">
+  <dialog id="pageDialog" class="page-dialog" aria-labelledby="pageDialogTitle">
     <div class="dialog-head">
       <div>
         <h3 id="pageDialogTitle"></h3>
@@ -388,6 +394,7 @@
         </label>
         <label id="readTargetField" class="number-field" hidden>读出来的字填到
           <select id="readTargetSelect">
+            <option value="auto">自动推荐（AI）</option>
             <option value="stem">题干</option>
             <option value="A">选项 A</option>
             <option value="B">选项 B</option>
@@ -397,8 +404,20 @@
           </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
-        <button class="button" type="button" data-close>取消</button>
+        <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
+    </div>
+    <div class="page-zoom-toolbar">
+      <div class="zoom-controls" role="group" aria-label="缩放整页原卷">
+        <button id="pageZoomFit" class="button" type="button" aria-pressed="false" title="完整显示这一页（0）">适页</button>
+        <button id="pageZoomWidth" class="button" type="button" aria-pressed="true" title="铺满可用宽度（W）">适宽</button>
+        <button id="pageZoomOut" class="button" type="button" aria-label="缩小整页原卷" title="缩小（-）；最小2%">−</button>
+        <span id="pageZoomLevel" class="zoom-level" title="缩放范围2%–400%">100%</span>
+        <button id="pageZoomIn" class="button" type="button" aria-label="放大整页原卷" title="放大（+）；最大400%">+</button>
+      </div>
+      <span id="pageCanvasHint" class="hint"></span>
+      <span id="pageImageState" class="hint" role="status" hidden></span>
+      <button id="pageImageRetry" class="button small" type="button" hidden>重新加载原卷</button>
     </div>
     <nav class="page-navigation" aria-label="原卷翻页">
       <button id="pagePrevious" class="button small" type="button" aria-label="上一页">上一页</button>
@@ -417,7 +436,7 @@
         </div>
       </details>
     </nav>
-    <div id="pageStage" class="page-stage"></div>
+    <div id="pageStage" class="page-stage" tabindex="0" aria-label="整页原卷画布"></div>
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
       <div class="figure-slot-head">
         <strong>这张图属于</strong>
@@ -446,11 +465,12 @@
       <div class="zoom-controls" role="group" aria-label="缩放原卷">
         <button id="zoomFit" class="button" type="button" title="完整显示整道题（0）" aria-pressed="true">全题</button>
         <button id="zoomWidth" class="button" type="button" title="铺满原卷栏宽度（W）" aria-pressed="false">适宽</button>
-        <button id="zoomOut" class="button" type="button" title="缩小（-）" aria-label="缩小">−</button>
-        <span id="zoomLevel" class="zoom-level">100%</span>
-        <button id="zoomIn" class="button" type="button" title="放大（+）" aria-label="放大">+</button>
+        <button id="zoomOut" class="button" type="button" title="缩小（-）；最小2%" aria-label="缩小">−</button>
+        <span id="zoomLevel" class="zoom-level" title="缩放范围2%–400%">100%</span>
+        <button id="zoomIn" class="button" type="button" title="放大（+）；最大400%" aria-label="放大">+</button>
       </div>
       <button class="button quiet" type="button" data-close>关闭 <span class="kbd-hint">Esc</span></button>
+      <span id="viewerImageState" class="hint viewer-image-state" role="status" hidden></span>
     </div>
     <div class="viewer-body">
       <div id="viewerSource" class="viewer-source" tabindex="-1"><div id="viewerCrop" class="viewer-crop"></div></div>
@@ -524,6 +544,22 @@
       </div>
     </div>
     <div id="splitGroups" class="split-groups"></div>
+  </dialog>
+
+  <dialog id="archivedPapersDialog" class="archived-papers-dialog" aria-labelledby="archivedPapersTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="archivedPapersTitle">已归档的试卷</h3>
+        <p class="hint">归档只收起任务。可以查看原卷和题卡，也可以恢复后继续核对。</p>
+      </div>
+      <button class="button" type="button" data-close>关闭</button>
+    </div>
+    <p id="archivedPapersState" class="hint archived-papers-state" role="status"></p>
+    <ul id="archivedPapersList" class="archived-papers-list"></ul>
+    <div class="archived-papers-footer">
+      <button id="archivedPapersMore" class="button" type="button" hidden>查看更多归档</button>
+      <button id="archivedPapersRetry" class="button" type="button" hidden>重新加载</button>
+    </div>
   </dialog>
 
   <dialog id="m3Dialog" class="m3-dialog">

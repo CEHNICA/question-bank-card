@@ -42,7 +42,7 @@ const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const render = fs.readFileSync(path.join(__dirname, "qb-render.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 // The typeset view lays tables out and keeps the rest of the text as before.
-assert.match(render, /function renderTypeset\(node, value, options = \{\}\) \{[\s\S]*?findTables\(source\)[\s\S]*?renderTable\(doc, table, marks\)/);
+assert.match(render, /function renderTypeset\(node, value, options = \{\}\) \{[\s\S]*?findTables\(source\)[\s\S]*?renderTable\(doc, table, marks, options\)/);
 assert.match(render, /figureElement\(figure, opts\.resolveUrl, opts\.figureAction\)/);
 assert.match(css, /\.qb-table td, \.qb-table th \{[^}]*border: 1px solid var\(--paper-ink\)/);
 // A crop MinerU read as a table offers the conversion on the card.

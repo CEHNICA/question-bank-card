@@ -27,6 +27,7 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>/resegment/preview", views.paper_resegment_preview),
     path("api/papers/<uuid:paper_id>/resegment", views.paper_resegment),
     path("api/papers/<uuid:paper_id>/archive", views.paper_archive),
+    path("api/papers/<uuid:paper_id>/restore", views.paper_restore),
     path("api/papers/<uuid:paper_id>/split", views.paper_split),
     path("api/papers/<uuid:paper_id>/confirm-structure", views.paper_confirm_structure),
     path("api/papers/<uuid:paper_id>/page-order", views.paper_page_order),

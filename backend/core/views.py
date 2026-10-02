@@ -820,6 +820,18 @@ def model_settings(request):
 @csrf_exempt
 def papers(request):
     if request.method == "GET":
+        if request.GET.get("archived") == "only":
+            try:
+                offset = int(request.GET.get("offset", "0"))
+            except (TypeError, ValueError):
+                return _error("归档列表的位置不正确")
+            if not 0 <= offset <= 2_147_483_647:
+                return _error("归档列表的位置不正确")
+            rows = list(Paper.objects.filter(archived=True).order_by("-created_at", "-id")[offset:offset + 201])
+            return JsonResponse({
+                "papers": [paper_json(p) for p in rows[:200]],
+                "next_offset": offset + 200 if len(rows) > 200 else None,
+            })
         include_archived = request.GET.get("archived") == "1"
         queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)
         return JsonResponse({"papers": [paper_json(p) for p in queryset[:200]]})
@@ -1349,6 +1361,22 @@ def paper_archive(request, paper_id):
     paper.archived = True
     paper.save(update_fields=["archived", "updated_at"])
     return JsonResponse({"paper": paper_json(paper), "archived": True})
+
+
+@csrf_exempt
+def paper_restore(request, paper_id):
+    """Restore visibility only: reviewed cards, snapshots and processing state stay intact."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    restored = paper.archived
+    if restored:
+        paper.archived = False
+        paper.save(update_fields=["archived", "updated_at"])
+    return JsonResponse({"paper": paper_json(paper), "archived": False, "restored": restored})
 
 
 @csrf_exempt
@@ -1945,7 +1973,7 @@ def question_region_read(request, question_id):
     if request.method == "DELETE":
         question.region_reads.all().delete()
         return JsonResponse({"question": question_json(question)})
-    target = payload.get("target")
+    target = payload.get("target", "auto")
     if target not in region_reads.TARGETS:
         return _error("请选择读出来的文字填到题干还是哪个选项")
     page_idx = payload.get("page_idx")
@@ -1959,7 +1987,8 @@ def question_region_read(request, question_id):
         return _error(region_reads.NO_ENGINE)
     with transaction.atomic():
         question.region_reads.all().delete()
-        RegionRead.objects.create(question=question, page_idx=page_idx, bbox=bbox, target=target)
+        RegionRead.objects.create(question=question, page_idx=page_idx, bbox=bbox, target=target,
+                                  recommendation=region_reads.queued_recommendation(question))
     return JsonResponse({"question": question_json(question)})
 
 
@@ -2471,14 +2500,30 @@ def library_list(request):
 
 
 def library_detail(request, publication_id):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
-    history = PublishedQuestion.objects.filter(question_id=publication.question_id).exclude(pk=publication.pk) \
-        if publication.question_id else PublishedQuestion.objects.none()
-    return JsonResponse({
+    history = library.publication_history(publication)
+    body = {
         "publication": library.publication_json(publication),
-        "versions": [{"id": str(i.id), "version": i.version, "status": i.status,
-                      "published_at": i.published_at.isoformat()} for i in history.order_by("-version")],
-    })
+        "versions": [row for row in history if row["id"] != str(publication.id)],
+        "history": history,
+    }
+    body.update(library.related_publication_sources(publication))
+    if compare_id := request.GET.get("compare"):
+        try:
+            compare_id = uuid.UUID(compare_id)
+        except ValueError:
+            return _error("对照版本编号不正确")
+        # Cross-card comparison would give unrelated questions a false history.
+        if not publication.question_id:
+            return _error("这份历史题面已没有关联题卡，无法比较其他版本")
+        before = get_object_or_404(PublishedQuestion, pk=compare_id, question_id=publication.question_id)
+        body["comparison"] = {
+            "publication": library.publication_json(before),
+            "changes": library.publication_changes(before, publication),
+        }
+    return JsonResponse(body)
 
 
 def library_figure(request, publication_id, name):

@@ -70,14 +70,16 @@ assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
 assert.match(js, /api\(`\/api\/questions\/\$\{q\.id\}\/region-read`, \{\s*method: "POST", body: \{ page_idx: box\.page_idx, bbox: box\.bbox, target \}/);
 // The page keeps polling while a region is read, and the result fills an option through 改字.
 assert.match(js, /q\.state === "reading" \|\| regionReadPending\(q\)/);
-assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: read\.target, value: read\.text \} \}\)/);
+assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: target, value: read\.text \} \}\)/);
 assert.match(js, /function openEditor\(card, q, \{ prefill = null \} = \{\}\)/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
 assert.match(js, /method: "DELETE", body: \{\}/);
 // Without a clipboard (an older browser) it says so instead of failing silently.
 assert.match(js, /: Promise\.reject\(new Error\("clipboard unavailable"\)\);/);
-// The guess for where the text goes: the missing option first.
+// New reads offer AI positioning while an explicitly chosen target is retained.
 const guess = js.slice(js.indexOf("function readTargetGuess(q)"), js.indexOf("function regionReadPending(q)"));
-assert.match(guess, /const missing = OPTION_KEYS\.slice\(0, last \+ 1\)\.find/);
+assert.match(guess, /return "auto"/);
+assert.match(html, /<option value="auto">自动推荐（AI）<\/option>/);
+assert.match(js, /确认位置并填入改字/);
 
 console.log("spots / region read checks: OK");

@@ -22,6 +22,7 @@
     <symbol id="i-printer" viewBox="0 0 24 24"><path d="M7 9V4h10v5"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7 14h10v6H7z"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2h.01"/></symbol>
     <symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.3M12 16.8h.01"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 1 7M3 4v6h6M12 7v5l3 2"/></symbol>
   </svg>
 
   <header class="topbar site-header">
@@ -63,13 +64,14 @@
     </section>
 
     <p id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</p>
+    <div id="libraryLoadError" class="library-load-error" role="alert" hidden></div>
     <div id="libraryList" class="library-list"></div>
     <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
   </main>
 
   <button id="basketButton" class="basket-button no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>试题篮 <span id="basketCount">0</span> · 组卷预览</button>
 
-  <dialog id="sourceDialog" class="source-dialog">
+  <dialog id="sourceDialog" class="source-dialog" aria-labelledby="sourceTitle">
     <div class="source-dialog-head">
       <div>
         <p class="eyebrow">查看出处</p>
@@ -81,7 +83,18 @@
         <button class="button button-quiet button-small" type="button" data-close>关闭</button>
       </div>
     </div>
-    <div id="sourcePages" class="source-pages"></div>
+    <div class="source-controls" aria-label="原卷显示方式">
+      <button id="sourceQuestion" class="button button-small" type="button" aria-pressed="true">只看本题</button>
+      <button id="sourceWholePage" class="button button-small" type="button" aria-pressed="false">整页位置</button>
+      <span class="source-control-spacer"></span>
+      <button id="sourceZoomOut" class="button button-small" type="button" aria-label="缩小原卷">−</button>
+      <output id="sourceZoom" aria-live="polite">100%</output>
+      <button id="sourceZoomIn" class="button button-small" type="button" aria-label="放大原卷">＋</button>
+      <button id="sourceFit" class="button button-small" type="button">适合窗口</button>
+    </div>
+    <p id="sourceGestureHint" class="source-gesture-hint">Ctrl + 滚轮缩放 · 按住鼠标左键拖动原卷</p>
+    <details id="sourceRelated" class="related-sources" hidden></details>
+    <div id="sourcePages" class="source-pages" tabindex="0" aria-label="原卷画布" aria-describedby="sourceGestureHint"></div>
   </dialog>
 
   <dialog id="confirmDialog" class="confirm-dialog" aria-labelledby="confirmTitle">
@@ -98,7 +111,35 @@
     </form>
   </dialog>
 
-  <section id="printSheet" class="print-sheet" hidden aria-label="组卷预览">
+  <dialog id="historyDialog" class="history-dialog" aria-labelledby="historyTitle">
+    <div class="source-dialog-head">
+      <div>
+        <p class="eyebrow">版本历史</p>
+        <h3 id="historyTitle">题目历史</h3>
+        <p class="helper">每次改动后重新核对、入库，都会留下一版题面。这里查看的是入库时保存的内容。</p>
+      </div>
+      <button class="button button-quiet button-small" type="button" data-close>关闭</button>
+    </div>
+    <p id="historyStatus" class="history-status" role="status" aria-live="polite"></p>
+    <details id="historyRelated" class="related-sources" hidden></details>
+    <div class="history-layout">
+      <nav id="historyVersions" class="history-versions" aria-label="选择历史版本"></nav>
+      <section class="history-content" aria-label="查看与比较版本">
+        <div id="historyControls" class="history-controls" hidden>
+          <label class="library-select">与哪版比较 <select id="historyCompare" aria-label="对照版本"></select></label>
+          <span id="historySummary" class="helper"></span>
+        </div>
+        <div id="historyPreview" class="history-preview"></div>
+        <details id="historyDiff" class="history-diff" hidden>
+          <summary>查看文字改动（含公式写法）</summary>
+          <p class="helper">红色划线是删去的内容，绿色下划线是新增的内容。完整排版见上方题面。</p>
+          <div id="historyChanges"></div>
+        </details>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="printSheet" class="print-sheet" hidden aria-label="组卷预览">
     <div class="print-controls no-print">
       <label class="print-title-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
       <label class="library-toggle switch"><input id="printAnswers" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>卷末附答案与解析</label>
@@ -109,8 +150,11 @@
       <button id="closePrint" class="button" type="button">返回题库</button>
       <button id="printButton" class="button button-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-printer"/></svg>打印</button>
     </div>
+    <div id="printMissing" class="print-notice no-print" role="alert" hidden></div>
+    <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
+    <p class="print-order-hint no-print">按题型分组，同题型内可上下移动。Esc 返回题库。</p>
     <article id="printPaper" class="print-paper"></article>
-  </section>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" popover="manual"></div>
 

@@ -8,9 +8,15 @@
     status: $("libraryStatus"), list: $("libraryList"), more: $("moreButton"),
     basketButton: $("basketButton"), basketCount: $("basketCount"),
     sourceDialog: $("sourceDialog"), sourceTitle: $("sourceTitle"), sourcePages: $("sourcePages"), sourceReviewLink: $("sourceReviewLink"),
+    sourceQuestion: $("sourceQuestion"), sourceWholePage: $("sourceWholePage"), sourceZoomOut: $("sourceZoomOut"),
+    sourceZoomIn: $("sourceZoomIn"), sourceZoom: $("sourceZoom"), sourceFit: $("sourceFit"), sourceRelated: $("sourceRelated"),
     sheet: $("printSheet"), paper: $("printPaper"), printTitle: $("printTitle"), printAnswers: $("printAnswers"),
     printOrigin: $("printOrigin"), printAi: $("printAiAnswers"), printAiBox: $("printAiBox"),
-    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools")
+    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools"),
+    historyDialog: $("historyDialog"), historyTitle: $("historyTitle"), historyStatus: $("historyStatus"),
+    historyVersions: $("historyVersions"), historyControls: $("historyControls"), historyCompare: $("historyCompare"),
+    historySummary: $("historySummary"), historyPreview: $("historyPreview"), historyDiff: $("historyDiff"), historyChanges: $("historyChanges"),
+    historyRelated: $("historyRelated")
   };
   const params = new URL(window.location.href).searchParams;
   const state = {
@@ -124,6 +130,7 @@
   async function load({ append = false, quiet = false } = {}) {
     const token = ++state.token;
     state.loading = true;
+    $("libraryLoadError").hidden = true;
     window.clearTimeout(state.poll);
     // A quiet refresh (jobs finishing) reloads everything already shown, page by page.
     const wanted = quiet ? Math.max(40, state.items.length) : 40;
@@ -157,7 +164,17 @@
         state.poll = window.setTimeout(() => load({ quiet: true }), 4000);
       }
     } catch (error) {
-      if (token === state.token) ui.status.textContent = error.message || "读取题库失败。";
+      if (token === state.token) {
+        ui.status.textContent = state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。";
+        const box = $("libraryLoadError");
+        const retry = node("button", "button button-small", "重试读取");
+        retry.id = "retryLibraryLoad";
+        retry.type = "button";
+        retry.addEventListener("click", () => load({ append, quiet }));
+        box.replaceChildren(node("span", "", error.message || "读取题库失败。"), retry);
+        box.hidden = false;
+        ui.more.hidden = true;
+      }
     } finally {
       if (token === state.token) state.loading = false;
     }
@@ -165,7 +182,7 @@
 
   function renderFacets() {
     const facets = state.facets || { sources: [], types: {} };
-    const current = ui.source.value || state.document;
+    const current = state.document;
     ui.source.replaceChildren(new Option("全部试卷", ""));
     facets.sources.forEach((source) => {
       ui.source.append(new Option(`${source.filename}（${source.count}）`, source.document_id || ""));
@@ -310,6 +327,8 @@
     const actions = node("footer", "library-card-actions");
     const origin = iconButton("button", "button button-quiet button-small", "查看出处", "source");
     origin.addEventListener("click", () => openSource(item));
+    const history = iconButton("button", "button button-quiet button-small", "版本历史", "history");
+    history.addEventListener("click", () => openHistory(item));
     const review = iconButton("a", "button button-quiet button-small", "回到题卡", "back");
     review.href = draftLink(item);
     const withdraw = iconButton("button", "button button-quiet button-small library-withdraw", "撤回", "undo");
@@ -323,7 +342,7 @@
       saveBasket();
       article.replaceWith(card(item));
     });
-    actions.append(origin, review, withdraw, ...jobButtons(item), node("span", "actions-spacer"), basket);
+    actions.append(origin, history, review, withdraw, ...jobButtons(item), node("span", "actions-spacer"), basket);
     article.append(meta, paper, actions);
     if (state.focus === item.id) article.classList.add("focused");
     return article;
@@ -425,8 +444,23 @@
     ui.list.replaceChildren();
     if (!state.items.length) {
       const empty = node("div", "library-empty");
-      empty.append(node("p", "", state.q || state.document || state.type || state.answer || state.tag ? "没有找到符合条件的题目。" : "题库还是空的。"),
-        node("p", "helper", "在“录入终审”页核对并标记题卡通过后，点“入库”，题目就会出现在这里。"));
+      const filtered = Boolean(state.q.trim() || state.document || state.type || state.review || state.answer || state.tag);
+      empty.append(node("p", "", filtered ? "没有找到符合条件的题目。" : "题库还是空的。"));
+      if (filtered) {
+        empty.append(node("p", "helper", "试试其他关键词，或清除筛选查看全部题目。"));
+        const reset = node("button", "button button-small", "清除搜索与筛选");
+        reset.type = "button";
+        reset.addEventListener("click", () => {
+          window.clearTimeout(searchTimer);
+          state.q = state.document = state.type = state.review = state.answer = state.tag = "";
+          ui.search.value = "";
+          syncUrl();
+          load();
+        });
+        empty.append(reset);
+      } else {
+        empty.append(node("p", "helper", "在“录入终审”页核对并标记题卡通过后，点“入库”，题目就会出现在这里。"));
+      }
       ui.list.append(empty);
     }
     // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
@@ -486,67 +520,483 @@
     return element;
   }
 
-  function openSource(item) {
+  const sourceState = { item: null, mode: "question", zoom: 1, token: 0 };
+  const SOURCE_MIN_ZOOM = 0.25, SOURCE_MAX_ZOOM = 4;
+  let sourcePan = null;
+
+  function sourceReady() {
+    return Array.from(ui.sourcePages.querySelectorAll(".source-surface img"))
+      .some((image) => image.complete && image.naturalWidth > 0);
+  }
+
+  function syncSourceZoom() {
+    const ready = sourceReady();
+    ui.sourceZoom.textContent = `${Math.round(sourceState.zoom * 100)}%`;
+    ui.sourceZoomOut.disabled = !ready || sourceState.zoom <= SOURCE_MIN_ZOOM;
+    ui.sourceZoomIn.disabled = !ready || sourceState.zoom >= SOURCE_MAX_ZOOM;
+    ui.sourceFit.disabled = !ready;
+    ui.sourcePages.classList.toggle("can-pan", ready);
+  }
+
+  function stopSourcePan() {
+    if (!sourcePan) return;
+    const pointerId = sourcePan.pointerId;
+    sourcePan = null;
+    ui.sourcePages.classList.remove("panning");
+    if (ui.sourcePages.hasPointerCapture(pointerId)) ui.sourcePages.releasePointerCapture(pointerId);
+  }
+
+  function zoomSource(value, clientX, clientY) {
+    const contents = ui.sourcePages.querySelector(".source-content");
+    if (!contents || !sourceReady()) return;
+    const next = Math.min(SOURCE_MAX_ZOOM, Math.max(SOURCE_MIN_ZOOM, Math.round(value * 100) / 100));
+    if (next === sourceState.zoom) return;
+    stopSourcePan();
+    const viewport = ui.sourcePages.getBoundingClientRect();
+    const x = clientX ?? viewport.left + ui.sourcePages.clientWidth / 2;
+    const y = clientY ?? viewport.top + ui.sourcePages.clientHeight / 2;
+    // Keep the point on the page under the mouse stable, including multi-page sources.
+    const surfaces = Array.from(contents.querySelectorAll(".source-surface"))
+      .filter((surface) => surface.querySelector("img")?.naturalWidth > 0);
+    const surface = surfaces.find((surface) => {
+      const rect = surface.getBoundingClientRect();
+      return y >= rect.top && y <= rect.bottom;
+    }) || surfaces.reduce((nearest, surface) => {
+      const rect = surface.getBoundingClientRect();
+      const distance = Math.max(rect.top - y, y - rect.bottom, 0);
+      return !nearest || distance < nearest.distance ? { surface, distance } : nearest;
+    }, null)?.surface;
+    const before = surface?.getBoundingClientRect();
+    const relX = before?.width ? (x - before.left) / before.width : 0;
+    const relY = before?.height ? (y - before.top) / before.height : 0;
+    sourceState.zoom = next;
+    contents.style.width = `${next * 100}%`;
+    syncSourceZoom();
+    if (before) {
+      const after = surface.getBoundingClientRect();
+      ui.sourcePages.scrollLeft += after.left + relX * after.width - x;
+      ui.sourcePages.scrollTop += after.top + relY * after.height - y;
+    }
+  }
+
+  function fitSourceWindow() {
+    const surface = Array.from(ui.sourcePages.querySelectorAll(".source-surface"))
+      .find((surface) => surface.querySelector("img")?.naturalWidth > 0);
+    if (!surface) return;
+    const style = getComputedStyle(ui.sourcePages);
+    const width = ui.sourcePages.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const height = ui.sourcePages.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - 26;
+    const rect = surface.getBoundingClientRect();
+    const fitted = Math.min(1, width / (rect.width / sourceState.zoom), height / (rect.height / sourceState.zoom));
+    zoomSource(Math.floor(fitted * 100) / 100);
+    ui.sourcePages.scrollTo({ left: 0, top: 0 });
+  }
+
+  function sourceRegions(item) {
     const content = item.content || {};
+    return [
+      ...(content.sources || []).filter((source) => source.type !== "image").map((source) => ({ ...source, kind: "text" })),
+      ...(content.figures || []).flatMap((figure) => [figure, ...(figure.parts || [])].map((part) => ({ ...part, kind: "figure" })))
+    ].filter((region) => Number.isInteger(region.page_idx) && region.page_idx >= 0 && Array.isArray(region.bbox)
+      && region.bbox.length === 4 && region.bbox.every(Number.isFinite)
+      && region.bbox[0] >= 0 && region.bbox[1] >= 0 && region.bbox[2] <= 1000 && region.bbox[3] <= 1000
+      && region.bbox[2] > region.bbox[0] && region.bbox[3] > region.bbox[1]);
+  }
+
+  function renderRelated(container, body, openHistoryLink) {
+    container.replaceChildren();
+    container.open = false;
+    const groups = [
+      ["题面相同的其他资料", body.related_sources || []],
+      ["题面相近的其他资料（需核对）", body.possible_sources || []]
+    ].filter(([, items]) => items.length);
+    container.hidden = groups.length === 0;
+    if (!groups.length) return;
+    container.append(node("summary", "", `其他资料中的相关题目（${groups.reduce((sum, [, items]) => sum + items.length, 0)}）`),
+      node("p", "helper", "每份资料保留各自的出处和入库历史。题面相近的记录，请对照原卷确认。"));
+    groups.forEach(([label, items]) => {
+      const group = node("div", "related-source-group");
+      group.append(node("h4", "", label));
+      items.forEach((item) => {
+        const row = node("div", "related-source-row");
+        const name = node("div", "related-source-name");
+        name.append(node("strong", "", `${item.source_filename} · 第 ${item.number} 题`));
+        if (item.origin) name.append(node("span", "helper", `题源：${item.origin}`));
+        name.append(node("span", "helper", `${item.version_count || 1} 个入库版本 · ${reviewLabel(item)}`));
+        const source = node("button", "button button-small", "查看原卷");
+        source.type = "button";
+        source.addEventListener("click", () => openSource(item));
+        row.append(name, source);
+        if (openHistoryLink) {
+          const history = node("button", "button button-small", "查看这份资料的历史");
+          history.type = "button";
+          history.addEventListener("click", () => {
+            ui.historyTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
+            loadHistoryVersion(item.id);
+          });
+          row.append(history);
+        }
+        group.append(row);
+      });
+      container.append(group);
+    });
+    if (body.related_sources_truncated || body.possible_sources_truncated) {
+      container.append(node("p", "helper", "这里只展示部分相关资料，可在题库搜索题干查找更多。"));
+    }
+  }
+
+  function renderSource() {
+    const item = sourceState.item;
+    if (!item) return;
+    stopSourcePan();
     ui.sourceTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
     ui.sourceReviewLink.href = item.document_id ? `/?document=${encodeURIComponent(item.document_id)}${item.draft_id ? `&draft=${encodeURIComponent(item.draft_id)}` : ""}` : "/";
     ui.sourceReviewLink.hidden = !item.document_id;
     ui.sourcePages.replaceChildren();
-    const regions = [
-      ...(content.sources || []).filter((source) => source.type !== "image").map((source) => ({ ...source, kind: "text" })),
-      ...(content.figures || []).map((figure) => ({ ...figure, kind: "figure" }))
-    ].filter((region) => Array.isArray(region.bbox) && Number.isInteger(region.page_idx));
+    const regions = sourceRegions(item);
+    const available = Boolean(item.document_id && regions.length);
+    ui.sourceQuestion.disabled = ui.sourceWholePage.disabled = ui.sourceFit.disabled = !available;
+    ui.sourceQuestion.setAttribute("aria-pressed", String(sourceState.mode === "question"));
+    ui.sourceWholePage.setAttribute("aria-pressed", String(sourceState.mode === "page"));
+    syncSourceZoom();
     if (!item.document_id || !regions.length) {
       ui.sourcePages.append(node("p", "helper", "这道题没有保存可定位的原卷坐标，或原试卷已从本机删除。"));
+      return;
     }
+    const contents = node("div", "source-content");
+    contents.style.width = `${sourceState.zoom * 100}%`;
+    ui.sourcePages.append(contents);
     const pages = [...new Set(regions.map((region) => region.page_idx))].sort((a, b) => a - b);
     pages.forEach((page) => {
+      const onPage = regions.filter((region) => region.page_idx === page);
+      const cropped = sourceState.mode === "question";
+      const bounds = cropped ? [
+        Math.max(0, Math.min(...onPage.map((r) => r.bbox[0])) - 8),
+        Math.max(0, Math.min(...onPage.map((r) => r.bbox[1])) - 8),
+        Math.min(1000, Math.max(...onPage.map((r) => r.bbox[2])) + 8),
+        Math.min(1000, Math.max(...onPage.map((r) => r.bbox[3])) + 8)
+      ] : [0, 0, 1000, 1000];
+      const [x0, y0, x1, y1] = bounds;
+      const rw = x1 - x0, rh = y1 - y0;
       const frame = node("figure", "source-page");
-      const surface = node("div", "source-surface");
+      const surface = node("div", `source-surface${cropped ? " source-cropped" : ""}`);
       const image = node("img");
-      image.alt = `原卷第 ${page + 1} 页`;
+      image.alt = `原卷第 ${page + 1} 页${cropped ? "本题范围" : ""}`;
+      image.draggable = false;
+      if (cropped) {
+        image.style.width = `${100000 / rw}%`;
+        image.style.left = `${-100 * x0 / rw}%`;
+        image.style.top = `${-100 * y0 / rh}%`;
+      }
       image.src = `/api/documents/${encodeURIComponent(item.document_id)}/pages/${page}/preview`;
+      image.addEventListener("error", () => {
+        surface.classList.remove("source-cropped");
+        surface.style.aspectRatio = "auto";
+        surface.replaceChildren(node("p", "helper source-unavailable", "这页原卷暂时打不开，请检查本机原卷文件是否还在。"));
+        syncSourceZoom();
+      }, { once: true });
       surface.append(image);
-      regions.filter((region) => region.page_idx === page).forEach((region) => surface.append(box(region.bbox, region.kind)));
-      frame.append(surface, node("figcaption", "", `第 ${page + 1} 页`));
-      ui.sourcePages.append(frame);
+      onPage.forEach((region) => {
+        const adjusted = [
+          (region.bbox[0] - x0) * 1000 / rw, (region.bbox[1] - y0) * 1000 / rh,
+          (region.bbox[2] - x0) * 1000 / rw, (region.bbox[3] - y0) * 1000 / rh
+        ];
+        surface.append(box(adjusted, region.kind));
+      });
+      frame.append(surface, node("figcaption", "", `第 ${page + 1} 页${cropped ? " · 本题范围" : " · 原卷位置"}`));
+      contents.append(frame);
       image.addEventListener("load", () => {
+        if (!surface.isConnected) return;
+        if (cropped) surface.style.aspectRatio = `${rw * image.naturalWidth} / ${rh * image.naturalHeight}`;
+        syncSourceZoom();
         const first = surface.querySelector(".source-box");
-        if (first && pages[0] === page) first.scrollIntoView({ block: "center" });
+        if (!cropped && first && pages[0] === page) first.scrollIntoView({ block: "nearest" });
       }, { once: true });
     });
-    ui.sourceDialog.showModal();
+    ui.sourcePages.scrollTo({ top: 0, left: 0 });
+    syncSourceZoom();
+  }
+
+  function openSource(item) {
+    const token = ++sourceState.token;
+    sourceState.item = item;
+    sourceState.mode = "question";
+    sourceState.zoom = 1;
+    ui.sourceRelated.replaceChildren();
+    ui.sourceRelated.hidden = true;
+    renderSource();
+    if (!ui.sourceDialog.open) ui.sourceDialog.showModal();
+    fetchHistory(item.id).then((body) => {
+      if (token === sourceState.token && ui.sourceDialog.open) renderRelated(ui.sourceRelated, body, false);
+    }).catch(() => { /* 保存的原卷仍可查看，关联资料读取失败不遮住它。 */ });
+  }
+
+  // ------------------------------------------------------------ 版本历史（只读）
+
+  const historyState = { token: 0, selected: "", previous: "" };
+  const historyStatusNames = { published: "当前入库版", superseded: "已被新版替代", withdrawn: "已撤回" };
+
+  function reviewLabel(item) {
+    return item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对` : "人工核对";
+  }
+
+  function historyDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  async function fetchHistory(id, compare = "") {
+    const query = compare ? `?compare=${encodeURIComponent(compare)}` : "";
+    const response = await fetch(`/api/library/${encodeURIComponent(id)}${query}`, { cache: "no-store" });
+    if (!response.ok) {
+      let message = "读取历史版本失败，请稍后重试。";
+      try { message = (await response.json()).error || message; } catch { /* 404 may be HTML */ }
+      throw new Error(message);
+    }
+    return response.json();
+  }
+
+  function openHistory(item) {
+    ui.historyTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
+    ui.historyVersions.replaceChildren();
+    ui.historyRelated.hidden = true;
+    ui.historyDiff.open = false;
+    ui.historyDialog.showModal();
+    loadHistoryVersion(item.id);
+  }
+
+  function historyPanel(item) {
+    const panel = node("section", "history-panel");
+    const head = node("header", "history-panel-head");
+    head.append(node("h4", "", `第 ${item.version} 版 · ${historyStatusNames[item.status] || item.status}`),
+      node("p", "", `${historyDate(item.published_at)} 入库 · ${reviewLabel(item)}`));
+    const tools = node("div", "section-tools");
+    const source = iconButton("button", "button button-quiet button-small", "查看这版原卷位置", "source");
+    source.addEventListener("click", () => openSource(item));
+    tools.append(source);
+    head.append(tools);
+    const paper = node("div", "paper");
+    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "collapsed" });
+    panel.append(head, paper);
+    if (item.origin) panel.append(node("p", "history-origin", `题源：${item.origin}`));
+    return panel;
+  }
+
+  function renderHistoryChanges(fields, before, selected) {
+    ui.historyChanges.replaceChildren();
+    const textFields = fields.filter((field) => typeof field.before === "string");
+    ui.historyDiff.hidden = textFields.length === 0;
+    textFields.forEach((field) => {
+      const section = node("section", "history-change");
+      section.append(node("h4", "", field.label));
+      const columns = node("div", "history-change-text");
+      [["before", before], ["after", selected]].forEach(([side, item]) => {
+        const column = node("div");
+        column.append(node("p", "helper", `第 ${item.version} 版`));
+        const text = node("pre");
+        if (Array.isArray(field.segments)) {
+          field.segments.forEach((segment) => {
+            const value = segment[side];
+            if (!value) return;
+            const tag = segment.kind === "equal" ? "span" : side === "before" ? "del" : "ins";
+            text.append(node(tag, "", value));
+          });
+        } else text.textContent = field[side];
+        if (!text.textContent) text.textContent = "（空）";
+        column.append(text);
+        columns.append(column);
+      });
+      section.append(columns);
+      ui.historyChanges.append(section);
+    });
+  }
+
+  async function loadHistoryVersion(id, compare = "") {
+    const token = ++historyState.token;
+    historyState.selected = id;
+    historyState.previous = compare;
+    ui.historyStatus.textContent = "正在读取历史版本…";
+    ui.historyPreview.replaceChildren();
+    ui.historyControls.hidden = true;
+    ui.historyDiff.hidden = true;
+    ui.historyRelated.hidden = true;
+    ui.historyVersions.querySelectorAll("button").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.id === id));
+    });
+    try {
+      let body = await fetchHistory(id, compare);
+      if (token !== historyState.token || !ui.historyDialog.open) return;
+      let selected = body.publication;
+      let versions = body.history || [selected];
+      const current = versions.find((row) => row.id === selected.id);
+      const previousId = compare || current?.previous_id || "";
+      if (!compare && previousId) {
+        body = await fetchHistory(id, previousId);
+        selected = body.publication;
+        versions = body.history || [selected];
+      }
+      if (token !== historyState.token || !ui.historyDialog.open) return;
+      historyState.previous = previousId;
+      ui.historyVersions.replaceChildren();
+      versions.forEach((row) => {
+        const button = node("button", "history-version");
+        button.type = "button";
+        button.dataset.id = row.id;
+        button.setAttribute("aria-pressed", String(row.id === selected.id));
+        button.append(node("strong", "", `第 ${row.version} 版`),
+          node("span", "history-version-state", historyStatusNames[row.status] || row.status),
+          node("span", "", historyDate(row.published_at)), node("span", "", reviewLabel(row)),
+          node("span", "", row.previous_id ? (row.changes?.length ? `改了：${row.changes.join("、")}` : "题面未变，重新入库") : selected.draft_id ? "首次入库" : "保留的入库记录"));
+        button.addEventListener("click", () => loadHistoryVersion(row.id));
+        ui.historyVersions.append(button);
+      });
+      const older = versions.filter((row) => row.version < selected.version);
+      ui.historyCompare.replaceChildren();
+      older.forEach((row) => ui.historyCompare.append(new Option(`第 ${row.version} 版`, row.id)));
+      ui.historyCompare.value = previousId;
+      ui.historyControls.hidden = older.length === 0;
+      const before = body.comparison?.publication;
+      const fields = body.comparison?.changes || [];
+      ui.historyPreview.classList.toggle("single", !before);
+      if (before) ui.historyPreview.append(historyPanel(before));
+      ui.historyPreview.append(historyPanel(selected));
+      ui.historySummary.textContent = fields.length ? `改了：${fields.map((field) => field.label).join("、")}` : "题面内容未变化";
+      ui.historyStatus.textContent = versions.length === 1
+        ? (selected.draft_id ? "只有这一版入库记录。以后修改题目并重新核对、入库，就能在这里比较。"
+          : "这版题面已保留，但关联题卡已不存在，无法确定其他版本。")
+        : `共 ${versions.length} 个入库版本 · 正在查看第 ${selected.version} 版${before ? `，与第 ${before.version} 版比较` : "（首次入库）"}`;
+      renderHistoryChanges(fields, before, selected);
+      renderRelated(ui.historyRelated, body, true);
+    } catch (error) {
+      if (token !== historyState.token || !ui.historyDialog.open) return;
+      ui.historyStatus.textContent = error.message || "历史读取失败";
+      const retry = node("button", "button button-small", "重试");
+      retry.type = "button";
+      retry.addEventListener("click", () => loadHistoryVersion(id, compare));
+      ui.historyPreview.replaceChildren(retry);
+    }
   }
 
   // ---------------------------------------------------------------- 组卷
 
+  let printAnswersPreference = ui.printAnswers.checked;
+  const printState = { token: 0, items: [], missing: [], loading: false, returnFocus: null };
+  const printNames = new Map();
+
+  function printAnswerContent(item) {
+    const original = item.content || {};
+    if (String(original.answer ?? "").trim()) {
+      return { content: original, ai: false };
+    }
+    const ai = ui.printAi.checked && state.features.ai_answer ? item.ai_answer : null;
+    if (ai && (String(ai.answer ?? "").trim() || String(ai.analysis ?? "").trim())) {
+      return { content: ai, ai: true };
+    }
+    return String(original.analysis ?? "").trim() ? { content: original, ai: false } : null;
+  }
+
+  function syncPrintAnswers(items) {
+    const available = items.filter((item) => printAnswerContent(item)).length;
+    const aiAvailable = state.features.ai_answer && items.some((item) =>
+      !String(item.content?.answer ?? "").trim()
+      && (String(item.ai_answer?.answer ?? "").trim() || String(item.ai_answer?.analysis ?? "").trim()));
+    ui.printAiBox.hidden = !aiAvailable;
+    ui.printAnswers.disabled = available === 0;
+    ui.printAnswers.checked = available > 0 && printAnswersPreference;
+    let status = $("printAnswerStatus");
+    if (!status) {
+      status = node("p", "print-answer-status");
+      status.id = "printAnswerStatus";
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+      ui.sheet.querySelector(".print-controls").append(status);
+      ui.printAnswers.setAttribute("aria-describedby", status.id);
+    }
+    status.textContent = !items.length ? "请先加入题目，再设置卷末答案。"
+      : !available ? (aiAvailable
+        ? "所选题目没有原卷答案或解析；可勾选“附 AI 参考答案”，附上未核对的参考内容。"
+        : "所选题目没有答案或解析，卷末不附参考答案。")
+      : available < items.length ? `${items.length} 题中有 ${available} 题可附答案或解析，其余题会标明原卷未提供。`
+      : `所选 ${items.length} 题都有可附的答案或解析。`;
+  }
+
   async function openPrint() {
+    const token = ++printState.token;
+    const opening = !ui.sheet.open;
+    if (opening) printState.returnFocus = document.activeElement;
     ui.printAiBox.hidden = !state.features.ai_answer;
     ui.paper.replaceChildren(node("p", "helper", "正在准备…"));
     ui.sheet.hidden = false;
+    if (opening) ui.sheet.showModal();
     document.body.classList.add("printing");
+    printState.loading = true;
+    $("printButton").disabled = true;
+    $("printMissing").hidden = true;
+    $("printLayoutNotice").hidden = true;
     const items = [];
-    for (const id of state.basket) {
+    const missing = [];
+    for (const id of [...state.basket]) {
       const known = state.items.find((item) => item.id === id);
-      if (known) { items.push(known); continue; }
+      if (known) { printNames.set(id, `${known.source_filename || "试卷"} · 第 ${known.number} 题`); items.push(known); continue; }
       try {
         const response = await fetch(`/api/library/${encodeURIComponent(id)}`, { cache: "no-store" });
-        if (response.ok) {
-          const body = await response.json();
-          if (body.publication?.status === "published") items.push(body.publication);
-        }
-      } catch { /* 已删除的题跳过 */ }
+        if (!response.ok) throw new Error(response.status === 404 ? "题目已撤回或暂时找不到" : "读取失败，请重试");
+        const body = await response.json();
+        if (body.publication?.status !== "published") throw new Error("题目已撤回，不能用于组卷");
+        printNames.set(id, `${body.publication.source_filename || "试卷"} · 第 ${body.publication.number} 题`);
+        items.push(body.publication);
+      } catch (error) {
+        missing.push({ id, label: printNames.get(id) || `未载入的第 ${state.basket.indexOf(id) + 1} 道选题`, reason: error.message || "读取失败，请重试" });
+      }
+      if (token !== printState.token || !ui.sheet.open) return;
     }
+    if (token !== printState.token || !ui.sheet.open) return;
+    printState.loading = false;
+    printState.missing = missing;
     renderPrint(items);
   }
 
+  function renderPrintMissing() {
+    const box = $("printMissing");
+    box.replaceChildren();
+    box.hidden = !printState.missing.length;
+    if (box.hidden) return;
+    box.append(node("p", "", `试题篮 ${state.basket.length} 题，成功载入 ${printState.items.length} 题；以下 ${printState.missing.length} 题尚未载入。处理后才能打印。`));
+    printState.missing.forEach((item) => {
+      const row = node("div", "print-missing-row");
+      const remove = node("button", "button button-small", "移出试题篮");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移出${item.label}`);
+      remove.addEventListener("click", () => {
+        state.basket = state.basket.filter((id) => id !== item.id);
+        printState.missing = printState.missing.filter((row) => row.id !== item.id);
+        saveBasket();
+        renderPrint(printState.items);
+        render();
+        ($("retryPrintMissing") || $("closePrint")).focus();
+      });
+      row.append(node("span", "", `${item.label}：${item.reason}`), remove);
+      box.append(row);
+    });
+    const retry = node("button", "button button-small", "重试未载入题目");
+    retry.id = "retryPrintMissing";
+    retry.type = "button";
+    retry.addEventListener("click", openPrint);
+    box.append(retry);
+  }
+
   function renderPrint(items) {
+    printState.items = items;
+    renderPrintMissing();
+    syncPrintAnswers(items);
     ui.paper.replaceChildren();
     const title = node("h2", "print-title", ui.printTitle.value.trim() || "练习");
     const info = node("p", "print-info", "姓名 ____________　班级 ____________　得分 ________");
     ui.paper.append(title, info);
     if (!items.length) {
-      ui.paper.append(node("p", "helper", "试题篮是空的。"));
+      ui.paper.append(node("p", "helper", printState.missing.length ? "选题尚未全部载入，请先重试或移出未载入题目。" : "试题篮是空的。"));
+      $("printLayoutNotice").hidden = true;
+      $("printButton").disabled = true;
       return;
     }
     const groups = [["single_choice", "选择题"], ["multiple_choice", "多选题"], ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]];
@@ -569,7 +1019,8 @@
         QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
         const origin = item.origin || item.content?.origin;
         if (ui.printOrigin.checked && origin) block.querySelector(".qb-stem-body")?.prepend(node("span", "print-origin", `（${origin}）`));
-        block.append(printTools(items, group, position));
+        block.dataset.questionId = item.id;
+        block.append(printTools(items, group, position, number));
         ui.paper.append(block);
         answers.push([number, item]);
       });
@@ -582,14 +1033,14 @@
         row.append(node("strong", "", `${index}.`));
         const body = node("div");
         const answer = node("span");
-        // 原卷没有答案时，打开了“附 AI 参考答案”就用 AI 的，并写明没核对过。
-        const ai = !String(item.content.answer ?? "").trim() && ui.printAi.checked && state.features.ai_answer ? item.ai_answer : null;
-        const shown = ai ? ai.answer : item.content.answer;
+        // 原卷没有答案时，可选择附上明确标注的 AI 参考。
+        const selected = printAnswerContent(item);
+        const shown = selected?.content.answer;
         if (/^\s*[A-E]{1,5}\s*$/.test(String(shown ?? ""))) answer.textContent = String(shown).trim();
-        else QB.renderTypeset(answer, shown, { empty: "（原卷未提供答案）" });
-        body.append(answer);
-        if (ai) body.append(node("span", "print-ai-note", "（AI 参考，未核对）"));
-        const analysisText = ai ? ai.analysis : item.content.analysis;
+        else if (String(shown ?? "").trim() || !selected) QB.renderTypeset(answer, shown, { empty: "（原卷未提供答案）" });
+        if (answer.textContent || answer.childNodes.length) body.append(answer);
+        if (selected?.ai) body.append(node("span", "print-ai-note", "（AI 参考，未核对）"));
+        const analysisText = selected?.content.analysis;
         if (String(analysisText || "").trim()) {
           const analysis = node("div", "qb-analysis");
           QB.renderTypeset(analysis, analysisText);
@@ -601,12 +1052,68 @@
       ui.paper.append(key);
     }
     ui.paper.append(node("p", "print-footer", `共 ${number} 题 · 题目来自本机正式题库，均为题卡审核页中已标记通过的版本；正式使用前请按场景复核`));
+    if (printState.missing.length) ui.paper.prepend(node("p", "print-incomplete-warning", "本卷尚未完整载入，有选题缺失。请返回组卷处理后再打印。"));
+    preparePrintLayout();
+    requestAnimationFrame(updateOverflowHints);
+  }
+
+  // 只适配组卷排版；KaTeX 顶层运算符可以换行，分数/矩阵内部不拆。
+  // 按 A4 正文宽度预检，禁止为了塞进页面把公式缩成难以阅读的小字。
+  function preparePrintLayout() {
+    ui.paper.querySelectorAll(".print-formula-fallback").forEach((el) => el.remove());
+    ui.paper.querySelectorAll(".katex").forEach((math) => math.style.removeProperty("--print-math-size"));
+    ui.paper.classList.add("print-layout-check");
+    let tooWide = 0;
+    ui.paper.querySelectorAll(".qb-math").forEach((span) => {
+      const math = span.querySelector(".katex");
+      const html = math?.querySelector(".katex-html");
+      if (!html) return;
+      const field = span.closest(".qb-stem-body, .qb-option-body, .qb-analysis, .print-answer-row > div") || span.parentElement;
+      const available = field.clientWidth - 6;
+      const widest = Math.max(0, ...Array.from(html.children, (base) => base.getBoundingClientRect().width));
+      if (!available || widest <= available + 1) return;
+      const size = parseFloat(getComputedStyle(math).fontSize);
+      const fitted = size * available / widest;
+      if (fitted >= 12) math.style.setProperty("--print-math-size", `${fitted}px`);
+      else {
+        tooWide += 1;
+        const fallback = node("span", "print-formula-fallback");
+        fallback.append(node("strong", "", "公式过宽，请分行后重新打印。完整公式写法："),
+          node("code", "", math.querySelector('annotation[encoding="application/x-tex"]')?.textContent || span.textContent));
+        span.append(fallback);
+      }
+    });
+    ui.paper.classList.remove("print-layout-check");
+    const notice = $("printLayoutNotice");
+    notice.textContent = tooWide ? `${tooWide} 处公式太宽，无法在保持清晰字号的情况下放进 A4。请回到题卡，在“改字”中将公式分行后重新组卷。` : "";
+    notice.hidden = !tooWide;
+    $("printButton").disabled = printState.loading || !!printState.missing.length || !printState.items.length || !!tooWide;
+  }
+
+  function updateOverflowHints() {
+    ui.paper.querySelectorAll(".print-overflow-hint").forEach((hint) => hint.remove());
+    ui.paper.querySelectorAll('[data-print-overflow="1"]').forEach((field) => {
+      field.removeAttribute("tabindex");
+      field.removeAttribute("aria-describedby");
+      delete field.dataset.printOverflow;
+    });
+    ui.paper.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
+      if (field.scrollWidth <= field.clientWidth + 2) return;
+      const hint = node("span", "print-overflow-hint no-print", "左右滑动查看完整公式；键盘可用左右方向键。");
+      hint.id = `overflow-hint-${ui.paper.querySelectorAll(".print-overflow-hint").length}`;
+      field.tabIndex = 0;
+      field.dataset.printOverflow = "1";
+      field.setAttribute("aria-describedby", hint.id);
+      field.after(hint);
+    });
   }
 
   // Move up / down within the same section, or take the question out of the
   // basket, without leaving the preview.  Hidden when printing.
-  function printTools(items, group, position) {
+  function printTools(items, group, position, number) {
     const tools = node("div", "print-question-tools no-print");
+    tools.setAttribute("role", "group");
+    tools.setAttribute("aria-label", `第 ${number} 题排序与移除`);
     const item = group[position];
     const move = (step) => {
       const other = group[position + step];
@@ -620,34 +1127,51 @@
       const b = items.indexOf(other);
       [items[a], items[b]] = [items[b], items[a]];
       renderPrint(items);
+      const block = Array.from(ui.paper.querySelectorAll(".print-question"))
+        .find((question) => question.dataset.questionId === item.id);
+      const preferred = block?.querySelector(`[data-action="${step < 0 ? "up" : "down"}"]`);
+      const focus = preferred && !preferred.disabled ? preferred : block?.querySelector("button:not(:disabled)");
+      focus?.focus({ preventScroll: true });
+      block?.scrollIntoView({ block: "nearest" });
     };
-    const up = node("button", "", "↑");
+    const up = node("button", "", "↑ 上移");
     up.type = "button";
-    up.title = "上移";
+    up.title = "在本题型内上移";
+    up.setAttribute("aria-label", `第 ${number} 题上移`);
+    up.dataset.action = "up";
     up.disabled = position === 0;
     up.addEventListener("click", () => move(-1));
-    const down = node("button", "", "↓");
+    const down = node("button", "", "↓ 下移");
     down.type = "button";
-    down.title = "下移";
+    down.title = "在本题型内下移";
+    down.setAttribute("aria-label", `第 ${number} 题下移`);
+    down.dataset.action = "down";
     down.disabled = position === group.length - 1;
     down.addEventListener("click", () => move(1));
-    const remove = node("button", "remove", "×");
+    const remove = node("button", "remove", "移出");
     remove.type = "button";
     remove.title = "移出试题篮";
+    remove.setAttribute("aria-label", `第 ${number} 题移出试题篮`);
     remove.addEventListener("click", () => {
       state.basket = state.basket.filter((id) => id !== item.id);
       saveBasket();
       items.splice(items.indexOf(item), 1);
       renderPrint(items);
       render();
+      const next = ui.paper.querySelectorAll(".print-question-tools .remove")[Math.min(number - 1, items.length - 1)];
+      (next || $("closePrint")).focus({ preventScroll: true });
     });
     tools.append(up, down, remove);
     return tools;
   }
 
   function closePrint() {
+    ++printState.token;
+    if (ui.sheet.open) ui.sheet.close();
     ui.sheet.hidden = true;
     document.body.classList.remove("printing");
+    const target = printState.returnFocus;
+    (target?.isConnected && !target.hidden ? target : ui.search).focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- 事件
@@ -661,17 +1185,68 @@
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
   ui.more.addEventListener("click", () => load({ append: true }));
   ui.basketButton.addEventListener("click", openPrint);
-  $("printButton").addEventListener("click", () => window.print());
+  $("printButton").addEventListener("click", () => { preparePrintLayout(); if (!$("printButton").disabled) window.print(); });
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });
   ui.printTitle.addEventListener("input", () => { const title = ui.paper.querySelector(".print-title"); if (title) title.textContent = ui.printTitle.value.trim() || "练习"; });
-  ui.printAnswers.addEventListener("change", openPrint);
+  ui.printAnswers.addEventListener("change", () => { printAnswersPreference = ui.printAnswers.checked; openPrint(); });
   ui.printOrigin.addEventListener("change", openPrint);
   ui.printAi.addEventListener("change", openPrint);
+  ui.sheet.addEventListener("cancel", (event) => { event.preventDefault(); closePrint(); });
+  ui.sheet.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const controls = Array.from(ui.sheet.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]'))
+      .filter((element) => element.getClientRects().length && !element.closest("[hidden]"));
+    const first = controls[0], last = controls[controls.length - 1];
+    if (!first) { event.preventDefault(); return; }
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  window.addEventListener("resize", () => { if (ui.sheet.open) updateOverflowHints(); });
+  window.addEventListener("beforeprint", () => { if (ui.sheet.open) preparePrintLayout(); });
   ui.tagSelect.addEventListener("change", () => { state.tag = ui.tagSelect.value; syncUrl(); load(); });
   ui.sourceDialog.addEventListener("click", (event) => {
     if (event.target === ui.sourceDialog || event.target.closest("[data-close]")) ui.sourceDialog.close();
   });
+  ui.sourceDialog.addEventListener("close", () => { ++sourceState.token; stopSourcePan(); });
+  ui.sourceQuestion.addEventListener("click", () => { sourceState.mode = "question"; sourceState.zoom = 1; renderSource(); });
+  ui.sourceWholePage.addEventListener("click", () => { sourceState.mode = "page"; sourceState.zoom = 1; renderSource(); });
+  ui.sourceZoomOut.addEventListener("click", () => zoomSource(sourceState.zoom - 0.5));
+  ui.sourceZoomIn.addEventListener("click", () => zoomSource(sourceState.zoom + 0.5));
+  ui.sourceFit.addEventListener("click", fitSourceWindow);
+  ui.sourcePages.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    if (!event.deltaY) return;
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? ui.sourcePages.clientHeight : 1);
+    zoomSource(sourceState.zoom * Math.exp(-Math.max(-240, Math.min(240, delta)) * 0.002), event.clientX, event.clientY);
+  }, { passive: false });
+  ui.sourcePages.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.pointerType !== "mouse" || event.altKey || !sourceReady()) return;
+    if (event.target.closest("a, button, input, textarea, select, summary, label")) return;
+    const rect = ui.sourcePages.getBoundingClientRect();
+    if (event.clientX >= rect.left + ui.sourcePages.clientWidth || event.clientY >= rect.top + ui.sourcePages.clientHeight) return;
+    event.preventDefault();
+    stopSourcePan();
+    sourcePan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      left: ui.sourcePages.scrollLeft, top: ui.sourcePages.scrollTop };
+    ui.sourcePages.setPointerCapture(event.pointerId);
+    ui.sourcePages.classList.add("panning");
+  });
+  ui.sourcePages.addEventListener("pointermove", (event) => {
+    if (!sourcePan || event.pointerId !== sourcePan.pointerId) return;
+    if (!(event.buttons & 1)) { stopSourcePan(); return; }
+    ui.sourcePages.scrollLeft = sourcePan.left - (event.clientX - sourcePan.x);
+    ui.sourcePages.scrollTop = sourcePan.top - (event.clientY - sourcePan.y);
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => ui.sourcePages.addEventListener(type, stopSourcePan));
+  ui.sourcePages.addEventListener("dragstart", (event) => event.preventDefault());
+  window.addEventListener("blur", stopSourcePan);
+  ui.historyDialog.addEventListener("click", (event) => {
+    if (event.target === ui.historyDialog || event.target.closest("[data-close]")) ui.historyDialog.close();
+  });
+  ui.historyDialog.addEventListener("close", () => { ++historyState.token; });
+  ui.historyCompare.addEventListener("change", () => loadHistoryVersion(historyState.selected, ui.historyCompare.value));
   $("confirmDialog").addEventListener("click", (event) => {
     if (event.target === $("confirmDialog")) $("confirmDialog").close();
   });
@@ -683,7 +1258,7 @@
   window.addEventListener("scroll", syncToolbar, { passive: true });
   syncToolbar();
   document.addEventListener("keydown", (event) => {
-    if (event.key === "/" && document.activeElement !== ui.search && !ui.sourceDialog.open && !$("confirmDialog").open
+    if (event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !ui.sourceDialog.open && !ui.historyDialog.open && !$("confirmDialog").open
       && !document.activeElement?.closest?.("input, textarea, select")) {
       event.preventDefault();
       ui.search.focus();

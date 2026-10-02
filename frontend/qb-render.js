@@ -724,9 +724,36 @@
     return found.sort((a, b) => a.start - b.start);
   }
 
-  function renderTable(doc, table, marks) {
+  // Mapping exists only in the edit preview. It never changes the source text.
+  const previewSourceRanges = new WeakMap();
+
+  function previewTextOffsets(raw, shown) {
+    const offsets = [];
+    let cursor = 0;
+    for (let index = 0; index < raw.length; index += 1) {
+      offsets[index] = cursor;
+      if (/\s/.test(raw[index])) {
+        if (cursor < shown.length && /\s/.test(shown[cursor])) cursor += 1;
+      } else {
+        while (cursor < shown.length && /\s/.test(shown[cursor])) cursor += 1;
+        offsets[index] = cursor;
+        if (shown[cursor] === raw[index]) cursor += 1;
+      }
+    }
+    offsets[raw.length] = shown.length;
+    return offsets;
+  }
+
+  function previewSource(node, start, end, kind, offsets = null, formula = null) {
+    node.dataset.qbSource = kind;
+    previewSourceRanges.set(node, { start, end, kind, offsets, formula });
+    return node;
+  }
+
+  function renderTable(doc, table, marks, { trackSource = false } = {}) {
     const wrap = doc.createElement("span");
     wrap.className = "qb-table-wrap";
+    if (trackSource) previewSource(wrap, table.start, table.end, "table");
     const element = doc.createElement("table");
     element.className = "qb-table";
     const width = Math.max(...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colspan || 1), 0)));
@@ -741,11 +768,13 @@
         const hits = marks.filter((mark) => mark.end > cell.start && mark.start < cell.end);
         if (cell.decoded) {
           renderTypesetText(td, cell.text, { empty: "" });
+          if (trackSource) previewSource(td, cell.start, cell.end, "table-cell");
           if (hits.length) td.classList.add("qb-cell-marked");
         } else {
           const text = cell.text.replace(/\\\|/g, "|");
           const shifted = text === cell.text ? hits.map((mark) => ({ ...mark, start: mark.start - cell.start, end: mark.end - cell.start })) : [];
-          renderTypesetText(td, text, { marks: shifted, empty: "" });
+          renderTypesetText(td, text, { marks: shifted, empty: "", trackSource: trackSource && text === cell.text, sourceOffset: cell.start });
+          if (trackSource && text !== cell.text) previewSource(td, cell.start, cell.end, "table-cell");
           if (hits.length && !shifted.length) td.classList.add("qb-cell-marked");
         }
         td.classList.remove("qb-typeset", "is-empty");
@@ -783,6 +812,8 @@
       run.className = "qb-text-run";
       renderTypesetText(run, source.slice(start, end), {
         empty: "",
+        trackSource: options.trackSource,
+        sourceOffset: start,
         marks: marks.filter((mark) => mark.end > start && mark.start < end)
           .map((mark) => ({ ...mark, start: mark.start - start, end: mark.end - start }))
       });
@@ -791,7 +822,7 @@
     let cursor = 0;
     tables.forEach((table) => {
       text(cursor, table.start);
-      node.append(renderTable(doc, table, marks));
+      node.append(renderTable(doc, table, marks, options));
       cursor = table.end;
     });
     text(cursor, source.length);
@@ -807,7 +838,7 @@
    * splitting a command or a brace group; null otherwise, and the caller falls
    * back to boxing the whole formula.
    */
-  function colourLatex(source, segment, mark) {
+  function colourLatex(source, segment, mark, colour = "#c2410c") {
     if (segment.auto) return null;
     const raw = source.slice(segment.start, segment.end);
     const delimiter = raw.startsWith("$$") || raw.startsWith("\\[") || raw.startsWith("\\(") ? 2 : raw.startsWith("$") ? 1 : 0;
@@ -822,17 +853,21 @@
     const before = inner.slice(0, from);
     if (/\\[A-Za-z]*$/.test(before) && /^[A-Za-z]/.test(piece)) return null;
     const latex = explicitToLatex(`${before}${SPOT_OPEN}${piece}${SPOT_CLOSE}${inner.slice(to)}`);
-    return latex.replace(SPOT_OPEN, "{\\textcolor{#c2410c}{").replace(SPOT_CLOSE, "}}");
+    return latex.replace(SPOT_OPEN, `{\\textcolor{${colour}}{`).replace(SPOT_CLOSE, "}}");
   }
 
   /*
    * 排版一段文字。marks 中与公式重叠的，会把整段公式包进同色框（公式无法逐字标色）。
    */
-  function renderTypesetText(node, value, { marks = [], empty = "（空）" } = {}) {
+  function renderTypesetText(node, value, { marks = [], empty = "（空）", trackSource = false, sourceOffset = 0 } = {}) {
     const source = String(value ?? "");
     node.replaceChildren();
     node.classList.add("qb-typeset");
-    if (!source.trim()) { node.append(document.createTextNode(empty)); node.classList.add("is-empty"); return node; }
+    if (!source.trim()) {
+      node.append(document.createTextNode(empty)); node.classList.add("is-empty");
+      if (trackSource) previewSource(node, sourceOffset, sourceOffset + source.length, "text", new Array(source.length + 1).fill(0));
+      return node;
+    }
     const segments = typesetSegments(source);
     let displayGroup = "";
     let displayGroupNode = null;
@@ -859,6 +894,7 @@
         symbol.className = `qb-parallelogram-symbol${segment.display ? " is-display" : ""}`;
         symbol.textContent = "▱";
         symbol.title = "平行四边形符号";
+        if (trackSource) previewSource(symbol, sourceOffset + segment.start, sourceOffset + segment.end, "math");
         if (overlapping.length) {
           const mark = document.createElement("mark");
           mark.className = `qb-mark ${overlapping[0].kind || ""}`.trim();
@@ -872,6 +908,8 @@
         span.className = `qb-math${segment.auto ? " is-auto" : ""}${segment.display ? " is-display" : ""}`;
         const raw = source.slice(segment.start, segment.end);
         span.dataset.raw = raw;
+        if (trackSource) previewSource(span, sourceOffset + segment.start, sourceOffset + segment.end, "math", null,
+          { raw, latex: segment.latex, display: segment.display, auto: segment.auto });
         const exact = overlapping.find((mark) => mark.exact);
         const coloured = exact ? colourLatex(source, segment, exact) : null;
         if (coloured && renderLatex(span, coloured, segment.display)) {
@@ -892,6 +930,7 @@
         const bracket = document.createElement("span");
         bracket.className = "qb-bracket";
         bracket.textContent = "（\u3000\u3000）";
+        if (trackSource) previewSource(bracket, sourceOffset + segment.start, sourceOffset + segment.end, "blank");
         if (overlapping.length) {
           const mark = document.createElement("mark");
           mark.className = `qb-mark ${overlapping[0].kind || ""}`.trim();
@@ -904,6 +943,7 @@
         const blank = document.createElement("span");
         blank.className = "qb-blank";
         blank.setAttribute("aria-label", "填空");
+        if (trackSource) previewSource(blank, sourceOffset + segment.start, sourceOffset + segment.end, "blank");
         node.append(blank);
         return;
       }
@@ -915,6 +955,14 @@
       };
       const raw = source.slice(segment.start, segment.end);
       const text = tidyText(raw, neighbour(segments[index - 1], true), neighbour(segments[index + 1], false));
+      if (trackSource) {
+        const run = document.createElement("span");
+        run.className = "qb-source-text";
+        run.textContent = text;
+        previewSource(run, sourceOffset + segment.start, sourceOffset + segment.end, "text", previewTextOffsets(raw, text));
+        node.append(run);
+        return;
+      }
       if (!overlapping.length) node.append(document.createTextNode(text));
       else if (text === raw) appendMarked(node, raw, segment.start, overlapping, "qb-mark");
       else {
@@ -931,6 +979,7 @@
     });
     // 公式后紧跟的中文标点不应单独折到下一行行首。
     node.querySelectorAll(".qb-math, .qb-mark-math").forEach((math) => {
+      if (trackSource) return;
       const next = math.nextSibling;
       if (!next || next.nodeType !== 3) return;
       const punctuation = /^[，。、；：？！）》」』】,.;:?!)]+/.exec(next.nodeValue);
@@ -956,6 +1005,120 @@
     appendMarked(node, source, 0, all, "qb-mark");
     node.querySelectorAll("mark.qb-syntax").forEach((element) => { element.className = "qb-syntax"; });
     return node;
+  }
+
+  // A display-only caret/selection. Formula source offsets are not visual glyph
+  // offsets: highlight the formula as a whole instead of inventing a position.
+  function previewSelection(container, selection) {
+    container.querySelectorAll(".qb-preview-position, .qb-preview-empty-field").forEach((node) => node.remove());
+    container.querySelectorAll(".qb-preview-active-formula, .qb-preview-active-region").forEach((node) => {
+      node.classList.remove("qb-preview-active-formula", "qb-preview-active-region");
+      if (node.classList.contains("qb-preview-active-symbol")) {
+        const formula = previewSourceRanges.get(node)?.formula;
+        if (formula) renderLatex(node, formula.latex, formula.display);
+        node.classList.remove("qb-preview-active-symbol");
+      }
+    });
+    if (!selection || !Number.isInteger(selection.start) || !Number.isInteger(selection.end)) return null;
+    const { field } = selection;
+    const start = Math.max(0, selection.start);
+    const end = Math.max(start, selection.end);
+    const collapsed = start === end;
+    const doc = container.ownerDocument || document;
+    let scope = Array.from(container.querySelectorAll("[data-qb-field]")).find((node) => node.dataset.qbField === field);
+    if (!scope) {
+      const row = doc.createElement("p");
+      row.className = "qb-preview-empty-field";
+      row.append(doc.createTextNode(`${{ stem: "题干", answer: "答案", analysis: "解析" }[field] || `${field} 选项`}：`));
+      scope = doc.createElement("span");
+      scope.dataset.qbField = field;
+      scope.textContent = "（当前为空）";
+      previewSource(scope, 0, 0, "text", [0]);
+      row.append(scope);
+      container.append(row);
+    }
+    const nodes = [scope, ...scope.querySelectorAll("[data-qb-source]")]
+      .map((node) => ({ node, map: previewSourceRanges.get(node) })).filter((item) => item.map);
+    const touches = (map) => collapsed ? start >= map.start && start <= map.end : end > map.start && start < map.end;
+    const hits = nodes.filter(({ map }) => touches(map));
+    const rootRect = container.getBoundingClientRect();
+    const overlay = (rect, caret) => {
+      const marker = doc.createElement("span");
+      marker.className = `qb-preview-position ${caret ? "qb-preview-caret" : "qb-preview-selection"}`;
+      marker.setAttribute("aria-hidden", "true");
+      marker.style.left = `${rect.left - rootRect.left + container.scrollLeft - container.clientLeft}px`;
+      marker.style.top = `${rect.top - rootRect.top + container.scrollTop - container.clientTop}px`;
+      marker.style.width = `${caret ? 0 : rect.width}px`;
+      marker.style.height = `${rect.height || 20}px`;
+      container.append(marker);
+    };
+    const textRange = ({ node, map }, from, to) => {
+      const text = Array.from(node.childNodes).find((child) => child.nodeType === 3);
+      if (!text) return;
+      const range = doc.createRange();
+      const offset = (point) => Math.min(text.length, map.offsets?.[Math.max(0, Math.min(map.end - map.start, point - map.start))] ?? 0);
+      range.setStart(text, offset(from));
+      range.setEnd(text, offset(to));
+      const rects = Array.from(range.getClientRects());
+      if (rects.length) rects.forEach((rect) => overlay(rect, collapsed));
+      else {
+        const rect = node.getBoundingClientRect();
+        overlay({ left: rect.left, top: rect.top, width: 0, height: rect.height }, true);
+      }
+    };
+    let kind = "text";
+    let exact = false;
+    let automatic = false;
+    const highlight = ({ node, map }) => {
+      node.classList.add(map.kind === "math" ? "qb-preview-active-formula" : "qb-preview-active-region");
+      if (map.kind !== "math" || !map.formula) return;
+      const formula = map.formula;
+      automatic = automatic || Boolean(formula.auto);
+      let from = Math.max(0, start - map.start);
+      let to = Math.min(formula.raw.length, end - map.start);
+      if (collapsed) {
+        // At the end of a digit/variable, point to that nearby symbol; never
+        // insert a cursor into a LaTeX command or alter the field's value.
+        if (/[A-Za-z0-9]/.test(formula.raw[from] || "")) to = from + 1;
+        else if (from > 0 && /[A-Za-z0-9]/.test(formula.raw[from - 1])) { from -= 1; to = from + 1; }
+      }
+      const piece = formula.raw.slice(from, to);
+      const coloured = /^[\p{L}\p{N}]+$/u.test(piece)
+        ? colourLatex(formula.raw, { start: 0, end: formula.raw.length, auto: formula.auto }, { start: from, end: to }, "#1f6b5f") : null;
+      if (coloured && renderLatex(node, coloured, formula.display)) {
+        node.classList.add("qb-preview-active-symbol"); exact = true;
+      }
+    };
+    if (collapsed) {
+      // Prefer a real text position at a formula boundary. Within a formula,
+      // the entire formula is the smallest honest correspondence.
+      let chosen = hits.find(({ map }) => map.kind === "text" && start > map.start && start < map.end)
+        || hits.find(({ map }) => map.kind === "text")
+        || hits.find(({ map }) => map.kind !== "table") || hits[0];
+      if (!chosen && nodes.length) {
+        chosen = [...nodes].filter(({ map }) => map.kind === "text")
+          .sort((a, b) => Math.min(Math.abs(start - a.map.start), Math.abs(start - a.map.end))
+            - Math.min(Math.abs(start - b.map.start), Math.abs(start - b.map.end)))[0];
+      }
+      if (chosen) {
+        kind = chosen.map.kind;
+        if (kind === "text") textRange(chosen, start, start);
+        else highlight(chosen);
+      }
+    } else {
+      hits.filter(({ map }) => map.kind !== "table").forEach((hit) => {
+        if (hit.map.kind === "text") textRange(hit, Math.max(start, hit.map.start), Math.min(end, hit.map.end));
+        else {
+          highlight(hit);
+          if (hit.map.kind === "math") kind = "math";
+          else if (kind === "text") kind = hit.map.kind;
+        }
+      });
+      if (hits.length && hits.every(({ map }) => map.kind === "table")) {
+        hits[0].node.classList.add("qb-preview-active-region"); kind = "table";
+      }
+    }
+    return { kind: kind === "table-cell" ? "table" : kind, field, start, end, collapsed, exact, automatic };
   }
 
   // ---------------------------------------------------------------- 题面
@@ -1046,7 +1209,8 @@
     if (opts.showNumber !== false) stem.append(make("span", "qb-number", `${opts.number ?? content.number ?? "?"}.`));
     const stemBody = make("span", "qb-stem-body");
     const marks = opts.marks || {};
-    view(stemBody, content.stem, { empty: "（题干为空）", marks: marks.stem || [] });
+    if (opts.trackSource) stemBody.dataset.qbField = "stem";
+    view(stemBody, content.stem, { empty: "（题干为空）", marks: marks.stem || [], trackSource: opts.trackSource });
     stem.append(stemBody);
     container.append(stem);
     const stemFigures = figures.filter((figure) => figure.slot === "stem");
@@ -1069,7 +1233,8 @@
         const item = make("li", "qb-option");
         item.append(make("span", "qb-option-label", `${key}.`));
         const body = make("span", "qb-option-body");
-        view(body, options[key], { empty: figures.some((figure) => figure.slot === key) ? "" : "（空）", marks: marks[key] || [] });
+        if (opts.trackSource) body.dataset.qbField = key;
+        view(body, options[key], { empty: figures.some((figure) => figure.slot === key) ? "" : "（空）", marks: marks[key] || [], trackSource: opts.trackSource });
         item.append(body);
         figures.filter((figure) => figure.slot === key).forEach((figure) => item.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
         list.append(item);
@@ -1080,14 +1245,14 @@
     if (mode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || opts.showEmptyAnswer)) {
       const box = make("details", "qb-answer");
       if (mode === "open") box.open = true;
-      box.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal }));
+      box.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal, trackSource: opts.trackSource }));
       container.append(box);
     }
     return container;
   }
 
   /* “答案”“解析”两行（题卡、题库的“看答案”共用）。empty：没有时写什么。 */
-  function answerRows(doc, content, { literal = false, empty = "原卷未提供" } = {}) {
+  function answerRows(doc, content, { literal = false, empty = "原卷未提供", trackSource = false } = {}) {
     const make = (tag, className, text) => {
       const element = doc.createElement(tag);
       if (className) element.className = className;
@@ -1098,16 +1263,19 @@
     const answer = make("p", "qb-answer-row");
     answer.append(make("strong", "", "答案"));
     const answerBody = make("span");
+    if (trackSource) answerBody.dataset.qbField = "answer";
     // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
     if (!literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
       answerBody.className = "qb-choice-answer";
       answerBody.textContent = String(content.answer).trim();
-    } else view(answerBody, content.answer, { empty });
+      if (trackSource) previewSource(answerBody, 0, String(content.answer).length, "text", previewTextOffsets(String(content.answer), answerBody.textContent));
+    } else view(answerBody, content.answer, { empty, trackSource });
     answer.append(answerBody);
     const analysis = make("div", "qb-answer-row");
     analysis.append(make("strong", "", "解析"));
     const analysisBody = make("div", "qb-analysis");
-    view(analysisBody, content.analysis, { empty });
+    if (trackSource) analysisBody.dataset.qbField = "analysis";
+    view(analysisBody, content.analysis, { empty, trackSource });
     analysis.append(analysisBody);
     return [answer, analysis];
   }
@@ -1139,7 +1307,7 @@
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
-    renderTypeset, renderLiteral, renderQuestion, answerRows, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
+    renderTypeset, renderLiteral, renderQuestion, answerRows, previewSelection, previewTextOffsets, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
     tidiedMarks
   };
 });

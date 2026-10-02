@@ -632,8 +632,98 @@ const QBFocus = (() => {
   return { readingLine, nearestToLine, mostlyVisible };
 })();
 
+const QBEdits = (() => {
+  "use strict";
+
+  // Compare the current form with the values shown when it opened. Returning
+  // to those values clears the warning; merely opening an editor is harmless.
+  function createEditGuard() {
+    const entries = new Map();
+    let confirming = false;
+    const selected = (ids) => ids == null ? [...entries.values()]
+      : ids.map((id) => entries.get(id)).filter(Boolean);
+    const dirty = (entry) => JSON.stringify(entry.read()) !== entry.initial;
+    return {
+      track(id, read, discard, focus = () => {}) {
+        entries.set(id, { read, initial: JSON.stringify(read()), discard, focus, saving: false });
+      },
+      release(id) { entries.delete(id); },
+      setSaving(id, saving) { if (entries.has(id)) entries.get(id).saving = saving; },
+      hasSaving(ids = null) { return selected(ids).some((entry) => entry.saving); },
+      hasPendingWork() { return selected(null).some((entry) => entry.saving || dirty(entry)); },
+      async discard(confirm, ids = null) {
+        // A repeated click must not reuse the first click's permission for a
+        // different destination. A save in flight must finish on this paper.
+        if (confirming) return false;
+        const active = selected(ids);
+        if (active.some((entry) => entry.saving)) return false;
+        const changed = active.filter(dirty);
+        confirming = true;
+        try {
+          if (changed.length && !(await confirm(changed.length))) {
+            changed[0].focus();
+            return false;
+          }
+          active.forEach((entry) => entry.discard());
+          return true;
+        } finally { confirming = false; }
+      }
+    };
+  }
+
+  function protectBeforeUnload(event, guard) {
+    if (!guard.hasPendingWork()) return false;
+    event.preventDefault();
+    event.returnValue = "";
+    return true;
+  }
+
+  // Return a proposed form value only when a reviewed range still matches.
+  // This helper performs no save, approval, or change to the original string.
+  function reviewedPrefill(original, prefill) {
+    const source = String(original ?? "");
+    if (!prefill || typeof prefill.value !== "string") return null;
+    const ranged = prefill.start !== undefined || prefill.end !== undefined;
+    const start = ranged ? prefill.start : 0;
+    const end = ranged ? prefill.end : source.length;
+    const splitsCharacter = (index) => index > 0 && index < source.length
+      && /[\uD800-\uDBFF]/.test(source[index - 1]) && /[\uDC00-\uDFFF]/.test(source[index]);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > source.length
+      || splitsCharacter(start) || splitsCharacter(end)
+      || (ranged && (typeof prefill.before !== "string" || source.slice(start, end) !== prefill.before))
+      || (!ranged && prefill.before !== undefined && prefill.before !== source)) return null;
+    return { value: source.slice(0, start) + prefill.value + source.slice(end), start, end: start + prefill.value.length };
+  }
+
+  return { createEditGuard, protectBeforeUnload, reviewedPrefill };
+})();
+
+const QBRegionAssist = (() => {
+  "use strict";
+  function recommendedPrefill(question, read) {
+    const r = read?.recommendation;
+    if (read?.status !== "done" || r?.status !== "recommended"
+      || !["stem", "A", "B", "C", "D", "E"].includes(r.field)
+      || typeof r.before !== "string" || typeof r.after !== "string" || !r.after.trim()
+      || r.after !== read.text || typeof r.field_text !== "string"
+      || !Number.isInteger(r.start) || !Number.isInteger(r.end)) return null;
+    const original = String(r.field === "stem" ? question.stem || "" : question.options?.[r.field] || "");
+    if (original !== r.field_text || r.start < 0 || r.end < r.start || r.end > original.length
+      || original.slice(r.start, r.end) !== r.before) return null;
+    const splitsCharacter = (index) => index > 0 && index < original.length
+      && /[\uD800-\uDBFF]/.test(original[index - 1]) && /[\uDC00-\uDFFF]/.test(original[index]);
+    if (splitsCharacter(r.start) || splitsCharacter(r.end)) return null;
+    if (r.before ? original.indexOf(r.before) !== r.start || original.indexOf(r.before, r.start + 1) !== -1
+      : original !== "" || r.field === "stem" || r.start !== 0 || r.end !== 0) return null;
+    return { field: r.field, value: r.after, start: r.start, end: r.end, before: r.before };
+  }
+  return { recommendedPrefill };
+})();
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify, ...QBFigureJoin, ...QBFocus,
+    ...QBEdits,
+    ...QBRegionAssist,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
     TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint };
 }
@@ -665,6 +755,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const state = {
     status: null, papers: [], paperId: null, paper: null, questions: [], filter: "all",
+    archivedPapers: [], archiveNextOffset: null, archiveLoading: false, restoringPaperId: null,
     rendered: new Map(), editing: new Set(), expanded: new Set(), pollTimer: null, listTimer: null,
     // autoExpanded：J/K 跳过去时自动展开的已通过题，离开时收回；手动展开的不在里面。
     autoExpanded: new Set(), autoExpand: readPref("qb-auto-expand", "1") === "1",
@@ -673,6 +764,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 入库进行中：{ paperId, done, total }，按钮上显示进度。
     publishing: null
   };
+  const editGuard = QBEdits.createEditGuard();
 
   // ---------------------------------------------------------------- 小工具
 
@@ -758,21 +850,53 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // 统一样式的确认框，替代浏览器自带的 confirm。
-  function confirmDialog({ title, text = "", ok = "确定", danger = false }) {
+  function confirmDialog({ title, text = "", ok = "确定", cancel = "取消", danger = false, focusCancel = false }) {
     const dialog = $("confirmDialog");
+    const cancelButton = dialog.querySelector('[value="cancel"]');
     $("confirmTitle").textContent = title;
     $("confirmText").textContent = text;
     $("confirmText").hidden = !text;
     $("confirmOk").textContent = ok;
+    cancelButton.textContent = cancel;
     $("confirmIconUse").setAttribute("href", danger ? "#i-alert" : "#i-question");
     dialog.classList.toggle("danger", danger);
     dialog.returnValue = "";
     dialog.showModal();
-    $("confirmOk").focus();
+    (focusCancel ? cancelButton : $("confirmOk")).focus();
     return new Promise((resolve) => {
       dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
     });
   }
+
+  async function discardEdits(ids = null) {
+    if (editGuard.hasSaving(ids)) {
+      toast("题目正在保存，请等保存完成后再离开", "error");
+      return false;
+    }
+    return editGuard.discard((count) => confirmDialog({
+      title: "改字还没保存",
+      text: `${count} 道题有未保存的改动。丢弃后不会修改题库里的题目；也可以继续编辑，再点保存。`,
+      ok: "丢弃改动", cancel: "继续编辑", danger: true, focusCancel: true
+    }), ids);
+  }
+
+  async function leaveFor(url) {
+    if (await discardEdits()) window.location.assign(url);
+  }
+
+  // Browser refresh/close cannot wait for our dialog. Use its native leave
+  // warning there; in-app navigation keeps the clearer two-action dialog.
+  window.addEventListener("beforeunload", (event) => QBEdits.protectBeforeUnload(event, editGuard));
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest?.("a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+      || link.hasAttribute("download") || (link.target && link.target !== "_self") || !editGuard.hasPendingWork()) return;
+    const url = new URL(link.href, window.location.href);
+    const here = new URL(window.location.href);
+    if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search && url.hash) return;
+    event.preventDefault();
+    leaveFor(url.href);
+  });
 
   function previewUrl(paperId, page) {
     // 照片卷调整过页序后，同一个页码对应的图变了：带上页序版本，浏览器就不会用旧缓存。
@@ -870,10 +994,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     node.className = `engine-line${kind ? ` ${kind}` : ""}`;
   }
 
+  let statusRequestToken = 0;
   async function loadStatus() {
+    const token = ++statusRequestToken;
     try {
-      state.status = await api("/api/status");
+      const received = await api("/api/status");
+      if (token !== statusRequestToken) return true;
+      state.status = received;
     } catch {
+      if (token !== statusRequestToken) return true;
       brandNotice("连不上本机服务：请关掉题有据再重新打开", "error");
       return false;
     }
@@ -988,6 +1117,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const data = await api("/api/papers");
       const previous = new Map(state.papers.map((paper) => [paper.id, paper.status]));
       state.papers = data.papers;
+      if (state.paper && !state.paper.archived && !state.papers.some((paper) => paper.id === state.paper.id)) {
+        state.papers.push(state.paper);
+      }
       noteFinishedPapers(previous, state.papers);
       renderPaperList();
     } catch (error) {
@@ -997,6 +1129,65 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const busy = state.papers.some((paper) => ACTIVE_STATUS.has(paper.status));
     state.listTimer = setTimeout(loadPapers, busy ? 3000 : 15000);
   }
+
+  function renderArchivedPapers() {
+    const list = $("archivedPapersList");
+    list.replaceChildren(...state.archivedPapers.map((paper) => {
+      const item = el("li", "archived-papers-item");
+      item.dataset.paperId = paper.id;
+      const info = el("div", "archived-papers-info");
+      info.append(el("strong", "archived-papers-name", paperDisplayName(paper)),
+        el("span", "hint", paperSummary(paper)));
+      const actions = el("div", "archived-papers-actions");
+      const view = button("查看", "quiet", async () => {
+        if (state.paperId !== paper.id && !(await discardEdits())) return;
+        $("archivedPapersDialog").close();
+        await selectPaper(paper.id);
+      });
+      view.setAttribute("aria-label", `查看“${paperDisplayName(paper)}”`);
+      const restore = button("恢复并打开", "", () => restoreArchivedPaper(paper.id));
+      restore.setAttribute("aria-label", `恢复并打开“${paperDisplayName(paper)}”`);
+      actions.append(view, restore);
+      item.append(info, actions);
+      return item;
+    }));
+    $("archivedPapersMore").hidden = state.archiveNextOffset === null;
+  }
+
+  async function loadArchivedPapers(append = false) {
+    if (state.archiveLoading) return;
+    state.archiveLoading = true;
+    const status = $("archivedPapersState");
+    status.textContent = "正在加载归档试卷…";
+    $("archivedPapersRetry").hidden = true;
+    $("archivedPapersMore").disabled = true;
+    try {
+      const offset = append ? state.archiveNextOffset : 0;
+      const data = await api(`/api/papers?archived=only&offset=${offset || 0}`);
+      state.archivedPapers = append ? [...state.archivedPapers, ...data.papers] : data.papers;
+      state.archiveNextOffset = data.next_offset ?? null;
+      renderArchivedPapers();
+      status.textContent = state.archivedPapers.length ? "" : "还没有归档的试卷。";
+    } catch (error) {
+      status.textContent = `归档列表未能加载：${error.message}`;
+      $("archivedPapersRetry").hidden = false;
+    } finally {
+      state.archiveLoading = false;
+      $("archivedPapersMore").disabled = false;
+    }
+  }
+
+  function openArchivedPapers() {
+    if (!$("archivedPapersDialog").open) $("archivedPapersDialog").showModal();
+    loadArchivedPapers();
+  }
+
+  $("archivedPapersButton").addEventListener("click", openArchivedPapers);
+  $("archivedPapersMore").addEventListener("click", () => loadArchivedPapers(true));
+  $("archivedPapersRetry").addEventListener("click", () => loadArchivedPapers());
+  $("restoreCurrentPaper").addEventListener("click", () => {
+    if (state.paperId) restoreArchivedPaper(state.paperId);
+  });
 
   // ---------------------------------------------------------------- 当前试卷
 
@@ -1021,6 +1212,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function selectPaper(id) {
+    if (state.paperId !== id && !(await discardEdits())) return;
     if (finishedUnseen.delete(id)) document.title = QBNotify.title(BASE_TITLE, finishedUnseen.size);
     if (state.paperId !== id) {
       stopSelecting({ render: false });
@@ -1044,7 +1236,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (teaching.active) renderTeach();
   }
 
-  function clearPaperSelection() {
+  async function clearPaperSelection() {
+    if (!(await discardEdits())) return false;
     clearTimeout(state.pollTimer);
     state.paperId = null;
     state.paper = null;
@@ -1065,6 +1258,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     history.replaceState(null, "", url);
     renderPaperList();
     renderSettingsTask();
+    return true;
   }
 
   async function refreshPaper() {
@@ -1082,6 +1276,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (state.paperId !== paperId) return;
     state.paper = data.paper;
+    $("archivedPaperNotice").hidden = !data.paper.archived;
     state.questions = data.questions;
     const existing = new Set(state.questions.map((question) => question.id));
     state.selected = new Set([...state.selected].filter((id) => existing.has(id)));
@@ -1917,6 +2112,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       segment.style.aspectRatio = `${rw * page.width} / ${rh * page.height}`;
       const image = el("img");
       image.alt = `原卷第 ${region.page_idx + 1} 页局部`;
+      image.draggable = false;
       image.loading = "lazy";
       image.decoding = "async";
       // 绝对定位图片在尚未下载时没有自然高度，Chromium 会把它视为
@@ -2026,7 +2222,85 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 原卷对照（大图）
 
-  const viewer = { id: null, zoom: 1, mode: "fit", fitFrame: 0 };
+  const CANVAS_ZOOM_MIN = 0.02;
+  const CANVAS_ZOOM_MAX = 4;
+
+  // Keep the same paper point under the pointer when the canvas changes size.
+  function anchorCanvasZoom(viewport, canvas, apply, pointer = null) {
+    if (!canvas) return;
+    const frame = viewport.getBoundingClientRect();
+    const x = pointer?.clientX ?? frame.left + viewport.clientWidth / 2;
+    const y = pointer?.clientY ?? frame.top + viewport.clientHeight / 2;
+    const segment = document.elementFromPoint(x, y)?.closest?.(".crop-seg");
+    const target = segment && canvas.contains(segment) ? segment : canvas;
+    const before = target.getBoundingClientRect();
+    const rx = before.width ? (x - before.left) / before.width : 0;
+    const ry = before.height ? (y - before.top) / before.height : 0;
+    canvas.classList.add("measuring");
+    apply();
+    const after = target.getBoundingClientRect();
+    viewport.scrollLeft += after.left + rx * after.width - x;
+    viewport.scrollTop += after.top + ry * after.height - y;
+    canvas.classList.remove("measuring");
+  }
+
+  function bindCanvasPan(viewport, canStart, modal) {
+    let cleanup = null;
+    let suppressClick = false;
+    const stop = () => { if (cleanup) cleanup(); };
+    viewport.addEventListener("pointerdown", (event) => {
+      if (event.target.closest?.("a, button, input, textarea, select, summary, label, [contenteditable='true']")) return;
+      if (event.pointerType !== "mouse" || !canStart(event)) return;
+      const rect = viewport.getBoundingClientRect();
+      if (event.clientX >= rect.left + viewport.clientWidth || event.clientY >= rect.top + viewport.clientHeight) return;
+      stop();
+      event.preventDefault();
+      event.stopPropagation();
+      viewport.focus({ preventScroll: true });
+      const start = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+      let moved = false;
+      viewport.classList.add("panning");
+      const move = (next) => {
+        if (next.pointerId !== event.pointerId) return;
+        moved ||= Math.hypot(next.clientX - start.x, next.clientY - start.y) > 3;
+        viewport.scrollLeft = start.left - (next.clientX - start.x);
+        viewport.scrollTop = start.top - (next.clientY - start.y);
+      };
+      const end = (next) => {
+        if (next.type !== "blur" && next.pointerId !== event.pointerId) return;
+        suppressClick = next.type === "pointerup" && moved;
+        stop();
+        setTimeout(() => { suppressClick = false; }, 0);
+      };
+      cleanup = () => {
+        cleanup = null;
+        viewport.classList.remove("panning");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+        window.removeEventListener("blur", end);
+        viewport.removeEventListener("lostpointercapture", end);
+        if (viewport.hasPointerCapture?.(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
+      window.addEventListener("blur", end);
+      viewport.addEventListener("lostpointercapture", end);
+      try { viewport.setPointerCapture(event.pointerId); } catch { /* Window listeners still finish the gesture. */ }
+    }, { capture: true });
+    viewport.addEventListener("click", (event) => {
+      if (!suppressClick) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressClick = false;
+    }, { capture: true });
+    viewport.addEventListener("dragstart", (event) => event.preventDefault());
+    modal.addEventListener("close", stop);
+    return stop;
+  }
+
+  const viewer = { id: null, zoom: 1, mode: "fit", fitFrame: 0, imageReady: false };
 
   function viewerList() {
     return state.questions.filter(visible);
@@ -2053,6 +2327,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("zoomFit").setAttribute("aria-pressed", String(viewer.mode === "fit"));
     $("zoomWidth").setAttribute("aria-pressed", String(viewer.mode === "width"));
     $("zoomLevel").textContent = `${Math.round(viewer.zoom * 100)}%`;
+    const available = viewer.imageReady;
+    $("zoomFit").disabled = $("zoomWidth").disabled = !available;
+    $("zoomOut").disabled = !available || viewer.zoom <= CANVAS_ZOOM_MIN;
+    $("zoomIn").disabled = !available || viewer.zoom >= CANVAS_ZOOM_MAX;
   }
 
   function applyZoom() {
@@ -2076,7 +2354,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function fitViewer() {
     const dialog = $("viewerDialog");
     const q = questionById(viewer.id);
-    if (!dialog.open || viewer.mode !== "fit" || !q?.regions?.length) return;
+    if (!dialog.open || viewer.mode !== "fit" || !q?.regions?.length || !viewer.imageReady) return;
     const source = $("viewerSource");
     const crop = $("viewerCrop");
     const style = getComputedStyle(source);
@@ -2095,6 +2373,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function renderViewer() {
+    stopViewerSourcePan();
+    if (stopViewerTextPan) stopViewerTextPan();
     const q = questionById(viewer.id);
     if (!q) { $("viewerDialog").close(); return; }
     const list = viewerList();
@@ -2104,7 +2384,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const crop = $("viewerCrop");
     const regions = q.regions || [];
     if (!regions.length && viewer.mode === "fit") viewer.zoom = 1;
+    viewer.imageReady = false;
     crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots }));
+    const images = [...crop.querySelectorAll("img")];
+    const imageStates = new Map(images.map((image) => [image, "pending"]));
+    const syncImages = () => {
+      if (images.length && !crop.contains(images[0])) return;
+      const values = [...imageStates.values()];
+      viewer.imageReady = values.includes("ready");
+      const failed = values.includes("failed");
+      const status = $("viewerImageState");
+      status.hidden = !images.length || (viewer.imageReady && !failed);
+      status.classList.toggle("image-error", failed);
+      status.textContent = failed ? (viewer.imageReady ? "部分原卷图片没能加载，关闭窗口后重试。" : "原卷图片没能加载，关闭窗口后重试。") : "正在加载原卷…";
+      if (!viewer.imageReady) stopViewerSourcePan();
+      syncViewerZoom();
+      if (viewer.imageReady && viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
+    };
+    images.forEach((image) => {
+      const finish = (result) => { imageStates.set(image, result); syncImages(); };
+      image.addEventListener("load", () => finish("ready"));
+      image.addEventListener("error", () => finish("failed"));
+      if (image.complete) imageStates.set(image, image.naturalWidth ? "ready" : "failed");
+    });
+    syncImages();
     // 又宽又矮的截图（一两行字的题）改成上下排：原卷能占满整个窗口宽度。
     $("viewerSource").parentElement.classList.toggle("stacked", cropAspect(regions) > 2.5 && window.innerWidth > 1100);
     applyZoom();
@@ -2122,7 +2425,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text.append(body);
       requestAnimationFrame(() => R.fitOptions(body));
     } else text.append(el("p", "hint", q.state === "waiting" || q.state === "reading" ? "AI 正在读这道题……" : "还没有题面"));
-    [$("zoomFit"), $("zoomWidth"), $("zoomOut"), $("zoomIn")].forEach((button) => { button.disabled = !regions.length; });
+    syncViewerZoom();
     $("viewerPrev").disabled = index <= 0;
     $("viewerNext").disabled = index < 0 || index >= list.length - 1;
     const approve = $("viewerApprove");
@@ -2229,13 +2532,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (fresh) { fresh.scrollIntoView({ block: "start" }); openEditor(fresh, q); }
   }
 
-  function zoomBy(factor) {
+  function zoomBy(factor, pointer = null) {
+    if (!viewer.imageReady) return;
+    if (viewer.fitFrame) cancelAnimationFrame(viewer.fitFrame);
+    viewer.fitFrame = 0;
     viewer.mode = "manual";
-    viewer.zoom = Math.min(4, Math.max(0.08, Math.round(viewer.zoom * factor * 100) / 100));
-    applyZoom();
+    viewer.zoom = Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, Math.round(viewer.zoom * factor * 1000) / 1000));
+    anchorCanvasZoom($("viewerSource"), $("viewerCrop"), applyZoom, pointer);
   }
 
   function setViewerWidth() {
+    if (!viewer.imageReady) return;
     viewer.mode = "width";
     viewer.zoom = 1;
     applyZoom();
@@ -2253,26 +2560,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("viewerSource").addEventListener("wheel", (event) => {
     if (!event.ctrlKey) return;
     event.preventDefault();
-    zoomBy(event.deltaY < 0 ? 1.1 : 0.9);
+    if (event.deltaY) zoomBy(event.deltaY < 0 ? 1.1 : 0.9, event);
   }, { passive: false });
-  // 按住拖动平移放大后的原卷
-  $("viewerSource").addEventListener("pointerdown", (event) => {
-    if (viewer.mode === "fit" || event.button !== 0 || event.pointerType !== "mouse") return;
-    const source = $("viewerSource");
-    const start = { x: event.clientX, y: event.clientY, left: source.scrollLeft, top: source.scrollTop };
-    source.classList.add("panning");
-    const move = (moveEvent) => {
-      source.scrollLeft = start.left - (moveEvent.clientX - start.x);
-      source.scrollTop = start.top - (moveEvent.clientY - start.y);
-    };
-    const up = () => {
-      source.classList.remove("panning");
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  });
+  const stopViewerSourcePan = bindCanvasPan($("viewerSource"),
+    (event) => viewer.imageReady && (event.button === 0 || event.button === 1), $("viewerDialog"));
+  let stopViewerTextPan = null;
   // 题面较长时，也可以像拖纸张一样按住鼠标左键上下移动。
   // Alt+拖动仍交给浏览器，方便需要时选择文字；可点击控件保持原有行为。
   $("viewerText").addEventListener("pointerdown", (event) => {
@@ -2285,6 +2577,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const scrollbarHeight = text.offsetHeight - text.clientHeight;
     if (scrollbarWidth > 0 && event.clientX >= rect.right - scrollbarWidth) return;
     if (scrollbarHeight > 0 && event.clientY >= rect.bottom - scrollbarHeight) return;
+    if (stopViewerTextPan) stopViewerTextPan();
     const start = { x: event.clientX, y: event.clientY, left: text.scrollLeft, top: text.scrollTop };
     let dragging = false;
     const move = (moveEvent) => {
@@ -2301,17 +2594,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text.scrollTop = start.top - dy;
     };
     const stop = () => {
+      stopViewerTextPan = null;
       text.classList.remove("panning");
       text.removeEventListener("pointermove", move);
       text.removeEventListener("pointerup", stop);
       text.removeEventListener("pointercancel", stop);
       text.removeEventListener("lostpointercapture", stop);
+      window.removeEventListener("blur", stop);
       if (text.hasPointerCapture?.(event.pointerId)) text.releasePointerCapture(event.pointerId);
     };
+    stopViewerTextPan = stop;
     text.addEventListener("pointermove", move);
     text.addEventListener("pointerup", stop);
     text.addEventListener("pointercancel", stop);
     text.addEventListener("lostpointercapture", stop);
+    window.addEventListener("blur", stop);
     try { text.setPointerCapture(event.pointerId); } catch { /* 浏览器不支持时仍可在区域内拖动 */ }
   });
   $("viewerText").addEventListener("dragstart", (event) => {
@@ -2323,6 +2620,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (clicked && !clicked.hasAttribute("data-close")) $("viewerSource").focus({ preventScroll: true });
   });
   $("viewerDialog").addEventListener("close", () => {
+    if (stopViewerTextPan) stopViewerTextPan();
     if (viewer.fitFrame) cancelAnimationFrame(viewer.fitFrame);
     viewer.fitFrame = 0;
     const card = document.querySelector(`.card[data-id="${state.current}"]`);
@@ -3303,6 +3601,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("这项任务已有正式题库记录，为保留来源追溯只能归档", "error");
       return;
     }
+    if (!(await discardEdits())) return;
     const displayName = paperDisplayName(paper);
     const ok = await confirmDialog({
       title: `删除任务“${displayName}”？`,
@@ -3324,7 +3623,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         return;
       }
       const next = state.papers[Math.min(Math.max(oldIndex, 0), state.papers.length - 1)];
-      clearPaperSelection();
+      await clearPaperSelection();
       if (next) await selectPaper(next.id);
       toast(message, kind);
     } catch (error) { toast(error.message, "error"); }
@@ -3333,6 +3632,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function archivePaper() {
     const paper = state.paper;
     if (!paper) return;
+    if (paper.archived) { openArchivedPapers(); return; }
     if (ACTIVE_STATUS.has(paper.status)) {
       toast("任务正在处理中，完成后再归档", "error");
       return;
@@ -3341,10 +3641,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("回收站里还有题卡；请先恢复这些题卡，再归档任务", "error");
       return;
     }
+    if (!(await discardEdits())) return;
     const displayName = paperDisplayName(paper);
     const ok = await confirmDialog({
       title: `归档任务“${displayName}”？`,
-      text: "归档后会从左侧任务列表隐藏，但不会删除原文件、题卡或正式题库中的来源记录。",
+      text: "归档后会从左侧任务列表隐藏，原文件、题卡和入库历史都保留。以后可从左侧“已归档的试卷”查看或恢复。",
       ok: "归档任务"
     });
     if (!ok) return;
@@ -3354,10 +3655,35 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       await api(`/api/papers/${paperId}/archive`, { method: "POST", body: {} });
       state.papers = state.papers.filter((item) => item.id !== paperId);
       const next = state.papers[Math.min(Math.max(oldIndex, 0), state.papers.length - 1)];
-      clearPaperSelection();
+      await clearPaperSelection();
       if (next) await selectPaper(next.id);
-      toast(`已归档任务“${displayName}”`, "success");
+      toast(`已归档任务“${displayName}”；可从“已归档的试卷”找回`, "success",
+        { label: "撤销归档", onClick: () => restoreArchivedPaper(paperId) });
     } catch (error) { toast(error.message, "error"); }
+  }
+
+  async function restoreArchivedPaper(paperId) {
+    if (state.restoringPaperId) return;
+    if (state.paperId !== paperId && !(await discardEdits())) return;
+    state.restoringPaperId = paperId;
+    const restoreButtons = [...$("archivedPapersList").querySelectorAll("button"), $("restoreCurrentPaper")];
+    restoreButtons.forEach((node) => { node.disabled = true; });
+    try {
+      const data = await api(`/api/papers/${paperId}/restore`, { method: "POST", body: {} });
+      state.archivedPapers = state.archivedPapers.filter((paper) => paper.id !== paperId);
+      const index = state.papers.findIndex((paper) => paper.id === paperId);
+      if (index >= 0) state.papers[index] = data.paper;
+      else state.papers.unshift(data.paper);
+      renderArchivedPapers();
+      renderPaperList();
+      if ($("archivedPapersDialog").open) $("archivedPapersDialog").close();
+      await selectPaper(paperId);
+      toast(`已恢复“${paperDisplayName(data.paper)}”，回到这份试卷`, "success");
+    } catch (error) { toast(`恢复未完成：${error.message}`, "error"); }
+    finally {
+      state.restoringPaperId = null;
+      restoreButtons.forEach((node) => { node.disabled = false; });
+    }
   }
 
   // ---------------------------------------------------------------- 设置
@@ -3433,6 +3759,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     setApiState("settingsMinimaxState", Boolean(configured.minimax));
     setApiState("settingsSiliconflowState", Boolean(configured.siliconflow));
     setApiState("settingsModelscopeState", Boolean(configured.modelscope));
+
+    // A status response can arrive while another choice is still being saved,
+    // or while a model ID is being typed. Keep that newer form intact.
+    if (modelFormDirty) return;
 
     const choices = settingsEngineChoices(engines);
     const modelEntries = choices.map((choice) => ({
@@ -3550,6 +3880,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     syncTrashControls();
     if (!paper) return;
+    $("viewOriginalPaper").disabled = !paper.pages?.length;
+    $("viewOriginalPaper").title = paper.pages?.length ? "查看完整原卷，支持缩放和拖动"
+      : "原卷页面尚未生成，处理完成后即可查看";
     $("settingsTaskStatus").textContent = paper.status_label || paperSummary(paper);
     const active = ACTIVE_STATUS.has(paper.status);
     const hasTrash = (Number(paper.trash_count) || 0) > 0;
@@ -3574,7 +3907,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("paperNotesCount").textContent = String(notes.length);
 
     const published = paper.counts?.published || 0;
-    $("settingsArchive").hidden = false;
+    $("settingsArchive").hidden = Boolean(paper.archived);
     $("settingsArchive").disabled = active || hasTrash;
     $("settingsArchive").title = hasTrash
       ? "回收站里还有题卡；请先恢复后再归档" : "";
@@ -3627,7 +3960,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务（魔搭免费）"].filter(Boolean);
     node.className = `settings-ready ${s.upload_enabled ? "ready" : "missing"}`;
     node.textContent = s.upload_enabled
-      ? (s.assistant_mode ? "可以上传新资料：AI 助手读题，题卡先用 MinerU 的文字。" : "可以上传新资料并自动读题。")
+      ? (s.assistant_mode ? "MinerU 密钥已配置：AI 助手读题，题卡先用 MinerU 的文字。服务当前是否可用，以任务返回为准。"
+        : "所需密钥已配置，可以提交新资料。服务当前是否可用，以任务返回为准。")
       : missing.length ? `还不能上传新资料：请先填写 ${missing.join("、")} 的密钥。已有的题卡照常可以审核。下面有免费的配法。`
         : "所选的主读模型还没有密钥，暂时不能上传新资料；可以在“读题模型”里换一个已填写密钥的模型。";
     // 只在“能不能上传”变了的时候自动展开或收起，不跟用户自己的开合较劲。
@@ -3688,7 +4022,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsLens").checked = state.lens;
     $("settingsFocus").checked = state.focus;
     $("settingsAutoExpand").checked = state.autoExpand;
-    $("settingsModelResult").textContent = "";
+    if (!modelFormDirty) showModelSaveResult("");
     showSettingsTab("settingsGeneral");
     $("settingsDialog").showModal();
     void loadStatus();
@@ -3783,45 +4117,104 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   });
 
-  // 读题模型改了就保存，不用再找“保存”按钮；关掉设置也不会丢。
+  // Queue the values captured at each change, rather than reading the form
+  // later, after an older response may have arrived.
   let modelSaving = Promise.resolve();
+  let modelFormDirty = false;
+  let lastModelSave = null;
+  let modelRetryButton = null;
+  const MODEL_SAVED_MESSAGE = "已保存；从下一项新任务或重新识读开始生效，不会改写现有题卡。";
+
+  function readModelSettings() {
+    return {
+      primary: $("settingsPrimaryModel").value,
+      checker: $("settingsCheckerModel").value,
+      arbiter: $("settingsArbiterModel").value,
+      models: {
+        minimax: $("settingsMinimaxModel").value.trim(),
+        siliconflow: $("settingsSiliconflowModel").value.trim(),
+        modelscope: $("settingsModelscopeModel").value.trim()
+      },
+      plans: { minimax: $("settingsMinimaxPlan").value }
+    };
+  }
+
+  function showModelSaveResult(message, { retry = false } = {}) {
+    $("settingsModelResult").textContent = message;
+    if (!modelRetryButton && retry) {
+      modelRetryButton = button("重试保存", "small", () => { void saveModelSettings(); });
+      modelRetryButton.id = "settingsModelRetry";
+      $("settingsModelResult").parentElement.append(modelRetryButton);
+    }
+    if (modelRetryButton) modelRetryButton.hidden = !retry;
+  }
+
   function saveModelSettings() {
-    modelSaving = modelSaving.then(saveModelSettingsNow, saveModelSettingsNow);
+    const body = readModelSettings();
+    const signature = JSON.stringify(body);
+    // Native blur/change and dialog cancel/close can describe the same edit.
+    // Keep one request; a failed request remains explicitly retryable.
+    if (lastModelSave?.signature === signature && !lastModelSave.failed) {
+      if (lastModelSave.succeeded) {
+        modelFormDirty = false;
+        showModelSaveResult(MODEL_SAVED_MESSAGE);
+      }
+      return modelSaving;
+    }
+    const change = { body, signature, failed: false, succeeded: false };
+    lastModelSave = change;
+    modelFormDirty = true;
+    showModelSaveResult("正在保存…");
+    modelSaving = modelSaving.then(() => saveModelSettingsNow(change), () => saveModelSettingsNow(change));
     return modelSaving;
   }
-  ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel", "settingsSiliconflowModel",
-    "settingsModelscopeModel", "settingsMinimaxPlan"]
+
+  const modelSettingFields = ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel", "settingsMinimaxModel",
+    "settingsSiliconflowModel", "settingsModelscopeModel", "settingsMinimaxPlan"];
+  modelSettingFields.forEach((id) => $(id).addEventListener("input", () => {
+    modelFormDirty = true;
+    showModelSaveResult("有改动待保存；离开输入框或关闭设置后会自动保存。", { retry: Boolean(lastModelSave?.failed) });
+  }));
+  modelSettingFields
     .forEach((id) => $(id).addEventListener("change", () => { void saveModelSettings(); }));
   $("modelSettingsForm").addEventListener("submit", (event) => {
     event.preventDefault();
     void saveModelSettings();
   });
 
-  async function saveModelSettingsNow() {
-    $("settingsModelResult").textContent = "正在保存…";
+  function saveModelDraftOnClose() {
+    if (!modelFormDirty) return;
+    const signature = JSON.stringify(readModelSettings());
+    if (lastModelSave?.signature !== signature) void saveModelSettings();
+  }
+  $("settingsDialog").addEventListener("cancel", saveModelDraftOnClose);
+  $("settingsDialog").addEventListener("close", saveModelDraftOnClose);
+
+  async function saveModelSettingsNow(change) {
     try {
-      await api("/api/settings/models", {
-        method: "POST",
-        body: {
-          primary: $("settingsPrimaryModel").value,
-          checker: $("settingsCheckerModel").value,
-          arbiter: $("settingsArbiterModel").value,
-          models: {
-            minimax: $("settingsMinimaxModel").value.trim(),
-            siliconflow: $("settingsSiliconflowModel").value.trim(),
-            modelscope: $("settingsModelscopeModel").value.trim()
-          },
-          plans: { minimax: $("settingsMinimaxPlan").value }
-        }
-      });
-      const message = "已保存；从下一项新任务或重新识读开始生效，不会改写现有题卡。";
-      $("settingsModelResult").textContent = message;
+      await api("/api/settings/models", { method: "POST", body: change.body });
+      change.succeeded = true;
+      if (change !== lastModelSave) return;
+      // An uncommitted text edit is also a newer intent. A completed save must
+      // not replace it with the older value before blur/change submits it.
+      if (JSON.stringify(readModelSettings()) !== change.signature) {
+        showModelSaveResult("有新改动待保存；离开输入框或关闭设置后会自动保存。");
+        return;
+      }
+      modelFormDirty = false;
+      const message = MODEL_SAVED_MESSAGE;
+      showModelSaveResult(message);
       toast(message, "success");
-      await loadStatus();
-      renderSettingsModels();
+      const refreshed = await loadStatus();
+      if (!refreshed && change === lastModelSave && !modelFormDirty) {
+        showModelSaveResult(`${message} 当前状态暂未刷新，重新打开设置即可查看。`);
+      }
     } catch (error) {
-      $("settingsModelResult").textContent = error.message;
-      toast(error.message, "error");
+      change.failed = true;
+      if (change !== lastModelSave) return;
+      const message = `未保存：${error.message}。你的选择仍保留，可以重试保存。`;
+      showModelSaveResult(message, { retry: true });
+      toast(message, "error");
     }
   }
 
@@ -3903,7 +4296,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
     if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
     toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
-      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => { window.location.href = "/library"; } } : null);
+      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => leaveFor("/library") } : null);
     // The button keeps its last count until the refreshed counts redraw it.
     if (state.paperId === paperId) refreshPaper();
     loadPapers();
@@ -4002,10 +4395,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 下面，和原卷上下对照；截图太高、上下堆叠或窄屏时放在题干输入框下面。
     const previewBox = el("div", "editor-preview-box");
     const preview = el("div", "editor-preview");
-    previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), preview);
+    const positionHint = el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
+    previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), positionHint, preview);
     const saveButton = el("button", "button primary", "保存");
     saveButton.type = "submit";
-    const cancel = button("取消", "", () => close());
+    const cancel = button("取消", "", () => discardEdits([q.id]));
     const bar = el("div", "editor-actions");
     bar.append(saveButton, cancel, el("p", "hint", "Ctrl+Enter 保存 · Esc 取消"));
     editor.append(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
@@ -4018,15 +4412,74 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       analysis: analysis.value,
       origin: origin.value
     });
+    editGuard.track(q.id, collect, () => close(), () => stem.focus({ preventScroll: true }));
+    const previewInputs = new Map([[stem, "stem"], [answer, "answer"], [analysis, "analysis"],
+      ...OPTION_KEYS.map((key) => [optionInputs[key], key])]);
+    const fieldName = (field) => ({ stem: "题干", answer: "答案", analysis: "解析" }[field] || `${field} 选项`);
+    let activePreviewInput = stem;
+    let composing = false;
+    let positionFrame = 0;
+    const showPosition = () => {
+      const input = activePreviewInput;
+      if (!input || !previewInputs.has(input)) return;
+      const field = previewInputs.get(input);
+      const shown = R.previewSelection(preview, { field, start: input.selectionStart ?? 0, end: input.selectionEnd ?? 0 });
+      const detail = composing ? "正在输入，预览会跟随输入内容更新。"
+        : shown?.kind === "math" ? (shown.automatic
+          ? "蓝框对应正在修改的数字或数学内容；实际输入位置请看输入框光标。"
+          : shown.exact
+          ? "绿色符号对应光标附近或所选范围，蓝框是这条公式；实际插入位置请看输入框光标。"
+          : "蓝框是正在修改的公式；公式内的位置请看输入框光标。$…$ 和反斜杠是公式写法。")
+        : shown?.kind === "table" ? "正在修改表格；分隔线和 | 用来排表格，输入框保留原写法。"
+        : shown?.kind === "blank" ? "正在修改这处填空；输入框保留原来的括号或下划线。"
+        : shown?.collapsed ? "绿线是当前输入位置。选中文字时，预览会标出对应范围。"
+        : "浅绿色是当前选中的文字；替换后预览会更新。";
+      positionHint.textContent = `${fieldName(field)} · ${detail}`;
+      preview.dataset.activeField = field;
+      // Reveal a position only inside this preview's own scroll area. Never
+      // move the page, and leave its scroll alone while the position is visible.
+      const symbol = Array.from(preview.querySelectorAll(".qb-preview-active-symbol [style]"))
+        .find((node) => node.style.color === "rgb(31, 107, 95)" || node.style.color === "#1f6b5f");
+      const target = symbol || preview.querySelector(".qb-preview-caret, .qb-preview-selection, .qb-preview-active-formula, .qb-preview-active-region");
+      if (target) {
+        const bounds = preview.getBoundingClientRect();
+        const rect = target.getBoundingClientRect();
+        if (preview.scrollHeight > preview.clientHeight) {
+          if (rect.top < bounds.top + 10) preview.scrollTop -= bounds.top + 10 - rect.top;
+          else if (rect.bottom > bounds.bottom - 10 && rect.height < preview.clientHeight - 20) preview.scrollTop += rect.bottom - bounds.bottom + 10;
+        }
+        if (preview.scrollWidth > preview.clientWidth) {
+          if (rect.left < bounds.left + 10) preview.scrollLeft -= bounds.left + 10 - rect.left;
+          else if (rect.right > bounds.right - 10 && rect.width < preview.clientWidth - 20) preview.scrollLeft += rect.right - bounds.right + 10;
+        }
+      }
+    };
+    const updatePosition = (event) => {
+      if (previewInputs.has(event?.target)) activePreviewInput = event.target;
+      if (positionFrame) return;
+      positionFrame = requestAnimationFrame(() => { positionFrame = 0; showPosition(); });
+    };
+    previewInputs.forEach((field, input) => {
+      ["focus", "click", "select", "keyup"].forEach((name) => input.addEventListener(name, updatePosition));
+      input.addEventListener("compositionstart", (event) => { composing = true; updatePosition(event); });
+      input.addEventListener("compositionend", (event) => { composing = false; updatePosition(event); });
+    });
+    const selectionChanged = () => { if (previewInputs.has(document.activeElement)) updatePosition({ target: document.activeElement }); };
+    document.addEventListener("selectionchange", selectionChanged);
     // One typeset per frame however fast the typing is.
     let frame = 0;
-    const update = () => {
+    const update = (event) => {
+      if (previewInputs.has(event?.target)) activePreviewInput = event.target;
       optionBox.hidden = !CHOICE.has(typeSelect.value) && !OPTION_KEYS.some((k) => optionInputs[k].value.trim());
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         const data = collect();
-        R.renderQuestion(preview, { ...content(q), ...data, options: optionBox.hidden ? {} : data.options }, { showNumber: false, showAnswer: "open" });
+        const scroll = { top: preview.scrollTop, left: preview.scrollLeft };
+        R.renderQuestion(preview, { ...content(q), ...data, options: optionBox.hidden ? {} : data.options }, { showNumber: false, showAnswer: "open", trackSource: true });
+        preview.scrollTop = scroll.top;
+        preview.scrollLeft = scroll.left;
+        showPosition();
       });
     };
     const placePreview = () => {
@@ -4039,17 +4492,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       previewBox.classList.toggle("beside", beside);
       previewBox.style.setProperty("--preview-room", beside ? `${Math.round(room - 30)}px` : "none");
     };
-    const relayout = () => { fitStem(); placePreview(); };
+    const relayout = () => { fitStem(); placePreview(); updatePosition(); };
     editor.addEventListener("input", update);
     stem.addEventListener("input", fitStem);
     window.addEventListener("resize", relayout);
     editor.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") { event.preventDefault(); close(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); discardEdits([q.id]); }
       else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); editor.requestSubmit(); }
     });
     editor.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (editGuard.hasSaving([q.id])) return;
       saveButton.disabled = true;
+      editGuard.setSaving(q.id, true);
       try {
         const data = collect();
         if (optionBox.hidden) data.options = {};
@@ -4062,12 +4517,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } catch (error) {
         toast(error.message, "error");
         saveButton.disabled = false;
+        editGuard.setSaving(q.id, false);
       }
     });
     function close(rerender = true) {
+      editGuard.release(q.id);
       state.editing.delete(q.id);
       card.classList.remove("editing");
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(positionFrame);
+      document.removeEventListener("selectionchange", selectionChanged);
       window.removeEventListener("resize", relayout);
       previewBox.remove();
       editor.remove();
@@ -4087,36 +4546,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // The original stays in sight while typing: the left column is sticky.
     card.classList.add("editing");
     let prefilled = null;
-    if (prefill && optionInputs[prefill.field]) {
-      // 框选识读的结果：填进那个选项，标出来，人看过再保存。
-      prefilled = optionInputs[prefill.field];
-      prefilled.value = prefill.value;
-      prefilled.classList.add("prefilled");
-      prefilled.title = "框选识读读出来的字，请对照原卷后保存";
+    let prefillSelection = null;
+    if (prefill) {
+      const target = Array.from(previewInputs).find(([, field]) => field === prefill.field)?.[0];
+      const replacement = target && QBEdits.reviewedPrefill(target.value, prefill);
+      if (replacement) {
+        prefilled = target;
+        target.value = replacement.value;
+        prefillSelection = [replacement.start, replacement.end];
+        prefilled.classList.add("prefilled");
+        target.title = "框选识读读出来的字，请对照原卷后保存";
+        if (target === answer || target === analysis) extra.open = true;
+      } else toast("原题文字或替换范围已经变化，未填入识读结果；请重新核对", "error");
     }
     fitStem();
     placePreview();
     update();
     (prefilled || stem).focus({ preventScroll: true });
+    if (prefillSelection) prefilled.setSelectionRange(...prefillSelection);
     card.scrollIntoView({ block: "start" });
   }
 
   // ---------------------------------------------------------------- 框选识读（1.10.2）
 
-  // Where the read text probably goes: an option the reading missed or invented a note for, else the stem.
+  // Start with an AI suggestion; retain a target the person already chose.
   function readTargetGuess(q) {
-    if (q.region_read?.target) return q.region_read.target;
-    const options = q.options || {};
-    const letters = Object.keys(options).filter((key) => OPTION_KEYS.includes(key) && String(options[key] || "").trim());
-    if (CHOICE.has(q.question_type) || letters.length) {
-      const last = Math.max(3, ...letters.map((key) => OPTION_KEYS.indexOf(key)));
-      const missing = OPTION_KEYS.slice(0, last + 1).find((key) => !String(options[key] || "").trim()
-        && !(q.figures || []).some((figure) => figure.slot === key));
-      if (missing) return missing;
-      const spot = (q.check_spots || []).find((item) => OPTION_KEYS.includes(item.field));
-      if (spot) return spot.field;
-    }
-    return "stem";
+    if (q.region_read?.target && ["auto", "stem", ...OPTION_KEYS].includes(q.region_read.target)) return q.region_read.target;
+    return "auto";
   }
 
   function regionReadPending(q) {
@@ -4129,11 +4585,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } catch (error) { toast(error.message, "error"); }
   }
 
-  function fillRegionRead(card, q) {
+  function fillRegionRead(card, q, target = null) {
     const read = q.region_read;
     if (!read?.text) return;
-    if (read.target !== "stem") {
-      openEditor(card, q, { prefill: { field: read.target, value: read.text } });
+    if (!target && read.target === "auto") {
+      const prefill = QBRegionAssist.recommendedPrefill(q, read);
+      if (!prefill) { toast("位置建议已经失效，请重新识读或手动选择位置", "error"); return; }
+      openEditor(card, q, { prefill });
+      return;
+    }
+    target = target || read.target;
+    if (OPTION_KEYS.includes(target)) {
+      openEditor(card, q, { prefill: { field: target, value: read.text } });
       return;
     }
     // A piece of the stem: copy it, the person pastes it where it belongs.
@@ -4161,12 +4624,61 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const text = el("div", "region-read-text");
       R.renderTypeset(text, read.text);
       panel.append(text);
-      if (read.engine) panel.append(el("p", "hint", `${read.engine} 只读了框里的这一块；请对照原卷确认后再填入`));
+      if (read.engine) panel.append(el("p", "hint", `${read.engine} 读了框里的这一块；请对照原卷确认后再填入`));
     }
     const actions = el("div", "region-read-actions");
     if (read.status === "done" && read.text) {
-      const label = read.target === "stem" ? "复制并打开改字" : `填入${read.target_name || read.target}（打开改字）`;
-      actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
+      if (read.target === "auto") {
+        const r = read.recommendation || {};
+        const prefill = QBRegionAssist.recommendedPrefill(q, read);
+        const suggestion = el("div", "region-recommendation");
+        if (prefill) {
+          suggestion.append(el("strong", "", `建议替换：${prefill.field === "stem" ? "题干中的这一段" : `选项 ${prefill.field}`}`),
+            el("p", "hint", r.why || "请对照原卷与下面的替换内容，确认位置后填入改字。"));
+          const comparison = el("div", "region-location-comparison");
+          [["替换前", r.before || "（原选项为空）", "region-location-before"],
+            ["替换后", r.after, "region-location-after"]].forEach(([label, value, className]) => {
+            const part = el("div", className);
+            part.append(el("p", "hint", label));
+            const body = el("div");
+            R.renderTypeset(body, value);
+            part.append(body);
+            comparison.append(part);
+          });
+          suggestion.append(comparison);
+          const position = el("details", "region-location-context");
+          position.append(el("summary", "", "查看完整替换位置"));
+          const location = el("div", "paper");
+          R.renderQuestion(location, content(q), { showNumber: false, showAnswer: "none",
+            marks: { [prefill.field]: [{ start: prefill.start, end: prefill.end, kind: "region-location", exact: true }] } });
+          position.append(location);
+          suggestion.append(position);
+          actions.append(button("确认位置并填入改字", "small primary", () => fillRegionRead(card, q)));
+        } else {
+          suggestion.append(el("strong", "", r.status === "stale" ? "题目已改过，这次位置建议已失效" : "没有确定的替换位置"),
+            el("p", "hint", r.why || "识读文字已保留。可以重新框选，或手动选择它属于哪一部分。"));
+        }
+        const manual = el("details", "region-manual-target");
+        manual.open = !prefill;
+        manual.append(el("summary", "", prefill ? "改选其他位置" : "手动选择替换位置"));
+        const select = el("select");
+        select.setAttribute("aria-label", "手动选择替换位置");
+        [["stem", "题干（复制后自行粘贴）"], ...OPTION_KEYS.map((key) => [key, `选项 ${key}`])].forEach(([value, label]) => {
+          const option = el("option", "", label);
+          option.value = value;
+          select.append(option);
+        });
+        const fill = button("复制并打开改字", "small", () => fillRegionRead(card, q, select.value));
+        select.addEventListener("change", () => {
+          fill.textContent = select.value === "stem" ? "复制并打开改字" : `填入选项 ${select.value}（打开改字）`;
+        });
+        manual.append(select, fill, el("p", "hint", "手动选择选项会替换整个选项；题干文字先复制，再粘贴到你选的位置。填入后仍需保存。"));
+        suggestion.append(manual);
+        panel.append(suggestion);
+      } else {
+        const label = read.target === "stem" ? "复制并打开改字" : `填入${read.target_name || read.target}（打开改字）`;
+        actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
+      }
     }
     actions.append(button("重新框", "small", () => openPageDialog("read", q)),
       button(regionReadPending(q) ? "不读了" : "关闭", "small quiet", () => dismissRegionRead(q)));
@@ -4178,12 +4690,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const dialog = {
     mode: null, question: null, boxes: [], page: 0, drag: null,
+    zoom: 1, zoomMode: "width", zoomFrame: 0, spacePan: false, imageReady: false,
     slotTarget: null, slotAnchor: null, pendingFigure: null, ignoredCandidates: new Set()
   };
 
   function openPageDialog(mode, q = null, { page: requestedPage = null } = {}) {
-    if (!state.paper?.pages?.length) return;
+    if (!state.paper?.pages?.length) { toast("原卷页面尚未生成", "error"); return; }
     dialog.mode = mode;
+    dialog.zoom = 1;
+    dialog.zoomMode = mode === "view" ? "fit" : "width";
+    dialog.spacePan = false;
+    $("pageStage").classList.toggle("read-only", mode === "view");
+    $("pageStage").classList.remove("pan-ready");
     dialog.question = q;
     closeFigureSlotMenu({ cancelPending: true, rerender: false });
     if (mode === "regions") dialog.boxes = q.regions.map((r) => ({ page_idx: r.page_idx, bbox: [...r.bbox] }));
@@ -4214,17 +4732,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage : firstPage;
     dialog.scrolled = false;
     dialog.selected = null;
+    $("pageStage").scrollTo({ top: 0, left: 0 });
     dialog.ignoredCandidates = new Set(Array.isArray(q?.figure_review?.ignored_candidates)
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
     $("pageDialogTitle").textContent = mode === "regions" ? `调整第 ${q.number} 题的原卷范围`
-      : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读` : "手动补一道题";
+      : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读`
+        : mode === "view" ? "查看整份原卷" : "手动补一道题";
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小 · 拖框内部移动 · 空白处拖出新框补上跨栏/跨页部分 · 选中后方向键微调、Delete 删除 · 保存后 AI 按新范围重读"
       : mode === "figures"
         ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
         : mode === "read"
-          ? "框住要单独识读的那一块印刷字（比如被手写盖住的选项），在右上角选好读出来的字填到哪里，再点“识读这一块”。读完显示在题卡上，你确认后再填入。"
-          : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
+          ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
+          : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
+            : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
+    $("pageDialogSave").hidden = mode === "view";
+    $("pageDialogClose").textContent = mode === "view" ? "关闭" : "取消";
+    $("pageCanvasHint").textContent = mode === "view"
+      ? "Ctrl+滚轮缩放 · 按住鼠标左键拖动画布"
+      : "Ctrl+滚轮缩放 · 空格+左键或中键拖画布 · 左键仍然画框";
     $("numberField").hidden = mode !== "new";
     $("readTargetField").hidden = mode !== "read";
     $("pageDialogSave").textContent = mode === "read" ? "识读这一块" : "保存";
@@ -4252,7 +4778,91 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderPageTabs();
     renderStage();
     $("pageDialog").showModal();
+    requestPageZoom();
+    if (mode !== "new") $("pageStage").focus({ preventScroll: true });
   }
+
+  function applyPageZoom() {
+    const stage = $("pageStage");
+    const surface = stage.querySelector(".stage-surface");
+    if (!surface || !$("pageDialog").open) return;
+    const style = getComputedStyle(stage);
+    const width = Math.min(1340, stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+    const height = stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    if (!(width > 0) || !(height > 0)) return;
+    const page = pageInfo(dialog.page);
+    if (dialog.zoomMode === "fit") {
+      dialog.zoom = Math.max(CANVAS_ZOOM_MIN, Math.min(1, height / (width * page.height / page.width)));
+    } else if (dialog.zoomMode === "width") dialog.zoom = 1;
+    surface.style.maxWidth = "none";
+    surface.style.width = `${width * dialog.zoom}px`;
+    $("pageZoomLevel").textContent = `${Math.round(dialog.zoom * 100)}%`;
+    $("pageZoomFit").setAttribute("aria-pressed", String(dialog.zoomMode === "fit"));
+    $("pageZoomWidth").setAttribute("aria-pressed", String(dialog.zoomMode === "width"));
+    $("pageZoomFit").disabled = $("pageZoomWidth").disabled = !dialog.imageReady;
+    $("pageZoomOut").disabled = !dialog.imageReady || dialog.zoom <= CANVAS_ZOOM_MIN;
+    $("pageZoomIn").disabled = !dialog.imageReady || dialog.zoom >= CANVAS_ZOOM_MAX;
+  }
+
+  function requestPageZoom(mode = null) {
+    if (mode && dialog.drag) return false;
+    if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
+    dialog.zoomFrame = requestAnimationFrame(() => {
+      dialog.zoomFrame = requestAnimationFrame(() => {
+        dialog.zoomFrame = 0;
+        if (mode && dialog.drag) return;
+        if (mode) dialog.zoomMode = mode;
+        applyPageZoom();
+        if (mode) $("pageStage").scrollTo({ top: 0, left: 0 });
+      });
+    });
+    return true;
+  }
+
+  function zoomPageBy(factor, pointer = null) {
+    if (dialog.drag || !dialog.imageReady) return;
+    if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
+    dialog.zoomFrame = 0;
+    dialog.zoomMode = "manual";
+    dialog.zoom = Math.max(CANVAS_ZOOM_MIN, Math.min(CANVAS_ZOOM_MAX, Math.round(dialog.zoom * factor * 1000) / 1000));
+    anchorCanvasZoom($("pageStage"), $("pageStage").querySelector(".stage-surface"), applyPageZoom, pointer);
+  }
+
+  $("viewOriginalPaper").addEventListener("click", () => closeSettingsThen(() => openPageDialog("view")));
+  $("pageZoomFit").addEventListener("click", () => { if (requestPageZoom("fit")) $("pageStage").focus({ preventScroll: true }); });
+  $("pageZoomWidth").addEventListener("click", () => { if (requestPageZoom("width")) $("pageStage").focus({ preventScroll: true }); });
+  $("pageZoomIn").addEventListener("click", () => { zoomPageBy(1.25); $("pageStage").focus({ preventScroll: true }); });
+  $("pageZoomOut").addEventListener("click", () => { zoomPageBy(0.8); $("pageStage").focus({ preventScroll: true }); });
+  $("pageStage").addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    if (event.deltaY) zoomPageBy(event.deltaY < 0 ? 1.1 : 0.9, event);
+  }, { passive: false });
+  $("pageImageRetry").addEventListener("click", () => {
+    stopPageCanvasPan();
+    if (dialog.drag) dialog.drag();
+    renderStage();
+  });
+  const stopPageCanvasPan = bindCanvasPan($("pageStage"), (event) => !dialog.drag && dialog.imageReady
+    && (event.button === 1 || (event.button === 0 && (dialog.mode === "view" || dialog.spacePan))), $("pageDialog"));
+  const clearPagePanKey = () => {
+    dialog.spacePan = false;
+    $("pageStage").classList.remove("pan-ready");
+  };
+  document.addEventListener("keydown", (event) => {
+    if (!$("pageDialog").open || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target.closest?.("input, textarea, select, button, summary, [contenteditable='true']")) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      dialog.spacePan = true;
+      $("pageStage").classList.add("pan-ready");
+    } else if (["+", "="].includes(event.key)) { event.preventDefault(); zoomPageBy(1.25); }
+    else if (["-", "_"].includes(event.key)) { event.preventDefault(); zoomPageBy(0.8); }
+    else if (event.key === "0") { event.preventDefault(); requestPageZoom("fit"); }
+    else if (event.key.toLowerCase() === "w") { event.preventDefault(); requestPageZoom("width"); }
+  });
+  document.addEventListener("keyup", (event) => { if (event.key === " ") clearPagePanKey(); });
+  window.addEventListener("blur", clearPagePanKey);
 
   function removeBox(index) {
     if (index === null || index === undefined || !dialog.boxes[index]) return;
@@ -4278,7 +4888,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function goToDialogPage(pageIdx, { focusTab = false, closePicker = false } = {}) {
     if (!(state.paper?.pages || []).some((page) => page.page_idx === pageIdx)) return;
     closeFigureSlotMenu({ cancelPending: true, rerender: false });
+    stopPageCanvasPan();
+    if (dialog.drag) dialog.drag();
     dialog.page = pageIdx;
+    dialog.scrolled = false;
+    $("pageStage").scrollTo({ top: 0, left: 0 });
     if (closePicker) $("allPagesPicker").open = false;
     renderPageTabs();
     renderStage();
@@ -4578,6 +5192,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const origin = box.label_offset || {
       x: Number(tab.dataset.autoX || 0), y: Number(tab.dataset.autoY || 0)
     };
+    const savedOffset = box.label_offset ? { ...box.label_offset } : null;
     let moved = false;
     const move = (moveEvent) => {
       const dx = moveEvent.clientX - start.x;
@@ -4589,15 +5204,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       tab.style.transform = `translate(${box.label_offset.x}px, ${box.label_offset.y}px)`;
     };
     const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      finish();
       if (moved) {
         box.suppressLabelClick = true;
         autoPlaceFigureLabels(surface);
       }
     };
+    const cancel = () => {
+      finish();
+      if (savedOffset) box.label_offset = savedOffset;
+      else delete box.label_offset;
+      if (surface.isConnected) autoPlaceFigureLabels(surface);
+    };
+    const finish = () => {
+      dialog.drag = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+    };
+    dialog.drag = cancel;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
   }
 
   $("figureSlotMenu").querySelectorAll("[data-figure-slot]").forEach((item) => {
@@ -4632,6 +5262,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   window.addEventListener("resize", () => {
     const surface = $("pageStage").querySelector(".stage-surface");
+    if ($("pageDialog").open) {
+      anchorCanvasZoom($("pageStage"), surface, applyPageZoom);
+    }
     if ($("pageDialog").open && dialog.mode === "figures" && surface) autoPlaceFigureLabels(surface);
     else if (menuIsOpen() && dialog.slotAnchor?.isConnected) positionFigureSlotMenu(dialog.slotAnchor);
   });
@@ -4639,12 +5272,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (menuIsOpen() && dialog.slotAnchor?.isConnected) positionFigureSlotMenu(dialog.slotAnchor);
   }, { passive: true });
   $("pageDialog").addEventListener("close", () => {
+    if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
+    dialog.zoomFrame = 0;
+    clearPagePanKey();
+    if (dialog.drag) dialog.drag();
     closeFigureSlotMenu({ cancelPending: true, rerender: false });
   });
 
   function renderStage() {
     const stage = $("pageStage");
+    const scroll = { left: stage.scrollLeft, top: stage.scrollTop };
     stage.replaceChildren();
+    dialog.imageReady = false;
+    ["pageZoomFit", "pageZoomWidth", "pageZoomOut", "pageZoomIn"].forEach((id) => { $(id).disabled = true; });
+    $("pageImageState").hidden = false;
+    $("pageImageState").classList.remove("page-image-error");
+    $("pageImageState").textContent = "正在加载原卷…";
+    $("pageImageRetry").hidden = true;
     const page = pageInfo(dialog.page);
     const surface = el("div", "stage-surface");
     surface.style.aspectRatio = `${page.width} / ${page.height}`;
@@ -4652,6 +5296,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     image.src = previewUrl(state.paperId, dialog.page);
     image.alt = `原卷第 ${dialog.page + 1} 页`;
     image.draggable = false;
+    image.addEventListener("load", () => {
+      if (!surface.isConnected || !$("pageDialog").open) return;
+      dialog.imageReady = true;
+      $("pageImageState").hidden = true;
+      applyPageZoom();
+    }, { once: true });
+    image.addEventListener("error", () => {
+      if (!surface.isConnected || !$("pageDialog").open) return;
+      dialog.imageReady = false;
+      $("pageImageState").hidden = false;
+      $("pageImageState").textContent = "原卷图片没能加载，请重试。";
+      $("pageImageState").classList.add("page-image-error");
+      $("pageImageRetry").hidden = false;
+      applyPageZoom();
+    }, { once: true });
     surface.append(image);
     const q = dialog.question;
 
@@ -4795,6 +5454,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       startDrag(event, surface, null, "create");
     });
     stage.append(surface);
+    applyPageZoom();
+    stage.scrollTo(scroll);
     if (!dialog.scrolled) {
       dialog.scrolled = true;
       image.addEventListener("load", () => {
@@ -4812,7 +5473,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function startDrag(event, surface, index, handle) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || dialog.mode === "view" || dialog.spacePan || !dialog.imageReady) return;
+    $("pageStage").focus({ preventScroll: true });
     event.preventDefault();
     const start = pointFrom(event, surface);
     const target = index === null ? null : event.currentTarget;
@@ -4847,8 +5509,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       placeBox(target, box.bbox);
     };
     const up = (upEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      finish();
       if (handle === "create") {
         const [x, y] = pointFrom(upEvent, surface);
         const bbox = [Math.min(x, start[0]), Math.min(y, start[1]), Math.max(x, start[0]), Math.max(y, start[1])].map((v) => Math.round(v * 10) / 10);
@@ -4867,13 +5528,29 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       renderStage();
     };
+    const cancel = () => {
+      finish();
+      if (box) { box.bbox = original; if (target.isConnected) placeBox(target, original); }
+      preview?.remove();
+    };
+    const finish = () => {
+      dialog.drag = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+    };
+    dialog.drag = cancel;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
   }
 
   function readingOrder(boxes) { return QBFigureJoin.readingOrder(boxes); }
 
   $("pageDialogSave").addEventListener("click", async () => {
+    if (dialog.mode === "view") return;
     const q = dialog.question;
     try {
       if (dialog.mode === "regions") {
@@ -5356,6 +6033,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   $("splitConfirm").addEventListener("click", async () => {
     if (!splitPlan.paperId || splitPlan.groups.length < 2) return;
+    if (!(await discardEdits())) return;
     const save = $("splitConfirm");
     const groupCount = splitPlan.groups.length;
     save.disabled = true;
@@ -5365,7 +6043,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       if ($("splitDialog").open) $("splitDialog").close();
       const targetId = data.papers?.[0]?.id || data.paper?.id || null;
-      clearPaperSelection();
+      await clearPaperSelection();
       await loadPapers();
       const target = targetId && state.papers.find((paper) => paper.id === targetId);
       if (target) await selectPaper(target.id);
@@ -5914,7 +6592,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     await loadPapers();
     const params = new URLSearchParams(window.location.search);
     const wanted = params.get("paper") || params.get("document");
-    if (wanted && state.papers.some((paper) => paper.id === wanted)) {
+    let wantedAvailable = Boolean(wanted && state.papers.some((paper) => paper.id === wanted));
+    // An archived paper stays reachable from its source link and after a refresh.
+    if (!wantedAvailable && wanted && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wanted)) {
+      try {
+        const data = await api(`/api/papers/${wanted}`);
+        wantedAvailable = Boolean(data.paper);
+        if (data.paper && !data.paper.archived) state.papers.push(data.paper);
+      } catch (error) { toast(error.message, "error"); }
+    }
+    if (wantedAvailable) {
       await selectPaper(wanted);
       const draft = Number(params.get("draft"));
       if (draft && questionById(draft)) {

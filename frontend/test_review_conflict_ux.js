@@ -52,7 +52,9 @@ for (const id of ["pagePrevious", "pageNumberInput", "pageNext", "pageTabs", "al
 assert.match(js, /function relatedDialogPages/);
 assert.match(js, /function renderPageSearchResults/);
 assert.doesNotMatch(js, /state\.paper\.pages\.forEach\(\(page, index\) => \{[\s\S]{0,500}tabs\.append\(tab\)/);
-assert.match(css, /\.page-stage\s*\{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*220px/s);
+// The fixed-height dialog gives the canvas its remaining space; it must shrink and scroll.
+// Real usable dimensions and reachable controls are checked by check_page_canvas_browser.py.
+assert.match(css, /\.page-stage\s*\{[^}]*flex:\s*1 1 auto[^}]*overflow:\s*auto/s);
 assert.match(css, /\.page-picker-popover\s*\{[^}]*position:\s*absolute[^}]*max-height:/s);
 
 // 未分类候选显示数量并分流；快捷确认保留 A-D 归属，不再一律写成题干。
