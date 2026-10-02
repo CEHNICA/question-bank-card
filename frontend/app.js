@@ -489,45 +489,72 @@ const QBTableText = (() => {
 const QBTeach = (() => {
   "use strict";
 
+  const VERSION = 2;
   const LESSONS = [
-    { key: "card", title: "认识题卡", manual: true,
-      text: "一道题一张卡：左边是原卷截图，右边是读出来的题面。先看看第 1 题，看完点“下一步”。" },
-    { key: "viewer", title: "放大对照",
-      text: "点第 1 题左边的原卷截图（或按空格键），在大窗口里逐字对照。看完按 Esc 或点“关闭”。" },
+    { key: "card", title: "一道题，一张卡", manual: true,
+      text: "左边是原卷，右边是题面。先看第 1 题：打勾表示你已对照确认；黄色只提示有疑点，绿色也不代表一定正确。" },
+    { key: "viewer", title: "放大，再拖着看", manual: true,
+      text: "点第 1 题的原卷截图。鼠标放在原卷上，按 Ctrl 滚轮放大，再按住左键拖动；也能点 ＋、全题、适宽。看完点“下一步”。" },
     { key: "tick", title: "对了就打勾",
-      text: "第 1 题读得没错。点题号左边的方框打勾（或按 Enter），标记通过。" },
-    { key: "todo", title: "先看有疑点的",
-      text: "点上方的“需逐题核对”，只看有疑点的题卡，先处理它们。" },
-    { key: "fix", title: "发现读错的字",
-      text: "第 9 题标黄的地方，两次读法不一样。对照原卷：原卷印的是“向右移动 5 个单位”。点“改字”，把 3 改成 5，再点“保存”。" },
-    { key: "tick9", title: "改完再打勾",
-      text: "改好了。再对照一遍原卷，没问题就给第 9 题打勾。" },
+      text: "对照第 1 题，确认没错，再点题号左边的方框（或按 Enter）标记通过。已通过的题会收起，随时能展开。" },
+    { key: "fix", title: "改错字，边改边看",
+      text: "第 9 题原卷是“向右移动 5 个单位”。点“改字”，把 3 改成 5：预览的绿线、选区或公式框会指出修改位置。点“保存”；改完还需重新核对、打勾。" },
     { key: "figure", title: "补上配图",
-      text: "第 2 题说“如图”，但还没有配图。点黄色提示里的“补选配图”，在原卷上点蓝色的候选图，选“题干”，再点右上角“保存”。" },
-    { key: "table", title: "核对表格",
-      text: "第 3 题的表格已经排成文字。点“全部”回到所有题卡，对照原卷逐格看一遍，没问题就给第 3 题打勾。" },
-    { key: "green", title: "剩下的一起通过",
-      text: "其余题卡都是几次读法一致的绿卡。真实使用时要逐张看过再通过；练习时可以直接点右上角“批量标记绿卡通过”。" },
-    { key: "publish", title: "入库",
-      text: "都通过了，最后点右上角“入库”。示例试卷只用来练习，不会真的进入正式题库。" },
-    { key: "finish", title: "学会了", manual: true, final: true,
-      text: "你已经走完一份试卷的全部流程：对照、打勾、改字、补配图、核对表格、入库。现在可以上传你自己的试卷了。" }
-  ];
+      text: "第 2 题缺图。点“补选配图”，点蓝色候选图，选“题干”，再保存。需要移动原卷时用空格＋左键或中键；普通左键用于画框。" },
+    { key: "publish", title: "核对过的题，才入库",
+      text: "点右上角“入库”看看说明。只入库已通过的题；表格要逐格核对，绿卡也要看原卷。示例只练操作，不会进入正式题库。" },
+    { key: "basics", title: "基础练习完成", manual: true, checkpoint: true,
+      text: "你已练过对照、打勾、改字、补图和入库入口。接下来可以看新版的 5 个常用功能，也可以先结束；以后在“设置 → 帮助”里继续看。" },
+    { key: "original", title: "整份原卷也能放大", manual: true,
+      text: "从“试卷操作 → 查看整份原卷”看完整页面。Ctrl＋滚轮缩放，左键拖动画布；适页看整页，适宽看细节，还能输入页码跳页。" },
+    { key: "preview", title: "不懂公式写法，也能看位置", manual: true,
+      text: "在“改字”输入框中点一个位置，或选中几个字。预览用绿线、浅绿选区和公式框对应标出；公式内绿色符号帮助定位，实际插入位置仍看输入框光标。" },
+    { key: "region", title: "只重读一小块，先确认替换", manual: true,
+      text: "点“框选识读”，框住印刷字，再选“自动推荐（AI）”。真实识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里练画框，不调用读题服务。" },
+    { key: "library", title: "找题，还要找得到出处", manual: true,
+      text: "“正式题库”里可以搜索、选题组卷。每道题的“查看出处”能看原卷与整页位置；“版本历史”保留修改前后，“相关资料”查看同题的其他来源。示例不会入库，所以这里先认识入口。" },
+    { key: "recovery", title: "没保存时，先留住改动", manual: true,
+      text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
+    { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
+      text: "已有题卡能继续审核；上传、重新识读和自动推荐需要读题服务可用。遇到问题打开“设置 → 帮助”；可重做基础练习，也可只看新版功能。" }
+  ].map((lesson, index) => ({ ...lesson, section: index <= 6 ? "basic" : "review" }));
+
+  const OLD_KEYS = ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"];
+  const OLD_ALIASES = { todo: "fix", tick9: "figure", table: "publish", green: "publish", finish: "basics" };
+  const indexOf = (key) => LESSONS.findIndex((lesson) => lesson.key === key);
+
+  // Stable keys keep progress attached to its lesson when the course changes.
+  function restore(saved) {
+    if (!saved || typeof saved !== "object" || typeof saved.paper !== "string" || !saved.paper) return null;
+    let key = "card";
+    if (saved.version === VERSION) key = indexOf(saved.lesson) >= 0 ? saved.lesson : "card";
+    else if (Number.isInteger(saved.index) && saved.index >= 0 && saved.index < OLD_KEYS.length) {
+      const old = OLD_KEYS[saved.index];
+      key = OLD_ALIASES[old] || old;
+    }
+    return { paper: saved.paper, index: indexOf(key), active: true, migrated: saved.version !== VERSION,
+      completed: saved.version === VERSION && saved.completed === true
+        && !LESSONS[indexOf(key)].manual ? key : null };
+  }
+
+  function progress(index) {
+    const safeIndex = Number.isInteger(index) && index >= 0 && index < LESSONS.length ? index : 0;
+    const lesson = LESSONS[safeIndex];
+    const section = LESSONS.filter((item) => item.section === lesson.section && !item.final);
+    return { lesson, label: lesson.final ? "学习完成" : lesson.section === "basic" ? "基础练习" : "新版功能",
+      current: lesson.final ? section.length : section.findIndex((item) => item.key === lesson.key) + 1,
+      total: section.length };
+  }
 
   const FIXED = /向右移动\s*5\s*个单位/;
 
   // event: {type, number, stem, figures, key}
   function lessonDone(key, event) {
-    if (!event) return false;
+    if (!event || !LESSONS.some((lesson) => lesson.key === key && !lesson.manual)) return false;
     switch (key) {
-      case "viewer": return event.type === "viewer";
-      case "tick": return event.type === "approve";
-      case "todo": return event.type === "filter" && event.key === "todo";
+      case "tick": return event.type === "approve" && event.number === 1;
       case "fix": return event.type === "text" && event.number === 9 && FIXED.test(event.stem || "");
-      case "tick9": return event.type === "approve" && event.number === 9;
       case "figure": return event.type === "figures" && event.number === 2 && event.figures > 0;
-      case "table": return event.type === "approve" && event.number === 3;
-      case "green": return event.type === "approveGreen";
       case "publish": return event.type === "publish";
       default: return false;
     }
@@ -540,7 +567,7 @@ const QBTeach = (() => {
     return "";
   }
 
-  return { LESSONS, lessonDone, lessonHint };
+  return { VERSION, LESSONS, restore, progress, indexOf, lessonDone, lessonHint };
 })();
 
 // A figure can continue on the next page (a table cut by a page break).  In
@@ -725,7 +752,8 @@ if (typeof module !== "undefined" && module.exports) {
     ...QBEdits,
     ...QBRegionAssist,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
-    TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint };
+    TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint,
+    restoreTeaching: QBTeach.restore, teachingProgress: QBTeach.progress };
 }
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -4255,12 +4283,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function publish() {
     if (state.publishing) return;
     if (state.paper?.demo) {
-      teach({ type: "publish" });
       await confirmDialog({
         title: "示例试卷不会入库",
         text: "示例试卷只用来练习，不会进入正式题库。你自己的试卷核对完，点“入库”，题目就进了正式题库，可以搜索、组卷。",
         ok: "知道了"
       });
+      teach({ type: "publish" });
       return;
     }
     const paperId = state.paperId;
@@ -4746,7 +4774,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
           : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
             : "在原卷上拖出这道题的范围（跨栏就拖两个框），填上题号后保存，AI 会自动读题。";
+    // The offline practice can demonstrate drawing and the real target picker,
+    // but must not dispatch recognition or invent an AI recommendation.
+    dialog.practiceRead = mode === "read" && Boolean(state.paper.demo);
     $("pageDialogSave").hidden = mode === "view";
+    $("pageDialogSave").disabled = dialog.practiceRead;
+    $("pageDialogSave").title = dialog.practiceRead ? "示例只练画框；真实识读需要可用的读题服务" : "";
+    if (dialog.practiceRead) $("pageDialogHint").textContent = "离线示例：可练画框和选择自动推荐，不会调用 AI 或生成识读结果。真实题目识读后，先确认替换前后，再填入改字、核对保存。";
     $("pageDialogClose").textContent = mode === "view" ? "关闭" : "取消";
     $("pageCanvasHint").textContent = mode === "view"
       ? "Ctrl+滚轮缩放 · 按住鼠标左键拖动画布"
@@ -5550,7 +5584,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function readingOrder(boxes) { return QBFigureJoin.readingOrder(boxes); }
 
   $("pageDialogSave").addEventListener("click", async () => {
-    if (dialog.mode === "view") return;
+    if (dialog.mode === "view" || dialog.practiceRead) return;
     const q = dialog.question;
     try {
       if (dialog.mode === "regions") {
@@ -6255,11 +6289,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("paperList"), title: "试卷列表",
       text: "上传后 AI 会自动切题、读题。每份资料读到哪一步、还有几张要看，都写在这里；点一份就打开它的题卡。" },
     { target: () => firstTourCard(), title: "题卡",
-      text: "一道题一张卡。左边是原卷截图（点一下放大对照），右边是读出来的题面。黄色荧光笔划出的是几次读法不一样的地方，重点看它们。" },
+      text: "一道题一张卡。左边原卷截图点一下放大：Ctrl＋滚轮缩放，左键拖动；右边是题面。黄色标出几次读法不一样的地方，重点核对。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "对了就打勾",
       text: "对照原卷没问题，就在题号左边的方框打勾（或按 Enter），会自动跳到下一张要看的题。点错了再点一下就撤销。" },
     { target: () => firstTourCard()?.querySelector(".card-actions"), title: "不对就改",
-      text: "字读错了点“改字”；截图框多了或少了点“调整范围”，AI 会按新范围重读；配图不对点“配图”。" },
+      text: "字错了点“改字”，预览会对应输入光标和选区；图不对点“配图”。“框选识读”可只重读一小块并推荐替换位置，先确认再保存；识读需要服务可用。" },
+    { target: () => $("paperMenu").querySelector("summary"), title: "看整份原卷",
+      text: "点“试卷操作 → 查看整份原卷”。Ctrl＋滚轮缩放，左键拖动，还能适页、适宽和跳页。画框编辑时用空格＋左键或中键拖动。" },
     { target: () => $("filters"), title: "先看有疑点的",
       text: "“需逐题核对”只列出有疑点的题卡，先处理它们；“识读一致”是几次读法完全相同的，也要看一眼再打勾。" },
     { target: () => document.querySelector("#toolbar .tool-group"), title: "专注和全屏",
@@ -6267,9 +6303,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("publishButton"), title: "入库",
       text: "核对完的题点“入库”，就进了正式题库。已经入库的题再改，会提示你重新入库，旧版本也会留着。" },
     { target: () => document.querySelector('.topnav a[href="/library"]'), title: "正式题库",
-      text: "入库的题都在这里，可以按试卷、题型、关键词找，选好几道就能组卷。" },
+      text: "按试卷、题型、关键词找题，选好就能组卷。每道题可“查看出处”，对照原卷；“版本历史”看修改前后，“相关资料”查其他来源。" },
     { target: () => $("settingsButton"), title: "设置",
-      text: "密钥、读题模型和界面开关都在这里。这段引导也可以在“设置 → 帮助”里重新看。" }
+      text: "设置 → 帮助里可做离线基础练习、只看新版功能，或查看未保存提醒的说明；改字有未保存内容时，离开前会提示继续编辑或丢弃。" }
   ];
 
   const tour = { steps: [], index: 0, target: null };
@@ -6416,33 +6452,57 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 在示例试卷上一步步做一遍：右下角的小卡片说这一步要做什么，做对了自动进入下一步。
   // 进度记在这台电脑的浏览器里；换到别的试卷时先暂停，回到示例试卷接着做。
   const TEACH_KEY = "qb-teach";
-  const teaching = { paper: null, index: 0, active: false };
+  const teaching = { paper: null, index: 0, active: false, timer: null, pending: null, completed: null,
+    session: 0, moving: false, migrated: false };
+
+  function cancelTeachingAdvance() {
+    clearTimeout(teaching.timer);
+    teaching.timer = null;
+    teaching.pending = null;
+  }
 
   function saveTeaching() {
-    writePref(TEACH_KEY, teaching.active ? JSON.stringify({ paper: teaching.paper, index: teaching.index }) : "");
+    const lesson = QBTeach.LESSONS[teaching.index];
+    writePref(TEACH_KEY, teaching.active && lesson ? JSON.stringify({
+      paper: teaching.paper, version: QBTeach.VERSION, lesson: lesson.key,
+      completed: teaching.completed === lesson.key
+    }) : "");
   }
 
   function loadTeaching() {
     try {
       const saved = JSON.parse(readPref(TEACH_KEY, "") || "null");
-      if (saved?.paper) Object.assign(teaching, { paper: saved.paper, index: Number(saved.index) || 0, active: true });
+      const restored = QBTeach.restore(saved);
+      if (restored) { Object.assign(teaching, restored); saveTeaching(); }
     } catch { /* 没有进度就不显示 */ }
   }
 
-  async function startTeaching({ reset = false } = {}) {
+  async function startTeaching({ reset = false, review = false } = {}) {
+    if (!(await discardEdits())) return;
     closeSettingsThen(() => {});
     if ($("welcomeDialog").open) finishWelcome();
     try {
       const data = await api("/api/demo", { method: "POST", body: { reset } });
       await loadPapers();
       await selectPaper(data.paper.id);
-      Object.assign(teaching, { paper: data.paper.id, index: 0, active: true });
+      if (state.paperId !== data.paper.id) return;
+      cancelTeachingAdvance();
+      endTour();
+      Object.assign(teaching, { paper: data.paper.id, index: review ? QBTeach.indexOf("original") : 0,
+        active: true, session: teaching.session + 1, migrated: false, completed: null });
+      $("teachDetails").hidden = false;
+      $("teachFold").setAttribute("aria-expanded", "true");
+      $("teachFold").setAttribute("aria-label", "收起教学说明");
+      $("teachFold").title = "收起教学说明";
+      $("teachFold").textContent = "−";
       saveTeaching();
       renderTeach();
     } catch (error) { toast(error.message, "error"); }
   }
 
   function exitTeaching() {
+    cancelTeachingAdvance();
+    teaching.session += 1;
     teaching.active = false;
     saveTeaching();
     endTour();
@@ -6462,13 +6522,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const panel = $("teachPanel");
     panel.hidden = !teaching.active;
     if (!teaching.active) return;
-    const lessons = QBTeach.LESSONS;
-    const lesson = lessons[Math.min(teaching.index, lessons.length - 1)];
+    const progress = QBTeach.progress(teaching.index);
+    const lesson = progress.lesson;
+    teaching.index = QBTeach.indexOf(lesson.key);
     const onDemo = state.paperId === teaching.paper;
-    $("teachProgress").textContent = `${Math.min(teaching.index + 1, lessons.length)} / ${lessons.length}`;
-    $("teachBar").style.width = `${Math.round((teaching.index / (lessons.length - 1)) * 100)}%`;
-    $("teachDone").hidden = true;
+    $("teachSection").textContent = progress.label;
+    $("teachProgress").textContent = lesson.final ? "" : `${progress.current} / ${progress.total}`;
+    $("teachBar").style.width = `${Math.round((progress.current / progress.total) * 100)}%`;
+    $("teachDone").hidden = teaching.completed !== lesson.key;
     if (!onDemo) {
+      cancelTeachingAdvance();
       $("teachTitle").textContent = "教学暂停了";
       $("teachText").textContent = "新手教学在示例试卷里进行。回到示例试卷就能接着做。";
       $("teachHint").hidden = true;
@@ -6480,34 +6543,86 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     $("teachTitle").textContent = lesson.title;
     $("teachText").textContent = lesson.text;
-    $("teachHint").textContent = hint;
-    $("teachHint").hidden = !hint;
+    const notice = hint || (teaching.migrated ? "教学已升级，已按原来的学习内容接续；要从头练，可在“设置 → 帮助”重新开始。" : "");
+    $("teachHint").textContent = notice;
+    $("teachHint").hidden = !notice;
     $("teachShow").hidden = Boolean(lesson.final);
-    $("teachSkip").hidden = Boolean(lesson.manual);
-    $("teachNext").hidden = !lesson.manual;
-    $("teachNext").textContent = lesson.final ? "完成" : "下一步";
-    if (lesson.key === "green" && !counts().green) advanceTeaching();
+    $("teachShow").textContent = lesson.key === "recovery" ? "查看帮助" : "指给我看";
+    $("teachSkip").hidden = Boolean(lesson.manual && !lesson.checkpoint);
+    $("teachSkip").textContent = lesson.checkpoint ? "先结束练习" : "跳过这一步";
+    $("teachNext").hidden = !lesson.manual && teaching.completed !== lesson.key;
+    $("teachNext").textContent = lesson.final ? "完成" : lesson.checkpoint ? "看新版功能"
+      : teaching.completed === lesson.key ? "继续下一步" : "下一步";
+    if (teaching.pending === lesson.key) {
+      $("teachShow").hidden = true;
+      $("teachSkip").hidden = true;
+    }
   }
 
-  function advanceTeaching() {
-    endTour();
-    teaching.index += 1;
-    if (teaching.index >= QBTeach.LESSONS.length) { exitTeaching(); return; }
-    saveTeaching();
-    renderTeach();
+  async function closeTeachingSurface() {
+    if ($("confirmDialog").open) return false;
+    const key = QBTeach.LESSONS[teaching.index]?.key;
+    if (["preview", "recovery", "fix"].includes(key) && !(await discardEdits())) return false;
+    if (key === "viewer" && $("viewerDialog").open) $("viewerDialog").close();
+    if (["original", "region"].includes(key) && $("pageDialog").open) $("pageDialog").close();
+    if (key === "recovery" && $("settingsDialog").open) $("settingsDialog").close();
+    return true;
+  }
+
+  async function advanceTeaching() {
+    if (!teaching.active || teaching.moving) return;
+    const session = teaching.session;
+    teaching.moving = true;
+    try {
+      const closed = await closeTeachingSurface();
+      if (!teaching.active || teaching.session !== session) return;
+      if (!closed) {
+        cancelTeachingAdvance();
+        saveTeaching();
+        renderTeach(teaching.completed ? "这一步已完成。先处理未保存的改动或关闭确认窗口，再点“继续下一步”。" : "先处理未保存的改动或关闭确认窗口，教学停在这里。");
+        return;
+      }
+      cancelTeachingAdvance();
+      endTour();
+      teaching.migrated = false;
+      teaching.completed = null;
+      teaching.index += 1;
+      if (teaching.index >= QBTeach.LESSONS.length) { exitTeaching(); return; }
+      $("teachDetails").hidden = false;
+      $("teachFold").setAttribute("aria-expanded", "true");
+      $("teachFold").setAttribute("aria-label", "收起教学说明");
+      $("teachFold").title = "收起教学说明";
+      $("teachFold").textContent = "−";
+      saveTeaching();
+      renderTeach();
+    } finally { teaching.moving = false; }
   }
 
   // Called by the review actions: approve, save text, save figures, filter, viewer, publish.
   function teach(event) {
     if (!teaching.active || state.paperId !== teaching.paper) return;
     const lesson = QBTeach.LESSONS[teaching.index];
-    if (!lesson || lesson.manual) return;
+    if (!lesson || lesson.manual || teaching.completed === lesson.key) return;
     if (QBTeach.lessonDone(lesson.key, event)) {
       endTour();
       $("teachDone").hidden = false;
       $("teachShow").hidden = true;
       $("teachSkip").hidden = true;
-      setTimeout(advanceTeaching, 1100);
+      const session = teaching.session;
+      const paper = teaching.paper;
+      teaching.pending = lesson.key;
+      teaching.completed = lesson.key;
+      saveTeaching();
+      renderTeach();
+      const complete = () => {
+        teaching.timer = null;
+        if (!teaching.active || teaching.session !== session || teaching.paper !== paper
+          || state.paperId !== paper || QBTeach.LESSONS[teaching.index]?.key !== lesson.key
+          || teaching.pending !== lesson.key) return;
+        if ($("confirmDialog").open) $("confirmDialog").addEventListener("close", complete, { once: true });
+        else advanceTeaching();
+      };
+      teaching.timer = setTimeout(complete, 1100);
       return;
     }
     const hint = QBTeach.lessonHint(lesson.key, event);
@@ -6515,12 +6630,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // “指给我看”：先把要用的那张卡找出来（必要时切回“全部”），再圈亮要点的地方。
-  function showLesson() {
+  async function showLesson() {
     const lesson = QBTeach.LESSONS[teaching.index];
     if (!lesson) return;
+    if (teaching.moving || $("confirmDialog").open) return;
     const focusCard = (number) => {
       const q = lessonNumber(number);
       if (!q) return;
+      if (!visible(q) && !state.editing.size) setFilter("all");
       if (isApproved(q) && !state.expanded.has(q.id)) { state.expanded.add(q.id); renderCards(); }
       goTo(q);
     };
@@ -6533,12 +6650,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     switch (lesson.key) {
       case "card": focusCard(1); later(() => cardFor(1), "第 1 题", "左边是原卷截图，右边是读出来的题面。"); break;
-      case "viewer": focusCard(1); later(() => cardFor(1)?.querySelector(".crop"), "点这里放大", "点原卷截图，在大窗口里逐字对照。"); break;
+      case "viewer": {
+        focusCard(1);
+        if (!$("viewerDialog").open && lessonNumber(1)) openViewer(lessonNumber(1));
+        later(() => $("viewerSource"), "在原卷上操作", "Ctrl＋滚轮放大，按住左键拖动；看完点教学的“下一步”。");
+        break;
+      }
       case "tick": focusCard(1); later(() => cardFor(1)?.querySelector(".card-tick"), "点这个方框", "对了就打勾，标记通过。"); break;
       case "todo": later(() => $("filter-todo"), "点这里", "只看有疑点的题卡。"); break;
-      case "fix": focusCard(9); later(() => cardFor(9)?.querySelector(".editor .button.primary")
-        || [...(cardFor(9)?.querySelectorAll(".card-actions .button") || [])].find((node) => node.textContent.includes("改字")),
-        "点“改字”", "把“3 个单位”改成“5 个单位”，再点“保存”。"); break;
+      case "fix":
+      case "preview": {
+        focusCard(9);
+        const card = cardFor(9);
+        if (card && lessonNumber(9)) openEditor(card, lessonNumber(9));
+        later(() => cardFor(9)?.querySelector(".stem-input"), "在这里改字或选字",
+          lesson.key === "fix" ? "把“3 个单位”改成“5 个单位”。预览同步标位置；核对后保存。" : "点一个位置，或选中几个字，看预览如何对应。试完下一步；有改动会先提醒保存或丢弃。");
+        break;
+      }
       case "tick9": focusCard(9); later(() => cardFor(9)?.querySelector(".card-tick"), "点这个方框", "改好了就打勾。"); break;
       case "figure": focusCard(2); later(() => cardFor(2)?.querySelector(".figure-review .button.primary")
         || cardFor(2)?.querySelector(".figure-review") || cardFor(2),
@@ -6547,6 +6675,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         "对照这张表", "逐格看一遍，没问题就给第 3 题打勾。"); break;
       case "green": later(() => $("approveGreen"), "点这里", "把剩下的绿卡一起标记通过。"); break;
       case "publish": later(() => $("publishButton"), "点“入库”", "示例试卷不会真的入库。"); break;
+      case "basics": later(() => $("settingsButton"), "以后从这里继续", "设置 → 帮助：可以重做基础练习，也可以只看新版功能。"); break;
+      case "original": {
+        if (!$("pageDialog").open) openPageDialog("view");
+        later(() => $("pageZoomFit"), "试试整份原卷", "适页、适宽、Ctrl＋滚轮和左键拖动。入口是“试卷操作 → 查看整份原卷”。");
+        break;
+      }
+      case "region": {
+        focusCard(9);
+        if (!$("pageDialog").open && lessonNumber(9)) openPageDialog("read", lessonNumber(9));
+        later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "示例不调用 AI。真实识读会先给替换建议，你确认后才填入改字，最后还要保存。");
+        break;
+      }
+      case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "入库后的题可看出处、版本历史和相关资料；也可搜索、选题组卷。示例不会入库。"); break;
+      case "recovery": {
+        openSettings();
+        showSettingsTab("settingsReview");
+        document.querySelector(".teaching-help").open = true;
+        later(() => document.querySelector(".teaching-help"), "随时能回来看", "继续编辑会保留当前改动；丢弃只回到上次保存的文字。未保存的字不会自动恢复。");
+        break;
+      }
       default: break;
     }
   }
@@ -6567,8 +6715,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   new MutationObserver(liftGuides).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
 
   $("teachShow").addEventListener("click", showLesson);
-  $("teachSkip").addEventListener("click", advanceTeaching);
+  $("teachSkip").addEventListener("click", () => {
+    if (QBTeach.LESSONS[teaching.index]?.checkpoint) exitTeaching(); else advanceTeaching();
+  });
   $("teachClose").addEventListener("click", exitTeaching);
+  $("teachFold").addEventListener("click", () => {
+    const collapsed = !$("teachDetails").hidden;
+    $("teachDetails").hidden = collapsed;
+    $("teachFold").setAttribute("aria-expanded", String(!collapsed));
+    $("teachFold").setAttribute("aria-label", collapsed ? "展开教学说明" : "收起教学说明");
+    $("teachFold").title = collapsed ? "展开教学说明" : "收起教学说明";
+    $("teachFold").textContent = collapsed ? "+" : "−";
+  });
   $("teachNext").addEventListener("click", async () => {
     if (state.paperId !== teaching.paper) {
       if (state.papers.some((paper) => paper.id === teaching.paper)) { await selectPaper(teaching.paper); renderTeach(); }
@@ -6577,14 +6735,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const lesson = QBTeach.LESSONS[teaching.index];
     if (lesson?.final) {
+      if (!(await closeTeachingSurface())) return;
       exitTeaching();
-      toast("教学完成。上传你自己的试卷试试吧；示例试卷可以在“试卷操作”里删除。", "success");
+      toast("教学完成。已有题卡可继续审核；新资料识读需要读题服务可用。", "success");
       return;
     }
     advanceTeaching();
   });
   $("welcomeLearn").addEventListener("click", () => startTeaching({ reset: true }));
   $("settingsLearn").addEventListener("click", () => startTeaching({ reset: true }));
+  $("settingsNewFeatures").addEventListener("click", () => startTeaching({ review: true }));
   $("emptyLearn").addEventListener("click", () => startTeaching());
 
   async function start() {

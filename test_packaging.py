@@ -401,5 +401,10 @@ class AgentDocsTests(unittest.TestCase):
             self.assertTrue(used, name)
             self.assertLessEqual(used, commands, f"{name} mentions {used - commands}")
         readme = (self.root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("releases/latest/download/install.ps1 | iex", readme)
-        self.assertIn("[AGENTS.md](AGENTS.md)", readme)
+        self.assertIn("[安装与使用指南](docs/使用指南.md)", readme)
+        guide = (self.root / "docs" / "使用指南.md").read_text(encoding="utf-8")
+        self.assertIn("releases/latest/download/install.ps1 | iex", guide)
+        self.assertIn("[AGENTS.md](../AGENTS.md)", guide)
+        used = set(re.findall(r"tiyouju(?:\.exe)? ([a-z]+)", guide)) - {"latest"}
+        self.assertTrue(used)
+        self.assertLessEqual(used, commands, f"usage guide mentions {used - commands}")

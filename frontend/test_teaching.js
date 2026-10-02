@@ -4,27 +4,56 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { TEACH_LESSONS, lessonDone, lessonHint } = require("./app.js");
+const { TEACH_LESSONS, lessonDone, lessonHint, restoreTeaching, teachingProgress } = require("./app.js");
 
 assert.deepEqual(TEACH_LESSONS.map((lesson) => lesson.key),
-  ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"]);
+  ["card", "viewer", "tick", "fix", "figure", "publish", "basics", "original", "preview", "region", "library", "recovery", "finish"]);
 assert.ok(TEACH_LESSONS[0].manual && TEACH_LESSONS.at(-1).final);
+assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "basic").length, 7);
+assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "review" && !lesson.final).length, 5);
+assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === "basics").checkpoint);
+
+// Stable keys and the old course's indexes must refer to learning content,
+// including the old finished screen; invalid progress starts safely at card.
+const oldKeys = ["card", "viewer", "tick", "fix", "fix", "figure", "figure", "publish", "publish", "publish", "basics"];
+oldKeys.forEach((key, index) => {
+  const restored = restoreTeaching({ paper: "demo", index });
+  assert.equal(TEACH_LESSONS[restored.index].key, key);
+  assert.equal(restored.migrated, true);
+});
+for (const lesson of TEACH_LESSONS) {
+  const restored = restoreTeaching({ paper: "demo", version: 2, lesson: lesson.key, index: -999 });
+  assert.equal(TEACH_LESSONS[restored.index].key, lesson.key);
+  assert.equal(restored.migrated, false);
+}
+for (const index of [-1, 11, 999, 1.5, "4", NaN, Infinity, undefined]) {
+  assert.equal(restoreTeaching({ paper: "demo", index }).index, 0);
+}
+for (const saved of [null, [], "demo", {}, { paper: 4 }, { paper: "" }]) assert.equal(restoreTeaching(saved), null);
+assert.equal(restoreTeaching({ paper: "demo", version: 2, lesson: "removed" }).index, 0);
+assert.equal(restoreTeaching({ paper: "demo", version: 2, lesson: "fix", completed: true }).completed, "fix",
+  "a completed action can resume without forcing another save after a leave warning");
+assert.equal(restoreTeaching({ paper: "demo", version: 2, lesson: "viewer", completed: true }).completed, null);
+assert.equal(restoreTeaching({ paper: "demo", index: 4, completed: true }).completed, null);
+assert.deepEqual(teachingProgress(-1), teachingProgress(0));
+for (let index = 0; index < TEACH_LESSONS.length; index += 1) {
+  const progress = teachingProgress(index);
+  assert.ok(progress.current >= 1 && progress.current <= progress.total);
+  assert.equal(progress.lesson.key, TEACH_LESSONS[index].key);
+}
+assert.equal(teachingProgress(7).current, 1);
+assert.equal(teachingProgress(7).total, 5);
 
 // Each step finishes on the matching action, and only then.
-assert.ok(lessonDone("viewer", { type: "viewer", number: 4 }));
+assert.ok(!lessonDone("viewer", { type: "viewer", number: 1 }), "opening a viewer alone must not skip the gesture explanation");
 assert.ok(lessonDone("tick", { type: "approve", number: 1 }));
-assert.ok(lessonDone("todo", { type: "filter", key: "todo" }));
-assert.ok(!lessonDone("todo", { type: "filter", key: "all" }));
+assert.ok(!lessonDone("tick", { type: "approve", number: 2 }));
 assert.ok(lessonDone("fix", { type: "text", number: 9, stem: "将点 P 向右移动 5 个单位后表示（ ）" }));
 assert.ok(lessonDone("fix", { type: "text", number: 9, stem: "向右移动5个单位" }));
 assert.ok(!lessonDone("fix", { type: "text", number: 9, stem: "向右移动 4 个单位" }));
 assert.match(lessonHint("fix", { type: "text", number: 9, stem: "向右移动 4 个单位" }), /原卷印的是“向右移动 5 个单位”/);
-assert.ok(lessonDone("tick9", { type: "approve", number: 9 }));
-assert.ok(!lessonDone("tick9", { type: "approve", number: 1 }));
 assert.ok(lessonDone("figure", { type: "figures", number: 2, figures: 1 }));
 assert.ok(!lessonDone("figure", { type: "figures", number: 2, figures: 0 }));
-assert.ok(lessonDone("table", { type: "approve", number: 3 }));
-assert.ok(lessonDone("green", { type: "approveGreen" }));
 assert.ok(lessonDone("publish", { type: "publish" }));
 assert.ok(!lessonDone("card", { type: "approve" }), "a reading step moves on only with 下一步");
 
@@ -41,7 +70,9 @@ for (const event of ['type: "viewer"', 'type: "approve"', 'type: "filter"', 'typ
   assert.ok(js.includes(`teach({ ${event}`), event);
 }
 // The practice paper never publishes: 入库 explains instead.
-assert.match(js, /if \(state\.paper\?\.demo\) \{\s*teach\(\{ type: "publish" \}\);\s*await confirmDialog\(\{\s*title: "示例试卷不会入库"/);
+assert.match(js, /if \(state\.paper\?\.demo\) \{\s*await confirmDialog\(\{\s*title: "示例试卷不会入库"[\s\S]*?\}\);\s*teach\(\{ type: "publish" \}\);\s*return;/);
+assert.match(js, /if \(dialog\.mode === "view" \|\| dialog\.practiceRead\) return;/);
+assert.match(html, /id="settingsNewFeatures"/);
 // “指给我看” does not block the page, and Esc still closes an open window first.
 assert.match(js, /if \(event\.key === "Escape" && !anyDialogOpen\(\)\) \{ endTour\(\);/);
 assert.match(js, /clearTimeout\(tour\.pending\);/);

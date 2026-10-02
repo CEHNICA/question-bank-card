@@ -24,9 +24,9 @@ assert.match(js, /if \(readPref\("qb-welcome-seen", ""\) !== "1"\) openWelcome\(
 assert.match(js, /writePref\("qb-welcome-seen", "1"\)/);
 assert.match(html, /id="settingsWelcome"[^>]*>重新看一遍新手引导<\/button>/);
 
-// Tour: ten stops, missing ones skipped, keys owned by the tour while it is open.
+// Tour: current workflow, missing stops skipped, keys owned while it is open.
 const steps = js.match(/const TOUR_STEPS = \[([\s\S]*?)\n  \];/)[1];
-for (const title of ["上传资料", "试卷列表", "题卡", "对了就打勾", "不对就改", "先看有疑点的", "专注和全屏", "入库", "正式题库", "设置"]) {
+for (const title of ["上传资料", "试卷列表", "题卡", "对了就打勾", "不对就改", "看整份原卷", "先看有疑点的", "专注和全屏", "入库", "正式题库", "设置"]) {
   assert.match(steps, new RegExp(`title: "${title}"`));
 }
 assert.match(js, /tour\.steps = TOUR_STEPS\.filter\(\(step\) => tourVisible\(step\.target\(\)\)\);/);

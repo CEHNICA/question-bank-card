@@ -1140,6 +1140,7 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .teach-head strong { color: var(--accent); font-size: 13px; }
 .teach-progress { color: var(--muted); font-size: 12px; }
 .teach-close { margin-left: auto; width: 26px; height: 26px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+#teachClose { margin-left: 0; }
 .teach-close:hover { background: var(--bg-sunken); color: var(--ink); }
 .teach-bar { height: 3px; margin: 8px 0 10px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
 .teach-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s ease; }
@@ -1147,7 +1148,7 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .teach-panel p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
 .teach-hint { margin-top: 6px !important; padding: 6px 9px; border-radius: 8px; background: var(--amber-soft); color: var(--amber) !important; }
 .teach-done { margin-top: 6px !important; color: var(--green) !important; font-weight: 700; }
-.teach-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.teach-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 10px; }
 .teach-skip { font-size: 12px; color: var(--muted); }
 .tour.pointing { pointer-events: none; }
 .tour.pointing .tour-card { pointer-events: auto; }
@@ -1157,11 +1158,21 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .welcome-learn span { color: var(--ink-2); font-size: 13px; line-height: 1.7; }
 .welcome-learn .button { justify-self: start; margin-top: 2px; }
 .settings-help-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.teaching-help { margin-top: 12px; }
+.teaching-help > summary { color: var(--accent); cursor: pointer; }
 #emptyLearn { margin: 4px 0 14px; }
 :root.review-fullscreen .teach-panel { left: auto; right: 20px; bottom: 132px; width: min(320px, calc(100vw - 32px)); }
 /* 放大对照窗口里，左下角是“改字 / 上一题”等按钮：卡片挪到右下，按钮上方。 */
 .viewer-dialog > .teach-panel { left: auto; right: 20px; bottom: 78px; }
-@media (max-width: 760px) { .teach-panel { left: 12px; right: 12px; width: auto; } }
+@media (max-width: 760px) {
+  .teach-panel { left: 12px; right: 12px; width: auto; max-height: min(300px, 45dvh); overflow: auto; }
+  /* In the top layer, reserve a row for the lesson instead of covering
+     the canvas, its save controls, or the confirmation buttons. */
+  dialog[open] > .teach-panel { position: relative; left: auto; right: auto; bottom: auto; width: auto;
+    flex: none; margin: 8px 12px; max-height: min(260px, 34dvh); }
+  .viewer-dialog[open]:has(> .teach-panel:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+  .tour-card { max-height: calc(100dvh - 20px); overflow: auto; }
+}
 
 /* 1.10.2 框选识读：题卡上的结果 */
 .region-read { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 8px; background: #fbfdfc; }

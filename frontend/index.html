@@ -310,8 +310,19 @@
             </dl>
             <div class="settings-help-actions">
               <button id="settingsLearn" class="button primary" type="button">用示例试卷重新学一遍</button>
+              <button id="settingsNewFeatures" class="button" type="button">只看新版功能</button>
               <button id="settingsWelcome" class="button" type="button">重新看一遍新手引导</button>
             </div>
+            <p class="settings-footnote">基础练习约 3 分钟；新版功能可以单独看。示例不用密钥、不调用读题服务，也不会进入正式题库。教学进度保存在本机浏览器，刷新后可继续。</p>
+            <details class="teaching-help">
+              <summary>忘了怎么操作，或遇到未保存提醒？</summary>
+              <dl class="explain-list">
+                <div><dt>看原卷</dt><dd>题卡截图、查看整份原卷、正式题库的查看出处，都支持 Ctrl＋滚轮缩放和左键拖动。画框编辑时，改用空格＋左键或中键拖动画布。</dd></div>
+                <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
+                <div><dt>框选识读</dt><dd>自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
+                <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
+              </dl>
+            </details>
           </section>
         </div>
 
@@ -657,7 +668,7 @@
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
         <strong>第一次用？先拿示例试卷练一遍</strong>
-        <span>一份 12 道题的示例试卷，已经读好了，不用密钥、不花额度。跟着提示一步步做：对照、打勾、改错字、补配图、核对表格、入库，大约 5 分钟。</span>
+        <span>一份已经读好的示例试卷，不用密钥、不调用读题服务。用约 3 分钟练对照、打勾、改错字、补配图和入库入口；然后可选看新版功能。示例不会进入正式题库。</span>
         <button id="welcomeLearn" class="button primary" type="button">用示例试卷学一遍</button>
       </div>
     </div>
@@ -686,15 +697,18 @@
 
   <aside id="teachPanel" class="teach-panel" aria-live="polite" aria-labelledby="teachTitle" hidden>
     <header class="teach-head">
-      <strong>新手教学</strong>
+      <strong id="teachSection">基础练习</strong>
       <span id="teachProgress" class="teach-progress"></span>
+      <button id="teachFold" class="teach-close" type="button" aria-label="收起教学说明" aria-expanded="true" title="收起教学说明">−</button>
       <button id="teachClose" class="teach-close" type="button" title="退出教学（以后可以在“设置 → 帮助”里重新开始）" aria-label="退出教学">×</button>
     </header>
     <div class="teach-bar" aria-hidden="true"><span id="teachBar"></span></div>
+    <div id="teachDetails">
     <h4 id="teachTitle"></h4>
     <p id="teachText"></p>
     <p id="teachHint" class="teach-hint" hidden></p>
     <p id="teachDone" class="teach-done" hidden>✓ 做对了</p>
+    </div>
     <div class="teach-actions">
       <button id="teachShow" class="button small" type="button">指给我看</button>
       <button id="teachSkip" class="link-button teach-skip" type="button">跳过这一步</button>
