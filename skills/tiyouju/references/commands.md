@@ -30,6 +30,11 @@
 | `reread <试卷> <题号> [--force]` | 让软件的读题模型重读一道题 |
 | `publish <试卷>` | 把通过的题入库，并列出还没通过、没入库的题 |
 | `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--limit N]` | 在正式题库里搜题。关键词也能搜题源和知识点 |
+| `features [--enable knowledge_tags ai_answer] [--disable ...]` | 不加选项只读查看开关；明确要求生成后仅打开所需项，不自动发起模型请求 |
+| `enrich tasks [--ids 入库UUID…] [--limit 1–50]` | 只读列出待当前助手处理的任务，默认最多50个；不开功能、不调用云API |
+| `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；明确设置新题入库后自动排队，只改 `on_intake` 的指定项，不开功能、不改API、不扫旧题 |
+| `enrich prepare 入库UUID [--kinds tags answer] [--out 目录] [--no-images]` | 准备指定任务，返回题面、目录、prompt和指纹；默认下载该题原卷截图与配图，整页原卷返回本机URL |
+| `enrich submit 任务UUID --fingerprint 指纹 --result-file 结果.json` | 一次提交一种结果：`tags`，或`answer`与可选`analysis`；只写AI附加内容，不改原卷或人工核对 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
 
 ## JSON 里的字段
@@ -89,6 +94,33 @@
 
 默认报告中的可选设置不能代替用户同意。`--skill-dir` 必须是当前客户端已确认支持的绝对 skills 父目录；命令会安装到它下面的 `tiyouju`，不能用猜测目录。执行多项设置后按各项 `verified` 核实，不把软件安装等同于识读服务可用。
 
+## 助手补标签与参考答案
+
+先检查安装版 `tiyouju enrich --help`；旧发布包可能没有这些命令。默认让当前豆包工作版或当前助手自己完成，不需要豆包 API。用户明确要求为指定题目生成后，才启用所需开关；不趁安装或升级批量处理全部历史题。
+
+设置集中在软件的“设置”页（`/settings`）。三种触发是新题录入并入库后自动排队、后期单题、勾选批量。自动排队默认 `on_intake:{tags:false,answer:false}`；只有明确要求以后自动处理才配置，例如 `tiyouju enrich auto --tags on`。不加参数只读；指定一项会保留另一项、模型模式、API和功能开关。助手模式仍由当前助手继续领取待办，不代表豆包已在后台常驻。
+
+```powershell
+tiyouju features --json
+tiyouju features --enable knowledge_tags ai_answer --json
+tiyouju library "关键词" --json
+tiyouju enrich tasks --ids <入库UUID> --json
+tiyouju enrich prepare <入库UUID> --kinds tags answer --agent 豆包 --json
+# 实际打开 local_images 中的原卷和配图；按 knowledge.points 选标签，自己解题并复核。
+tiyouju enrich submit <标签任务UUID> --fingerprint <该任务指纹> --result-file tags.json --agent 豆包 --json
+tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --result-file answer.json --agent 豆包 --json
+```
+
+`tags.json` 是 `{"tags":["知识点目录中的标签"]}`，选1–3个。`answer.json` 是 `{"answer":"参考答案","analysis":"参考解析"}`，解析可省略。UTF-8文件最多256 KiB；不允许夹带题面、密钥、审核或任务身份字段。也可用 `--tags 标签1 标签2`，或 `--answer-file answer.txt [--analysis-file analysis.txt]`；任务ID、指纹和助手名称始终由命令参数提供。
+
+- `tasks` 返回 `tasks`、`total`、`limit`、`mode`、`message`。每项含任务 `id`、`publication_id`、`kind`、`executor`、`status`、`fingerprint`、`agent`、`enabled`、`stale`。关闭功能的任务仍可列出，但不能准备或提交。
+- `prepare` 返回 `publication`（完整题面与入库版本）、每种任务一项的 `jobs`（`id`、`kind`、`fingerprint`、`prompt`）、`knowledge.points`（`point`、`chapter`）、`images` 和 `local_images`。CLI只下载同一道题的本机原卷截图和配图，原卷整页URL供需要时打开；MCP直接附截图与配图。
+- 一次 `submit` 只交一个任务的标签或答案；必须用它自己的指纹。`complete` 返回 `job.status=done` 与当前 `publication` 后才报告成功。过期版本、配图变化、关闭开关、已完成任务或目录外标签会拒绝；重新准备并核对，不强行覆盖。
+- 内容保存为 AI 附加信息，记录真实助手来源，参考答案始终“未核对”。不使用 `fix --answer` 写入原卷答案，不因此打勾或撤销人工审核。
+- 整批按用户指定的入库UUID领取，每个题目分别准备，每种任务分别提交。完成当前最多50项后再取下一批；不能把批量题目拼成一个任务结果。新题任务在成功入库后才创建，识读开始前不会有生成答案。
+
+独立模型 API 是另一条可选途径，可推荐 DeepSeek，也允许其他服务。实际模型名按服务核实或由用户填写，不虚构“DeepSeek Pro”官方 ID，不自动调用收费测试或 OCR 读题模型。
+
 ## MCP 工具
 
 `tiyouju mcp` 提供这些工具：
@@ -101,5 +133,9 @@
 - `set_figures(paper, card, use | keep | none)`
 - `approve_cards(paper, cards | green)`、`unapprove_card(paper, card)`、`reread_card(paper, card)`
 - `publish_paper(paper)`、`search_library(keywords, review, limit)`
+- `configure_features(enable, disable)`：不传选项只看开关；按明确生成需求启用所需的 `knowledge_tags`、`ai_answer`
+- `configure_enrichment_auto(tags, answer)`：不传只看现状；明确设置新题入库后自动排队，不暗自开功能、改模型或处理旧题
+- `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题
+- `submit_enrichment(job_id, fingerprint, agent, tags | answer, analysis)`：只交一种任务的AI附加结果
 
 AI 的名字默认取 MCP 客户端的名字。

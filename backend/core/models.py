@@ -313,10 +313,11 @@ class PublishedQuestion(models.Model):
 
 
 class LibraryJob(models.Model):
-    """题库里排队给独立豆包服务做的事：补知识点、做 AI 参考答案。
+    """绑定入库版本的附加任务；当前助手和可选 API 分开执行。"""
 
-    网页进程拿不到密钥，所以网页只排队，后台工作者调用模型、写回结果。
-    """
+    class Executor(models.TextChoices):
+        ASSISTANT = "assistant", "当前 AI 助手"
+        API = "api", "独立 API"
 
     class Kind(models.TextChoices):
         TAGS = "tags", "知识点"
@@ -331,6 +332,11 @@ class LibraryJob(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="jobs")
     kind = models.CharField(max_length=8, choices=Kind.choices)
+    # API default keeps pre-migration automatic jobs out of the assistant inbox.
+    executor = models.CharField(max_length=12, choices=Executor.choices, default=Executor.API, db_index=True)
+    fingerprint = models.CharField(max_length=64, blank=True, default="")
+    api_snapshot = models.JSONField(default=dict, blank=True)
+    agent = models.CharField(max_length=120, blank=True, default="")
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
     error = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

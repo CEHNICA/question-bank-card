@@ -8,8 +8,8 @@ from django.db import models
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import features, library, library_jobs, qtypes
-from .models import PublishedQuestion
+from . import features, library, library_jobs, library_ai_settings, qtypes
+from .models import LibraryJob, PublishedQuestion
 
 MAX_BATCH_IDS = 500
 DEFAULT_LIMIT = 40
@@ -99,11 +99,16 @@ def serialize_items(publications) -> list[dict]:
     ids = [item.id for item in publications]
     waiting = library_jobs.pending_kinds(ids)
     failed = library_jobs.last_errors(ids)
+    details = {}
+    for row in LibraryJob.objects.filter(publication_id__in=ids, status__in=library_jobs.ACTIVE) \
+            .values("publication_id", "kind", "executor", "status"):
+        details.setdefault(str(row["publication_id"]), []).append({key: row[key] for key in ("kind", "executor", "status")})
     items = []
     for item in publications:
         data = library.publication_json(item)
         data["jobs"] = waiting.get(str(item.id), [])
         data["job_errors"] = failed.get(str(item.id), {})
+        data["job_details"] = details.get(str(item.id), [])
         items.append(data)
     return items
 
@@ -158,9 +163,11 @@ def library_list(request):
     total = rows.count()
     items = serialize_items(rows[offset:offset + limit])
     next_offset = offset + len(items)
+    ai_status = library_ai_settings.public_status()
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS,
+        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message")},
         "sort": sort, "limit": limit, "offset": offset,
         "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
     })

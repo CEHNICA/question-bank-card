@@ -100,6 +100,10 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   border: 1px solid transparent; background: none; color: var(--ink-2); font-size: 13px; font-weight: 600; }
 .settings-trigger:hover { background: var(--bg-sunken); color: var(--ink); }
 .settings-trigger .icon { width: 17px; height: 17px; }
+.settings-home { max-width: 720px; margin: 64px auto; padding: 24px; }
+.settings-home h1 { font-size: 28px; margin: 6px 0 12px; }
+.settings-home p:not(.eyebrow) { color: var(--muted); margin-bottom: 24px; line-height: 1.7; }
+.settings-home .button { margin: 0 8px 10px 0; }
 .source-link { display: inline-flex; align-items: center; min-height: 34px; padding: 0 8px; border-radius: 9px;
   color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 600; }
 .source-link:hover { background: var(--bg-sunken); color: var(--ink); }
@@ -1010,6 +1014,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .api-settings-actions .button { width: 100%; }
 }
 @media (max-width: 540px) {
+  .topbar { grid-template-columns: 34px minmax(0, 1fr) auto; gap: 6px; padding-inline: 12px; }
+  .topnav { min-width: 0; gap: 8px; }
+  .topnav a { padding: 6px 4px; font-size: 13px; letter-spacing: 0; }
+  .review-meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 10px; }
+  .review-meter .meter-bar { min-width: 0; }
+  .meter-note { grid-column: 1 / -1; justify-self: end; }
+  .meter-legend { grid-column: 1 / -1; }
   .main { padding-inline: 12px; }
   .toolbar { margin-inline: -12px; padding-inline: 12px; }
   .selection-bar { align-items: stretch; flex-direction: column; }

@@ -325,8 +325,8 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
         extras["tags"] = tags_of(previous.extras)
         if previous.extras.get("tags_source"):
             extras["tags_source"] = previous.extras["tags_source"]
-        for key in ("tags_at", "tags_fingerprint", "tags_publication_id"):
-            if previous.extras.get(key):
+        for key in ("tags_at", "tags_fingerprint", "tags_publication_id", "tags_agent", "tags_executor", "tags_checked"):
+            if key in previous.extras:
                 extras[key] = previous.extras[key]
     answer = previous.extras.get("ai_answer")
     if same_task and isinstance(answer, dict) and answer.get("fingerprint") == old_fingerprint:
@@ -420,6 +420,8 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
             # A queued or running enrichment job keeps its original snapshot.
             # The worker rejects replaced versions; a new version needs its own job.
+            from .library_jobs import queue_on_intake
+            queue_on_intake(publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise

@@ -2495,6 +2495,29 @@ def library_figure(request, publication_id, name):
     return _file(settings.DATA_ROOT / "library" / str(publication_id) / name, "image/png")
 
 
+def library_source_page(request, publication_id, page):
+    """Only pages referenced by this published snapshot, never draft regions."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    sources = (publication.content or {}).get("sources") or []
+    if not publication.paper_id or not any(isinstance(source, dict) and source.get("page_idx") == page for source in sources):
+        raise Http404("这道入库题没有引用这一页原卷")
+    return page_preview(request, publication.paper_id, page)
+
+
+def library_crop(request, publication_id):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from . import library_assistant
+    try:
+        response = HttpResponse(library_assistant.crop_png(publication_id), content_type="image/png")
+        response["Cache-Control"] = "no-store"
+        return response
+    except library_assistant.AssistantError as error:
+        return _error(str(error), getattr(error, "status", 409))
+
+
 @csrf_exempt
 def library_withdraw(request, publication_id):
     if request.method != "POST":
@@ -2601,11 +2624,72 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         targets = list(live.filter(pk__in=wanted))
+        targets = [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
+            item for item in targets if not str((item.content or {}).get("answer") or "").strip()
+            and not (item.extras or {}).get("ai_answer")]
+    requested = len(set(str(value) for value in payload.get("ids", []))) if payload.get("missing") is not True else len(targets)
     queued = 0
+    executors = set()
     try:
-        for publication in targets:
-            library_jobs.enqueue(publication, kind)
-            queued += 1
+        with transaction.atomic():
+            for publication in targets:
+                job = library_jobs.enqueue(publication, kind)
+                executors.add(job.executor)
+                queued += 1
     except library_jobs.JobError as error:
         return _error(str(error), 409)
-    return JsonResponse({"queued": queued})
+    from . import library_ai_settings
+    mode = next(iter(executors)) if len(executors) == 1 else "mixed" if executors else library_ai_settings.public_status()["mode"]
+    return JsonResponse({"queued": queued, "skipped": requested - queued, "executor": mode,
+                         "message": "已加入待助手处理；请让正在操作软件的豆包或 AI 助手领取并写回。" if mode == "assistant"
+                         else "已加入独立模型任务队列。"})
+
+
+@csrf_exempt
+def library_assistant_tasks(request):
+    """Read the local assistant inbox without starting any cloud generation."""
+    from . import library_assistant
+    from .library_browse import normalize_ids, BrowseError
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("助手待处理任务只能在本机读取", 403)
+    try:
+        limit = int(request.GET.get("limit", "50"))
+        if not 1 <= limit <= 50:
+            return _error("limit 应为 1–50")
+        raw_ids = request.GET.get("ids")
+        ids = normalize_ids(raw_ids.split(",")) if raw_ids is not None else None
+        return JsonResponse(library_assistant.list_tasks(ids=ids, limit=limit))
+    except (BrowseError, library_assistant.AssistantError) as error:
+        return _error(str(error), getattr(error, "status", 400))
+    except (ValueError, TypeError):
+        return _error("待处理任务查询格式不正确")
+
+
+@csrf_exempt
+def library_assistant_prepare(request):
+    return _library_assistant_action(request, "prepare")
+
+
+@csrf_exempt
+def library_assistant_complete(request):
+    return _library_assistant_action(request, "complete")
+
+
+def _library_assistant_action(request, action):
+    from . import library_assistant
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("助手生成和写回只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("助手任务请求必须是 JSON 对象")
+    try:
+        return JsonResponse(getattr(library_assistant, action)(payload))
+    except library_assistant.AssistantError as error:
+        return _error(str(error), getattr(error, "status", 409))

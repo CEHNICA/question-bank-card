@@ -1,10 +1,8 @@
-"""Independent, opt-in Doubao Pro configuration for library enrichment.
+"""Optional enrichment by the current assistant or an explicitly configured API.
 
-This module never consults OCR credentials, desktop assistants or fallback
-engines. Saving performs local validation only; an explicit synthetic probe
-must succeed before generation can start. Keys stay in a separate DPAPI file.
+Saving never contacts a service. API credentials are independent of OCR and
+provider-specific DPAPI files; status reads only their non-secret metadata.
 """
-
 from __future__ import annotations
 
 import base64
@@ -16,6 +14,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from django.utils import timezone
@@ -23,11 +22,19 @@ from PIL import Image, ImageDraw
 
 from . import credential_settings, features
 
-ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
+ARK_URL = ARK_BASE + "/chat/completions"
+DEFAULTS = {
+    "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-v4-pro", "supports_images": False},
+    "doubao": {"base_url": ARK_BASE, "model": "", "supports_images": False},
+    "custom": {"base_url": "", "model": "", "supports_images": False},
+}
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
-UNAVAILABLE = "豆包 API 尚未配置并通过显式测试，已暂停生成；请打开“标签与参考答案设置”。可考虑 DeepSeek Pro；软件不会自动切换到它、OCR 读题服务或其他 AI 助手。"
+ASSISTANT_MESSAGE = "由当前操作软件的豆包工作版或 AI 助手领取任务、看图解题，再通过本地工具写回。无需 API；软件不会自动连接桌面助手。生成结果仍需核对。"
+UNAVAILABLE = "独立 API 尚未配置并通过显式测试，已暂停 API 生成；请打开“标签与参考答案设置”。可推荐 DeepSeek Pro，也可配置其他模型；不会自动回退到 OCR 或其他服务。"
 _lock = threading.RLock()
+API_FIELDS = ("provider", "model", "base_url", "supports_images", "thinking", "reasoning_effort")
 
 
 class SettingsError(ValueError):
@@ -39,7 +46,7 @@ class ServiceError(SettingsError):
 
 
 class ConnectionError(ServiceError):
-    """A credential/transport/model failure invalidates the former probe."""
+    """A credential or transport failure invalidates the API connection probe."""
 
 
 def path() -> Path:
@@ -47,17 +54,44 @@ def path() -> Path:
     return Path(explicit).resolve() if explicit else credential_settings.store.credential_path().with_name("library-ai-settings.json")
 
 
-def key_path() -> Path:
+def key_path(provider: str | None = None) -> Path:
+    provider = provider or _load()["provider"]
     explicit = os.environ.get("QB_LIBRARY_AI_CREDENTIAL_FILE", "").strip()
-    return Path(explicit).resolve() if explicit else path().with_name("library-ai.dat")
+    target = Path(explicit).resolve() if explicit else path().with_name("library-ai.dat")
+    return target if provider == "doubao" else target.with_name(f"{target.stem}-{provider}{target.suffix}")
 
 
 def _load() -> dict:
     try:
         value = json.loads(path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) and value.get("version") == 1 else {}
+        value = {}
+    if not isinstance(value, dict) or value.get("version") not in (1, 2):
+        value = {}
+    legacy = value.get("version") == 1
+    provider = "doubao" if legacy else value.get("provider", "deepseek")
+    if provider not in DEFAULTS:
+        provider = "deepseek"
+    config = {**DEFAULTS[provider], "version": 2, "mode": "assistant", "provider": provider,
+              "thinking": True, "reasoning_effort": "high", "revision": "", "key_states": {},
+              "on_intake": {"tags": False, "answer": False},
+              "key_revision": "", "key_configured": False, "verified": False,
+              "verified_at": "", "resolved_model": "", **value}
+    config["version"] = 2
+    config["mode"] = value.get("mode") if value.get("mode") in ("assistant", "api") else "assistant"
+    config["provider"] = provider
+    timing = config.get("on_intake")
+    config["on_intake"] = {kind: isinstance(timing, dict) and timing.get(kind) is True for kind in ("tags", "answer")}
+    if legacy:
+        config.update(model=str(value.get("endpoint_id") or ""), base_url=ARK_BASE, supports_images=True)
+    states = config.get("key_states")
+    config["key_states"] = dict(states) if isinstance(states, dict) else {}
+    if legacy:
+        config["key_states"]["doubao"] = {"revision": config["key_revision"], "configured": config["key_configured"] is True}
+    state = config["key_states"].get(provider, {})
+    config["key_revision"] = state.get("revision", config.get("key_revision", ""))
+    config["key_configured"] = state.get("configured", config.get("key_configured", False)) is True
+    return config
 
 
 def _write(target: Path, value: bytes) -> None:
@@ -75,84 +109,119 @@ def _write_settings(value: dict) -> None:
     _write(path(), json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8"))
 
 
+def _base_url(raw, provider) -> str:
+    if not isinstance(raw, str) or len(raw) > 2000:
+        raise SettingsError("请填写有效的 API 服务地址。")
+    value = raw.strip().rstrip("/")
+    if not value:
+        return ""
+    if value.endswith("/chat/completions"):
+        value = value[:-len("/chat/completions")]
+    try:
+        parts = urlsplit(value)
+        _port = parts.port
+    except ValueError:
+        raise SettingsError("请填写有效的 API 服务地址。") from None
+    local = parts.hostname in {"127.0.0.1", "localhost", "::1"}
+    if (parts.scheme != "https" and not (provider == "custom" and parts.scheme == "http" and local)) or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+        raise SettingsError("API 地址使用 HTTPS；本机自定义服务可用 localhost 的 HTTP 地址，不包含密码或查询参数。")
+    if provider == "doubao" and value != ARK_BASE:
+        raise SettingsError("豆包 API 请使用火山方舟的官方服务地址。")
+    if provider == "deepseek" and value != DEFAULTS["deepseek"]["base_url"]:
+        raise SettingsError("DeepSeek 请使用官方服务地址；其他兼容地址请选自定义。")
+    return value
+
+
 def public_status() -> dict:
-    """Read non-secret metadata only. Never decrypt a key during a web GET."""
     config = _load()
-    endpoint = str(config.get("endpoint_id") or "")
-    configured = bool(config.get("key_configured") is True and key_path().is_file()
-                      and ENDPOINT_ID.fullmatch(endpoint) and config.get("thinking") is True)
+    key_configured = bool(config["key_configured"] and key_path(config["provider"]).is_file())
+    configured = bool(key_configured and config.get("model") and config.get("base_url"))
     verified = configured and config.get("verified") is True
+    assistant = config["mode"] == "assistant"
     switches = features.load()
-    return {
-        "provider": "doubao", "model_profile": "pro", "endpoint_id": endpoint,
-        "thinking": True, "configured": configured, "verified": verified,
-        "ready": verified, "status": "verified" if verified else "unverified" if configured else "missing",
+    return {key: config[key] for key in ("mode", *API_FIELDS)} | {
+        "endpoint_id": config["model"] if config["provider"] == "doubao" else "",
+        "key_configured": key_configured, "configured": configured, "verified": verified,
+        "api_ready": verified, "ready": assistant or verified,
+        "status": "assistant" if assistant else "verified" if verified else "unverified" if configured else "missing",
         "verified_at": str(config.get("verified_at") or "") if verified else "",
         "resolved_model": str(config.get("resolved_model") or "") if verified else "",
         "features": {key: switches[key] for key in sorted(FEATURE_KEYS)},
-        "message": "豆包 Pro API 已通过图文与思考测试；生成结果仍需核对。" if verified else UNAVAILABLE,
+        "on_intake": config["on_intake"],
+        "message": ASSISTANT_MESSAGE if assistant else "独立 API 已通过连接及所选思考/图像响应测试；这不保证题目答案正确。" if verified else UNAVAILABLE,
     }
 
 
 def save(payload: dict) -> dict:
-    """Validate and save without a network call or an OCR credential change."""
-    if not isinstance(payload, dict) or set(payload) - {"features", "endpoint_id", "thinking", "key"}:
+    allowed = {"features", "mode", *API_FIELDS, "endpoint_id", "key", "on_intake"}
+    if not isinstance(payload, dict) or set(payload) - allowed:
         raise SettingsError("标签与参考答案设置格式不正确。")
     changes = payload.get("features", {})
     if not isinstance(changes, dict) or set(changes) - FEATURE_KEYS or not all(type(v) is bool for v in changes.values()):
         raise SettingsError("标签与参考答案开关只能分别设为 true 或 false。")
-    if payload.get("thinking", True) is not True:
-        raise SettingsError("数学标签与答案使用 Pro 思考策略，请保持思考开启。")
+    timing = payload.get("on_intake", {})
+    if not isinstance(timing, dict) or set(timing) - {"tags", "answer"} or not all(type(v) is bool for v in timing.values()):
+        raise SettingsError("录入时生成的开关只能分别设为 true 或 false。")
     operation = payload.get("key", {"action": "keep"})
     if not isinstance(operation, dict) or set(operation) - {"action", "value"}:
-        raise SettingsError("请按保持、替换或清除保存豆包 API Key。")
+        raise SettingsError("请按保持、替换或清除保存 API Key。")
     action = operation.get("action")
-    if action not in {"keep", "clear", "replace"} or (action != "replace" and "value" in operation):
-        raise SettingsError("请按保持、替换或清除保存豆包 API Key。")
+    if not isinstance(action, str) or action not in {"keep", "clear", "replace"} or (action != "replace" and "value" in operation):
+        raise SettingsError("请按保持、替换或清除保存 API Key。")
     key = ""
     if action == "replace":
         raw = operation.get("value")
         if not isinstance(raw, str) or not raw.strip() or len(raw.strip()) > 4096:
-            raise SettingsError("请填写完整的豆包 API Key。")
+            raise SettingsError("请填写完整的 API Key。")
         key = raw.strip()
         if any(c.isspace() or ord(c) < 33 or ord(c) > 126 for c in key):
-            raise SettingsError("豆包 API Key 不能包含空格、换行或非英文字符。")
+            raise SettingsError("API Key 不能包含空格、换行或非英文字符。")
     with _lock:
         previous = _load()
-        endpoint = payload.get("endpoint_id", previous.get("endpoint_id", ""))
-        if not isinstance(endpoint, str):
-            raise SettingsError("请填写火山方舟控制台的模型 Endpoint ID。")
-        endpoint = endpoint.strip()
-        if endpoint and ENDPOINT_ID.fullmatch(endpoint) is None:
-            raise SettingsError("模型 Endpoint ID 应以 ep- 开头，请从火山方舟控制台完整复制。")
-        if action == "replace" and not endpoint:
-            raise SettingsError("保存豆包 API Key 前，请填写 Pro 思考模型的 Endpoint ID。")
-        changed = action != "keep" or endpoint != previous.get("endpoint_id", "")
-        revision = uuid.uuid4().hex if changed else previous.get("revision", uuid.uuid4().hex)
-        config = {"version": 1, "revision": revision, "endpoint_id": endpoint, "thinking": True,
-                  "key_revision": previous.get("key_revision", ""),
-                  "key_configured": previous.get("key_configured") is True,
-                  "verified": previous.get("verified") is True and not changed,
-                  "verified_at": previous.get("verified_at", "") if not changed else "",
-                  "resolved_model": previous.get("resolved_model", "") if not changed else ""}
+        mode = payload.get("mode", previous["mode"])
+        provider = payload.get("provider", "doubao" if "endpoint_id" in payload else previous["provider"])
+        if mode not in ("assistant", "api") or not isinstance(provider, str) or provider not in DEFAULTS:
+            raise SettingsError("请选择当前 AI 助手或独立 API，以及有效的服务商。")
+        switching = provider != previous["provider"]
+        config = {**previous, **(DEFAULTS[provider] if switching else {}), "mode": mode, "provider": provider}
+        config["on_intake"] = {**previous["on_intake"], **timing}
+        for field in API_FIELDS:
+            if field in payload:
+                config[field] = payload[field]
+        if "endpoint_id" in payload:
+            if "model" in payload and payload["model"] != payload["endpoint_id"]:
+                raise SettingsError("模型 ID 不一致。")
+            config["model"] = payload["endpoint_id"]
+        if not isinstance(config["model"], str) or len(config["model"]) > 160 or any(c.isspace() or not c.isprintable() for c in config["model"]):
+            raise SettingsError("请完整填写模型 ID，不能含空格或换行。")
+        if provider == "doubao" and config["model"] and not ENDPOINT_ID.fullmatch(config["model"]):
+            raise SettingsError("豆包模型 Endpoint ID 应以 ep- 开头，请从火山方舟完整复制。")
+        config["base_url"] = _base_url(config["base_url"], provider)
+        if type(config["thinking"]) is not bool or type(config["supports_images"]) is not bool or config["reasoning_effort"] != "high":
+            raise SettingsError("思考与图像能力使用 true 或 false；数学默认思考强度为 high。")
+        if action == "replace" and not (config["model"] and config["base_url"]):
+            raise SettingsError("保存 API Key 前，请填写服务地址和模型 ID。")
+        state = config["key_states"].get(provider, {}) if switching else {"revision": previous["key_revision"], "configured": previous["key_configured"]}
+        config.update(key_revision=state.get("revision", ""), key_configured=state.get("configured") is True)
+        changed = action != "keep" or any(previous.get(k) != config.get(k) for k in API_FIELDS)
         if changed:
-            # Invalidate a former probe before any credential mutation. A failed
-            # write cannot leave a changed key marked usable in another process.
-            _write_settings({**config, "verified": False})
+            config.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+        config.pop("endpoint_id", None)
+        if changed:
+            _write_settings(config)
         try:
             if action == "replace":
                 config["key_revision"] = uuid.uuid4().hex
-                encrypted = credential_settings.store._transform(
-                    json.dumps({"version": 1, "revision": config["key_revision"], "key": key}).encode("utf-8"), protect=True)
-                _write(key_path(), encrypted)
+                protected = credential_settings.store._transform(json.dumps({"version": 1, "revision": config["key_revision"], "key": key}).encode(), protect=True)
+                _write(key_path(provider), protected)
                 config["key_configured"] = True
             elif action == "clear":
-                key_path().unlink(missing_ok=True)
-                config["key_configured"] = False
-                config["key_revision"] = ""
+                key_path(provider).unlink(missing_ok=True)
+                config.update(key_revision="", key_configured=False)
+            config["key_states"][provider] = {"revision": config["key_revision"], "configured": config["key_configured"]}
             _write_settings(config)
         except (OSError, credential_settings.CredentialStoreError):
-            raise SettingsError("豆包 API 设置加密保存失败；生成保持暂停，请重新保存。") from None
+            raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None
         if changes:
             features.save(changes)
     return public_status()
@@ -167,55 +236,29 @@ def ensure_ready(kind: str | None = None) -> dict:
     return result
 
 
+def execution_snapshot() -> dict:
+    config = _load()
+    return {key: config.get(key) for key in ("mode", *API_FIELDS, "revision", "key_revision")}
+
+
+def require_snapshot(snapshot: dict) -> None:
+    if not snapshot or snapshot != execution_snapshot() or snapshot.get("mode") != "api":
+        raise ServiceError("执行方式或 API 设置已变化，旧 API 任务未执行/写回；请重新排队。")
+
+
 def _key(config: dict) -> str:
     try:
-        value = json.loads(credential_settings.store._transform(key_path().read_bytes(), protect=False).decode("utf-8"))
+        value = json.loads(credential_settings.store._transform(key_path(config["provider"]).read_bytes(), protect=False).decode("utf-8"))
         key = value.get("key", "") if isinstance(value, dict) and value.get("version") == 1 else ""
-        if (not isinstance(key, str) or not key or any(c.isspace() for c in key)
-                or value.get("revision") != config.get("key_revision")):
+        if not isinstance(key, str) or not key or any(c.isspace() for c in key) or value.get("revision") != config.get("key_revision"):
             raise ValueError
         return key
     except (OSError, ValueError, credential_settings.CredentialStoreError):
-        raise ConnectionError("豆包 API Key 无法读取，已暂停生成；请在独立设置中重新保存。") from None
-
-
-def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None) -> tuple[str, dict]:
-    key = _key(config)
-    if not _same_configuration(config, _load()):
-        raise ServiceError("请求前豆包 API 设置已变化，旧任务未发起，请按新设置重试。")
-    if kind:
-        ensure_ready(kind)
-    content = [{"type": "text", "text": prompt}]
-    content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
-    payload = {"model": config["endpoint_id"], "messages": [{"role": "user", "content": content}],
-               "thinking": {"type": "enabled"}, "max_tokens": max_tokens, "stream": False}
-    try:
-        response = requests.post(ARK_URL, json=payload, headers={"Authorization": f"Bearer {key}"},
-                                 timeout=(15, 180), allow_redirects=False)
-        if response.status_code != 200:
-            if response.status_code in {401, 403}:
-                raise ConnectionError("豆包 API 鉴权或权限未通过，已暂停生成；请核对 API Key 与 Endpoint ID。")
-            raise ConnectionError(f"豆包 API 未完成请求（HTTP {int(response.status_code)}），已暂停生成，请稍后显式重试。")
-        body = response.json()
-        choice = body["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise ConnectionError("豆包思考或答案超过本次长度限制，未保存不完整结果。")
-        message = choice["message"]
-        text = message.get("content")
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError
-        return text, {"model": str(body.get("model") or ""),
-                      "thinking": bool(str(message.get("reasoning_content") or "").strip())}
-    except ServiceError:
-        raise
-    except requests.RequestException:
-        raise ConnectionError("豆包 API 网络请求未完成，已暂停生成，请稍后显式重试。") from None
-    except (ValueError, TypeError, KeyError, IndexError):
-        raise ConnectionError("豆包 API 没有返回完整可用的答案，未保存结果。") from None
+        raise ConnectionError("API Key 无法读取，已暂停 API 生成；请在独立设置中重新保存。") from None
 
 
 def _same_configuration(left: dict, right: dict) -> bool:
-    return all(left.get(key) == right.get(key) for key in ("revision", "key_revision", "endpoint_id", "thinking"))
+    return all(left.get(key) == right.get(key) for key in (*API_FIELDS, "revision", "key_revision"))
 
 
 def _mark_unverified(config: dict) -> None:
@@ -225,51 +268,93 @@ def _mark_unverified(config: dict) -> None:
             _write_settings({**current, "verified": False, "verified_at": "", "resolved_model": ""})
 
 
+def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None) -> tuple[str, dict]:
+    if image_urls and not config["supports_images"]:
+        raise ServiceError("这道题有配图，所选 API 未声明支持图片；已暂停，改用当前助手或明确支持图文的模型。")
+    if config["mode"] != "api" or not _same_configuration(config, _load()) or _load()["mode"] != "api":
+        raise ServiceError("请求前执行方式或 API 设置已变化，旧任务未发起。")
+    if kind:
+        ensure_ready(kind)
+    key = _key(config)
+    content = [{"type": "text", "text": prompt}]
+    content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
+    payload = {"model": config["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens, "stream": False}
+    if config["thinking"]:
+        payload["thinking"] = {"type": "enabled"}
+        if config["provider"] != "doubao":
+            payload["reasoning_effort"] = "high"
+    elif config["provider"] in ("doubao", "deepseek"):
+        payload["thinking"] = {"type": "disabled"}
+    if kind:
+        ensure_ready(kind)
+    try:
+        response = requests.post(config["base_url"] + "/chat/completions", json=payload,
+                                 headers={"Authorization": f"Bearer {key}"}, timeout=(15, 180), allow_redirects=False)
+        if response.status_code != 200:
+            raise ConnectionError(f"独立 API 请求未完成（HTTP {int(response.status_code)}），已暂停，请核对服务配置后显式重试。")
+        body = response.json()
+        choice = body["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ConnectionError("答案超过本次长度限制，未保存不完整结果。")
+        message = choice["message"]
+        text = message.get("content")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError
+        return text, {"model": str(body.get("model") or config["model"]), "thinking": bool(str(message.get("reasoning_content") or "").strip())}
+    except ServiceError:
+        raise
+    except requests.RequestException:
+        raise ConnectionError("独立 API 网络请求未完成，已暂停，请稍后显式重试。") from None
+    except (ValueError, TypeError, KeyError, IndexError):
+        raise ConnectionError("独立 API 没有返回完整可用的答案，未保存结果。") from None
+
+
 def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 12000) -> tuple[str, str]:
-    """Exactly one Doubao request; no engine discovery, fallback or retries."""
     ensure_ready(kind)
     config = _load()
+    if config["mode"] != "api":
+        raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
     try:
         text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
-        if "doubao" not in evidence["model"].lower() or "pro" not in evidence["model"].lower() or not evidence["thinking"]:
-            raise ConnectionError("本次响应未确认豆包 Pro 思考能力，结果未保存，生成保持暂停。")
+        if config["thinking"] and not evidence["thinking"]:
+            raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")
     except ConnectionError:
         _mark_unverified(config)
         raise
-    if not _same_configuration(config, _load()):
-        raise ServiceError("生成期间豆包 API 设置已变化，旧结果未保存，请按新设置重试。")
+    if not _same_configuration(config, _load()) or _load()["mode"] != "api":
+        raise ServiceError("生成期间执行方式或 API 设置已变化，旧结果未保存。")
     ensure_ready(kind)
-    return text, f"豆包 Pro · {evidence['model'] or config['endpoint_id']}"
+    return text, f"{config['provider']} API · {evidence['model']}"
 
 
 def test_connection(payload: dict) -> dict:
-    """Explicit paid-capable synthetic image/math probe, never a user paper."""
     if not isinstance(payload, dict) or payload != {"confirm": True}:
-        raise SettingsError("请明确确认运行一次豆包图文与思考测试；这可能产生 API 费用。")
+        raise SettingsError("请明确确认运行一次连接测试；这可能产生 API 费用。")
     config = _load()
-    if not public_status()["configured"]:
+    if config["mode"] != "api" or not public_status()["configured"]:
         raise ServiceError(UNAVAILABLE)
-    image = Image.new("RGB", (120, 70), "white")
-    drawing = ImageDraw.Draw(image)
-    drawing.ellipse((15, 20, 35, 40), fill="black")
-    drawing.ellipse((70, 20, 90, 40), fill="black")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    image_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-    prompt = "这是连接测试用的合成图，不是用户试卷。开启思考，计算 1+1，并数图中的黑色圆点。只输出【答案】数值【图示】圆点个数。"
+    urls = []
+    prompt = "这是合成连接测试，不是用户试卷。计算 1+1，只输出【答案】2。"
+    if config["supports_images"]:
+        image = Image.new("RGB", (120, 70), "white")
+        drawing = ImageDraw.Draw(image)
+        for box in ((15, 20, 35, 40), (70, 20, 90, 40)):
+            drawing.ellipse(box, fill="black")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        urls = ["data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")]
+        prompt = "这是合成连接测试，不是用户试卷。计算1+1，并数图中黑色圆点。只输出【答案】数值【图示】圆点个数。"
     try:
-        text, evidence = _request(config, prompt, [image_url], 12000)
-        if not re.search(r"【答案】\s*\$?2\$?\s*【图示】\s*\$?2\$?", text):
-            raise ServiceError("豆包 API 未通过合成数学题与图像核对，生成保持暂停。")
-        if "doubao" not in evidence["model"].lower() or "pro" not in evidence["model"].lower() or not evidence["thinking"]:
-            raise ServiceError("服务响应未确认豆包 Pro 模型及思考能力；请核对 Endpoint ID，生成保持暂停。")
+        text, evidence = _request(config, prompt, urls, 12000)
+        expected = r"【答案】\s*\$?2\$?\s*【图示】\s*\$?2\$?" if urls else r"【答案】\s*\$?2\$?"
+        if not re.search(expected, text) or (config["thinking"] and not evidence["thinking"]):
+            raise ServiceError("API 未通过所选合成数学/图像与思考响应测试，API 生成保持暂停；这不是答案质量评估。")
     except ServiceError:
         _mark_unverified(config)
         raise
     with _lock:
         current = _load()
-        if not _same_configuration(config, current):
+        if not _same_configuration(config, current) or current["mode"] != "api":
             raise ServiceError("测试期间设置已变化，测试结果未沿用，请重新测试。")
-        _write_settings({**current, "verified": True, "verified_at": timezone.now().isoformat(),
-                         "resolved_model": evidence["model"]})
+        _write_settings({**current, "verified": True, "verified_at": timezone.now().isoformat(), "resolved_model": evidence["model"]})
     return public_status()

@@ -42,6 +42,7 @@
     // 1.10.5: 翻开了答案的题（每题单独翻开，不再一键全部展开）。
     opened: new Set(),
     features: {},
+    ai: { mode: "assistant" },
     poll: null,
     focus: params.get("focus") || "",
     items: [],
@@ -147,8 +148,18 @@
 
   async function load({ append = false, quiet = false } = {}) {
     if (state.view === "selected") {
+      window.clearTimeout(state.poll);
+      try {
+        const response = await fetch("/api/settings/library-ai", { cache: "no-store" });
+        if (response.ok) {
+          const settings = await response.json();
+          state.features = { ...state.features, ...settings.features };
+          state.ai = { mode: settings.mode, provider: settings.provider, message: settings.message };
+        }
+      } catch (_) { /* Keep the last known settings when a local refresh fails. */ }
       await refreshBasket({ force: true });
       render();
+      scheduleJobRefresh();
       return;
     }
     const token = ++state.token;
@@ -181,13 +192,12 @@
       state.total = body.total;
       state.facets = body.facets;
       state.features = body.features || {};
+      state.ai = body.ai || { mode: "assistant" };
       state.items = append ? state.items.concat(body.items) : body.items;
       state.items.forEach((item) => state.catalog.set(item.id, item));
       render();
-      // 知识点、AI 参考答案在后台做：有排队的就过几秒再看一眼。
-      if (state.items.some((item) => (item.jobs || []).length)) {
-        state.poll = window.setTimeout(() => load({ quiet: true }), 4000);
-      }
+      // 助手任务只等待工具写回；API 任务由后台处理。两种结果都刷新显示。
+      scheduleJobRefresh();
     } catch (error) {
       if (token === state.token) {
         ui.status.textContent = state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。";
@@ -203,6 +213,13 @@
     } finally {
       if (token === state.token) state.loading = false;
     }
+  }
+
+  function scheduleJobRefresh() {
+    const pending = visibleItems().flatMap((item) => item.job_details || [])
+      .filter((job) => job.kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer);
+    if (pending.length) state.poll = window.setTimeout(() => load({ quiet: true }),
+      pending.some((job) => job.executor === "api") ? 4000 : 10000);
   }
 
   function renderFacets() {
@@ -282,7 +299,9 @@
       tools.push(answers);
     }
     box.hidden = !tools.length;
-    if (tools.length) box.append(node("span", "helper", "使用“标签与答案设置”中单独连接的豆包，会用到它的额度："), ...tools);
+    if (tools.length) box.append(node("span", "helper", state.ai.mode === "api"
+      ? "由独立模型生成，会用到已配置服务的额度："
+      : "交给正在操作软件的豆包或 AI 助手处理，无需额外豆包 API："), ...tools);
   }
 
   async function queueJobs(kind, target) {
@@ -294,7 +313,11 @@
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "没能排上队");
       const what = kind === "tags" ? "打知识点标签" : "做 AI 参考答案";
-      toast(body.queued ? `已排队${what}：${body.queued} 道题，做好会自动显示` : `没有需要${what}的题`, body.queued ? "success" : "");
+      const skipped = body.skipped ? `；${body.skipped} 道已有结果或当前不能生成` : "";
+      toast(body.queued ? body.executor === "assistant"
+        ? `已加入待助手处理：${body.queued} 道题，请把任务交给豆包${skipped}`
+        : `已排队${what}：${body.queued} 道题，做好会自动显示${skipped}`
+        : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
       load({ quiet: true });
     } catch (error) {
       toast(error.message || "没能排上队", "error");
@@ -492,19 +515,22 @@
 
   function jobButtons(item) {
     const buttons = [];
-    const waiting = new Set(item.jobs || []);
+    const details = item.job_details || [];
+    const waiting = new Set(details.length ? details.filter((job) => job.executor === state.ai.mode).map((job) => job.kind) : item.jobs || []);
     if (state.features.knowledge_tags && !(item.tags || []).length) {
       const busy = waiting.has("tags");
-      const button = iconButton("button", "button button-quiet button-small", busy ? "正在打知识点标签…" : "打知识点标签", busy ? "" : "plus");
+      const assistant = state.ai.mode === "assistant" && details.some((job) => job.kind === "tags" && job.executor === "assistant");
+      const button = iconButton("button", "button button-quiet button-small", busy ? (assistant ? "待助手生成标签" : "正在打知识点标签…") : "打知识点标签", busy ? "" : "plus");
       button.disabled = busy;
       button.addEventListener("click", () => queueJobs("tags", { ids: [item.id] }));
       buttons.push(button);
     }
     if (state.features.ai_answer && !item.has_answer && !item.ai_answer) {
       const busy = waiting.has("answer");
-      const button = iconButton("button", "button button-quiet button-small", busy ? "AI 正在解答…" : "AI 解答", busy ? "" : "plus");
+      const assistant = state.ai.mode === "assistant" && details.some((job) => job.kind === "answer" && job.executor === "assistant");
+      const button = iconButton("button", "button button-quiet button-small", busy ? (assistant ? "待助手解答" : "AI 正在解答…") : "AI 解答", busy ? "" : "plus");
       button.disabled = busy;
-      button.title = "原卷没有答案：使用单独配置并核验的豆包，结果标着“AI 参考 · 未核对”";
+      button.title = "原卷没有答案：由当前助手或选定的独立模型生成，结果标着“AI 参考 · 未核对”";
       button.addEventListener("click", () => queueJobs("answer", { ids: [item.id] }));
       buttons.push(button);
     }
@@ -513,6 +539,11 @@
 
   function render() {
     renderFacets();
+    const pendingAssistant = state.ai.mode === "assistant" && visibleItems().some((item) => (item.job_details || []).some((job) => job.executor === "assistant"
+      && (job.kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer)));
+    const notice = $("assistantTaskNotice");
+    notice.hidden = !pendingAssistant;
+    if (pendingAssistant) notice.textContent = "有题目等待助手处理。告诉正在操作题有据的豆包：“请完成题库里的待处理标签和参考答案。”助手写回后会显示在这里；网页排队不会自动唤醒桌面豆包。";
     renderActiveFilters();
     renderBasket();
     syncSelection();
@@ -540,12 +571,14 @@
     const previous = state.cards || new Map();
     state.cards = new Map();
     shown.forEach((item) => {
-      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag]);
+      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag]);
       const kept = previous.get(item.id);
       const node = kept && kept.signature === signature ? kept.node : card(item);
       state.cards.set(item.id, { signature, node });
       ui.list.append(node);
     });
+    const currentQuestion = state.catalog.get(state.questionReturnId);
+    if ($("questionDialog").open && currentQuestion && state.questionSignature !== questionSignature(currentQuestion)) openQuestion(currentQuestion);
     ui.status.textContent = state.view === "selected" ? `试题篮 ${state.basket.length} 题 · 已载入 ${shown.length} 题。已选题目不受搜索与筛选影响。`
       : state.total
       ? `已显示 ${state.items.length} / 共 ${state.total} 题${state.q ? `，匹配“${state.q}”` : ""} · 每题保留入库版本。`
@@ -619,6 +652,11 @@
     $("selectVisible").indeterminate = count > 0 && count < shown.length;
     $("selectVisible").disabled = !shown.length;
     $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
+    for (const [id, feature] of [["generateSelectedTags", "knowledge_tags"], ["generateSelectedAnswers", "ai_answer"]]) {
+      const button = $(id);
+      button.hidden = !state.features[feature];
+      button.disabled = !state.selected.size;
+    }
     $("addSelected").disabled = !state.selected.size;
     $("clearSelection").disabled = !state.selected.size;
   }
@@ -719,8 +757,14 @@
     }
   }
 
+  function questionSignature(item) {
+    return JSON.stringify([item, state.features, state.ai.mode, state.basket.includes(item.id)]);
+  }
+
   function openQuestion(item) {
     const dialog = $("questionDialog");
+    const refreshing = dialog.open && state.questionReturnId === item.id;
+    const scroll = refreshing ? dialog.scrollTop : 0;
     $("questionTitle").textContent = `${item.source_filename} · 第 ${item.number} 题`;
     $("questionVersion").textContent = `${QB.TYPE_NAMES[item.question_type] || item.question_type} · 第 ${item.version} 版 · ${formatDate(item.published_at)} 入库${item.review?.source === "ai" ? " · AI 审核，待人工核对" : ""}`;
     const paper = $("questionContent");
@@ -747,6 +791,8 @@
     actions.append(source, history, ...jobButtons(item), node("span", "actions-spacer"), add);
     if (!dialog.open) { state.questionReturnFocus = document.activeElement; dialog.showModal(); }
     state.questionReturnId = item.id;
+    state.questionSignature = questionSignature(item);
+    if (refreshing) dialog.scrollTop = scroll;
     paper.scrollTop = 0;
     QB.fitOptions(paper);
     requestAnimationFrame(() => readingOverflowHints(paper));
@@ -1570,6 +1616,8 @@
     render();
   });
   $("clearSelection").addEventListener("click", () => { state.selected.clear(); render(); });
+  $("generateSelectedTags").addEventListener("click", () => queueJobs("tags", { ids: [...state.selected] }));
+  $("generateSelectedAnswers").addEventListener("click", () => queueJobs("answer", { ids: [...state.selected] }));
   $("addSelected").addEventListener("click", () => {
     if (new Set([...state.basket, ...state.selected]).size > 500) { toast("试题篮最多放 500 题，请先保存一份组卷", "error"); return; }
     state.basket = workspace.uniqueIds([...state.basket, ...state.selected]);

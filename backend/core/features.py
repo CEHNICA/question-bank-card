@@ -31,11 +31,11 @@ FEATURES = {
     },
     "knowledge_tags": {
         "default": False, "label": "知识点标签",
-        "help": "在独立的“标签与参考答案设置”中配置豆包 Pro API，从固定目录选 1–3 个标签。默认关闭，不使用读题服务或其他 AI 助手；生成可能计费。",
+        "help": "默认关闭。开启后由当前豆包或 AI 助手从固定目录选 1–3 个标签并写回；也可在独立设置中选择模型 API。AI 标签需核对。",
     },
     "ai_answer": {
         "default": False, "label": "AI 参考答案",
-        "help": "在独立设置中配置并显式测试豆包 Pro API 后，为没有原卷答案的题生成参考。默认关闭，标着“AI 参考 · 未核对”，不覆盖原答；生成可能计费。",
+        "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
 }
 DEFAULTS = {key: spec["default"] for key, spec in FEATURES.items()}

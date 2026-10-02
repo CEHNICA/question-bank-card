@@ -517,8 +517,8 @@ const QBTeach = (() => {
       text: "“选择当前已显示题目”只勾选已经加载的题，再点“加入试题篮”。“已选题目”可以集中检查篮中的题；换筛选、加载更多或收起试题篮都不会清空它。进入“组卷预览”前，先看一遍完整题目。" },
     { key: "drafts", title: "给这份练习起个名字", manual: true,
       text: "在组卷预览里填写试卷标题，点“保存草稿”；“另存为”会保留另一份。下次从“组卷草稿”继续选题和调整顺序。题目被撤回、更新或找不到时会明确提示；先处理缺题，不会悄悄换成新版本或漏印。" },
-    { key: "ai", title: "标签和答案，单独设置", manual: true,
-      text: "“标签与答案设置”是独立窗口，两项默认关闭。接通可用的豆包 Pro API 后才可生成；未接通就暂停，只推荐了解 DeepSeek Pro，不会自动换模型。保存配置不会发起测试；可能计费的测试需单独同意。这里仅认识入口，不生成、不测试。" },
+    { key: "ai", title: "标签和答案，统一设置", manual: true,
+      text: "所有页面共用“设置 → 标签与参考答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，也可在正式题库单题或勾选批量生成。默认由当前 AI 助手通过本机工具写回，无需额外豆包 API；独立模型可选，推荐 DeepSeek。教学只认识入口，不改开关、不生成、不测试。" },
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
@@ -4063,7 +4063,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestAnimationFrame(() => $("settingsClose").focus());
   }
 
-  $("settingsButton").addEventListener("click", openSettings);
+  $("settingsButton").addEventListener("click", (event) => {
+    if (window.location.pathname === "/settings") { event.preventDefault(); openSettings(); }
+  });
+  $("reopenSettings").addEventListener("click", openSettings);
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
@@ -6485,6 +6488,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function startTeaching({ reset = false, review = false } = {}) {
+    if (window.location.pathname === "/settings") {
+      await leaveFor(`/?learn=${review ? "new" : "all"}`);
+      return;
+    }
     if (!(await discardEdits())) return;
     closeSettingsThen(() => {});
     if ($("welcomeDialog").open) finishWelcome();
@@ -6700,7 +6707,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "ai": {
         openSettings();
         showSettingsTab("settingsGeneral");
-        later(() => document.querySelector('[data-library-ai-settings]'), "标签与答案有独立设置", "两项默认关闭。没有可用豆包就暂停；保存配置和可能计费的测试分开。教学只指出入口，不打开测试或改变开关。");
+        later(() => document.querySelector('[data-library-ai-settings]'), "标签与答案都在设置里", "所有页面共用这个入口。两项默认关闭、默认手动；可选录入并入库时生成，或在题库单题、勾选批量生成。助手模式仍需当前助手处理并写回，教学不改开关、不生成、不测试。");
         break;
       }
       case "recovery": {
@@ -6764,6 +6771,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function start() {
     await loadStatus();
+    if (window.location.pathname === "/settings") {
+      document.title = "题有据 · 共用设置";
+      document.querySelector(".layout").hidden = true;
+      $("settingsHome").hidden = false;
+      document.querySelectorAll(".topnav a").forEach((link) => {
+        const active = new URL(link.href, window.location.href).pathname === "/settings";
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+      });
+      try {
+        const previous = new URL(document.referrer);
+        if (previous.origin === window.location.origin && ["/", "/library"].includes(previous.pathname)) {
+          $("settingsReturn").href = previous.pathname + previous.search;
+          $("settingsReturn").textContent = previous.pathname === "/" ? "返回录入终审" : "返回题库";
+        }
+      } catch (_) { /* A direct bookmark defaults to the library. */ }
+      openSettings();
+      return;
+    }
     await loadPapers();
     const params = new URLSearchParams(window.location.search);
     const wanted = params.get("paper") || params.get("document");
@@ -6794,6 +6820,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     loadTeaching();
     if (teaching.active && !state.papers.some((paper) => paper.id === teaching.paper)) exitTeaching();
     renderTeach();
+    if (["all", "new"].includes(params.get("learn"))) {
+      await startTeaching({ reset: params.get("learn") === "all", review: params.get("learn") === "new" });
+      return;
+    }
     if (readPref("qb-welcome-seen", "") !== "1") openWelcome();
   }
 

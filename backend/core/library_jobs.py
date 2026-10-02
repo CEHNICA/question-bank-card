@@ -1,6 +1,6 @@
 """题库里的两件可选的事：补知识点标签、做 AI 参考答案（设置里默认都关）。
 
-网页只排队，后台工作者用独立配置且经过显式测试的豆包 Pro API 做完再写回。
+网页只排队，默认由当前助手通过本地工具写回；后台只处理显式选择的 API 任务。
 结果存在题库条目的 extras 里：不属于题面快照，不出新版本、不用重审；
 AI 答案和原卷答案分开放，题库和打印里都标着“AI 参考 · 未核对”。
 """
@@ -29,6 +29,14 @@ class JobError(ValueError):
     pass
 
 
+def _no_existing_result(publication, kind):
+    extras = publication.extras or {}
+    if kind == "answer" and isinstance(extras.get("ai_answer"), dict) and extras["ai_answer"].get("answer"):
+        raise JobError("这个入库版已有 AI 参考答案，未重复覆盖。")
+    if kind == "tags" and library.tags_of(extras):
+        raise JobError("这个入库版已有知识点标签，未重复覆盖。")
+
+
 _ANSWER_TAG = re.compile(r"【\s*(答案|解析|知识点)\s*】")
 
 
@@ -44,7 +52,7 @@ def split_answer_tags(raw: str) -> dict[str, str]:
     return result
 
 
-def enqueue(publication: PublishedQuestion, kind: str) -> LibraryJob:
+def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "") -> LibraryJob:
     """Queue one job; an identical job already waiting is reused."""
     if kind not in FEATURE_OF:
         raise JobError("不认识的任务")
@@ -53,13 +61,24 @@ def enqueue(publication: PublishedQuestion, kind: str) -> LibraryJob:
     if publication.status != PublishedQuestion.Status.PUBLISHED:
         raise JobError("这道题已不在正式题库里")
     try:
-        library_ai_settings.ensure_ready(kind)
+        state = library_ai_settings.ensure_ready(kind)
     except library_ai_settings.SettingsError as error:
         raise JobError(str(error)) from None
-    existing = publication.jobs.filter(kind=kind, status__in=ACTIVE).first()
-    if existing is not None:
-        return existing
-    return LibraryJob.objects.create(publication=publication, kind=kind)
+    executor = state.get("mode", "assistant")
+    with transaction.atomic():
+        if publication.question_id:
+            Question.all_objects.select_for_update().filter(pk=publication.question_id).first()
+        publication = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
+        if live_version(publication) is None:
+            raise JobError("这道题已撤回或被新版替代，请使用当前入库版。")
+        _no_existing_result(publication, kind)
+        fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
+        existing = publication.jobs.filter(kind=kind, executor=executor, fingerprint=fingerprint, status__in=ACTIVE).first()
+        if existing is not None:
+            return existing
+        return LibraryJob.objects.create(publication=publication, kind=kind, executor=executor,
+                                         fingerprint=fingerprint, agent=agent,
+                                         api_snapshot=library_ai_settings.execution_snapshot() if executor == "api" else {})
 
 
 def pending_kinds(publication_ids) -> dict[str, list[str]]:
@@ -69,6 +88,29 @@ def pending_kinds(publication_ids) -> dict[str, list[str]]:
     for row in rows.values("publication_id", "kind"):
         result.setdefault(str(row["publication_id"]), []).append(row["kind"])
     return result
+
+
+def queue_on_intake(publication: PublishedQuestion) -> list[LibraryJob]:
+    """Only enqueue after a new publication; optional service absence cannot undo it."""
+    state = library_ai_settings.public_status()
+    jobs = []
+    for kind, feature in FEATURE_OF.items():
+        if not state.get("on_intake", {}).get(kind) or not features.enabled(feature):
+            continue
+        if kind == "tags" and library.tags_of(publication.extras):
+            continue
+        if kind == "answer" and (str((publication.content or {}).get("answer") or "").strip()
+                                 or (publication.extras or {}).get("ai_answer")):
+            continue
+        try:
+            jobs.append(enqueue(publication, kind))
+        except (JobError, library_ai_settings.SettingsError) as error:
+            jobs.append(LibraryJob.objects.create(
+                publication=publication, kind=kind, executor=state["mode"],
+                fingerprint=library.generation_fingerprint(publication.content or {}, publication.pk),
+                api_snapshot=library_ai_settings.execution_snapshot() if state["mode"] == "api" else {},
+                status=LibraryJob.Status.FAILED, error=str(error)[:300]))
+    return jobs
 
 
 def last_errors(publication_ids) -> dict[str, dict[str, str]]:
@@ -85,7 +127,7 @@ def last_errors(publication_ids) -> dict[str, dict[str, str]]:
 
 
 def pending() -> bool:
-    return LibraryJob.objects.filter(status=LibraryJob.Status.QUEUED).exists()
+    return LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED).exists()
 
 
 # ---------------------------------------------------------------- 提示词
@@ -170,6 +212,7 @@ def run_answer(publication: PublishedQuestion) -> dict:
         "publication_id": str(publication.id),
         "fingerprint": library.generation_fingerprint(content, publication.id),
         "checked": False,
+        "executor": "api",
     }
 
 
@@ -201,13 +244,16 @@ def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: 
         Question.all_objects.select_for_update().filter(pk=publication.question_id).first()
     current_job = LibraryJob.objects.select_for_update().get(pk=job.pk)
     current = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
-    if (current_job.status != LibraryJob.Status.RUNNING or current_job.publication_id != publication.pk
+    if (current_job.status != LibraryJob.Status.RUNNING or current_job.executor != LibraryJob.Executor.API
+            or current_job.publication_id != publication.pk or current_job.fingerprint != fingerprint
             or live_version(current) is None or current.content_hash != content_hash
             or library.generation_fingerprint(current.content or {}, current.pk) != fingerprint):
         raise JobError("生成期间题面、配图或入库版本已变化，旧结果未保存；请在当前版本重新生成。")
     if not features.enabled(FEATURE_OF[job.kind]):
         raise JobError("生成期间这个功能已关闭，结果未保存。")
     library_ai_settings.ensure_ready(job.kind)
+    library_ai_settings.require_snapshot(current_job.api_snapshot)
+    _no_existing_result(current, job.kind)
     return current
 
 
@@ -223,7 +269,7 @@ def process_pending(limit: int = 5) -> int:
     for _ in range(limit):
         close_old_connections()
         with transaction.atomic():
-            job = LibraryJob.objects.select_for_update().filter(status=LibraryJob.Status.QUEUED) \
+            job = LibraryJob.objects.select_for_update().filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED) \
                 .select_related("publication").order_by("created_at").first()
             if job is None:
                 break
@@ -236,7 +282,11 @@ def process_pending(limit: int = 5) -> int:
                 raise JobError("这道题已撤回或被新版替代，旧任务未执行；请在当前版本重新生成。")
             if not features.enabled(FEATURE_OF[job.kind]):
                 raise JobError("这个功能已在设置里关掉")
+            _no_existing_result(publication, job.kind)
             fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
+            if not job.fingerprint or job.fingerprint != fingerprint:
+                raise JobError("排队后题面或配图已变化，旧任务未执行；请在当前版本重新排队。")
+            library_ai_settings.require_snapshot(job.api_snapshot)
             initial_hash = publication.content_hash
             if job.kind == LibraryJob.Kind.ANSWER:
                 result = run_answer(publication)
@@ -250,6 +300,7 @@ def process_pending(limit: int = 5) -> int:
                     publication = _bound_target(job, publication, fingerprint, initial_hash)
                     library.save_extras(publication, {**(publication.extras or {}), "tags": tags,
                                                       "tags_source": engine, "tags_at": timezone.now().isoformat(),
+                                                      "tags_executor": "api", "tags_checked": False,
                                                       "tags_fingerprint": fingerprint, "tags_publication_id": str(publication.pk)})
             _finish(job, LibraryJob.Status.DONE)
         except (JobError, library_ai_settings.SettingsError) as error:
@@ -262,4 +313,4 @@ def process_pending(limit: int = 5) -> int:
 
 def recover_interrupted() -> int:
     """Jobs left running by a worker that stopped go back to the queue."""
-    return LibraryJob.objects.filter(status=LibraryJob.Status.RUNNING).update(status=LibraryJob.Status.QUEUED)
+    return LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.RUNNING).update(status=LibraryJob.Status.QUEUED)

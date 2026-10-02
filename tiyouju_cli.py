@@ -21,6 +21,7 @@ import json
 import math
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -979,6 +980,180 @@ def show_library(result: dict) -> str:
     return "\n".join(lines)
 
 
+ENRICH_FEATURES = ("knowledge_tags", "ai_answer")
+ENRICH_KINDS = ("tags", "answer")
+ENRICH_RESULT_BYTES = 256 * 1024
+
+
+def cmd_features(client: Client, args) -> dict:
+    """Read by default; changes only come from explicit flags or MCP choices."""
+    enabled, disabled = getattr(args, "enable", None) or [], getattr(args, "disable", None) or []
+    if not isinstance(enabled, (list, tuple)) or not isinstance(disabled, (list, tuple)):
+        raise CliError("启用/关闭项目需为功能名称列表")
+    if any(key not in ENRICH_FEATURES for key in [*enabled, *disabled]):
+        raise CliError("这里只能设置 knowledge_tags 或 ai_answer")
+    if set(enabled) & set(disabled):
+        raise CliError("同一个功能不能同时启用和关闭")
+    changes = {**dict.fromkeys(enabled, True), **dict.fromkeys(disabled, False)}
+    return client.post("/api/settings/features", {"features": changes}) if changes else client.get("/api/settings/features")
+
+
+def _enrichment_ids(values) -> list[str]:
+    if not isinstance(values, (list, tuple)) or len(values) > 500:
+        raise CliError("最多指定 500 个入库题目编号")
+    result = []
+    for value in values:
+        try:
+            normalized = str(uuid.UUID(str(value)))
+        except (ValueError, TypeError, AttributeError):
+            raise CliError("请使用完整的入库题目 UUID（library 会列出）") from None
+        if normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _enrichment_agent(client: Client, args) -> str:
+    value = " ".join(str(getattr(args, "agent", None) or client.agent).split())
+    if not value or len(value) > 40:
+        raise CliError("助手名字需为 1–40 个字符")
+    return value
+
+
+def cmd_enrich_tasks(client: Client, args) -> dict:
+    limit = getattr(args, "limit", 50)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise CliError("任务数量 limit 需为 1–50")
+    ids = _enrichment_ids(getattr(args, "ids", None) or [])
+    query = {"limit": str(limit)}
+    if ids:
+        query["ids"] = ",".join(ids)
+    return client.get("/api/library/assistant/tasks?" + urllib.parse.urlencode(query))
+
+
+def cmd_enrich_auto(client: Client, args) -> dict:
+    changes = {}
+    for kind in ENRICH_KINDS:
+        value = getattr(args, kind, None)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            changes[kind] = value
+        elif value in ("on", "off"):
+            changes[kind] = value == "on"
+        else:
+            raise CliError("入库时自动排队只能设置 on/off（MCP 用 true/false）")
+    return client.post("/api/settings/library-ai", {"on_intake": changes}) if changes else client.get("/api/settings/library-ai")
+
+
+def _enrichment_resource(client: Client, publication_id: str, url) -> tuple[str, str]:
+    """The app supplies local images, never arbitrary remote URLs or files."""
+    if not isinstance(url, str) or not url:
+        raise CliError("任务图片地址缺失")
+    absolute = urllib.parse.urljoin(client.url + "/", url)
+    parsed, local = urllib.parse.urlsplit(absolute), urllib.parse.urlsplit(client.url)
+    prefix = f"/api/library/{publication_id}/"
+    suffix = parsed.path[len(prefix):] if parsed.path.startswith(prefix) else ""
+    parts = suffix.split("/")
+    allowed = suffix == "crop" or (len(parts) == 2 and (
+        (parts[0] == "pages" and parts[1].isdigit())
+        or (parts[0] == "figures" and re.fullmatch(r"figure-\d{1,3}\.png", parts[1]))))
+    if (parsed.scheme, parsed.netloc) != (local.scheme, local.netloc) or parsed.fragment or not allowed:
+        raise CliError("任务图片必须来自本机同一道入库题的原卷或配图接口")
+    path = urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
+    return path, absolute
+
+
+def cmd_enrich_prepare(client: Client, args) -> dict:
+    publication_id = _enrichment_ids([args.publication_id])[0]
+    kinds = getattr(args, "kinds", None) or list(ENRICH_KINDS)
+    if not isinstance(kinds, (list, tuple)) or not kinds or any(kind not in ENRICH_KINDS for kind in kinds):
+        raise CliError("kinds 只能包含 tags 和 answer")
+    result = client.post("/api/library/assistant/prepare", {
+        "publication_id": publication_id, "kinds": list(dict.fromkeys(kinds)), "agent": _enrichment_agent(client, args),
+    })
+    result = json.loads(json.dumps(result))
+    images = result.get("images") or {}
+    resources = []
+    if images.get("crop"):
+        path, images["crop"] = _enrichment_resource(client, publication_id, images["crop"])
+        resources.append(("crop.png", path))
+    for index, figure in enumerate(images.get("figures") or [], 1):
+        path, figure["url"] = _enrichment_resource(client, publication_id, figure.get("url"))
+        resources.append((f"figure-{index}.png", path))
+    for original in images.get("originals") or []:
+        _, original["url"] = _enrichment_resource(client, publication_id, original.get("url"))
+    result["images"] = images
+    local_images = {"crop": None, "figures": []}
+    if not getattr(args, "no_images", False) and resources:
+        try:
+            folder = Path(args.out).expanduser() if getattr(args, "out", None) else Path(tempfile.mkdtemp(prefix="tiyouju-enrich-"))
+            folder.mkdir(parents=True, exist_ok=True)
+            for filename, path in resources:
+                target = folder / filename
+                target.write_bytes(client.get_bytes(path))
+                if filename == "crop.png":
+                    local_images["crop"] = str(target.resolve())
+                else:
+                    local_images["figures"].append(str(target.resolve()))
+        except OSError as error:
+            raise CliError("任务已准备，但图片未能存到本机；请检查输出目录或使用 --no-images 查看本机图片地址") from error
+    result["local_images"] = local_images
+    return result
+
+
+def _enrichment_text_file(filename: str) -> str:
+    try:
+        with Path(filename).expanduser().open("rb") as stream:
+            data = stream.read(ENRICH_RESULT_BYTES + 1)
+        if len(data) > ENRICH_RESULT_BYTES:
+            raise CliError("单次参考结果文件不能超过 256 KiB")
+        return data.decode("utf-8-sig")
+    except (OSError, UnicodeError) as error:
+        raise CliError("无法读取 UTF-8 参考结果文件") from error
+
+
+def cmd_enrich_submit(client: Client, args) -> dict:
+    job_id = _enrichment_ids([args.job_id])[0]
+    fingerprint = getattr(args, "fingerprint", None)
+    if not isinstance(fingerprint, str) or not fingerprint.strip():
+        raise CliError("请原样提交 prepare 返回的任务 fingerprint")
+    if getattr(args, "result_file", None):
+        if any(getattr(args, field, None) is not None for field in ("tags", "answer", "answer_file", "analysis", "analysis_file")):
+            raise CliError("使用 --result-file 时不要再单独传标签、答案或解析")
+        try:
+            result = json.loads(_enrichment_text_file(args.result_file))
+        except ValueError:
+            raise CliError("参考结果文件不是有效的 JSON") from None
+    else:
+        result = {}
+        if getattr(args, "tags", None) is not None:
+            result["tags"] = args.tags
+        if getattr(args, "answer", None) is not None:
+            result["answer"] = args.answer
+        elif getattr(args, "answer_file", None):
+            result["answer"] = _enrichment_text_file(args.answer_file)
+        if getattr(args, "analysis", None) is not None:
+            result["analysis"] = args.analysis
+        elif getattr(args, "analysis_file", None):
+            result["analysis"] = _enrichment_text_file(args.analysis_file)
+    if not isinstance(result, dict) or not result or set(result) - {"tags", "answer", "analysis"}:
+        raise CliError("结果只允许 tags，或 answer 和可选 analysis；不能改题面、审核或来源")
+    if "tags" in result:
+        tags = result["tags"]
+        if set(result) != {"tags"} or not isinstance(tags, list) or not 1 <= len(tags) <= 3 or not all(isinstance(tag, str) and tag.strip() for tag in tags):
+            raise CliError("标签任务需单独提交目录里的 1–3 个标签")
+    elif not isinstance(result.get("answer"), str) or not result["answer"].strip() or ("analysis" in result and not isinstance(result["analysis"], str)):
+        raise CliError("答案任务需要非空 answer 和可选的文字 analysis")
+    return client.post("/api/library/assistant/complete", {
+        **result, "job_id": job_id, "fingerprint": fingerprint, "agent": _enrichment_agent(client, args),
+    })
+
+
+def cmd_enrich(client: Client, args) -> dict:
+    return {"tasks": cmd_enrich_tasks, "auto": cmd_enrich_auto,
+            "prepare": cmd_enrich_prepare, "submit": cmd_enrich_submit}[args.enrich_command](client, args)
+
+
 SHOWERS = {
     "status": show_status, "config": show_config, "papers": show_papers, "upload": show_upload, "wait": show_wait, "cards": show_cards,
     "show": show_card, "fix": show_fix, "figures": show_figures, "approve": show_approve, "publish": show_publish,
@@ -994,9 +1169,15 @@ MCP_INSTRUCTIONS = (
     "list_cards(filter=todo) → 对每道 show_card（会给你原卷截图），逐字对照；不对就 fix_card / set_figures，"
     "对了就 approve_cards；绿卡也要抽查后再 approve_cards(green=true)；最后 publish_paper。"
     "你打的勾记成“AI 通过”，使用者会再核对。不要碰密钥；缺密钥请使用者在软件“设置 → 常用”里填写"
-    "（MinerU 和魔搭都免费，status 会给出申请网址）。题卡写着“MinerU 初稿”时（AI 助手读题），"
+    "（status 会给出申请网址，费用与额度按当前账户规则）。题卡写着“MinerU 初稿”时（AI 助手读题），"
     "题面还没人看图核对过：每一道都要对照截图逐字核对。"
     "题型没读出来（type_blocked）的题不能通过：先用 fix_card 只传 type 选好题型。"
+    "用户明确需要标签或参考答案时，当前助手自己完成，不需要豆包API：configure_features明确打开所需开关，"
+    "list_enrichment_tasks → prepare_enrichment（看题面、原卷和配图，按目录选标签或自己解题复核）→ submit_enrichment。"
+    "按每个kind任务的fingerprint提交，不改原卷答案或审核；结果仍是AI附加内容、未核对。独立模型API只是可选方式。"
+    "用户要整批生成时，逐个入库题prepare，再按每个kind分别submit，不把多道题合成一段答案。"
+    "用户明确要以后新题入库时自动处理，可configure_enrichment_auto设置自动排队（默认关闭），所需feature仍需显式启用。"
+    "自动任务在新题入库之后创建；助手模式由当前助手继续领取完成，不声称已在OCR前生成答案或已常驻豆包。"
 )
 
 
@@ -1050,6 +1231,28 @@ MCP_TOOLS = [
         "tag": {"type": "string", "description": "知识点标签（设置里打开“知识点标签”后才有）"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
     })),
+    ("configure_features", "只读查看标签/参考答案开关，或按用户明确生成需求启用/关闭。默认关闭；不配置API、不生成内容。", _schema({
+        "enable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
+        "disable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
+    })),
+    ("list_enrichment_tasks", "查看待当前助手自己完成的标签/参考答案任务。不自动启用功能或调用云模型。ids是入库题UUID。", _schema({
+        "ids": {"type": "array", "maxItems": 500, "items": {"type": "string"}},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+    })),
+    ("configure_enrichment_auto", "查看或明确设置新题入库后自动排队标签/参考答案（默认关闭）。不改功能开关、模型、API或旧题；助手继续领任务完成。", _schema({
+        "tags": {"type": "boolean"}, "answer": {"type": "boolean"},
+    })),
+    ("prepare_enrichment", "为指定入库题准备标签或参考答案任务，返回题面、原卷/配图、知识点目录、prompt和fingerprint。当前助手自己看图完成，不调用API。", _schema({
+        "publication_id": {"type": "string"},
+        "kinds": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "enum": list(ENRICH_KINDS)}},
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+    }, ["publication_id"])),
+    ("submit_enrichment", "交回当前助手完成的一种任务。tags从目录选1–3个；答案自己解题复核，仍标未核对。不改原卷答案或审核；过期任务拒绝写入。", _schema({
+        "job_id": {"type": "string"}, "fingerprint": {"type": "string"},
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+        "tags": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+        "answer": {"type": "string"}, "analysis": {"type": "string"},
+    }, ["job_id", "fingerprint"])),
 ]
 
 
@@ -1104,6 +1307,21 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_library(client, _ns(keywords=str(a.get("keywords") or "").split(), paper=None, type=None,
                                        review=a.get("review"), answer=a.get("answer"), tag=a.get("tag"),
                                        limit=int(a.get("limit") or 20))), []
+    if name == "configure_features":
+        return cmd_features(client, _ns(enable=a.get("enable"), disable=a.get("disable"))), []
+    if name == "list_enrichment_tasks":
+        return cmd_enrich_tasks(client, _ns(ids=a.get("ids"), limit=a.get("limit", 50))), []
+    if name == "configure_enrichment_auto":
+        return cmd_enrich_auto(client, _ns(tags=a.get("tags"), answer=a.get("answer"))), []
+    if name == "prepare_enrichment":
+        result = cmd_enrich_prepare(client, _ns(publication_id=a.get("publication_id"),
+                                               kinds=a.get("kinds"), agent=a.get("agent")))
+        images = result.get("local_images") or {}
+        return result, [path for path in [images.get("crop"), *(images.get("figures") or [])] if path]
+    if name == "submit_enrichment":
+        return cmd_enrich_submit(client, _ns(job_id=a.get("job_id"), fingerprint=a.get("fingerprint"),
+                                             agent=a.get("agent"), tags=a.get("tags"),
+                                             answer=a.get("answer"), analysis=a.get("analysis"))), []
     raise CliError(f"没有这个工具：{name}")
 
 
@@ -1190,6 +1408,7 @@ WORKFLOW = """\
   6. tiyouju approve latest 9               对了就打勾（记为 AI 通过）
   7. tiyouju approve latest --green         绿卡抽查后一起通过
   8. tiyouju publish latest                 入库
+标签/参考答案由当前助手自己完成（不需要豆包API）：按用户需求 features --enable，再 enrich prepare / submit 写回附加内容，仍待核对。
 没有看图读题的密钥：征得使用者同意后 tiyouju config --reader assistant，题卡先用 MinerU 的文字，由你逐题核对。
 每个命令加 --json 输出 JSON（纯 ASCII，中文写成 \\uXXXX，任何终端都不会乱码）。
 退出码：0 成功，1 出错，2 题有据没打开，3 需要使用者处理。"""
@@ -1291,6 +1510,34 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--tag", help="知识点标签（设置里打开“知识点标签”后才有）")
     library.add_argument("--limit", type=int, default=20)
 
+    feature_parser = sub.add_parser("features", parents=[common], help="查看或明确启用/关闭标签与参考答案（默认关闭）")
+    feature_parser.add_argument("--enable", nargs="+", choices=ENRICH_FEATURES, help="按用户明确生成需求启用")
+    feature_parser.add_argument("--disable", nargs="+", choices=ENRICH_FEATURES)
+    enrich = sub.add_parser("enrich", help="当前助手自己补标签/参考答案，再写回本机题库；不需要豆包API")
+    enrichment = enrich.add_subparsers(dest="enrich_command", required=True, metavar="步骤")
+    tasks = enrichment.add_parser("tasks", parents=[common], help="只读查看待助手任务")
+    tasks.add_argument("--ids", nargs="+", help="指定完整入库题 UUID（最多500个）")
+    tasks.add_argument("--limit", type=int, default=50)
+    auto = enrichment.add_parser("auto", parents=[common], help="查看或明确设置新题入库后自动排队（默认关闭）")
+    auto.add_argument("--tags", choices=["on", "off"])
+    auto.add_argument("--answer", choices=["on", "off"])
+    prepare = enrichment.add_parser("prepare", parents=[common], help="领取题面、图片、目录、prompt和任务指纹")
+    prepare.add_argument("publication_id", help="入库题 UUID")
+    prepare.add_argument("--kinds", nargs="+", choices=ENRICH_KINDS, default=list(ENRICH_KINDS))
+    prepare.add_argument("--out", help="原卷截图与配图保存目录（默认新建临时目录）")
+    prepare.add_argument("--no-images", action="store_true", help="只返回本机图片URL，不下载图片")
+    submit = enrichment.add_parser("submit", parents=[common], help="提交一种已完成的任务，仅写AI附加内容")
+    submit.add_argument("job_id", help="prepare 返回的任务 UUID")
+    submit.add_argument("--fingerprint", required=True, help="原样使用该任务的 fingerprint")
+    result_source = submit.add_mutually_exclusive_group(required=True)
+    result_source.add_argument("--result-file", help='UTF-8 JSON：{"tags":["目录标签"]} 或 {"answer":"答案","analysis":"解析"}')
+    result_source.add_argument("--tags", nargs="+", help="目录中的1–3个标签，不与答案混交")
+    result_source.add_argument("--answer", help="参考答案；有公式时建议使用文件")
+    result_source.add_argument("--answer-file", help="UTF-8参考答案文件")
+    analysis_source = submit.add_mutually_exclusive_group()
+    analysis_source.add_argument("--analysis", help="可选参考解析")
+    analysis_source.add_argument("--analysis-file", help="UTF-8参考解析文件")
+
     sub.add_parser("mcp", parents=[common], help="作为 MCP 服务器运行（stdio），给支持 MCP 的 AI 用")
     return parser
 
@@ -1300,6 +1547,7 @@ COMMANDS = {
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
     "assistant-setup": cmd_assistant_setup,
+    "features": cmd_features, "enrich": cmd_enrich,
 }
 
 

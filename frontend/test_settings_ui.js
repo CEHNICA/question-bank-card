@@ -18,8 +18,10 @@ for (const page of [html, libraryHtml]) {
 assert.match(html, /id="aboutVersion"/);
 assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
-// 顶栏只有一个带文字的设置入口；设置按分页显示：常用、读题模型、帮助、关于。
-assert.match(html, /id="settingsButton"[^>]*>[\s\S]*?<use href="#i-gear"\/>[\s\S]*?设置<\/button>/);
+// 两页指向同一个设置位置；设置按分页显示：常用、读题模型、帮助、关于。
+assert.match(html, /id="settingsButton" href="\/settings">设置<\/a>/);
+assert.match(libraryHtml, /href="\/settings">设置<\/a>/);
+assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
 for (const id of ["settingsGeneral", "settingsModels", "settingsReview", "settingsAbout"]) {
   assert.match(html, new RegExp(`data-settings-tab="${id}"`));
   assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));

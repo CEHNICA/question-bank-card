@@ -56,7 +56,7 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.addCleanup(network.stop)
 
     def configure(self, **extra):
-        payload = {"endpoint_id": "ep-offline-pro", "thinking": True,
+        payload = {"mode": "api", "endpoint_id": "ep-offline-pro", "supports_images": True, "thinking": True,
                    "key": {"action": "replace", "value": "offline-key-never-print"}}
         payload.update(extra)
         return service.save(payload)
@@ -105,7 +105,7 @@ class IndependentAISettingsTests(SimpleTestCase):
     def test_invalid_settings_do_not_overwrite_existing_credentials(self):
         self.configure()
         original = service.key_path().read_bytes()
-        for payload in [{"thinking": False}, {"features": {"ai_answer": "yes"}},
+        for payload in [{"thinking": "yes"}, {"features": {"ai_answer": "yes"}},
                         {"endpoint_id": "https://untrusted.invalid/secret"},
                         {"key": {"action": "replace", "value": "private key\n"}},
                         {"key": {"action": "clear", "value": "private-key"}}]:
@@ -143,15 +143,16 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.assertTrue(sent["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
         self.assertNotIn("user question", json.dumps(sent))
 
-    def test_probe_does_not_accept_non_pro_model_or_missing_reasoning_or_wrong_image(self):
+    def test_probe_checks_requested_reasoning_and_images_without_claiming_answer_quality(self):
         self.configure()
         self.network.side_effect = None
-        for response in [answer_response(model="other-vision-pro"), answer_response(model="doubao-lite"),
-                         answer_response(thinking=False), answer_response(text="【答案】2【图示】3")]:
+        for response in [answer_response(thinking=False), answer_response(text="【答案】2【图示】3")]:
             self.network.return_value = response
             with self.assertRaises(service.ServiceError):
                 service.test_connection({"confirm": True})
             self.assertFalse(service.public_status()["ready"])
+        self.network.return_value = answer_response(model="another-compatible-model")
+        self.assertTrue(service.test_connection({"confirm": True})["api_ready"])
 
     def test_feature_off_stops_new_requests_and_keep_does_not_force_answers_on(self):
         self.configure(features={"knowledge_tags": True, "ai_answer": False})
@@ -201,6 +202,7 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.assertEqual(client.get("/api/settings/library-ai", REMOTE_ADDR="198.51.100.1").status_code, 403)
         self.assertEqual(client.post("/api/settings/library-ai", data="{}", content_type="application/json").status_code, 403)
         response = client.post("/api/settings/library-ai", data=json.dumps({
+            "mode": "api",
             "features": {"knowledge_tags": True, "ai_answer": False},
             "endpoint_id": "ep-offline-pro", "key": {"action": "replace", "value": "offline-api-secret"},
         }), content_type="application/json", HTTP_X_QB_REQUEST="1")
@@ -250,9 +252,16 @@ class GenerationBindingTests(TempDataMixin, TestCase):
         self.question.save()
         self.publication = library.publish(self.question)[0]
         features.save({"ai_answer": True, "knowledge_tags": True})
-        ready = mock.patch.object(service, "ensure_ready", return_value={"ready": True})
+        isolated = mock.patch.dict(os.environ, {"QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "settings.json"),
+                                                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "library-ai.dat")})
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        ready = mock.patch.object(service, "ensure_ready", return_value={"ready": True, "mode": "api"})
         ready.start()
         self.addCleanup(ready.stop)
+        snapshot = mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "offline-test"})
+        snapshot.start()
+        self.addCleanup(snapshot.stop)
         self.transport = mock.patch.object(service.requests, "post", side_effect=AssertionError("unexpected paid request"))
         self.transport.start()
         self.addCleanup(self.transport.stop)
@@ -358,3 +367,43 @@ class GenerationBindingTests(TempDataMixin, TestCase):
         self.publication.extras["ai_answer"]["fingerprint"] = library.generation_fingerprint(content, self.publication.pk)
         content["figures"][0]["bbox"] = [0, 0, 11, 10]
         self.assertNotIn("ai_answer", library.carried_extras(self.publication, content))
+
+    def test_queue_fingerprint_stops_changed_picture_before_any_api_request(self):
+        target = self.figure()
+        job = library_jobs.enqueue(self.publication, "answer")
+        Image.new("RGB", (12, 12), "black").save(target)
+        with mock.patch.object(service, "chat") as chat:
+            library_jobs.process_pending()
+            chat.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+
+    def test_api_configuration_snapshot_is_checked_before_request_and_after_response(self):
+        job = library_jobs.enqueue(self.publication, "answer")
+        with mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"}), \
+                mock.patch.object(service, "chat") as chat:
+            library_jobs.process_pending()
+            chat.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        def changed(*_args, **_kwargs):
+            self.changed_snapshot = mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"})
+            self.changed_snapshot.start()
+            self.addCleanup(self.changed_snapshot.stop)
+            return "【答案】2", "离线 API"
+        job, _chat = self.run_job(side_effect=changed)
+        self.assertEqual(job.status, "failed")
+        self.assertNotIn("ai_answer", self.publication.extras)
+
+    def test_direct_enqueue_and_pending_write_cannot_overwrite_existing_ai_result(self):
+        job = library_jobs.enqueue(self.publication, "answer")
+        library.save_extras(self.publication, {"ai_answer": {"answer": "已有结果", "checked": False}})
+        with self.assertRaisesRegex(library_jobs.JobError, "已有"):
+            library_jobs.enqueue(self.publication, "answer")
+        with mock.patch.object(service, "chat") as chat:
+            library_jobs.process_pending()
+            chat.assert_not_called()
+        job.refresh_from_db()
+        self.publication.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertEqual(self.publication.extras["ai_answer"]["answer"], "已有结果")

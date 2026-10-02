@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -479,9 +480,16 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         self.client = Client()
         self.paper = self.make_paper()
         # No real credentials or service are consulted by these offline jobs.
-        ready = mock.patch.object(library_ai_settings, "ensure_ready", return_value={"ready": True})
+        isolated = mock.patch.dict(os.environ, {"QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "library-ai-settings.json"),
+                                                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "library-ai.dat")})
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        ready = mock.patch.object(library_ai_settings, "ensure_ready", return_value={"ready": True, "mode": "api"})
         ready.start()
         self.addCleanup(ready.stop)
+        snapshot = mock.patch.object(library_ai_settings, "execution_snapshot", return_value={"mode": "api", "revision": "offline-test"})
+        snapshot.start()
+        self.addCleanup(snapshot.stop)
 
     def published(self, number, **extra):
         values = {"question_type": "free_response", "stem": TIDY_STEM, "origin": "2026山东枣庄滕州二中月考"}

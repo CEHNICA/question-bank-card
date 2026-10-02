@@ -5,6 +5,7 @@ from core import views, library_browse, library_drafts
 urlpatterns = [
     path("", views.index_page),
     path("library", views.library_page),
+    path("settings", views.index_page),
     path("app.js", views.app_script),
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
@@ -57,7 +58,12 @@ urlpatterns = [
     path("api/library/drafts", library_drafts.drafts_view),
     path("api/library/drafts/<uuid:draft_id>", library_drafts.draft_detail),
     path("api/library/jobs", views.library_jobs_view),
+    path("api/library/assistant/tasks", views.library_assistant_tasks),
+    path("api/library/assistant/prepare", views.library_assistant_prepare),
+    path("api/library/assistant/complete", views.library_assistant_complete),
     path("api/library/<uuid:publication_id>", views.library_detail),
     path("api/library/<uuid:publication_id>/figures/<str:name>", views.library_figure),
+    path("api/library/<uuid:publication_id>/pages/<int:page>", views.library_source_page),
+    path("api/library/<uuid:publication_id>/crop", views.library_crop),
     path("api/library/<uuid:publication_id>/withdraw", views.library_withdraw),
 ]
