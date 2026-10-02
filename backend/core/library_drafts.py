@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import errno
 import json
 import os
@@ -24,7 +25,8 @@ MAX_STORE_BYTES = 2 * 1024 * 1024
 MAX_TITLE_LENGTH = 120
 LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
 PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False,
-                  "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True}
+                  "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True,
+                  "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": []}
 INPUT_FIELDS = {"title", "ids", "print_options", "revision"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -49,7 +51,7 @@ def _title(value) -> str:
     return value
 
 
-def _print_options(value, defaults=None) -> dict:
+def _print_options(value, defaults=None, *, ids=None) -> dict:
     if not isinstance(value, dict) or set(value) - set(PRINT_DEFAULTS):
         raise DraftError("打印设置包含不支持的选项")
     if any(type(value[key]) is not bool for key in (LEGACY_PRINT_KEYS | {"student_info"}) & set(value)):
@@ -60,10 +62,30 @@ def _print_options(value, defaults=None) -> dict:
         raise DraftError("请选择题目卷、答案解析卷或题目与答案合卷")
     if "answer_space" in value and value["answer_space"] not in ("none", "medium", "large"):
         raise DraftError("答题留白只能选 none、medium、large")
-    result = {**PRINT_DEFAULTS, **(defaults or {}), **value}
+    if "pagination" in value and value["pagination"] not in ("compact", "keep"):
+        raise DraftError("分页只能选紧凑排版或尽量整题同页")
+    if "option_layout" in value and value["option_layout"] not in ("auto", "four", "two"):
+        raise DraftError("选项排版只能选 auto、four、two")
+    result = {**deepcopy(PRINT_DEFAULTS), **deepcopy(defaults or {}), **deepcopy(value)}
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"
+    overrides = result["option_overrides"]
+    if not isinstance(overrides, dict) or len(overrides) > 500 \
+            or any(mode not in ("auto", "four", "two") for mode in overrides.values()):
+        raise DraftError("单题选项排版应为题目编号到 auto、four、two 的映射，最多 500 题")
+    try:
+        keys = normalize_ids(list(overrides))
+        breaks = normalize_ids(result["question_breaks"])
+        selected = set(normalize_ids(ids)) if ids is not None else None
+    except BrowseError as error:
+        raise DraftError("单题排版或另起页的题目编号不正确：" + str(error)) from None
+    if len(keys) != len(overrides) or len(breaks) != len(result["question_breaks"]):
+        raise DraftError("单题排版或另起页的题目编号不能重复")
+    if selected is not None and (set(keys) - selected or set(breaks) - selected):
+        raise DraftError("单题排版和另起页只能指定当前选中的题目")
+    result["option_overrides"] = dict(zip(keys, overrides.values()))
+    result["question_breaks"] = breaks
     return result
 
 
@@ -102,7 +124,7 @@ def _read() -> dict:
                 raise ValueError()
             if not isinstance(draft["print_options"], dict) or not LEGACY_PRINT_KEYS <= set(draft["print_options"]):
                 raise ValueError()
-            draft["print_options"] = _print_options(draft["print_options"])
+            draft["print_options"] = _print_options(draft["print_options"], ids=draft["ids"])
             _revision(draft["revision"])
             for field in ("created_at", "updated_at"):
                 if not isinstance(draft[field], str) or len(draft[field]) > 40:
@@ -211,7 +233,12 @@ def _save(payload: dict, draft_id=None) -> dict:
             ids = normalize_ids(payload.get("ids", draft["ids"] if draft else []))
         except BrowseError as error:
             raise DraftError(str(error)) from None
-        options = _print_options(payload.get("print_options", {}), draft["print_options"] if draft else PRINT_DEFAULTS)
+        defaults = deepcopy(draft["print_options"] if draft else PRINT_DEFAULTS)
+        # Removing a question also removes its saved layout hint. Explicit new
+        # hints for an unselected ID still fail validation rather than disappearing.
+        defaults["option_overrides"] = {key: mode for key, mode in defaults["option_overrides"].items() if key in ids}
+        defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
+        options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
         now = timezone.now().isoformat()
         result = {"id": str(draft_id) if draft else str(uuid.uuid4()), "title": title, "ids": ids,
                   "print_options": options, "created_at": draft["created_at"] if draft else now,

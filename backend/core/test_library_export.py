@@ -313,8 +313,8 @@ class LibraryExportTests(TestCase):
 
     def test_question_paragraphs_keep_together_and_release_the_final_chain(self):
         pub = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"})
-        self.figure(pub)
-        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False}))
+        self.figure(pub, slot="A")
+        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False, "pagination": "keep"}))
         self.assertEqual(response.status_code, 200)
         xml = document_xml(response.content)
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
@@ -329,6 +329,181 @@ class LibraryExportTests(TestCase):
         response = self.post(self.payload([pub], print_options={"ai_answers": True}))
         self.assertEqual(response.status_code, 409)
         self.assertIn("不匹配", response.json()["error"])
+
+    def test_pdf_metadata_validates_math_without_invoking_word_converter(self):
+        value = math_field(r"\cancel{x}", '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
+        pub = self.publication(stem=value["source"])
+        payload = self.payload([pub], print_options={"document": "questions"})
+        payload["rendered_fields"][str(pub.id)]["stem"] = value
+        options = library_drafts._print_options(payload["print_options"], ids=payload["ids"])
+        with mock.patch.object(export, "_convert_math_root", side_effect=AssertionError("Word converter must not run for PDF")):
+            captured, use_ai = export._capture(payload["ids"], payload["rendered_fields"], options, "pdf")
+        segment = captured[0]["fields"]["stem"][0]["segments"][0]
+        self.assertIsNone(segment["omml"])
+        self.assertEqual(segment["mathml"], value["blocks"][0]["segments"][0]["mathml"])
+        self.assertEqual(segment["latex"], r"\cancel{x}")
+        export._recheck(captured, options, use_ai)
+        self.assertEqual(self.post(payload).status_code, 400)
+        # Skipping OMML compatibility never skips XML, source or annotation checks.
+        for mutation in (lambda raw: raw.replace("<mi>x</mi>", "<unsupported>x</unsupported>"),
+                         lambda raw: raw.replace("<mi>x</mi>", '<mi onclick="bad">x</mi>'),
+                         lambda raw: '<!DOCTYPE math>' + raw):
+            bad = deepcopy(value)
+            bad["blocks"][0]["segments"][0]["mathml"] = mutation(bad["blocks"][0]["segments"][0]["mathml"])
+            with self.assertRaises(export.ExportError):
+                export._field(bad, bad["source"], "合成PDF公式", word_math=False)
+        with self.assertRaises(export.ExportError):
+            export._field(value, "不同题干", "合成PDF公式", word_math=False)
+
+    def test_compact_splits_source_subquestions_into_breakable_paragraphs(self):
+        pub = self.publication(stem="合成题开头\n(1) 第一小问\n(2) 第二小问")
+        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False}))
+        self.assertEqual(response.status_code, 200)
+        xml = document_xml(response.content)
+        paragraphs = xml.find("w:body", NS).findall("w:p", NS)
+        question = [paragraph for paragraph in paragraphs if any(word in "".join(paragraph.itertext())
+                    for word in ("合成题开头", "第一小问", "第二小问"))]
+        self.assertEqual(len(question), 3)
+        for paragraph in question:
+            self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
+            self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(question[-1].find("w:pPr/w:spacing", NS).get(f'{{{NS["w"]}}}after'), "160")
+
+    def test_compact_protects_display_formula_and_picture_without_locking_long_prose(self):
+        formula = math_field(r"\frac{a}{b}", '<mfrac><mi>a</mi><mi>b</mi></mfrac>', display=True)
+        before, after = "长段开头" * 40 + "\n", "\n结束文字"
+        source = before + formula["source"] + after
+        pub = self.publication(stem=source)
+        self.figure(pub)
+        payload = self.payload([pub], print_options={"document": "questions"})
+        math = deepcopy(formula["blocks"][0]["segments"][0])
+        math.update(start=units(before), end=units(before + formula["source"]))
+        payload["rendered_fields"][str(pub.id)]["stem"] = {"source": source, "blocks": [{"type": "text", "start": 0,
+            "end": units(source), "segments": [{"type": "text", "start": 0, "end": units(before)}, math,
+            {"type": "text", "start": units(before + formula["source"]), "end": units(source)}]}]}
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200)
+        paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+        for paragraph in paragraphs:
+            if paragraph.find("m:oMath", NS) is not None or paragraph.find(".//w:drawing", NS) is not None:
+                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "1")
+        prose = next(paragraph for paragraph in paragraphs if "长段开头" in "".join(paragraph.itertext()))
+        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
+
+    def test_blank_source_lines_add_spacing_without_empty_word_paragraphs(self):
+        formula = math_field(r"\frac{a}{b}", '<mfrac><mi>a</mi><mi>b</mi></mfrac>', display=True)
+        before, after = "题干开头\n\n  \n(1) 保留答题线________\n\n", "\n\n  \n(2) 保留第二小问\n\n"
+        source = before + formula["source"] + after
+        pub = self.publication(stem=source)
+        payload = self.payload([pub], print_options={"document": "questions", "student_info": False})
+        math = deepcopy(formula["blocks"][0]["segments"][0])
+        math.update(start=units(before), end=units(before + formula["source"]))
+        payload["rendered_fields"][str(pub.id)]["stem"] = {"source": source, "blocks": [{"type": "text", "start": 0,
+            "end": units(source), "segments": [{"type": "text", "start": 0, "end": units(before)}, math,
+            {"type": "text", "start": units(before + formula["source"]), "end": units(source)}]}]}
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+        question = paragraphs[2:]  # title, section heading
+        self.assertEqual(len(question), 4)
+        self.assertEqual(sum(paragraph.find("m:oMath", NS) is not None for paragraph in question), 1)
+        self.assertFalse(any(not "".join(paragraph.itertext()).strip() and paragraph.find("m:oMath", NS) is None
+                             for paragraph in question))
+        text = "".join(document_xml(response.content).itertext())
+        for part in ("题干开头", "(1) 保留答题线________", "(2) 保留第二小问"):
+            self.assertIn(part, text)
+
+    def test_compact_binds_only_short_caption_to_picture(self):
+        short = self.publication(stem="短图注请看下图")
+        long = self.publication(stem="多行题干材料" * 12)
+        formula = math_field("x" * 80, "<mrow>" + "<mi>x</mi>" * 80 + "</mrow>")
+        prefix = "短文字与长公式"
+        wide_math = self.publication(stem=prefix + formula["source"])
+        self.figure(short)
+        self.figure(long)
+        self.figure(wide_math)
+        payload = self.payload([short, long, wide_math], print_options={"document": "questions"})
+        math = deepcopy(formula["blocks"][0]["segments"][0])
+        math.update(start=units(prefix), end=units(prefix + formula["source"]))
+        payload["rendered_fields"][str(wide_math.id)]["stem"] = {"source": wide_math.content["stem"], "blocks": [
+            {"type": "text", "start": 0, "end": units(wide_math.content["stem"]), "segments": [
+                {"type": "text", "start": 0, "end": units(prefix)}, math]}]}
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200)
+        paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+        short_paragraph = next(paragraph for paragraph in paragraphs if "短图注请看下图" in "".join(paragraph.itertext()))
+        long_paragraph = next(paragraph for paragraph in paragraphs if "多行题干材料" in "".join(paragraph.itertext()))
+        math_paragraph = next(paragraph for paragraph in paragraphs if "短文字与长公式" in "".join(paragraph.itertext()))
+        self.assertEqual(short_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "1")
+        self.assertEqual(long_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(math_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        for paragraph in paragraphs:
+            if paragraph.find(".//w:drawing", NS) is not None:
+                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "1")
+
+    def test_keep_long_question_falls_back_to_breakable_paragraphs(self):
+        pub = self.publication(stem="\n".join(f"第 {index} 段合成材料" * 12 for index in range(60)))
+        response = self.post(self.payload([pub], print_options={"document": "questions", "pagination": "keep"}))
+        self.assertEqual(response.status_code, 200)
+        xml = document_xml(response.content)
+        prose = next(paragraph for paragraph in xml.find("w:body", NS).findall("w:p", NS) if "第 1 段合成材料" in "".join(paragraph.itertext()))
+        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
+
+    def test_global_and_per_question_columns_and_font_size_safe_fallback(self):
+        first = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
+        second = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
+        options = {"document": "questions", "option_layout": "four", "option_overrides": {str(second.id): "two"}}
+        result = self.post(self.payload([first, second], print_options=options))
+        tables = document_xml(result.content).findall(".//w:tbl", NS)
+        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [4, 2])
+        first.content["options"] = {key: "中文测试字符" for key in "ABCD"}  # six CJK characters
+        first.save(update_fields=["content"])
+        columns = []
+        for size in (12, 16):
+            result = self.post(self.payload([first], print_options={"document": "questions", "option_layout": "four", "font_size": size}))
+            table = document_xml(result.content).find(".//w:tbl", NS)
+            columns.append(len(table.findall("w:tblGrid/w:gridCol", NS)))
+            self.assertIn(f'w:val="{size * 2}"'.encode(), etree.tostring(document_xml(result.content)))
+        self.assertEqual(columns, [4, 2])
+
+    def test_five_options_and_wide_forced_four_never_drop_or_shrink_content(self):
+        pub = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCDE"})
+        result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four"}))
+        xml = document_xml(result.content)
+        table = xml.find(".//w:tbl", NS)
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
+        self.assertIn("E. 短选项", "".join(table.itertext()))
+        pub.content["options"] = {key: "长选项" * 30 for key in "ABCD"}
+        pub.save(update_fields=["content"])
+        result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four", "font_size": 16}))
+        xml = document_xml(result.content)
+        self.assertIsNone(xml.find(".//w:tbl", NS))
+        for key in "ABCD":
+            self.assertIn(key + ". " + "长选项" * 30, "".join(xml.itertext()))
+
+    def test_selected_page_breaks_bind_section_heading_and_do_not_repeat_in_answers(self):
+        first = self.publication(kind="single_choice", answer="甲")
+        second = self.publication(kind="single_choice", answer="乙")
+        third = self.publication(kind="free_response", answer="丙")
+        options = {"question_breaks": [str(first.id), str(second.id), str(third.id)]}
+        response = self.post(self.payload([first, second, third], print_options=options))
+        self.assertEqual(response.status_code, 200)
+        paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+        breaks = [paragraph for paragraph in paragraphs if paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None]
+        self.assertEqual(len(breaks), 2)
+        self.assertTrue("".join(breaks[0].itertext()).startswith("2."))
+        self.assertIn("解答题", "".join(breaks[1].itertext()))
+        answer_index = next(index for index, paragraph in enumerate(paragraphs) if "参考答案与解析" in "".join(paragraph.itertext()))
+        self.assertFalse(any(paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None for paragraph in paragraphs[answer_index:]))
+
+    def test_layout_hints_for_unselected_ids_are_rejected_by_export(self):
+        pub = self.publication()
+        for hints in ({"option_overrides": {str(uuid.uuid4()): "four"}}, {"question_breaks": [str(uuid.uuid4())]}):
+            response = self.post(self.payload([pub], print_options=hints))
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("当前选中", response.json()["error"])
 
     def test_mathml_annotation_mismatch_external_entities_and_unsupported_nodes_fail(self):
         value = math_field("x", '<mi>x</mi>')
@@ -420,14 +595,14 @@ class LibraryExportTests(TestCase):
         self.assertIn("A.", "".join(xml.itertext()))
         self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
 
-    def test_four_short_options_use_two_columns_and_complex_options_keep_vertical(self):
+    def test_four_short_options_auto_uses_four_columns_and_complex_options_keep_vertical(self):
         pub = self.publication(kind="single_choice", options={key: "离线选项" for key in "ABCD"})
         result = self.post(self.payload([pub], print_options={"document": "questions"}))
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertIsNotNone(table)
-        self.assertEqual(len(table.findall("w:tr", NS)), 2)
-        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
+        self.assertEqual(len(table.findall("w:tr", NS)), 1)
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 4)
         self.assertEqual(table.find("w:tblPr/w:tblBorders/w:top", NS).get(f'{{{NS["w"]}}}val'), "nil")
         for paragraph in table.findall("w:tr", NS)[-1].findall(".//w:p", NS):
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
@@ -547,3 +722,40 @@ class DraftPrintCompatibilityTests(TestCase):
             self.assertEqual(second["print_options"]["document"], "answers")
             self.assertEqual(second["print_options"]["font_size"], 16)
             self.assertFalse(second["print_options"]["student_info"])
+
+    def test_layout_defaults_are_independent_and_old_store_stays_unchanged(self):
+        first = library_drafts._print_options({})
+        self.assertEqual((first["pagination"], first["option_layout"]), ("compact", "auto"))
+        first["option_overrides"][str(uuid.uuid4())] = "four"
+        first["question_breaks"].append(str(uuid.uuid4()))
+        self.assertEqual(library_drafts._print_options({})["option_overrides"], {})
+        self.assertEqual(library_drafts._print_options({})["question_breaks"], [])
+
+    def test_layout_hints_validate_types_membership_duplicates_and_limit(self):
+        key, other = str(uuid.uuid4()), str(uuid.uuid4())
+        normalized = library_drafts._print_options({"option_overrides": {key.upper(): "two"}, "question_breaks": [key.upper()]}, ids=[key])
+        self.assertEqual(normalized["option_overrides"], {key: "two"})
+        self.assertEqual(normalized["question_breaks"], [key])
+        for invalid in ({"pagination": "other"}, {"option_layout": False}, {"option_overrides": []},
+                        {"option_overrides": {key: False}}, {"option_overrides": {key: "three"}},
+                        {"option_overrides": {other: "four"}}, {"option_overrides": {key: "four", key.upper(): "two"}},
+                        {"question_breaks": key}, {"question_breaks": [other]}, {"question_breaks": [key, key]},
+                        {"question_breaks": [str(uuid.uuid4()) for _ in range(501)]}):
+            with self.assertRaises(library_drafts.DraftError):
+                library_drafts._print_options(invalid, ids=[key])
+
+    def test_layout_hints_roundtrip_and_removed_question_hints_are_cleaned_atomically(self):
+        with tempfile.TemporaryDirectory() as directory, override_settings(DATA_ROOT=Path(directory)):
+            first, second = str(uuid.uuid4()), str(uuid.uuid4())
+            record = library_drafts._save({"ids": [first, second], "print_options": {"pagination": "keep", "option_layout": "four",
+                "option_overrides": {second: "two"}, "question_breaks": [second]}})
+            self.assertEqual(library_drafts._read()["drafts"][0]["print_options"], record["print_options"])
+            changed = library_drafts._save({"print_options": {"font_size": 16}}, record["id"])
+            self.assertEqual(changed["print_options"]["option_overrides"], {second: "two"})
+            removed = library_drafts._save({"ids": [first]}, record["id"])
+            self.assertEqual(removed["print_options"]["option_overrides"], {})
+            self.assertEqual(removed["print_options"]["question_breaks"], [])
+            before = library_drafts.draft_path().read_bytes()
+            with self.assertRaises(library_drafts.DraftError):
+                library_drafts._save({"print_options": {"question_breaks": [second]}}, record["id"])
+            self.assertEqual(library_drafts.draft_path().read_bytes(), before)

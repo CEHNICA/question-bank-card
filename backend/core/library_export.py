@@ -11,6 +11,7 @@ from copy import deepcopy
 import hashlib
 import io
 import re
+import unicodedata
 import warnings
 import zipfile
 import xml.sax
@@ -40,6 +41,13 @@ GROUPS = (("single_choice", "选择题"), ("multiple_choice", "多选题"),
 FIELDS = {"stem", "answer", "analysis", "origin", *(f"options.{key}" for key in "ABCDE")}
 ACCENTS = {"⃗": "⃗", "→": "⃗", "←": "⃖", "↔": "⃡", "^": "̂", "~": "̃", "ˉ": "̅",
            "¯": "̅", "˙": "̇", "¨": "̈", "ˇ": "̌", "˘": "̆", "´": "́", "`": "̀"}
+MATHML_ELEMENTS = {"math", "semantics", "annotation", "mi", "mn", "mo", "mrow", "mtext", "mspace", "ms",
+                   "mstyle", "mpadded", "mphantom", "mfrac", "msqrt", "mroot", "mfenced", "menclose", "msub",
+                   "msup", "msubsup", "munder", "mover", "munderover", "mmultiscripts", "mprescripts", "none",
+                   "mtable", "mtr", "mtd", "mlabeledtr", "maction"}
+LINE_SPACING = 1.35
+PARAGRAPH_GAP_PT = 3
+QUESTION_GAP_PT = 8
 
 
 class ExportError(ValueError):
@@ -142,7 +150,7 @@ def _convert_math_root(root):
     return omml
 
 
-def _math(segment, where):
+def _math(segment, where, *, word_math=True):
     """Adapt two narrowly identified upstream OMML bugs, then validate structure.
 
     mathml2omml 0.0.2 closes groupChrPr with the wrong tag, and omits deg for
@@ -167,17 +175,23 @@ def _math(segment, where):
                                    for node in nodes):
             raise ValueError("nodes")
         for node in nodes:
-            if len(list(node.iterancestors())) > 60 or any("href" in key.lower() or "src" in key.lower() for key in node.attrib):
+            if etree.QName(node).localname not in MATHML_ELEMENTS or len(list(node.iterancestors())) > 60 \
+                    or any("href" in key.lower() or "src" in key.lower() or key.lower().startswith("on") for key in node.attrib):
                 raise ValueError("attributes")
             # Upstream turns every menclose into a box, silently losing strikes.
             # A boxed formula is safe; cancellation/radical/arrow enclosures aren't.
-            if etree.QName(node).localname == "menclose" and node.get("notation", "longdiv") != "box":
+            if word_math and etree.QName(node).localname == "menclose" and node.get("notation", "longdiv") != "box":
                 raise ValueError("unsupported enclosure")
         annotations = root.findall(f".//{{{MATH_NS}}}annotation")
         if len(annotations) != 1 or annotations[0].get("encoding") != "application/x-tex" \
-                or "".join(annotations[0].itertext()) != latex:
+                or len(annotations[0]) or "".join(annotations[0].itertext()) != latex \
+                or annotations[0].getparent().tag != f"{{{MATH_NS}}}semantics" or len(annotations[0].getparent()) < 2:
             raise ValueError("annotation")
         annotations[0].getparent().remove(annotations[0])
+        if not word_math:
+            # PDF renders canonical source again through KaTeX; validated metadata
+            # stays in the segment, without imposing Word's OMML support limits.
+            return None
         # Upstream SAX handler would print annotation characters as a side effect.
         omml = _convert_math_root(root)
         # Detect silent token loss in the converter, excluding intentional phantom.
@@ -200,10 +214,11 @@ def _math(segment, where):
         return omml
     except (ValueError, TypeError, RuntimeError, NotImplementedError, AssertionError, IndexError, KeyError,
             etree.XMLSyntaxError, xml.sax.SAXException):
-        _fail(where, "这段公式暂不能准确转换为可编辑 Word 公式，请在预览核对并改用打印 / 保存 PDF")
+        _fail(where, "这段公式暂不能准确转换为可编辑 Word 公式，请在预览核对并改用打印 / 保存 PDF" if word_math
+              else "公式排版结果无效，请重新打开组卷预览后再导出 PDF")
 
 
-def _segments(source, segments, start, end, where, offsets=None):
+def _segments(source, segments, start, end, where, offsets=None, *, word_math=True):
     offsets = offsets or _utf16_map(source, where)
     if not isinstance(segments, list) or len(segments) > 4000:
         _fail(where, "排版片段格式不正确")
@@ -234,7 +249,7 @@ def _segments(source, segments, start, end, where, offsets=None):
             _fail(where, "公式尚未转换，不能把 LaTeX 源码当作成功结果")
         if kind == "text" and re.search(r"<(?:table|tr|td|th)\b", raw, re.I):
             _fail(where, "表格尚未转换，不能把表格源码当作成功结果")
-        converted.append({**segment, "raw": raw, "omml": _math(segment, where) if kind == "math" else None})
+        converted.append({**segment, "raw": raw, "omml": _math(segment, where, word_math=word_math) if kind == "math" else None})
         cursor = b
     if cursor != end:
         _fail(where, "排版结果没有完整覆盖原文，请重新打开组卷")
@@ -305,7 +320,7 @@ def _table_source(raw, where):
             for i, row in enumerate(rows)]
 
 
-def _field(value, official, where):
+def _field(value, official, where, *, word_math=True):
     if not isinstance(value, dict) or set(value) != {"source", "blocks"} or value.get("source") != official:
         _fail(where, "原文与当前入库版不一致，请重新打开组卷", 409)
     offsets = _utf16_map(official, where)
@@ -319,7 +334,7 @@ def _field(value, official, where):
             _fail(where, "排版块格式不正确")
         a, b = _bounds(block, offsets, cursor, end, where)
         if block.get("type") == "text" and set(block) == {"type", "start", "end", "segments"}:
-            result.append({"type": "text", "segments": _segments(official, block["segments"], a, b, where, offsets)})
+            result.append({"type": "text", "segments": _segments(official, block["segments"], a, b, where, offsets, word_math=word_math)})
         elif block.get("type") == "table" and set(block) == {"type", "start", "end", "rows"}:
             expected = _table_source(official[offsets[a]:offsets[b]], where)
             rows = block["rows"]
@@ -335,7 +350,7 @@ def _field(value, official, where):
                             or any(cell.get(key) != reference[key] or type(cell.get(key)) is not type(reference[key]) for key in reference):
                         _fail(where, "表格内容或合并结构与原文不符")
                     cell_offsets = _utf16_map(cell["source"], where)
-                    cells.append({**reference, "segments": _segments(cell["source"], cell["segments"], 0, max(cell_offsets), where, cell_offsets)})
+                    cells.append({**reference, "segments": _segments(cell["source"], cell["segments"], 0, max(cell_offsets), where, cell_offsets, word_math=word_math)})
                 converted.append(cells)
             result.append({"type": "table", "rows": converted})
         else:
@@ -391,7 +406,8 @@ def _images(publication, where):
     return images
 
 
-def _capture(ids, rendered, options, output_format):
+def _capture(ids, rendered, options, output_format, *, word_math=None):
+    word_math = output_format != "pdf" if word_math is None else word_math
     if not isinstance(rendered, dict) or set(rendered) != set(ids):
         raise ExportError("每道选题都需提供完整排版结果，请重新打开组卷")
     found = {str(item.id): item for item in PublishedQuestion.objects.filter(pk__in=ids)}
@@ -435,7 +451,7 @@ def _capture(ids, rendered, options, output_format):
         given = rendered[key]
         if not isinstance(given, dict) or set(given) - FIELDS or not set(required) <= set(given):
             _fail(where, "缺少题干、选项或所选答案的排版字段")
-        converted = {name: _field(given[name], text, f"{where} · {name}") for name, text in required.items()}
+        converted = {name: _field(given[name], text, f"{where} · {name}", word_math=word_math) for name, text in required.items()}
         # Optional empty fields sent by older clients must still match the official value.
         for name in set(given) - set(required):
             if name in {"answer", "analysis"}:
@@ -444,7 +460,7 @@ def _capture(ids, rendered, options, output_format):
                 official = str((content.get("options") or {}).get(name[-1]) or "")
             else:
                 official = str(content.get(name) or "")
-            _field(given[name], official, f"{where} · {name}")
+            _field(given[name], official, f"{where} · {name}", word_math=word_math)
         images = _images(publication, where) if question_fields else []
         total_bytes += sum(len(image["bytes"]) for image in images)
         if total_bytes > MAX_TOTAL_IMAGES:
@@ -560,12 +576,22 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
                 group = segment.get("displayGroup") or ("display" if segment.get("display") else None)
                 if group != display_group and (group is not None or display_group is not None):
                     paragraph = None
-                paragraph = paragraph or document.add_paragraph()
-                if group is not None:
-                    paragraph.alignment = 1
-                _write_segments(paragraph, [segment], size)
-                paragraph.paragraph_format.space_after = Pt(4)
-                paragraph.paragraph_format.line_spacing = 1.25
+                # Source newlines become real Word paragraphs so compact mode
+                # can break between subquestions, rather than keeping a huge
+                # paragraph with many manual line breaks on one page. Empty
+                # source lines use the normal paragraph gap, not extra full-
+                # height empty paragraphs; inline spaces still remain intact.
+                parts = re.split(r"\r\n|[\r\n]", segment["raw"]) if segment["type"] == "text" else [None]
+                for index, part in enumerate(parts):
+                    if part is None or (part and (paragraph is not None or part.strip())):
+                        paragraph = paragraph or document.add_paragraph()
+                        if group is not None:
+                            paragraph.alignment = 1
+                        _write_segments(paragraph, [{**segment, "raw": part} if part is not None else segment], size)
+                        paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
+                        paragraph.paragraph_format.line_spacing = LINE_SPACING
+                    if index < len(parts) - 1:
+                        paragraph = None
                 display_group = group
             paragraph = None
 
@@ -583,36 +609,116 @@ def _write_images(document, item, slot):
         paragraph.paragraph_format.keep_together = True
 
 
-def _compact_options(item):
+def _text_em(value):
+    """Conservative Cambria/Chinese width in em, independent of LaTeX spelling."""
+    total = 0.0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        total += 1.0 if unicodedata.east_asian_width(char) in {"W", "F"} else 0.30 if char.isspace() else 0.60
+    return total
+
+
+def _math_extent(element):
+    """Approximate native formula width/height for safe column selection.
+
+    Fractions, radicals, scripts and matrices are measured structurally; raw
+    command length is a poor proxy. This errs toward fewer columns and never
+    changes font size or mathematical content.
+    """
+    from lxml import etree
+    name = etree.QName(element).localname
+    if name.endswith("Pr"):
+        return 0.0, 0.0
+    if name == "t":
+        return _text_em(element.text or ""), 1.0
+    children = {etree.QName(child).localname: child for child in element}
+    def size(key):
+        return _math_extent(children[key]) if key in children else (0.0, 0.0)
+    if name == "f":
+        numerator, denominator = size("num"), size("den")
+        return max(numerator[0], denominator[0]) + 0.4, numerator[1] + denominator[1] + 0.3
+    if name == "rad":
+        base, degree = size("e"), size("deg")
+        return base[0] + 1.0 + degree[0] * 0.35, max(1.3, base[1] + 0.25)
+    if name in {"sSup", "sSub", "sSubSup"}:
+        base, upper, lower = size("e"), size("sup"), size("sub")
+        return base[0] + 0.7 * max(upper[0], lower[0]), base[1] + 0.5 * (upper[1] + lower[1])
+    if name in {"acc", "bar", "groupChr"}:
+        base = size("e")
+        return base[0], base[1] + 0.4
+    if name == "d":
+        base = size("e")
+        return base[0] + 1.0, base[1]
+    if name in {"limLow", "limUpp"}:
+        base, limit = size("e"), size("lim")
+        return max(base[0], limit[0] * 0.75), base[1] + limit[1] * 0.6
+    if name == "nary":
+        base, upper, lower = size("e"), size("sup"), size("sub")
+        return 1.0 + max(upper[0], lower[0]) * 0.65 + base[0], max(base[1], 1.5 + (upper[1] + lower[1]) * 0.6)
+    if name in {"m", "eqArr"}:
+        rows = [child for child in element if etree.QName(child).localname in {"mr", "e"}]
+        metrics = [_math_extent(row) for row in rows]
+        return max((metric[0] for metric in metrics), default=1.0), sum(metric[1] + 0.2 for metric in metrics)
+    metrics = [_math_extent(child) for child in element]
+    return sum(metric[0] for metric in metrics), max((metric[1] for metric in metrics), default=0.0)
+
+
+def _option_columns(item, options, *, text_width_mm=178):
     values = item["content"].get("options") or {}
     letters = [key for key in "ABCDE" if str(values.get(key) or "").strip()]
-    return letters == list("ABCD") and not any(image["slot"] != "stem" for image in item["images"]) \
-        and all(len(values[key]) <= 36 and not re.search(r"[\r\n]", values[key])
-                and len(item["fields"].get(f"options.{key}", [])) == 1
-                and item["fields"][f"options.{key}"][0]["type"] == "text"
-                and not any(segment.get("display") or segment.get("displayGroup")
-                            for segment in item["fields"][f"options.{key}"][0]["segments"])
-                for key in letters)
+    if len(letters) < 2 or any(image["slot"] != "stem" for image in item["images"]):
+        return 1
+    widths = []
+    for letter in letters:
+        blocks = item["fields"].get(f"options.{letter}", [])
+        if re.search(r"[\r\n]", values[letter]) or len(blocks) != 1 or blocks[0]["type"] != "text":
+            return 1
+        width = 1.8  # letter, period and breathing room
+        for segment in blocks[0]["segments"]:
+            if segment.get("display") or segment.get("displayGroup"):
+                return 1
+            if segment["type"] == "math":
+                if segment["omml"] is None:
+                    return 1
+                extent = _math_extent(segment["omml"])
+                if extent[1] > 2.6:
+                    return 1
+                width += extent[0]
+            elif segment["type"] != "delimiter":
+                width += _text_em(segment["raw"]) if segment["type"] == "text" else 4.5
+        widths.append(width * options["font_size"] * 25.4 / 72)
+    requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
+    candidates = (4, 2) if requested != "two" and len(letters) == 4 else (2,)
+    for columns in candidates:
+        # Cell margins and a 10% reserve absorb font/rendering variation.
+        if max(widths) <= (text_width_mm / columns - 4.0) * 0.90:
+            return columns
+    return 1
 
 
-def _write_compact_options(document, item, size):
+def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
     from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    table = document.add_table(rows=2, cols=2)
+    letters = [key for key in "ABCDE" if f"options.{key}" in item["fields"]]
+    table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
     for column in table.columns:
-        column.width = Mm(89)
+        column.width = Mm(text_width_mm / columns)
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
         border.set(qn("w:val"), "nil")
         borders.append(border)
     table._tbl.tblPr.append(borders)
-    for index, letter in enumerate("ABCD"):
-        paragraph = table.cell(index // 2, index % 2).paragraphs[0]
+    for index, letter in enumerate(letters):
+        paragraph = table.cell(index // columns, index % columns).paragraphs[0]
         _font(paragraph.add_run(letter + ". "), size)
         _write_segments(paragraph, item["fields"][f"options.{letter}"][0]["segments"], size)
+        paragraph.paragraph_format.line_spacing = LINE_SPACING
+    for row in table.rows:
+        row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
 
 def _ordered(captured):
@@ -657,6 +763,108 @@ def _keep_unit(document, start):
                     keep.set(qn("w:val"), "0")
 
 
+def _paragraph_measure(paragraph, size, width_mm=178):
+    from docx.oxml.ns import qn
+    import math
+    spacing = paragraph.find(qn("w:pPr") + "/" + qn("w:spacing"))
+    gap = int(spacing.get(qn("w:after"), str(PARAGRAPH_GAP_PT * 20))) * 25.4 / 1440 if spacing is not None \
+        else PARAGRAPH_GAP_PT * 25.4 / 72
+    drawings = paragraph.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent")
+    if drawings:
+        return max(int(node.get("cy", "0")) / 36_000 for node in drawings) + gap
+    text = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t")))
+    metrics = [_math_extent(node) for node in paragraph.findall(".//" + qn("m:oMath"))]
+    width = (_text_em(text) + sum(metric[0] for metric in metrics)) * size * 25.4 / 72
+    height = max(LINE_SPACING, max((metric[1] for metric in metrics), default=1.0)) * size * 25.4 / 72
+    return max(1, math.ceil(width / width_mm)) * height + gap
+
+
+def _unit_height(elements, size):
+    from docx.oxml.ns import qn
+    total = 0.0
+    for element in elements:
+        if element.tag == qn("w:p"):
+            total += _paragraph_measure(element, size)
+        elif element.tag == qn("w:tbl"):
+            columns = max(1, len(element.findall(qn("w:tblGrid") + "/" + qn("w:gridCol"))))
+            for row in element.findall(qn("w:tr")):
+                total += max((sum(_paragraph_measure(paragraph, size, 178 / columns - 4)
+                                  for paragraph in cell.findall(qn("w:p")))
+                              for cell in row.findall(qn("w:tc"))), default=0)
+    return total
+
+
+def _pagination(document, start, mode, size):
+    """Compact flows at paragraph/row boundaries; short keep-mode items bind."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    elements = list(document._element.body)[start:-1]
+    if mode == "keep" and _unit_height(elements, size) <= 230:
+        _keep_unit(document, start)
+        return
+    for element in elements:
+        paragraphs = [element] if element.tag == qn("w:p") else element.findall(".//" + qn("w:p"))
+        for paragraph in paragraphs:
+            props = paragraph.get_or_add_pPr()
+            plain = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t"))).strip()
+            atomic = element.tag == qn("w:tbl") or bool(paragraph.findall(".//" + qn("w:drawing"))) \
+                or (bool(paragraph.findall(".//" + qn("m:oMath"))) and not plain.strip("▱"))
+            for name, value in (("w:keepNext", False), ("w:keepLines", atomic), ("w:widowControl", True)):
+                existing = props.find(qn(name))
+                if existing is not None:
+                    props.remove(existing)
+                node = OxmlElement(name)
+                node.set(qn("w:val"), "1" if value else "0")
+                props.append(node)
+    # An isolated number/origin lead must stay with the start of its actual stem.
+    # Only a one-line caption stays with the immediately following diagram/table.
+    # A normal multi-line stem must remain breakable in compact mode; plain-text
+    # length alone misses the width of its native formulas.
+    for index, element in enumerate(elements[:-1]):
+        if element.tag != qn("w:p"):
+            continue
+        plain = "".join(node.text or "" for node in element.findall(".//" + qn("w:t"))).strip()
+        next_element = elements[index + 1]
+        lead_only = bool(re.fullmatch(r"\d+\.(?:（AI 参考 · 未核对）)?\s*", plain))
+        next_visual = next_element.tag == qn("w:tbl") or bool(next_element.findall(".//" + qn("w:drawing")))
+        formula_width = sum(_math_extent(node)[0] for node in element.findall(".//" + qn("m:oMath")))
+        width_mm = (_text_em(plain) + formula_width) * size * 25.4 / 72
+        short_caption = bool(plain and len(plain) <= 40 and width_mm <= 178)
+        if lead_only or (short_caption and next_visual):
+            element.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
+
+
+def _question_gap(document):
+    from docx.shared import Pt
+    from docx.oxml.ns import qn
+    last = list(document._element.body)[-2]
+    if last.tag == qn("w:tbl"):
+        # Word requires a paragraph after a table; use its invisible line for the
+        # same external question gap as a normal paragraph, without resizing text.
+        if "QB Question Gap" not in document.styles:
+            from docx.enum.style import WD_STYLE_TYPE
+            style = document.styles.add_style("QB Question Gap", WD_STYLE_TYPE.PARAGRAPH)
+            style.font.size = Pt(1)
+            style.paragraph_format.line_spacing = Pt(1)
+            style.paragraph_format.space_after = Pt(QUESTION_GAP_PT)
+        document.add_paragraph(style="QB Question Gap")
+    else:
+        from docx.text.paragraph import Paragraph
+        paragraph = Paragraph(last, document)
+        after = paragraph.paragraph_format.space_after
+        if after is None or after < Pt(QUESTION_GAP_PT):
+            paragraph.paragraph_format.space_after = Pt(QUESTION_GAP_PT)
+
+
+def _question_page_break(document, start):
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    elements = list(document._element.body)[start:-1]
+    first = next((element for element in elements if element.tag == qn("w:p")), None)
+    if first is not None:
+        first.get_or_add_pPr().append(OxmlElement("w:pageBreakBefore"))
+
+
 def _document(captured, title, options, mode):
     from docx import Document
     from docx.shared import Mm, Pt
@@ -671,17 +879,24 @@ def _document(captured, title, options, mode):
     size = options["font_size"]
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = "Cambria", Pt(size)
+    normal.paragraph_format.line_spacing = LINE_SPACING
+    normal.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
+    normal.paragraph_format.widow_control = True
     normal._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
     # Word math defaults, including editable equations, follow the selected size.
     default = document.styles["Default Paragraph Font"]
     default.font.name, default.font.size = "Cambria", Pt(size)
     heading = document.add_paragraph()
     heading.alignment = 1
+    heading.paragraph_format.keep_with_next = True
     _font(heading.add_run(title + (" · 答案解析" if mode == "answers" else "")), size + 6, True)
     if options["student_info"] and mode != "answers":
-        _font(document.add_paragraph().add_run("姓名：____________    班级：____________    得分：____________"), size)
+        info = document.add_paragraph()
+        info.paragraph_format.keep_with_next = True
+        _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
     numbered, number = [], 0
     for index, (name, group) in enumerate(_ordered(captured)):
+        section_title = None
         if mode != "answers":
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
@@ -703,8 +918,9 @@ def _document(captured, title, options, mode):
                     prefix = ""
             _write_field(document, item["fields"]["stem"], size, prefix=prefix, where=item["where"], lead_segments=lead_segments)
             _write_images(document, item, "stem")
-            if _compact_options(item):
-                _write_compact_options(document, item, size)
+            columns = _option_columns(item, options)
+            if columns > 1:
+                _write_compact_options(document, item, size, columns)
             else:
                 for letter in "ABCDE":
                     if f"options.{letter}" in item["fields"]:
@@ -715,23 +931,33 @@ def _document(captured, title, options, mode):
             if item["type"] == "free_response" and options["answer_space"] != "none":
                 paragraph = document.add_paragraph()
                 paragraph.paragraph_format.space_after = Mm(30 if options["answer_space"] == "medium" else 60)
-            _keep_unit(document, unit_start)
+            _question_gap(document)
+            _pagination(document, unit_start, options["pagination"], size)
+            if number > 1 and item["id"] in options["question_breaks"]:
+                if item is group[0] and section_title is not None:
+                    section_title.paragraph_format.page_break_before = True
+                else:
+                    _question_page_break(document, unit_start)
     if mode != "questions":
         if mode == "combined":
             document.add_page_break()
-        _font(document.add_paragraph().add_run("参考答案与解析"), size + 1, True)
+        answer_heading = document.add_paragraph()
+        answer_heading.paragraph_format.keep_with_next = True
+        _font(answer_heading.add_run("参考答案与解析"), size + 1, True)
         for number, item in numbered:
             unit_start = len(document._element.body) - 1
             label = f"{number}." + ("（AI 参考 · 未核对）" if item["ai"] else "")
             selected = item["selected"]
             if not str(selected.get("answer") or "").strip() and not str(selected.get("analysis") or "").strip():
                 _font(document.add_paragraph().add_run(label + "（原卷未提供答案）"), size)
-                _keep_unit(document, unit_start)
+                _question_gap(document)
+                _pagination(document, unit_start, options["pagination"], size)
                 continue
             _write_field(document, item["fields"]["answer"], size, prefix=label + " ", where=item["where"])
             if str(selected.get("analysis") or "").strip():
                 _write_field(document, item["fields"]["analysis"], size, prefix="解析：", where=item["where"])
-            _keep_unit(document, unit_start)
+            _question_gap(document)
+            _pagination(document, unit_start, options["pagination"], size)
     footer = section.footer.paragraphs[0]
     footer.alignment = 2
     _font(footer.add_run(f"共 {len(captured)} 题 · 第 "), 9)
@@ -757,7 +983,7 @@ def export(payload):
     try:
         ids = normalize_ids(payload.get("ids"))
         title = _title(payload.get("title", "练习"))
-        options = _print_options(payload.get("print_options", {}))
+        options = _print_options(payload.get("print_options", {}), ids=ids)
     except (BrowseError, DraftError) as error:
         raise ExportError(str(error)) from None
     if not ids:

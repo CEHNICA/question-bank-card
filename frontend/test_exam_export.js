@@ -95,5 +95,20 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
   await assert.rejects(Export.download([item], { print_options: { document: "questions" } }), /正在导出/);
   resolveReply(response()); await first;
   assert.equal(links.length, 2);
+  global.fetch = async (url, request) => {
+    requests.push({url,request});
+    return response({"Content-Type":"application/pdf","Content-Disposition":"attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.pdf"},new TextEncoder().encode("%PDF-1.7\nsynthetic\n%%EOF"));
+  };
+  const pdf = await Export.download([item], {title:"数学",format:"pdf",print_options:{document:"questions",pagination:"compact",option_layout:"four",option_overrides:{[item.id]:"two"}}});
+  assert.deepEqual(pdf,{filename:"数学.pdf",question_count:1});
+  assert.equal(requests.at(-1).url,"/api/library/export-pdf");
+  const pdfBody=JSON.parse(requests.at(-1).request.body);
+  assert.equal(pdfBody.print_options.pagination,"compact");
+  assert.equal(pdfBody.print_options.option_overrides[item.id],"two");
+  assert.equal(Object.hasOwn(pdfBody,"html"),false);
+  const previous=links.length;
+  global.fetch=async()=>response({"Content-Type":"application/pdf"});
+  await assert.rejects(Export.download([item],{format:"pdf",print_options:{document:"questions"}}),/不完整/);
+  assert.equal(links.length,previous);
   console.log("Word download transport, failure containment and repeated-click protection: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

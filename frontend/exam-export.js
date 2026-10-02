@@ -49,11 +49,11 @@
           strict: "ignore", trust: false, maxSize: 10, maxExpand: 1000
         });
         const mathml = markup.match(/<math\b[\s\S]*?<\/math>/)?.[0];
-        if (!mathml) throw new Error("公式未能转换为 Word，请用打印或 PDF 查看。");
+        if (!mathml) throw new Error("公式未能完成排版，请检查预览后重试。");
         Object.assign(entry, { latex: part.latex, mathml, display: Boolean(part.display) });
         if (part.displayGroup) entry.displayGroup = part.displayGroup;
       } else if (!["text", "blank", "bracket", "parallelogram"].includes(part.type)) {
-        throw new Error("这段题目暂不支持 Word 排版，请用打印或 PDF 查看。");
+        throw new Error("这段题目暂不支持导出排版，请检查预览。");
       }
       result.push(entry);
       cursor = part.end;
@@ -102,7 +102,7 @@
           segments: [{ type: "text", start: 0, end: source.length }] }] } : serializeField(source);
       } catch (error) {
         const label = name === "stem" ? "题干" : name === "analysis" ? "解析" : name === "answer" ? "答案" : name.startsWith("options.") ? `选项 ${name.slice(-1)}` : "题源";
-        throw new Error(`原卷第 ${item.number || index + 1} 题的${label}未能导出 Word：${error.message}`);
+        throw new Error(`原卷第 ${item.number || index + 1} 题的${label}未能导出${format === "pdf" ? " PDF" : " Word"}：${error.message}`);
       }
     };
     if (options.document !== "answers" || format === "split") {
@@ -142,8 +142,8 @@
   async function download(items, { title, print_options, format = "docx" } = {}) {
     if (downloading) throw new Error("正在导出，请稍候。");
     if (!Array.isArray(items) || !items.length) throw new Error("请先选题，再导出试卷。");
-    if (!["docx", "split"].includes(format)) throw new Error("请选择 Word 或分卷 Word。");
-    const options = { ...print_options };
+    if (!["docx", "split", "pdf"].includes(format)) throw new Error("请选择 PDF、Word 或分卷 Word。");
+    const options = JSON.parse(JSON.stringify(print_options || {}));
     if (!["questions", "answers", "combined"].includes(options.document)) options.document = options.answers === false ? "questions" : "combined";
     if ((options.document === "answers" || format === "split") && !items.some((item) => selectedAnswer(item, options))) throw new Error("所选题目没有可附的答案或解析，请先导出题目卷。");
     downloading = true;
@@ -156,18 +156,18 @@
       }
       const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, format });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");
-      const response = await root.fetch("/api/library/export-docx", { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body });
+      const response = await root.fetch(format === "pdf" ? "/api/library/export-pdf" : "/api/library/export-docx", { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body });
       if (!response.ok) {
         let detail; try { detail = await response.json(); } catch { /* Keep the local error. */ }
-        throw new Error(detail?.error || "Word 未能导出，请稍后重试。");
+        throw new Error(detail?.error || `${format === "pdf" ? "PDF" : "Word"} 未能导出，请稍后重试。`);
       }
       const mime = response.headers.get("Content-Type")?.split(";", 1)[0].trim();
-      const expected = format === "split" ? "application/zip" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const expected = format === "pdf" ? "application/pdf" : format === "split" ? "application/zip" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (mime !== expected || Number(response.headers.get("X-Question-Count")) !== items.length) throw new Error("导出文件或题目数量有出入，未下载不完整的试卷。");
       const blob = await response.blob();
-      const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
-      if (signature.join(",") !== "80,75,3,4") throw new Error("导出文件不完整，请重试。");
-      const filename = fileName(response.headers.get("Content-Disposition"), `${title || "练习"}.${format === "split" ? "zip" : "docx"}`);
+      const signature = new Uint8Array(await blob.slice(0, format === "pdf" ? 5 : 4).arrayBuffer());
+      if (signature.join(",") !== (format === "pdf" ? "37,80,68,70,45" : "80,75,3,4")) throw new Error("导出文件不完整，请重试。");
+      const filename = fileName(response.headers.get("Content-Disposition"), `${title || "练习"}.${format === "pdf" ? "pdf" : format === "split" ? "zip" : "docx"}`);
       const url = root.URL.createObjectURL(blob), link = root.document.createElement("a");
       link.href = url; link.download = filename; link.hidden = true;
       root.document.body.append(link);

@@ -197,7 +197,8 @@
       </details>
       <span class="print-spacer"></span>
       <button id="exportWord" class="button button-primary" type="button">导出 Word</button>
-      <button id="printButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-printer"/></svg>打印 · 存 PDF</button>
+      <button id="exportPdf" class="button button-primary" type="button">导出 PDF</button>
+      <button id="printButton" class="button button-quiet print-legacy" type="button" title="打开系统打印窗口">打印</button>
     </div>
     <p id="printExportStatus" class="print-export-status no-print" role="status" aria-live="polite" hidden></p>
     <div class="print-workspace">
@@ -205,17 +206,25 @@
         <summary>排版与内容</summary>
         <div class="print-options-body">
           <label class="print-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
-          <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目卷</option><option value="answers">答案与解析卷</option><option value="combined" selected>题目卷附答案与解析</option></select></label>
+          <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目</option><option value="answers">答案与解析</option><option value="combined" selected>题目＋答案</option></select></label>
+          <label class="print-field">分页 <select id="printPagination"><option value="compact" selected>连续排版，节省纸张</option><option value="keep">尽量保持单题完整</option></select></label>
+          <label class="print-field">选择题选项 <select id="printOptionLayout"><option value="auto" selected>自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option></select></label>
           <input id="printAnswers" type="checkbox" checked hidden aria-hidden="true" tabindex="-1">
           <label class="library-toggle switch" title="题号后印上原有题源"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
           <label id="printAiBox" class="library-toggle switch" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考（未核对）</label>
           <p id="printAnswerStatus" class="print-answer-status" role="status" aria-live="polite"></p>
           <button id="exportSplit" class="button button-quiet print-split" type="button">分别导出题目卷与答案卷</button>
-          <p class="print-options-note">Word 可继续编辑。存 PDF 时，在打印窗口选择“另存为 PDF”。</p>
+          <p class="print-options-note">PDF 按右侧分页保存；Word 可继续编辑。选项过长时自动换行，保留完整内容。</p>
           <details class="print-advanced"><summary>更多排版</summary><div class="print-options-body">
             <label class="print-field">正文字号 <select id="printFontSize"><option value="12" selected>12 磅</option><option value="14">14 磅</option><option value="16">16 磅</option></select></label>
             <label class="print-field">解答题留白 <select id="printAnswerSpace"><option value="none">不留白</option><option value="medium">适中</option><option value="large">较多</option></select></label>
             <label class="library-toggle switch"><input id="printStudentInfo" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>姓名、班级与得分栏</label>
+          </div></details>
+          <details class="print-individual"><summary>调整单题</summary><div class="print-options-body">
+            <label class="print-field">题目 <select id="printIndividualQuestion" aria-label="要调整的题目"></select></label>
+            <label class="print-field">本题选项 <select id="printIndividualOption"><option value="">跟随全卷</option><option value="auto">自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option></select></label>
+            <label class="library-toggle switch"><input id="printIndividualBreak" type="checkbox"><span class="switch-track" aria-hidden="true"></span>这题另起一页</label>
+            <p id="printIndividualHint" class="print-options-note"></p>
           </div></details>
           <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
         </div>
@@ -223,7 +232,9 @@
       <section class="print-preview" aria-label="试卷内容预览">
         <div id="printMissing" class="print-notice no-print" role="alert" hidden></div>
         <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
-        <p class="print-order-hint no-print">A4 · 按题型分组，同题型内可上下移动。Esc 返回题库。</p>
+        <p id="printPageStatus" class="print-page-status no-print" role="status" aria-live="polite">正在排版…</p>
+        <p id="printLayoutWarnings" class="print-layout-warnings no-print" role="status" hidden></p>
+        <p class="print-order-hint no-print">A4 · 按题型分组。题目旁可调整顺序、选项或另起一页。Esc 返回题库。</p>
         <article id="printPaper" class="print-paper"></article>
       </section>
     </div>
@@ -236,6 +247,7 @@
   <script src="/library-workspace.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/exam-export.js" defer></script>
+  <script src="/exam-layout.js" defer></script>
   <script src="/library.js" defer></script>
 </body>
 </html>

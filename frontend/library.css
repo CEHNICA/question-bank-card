@@ -302,6 +302,7 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .print-controls { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; max-width: 1180px; margin: 0 auto 18px;
   padding: 10px 12px; border-radius: 0 0 12px 12px; background: rgba(255,255,255,.97); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop); font-size: 13px; }
 .print-controls > * { max-width: 100%; }
+.print-legacy { font-size: 12px; padding-inline: 10px; }
 .print-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; max-width: 1180px; margin: 0 auto; align-items: start; }
 .print-workspace:has(.print-options:not([open])) { grid-template-columns: 140px minmax(0, 1fr); }
 .print-options { position: sticky; top: 82px; max-height: calc(100dvh - 94px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid #c6cfc8; border-radius: 10px; background: #f8faf7; overflow-wrap: anywhere; }
@@ -313,9 +314,9 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .print-options .library-toggle input:disabled + .switch-track { opacity: .45; }
 .print-options-note, .print-answer-status { margin: 0; color: var(--muted); line-height: 1.6; font-size: 12px; }
 .print-split { padding: 6px 0; font-size: 12px; white-space: normal; text-align: left; justify-content: flex-start; }
-.print-advanced { border-top: 1px solid var(--line); padding-top: 10px; }
-.print-advanced > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
-.print-advanced .print-options-body { padding: 14px 0 0; }
+.print-advanced, .print-individual { border-top: 1px solid var(--line); padding-top: 10px; }
+.print-advanced > summary, .print-individual > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.print-advanced .print-options-body, .print-individual .print-options-body { padding: 14px 0 0; }
 .print-preview { min-width: 0; }
 .print-draft-menu { position: relative; }
 .print-draft-menu > summary { cursor: pointer; list-style: none; }
@@ -325,14 +326,35 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .print-export-status { max-width: 1180px; margin: -4px auto 14px; padding: 10px 14px; border-radius: 7px; background: #edf5ef; color: var(--accent); font-size: 13px; overflow-wrap: anywhere; }
 .print-options :focus-visible, .print-draft-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .print-spacer { flex: 1; }
-.print-paper { width: 210mm; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0 auto; padding: 18mm 16mm; background: #fff; color: #111; font-family: var(--content-font);
-  box-shadow: 0 16px 50px -12px rgba(0,0,0,.28); border-radius: 2px; }
+.print-paper { min-width: 0; width: 100%; box-sizing: border-box; margin: 0 auto; color: #111; font-family: var(--content-font); }
+.print-flow, .exam-page-body { color: #111; font-family: var(--content-font); font-size: var(--exam-font-size, 12pt); }
+.print-flow { width: 178mm; max-width: none; padding: 0; box-sizing: border-box; }
+.exam-layout-measure, .print-flow.exam-source { position: fixed; left: -20000px; top: 0; visibility: hidden; pointer-events: none; width: 178mm; }
+.exam-layout-measure .print-flow, .exam-layout-probe { width: 178mm; }
+.exam-page { position: relative; width: 210mm; height: 297mm; box-sizing: border-box; padding: 18mm 16mm; margin: 0 auto 22px; background: #fff; box-shadow: 0 16px 50px -12px rgba(0,0,0,.28); color: #111; }
+.exam-page-body { width: 178mm; height: 261mm; display: flex; flex-direction: column; align-items: stretch; }
+.exam-page-body > * { flex: 0 0 auto; }
+.exam-page-number { position: absolute; bottom: 8mm; left: 16mm; right: 16mm; text-align: center; color: #666; font: 10px/1.4 "Microsoft YaHei", sans-serif; }
+.print-page-status { margin: 0 0 12px; font-size: 13px; color: #46554d; }
+.print-layout-warnings { margin: 0 0 12px; color: #795015; font-size: 12px; line-height: 1.6; }
+.print-flow .qb-question, .exam-page .qb-question { line-height: 1.35; letter-spacing: 0; }
+.print-flow .print-answer-row, .exam-page .print-answer-row,
+.print-flow .qb-analysis, .exam-page .qb-analysis { line-height: 1.35; }
+.print-flow .qb-figure img, .exam-page .qb-figure img { max-width: 100%; max-height: none; height: auto; }
+.print-flow .katex, .print-flow .katex-html, .print-flow .qb-math-display-group { white-space: normal; }
+.print-flow .katex, .exam-page .katex { font-size: var(--print-math-size, 1.02em); }
+.print-flow .qb-analysis .katex, .exam-page .qb-analysis .katex,
+.print-flow .print-answer-row .katex, .exam-page .print-answer-row .katex { font-size: var(--print-math-size, 1.21em); }
 .print-title { margin: 0; text-align: center; font-size: 24px; letter-spacing: .12em; font-family: var(--content-font); }
 .print-info { text-align: center; margin: 12px 0 22px; font-size: 14px; color: #333; }
-.print-section { margin: 20px 0 8px; font-size: 16px; font-family: "SimHei", "Microsoft YaHei", sans-serif; }
-.print-question { position: relative; margin: 0 0 14px; break-inside: avoid; }
+.print-section { margin: 12px 0 6px; font-size: 16px; font-family: "SimHei", "Microsoft YaHei", sans-serif; break-after: avoid; }
+.print-question { position: relative; margin: 0 0 8pt; break-inside: auto; }
 /* Arrange the basket in the preview: move a question within its section or drop it. */
-.print-question-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 8px; font-family: var(--ui-font); }
+.print-question-tools { position: absolute; right: -12mm; top: 0; z-index: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 210px; padding: 4px; margin: 0; background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 7px; opacity: 0; font-family: var(--ui-font); }
+.print-question:hover > .print-question-tools, .print-question:focus-within > .print-question-tools { opacity: 1; }
+.print-question-tools select { max-width: 128px; min-height: 32px; font: 12px var(--ui-font); }
+.exam-continued { color: #666; font-size: .8em; white-space: nowrap; }
+.exam-continuation-label { margin: 0 0 4px; color: #666; font-size: 10px; line-height: 1.35; }
 .print-question-tools button { min-width: 44px; min-height: 32px; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--ink-2); font-size: 12px; cursor: pointer; }
 .print-question-tools button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .print-question-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -377,16 +399,20 @@ body.printing { overflow: hidden; }
   .print-workspace, .print-workspace:has(.print-options:not([open])) { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .print-options { position: static; max-height: none; overflow: visible; }
   .print-options-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .print-options-note, .print-advanced { grid-column: 1 / -1; }
+  .print-options-note, .print-advanced, .print-individual { grid-column: 1 / -1; }
   .print-advanced .print-options-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
-  .print-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; margin-bottom: 12px; }
+  .print-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px; margin-bottom: 12px; }
   .print-controls .button { width: 100%; box-sizing: border-box; min-height: 36px; padding: 7px 8px; font-size: 13px; white-space: nowrap; }
   .print-spacer { display: none; }
+  #closePrint { grid-column: span 2; order: 0; }
+  .print-draft-menu { order: 1; }
+  #printButton { order: 2; }
+  #exportWord, #exportPdf { grid-column: span 2; order: 3; }
   .print-draft-menu { min-width: 0; }
   .print-draft-actions { left: auto; right: 0; }
-  .print-options-body, .print-advanced .print-options-body { grid-template-columns: minmax(0, 1fr); }
+  .print-options-body, .print-advanced .print-options-body, .print-individual .print-options-body { grid-template-columns: minmax(0, 1fr); }
   .print-options > summary { padding: 11px 14px; }
 }
 
@@ -402,7 +428,7 @@ body.printing { overflow: hidden; }
   .library-card-meta > span:not(:first-child):not(.library-type)::before { display: none; }
   .basket-button { right: 12px; bottom: 12px; left: 12px; justify-content: center; }
   .print-sheet { padding: 0 8px 24px; }
-  .print-paper { padding: 28px 18px; }
+  .print-paper { padding: 0; }
 }
 
 @media print {
@@ -414,7 +440,11 @@ body.printing { overflow: hidden; }
   .print-sheet::backdrop { display: none; }
   .print-workspace { display: block; max-width: none; margin: 0; }
   .print-preview { width: 100%; }
-  .print-paper { width: 100%; box-shadow: none; max-width: none; padding: 0; margin: 0; border-radius: 0; }
+  .print-paper { width: 210mm; box-shadow: none; max-width: none; padding: 0; margin: 0; border-radius: 0; }
+  .exam-page { zoom: 1 !important; transform: none !important; width: 210mm; height: 297mm; margin: 0; box-shadow: none; break-after: page; break-inside: avoid; }
+  .exam-page:last-child { break-after: auto; }
+  .exam-page-body { overflow: visible; }
+  .exam-source, .exam-layout-measure { display: none !important; }
   .print-paper [data-print-overflow="1"] { outline: none; }
   .print-paper .katex { font-size: var(--print-math-size, 1.02em); }
   .print-paper .qb-analysis .katex, .print-paper .print-answer-row .katex { font-size: var(--print-math-size, 1.21em); }
@@ -422,7 +452,7 @@ body.printing { overflow: hidden; }
   .print-paper .qb-math:has(.print-formula-fallback) > .katex { display: none; }
   .print-formula-fallback { display: block; color: #111; font: 12px/1.7 var(--ui-font); white-space: normal; }
   .print-formula-fallback code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
-  @page { size: A4; margin: 18mm 16mm; }
+  @page { size: A4; margin: 0; }
 }
 
 /* AI 助手审核入库、还没人工核对的题。 */

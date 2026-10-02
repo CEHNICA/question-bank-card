@@ -121,6 +121,7 @@
   }
 
   function saveBasket() {
+    prunePrintChoices();
     try { window.localStorage.setItem("qb-basket", JSON.stringify(state.basket)); } catch { /* 浏览器禁止存储时，试题篮只在本页有效 */ }
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = state.basket.length === 0;
@@ -1199,7 +1200,8 @@
   // ---------------------------------------------------------------- 组卷
 
   let printAnswersPreference = ui.printAnswers.checked;
-  const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null };
+  const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
+    optionOverrides: {}, questionBreaks: [], layoutToken: 0, layoutPending: false, layoutError: "" };
   const printNames = new Map();
 
   function normalizePrintOptions(options = {}) {
@@ -1209,7 +1211,11 @@
       answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
       document, font_size: [12, 14, 16].includes(Number(options.font_size)) ? Number(options.font_size) : 12,
       answer_space: ["none", "medium", "large"].includes(options.answer_space) ? options.answer_space : "none",
-      student_info: options.student_info !== false
+      student_info: options.student_info !== false,
+      pagination: options.pagination === "keep" ? "keep" : "compact",
+      option_layout: ["auto", "four", "two"].includes(options.option_layout) ? options.option_layout : "auto",
+      option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two"].includes(value))),
+      question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : []
     };
   }
 
@@ -1218,8 +1224,17 @@
       document: $("printDocument").value, origin: ui.printOrigin.checked,
       ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked),
       font_size: $("printFontSize").value, answer_space: $("printAnswerSpace").value,
-      student_info: $("printStudentInfo").checked
+      student_info: $("printStudentInfo").checked,
+      pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
+      option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
+      question_breaks: (printState.questionBreaks || []).filter(id => !state.basket || state.basket.includes(id))
     });
+  }
+
+  function prunePrintChoices() {
+    const ids = new Set(state.basket);
+    printState.optionOverrides = Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => ids.has(id)));
+    printState.questionBreaks = (printState.questionBreaks || []).filter(id => ids.has(id));
   }
 
   function applyPrintOptions(options) {
@@ -1228,6 +1243,10 @@
     $("printFontSize").value = String(restored.font_size);
     $("printAnswerSpace").value = restored.answer_space;
     $("printStudentInfo").checked = restored.student_info;
+    $("printPagination").value = restored.pagination;
+    $("printOptionLayout").value = restored.option_layout;
+    printState.optionOverrides = restored.option_overrides;
+    printState.questionBreaks = restored.question_breaks;
     printAnswersPreference = restored.answers;
     ui.printAnswers.checked = restored.answers;
     ui.printOrigin.checked = restored.origin;
@@ -1238,6 +1257,7 @@
     const blocked = printState.exporting || printState.loading || !!printState.missing.length || !printState.items.length;
     const answerEmpty = $("printDocument").value === "answers" && !printState.availableAnswers;
     $("printButton").disabled = blocked || answerEmpty || !!printState.tooWide;
+    $("exportPdf").disabled = blocked || answerEmpty || !!printState.tooWide || printState.layoutPending || !!printState.layoutError;
     $("exportWord").disabled = blocked || answerEmpty;
     $("exportSplit").disabled = blocked || !printState.availableAnswers;
   }
@@ -1322,6 +1342,7 @@
     printState.loading = false;
     printState.missing = missing;
     renderPrint(items);
+    await printState.layoutPromise;
   }
 
   function markDraftDirty() {
@@ -1539,9 +1560,83 @@
     if (options.document === "answers" && !printState.availableAnswers) ui.paper.append(node("p", "helper", "这些题没有答案或解析，请改选题目卷。"));
     ui.paper.append(node("p", "print-footer", `共 ${number} 题`));
     ui.paper.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
+    syncIndividualLayout();
     if (printState.missing.length) ui.paper.prepend(node("p", "print-incomplete-warning", "本卷尚未完整载入，有选题缺失。请返回组卷处理后再打印。"));
     preparePrintLayout();
-    requestAnimationFrame(updateOverflowHints);
+    const flow = node("div", "print-flow exam-source");
+    flow.style.setProperty("--exam-font-size", `${options.font_size}pt`);
+    flow.dataset.answerSpace = options.answer_space;
+    flow.dataset.document = options.document;
+    flow.append(...Array.from(ui.paper.childNodes));
+    ui.paper.append(flow);
+    printState.layoutSource = flow;
+    printState.layoutPromise = refreshPrintPages(flow);
+  }
+
+  function syncIndividualLayout() {
+    const picker = $("printIndividualQuestion");
+    const previous = picker.value;
+    const questions = Array.from(ui.paper.querySelectorAll(".print-question"));
+    printState.firstQuestion = questions[0]?.dataset.questionId;
+    picker.replaceChildren();
+    questions.forEach(question => {
+      const choice = node("option", "", `第 ${parseInt(question.querySelector(".qb-number")?.textContent, 10)} 题`);
+      choice.value = question.dataset.questionId; picker.append(choice);
+    });
+    if (questions.some(question => question.dataset.questionId === previous)) picker.value = previous;
+    syncIndividualControls();
+  }
+
+  function syncIndividualControls() {
+    const id = $("printIndividualQuestion").value;
+    const item = printState.items.find(item => item.id === id);
+    $("printIndividualOption").value = printState.optionOverrides[id] || "";
+    $("printIndividualOption").disabled = printState.exporting || !item || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
+    $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
+    $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
+    $("printIndividualHint").textContent = id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
+  }
+
+  async function refreshPrintPages(flow) {
+    const token = ++printState.layoutToken;
+    printState.layoutPending = true;
+    printState.layoutError = "";
+    $("printPageStatus").textContent = "正在排版…";
+    $("printLayoutWarnings").hidden = true;
+    syncExportButtons();
+    try {
+      await waitForPrintAssets();
+      if (token !== printState.layoutToken || !ui.sheet.open) return;
+      if (typeof window.ExamLayout?.paginate !== "function") throw new Error("分页组件未载入，请刷新页面后重试");
+      preparePrintLayout();
+      const layoutHost = node("div", "print-paper");
+      const result = await window.ExamLayout.paginate(flow, { host: layoutHost, ...currentPrintOptions() });
+      if (token !== printState.layoutToken) return;
+      ui.paper.replaceChildren(...result.pages);
+      ui.paper.dataset.pageCount = String(result.page_count);
+      window.ExamLayout.scale(ui.paper);
+      const seen = new Set();
+      const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
+      ui.paper.querySelectorAll(".print-question").forEach(question => {
+        const id = question.dataset.questionId;
+        if (seen.has(id)) return;
+        seen.add(id);
+        const item = printState.items.find(item => item.id === id);
+        if (!item) return;
+        const group = printState.items.filter(other => knownTypes.has(item.question_type) ? other.question_type === item.question_type : !knownTypes.has(other.question_type));
+        const number = parseInt(question.querySelector(".qb-number")?.textContent, 10) || seen.size;
+        question.append(printTools(printState.items, group, group.indexOf(item), number));
+      });
+      $("printPageStatus").textContent = `A4 · 共 ${result.page_count} 页 · ${printState.items.length} 题`;
+      $("printLayoutWarnings").textContent = result.warnings.join(" ");
+      $("printLayoutWarnings").hidden = !result.warnings.length;
+    } catch (error) {
+      if (token !== printState.layoutToken) return;
+      printState.layoutError = error.message || "排版失败，请重试";
+      $("printPageStatus").textContent = printState.layoutError;
+    } finally {
+      if (token === printState.layoutToken) { printState.layoutPending = false; syncExportButtons(); }
+    }
   }
 
   // 只适配组卷排版；KaTeX 顶层运算符可以换行，分数/矩阵内部不拆。
@@ -1650,7 +1745,28 @@
       const next = ui.paper.querySelectorAll(".print-question-tools .remove")[Math.min(number - 1, items.length - 1)];
       (next || $("closePrint")).focus({ preventScroll: true });
     });
-    tools.append(up, down, remove);
+    const optionLayout = node("select", "print-single-layout");
+    optionLayout.setAttribute("aria-label", `第 ${number} 题选项排版`);
+    [["", "跟随全卷"], ["auto", "自动排版"], ["four", "一行四个"], ["two", "两行两个"]].forEach(([value, label]) => {
+      const choice = node("option", "", label); choice.value = value; optionLayout.append(choice);
+    });
+    optionLayout.value = printState.optionOverrides[item.id] || "";
+    optionLayout.disabled = printState.exporting;
+    optionLayout.hidden = !Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot));
+    optionLayout.addEventListener("change", () => {
+      if (optionLayout.value) printState.optionOverrides[item.id] = optionLayout.value;
+      else delete printState.optionOverrides[item.id];
+      markDraftDirty(); renderPrint(items);
+    });
+    const pageBreak = node("button", "", printState.questionBreaks.includes(item.id) ? "取消另起页" : "另起一页");
+    pageBreak.type = "button"; pageBreak.disabled = printState.exporting || item.id === printState.firstQuestion;
+    pageBreak.setAttribute("aria-label", `第 ${number} 题另起一页`);
+    pageBreak.setAttribute("aria-pressed", String(printState.questionBreaks.includes(item.id)));
+    pageBreak.addEventListener("click", () => {
+      printState.questionBreaks = printState.questionBreaks.includes(item.id) ? printState.questionBreaks.filter(id => id !== item.id) : [...printState.questionBreaks, item.id];
+      markDraftDirty(); renderPrint(items);
+    });
+    tools.append(up, down, remove, optionLayout, pageBreak);
     return tools;
   }
 
@@ -1702,18 +1818,21 @@
       if (printState.loading || printState.missing.length || !printState.items.length) throw new Error("选题尚未完整载入，请先处理未载入题目");
       if ((format === "split" || $("printDocument").value === "answers") && !printState.availableAnswers) throw new Error("这些题没有答案或解析，不能导出空答案卷");
       await waitForPrintAssets();
+      await printState.layoutPromise;
       preparePrintLayout();
       const options = currentPrintOptions();
+      if ((format === "print" || format === "pdf") && printState.layoutError) throw new Error(printState.layoutError);
+      if ((format === "print" || format === "pdf") && printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
       if (format === "print") {
         if (printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
-        status.textContent = "在打印窗口选择“另存为 PDF”，即可保存 PDF。";
+        status.textContent = "已准备好分页，正在打开打印窗口。";
         window.print();
       } else {
         if (typeof window.ExamExport?.download !== "function") throw new Error("导出组件未载入，请刷新页面后重试");
-        status.textContent = "正在生成 Word 文件…";
+        status.textContent = format === "pdf" ? "正在生成 PDF 文件…" : "正在生成 Word 文件…";
         const result = await window.ExamExport.download(printState.items, { title: ui.printTitle.value.trim() || "练习", print_options: options, format });
         status.textContent = `已导出 ${result.filename}`;
-        toast("Word 文件已生成", "success");
+        toast(format === "pdf" ? "PDF 文件已生成" : "Word 文件已生成", "success");
       }
     } catch (error) {
       status.textContent = error.message || "导出失败，请重试";
@@ -1795,12 +1914,25 @@
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => exportPaper("print"));
   $("exportWord").addEventListener("click", () => exportPaper("docx"));
+  $("exportPdf").addEventListener("click", () => exportPaper("pdf"));
   $("exportSplit").addEventListener("click", () => exportPaper("split"));
+  $("printIndividualQuestion").addEventListener("change", syncIndividualControls);
+  $("printIndividualOption").addEventListener("change", () => {
+    const id = $("printIndividualQuestion").value, value = $("printIndividualOption").value;
+    if (value) printState.optionOverrides[id] = value; else delete printState.optionOverrides[id];
+    markDraftDirty(); renderPrint(printState.items);
+  });
+  $("printIndividualBreak").addEventListener("change", () => {
+    const id = $("printIndividualQuestion").value;
+    printState.questionBreaks = $("printIndividualBreak").checked ? [...new Set([...printState.questionBreaks, id])] : printState.questionBreaks.filter(value => value !== id);
+    markDraftDirty(); renderPrint(printState.items);
+  });
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });
-  ui.printTitle.addEventListener("input", () => { const title = ui.paper.querySelector(".print-title"); if (title) title.textContent = ui.printTitle.value.trim() || "练习"; markDraftDirty(); });
+  let printTitleTimer;
+  ui.printTitle.addEventListener("input", () => { markDraftDirty(); clearTimeout(printTitleTimer); printTitleTimer = setTimeout(() => renderPrint(printState.items), 160); });
   ui.printAnswers.addEventListener("change", () => { $("printDocument").value = ui.printAnswers.checked ? "combined" : "questions"; markDraftDirty(); renderPrint(printState.items); });
-  [$("printDocument"), $("printFontSize"), $("printAnswerSpace"), $("printStudentInfo"), ui.printOrigin, ui.printAi].forEach((control) => {
+  [$("printDocument"), $("printPagination"), $("printOptionLayout"), $("printFontSize"), $("printAnswerSpace"), $("printStudentInfo"), ui.printOrigin, ui.printAi].forEach((control) => {
     control.addEventListener("change", () => { markDraftDirty(); $("printExportStatus").hidden = true; renderPrint(printState.items); });
   });
   ui.sheet.addEventListener("cancel", (event) => { event.preventDefault(); closePrint(); });
@@ -1813,8 +1945,8 @@
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
-  window.addEventListener("resize", () => { if (ui.sheet.open) updateOverflowHints(); });
-  window.addEventListener("beforeprint", () => { if (ui.sheet.open) preparePrintLayout(); });
+  window.addEventListener("resize", () => { if (ui.sheet.open) window.ExamLayout?.scale(ui.paper); });
+  $("printSettings").addEventListener("toggle", () => { if (ui.sheet.open) requestAnimationFrame(() => window.ExamLayout?.scale(ui.paper)); });
   window.addEventListener("beforeunload", (event) => {
     if (!state.draftDirty && !state.draftSaving && !printState.exporting) return;
     event.preventDefault();
