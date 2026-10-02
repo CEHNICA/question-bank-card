@@ -90,7 +90,8 @@ assert.match(js, /body:\s*materialType\s*\?\s*\{\s*material_type:\s*materialType
 
 // MiniMax concurrency follows the membership: picked in 常用, saved with the
 // model settings, explained in plain words.
-assert.match(html, /<select id="settingsMinimaxPlan"[^>]*>\s*<option value="auto">不确定（自动摸索）<\/option>\s*<option value="plus">Plus<\/option>\s*<option value="max">Max<\/option>\s*<option value="ultra">Ultra<\/option>\s*<option value="payg">/);
+assert.match(html, /<details class="plan-setting">\s*<summary>同时读题数量（默认自动调整）<\/summary>/);
+assert.match(html, /<select id="settingsMinimaxPlan"[^>]*>\s*<option value="auto">自动调整（推荐）<\/option>\s*<option value="plus">Plus<\/option>\s*<option value="max">Max<\/option>\s*<option value="ultra">Ultra<\/option>\s*<option value="payg">/);
 assert.match(js, /const modelSettingFields = \[[\s\S]*?"settingsMinimaxPlan"\];/);
 assert.match(js, /modelSettingFields\s*\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\);/);
 assert.match(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);

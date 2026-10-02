@@ -225,11 +225,12 @@
               <p class="settings-footnote">密钥只加密保存在这台电脑上，保存后不再显示出来。</p>
               <button id="settingsCredentialOpen" class="button" type="button">填写或更换密钥</button>
             </div>
-            <div class="plan-setting">
+            <details class="plan-setting">
+              <summary>同时读题数量（默认自动调整）</summary>
               <label class="plan-field" for="settingsMinimaxPlan">
                 <span><strong>MiniMax 会员档位</strong><small>决定每个 MiniMax 密钥同时读几道题</small></span>
                 <select id="settingsMinimaxPlan" aria-describedby="settingsMinimaxPlanNote">
-                  <option value="auto">不确定（自动摸索）</option>
+                  <option value="auto">自动调整（推荐）</option>
                   <option value="plus">Plus</option>
                   <option value="max">Max</option>
                   <option value="ultra">Ultra</option>
@@ -237,7 +238,7 @@
                 </select>
               </label>
               <p id="settingsMinimaxPlanNote" class="settings-footnote">正在读取…</p>
-            </div>
+            </details>
           </section>
           <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
             <h3 id="settingsInterfaceTitle">审核界面</h3>
@@ -249,8 +250,10 @@
           </section>
           <section id="settingsFeatures" class="settings-section" aria-labelledby="settingsFeaturesTitle">
             <h3 id="settingsFeaturesTitle">功能开关</h3>
-            <p class="settings-footnote">前两项只挪格式、不改字，默认开着；后面几项要用的时候再打开。</p>
+              <p class="settings-footnote">格式整理默认开启；子题识别按需要打开。标签与参考答案在独立窗口配置。</p>
             <div id="featureSwitches"><p class="settings-footnote">正在读取…</p></div>
+            <button class="button" type="button" data-library-ai-settings>配置知识点标签与 AI 参考答案</button>
+            <p class="settings-footnote">这两项默认关闭，模型与读题服务分开配置；没有可用豆包时先暂停生成。</p>
             <p id="featureNote" class="settings-footnote" hidden></p>
           </section>
         </div>
@@ -321,6 +324,9 @@
                 <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
                 <div><dt>框选识读</dt><dd>自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
                 <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
+                <div><dt>快速找题和选题</dt><dd>正式题库先显示完整段落或公式摘要；点“完整题目”查看所有条件、选项和配图。可勾选当前已显示的题批量加入试题篮；换来源、筛选或翻页后，篮中的题会保留。</dd></div>
+                <div><dt>继续上次组卷</dt><dd>在组卷预览里填写标题、点“保存草稿”。下次从“组卷草稿”继续；已撤回或更新的题会提示处理，不会自动换题或漏印。</dd></div>
+                <div><dt>标签和参考答案</dt><dd>在单独的“标签与参考答案设置”窗口中分别开启；默认都关闭。连接并核验豆包后才生成，答案始终标为“AI 参考 · 未核对”。</dd></div>
               </dl>
             </details>
           </section>
@@ -771,6 +777,7 @@
 
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js" defer></script>
+  <script src="/static/library-ai-settings.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

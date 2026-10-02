@@ -14,7 +14,7 @@ from unittest import mock
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from . import features, knowledge, library, library_jobs, pipeline, prose, qtypes, readers, segment, textnorm
+from . import features, knowledge, library, library_ai_settings, library_jobs, pipeline, prose, qtypes, readers, segment, textnorm
 from .models import Block, LibraryJob, Paper, PublishedQuestion, Question
 from .tests import PAGES, fake_page_pdf, tagged, two_column_paper
 
@@ -478,6 +478,10 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         self.use_temp_data()
         self.client = Client()
         self.paper = self.make_paper()
+        # No real credentials or service are consulted by these offline jobs.
+        ready = mock.patch.object(library_ai_settings, "ensure_ready", return_value={"ready": True})
+        ready.start()
+        self.addCleanup(ready.stop)
 
     def published(self, number, **extra):
         values = {"question_type": "free_response", "stem": TIDY_STEM, "origin": "2026山东枣庄滕州二中月考"}
@@ -529,12 +533,12 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         listed = self.client.get("/api/library").json()["items"][0]
         self.assertEqual(sorted(listed["jobs"]), ["answer", "tags"])
 
-        def chat(_engine, prompt, _images, max_tokens=3000):
+        def chat(prompt, _images, **_kwargs):
             if "知识点目录" in prompt:
-                return "【知识点】集合间的基本关系；全称量词与存在量词；随便编的"
-            return "【答案】(1) $3\\leqslant m\\leqslant 4$；(2) $3\\leqslant m\\leqslant \\frac{9}{2}$\n【解析】由 $B\\neq\\varnothing$ 得 $m\\geqslant 3$。"
+                return "【知识点】集合间的基本关系；全称量词与存在量词；随便编的", "模拟豆包 Pro"
+            return "【答案】(1) $3\\leqslant m\\leqslant 4$；(2) $3\\leqslant m\\leqslant \\frac{9}{2}$\n【解析】由 $B\\neq\\varnothing$ 得 $m\\geqslant 3$。", "模拟豆包 Pro"
 
-        with mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test"}), mock.patch.object(readers, "chat", chat):
+        with mock.patch.object(library_ai_settings, "chat", chat):
             self.assertEqual(library_jobs.process_pending(), 2)
         publication.refresh_from_db()
         self.assertEqual(publication.extras["tags"], ["集合间的基本关系", "全称量词与存在量词"])
@@ -559,7 +563,7 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         self.assertIn("ai_answer", newer.extras)
         self.assertEqual(self.client.get("/api/library?tag=全称量词与存在量词").json()["total"], 1)
 
-    def test_a_waiting_job_moves_to_the_new_version(self):
+    def test_a_waiting_job_keeps_its_source_version_and_new_version_needs_its_own_job(self):
         features.save({"ai_answer": True})
         question, publication = self.published(2)
         library_jobs.enqueue(publication, "answer")
@@ -569,20 +573,24 @@ class LibraryExtrasTests(TempDataMixin, TestCase):
         question.save()
         newer, created = library.publish(question)
         self.assertTrue(created)
-        self.assertEqual(LibraryJob.objects.get().publication_id, newer.id)
-        chat = lambda *_args, **_kwargs: "【答案】(1) [3,4]\n【解析】略"  # noqa: E731
-        with mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test"}), mock.patch.object(readers, "chat", chat):
+        self.assertEqual(LibraryJob.objects.get().publication_id, publication.id)
+        with mock.patch.object(library_ai_settings, "chat") as chat:
+            library_jobs.process_pending()
+            chat.assert_not_called()
+        self.assertEqual(LibraryJob.objects.get().status, "failed")
+        library_jobs.enqueue(newer, "answer")
+        with mock.patch.object(library_ai_settings, "chat", return_value=("【答案】(1) [3,4]\n【解析】略", "模拟豆包 Pro")):
             library_jobs.process_pending()
         newer.refresh_from_db()
         publication.refresh_from_db()
         self.assertEqual(newer.extras["ai_answer"]["answer"], "(1) [3,4]")
         self.assertNotIn("ai_answer", publication.extras)
 
-    def test_a_job_without_any_reading_service_fails_with_a_reason(self):
+    def test_a_job_without_independent_doubao_service_fails_with_a_reason(self):
         features.save({"ai_answer": True})
         _question, publication = self.published(2)
         library_jobs.enqueue(publication, "answer")
-        with mock.patch.object(readers, "primary_engine", return_value=None):
+        with mock.patch.object(library_ai_settings, "chat", side_effect=library_ai_settings.ServiceError(library_ai_settings.UNAVAILABLE)):
             library_jobs.process_pending()
         job = LibraryJob.objects.get()
         self.assertEqual(job.status, "failed")

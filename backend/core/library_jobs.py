@@ -1,6 +1,6 @@
 """题库里的两件可选的事：补知识点标签、做 AI 参考答案（设置里默认都关）。
 
-网页只排队（网页进程拿不到密钥），后台工作者用读题服务做完再写回。
+网页只排队，后台工作者用独立配置且经过显式测试的豆包 Pro API 做完再写回。
 结果存在题库条目的 extras 里：不属于题面快照，不出新版本、不用重审；
 AI 答案和原卷答案分开放，题库和打印里都标着“AI 参考 · 未核对”。
 """
@@ -16,14 +16,13 @@ from django.db import close_old_connections, transaction
 from django.utils import timezone
 from PIL import Image
 
-from . import features, imaging, knowledge, library, qtypes, readers
-from .models import LibraryJob, PublishedQuestion
+from . import features, imaging, knowledge, library, library_ai_settings, qtypes
+from .models import LibraryJob, PublishedQuestion, Question
 
 logger = logging.getLogger("core")
 
 FEATURE_OF = {LibraryJob.Kind.TAGS: "knowledge_tags", LibraryJob.Kind.ANSWER: "ai_answer"}
 ACTIVE = (LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING)
-NO_ENGINE = "没有可用的读题服务：请先在“设置 → 常用”里填魔搭、MiniMax 或硅基流动的密钥"
 
 
 class JobError(ValueError):
@@ -50,9 +49,13 @@ def enqueue(publication: PublishedQuestion, kind: str) -> LibraryJob:
     if kind not in FEATURE_OF:
         raise JobError("不认识的任务")
     if not features.enabled(FEATURE_OF[kind]):
-        raise JobError("这个功能在设置的“功能开关”里关着，打开后再用")
+        raise JobError("这个功能在“标签与参考答案设置”里关着，打开后再用")
     if publication.status != PublishedQuestion.Status.PUBLISHED:
         raise JobError("这道题已不在正式题库里")
+    try:
+        library_ai_settings.ensure_ready(kind)
+    except library_ai_settings.SettingsError as error:
+        raise JobError(str(error)) from None
     existing = publication.jobs.filter(kind=kind, status__in=ACTIVE).first()
     if existing is not None:
         return existing
@@ -134,28 +137,27 @@ def _figure_urls(publication: PublishedQuestion) -> list[str]:
     folder = Path(settings.DATA_ROOT) / "library" / str(publication.id)
     for figure in (publication.content or {}).get("figures") or []:
         name = str(figure.get("file") or "")
+        if not name or Path(name).name != name or "/" in name or "\\" in name:
+            raise JobError("题目配图文件无效，未生成答案或标签；请先核对配图。")
         target = folder / name
-        if not name or not target.is_file():
-            continue
-        with Image.open(target) as image:
-            urls.append(imaging.jpeg_data_url(image, long_side=1400))
-    return urls[:6]
+        if not target.is_file():
+            raise JobError("题目配图缺失，未生成答案或标签；请先核对配图。")
+        try:
+            with Image.open(target) as image:
+                urls.append(imaging.jpeg_data_url(image, long_side=1400))
+        except (OSError, ValueError):
+            raise JobError("题目配图无法打开，未生成答案或标签；请先核对配图。") from None
+    if len(urls) > 6:
+        raise JobError("这道题配图超过 6 张，未忽略配图生成；请人工核对。")
+    return urls
 
 
 # ---------------------------------------------------------------- 后台执行
 
-def _engine():
-    engine = readers.primary_engine()
-    if engine is None:
-        raise JobError(NO_ENGINE)
-    return engine
-
-
 def run_answer(publication: PublishedQuestion) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)
-    engine = _engine()
-    raw = readers.chat(engine, answer_prompt(content, bool(figures)), figures, max_tokens=2500)
+    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures)), figures, kind="answer")
     tags = split_answer_tags(raw)
     answer = str(tags.get("答案") or "").strip()
     if not answer:
@@ -163,8 +165,11 @@ def run_answer(publication: PublishedQuestion) -> dict:
     return {
         "answer": answer[:2000],
         "analysis": str(tags.get("解析") or "").strip()[:6000],
-        "engine": readers.answered_by(engine).label,
+        "engine": engine,
         "at": timezone.now().isoformat(),
+        "publication_id": str(publication.id),
+        "fingerprint": library.generation_fingerprint(content, publication.id),
+        "checked": False,
     }
 
 
@@ -172,21 +177,38 @@ def run_tags(publication: PublishedQuestion) -> tuple[list[str], str]:
     points = knowledge.load()
     if not points:
         raise JobError("知识点目录是空的，请检查数据目录里的 knowledge-points.txt")
-    engine = _engine()
-    raw = readers.chat(engine, tags_prompt(publication.content or {}, points), [], max_tokens=300)
+    figures = _figure_urls(publication)
+    raw, engine = library_ai_settings.chat(tags_prompt(publication.content or {}, points), figures, kind="tags")
     named = split_answer_tags(raw).get("知识点", raw)
-    return knowledge.match_tags(named, points), readers.answered_by(engine).label
+    return knowledge.match_tags(named, points), engine
 
 
 def live_version(publication: PublishedQuestion) -> PublishedQuestion | None:
-    """The version of this question now in the library (a job may outlive the one it was queued on)."""
-    if publication.status == PublishedQuestion.Status.PUBLISHED:
-        return publication
-    if not publication.question_id:
+    """An old job never silently changes its target to a replacement version."""
+    current = PublishedQuestion.objects.filter(pk=publication.pk, status=PublishedQuestion.Status.PUBLISHED).first()
+    if current is None:
         return None
-    return PublishedQuestion.objects.filter(
-        question_id=publication.question_id, status=PublishedQuestion.Status.PUBLISHED,
-    ).order_by("-version").first()
+    if current.question_id and PublishedQuestion.objects.filter(
+            question_id=current.question_id, status=PublishedQuestion.Status.PUBLISHED,
+            version__gt=current.version).exists():
+        return None
+    return current
+
+
+def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: str, content_hash: str) -> PublishedQuestion:
+    """Called inside the write transaction after a potentially long model call."""
+    if publication.question_id:
+        Question.all_objects.select_for_update().filter(pk=publication.question_id).first()
+    current_job = LibraryJob.objects.select_for_update().get(pk=job.pk)
+    current = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
+    if (current_job.status != LibraryJob.Status.RUNNING or current_job.publication_id != publication.pk
+            or live_version(current) is None or current.content_hash != content_hash
+            or library.generation_fingerprint(current.content or {}, current.pk) != fingerprint):
+        raise JobError("生成期间题面、配图或入库版本已变化，旧结果未保存；请在当前版本重新生成。")
+    if not features.enabled(FEATURE_OF[job.kind]):
+        raise JobError("生成期间这个功能已关闭，结果未保存。")
+    library_ai_settings.ensure_ready(job.kind)
+    return current
 
 
 def _finish(job: LibraryJob, status: str, error: str = "") -> None:
@@ -211,29 +233,30 @@ def process_pending(limit: int = 5) -> int:
         try:
             publication = live_version(job.publication)
             if publication is None:
-                raise JobError("这道题已不在正式题库里")
-            if publication.pk != job.publication_id:
-                job.publication = publication
-                job.save(update_fields=["publication", "updated_at"])
+                raise JobError("这道题已撤回或被新版替代，旧任务未执行；请在当前版本重新生成。")
             if not features.enabled(FEATURE_OF[job.kind]):
                 raise JobError("这个功能已在设置里关掉")
+            fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
+            initial_hash = publication.content_hash
             if job.kind == LibraryJob.Kind.ANSWER:
                 result = run_answer(publication)
                 with transaction.atomic():
-                    publication = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
+                    publication = _bound_target(job, publication, fingerprint, initial_hash)
+                    result.update(fingerprint=fingerprint, publication_id=str(publication.pk), checked=False)
                     library.save_extras(publication, {**(publication.extras or {}), "ai_answer": result})
             else:
                 tags, engine = run_tags(publication)
                 with transaction.atomic():
-                    publication = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
+                    publication = _bound_target(job, publication, fingerprint, initial_hash)
                     library.save_extras(publication, {**(publication.extras or {}), "tags": tags,
-                                                      "tags_source": engine, "tags_at": timezone.now().isoformat()})
+                                                      "tags_source": engine, "tags_at": timezone.now().isoformat(),
+                                                      "tags_fingerprint": fingerprint, "tags_publication_id": str(publication.pk)})
             _finish(job, LibraryJob.Status.DONE)
-        except (JobError, readers.ReaderError) as error:
+        except (JobError, library_ai_settings.SettingsError) as error:
             _finish(job, LibraryJob.Status.FAILED, str(error) or "失败了，请稍后再试")
         except Exception as error:  # 一道题失败不影响别的题，也不让工作者退出
-            logger.exception("library job failed")
-            _finish(job, LibraryJob.Status.FAILED, f"出错了：{str(error) or type(error).__name__}")
+            logger.error("library job failed (%s)", type(error).__name__)
+            _finish(job, LibraryJob.Status.FAILED, "本机生成任务未完成，结果未保存；请稍后重试。")
     return handled
 
 

@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r backend/requirements.lock.txt
       - name: Test desktop launcher
-        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup
+        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
       - name: Test backend
         working-directory: backend
         run: python manage.py test core

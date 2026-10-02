@@ -58,7 +58,7 @@ def seed():
             saved["figures"][0]["bbox"][0] += 10
         version = PublishedQuestion.objects.create(question=question, paper=paper, source_filename=paper.filename,
             number=11, question_type=question.question_type, version=number,
-            status="published" if number == 3 else "superseded", content=saved, content_hash=library.content_hash(saved),
+            status="published" if number == 3 else "superseded", content=saved, content_hash=library.content_hash(saved), search_text=library._search_text(saved),
             published_at=timezone.now(), review_source="ai" if number == 1 else "human", review_agent="演示助手" if number == 1 else "")
         image_folder = settings.DATA_ROOT / "library" / str(version.id)
         image_folder.mkdir(parents=True, exist_ok=True)

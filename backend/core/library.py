@@ -281,20 +281,58 @@ def tags_text(tags) -> str:
     return f"|{'|'.join(cleaned)}|" if cleaned else ""
 
 
+def generation_fingerprint(content: dict, publication_id=None) -> str:
+    """Bind generated extras to task text, crop identity and actual image bytes.
+
+    A publication's download URL changes between versions, but that alone is
+    not a new mathematical task. Image bytes and crop metadata must both match.
+    Paths are restricted to this publication's immutable local asset folder.
+    """
+    material = {key: deepcopy(content.get(key)) for key in ("question_type", "stem", "options")}
+    images = []
+    for figure in content.get("figures") or []:
+        if not isinstance(figure, dict):
+            images.append({"invalid": True})
+            continue
+        image = {key: deepcopy(figure.get(key)) for key in ("slot", "page_idx", "bbox", "parts", "source")}
+        name = str(figure.get("file") or "")
+        owner = str(publication_id or "")
+        if not owner:
+            match = re.fullmatch(r"/api/library/([0-9a-fA-F-]{36})/figures/[^/]+", str(figure.get("url") or ""))
+            owner = match.group(1) if match else ""
+        try:
+            owner = str(uuid.UUID(owner))
+            if not name or Path(name).name != name or "/" in name or "\\" in name:
+                raise ValueError
+            data = (Path(settings.DATA_ROOT) / "library" / owner / name).read_bytes()
+            image["sha256"] = hashlib.sha256(data).hexdigest()
+        except (OSError, ValueError):
+            image["missing"] = True
+        images.append(image)
+    material["figures"] = images
+    return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
-    """What a new version inherits: tags always; an AI answer only for the same task text."""
+    """Inherit extras only for the same task; legacy answers stay on their source version."""
     if previous is None or not isinstance(previous.extras, dict):
         return {}
     extras = {}
-    if tags_of(previous.extras):
+    old_fingerprint = generation_fingerprint(previous.content or {}, previous.id)
+    same_task = old_fingerprint == generation_fingerprint(content)
+    tag_binding = previous.extras.get("tags_fingerprint")
+    if same_task and tags_of(previous.extras) and (not tag_binding or tag_binding == old_fingerprint):
         extras["tags"] = tags_of(previous.extras)
         if previous.extras.get("tags_source"):
             extras["tags_source"] = previous.extras["tags_source"]
+        for key in ("tags_at", "tags_fingerprint", "tags_publication_id"):
+            if previous.extras.get(key):
+                extras[key] = previous.extras[key]
     answer = previous.extras.get("ai_answer")
-    old = previous.content or {}
-    if isinstance(answer, dict) and old.get("stem") == content.get("stem") \
-            and (old.get("options") or {}) == (content.get("options") or {}):
-        extras["ai_answer"] = answer
+    if same_task and isinstance(answer, dict) and answer.get("fingerprint") == old_fingerprint:
+        # Fingerprint binding is evidence of which task was generated, never
+        # evidence that the mathematical answer has been checked by a person.
+        extras["ai_answer"] = deepcopy(answer)
     return extras
 
 
@@ -380,11 +418,8 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             )
             question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
-            # 还在排队的知识点、AI 答案跟着到新的一版上做。
-            LibraryJob.objects.filter(
-                publication__question=question,
-                status__in=(LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING),
-            ).exclude(publication=publication).update(publication=publication)
+            # A queued or running enrichment job keeps its original snapshot.
+            # The worker rejects replaced versions; a new version needs its own job.
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise

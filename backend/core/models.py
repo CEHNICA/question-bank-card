@@ -302,7 +302,7 @@ class PublishedQuestion(models.Model):
     published_at = models.DateTimeField(auto_now_add=True)
     withdrawn_at = models.DateTimeField(null=True, blank=True)
     # 题面以外、可以随时补的东西：知识点标签、AI 参考答案。它们不属于快照，
-    # 改了不出新版本、不用重审；再入库出新版本时原样带过去。
+    # 改了不出新版本；仅在题面和配图指纹一致时继承，AI 结果仍须人工核对。
     extras = models.JSONField(default=dict, blank=True)
     # “|集合间的基本关系|全称量词与存在量词|”：按知识点筛选用。
     tags_text = models.TextField(blank=True, default="")
@@ -313,7 +313,7 @@ class PublishedQuestion(models.Model):
 
 
 class LibraryJob(models.Model):
-    """题库里排队给读题模型做的事：补知识点、做 AI 参考答案。
+    """题库里排队给独立豆包服务做的事：补知识点、做 AI 参考答案。
 
     网页进程拿不到密钥，所以网页只排队，后台工作者调用模型、写回结果。
     """

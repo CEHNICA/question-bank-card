@@ -37,7 +37,7 @@
       <a class="header-link" href="/">录入终审</a>
       <a class="header-link active" href="/library" aria-current="page">正式题库</a>
     </nav>
-    <div class="topbar-tools"><a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码">源码</a></div>
+    <div class="topbar-tools"><button class="button button-quiet button-small" type="button" data-library-ai-settings>标签与答案设置</button><a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码">源码</a></div>
   </header>
 
   <main class="library-main">
@@ -53,23 +53,63 @@
           <select id="sourceSelect" aria-label="来源试卷"><option value="">全部试卷</option></select>
         </label>
         <div id="typeFilters" class="draft-filters" role="group" aria-label="题型"></div>
+        <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
+        <button id="basketToggle" class="button button-small" type="button" aria-controls="basketPanel" aria-expanded="true">收起试题篮</button>
+      </div>
+      <details id="advancedFilters" class="library-advanced">
+        <summary>更多筛选</summary>
+        <div class="library-filters">
         <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
         <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
         <label id="tagFilterBox" class="library-select" hidden>
           <span>知识点</span>
           <select id="tagSelect" aria-label="知识点"><option value="">全部知识点</option></select>
         </label>
-      </div>
-      <div id="extraTools" class="library-extra-tools" hidden></div>
+        </div>
+        <div id="extraTools" class="library-extra-tools" hidden></div>
+      </details>
     </section>
-
-    <p id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</p>
-    <div id="libraryLoadError" class="library-load-error" role="alert" hidden></div>
-    <div id="libraryList" class="library-list"></div>
-    <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
+    <div class="library-workspace">
+      <section class="library-results" aria-label="题目列表">
+        <div class="library-results-head">
+          <div class="draft-filters" role="group" aria-label="浏览范围">
+            <button id="allQuestionsButton" class="draft-filter active" type="button" aria-pressed="true">全部题目</button>
+            <button id="basketViewButton" class="draft-filter" type="button" aria-pressed="false">已选题目 <span id="selectedViewCount" class="count">0</span></button>
+          </div>
+          <button id="openDrafts" class="button button-quiet button-small" type="button">组卷草稿</button>
+        </div>
+        <div id="activeFilters" class="active-filters" aria-label="当前筛选" hidden></div>
+        <div class="library-bulk" aria-label="批量选题">
+          <label><input id="selectVisible" type="checkbox">选择当前已显示题目</label>
+          <span id="selectionCount" role="status" aria-live="polite">已勾选 0 题</span>
+          <button id="addSelected" class="button button-small" type="button" disabled>加入试题篮</button>
+          <button id="clearSelection" class="button button-quiet button-small" type="button" disabled>取消勾选</button>
+        </div>
+        <p id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</p>
+        <div id="libraryLoadError" class="library-load-error" role="alert" hidden></div>
+        <div id="libraryList" class="library-list"></div>
+        <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
+      </section>
+      <aside id="basketPanel" class="basket-panel" aria-labelledby="basketPanelTitle">
+        <div class="basket-panel-head"><h2 id="basketPanelTitle">试题篮 <span id="basketPanelCount">0</span></h2><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
+        <p id="basketSummary" class="helper">先找到题目，再加入试题篮。</p>
+        <div id="basketLoadError" class="library-load-error" role="alert" hidden></div>
+        <ol id="basketList" class="basket-list"></ol>
+        <button id="basketButton" class="button button-primary basket-preview no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>组卷预览 <span id="basketCount">0</span> 题</button>
+      </aside>
+    </div>
   </main>
 
-  <button id="basketButton" class="basket-button no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>试题篮 <span id="basketCount">0</span> · 组卷预览</button>
+  <dialog id="questionDialog" class="question-dialog" aria-labelledby="questionTitle">
+    <div class="source-dialog-head"><div><p class="eyebrow">完整题目</p><h3 id="questionTitle"></h3><p id="questionVersion" class="helper"></p></div><button id="closeQuestion" class="button button-quiet button-small" type="button">返回题库</button></div>
+    <div id="questionContent" class="paper question-content"></div>
+    <div id="questionActions" class="question-actions"></div>
+  </dialog>
+
+  <dialog id="draftsDialog" class="drafts-dialog" aria-labelledby="draftsTitle">
+    <div class="source-dialog-head"><div><p class="eyebrow">继续备课</p><h3 id="draftsTitle">组卷草稿</h3></div><button id="closeDrafts" class="button button-quiet button-small" type="button">关闭</button></div>
+    <p id="draftsStatus" class="helper" role="status" aria-live="polite"></p><div id="draftsList" class="drafts-list"></div>
+  </dialog>
 
   <dialog id="sourceDialog" class="source-dialog" aria-labelledby="sourceTitle">
     <div class="source-dialog-head">
@@ -147,9 +187,12 @@
       <label id="printAiBox" class="library-toggle switch" title="原卷没有答案、但有 AI 参考答案的题，卷末附上并标明“AI 参考，未核对”" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考答案</label>
       <span class="print-spacer"></span>
       <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
+      <button id="saveDraft" class="button" type="button">保存草稿</button>
+      <button id="saveDraftAs" class="button button-quiet" type="button">另存为</button>
       <button id="closePrint" class="button" type="button">返回题库</button>
       <button id="printButton" class="button button-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-printer"/></svg>打印</button>
     </div>
+    <p id="draftSaveStatus" class="print-draft-status no-print" role="status" aria-live="polite"></p>
     <div id="printMissing" class="print-notice no-print" role="alert" hidden></div>
     <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
     <p class="print-order-hint no-print">按题型分组，同题型内可上下移动。Esc 返回题库。</p>
@@ -160,6 +203,8 @@
 
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js" defer></script>
+  <script src="/library-workspace.js" defer></script>
+  <script src="/static/library-ai-settings.js" defer></script>
   <script src="/library.js" defer></script>
 </body>
 </html>

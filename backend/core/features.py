@@ -31,11 +31,11 @@ FEATURES = {
     },
     "knowledge_tags": {
         "default": False, "label": "知识点标签",
-        "help": "让读题模型从固定的知识点目录里给每道题选 1–3 个标签，题库可以按知识点筛选。会用到读题服务的额度。",
+        "help": "在独立的“标签与参考答案设置”中配置豆包 Pro API，从固定目录选 1–3 个标签。默认关闭，不使用读题服务或其他 AI 助手；生成可能计费。",
     },
     "ai_answer": {
         "default": False, "label": "AI 参考答案",
-        "help": "对原卷没有答案的题，可以让读题模型做一遍。单独存放，标着“AI 参考 · 未核对”，不会混进原卷答案。会用到读题服务的额度。",
+        "help": "在独立设置中配置并显式测试豆包 Pro API 后，为没有原卷答案的题生成参考。默认关闭，标着“AI 参考 · 未核对”，不覆盖原答；生成可能计费。",
     },
 }
 DEFAULTS = {key: spec["default"] for key, spec in FEATURES.items()}

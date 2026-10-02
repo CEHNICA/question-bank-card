@@ -7,10 +7,10 @@ const path = require("node:path");
 const { TEACH_LESSONS, lessonDone, lessonHint, restoreTeaching, teachingProgress } = require("./app.js");
 
 assert.deepEqual(TEACH_LESSONS.map((lesson) => lesson.key),
-  ["card", "viewer", "tick", "fix", "figure", "publish", "basics", "original", "preview", "region", "library", "recovery", "finish"]);
+  ["card", "viewer", "tick", "fix", "figure", "publish", "basics", "original", "preview", "region", "library", "basket", "drafts", "ai", "recovery", "finish"]);
 assert.ok(TEACH_LESSONS[0].manual && TEACH_LESSONS.at(-1).final);
 assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "basic").length, 7);
-assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "review" && !lesson.final).length, 5);
+assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "review" && !lesson.final).length, 8);
 assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === "basics").checkpoint);
 
 // Stable keys and the old course's indexes must refer to learning content,
@@ -42,7 +42,7 @@ for (let index = 0; index < TEACH_LESSONS.length; index += 1) {
   assert.equal(progress.lesson.key, TEACH_LESSONS[index].key);
 }
 assert.equal(teachingProgress(7).current, 1);
-assert.equal(teachingProgress(7).total, 5);
+assert.equal(teachingProgress(7).total, 8);
 
 // Each step finishes on the matching action, and only then.
 assert.ok(!lessonDone("viewer", { type: "viewer", number: 1 }), "opening a viewer alone must not skip the gesture explanation");
@@ -56,6 +56,13 @@ assert.ok(lessonDone("figure", { type: "figures", number: 2, figures: 1 }));
 assert.ok(!lessonDone("figure", { type: "figures", number: 2, figures: 0 }));
 assert.ok(lessonDone("publish", { type: "publish" }));
 assert.ok(!lessonDone("card", { type: "approve" }), "a reading step moves on only with 下一步");
+for (const key of ["library", "basket", "drafts", "ai"]) {
+  assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === key).manual);
+  for (const type of ["approve", "publish", "basket", "draft", "ai", "test"]) {
+    assert.ok(!lessonDone(key, { type, number: 1, figures: 1 }),
+      "recognizing the library and optional AI tools must not require changing real data or calling a service");
+  }
+}
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");

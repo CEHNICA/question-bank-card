@@ -1,15 +1,20 @@
-"""在桌面和开始菜单放一个“题有据”图标，双击即以窗口版打开题库。
+"""Create TiYouJu shortcuts, preferring the installed application's verified CLI.
 
-只写快捷方式文件（.lnk），不改注册表、不需要管理员权限；删掉图标即可撤销。
+The source fallback keeps unrelated links intact and reads a new link back before
+publishing it. No application is started and no question-bank settings are read.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
+
+import assistant_setup as setup
 
 ROOT = Path(__file__).resolve().parent
 VENV_PYTHONW = ROOT / "backend" / ".venv" / "Scripts" / "pythonw.exe"
@@ -31,31 +36,30 @@ def shortcut_spec() -> dict[str, str]:
 
 
 def _special_folder(name: str) -> Path:
-    """Desktop 可能被 OneDrive 重定向，用系统接口取真实位置。"""
-    script = f"[Environment]::GetFolderPath('{name}')"
-    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                            capture_output=True, text=True, timeout=30)
-    path = (result.stdout or "").strip()
+    if name == "Desktop":
+        return setup.windows_desktop()
+    if name != "Programs":
+        raise setup.SetupError("不支持的快捷方式目录。")
+    script = ("$ErrorActionPreference = 'Stop'; "
+              "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); "
+              "[Environment]::GetFolderPath('Programs')")
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, encoding="utf-8", check=True, timeout=20,
+    )
+    path = (result.stdout or "").strip().lstrip("\ufeff")
     if not path:
-        raise RuntimeError(f"找不到 {name} 文件夹")
+        raise setup.SetupError("找不到开始菜单文件夹。")
     return Path(path)
 
 
 def _write_with_com(link: Path, spec: dict[str, str]) -> None:
-    """用 Unicode Shell Link 接口写快捷方式。
-
-    WScript.Shell 的 IDispatch 包装在部分 Windows 区域设置下会把中文目标路径
-    转成问号，随后给 TargetPath 赋值时报 0x80070057。直接调用 IShellLinkW
-    可以完整保留题库目录、参数和图标里的中文路径。
-    """
-    import pythoncom  # pywin32（已锁定在 Windows 运行环境依赖里）
+    """Use the Unicode Shell Link interface provided by the source runtime."""
+    import pythoncom
     from win32com.shell import shell
 
     shortcut = pythoncom.CoCreateInstance(
-        shell.CLSID_ShellLink,
-        None,
-        pythoncom.CLSCTX_INPROC_SERVER,
-        shell.IID_IShellLink,
+        shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink,
     )
     shortcut.SetPath(spec["target"])
     shortcut.SetArguments(spec["arguments"])
@@ -72,6 +76,7 @@ def _ps_quote(value: str) -> str:
 
 def powershell_script(link: Path, spec: dict[str, str]) -> str:
     return "\n".join([
+        "$ErrorActionPreference = 'Stop'",
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + _ps_quote(str(link)) + ")",
         "$s.TargetPath = " + _ps_quote(spec["target"]),
         "$s.Arguments = " + _ps_quote(spec["arguments"]),
@@ -83,52 +88,154 @@ def powershell_script(link: Path, spec: dict[str, str]) -> str:
 
 
 def _write_with_powershell(link: Path, spec: dict[str, str]) -> None:
-    # -EncodedCommand 用 UTF-16LE，中文路径不会因为控制台代码页而乱码。
     encoded = base64.b64encode(powershell_script(link, spec).encode("utf-16-le")).decode("ascii")
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], check=True, timeout=60)
-
-
-def create(link: Path) -> None:
-    link.parent.mkdir(parents=True, exist_ok=True)
-    spec = shortcut_spec()
     try:
-        _write_with_com(link, spec)
-    except Exception:  # noqa: BLE001 - 没有 pywin32 时退回 PowerShell
-        _write_with_powershell(link, spec)
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            capture_output=True, check=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise setup.SetupError("Windows 无法写入源码快捷方式，未确认创建成功。") from error
+
+
+def _same_path(first: str | Path, second: str | Path) -> bool:
+    if not isinstance(first, (str, Path)) or not isinstance(second, (str, Path)):
+        return False
+    try:
+        a, b = Path(first), Path(second)
+        return a.is_absolute() and b.is_absolute() and os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+    except (OSError, ValueError):
+        return False
+
+
+def _matches(link: Path, spec: dict[str, str], *, shortcuts=None) -> bool:
+    setup._safe_path(link)
     if not link.is_file():
-        raise RuntimeError(f"没能写入 {link}")
+        return False
+    info = (shortcuts or setup.WindowsShortcuts()).read(link)
+    return (_same_path(info.get("target") or "", spec["target"])
+            and info.get("arguments", "") == spec["arguments"]
+            and _same_path(info.get("working_dir") or "", spec["workdir"]))
 
 
-def remove_legacy_shortcut(link: Path) -> None:
-    """改名后只清理同一目录下由旧版创建的精确快捷方式名。"""
-    legacy_link = link.with_name(f"{LEGACY_NAME}.lnk")
-    if legacy_link != link:
-        legacy_link.unlink(missing_ok=True)
+def create(link: Path, *, spec=None, shortcuts=None) -> bool:
+    """Publish a verified source shortcut, refusing to overwrite existing links."""
+    link = setup._safe_path(Path(link))
+    spec = spec or shortcut_spec()
+    if link.exists():
+        if _matches(link, spec, shortcuts=shortcuts):
+            return False
+        raise setup.SetupError(f"已有同名快捷方式与当前源码启动方式不同，已保留：{link}")
+    if not link.parent.is_dir():
+        raise setup.SetupError(f"快捷方式文件夹不存在，未创建：{link.parent}")
+    stage = link.parent / f".tiyouju-shortcut-{uuid.uuid4().hex}.lnk"
+    try:
+        try:
+            _write_with_com(stage, spec)
+        except Exception:
+            _write_with_powershell(stage, spec)
+        if not _matches(stage, spec, shortcuts=shortcuts):
+            raise setup.SetupError("新快捷方式目标、启动参数或工作目录校验失败，未显示图标。")
+        setup._rename(stage, link)
+        if not _matches(link, spec, shortcuts=shortcuts):
+            raise setup.SetupError("快捷方式安装后的目标校验失败，未确认成功。")
+        return True
+    finally:
+        if stage.exists():
+            setup._safe_path(stage)
+            stage.unlink()
+
+
+def remove_legacy_shortcut(link: Path, *, spec=None, shortcuts=None) -> None:
+    """Only remove a legacy name whose complete source launch target matches."""
+    legacy = link.with_name(f"{LEGACY_NAME}.lnk")
+    if legacy == link or not legacy.exists():
+        return
+    try:
+        owned = _matches(legacy, spec or shortcut_spec(), shortcuts=shortcuts)
+    except (setup.SetupError, OSError):
+        return  # An unreadable or unrelated legacy file is not ours to delete.
+    if owned:
+        legacy.unlink()
+
+
+def _installed_paths() -> tuple[Path, Path] | None:
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if not local:
+        return None
+    directory = Path(local) / "Programs" / "QuestionBankCard"
+    app, cli = directory / "QuestionBankCard.exe", directory / "tiyouju.exe"
+    if app.exists() or cli.exists():
+        return app, cli
+    return None
+
+
+def _run_cli(cli: Path, app: Path, arguments: list[str]):
+    environment = dict(os.environ)
+    environment["TIYOUJU_APP"] = str(app)
+    return subprocess.run(
+        [str(cli), "assistant-setup", *arguments], cwd=str(cli.parent),
+        env=environment, capture_output=True, encoding="utf-8", errors="replace", timeout=45,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
+def _create_installed(app: Path, cli: Path) -> Path:
+    if not app.is_file() or not cli.is_file():
+        raise setup.SetupError("已找到安装目录，但程序或配套命令不完整。请重新安装或升级题有据；未改用源码创建图标。")
+    help_result = _run_cli(cli, app, ["--help"])
+    if help_result.returncode or "--desktop" not in help_result.stdout:
+        raise setup.SetupError("已安装的题有据不支持新版图标命令。请升级题有据；未改用源码创建图标。")
+    process = _run_cli(cli, app, ["--desktop", "show", "--json"])
+    try:
+        result = json.loads(process.stdout.strip().lstrip("\ufeff"))
+    except (TypeError, ValueError) as error:
+        raise setup.SetupError("安装版图标命令没有返回可核实结果，未确认创建成功。") from error
+    if not isinstance(result, dict):
+        raise setup.SetupError("安装版图标命令返回格式无效，未确认创建成功。")
+    if process.returncode:
+        raise setup.SetupError(str(result.get("error") or "安装版图标命令失败，未确认创建成功。"))
+    icon = result.get("desktop")
+    if (not isinstance(icon, dict) or icon.get("status") != "shown" or icon.get("verified") is not True
+            or not _same_path(icon.get("target") or "", app)):
+        raise setup.SetupError("安装版未确认正确的桌面图标，不能宣称创建成功。")
+    link = setup.windows_desktop() / f"{NAME}.lnk"
+    if not _same_path(icon.get("path") or "", link) or not setup._owned_shortcut(link, app, setup.WindowsShortcuts()):
+        raise setup.SetupError("桌面快捷方式回读校验失败，未确认创建成功。")
+    return link
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def main() -> int:
-    if os.name != "nt":
+    if not _is_windows():
         print("只支持 Windows。")
         return 1
-    if not VENV_PYTHONW.is_file():
-        print("还没有建立运行环境。请先双击“启动题有据.cmd”完成第一次安装，再运行本工具。")
-        return 1
-    places = [("桌面", _special_folder("Desktop") / f"{NAME}.lnk")]
     try:
-        places.append(("开始菜单", _special_folder("Programs") / f"{NAME}.lnk"))
-    except Exception:  # noqa: BLE001 - 开始菜单不是必需的
-        pass
-    for label, link in places:
+        installed = _installed_paths()
+        if installed is not None:
+            link = _create_installed(*installed)
+            print(f"已显示并核验安装版题有据桌面图标：{link}")
+            return 0
+        if not VENV_PYTHONW.is_file() or not LAUNCHER.is_file():
+            raise setup.SetupError("未找到安装版，源码运行环境也未准备好。请先安装题有据，或双击“启动题有据.cmd”准备源码环境，再运行本工具。")
+        desktop_link = _special_folder("Desktop") / f"{NAME}.lnk"
+        create(desktop_link)
+        remove_legacy_shortcut(desktop_link)
+        print(f"已显示并核验源码版桌面图标：{desktop_link}")
         try:
-            create(link)
-            remove_legacy_shortcut(link)
-            print(f"已创建{label}图标：{link}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"创建{label}图标失败：{exc}")
-            if label == "桌面":
-                return 1
-    print(f"\n以后双击“{NAME}”图标即可打开独立窗口；关掉窗口，后台服务会一起停止。")
-    return 0
+            menu_link = _special_folder("Programs") / f"{NAME}.lnk"
+            create(menu_link)
+            remove_legacy_shortcut(menu_link)
+            print(f"已核验开始菜单图标：{menu_link}")
+        except (setup.SetupError, OSError, subprocess.SubprocessError) as error:
+            print(f"桌面图标已完成；开始菜单图标未完成：{error}")
+        return 0
+    except (setup.SetupError, OSError, subprocess.SubprocessError) as error:
+        print(f"创建图标没有完成：{error}")
+        return 1
 
 
 if __name__ == "__main__":

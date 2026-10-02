@@ -504,15 +504,21 @@ const QBTeach = (() => {
     { key: "publish", title: "核对过的题，才入库",
       text: "点右上角“入库”看看说明。只入库已通过的题；表格要逐格核对，绿卡也要看原卷。示例只练操作，不会进入正式题库。" },
     { key: "basics", title: "基础练习完成", manual: true, checkpoint: true,
-      text: "你已练过对照、打勾、改字、补图和入库入口。接下来可以看新版的 5 个常用功能，也可以先结束；以后在“设置 → 帮助”里继续看。" },
+      text: "你已练过对照、打勾、改字、补图和入库入口。接下来可以看新版常用功能，也可以先结束；以后在“设置 → 帮助”里继续看。" },
     { key: "original", title: "整份原卷也能放大", manual: true,
       text: "从“试卷操作 → 查看整份原卷”看完整页面。Ctrl＋滚轮缩放，左键拖动画布；适页看整页，适宽看细节，还能输入页码跳页。" },
     { key: "preview", title: "不懂公式写法，也能看位置", manual: true,
       text: "在“改字”输入框中点一个位置，或选中几个字。预览用绿线、浅绿选区和公式框对应标出；公式内绿色符号帮助定位，实际插入位置仍看输入框光标。" },
     { key: "region", title: "只重读一小块，先确认替换", manual: true,
       text: "点“框选识读”，框住印刷字，再选“自动推荐（AI）”。真实识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里练画框，不调用读题服务。" },
-    { key: "library", title: "找题，还要找得到出处", manual: true,
-      text: "“正式题库”里可以搜索、选题组卷。每道题的“查看出处”能看原卷与整页位置；“版本历史”保留修改前后，“相关资料”查看同题的其他来源。示例不会入库，所以这里先认识入口。" },
+    { key: "library", title: "找题，还要看完整题目", manual: true,
+      text: "“正式题库”先显示题目摘要，点“完整题目”看所有条件、选项和配图。用来源、题型和排序找题；“更多筛选”放其他条件。“查看出处”和“版本历史”仍保留。示例不会入库，这一步只认识入口。" },
+    { key: "basket", title: "选好题，再看试题篮", manual: true,
+      text: "“选择当前已显示题目”只勾选已经加载的题，再点“加入试题篮”。“已选题目”可以集中检查篮中的题；换筛选、加载更多或收起试题篮都不会清空它。进入“组卷预览”前，先看一遍完整题目。" },
+    { key: "drafts", title: "给这份练习起个名字", manual: true,
+      text: "在组卷预览里填写试卷标题，点“保存草稿”；“另存为”会保留另一份。下次从“组卷草稿”继续选题和调整顺序。题目被撤回、更新或找不到时会明确提示；先处理缺题，不会悄悄换成新版本或漏印。" },
+    { key: "ai", title: "标签和答案，单独设置", manual: true,
+      text: "“标签与答案设置”是独立窗口，两项默认关闭。接通可用的豆包 Pro API 后才可生成；未接通就暂停，只推荐了解 DeepSeek Pro，不会自动换模型。保存配置不会发起测试；可能计费的测试需单独同意。这里仅认识入口，不生成、不测试。" },
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
@@ -4013,7 +4019,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderFeatureSwitches(data) {
     const box = $("featureSwitches");
     box.replaceChildren();
-    (data.features || []).forEach((item) => {
+    (data.features || []).filter((item) => !["knowledge_tags", "ai_answer"].includes(item.key)).forEach((item) => {
       const label = el("label", "settings-switch");
       const text = el("span");
       text.append(el("strong", "", item.label), el("small", "", item.help));
@@ -4058,6 +4064,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   $("settingsButton").addEventListener("click", openSettings);
+  document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
@@ -6687,7 +6694,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "示例不调用 AI。真实识读会先给替换建议，你确认后才填入改字，最后还要保存。");
         break;
       }
-      case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "入库后的题可看出处、版本历史和相关资料；也可搜索、选题组卷。示例不会入库。"); break;
+      case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "列表先看摘要，点“完整题目”再核对条件、选项和配图；查看出处和版本历史仍在。示例不会入库。"); break;
+      case "basket": later(() => document.querySelector('.topnav a[href="/library"]'), "从这里进入题库选题", "勾选当前已显示的题，再加入试题篮。可切到“已选题目”集中检查；收起试题篮不会清空。教学不替你选择真实题目。"); break;
+      case "drafts": later(() => document.querySelector('.topnav a[href="/library"]'), "从题库继续组卷", "组卷预览里起名字、保存草稿；下次从“组卷草稿”打开。旧版本或缺题会提示处理，不会悄悄替换。教学不保存真实草稿。"); break;
+      case "ai": {
+        openSettings();
+        showSettingsTab("settingsGeneral");
+        later(() => document.querySelector('[data-library-ai-settings]'), "标签与答案有独立设置", "两项默认关闭。没有可用豆包就暂停；保存配置和可能计费的测试分开。教学只指出入口，不打开测试或改变开关。");
+        break;
+      }
       case "recovery": {
         openSettings();
         showSettingsTab("settingsReview");

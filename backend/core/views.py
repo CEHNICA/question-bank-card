@@ -649,6 +649,8 @@ library_page = _frontend("library.html", "text/html; charset=utf-8")
 app_script = _frontend("app.js", "application/javascript; charset=utf-8")
 render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
+library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
+library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")
@@ -2455,48 +2457,8 @@ def _library_rows(request):
 
 
 def library_list(request):
-    try:
-        limit = min(100, max(1, int(request.GET.get("limit", "50"))))
-        offset = max(0, int(request.GET.get("offset", "0")))
-    except ValueError:
-        return _error("limit 与 offset 必须是整数")
-    rows = _library_rows(request).order_by("source_filename", "number", "-version")
-    live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-    sources, types, reviews = {}, {}, {"human": 0, "ai": 0}
-    answers, tags = {"yes": 0, "no": 0}, {}
-    for row in live.values("paper_id", "source_filename", "question_type", "review_source",
-                           "content__answer", "tags_text"):
-        key = str(row["paper_id"]) if row["paper_id"] else ""
-        entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"], "count": 0})
-        entry["count"] += 1
-        types[row["question_type"]] = types.get(row["question_type"], 0) + 1
-        review_key = row["review_source"] if row["review_source"] in reviews else "human"
-        reviews[review_key] += 1
-        answers["yes" if str(row["content__answer"] or "").strip() else "no"] += 1
-        for tag in (row["tags_text"] or "").strip("|").split("|"):
-            if tag:
-                tags[tag] = tags.get(tag, 0) + 1
-    page = list(rows[offset:offset + limit])
-    ids = [item.id for item in page]
-    waiting = library_jobs.pending_kinds(ids)
-    failed = library_jobs.last_errors(ids)
-    items = []
-    for item in page:
-        data = library.publication_json(item)
-        data["jobs"] = waiting.get(str(item.id), [])
-        data["job_errors"] = failed.get(str(item.id), {})
-        items.append(data)
-    switches = features.load()
-    return JsonResponse({
-        "total": rows.count(),
-        "items": items,
-        "facets": {"sources": sorted(sources.values(), key=lambda item: item["filename"]), "types": types,
-                   "reviews": reviews, "answers": answers,
-                   "tags": sorted(({"tag": key, "count": value} for key, value in tags.items()),
-                                  key=lambda item: (-item["count"], item["tag"]))},
-        "features": switches,
-        "type_names": qtypes.TYPE_LABELS,
-    })
+    from .library_browse import library_list as browse
+    return browse(request)
 
 
 def library_detail(request, publication_id):
@@ -2546,6 +2508,43 @@ def library_withdraw(request, publication_id):
 
 
 # ---------------------------------------------------------------- 功能开关与题库任务
+
+@csrf_exempt
+def library_ai_settings_view(request):
+    from . import library_ai_settings
+    if request.method not in {"GET", "POST"}:
+        return HttpResponseNotAllowed(["GET", "POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("标签与答案设置只能在本机使用", 403)
+    if request.method == "GET":
+        return JsonResponse(library_ai_settings.public_status())
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    try:
+        return JsonResponse(library_ai_settings.save(_body(request)))
+    except library_ai_settings.ServiceError as error:
+        return _error(str(error), 409)
+    except library_ai_settings.SettingsError as error:
+        return _error(str(error), 400)
+
+
+@csrf_exempt
+def library_ai_test_view(request):
+    from . import library_ai_settings
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("连接测试只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    try:
+        return JsonResponse(library_ai_settings.test_connection(_body(request)))
+    except library_ai_settings.ServiceError as error:
+        return _error(str(error), 409)
+    except library_ai_settings.SettingsError as error:
+        return _error(str(error), 400)
 
 @csrf_exempt
 def feature_settings(request):

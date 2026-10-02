@@ -2,6 +2,7 @@
   "use strict";
 
   const QB = window.QBRender;
+  const workspace = window.LibraryWorkspace;
   const $ = (id) => document.getElementById(id);
   const ui = {
     search: $("searchInput"), source: $("sourceSelect"), types: $("typeFilters"),
@@ -27,6 +28,17 @@
     review: ["human", "ai"].includes(params.get("review")) ? params.get("review") : "",
     answer: ["yes", "no"].includes(params.get("answer")) ? params.get("answer") : "",
     tag: params.get("tag") || "",
+    sort: params.get("sort") === "source" ? "source" : "recent",
+    view: "all",
+    selected: new Set(),
+    expanded: new Set(),
+    catalog: new Map(),
+    basketMissing: [],
+    basketToken: 0,
+    basketLoading: false,
+    basketVisible: window.matchMedia("(min-width: 980px)").matches,
+    draft: null,
+    draftDirty: false,
     // 1.10.5: 翻开了答案的题（每题单独翻开，不再一键全部展开）。
     opened: new Set(),
     features: {},
@@ -101,7 +113,7 @@
   function loadBasket() {
     try {
       const value = JSON.parse(window.localStorage.getItem("qb-basket") || "[]");
-      return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+      return workspace.uniqueIds(value);
     } catch {
       return [];
     }
@@ -114,6 +126,10 @@
     ui.basketButton.classList.remove("bump");
     void ui.basketButton.offsetWidth;
     ui.basketButton.classList.add("bump");
+    if (state.draft) markDraftDirty();
+    renderBasket();
+    syncSelection();
+    void refreshBasket();
   }
 
   function syncUrl() {
@@ -123,11 +139,18 @@
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
+    if (state.sort === "source") url.searchParams.set("sort", "source");
+    else url.searchParams.delete("sort");
     url.searchParams.delete("focus");
     window.history.replaceState(null, "", url);
   }
 
   async function load({ append = false, quiet = false } = {}) {
+    if (state.view === "selected") {
+      await refreshBasket({ force: true });
+      render();
+      return;
+    }
     const token = ++state.token;
     state.loading = true;
     $("libraryLoadError").hidden = true;
@@ -135,6 +158,7 @@
     // A quiet refresh (jobs finishing) reloads everything already shown, page by page.
     const wanted = quiet ? Math.max(40, state.items.length) : 40;
     const query = new URLSearchParams({ limit: String(Math.min(100, wanted)), offset: String(append ? state.items.length : 0) });
+    query.set("sort", state.sort);
     if (state.q.trim()) query.set("q", state.q.trim());
     if (state.document) query.set("document", state.document);
     if (state.type) query.set("type", state.type);
@@ -158,6 +182,7 @@
       state.facets = body.facets;
       state.features = body.features || {};
       state.items = append ? state.items.concat(body.items) : body.items;
+      state.items.forEach((item) => state.catalog.set(item.id, item));
       render();
       // 知识点、AI 参考答案在后台做：有排队的就过几秒再看一眼。
       if (state.items.some((item) => (item.jobs || []).length)) {
@@ -189,9 +214,15 @@
     });
     ui.source.value = current;
     if (ui.source.value !== current) ui.source.value = "";
+    if (current && !facets.sources.some((source) => source.document_id === current)) {
+      ui.source.append(new Option("当前来源（此条件下无题目）", current));
+      ui.source.value = current;
+    }
+    $("sortSelect").value = state.sort;
     ui.types.replaceChildren();
     const total = Object.values(facets.types).reduce((sum, value) => sum + value, 0);
-    [["", "全部题型", total], ...Object.entries(facets.types).map(([key, count]) => [key, QB.TYPE_NAMES[key] || key, count])]
+    const typeKeys = new Set([...Object.keys(facets.types), ...(state.type ? [state.type] : [])]);
+    [["", "全部题型", total], ...[...typeKeys].map((key) => [key, QB.TYPE_NAMES[key] || key, facets.types[key] || 0])]
       .forEach(([key, label, count]) => {
         const button = node("button", `draft-filter${state.type === key ? " active" : ""}`);
         button.append(node("span", "", label), node("span", "count", count));
@@ -204,6 +235,8 @@
     renderAnswerFilters(facets.answers || {});
     renderTagFilter(facets.tags || []);
     renderExtraTools();
+    const selectedView = state.view === "selected";
+    for (const control of [ui.search, ui.source, $("sortSelect"), ...document.querySelectorAll("#typeFilters button, .library-advanced button, .library-advanced select")]) control.disabled = selectedView;
   }
 
   // 有没有答案：挑出原卷没给答案的题（补答案或做 AI 参考答案时用）。
@@ -249,7 +282,7 @@
       tools.push(answers);
     }
     box.hidden = !tools.length;
-    if (tools.length) box.append(node("span", "helper", "用设置里填的读题服务在后台做，会用到它的额度："), ...tools);
+    if (tools.length) box.append(node("span", "helper", "使用“标签与答案设置”中单独连接的豆包，会用到它的额度："), ...tools);
   }
 
   async function queueJobs(kind, target) {
@@ -296,11 +329,20 @@
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}`);
     article.id = `q-${item.id}`;
     const meta = node("header", "library-card-meta");
+    const select = node("input", "library-card-select");
+    select.type = "checkbox";
+    select.checked = state.selected.has(item.id);
+    select.setAttribute("aria-label", `勾选${item.source_filename}第 ${item.number} 题`);
+    select.addEventListener("change", () => {
+      if (select.checked) state.selected.add(item.id); else state.selected.delete(item.id);
+      article.classList.toggle("is-selected", select.checked);
+      syncSelection();
+    });
+    meta.append(select);
     meta.append(
       node("span", "library-source", item.source_filename),
       node("span", "", `原卷第 ${item.number} 题`),
-      typeChip(item),
-      node("span", "", `第 ${item.version} 版 · ${formatDate(item.published_at)} 入库`)
+      typeChip(item)
     );
     if (item.origin) {
       const origin = node("span", "library-origin", `题源：${item.origin}`);
@@ -319,7 +361,19 @@
       meta.append(badge);
     }
     const paper = node("div", "paper");
-    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
+    const summary = workspace.summaryStem(item.content?.stem, QB);
+    const expanded = state.expanded.has(item.id);
+    if (expanded) QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
+    else QB.renderQuestion(paper, { ...item.content, stem: summary.text, options: {}, figures: (item.content?.figures || []).filter((figure) => figure.slot === "stem").slice(0, 2) }, { showNumber: false, showAnswer: "none" });
+    article.classList.toggle("compact", !expanded);
+    article.classList.toggle("is-selected", state.selected.has(item.id));
+    if (!expanded) {
+      const notes = [];
+      if (summary.folded) notes.push("还有题干与小问");
+      if (Object.keys(item.content?.options || {}).length) notes.push("含选项");
+      if ((item.content?.figures || []).length > 2) notes.push(`含 ${(item.content.figures || []).length} 张配图`);
+      if (notes.length) paper.append(node("p", "library-preview-note", notes.join(" · ") + " · 点完整题目查看"));
+    }
     const reveal = answerReveal(item);
     if (reveal) paper.append(reveal);
     const extras = extrasNode(item);
@@ -327,6 +381,21 @@
     const actions = node("footer", "library-card-actions");
     const origin = iconButton("button", "button button-quiet button-small", "查看出处", "source");
     origin.addEventListener("click", () => openSource(item));
+    const full = node("button", "button button-small library-full-button", "完整题目");
+    full.type = "button";
+    full.addEventListener("click", () => openQuestion(item));
+    const expand = node("button", "button button-quiet button-small", expanded ? "收起题面" : "展开题面");
+    expand.type = "button";
+    expand.setAttribute("aria-expanded", String(expanded));
+    expand.addEventListener("click", () => {
+      if (expanded) state.expanded.delete(item.id); else state.expanded.add(item.id);
+      const replacement = card(item);
+      article.replaceWith(replacement);
+      replacement.querySelector('[aria-expanded]')?.focus({ preventScroll: true });
+    });
+    const more = node("details", "library-card-more");
+    more.append(node("summary", "", "更多"));
+    const menu = node("div", "library-card-menu");
     const history = iconButton("button", "button button-quiet button-small", "版本历史", "history");
     history.addEventListener("click", () => openHistory(item));
     const review = iconButton("a", "button button-quiet button-small", "回到题卡", "back");
@@ -338,11 +407,14 @@
     const basket = iconButton("button", `button ${inBasket ? "button-outline" : ""} button-small`, inBasket ? "已在试题篮" : "加入试题篮", inBasket ? "check" : "plus");
     basket.setAttribute("aria-pressed", String(inBasket));
     basket.addEventListener("click", () => {
+      if (!inBasket && state.basket.length >= 500) { toast("试题篮最多放 500 题，请先保存一份组卷", "error"); return; }
       state.basket = inBasket ? state.basket.filter((id) => id !== item.id) : state.basket.concat(item.id);
       saveBasket();
-      article.replaceWith(card(item));
+      render();
     });
-    actions.append(origin, history, review, withdraw, ...jobButtons(item), node("span", "actions-spacer"), basket);
+    menu.append(history, review, withdraw, ...jobButtons(item));
+    more.append(menu);
+    actions.append(origin, full, expand, more, node("span", "actions-spacer"), basket);
     article.append(meta, paper, actions);
     if (state.focus === item.id) article.classList.add("focused");
     return article;
@@ -387,7 +459,7 @@
     if (ai) {
       const part = node("div", "qb-answer ai-answer");
       const label = node("p", "library-answer-label", "AI 参考答案 · 未核对");
-      label.title = `${ai.engine || "读题模型"} 做的，没有人核对过；用之前请自己算一遍`;
+      label.title = `${ai.engine || "解题模型"} 做的，没有人核对过；用之前请自己算一遍`;
       const rows = QB.answerRows(document, ai, { empty: "（空）" });
       if (!String(ai.analysis || "").trim()) rows.pop();
       part.append(label, ...rows);
@@ -432,7 +504,7 @@
       const busy = waiting.has("answer");
       const button = iconButton("button", "button button-quiet button-small", busy ? "AI 正在解答…" : "AI 解答", busy ? "" : "plus");
       button.disabled = busy;
-      button.title = "原卷没有答案：让读题模型做一遍，结果标着“AI 参考 · 未核对”";
+      button.title = "原卷没有答案：使用单独配置并核验的豆包，结果标着“AI 参考 · 未核对”";
       button.addEventListener("click", () => queueJobs("answer", { ids: [item.id] }));
       buttons.push(button);
     }
@@ -441,21 +513,22 @@
 
   function render() {
     renderFacets();
+    renderActiveFilters();
+    renderBasket();
+    syncSelection();
     ui.list.replaceChildren();
-    if (!state.items.length) {
+    const shown = visibleItems();
+    if (!shown.length) {
       const empty = node("div", "library-empty");
       const filtered = Boolean(state.q.trim() || state.document || state.type || state.review || state.answer || state.tag);
-      empty.append(node("p", "", filtered ? "没有找到符合条件的题目。" : "题库还是空的。"));
-      if (filtered) {
+      empty.append(node("p", "", state.view === "selected" ? (state.basket.length ? "选题尚未载入。" : "试题篮还是空的。") : filtered ? "没有找到符合条件的题目。" : "题库还是空的。"));
+      if (state.view === "selected") empty.append(node("p", "helper", state.basket.length ? "在右侧重试，或移出已撤回的题目。" : "回到全部题目，选择需要的题加入试题篮。"));
+      else if (filtered) {
         empty.append(node("p", "helper", "试试其他关键词，或清除筛选查看全部题目。"));
         const reset = node("button", "button button-small", "清除搜索与筛选");
         reset.type = "button";
         reset.addEventListener("click", () => {
-          window.clearTimeout(searchTimer);
-          state.q = state.document = state.type = state.review = state.answer = state.tag = "";
-          ui.search.value = "";
-          syncUrl();
-          load();
+          clearFilters();
         });
         empty.append(reset);
       } else {
@@ -466,17 +539,19 @@
     // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
     const previous = state.cards || new Map();
     state.cards = new Map();
-    state.items.forEach((item) => {
-      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.opened.has(item.id), state.tag]);
+    shown.forEach((item) => {
+      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag]);
       const kept = previous.get(item.id);
       const node = kept && kept.signature === signature ? kept.node : card(item);
       state.cards.set(item.id, { signature, node });
       ui.list.append(node);
     });
-    ui.status.textContent = state.total
-      ? `共 ${state.total} 道已入库题目${state.q ? `，匹配“${state.q}”` : ""}。每道题都是标记通过时的版本快照。`
+    ui.status.textContent = state.view === "selected" ? `试题篮 ${state.basket.length} 题 · 已载入 ${shown.length} 题。已选题目不受搜索与筛选影响。`
+      : state.total
+      ? `已显示 ${state.items.length} / 共 ${state.total} 题${state.q ? `，匹配“${state.q}”` : ""} · 每题保留入库版本。`
       : "";
-    ui.more.hidden = state.items.length >= state.total;
+    ui.more.hidden = state.view === "selected" || state.items.length >= state.total;
+    requestAnimationFrame(() => readingOverflowHints(ui.list));
     if (state.focus) {
       const target = document.getElementById(`q-${state.focus}`);
       if (target) {
@@ -484,6 +559,197 @@
         state.focus = "";
       }
     }
+  }
+
+  function readingOverflowHints(container) {
+    container.querySelectorAll(".reading-overflow-hint").forEach((hint) => hint.remove());
+    container.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
+      if (!field.clientWidth || field.scrollWidth <= field.clientWidth + 2) return;
+      field.tabIndex = 0;
+      field.setAttribute("aria-label", "题目内容，可左右滚动查看完整公式");
+      const hint = node("span", "reading-overflow-hint", "左右滑动查看完整公式；键盘可用左右方向键。");
+      (field.closest(".qb-stem, .qb-option") || field).after(hint);
+    });
+  }
+
+  function visibleItems() {
+    if (state.view !== "selected") return state.items;
+    const missing = new Set(state.basketMissing.map((item) => item.id));
+    return state.basket.filter((id) => !missing.has(id)).map((id) => state.catalog.get(id)).filter(Boolean);
+  }
+
+  function clearFilters() {
+    window.clearTimeout(searchTimer);
+    state.q = state.document = state.type = state.review = state.answer = state.tag = "";
+    ui.search.value = "";
+    syncUrl();
+    void load();
+  }
+
+  function renderActiveFilters() {
+    const box = $("activeFilters");
+    box.replaceChildren();
+    const source = state.facets?.sources?.find((row) => row.document_id === state.document);
+    const labels = [["q", state.q.trim() ? `搜索：${state.q.trim()}` : ""],
+      ["document", state.document ? `来源：${source?.filename || "当前试卷"}` : ""],
+      ["type", state.type ? `题型：${QB.TYPE_NAMES[state.type] || state.type}` : ""],
+      ["review", state.review ? (state.review === "ai" ? "AI 审核" : "人工核对") : ""],
+      ["answer", state.answer ? (state.answer === "yes" ? "有原卷答案" : "无原卷答案") : ""],
+      ["tag", state.tag ? `知识点：${state.tag}` : ""]];
+    box.hidden = state.view === "selected" || !labels.some(([, label]) => label);
+    if (box.hidden) return;
+    labels.forEach(([key, label]) => {
+      if (!label) return;
+      const remove = node("button", "library-filter-chip", `${label} ×`);
+      remove.type = "button";
+      remove.setAttribute("aria-label", `取消${label}`);
+      remove.addEventListener("click", () => { state[key] = ""; ui.search.value = state.q; syncUrl(); void load(); });
+      box.append(remove);
+    });
+    const clear = node("button", "button button-quiet button-small", "清除筛选");
+    clear.type = "button";
+    clear.addEventListener("click", clearFilters);
+    box.append(clear);
+  }
+
+  function syncSelection() {
+    const shown = visibleItems();
+    const count = shown.filter((item) => state.selected.has(item.id)).length;
+    $("selectVisible").checked = Boolean(shown.length && count === shown.length);
+    $("selectVisible").indeterminate = count > 0 && count < shown.length;
+    $("selectVisible").disabled = !shown.length;
+    $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
+    $("addSelected").disabled = !state.selected.size;
+    $("clearSelection").disabled = !state.selected.size;
+  }
+
+  async function batchItems(ids) {
+    if (!ids.length) return { items: [], missing: [] };
+    const response = await fetch("/api/library/batch", { method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify({ ids }) });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "选题读取失败，请重试");
+    if (!Array.isArray(body.items) || !Array.isArray(body.missing)) throw new Error("选题返回不完整，请重试");
+    const returned = new Set([...body.items, ...body.missing].map((item) => item.id));
+    for (const id of ids) if (!returned.has(id)) body.missing.push({ id, reason: "题目未返回，请重试" });
+    return body;
+  }
+
+  async function refreshBasket({ force = false } = {}) {
+    const ids = [...state.basket];
+    const signature = JSON.stringify(ids);
+    if (!force && signature === state.basketSignature) return;
+    state.basketSignature = signature;
+    const token = ++state.basketToken;
+    state.basketLoading = Boolean(ids.length);
+    renderBasket();
+    try {
+      const body = await batchItems(ids);
+      if (token !== state.basketToken) return;
+      body.items.forEach((item) => state.catalog.set(item.id, item));
+      state.basketMissing = body.missing;
+      state.basketError = "";
+    } catch (error) {
+      if (token !== state.basketToken) return;
+      state.basketError = error.message || "选题读取失败，请重试";
+      state.basketSignature = null;
+    } finally {
+      if (token === state.basketToken) {
+        state.basketLoading = false;
+        renderBasket();
+        if (state.view === "selected") render();
+      }
+    }
+  }
+
+  function renderBasket() {
+    const panel = $("basketPanel");
+    panel.hidden = !state.basketVisible;
+    document.querySelector(".library-workspace").classList.toggle("basket-collapsed", !state.basketVisible);
+    const toggle = $("basketToggle");
+    toggle.textContent = `${state.basketVisible ? "收起" : "打开"}试题篮（${state.basket.length}）`;
+    toggle.setAttribute("aria-expanded", String(state.basketVisible));
+    $("basketPanelCount").textContent = String(state.basket.length);
+    $("selectedViewCount").textContent = String(state.basket.length);
+    $("clearBasketPanel").disabled = !state.basket.length;
+    ui.basketCount.textContent = String(state.basket.length);
+    ui.basketButton.hidden = !state.basket.length;
+    ui.basketButton.disabled = state.basketLoading;
+    $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
+    $("allQuestionsButton").classList.toggle("active", state.view === "all");
+    $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
+    $("basketViewButton").classList.toggle("active", state.view === "selected");
+    const counts = {}, sources = new Set();
+    const list = $("basketList");
+    list.replaceChildren();
+    const missing = new Map(state.basketMissing.map((item) => [item.id, item.reason]));
+    state.basket.forEach((id, index) => {
+      const item = state.catalog.get(id);
+      if (item && !missing.has(id)) {
+        counts[item.question_type] = (counts[item.question_type] || 0) + 1;
+        sources.add(item.document_id || item.source_filename);
+      }
+      const row = node("li", "basket-row");
+      const open = node("button", "basket-item-open");
+      open.type = "button";
+      open.disabled = !item || missing.has(id);
+      const name = item ? `${item.source_filename} · 第 ${item.number} 题` : `选题 ${index + 1}`;
+      open.append(node("strong", "", item ? `第 ${item.number} 题 · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : `选题 ${index + 1}`), node("span", "", name));
+      if (missing.has(id)) open.append(node("span", "basket-item-error", missing.get(id)));
+      open.addEventListener("click", () => openQuestion(item));
+      const remove = node("button", "button button-quiet button-small basket-remove", "移出");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移出${name}`);
+      remove.addEventListener("click", () => { state.basket = state.basket.filter((value) => value !== id); saveBasket(); render(); });
+      row.append(open, remove);
+      list.append(row);
+    });
+    $("basketSummary").textContent = state.basketLoading ? "正在核对选题的入库版本…"
+      : !state.basket.length ? "把需要的题加入这里，跨试卷、跨筛选保留。"
+      : `${Object.entries(counts).map(([type, count]) => `${QB.TYPE_NAMES[type] || "其他"} ${count} 题`).join(" · ") || "选题尚未载入"}${sources.size ? ` · 来自 ${sources.size} 份资料` : ""}`;
+    const error = $("basketLoadError");
+    error.replaceChildren();
+    error.hidden = !state.basketError && !state.basketMissing.length;
+    if (!error.hidden) {
+      error.append(node("span", "", state.basketError || `${state.basketMissing.length} 道选题已撤回、更新或不存在，请处理后组卷。`));
+      const retry = node("button", "button button-small", "重试选题");
+      retry.type = "button";
+      retry.addEventListener("click", () => refreshBasket({ force: true }));
+      error.append(retry);
+    }
+  }
+
+  function openQuestion(item) {
+    const dialog = $("questionDialog");
+    $("questionTitle").textContent = `${item.source_filename} · 第 ${item.number} 题`;
+    $("questionVersion").textContent = `${QB.TYPE_NAMES[item.question_type] || item.question_type} · 第 ${item.version} 版 · ${formatDate(item.published_at)} 入库${item.review?.source === "ai" ? " · AI 审核，待人工核对" : ""}`;
+    const paper = $("questionContent");
+    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
+    const reveal = answerReveal(item);
+    if (reveal) paper.append(reveal);
+    else paper.append(node("p", "helper", "原卷未提供答案与解析。"));
+    const extras = extrasNode(item);
+    if (extras) paper.append(extras);
+    const actions = $("questionActions");
+    actions.replaceChildren();
+    const source = iconButton("button", "button button-small", "查看出处", "source");
+    source.addEventListener("click", () => openSource(item));
+    const history = iconButton("button", "button button-small", "版本历史", "history");
+    history.addEventListener("click", () => openHistory(item));
+    const add = iconButton("button", "button button-primary button-small", state.basket.includes(item.id) ? "移出试题篮" : "加入试题篮", state.basket.includes(item.id) ? "check" : "plus");
+    add.addEventListener("click", () => {
+      if (!state.basket.includes(item.id) && state.basket.length >= 500) { toast("试题篮最多放 500 题，请先保存一份组卷", "error"); return; }
+      state.basket = state.basket.includes(item.id) ? state.basket.filter((id) => id !== item.id) : workspace.uniqueIds([...state.basket, item.id]);
+      saveBasket();
+      render();
+      openQuestion(item);
+    });
+    actions.append(source, history, ...jobButtons(item), node("span", "actions-spacer"), add);
+    if (!dialog.open) { state.questionReturnFocus = document.activeElement; dialog.showModal(); }
+    state.questionReturnId = item.id;
+    paper.scrollTop = 0;
+    QB.fitOptions(paper);
+    requestAnimationFrame(() => readingOverflowHints(paper));
   }
 
   async function withdrawItem(item) {
@@ -500,6 +766,8 @@
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "撤回失败");
       state.basket = state.basket.filter((id) => id !== item.id);
+      state.selected.delete(item.id);
+      state.catalog.delete(item.id);
       saveBasket();
       toast(`已撤回“${item.source_filename} 第 ${item.number} 题”`, "success");
       load();
@@ -933,27 +1201,137 @@
     $("printButton").disabled = true;
     $("printMissing").hidden = true;
     $("printLayoutNotice").hidden = true;
-    const items = [];
-    const missing = [];
-    for (const id of [...state.basket]) {
-      const known = state.items.find((item) => item.id === id);
-      if (known) { printNames.set(id, `${known.source_filename || "试卷"} · 第 ${known.number} 题`); items.push(known); continue; }
-      try {
-        const response = await fetch(`/api/library/${encodeURIComponent(id)}`, { cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 404 ? "题目已撤回或暂时找不到" : "读取失败，请重试");
-        const body = await response.json();
-        if (body.publication?.status !== "published") throw new Error("题目已撤回，不能用于组卷");
-        printNames.set(id, `${body.publication.source_filename || "试卷"} · 第 ${body.publication.number} 题`);
-        items.push(body.publication);
-      } catch (error) {
-        missing.push({ id, label: printNames.get(id) || `未载入的第 ${state.basket.indexOf(id) + 1} 道选题`, reason: error.message || "读取失败，请重试" });
-      }
-      if (token !== printState.token || !ui.sheet.open) return;
+    let items = [], missing = [];
+    const ids = [...state.basket];
+    ids.forEach((id) => {
+      const known = state.catalog.get(id);
+      if (known) printNames.set(id, `${known.source_filename || "试卷"} · 第 ${known.number} 题`);
+    });
+    try {
+      // Revalidate every selected snapshot, including cards already displayed.
+      // An old cached item must not print after it was withdrawn or superseded.
+      const body = await batchItems(ids);
+      const byId = new Map(body.items.map((item) => [item.id, item]));
+      items = ids.map((id) => byId.get(id)).filter(Boolean);
+      items.forEach((item) => { state.catalog.set(item.id, item); printNames.set(item.id, `${item.source_filename || "试卷"} · 第 ${item.number} 题`); });
+      missing = body.missing.map((item) => ({ ...item, label: printNames.get(item.id) || `未载入的第 ${ids.indexOf(item.id) + 1} 道选题` }));
+    } catch (error) {
+      missing = ids.map((id, index) => ({ id, label: printNames.get(id) || `未载入的第 ${index + 1} 道选题`, reason: error.message || "读取失败，请重试" }));
     }
     if (token !== printState.token || !ui.sheet.open) return;
     printState.loading = false;
     printState.missing = missing;
     renderPrint(items);
+  }
+
+  function markDraftDirty() {
+    state.draftDirty = true;
+    $("draftSaveStatus").textContent = state.draft ? `“${state.draft.title}”有未保存的改动` : "当前组卷尚未保存为草稿";
+  }
+
+  function draftPayload() {
+    return { title: ui.printTitle.value.trim() || "练习", ids: [...state.basket],
+      print_options: { answers: printAnswersPreference, origin: ui.printOrigin.checked, ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked) } };
+  }
+
+  async function saveDraft({ copy = false } = {}) {
+    if (state.draftSaving) return;
+    if (!state.basket.length) { toast("先选题，再保存组卷草稿", "error"); return; }
+    const previousDraft = state.draft;
+    const existing = !copy && state.draft;
+    const payload = draftPayload();
+    const submitted = JSON.stringify(payload);
+    state.draftSaving = true;
+    $("saveDraft").disabled = $("saveDraftAs").disabled = true;
+    try {
+      if (existing) payload.revision = existing.revision;
+      const response = await fetch(existing ? `/api/library/drafts/${encodeURIComponent(existing.id)}` : "/api/library/drafts", {
+        method: existing ? "PUT" : "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify(payload) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "草稿未保存");
+      if (state.draft === previousDraft) {
+        state.draft = body.draft;
+        state.draftDirty = JSON.stringify(draftPayload()) !== submitted;
+        $("draftSaveStatus").textContent = `已保存“${body.draft.title}” · ${body.draft.ids.length} 题${state.draftDirty ? " · 后续改动尚未保存" : body.draft.validity?.valid === false ? " · 有选题需要处理" : ""}`;
+      }
+      toast("组卷草稿已保存", "success");
+    } catch (error) { toast(error.message || "草稿未保存", "error"); $("draftSaveStatus").textContent = error.message || "草稿未保存"; }
+    finally { state.draftSaving = false; $("saveDraft").disabled = $("saveDraftAs").disabled = false; }
+  }
+
+  async function openDrafts() {
+    const dialog = $("draftsDialog");
+    if (!dialog.open) dialog.showModal();
+    const box = $("draftsList"), status = $("draftsStatus");
+    box.replaceChildren();
+    status.textContent = "正在读取草稿…";
+    try {
+      const response = await fetch("/api/library/drafts", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "草稿读取失败");
+      status.textContent = body.drafts.length ? `共 ${body.drafts.length} 份草稿 · 保存的题目版本与顺序保持不变` : "还没有组卷草稿。在组卷预览里点“保存草稿”，下次继续备课。";
+      body.drafts.forEach((draft) => {
+        const row = node("article", "draft-row");
+        const info = node("div", "draft-info");
+        info.append(node("strong", "", draft.title), node("p", "helper", `${draft.ids.length} 题 · ${formatDate(draft.updated_at)} 保存${draft.validity?.valid === false ? ` · ${draft.validity.missing.length} 道选题需要处理` : ""}`));
+        const open = node("button", "button button-small", "继续组卷");
+        open.type = "button";
+        open.addEventListener("click", async () => {
+          const openToken = state.draftOpenToken = (state.draftOpenToken || 0) + 1;
+          if (state.draftDirty || (state.basket.length && JSON.stringify(state.basket) !== JSON.stringify(draft.ids))) {
+            const ok = await confirmDialog({ title: "打开这份草稿？", text: "当前试题篮将换成草稿中的选题。已保存的其他草稿不变；当前未保存的选题请先保存。", ok: "打开草稿" });
+            if (!ok) return;
+          }
+          if (openToken !== state.draftOpenToken) return;
+          const currentSnapshot = JSON.stringify(draftPayload());
+          // Re-read the revision so another window's saved changes aren't lost.
+          try {
+            const response = await fetch(`/api/library/drafts/${encodeURIComponent(draft.id)}`, { cache: "no-store" });
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.error || "草稿读取失败");
+            if (openToken !== state.draftOpenToken || !dialog.open) return;
+            if (currentSnapshot !== JSON.stringify(draftPayload())) {
+              toast("当前组卷已发生变化，请重新选择要打开的草稿", "error");
+              return;
+            }
+            const current = body.draft;
+            state.basket = workspace.uniqueIds(current.ids);
+            state.draft = null;
+            saveBasket();
+            state.draft = current;
+            state.draftDirty = false;
+            ui.printTitle.value = current.title;
+            printAnswersPreference = current.print_options.answers;
+            ui.printOrigin.checked = current.print_options.origin;
+            ui.printAi.checked = Boolean(state.features.ai_answer && current.print_options.ai_answers);
+            $("draftSaveStatus").textContent = `正在编辑“${current.title}”`;
+            dialog.close();
+            render();
+            await openPrint();
+          } catch (error) { toast(error.message || "草稿读取失败", "error"); }
+        });
+        const remove = node("button", "button button-quiet button-small", "删除草稿");
+        remove.type = "button";
+        remove.addEventListener("click", async () => {
+          if (!await confirmDialog({ title: `删除“${draft.title}”？`, text: "只删除这份组卷草稿，题库中的题目和原卷都保留。", ok: "删除草稿", danger: true })) return;
+          try {
+            const response = await fetch(`/api/library/drafts/${encodeURIComponent(draft.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: "{}" });
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.error || "草稿删除失败");
+            if (state.draft?.id === draft.id) { state.draft = null; markDraftDirty(); }
+            await openDrafts();
+          } catch (error) { toast(error.message || "草稿删除失败", "error"); }
+        });
+        row.append(info, open, remove);
+        box.append(row);
+      });
+    } catch (error) {
+      status.textContent = error.message || "草稿读取失败";
+      const retry = node("button", "button", "重试读取草稿");
+      retry.type = "button";
+      retry.addEventListener("click", openDrafts);
+      box.append(retry);
+    }
   }
 
   function renderPrintMissing() {
@@ -1121,7 +1499,7 @@
       const from = state.basket.indexOf(item.id);
       const to = state.basket.indexOf(other.id);
       if (from < 0 || to < 0) return;
-      [state.basket[from], state.basket[to]] = [state.basket[to], state.basket[from]];
+      state.basket = workspace.moveWithinGroup(state.basket, item.id, other.id);
       saveBasket();
       const a = items.indexOf(item);
       const b = items.indexOf(other);
@@ -1183,15 +1561,51 @@
     searchTimer = window.setTimeout(() => { state.q = ui.search.value; syncUrl(); load(); }, 250);
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
+  $("sortSelect").addEventListener("change", () => { state.sort = $("sortSelect").value; syncUrl(); load(); });
+  $("basketToggle").addEventListener("click", () => { state.basketVisible = !state.basketVisible; renderBasket(); });
+  $("allQuestionsButton").addEventListener("click", () => { state.view = "all"; render(); });
+  $("basketViewButton").addEventListener("click", async () => { state.view = "selected"; render(); await refreshBasket({ force: true }); });
+  $("selectVisible").addEventListener("change", () => {
+    visibleItems().forEach((item) => { if ($("selectVisible").checked) state.selected.add(item.id); else state.selected.delete(item.id); });
+    render();
+  });
+  $("clearSelection").addEventListener("click", () => { state.selected.clear(); render(); });
+  $("addSelected").addEventListener("click", () => {
+    if (new Set([...state.basket, ...state.selected]).size > 500) { toast("试题篮最多放 500 题，请先保存一份组卷", "error"); return; }
+    state.basket = workspace.uniqueIds([...state.basket, ...state.selected]);
+    state.selected.clear();
+    saveBasket();
+    render();
+    toast(`试题篮共 ${state.basket.length} 题`, "success");
+  });
+  $("clearBasketPanel").addEventListener("click", async () => {
+    if (!await confirmDialog({ title: "清空试题篮？", text: "只清空当前选题。题库和已保存的组卷草稿都保留。", ok: "清空试题篮" })) return;
+    state.basket = []; saveBasket(); render();
+  });
+  $("closeQuestion").addEventListener("click", () => $("questionDialog").close());
+  $("questionDialog").addEventListener("close", () => {
+    const target = state.questionReturnFocus;
+    if (target?.isConnected) target.focus({ preventScroll: true });
+    else {
+      const card = document.getElementById(`q-${state.questionReturnId}`);
+      const button = Array.from(card?.querySelectorAll("button") || []).find((node) => node.textContent === "完整题目");
+      (button || ui.search).focus({ preventScroll: true });
+    }
+  });
+  $("openDrafts").addEventListener("click", openDrafts);
+  $("closeDrafts").addEventListener("click", () => $("draftsDialog").close());
+  $("saveDraft").addEventListener("click", () => saveDraft());
+  $("saveDraftAs").addEventListener("click", () => saveDraft({ copy: true }));
+  document.addEventListener("library-ai-settings-saved", () => load({ quiet: true }));
   ui.more.addEventListener("click", () => load({ append: true }));
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => { preparePrintLayout(); if (!$("printButton").disabled) window.print(); });
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });
-  ui.printTitle.addEventListener("input", () => { const title = ui.paper.querySelector(".print-title"); if (title) title.textContent = ui.printTitle.value.trim() || "练习"; });
-  ui.printAnswers.addEventListener("change", () => { printAnswersPreference = ui.printAnswers.checked; openPrint(); });
-  ui.printOrigin.addEventListener("change", openPrint);
-  ui.printAi.addEventListener("change", openPrint);
+  ui.printTitle.addEventListener("input", () => { const title = ui.paper.querySelector(".print-title"); if (title) title.textContent = ui.printTitle.value.trim() || "练习"; markDraftDirty(); });
+  ui.printAnswers.addEventListener("change", () => { printAnswersPreference = ui.printAnswers.checked; markDraftDirty(); openPrint(); });
+  ui.printOrigin.addEventListener("change", () => { markDraftDirty(); openPrint(); });
+  ui.printAi.addEventListener("change", () => { markDraftDirty(); openPrint(); });
   ui.sheet.addEventListener("cancel", (event) => { event.preventDefault(); closePrint(); });
   ui.sheet.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
@@ -1254,11 +1668,13 @@
   const syncToolbar = () => {
     const top = document.querySelector(".topbar")?.offsetHeight || 56;
     toolbar.classList.toggle("stuck", window.scrollY > 0 && toolbar.getBoundingClientRect().top <= top + 1);
+    document.documentElement.style.setProperty("--library-toolbar-h", `${toolbar.offsetHeight}px`);
   };
+  new ResizeObserver(syncToolbar).observe(toolbar);
   window.addEventListener("scroll", syncToolbar, { passive: true });
   syncToolbar();
   document.addEventListener("keydown", (event) => {
-    if (event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !ui.sourceDialog.open && !ui.historyDialog.open && !$("confirmDialog").open
+    if (event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !document.querySelector("dialog[open]") && !ui.search.disabled
       && !document.activeElement?.closest?.("input, textarea, select")) {
       event.preventDefault();
       ui.search.focus();

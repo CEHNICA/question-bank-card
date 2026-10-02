@@ -381,7 +381,7 @@ class ShortcutTests(unittest.TestCase):
         self.assertIn("O''Neil", script)
         self.assertIn("题有据.lnk", script)
 
-    def test_rebrand_removes_only_exact_legacy_shortcut(self):
+    def test_rebrand_preserves_legacy_file_without_verified_ownership(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             new_link = folder / "题有据.lnk"
@@ -390,7 +390,7 @@ class ShortcutTests(unittest.TestCase):
             old_link.write_bytes(b"old")
             unrelated.write_bytes(b"keep")
             create_shortcut.remove_legacy_shortcut(new_link)
-            self.assertFalse(old_link.exists())
+            self.assertEqual(old_link.read_bytes(), b"old")
             self.assertTrue(unrelated.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Shell Link only")

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views
+from core import views, library_browse, library_drafts
 
 urlpatterns = [
     path("", views.index_page),
@@ -8,6 +8,8 @@ urlpatterns = [
     path("app.js", views.app_script),
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
+    path("library-workspace.js", views.library_workspace_script),
+    path("static/library-ai-settings.js", views.library_ai_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
     path("favicon.png", views.favicon),
@@ -17,6 +19,8 @@ urlpatterns = [
     path("api/settings/credentials", views.credential_settings_view),
     path("api/settings/models", views.model_settings),
     path("api/settings/features", views.feature_settings),
+    path("api/settings/library-ai", views.library_ai_settings_view),
+    path("api/settings/library-ai/test", views.library_ai_test_view),
     path("api/papers", views.papers),
     path("api/demo", views.demo_paper),
     path("api/papers/<uuid:paper_id>", views.paper_detail),
@@ -49,6 +53,9 @@ urlpatterns = [
     path("api/questions/<int:question_id>/<str:action>", views.question_action),
     path("api/m3/papers", views.m3_papers),
     path("api/library", views.library_list),
+    path("api/library/batch", library_browse.library_batch),
+    path("api/library/drafts", library_drafts.drafts_view),
+    path("api/library/drafts/<uuid:draft_id>", library_drafts.draft_detail),
     path("api/library/jobs", views.library_jobs_view),
     path("api/library/<uuid:publication_id>", views.library_detail),
     path("api/library/<uuid:publication_id>/figures/<str:name>", views.library_figure),

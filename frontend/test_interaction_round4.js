@@ -61,7 +61,8 @@ assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"
 assert.match(css, /\.library-withdraw \{ color: var\(--muted\) !important; \}/);
 assert.match(libraryJs, /function printTools\(items, group, position, number\)/);
 assert.match(libraryCss, /\.print-question-tools/);
-assert.match(libraryCss, /@media \(min-width: 1600px\) \{ \.library-main \{ max-width: 1200px; \} \}/);
+assert.match(libraryCss, /\.library-main \{ max-width: 1480px;/);
+assert.match(libraryCss, /@media \(max-width: 979px\)/);
 
 // Finishing a paper offers the next one that still has cards to review.
 const list = [

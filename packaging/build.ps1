@@ -147,7 +147,7 @@ winget install --id JRSoftware.InnoSetup.7 --exact --source winget --accept-sour
 }
 
 
-if ($env:OS -ne 'Windows_NT') {
+if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
     throw 'The installer must be built on Windows.'
 }
 
