@@ -141,11 +141,15 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-card-more > summary { padding: 6px 9px; cursor: pointer; color: var(--ink-2); }
 .library-card-menu { position: absolute; z-index: 16; right: 0; top: calc(100% + 4px); min-width: 165px; max-width: calc(100vw - 40px); display: grid; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-pop); }
 .library-card-menu .button { justify-content: flex-start; }
-.basket-panel { position: sticky; top: calc(var(--topbar-h) + var(--library-toolbar-h, 160px) + 18px); padding: 15px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0; }
+.basket-panel { position: sticky; top: var(--basket-top, calc(var(--topbar-h) + var(--library-toolbar-h, 160px) + 18px));
+  display: flex; flex-direction: column; max-height: calc(100dvh - var(--basket-top, calc(var(--topbar-h) + var(--library-toolbar-h, 160px) + 18px)) - 12px);
+  padding: 15px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0; }
+.basket-panel-head, .basket-panel > .helper, .basket-preview { flex: none; }
+.basket-panel > .helper { overflow-wrap: anywhere; }
 .basket-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .basket-panel h2 { margin: 0; font: 600 16px/1.5 var(--ui-font); }
 .basket-panel h2 span { color: var(--accent); font-variant-numeric: tabular-nums; }
-.basket-list { list-style: none; margin: 13px 0 0; padding: 0; max-height: min(52vh, 460px); overflow: auto; }
+.basket-list { list-style: none; margin: 13px 0 0; padding: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .basket-row { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding: 10px 0; }
 .basket-item-open { flex: 1; min-width: 0; text-align: left; border: 0; padding: 0; background: none; color: var(--ink); font-family: var(--ui-font); }
 .basket-item-open strong { display: block; font-size: 12.5px; font-weight: 600; }
@@ -153,7 +157,9 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .basket-item-open .basket-item-error { color: var(--amber); }
 .basket-remove { flex: none; }
 .basket-preview { width: 100%; margin-top: 13px; }
-.basket-panel .library-load-error { padding: 9px; font-size: 12px; }
+.basket-preview-shortcut { display: inline-flex; max-width: 100%; }
+.basket-preview-shortcut .basket-preview { width: auto; min-height: 34px; margin-top: 0; padding-block: 6px; font-size: 12.5px; }
+.basket-panel .library-load-error { flex: 0 1 auto; min-height: 0; overflow: auto; padding: 9px; font-size: 12px; }
 .question-dialog { padding: 0; width: min(1000px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); background: var(--surface); }
 .question-dialog[open] { display: flex; flex-direction: column; }
 .question-content { padding: 22px 28px; overflow: auto; min-height: 0; overscroll-behavior: contain; }
@@ -177,8 +183,7 @@ a.library-type.undecided:hover { text-decoration: underline; }
   .library-toolbar { position: static; }
   .library-card { scroll-margin-top: calc(var(--topbar-h) + 12px); }
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
-  .basket-panel { position: static; grid-row: 1; }
-  .basket-list { max-height: 250px; }
+  .basket-panel { position: static; grid-row: 1; max-height: calc(100dvh - var(--topbar-h) - 24px); scroll-margin-top: calc(var(--topbar-h) + 12px); }
   .library-select select { max-width: min(300px, 65vw); }
 }
 @media (max-width: 560px) {

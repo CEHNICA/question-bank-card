@@ -713,6 +713,11 @@
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = !state.basket.length;
     ui.basketButton.disabled = state.basketLoading;
+    // Keep one preview control: in the rail when open, beside its toggle when closed.
+    const shortcut = $("basketPreviewShortcut");
+    shortcut.hidden = state.basketVisible || !state.basket.length;
+    const previewParent = state.basketVisible ? panel : shortcut;
+    if (ui.basketButton.parentElement !== previewParent) previewParent.append(ui.basketButton);
     $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
     $("allQuestionsButton").classList.toggle("active", state.view === "all");
     $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
@@ -1608,7 +1613,16 @@
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
   $("sortSelect").addEventListener("change", () => { state.sort = $("sortSelect").value; syncUrl(); load(); });
-  $("basketToggle").addEventListener("click", () => { state.basketVisible = !state.basketVisible; renderBasket(); });
+  $("basketToggle").addEventListener("click", () => {
+    state.basketVisible = !state.basketVisible;
+    renderBasket();
+    if (state.basketVisible && window.matchMedia("(max-width: 979px)").matches) {
+      const headerHeight = document.querySelector(".topbar")?.offsetHeight || 56;
+      const panelTop = $("basketPanel").getBoundingClientRect().top + window.scrollY;
+      // The review page's global scroll-padding includes another toolbar; do not double it here.
+      window.scrollTo({ top: panelTop - headerHeight - 12, behavior: "instant" });
+    }
+  });
   $("allQuestionsButton").addEventListener("click", () => { state.view = "all"; render(); });
   $("basketViewButton").addEventListener("click", async () => { state.view = "selected"; render(); await refreshBasket({ force: true }); });
   $("selectVisible").addEventListener("change", () => {
@@ -1717,9 +1731,12 @@
     const top = document.querySelector(".topbar")?.offsetHeight || 56;
     toolbar.classList.toggle("stuck", window.scrollY > 0 && toolbar.getBoundingClientRect().top <= top + 1);
     document.documentElement.style.setProperty("--library-toolbar-h", `${toolbar.offsetHeight}px`);
+    const toolbarBottom = toolbar.getBoundingClientRect().bottom;
+    document.documentElement.style.setProperty("--basket-top", `${Math.max(top, toolbarBottom) + 18}px`);
   };
   new ResizeObserver(syncToolbar).observe(toolbar);
   window.addEventListener("scroll", syncToolbar, { passive: true });
+  window.addEventListener("resize", syncToolbar);
   syncToolbar();
   document.addEventListener("keydown", (event) => {
     if (event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !document.querySelector("dialog[open]") && !ui.search.disabled
