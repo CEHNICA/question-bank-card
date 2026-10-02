@@ -163,6 +163,10 @@ def check(base):
             page.screenshot(path=str(OUT / f"workspace-{width}.png"), full_page=True)
         assert not errors, errors
         assert not outgoing, outgoing
+        page.set_viewport_size({"width": 650, "height": 574})
+        page.locator(".library-card").first.scroll_into_view_if_needed()
+        assert page.locator(".library-toolbar").evaluate("e=>getComputedStyle(e).position") == "static"
+        assert page.locator(".library-card").first.bounding_box()["y"] < 300, "Short window keeps controls over the question"
         browser.close()
     print("Offline workspace browser passed: filters/selected basket/full detail/source wheel+pan/history/draft save+reorder+reopen/AI default off/5 viewport widths; no external requests")
 
