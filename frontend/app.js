@@ -256,7 +256,12 @@ const QBProgress = (() => {
     return ["queued", "parsing", "segmenting", "reading"].includes(paper?.status);
   }
 
-  return { STAGES, formatDuration, formatAge, processingPresentation, canStopPaper };
+  function canSwitchMinerUToManual(paper) {
+    return paper?.parse_mode === "mineru" && !paper.archived && !paper.demo
+      && ["queued", "parsing", "segmenting"].includes(paper.status);
+  }
+
+  return { STAGES, formatDuration, formatAge, processingPresentation, canStopPaper, canSwitchMinerUToManual };
 })();
 
 const QBSelection = (() => {
@@ -539,7 +544,7 @@ const QBTeach = (() => {
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
-      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可用“手工切题”从原卷框选保存。连续切题时只保存范围，点“保存并关闭”或“完成切题”后自动 AI 识读；文字显示在原图旁，再核对文字、配图并审核入库。没有读题服务时原图仍保留。遇到问题打开“设置 → 帮助”。" }
+      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可用“手工切题”从原卷框选保存。MinerU 解析一直没结果时，可点“试卷操作 → 停止 MinerU，改为手工切题”，保留原卷和已切出的题，直接开始手工框题。连续切题时只保存范围，点“保存并关闭”或“完成切题”后自动 AI 识读；文字显示在原图旁，再核对文字、配图并审核入库。没有读题服务时原图仍保留。遇到问题打开“设置 → 帮助”。" }
   ].map((lesson, index) => ({ ...lesson, section: index <= 6 ? "basic" : "review" }));
 
   const OLD_KEYS = ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"];
@@ -4455,6 +4460,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 1.10.8: a paper still queued or waiting on MinerU can be stopped, then deleted.
     const stoppable = QBProgress.canStopPaper(paper);
     $("settingsStop").hidden = !stoppable;
+    const switchingManual = manualSwitches.has(paper.id);
+    $("settingsManualFallback").hidden = !switchingManual && !QBProgress.canSwitchMinerUToManual(paper);
+    $("settingsManualFallback").disabled = switchingManual;
+    $("settingsManualFallback").textContent = switchingManual ? "正在停止并准备手工切题…" : "停止 MinerU，改为手工切题";
+    $("settingsStop").disabled = switchingManual;
+    $("settingsReparse").disabled = switchingManual;
+    $("manualProcessing").disabled = $("pageManualCut").disabled = switchingManual;
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -4619,6 +4631,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
   $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
   $("settingsStop").addEventListener("click", () => closeSettingsThen(stopPaper));
+  $("settingsManualFallback").addEventListener("click", () => {
+    const paperId = state.paperId;
+    closeSettingsThen(() => {
+      if (state.paperId === paperId) void switchToManual(null, { stopMinerU: true });
+    });
+  });
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
@@ -6807,22 +6825,54 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
 
   $("manualProcessing").addEventListener("click", () => {
+    if (manualSwitches.has(state.paperId)) return;
     $("toolsMenu").open = false;
     if (state.paper?.status === "ready") openPageDialog("new"); else switchToManual();
   });
 
-  async function switchToManual(page = null) {
+  const manualSwitches = new Set();
+
+  async function switchToManual(page = null, { stopMinerU = false } = {}) {
     const id = state.paperId;
-    if (!id) return;
+    if (!id || manualSwitches.has(id) || (stopMinerU && !QBProgress.canSwitchMinerUToManual(state.paper))) return false;
+    manualSwitches.add(id);
+    // Switching to manual is only the cutting step. A pending local-upload
+    // continuation must not queue OCR while the original pages are prepared.
+    newUploadReadContinuations.delete(id);
+    renderSettingsTask();
     try {
-      const data = await api(`/api/papers/${id}/processing`, { method: "POST", body: { mode: "manual", ...(Number.isInteger(page) ? { pages: [page] } : {}) } });
-      if (state.paperId !== id) return;
+      // The API switches the whole paper. `page` only positions the canvas;
+      // sending it as a page-restriction would imply unsupported cloud scope.
+      const data = await QBRegionWait.boundedRequest((signal) => api(`/api/papers/${id}/processing`, {
+        method: "POST", signal, body: { mode: "manual" }
+      }), { timeoutMs: 30000 });
+      if (state.paperId !== id) return false;
+      if (data.paper?.id !== id || data.paper.status !== "ready" || data.paper.parse_mode !== "manual"
+        || !data.paper.pages?.length || (stopMinerU && data.manual_ready !== true)) {
+        throw new Error("手工切题的原页尚未准备好，原卷和已有题卡保留，请稍后查看任务状态。");
+      }
       updatePaperFromResponse(data.paper);
-      await refreshPaper();
+      const refreshed = await refreshPaper();
+      if (state.paperId !== id) return false;
+      if (!refreshed || state.paper?.status !== "ready" || state.paper.parse_mode !== "manual" || !state.paper.pages?.length) {
+        throw new Error("已请求转为手工切题，但界面尚未确认最新原页和题卡，请稍后重试。");
+      }
       if ($("pageDialog").open) $("pageDialog").close();
-      toast("已转为手工切题，已有题目和修改已保留；不会自动识读", "success");
+      toast(data.message || "已转为手工切题，原卷、已有题目和修改已保留；先框题，尚未开始 AI 识读。", "success");
       openPageDialog("new", null, { page });
-    } catch (error) { toast(error.message, "error"); }
+      return true;
+    } catch (error) {
+      if (state.paperId !== id) return false;
+      const message = error.name === "TimeoutError"
+        ? "切换结果尚未确认，原卷和已有题卡保留；请稍后查看任务状态或重试。"
+        : `未能进入手工切题：${error.message}`;
+      toast(message, "error");
+      void refreshPaper();
+      return false;
+    } finally {
+      manualSwitches.delete(id);
+      renderSettingsTask();
+    }
   }
 
   const resegmentPreview = { paperId: null, report: null, loading: false, applying: false };

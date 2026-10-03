@@ -46,6 +46,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/C
 
 完整核对流程见 [question-workflow.md](skills/tiyouju/references/question-workflow.md)，命令与 MCP 参数见 [commands.md](skills/tiyouju/references/commands.md)。
 
+1.11.11 起，正在等待 MinerU 的试卷可在“试卷操作 → 停止 MinerU，改为手工切题”中直接接回本机裁剪。已有成果保留，旧任务返回不能覆盖手工修改；这里只停止本机等待和接收结果，远端任务是否取消由服务商决定。切换本身不提交识读，完成切题后才接回识读与审核。
+
 MinerU 当前限制与错误分类见 [云 API 调查](docs/MINERU_API.md)：按 200 页单文件限制处理，1000 页/日是优先级额度，Token 不固定宣称 14 天有效。公开文档可访问、已有凭据或离线测试通过，都不证明当前用户真实云识读已经恢复。
 
 1.10.15 起，保存 MinerU 凭据只做格式校验和本机加密存储，不请求未公开的额度接口；报告“已配置，未核验”。只有实际任务的错误才能支持鉴权失败、过期等判断，不以配置成功宣称服务可用。

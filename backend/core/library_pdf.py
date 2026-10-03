@@ -247,6 +247,8 @@ window.__qbPdfStatus = {ready:false};
 
 
 def _html_document(captured, title, options):
+    mode = word._effective_document(captured, options["document"])
+    options = {**options, "document": mode, "answers": mode != "questions"}
     css, scripts = _assets(Path(settings.FRONTEND_ROOT))
     nonce = secrets.token_urlsafe(24)
     items = []

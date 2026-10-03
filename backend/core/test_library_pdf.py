@@ -3,6 +3,7 @@ from copy import deepcopy
 import io
 import json
 from pathlib import Path
+import re
 import socket
 import struct
 import threading
@@ -43,6 +44,51 @@ class PdfExportTests(TestCase):
         self.assertIn("window.__qbPdfStatus", renderer.call_args.args[0])
         pub.refresh_from_db()
         self.assertEqual(pub.content, before)
+
+    def rendered_input(self, renderer):
+        document = renderer.call_args.args[0]
+        return json.loads(re.search(r'<script[^>]+id="examData"[^>]*>(.*?)</script>', document, re.S)[1])
+
+    def test_combined_without_selected_answers_renders_only_questions(self):
+        blank = self.publication(stem="题干必须保留", answer=" \n ", analysis="\t ")
+        optional_ai = self.publication(extras={"ai_answer": {"answer": "未选用的 AI 参考"}})
+        payload = self.payload([blank, optional_ai], output_format="pdf", print_options={"document": "combined", "answers": True})
+        before = deepcopy(payload)
+        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.content)
+        document = self.rendered_input(renderer)
+        self.assertEqual(document["options"]["document"], "questions")
+        self.assertFalse(document["options"]["answers"])
+        self.assertEqual(len(document["items"]), 2)
+        self.assertEqual(document["items"][0]["content"]["stem"], "题干必须保留")
+        self.assertTrue(all(not item["selected"] and not item["ai"] for item in document["items"]))
+        self.assertEqual(payload, before)
+
+    def test_combined_with_missing_answer_and_analysis_only_keeps_answer_appendix(self):
+        missing = self.publication(stem="无答案题")
+        explained = self.publication(stem="仅有解析的题", analysis="原卷解析必须保留")
+        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 2)) as renderer:
+            response = self.post(self.payload([missing, explained], output_format="pdf", print_options={"document": "combined"}))
+        self.assertEqual(response.status_code, 200)
+        document = self.rendered_input(renderer)
+        self.assertEqual(document["options"]["document"], "combined")
+        self.assertTrue(document["options"]["answers"])
+        self.assertEqual([item["content"]["stem"] for item in document["items"]], ["无答案题", "仅有解析的题"])
+        self.assertEqual(document["items"][1]["selected"]["analysis"], "原卷解析必须保留")
+
+    def test_selected_ai_reference_keeps_combined_appendix_and_explicit_answer_only_stays_answer_only(self):
+        fixtures.features.save({"ai_answer": True})
+        pub = self.publication(stem="题干", extras={"ai_answer": {"answer": "已选 AI 参考"}})
+        for mode in ("combined", "answers"):
+            with self.subTest(mode=mode):
+                with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
+                    response = self.post(self.payload([pub], output_format="pdf", print_options={"document": mode, "ai_answers": True}))
+                self.assertEqual(response.status_code, 200)
+                document = self.rendered_input(renderer)
+                self.assertEqual(document["options"]["document"], mode)
+                self.assertEqual(document["items"][0]["selected"]["answer"], "已选 AI 参考")
+                self.assertTrue(document["items"][0]["ai"])
 
     def test_client_cannot_supply_html_css_urls_or_flags(self):
         pub = self.publication()

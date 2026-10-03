@@ -1830,7 +1830,9 @@ def paper_retry(request, paper_id):
         local_mode = (paper.processing_plan or {}).get("mode")
         if local_mode in {"manual", "native"}:
             try:
-                if paper.questions.exists() or paper.blocks.exists():
+                if local_mode == "manual":
+                    paper, _ = intake.switch_to_manual(paper)
+                elif paper.questions.exists() or paper.blocks.exists():
                     paper = intake.select_manual(paper)
                 else:
                     intake.prepare(paper, local_mode)
@@ -2749,15 +2751,17 @@ def paper_processing(request, paper_id):
         # still uploads the whole original document. Do not advertise a page
         # isolation contract until providers honor it before uploading bytes.
         return _error("本版仅支持整份转为手工框题；已有成功题目和人工修改会保留。")
+    revision = payload.get("revision")
+    if revision is not None and (type(revision) is not int or revision < 0):
+        return _error("原卷版本格式不正确")
     paper = get_object_or_404(Paper, pk=paper_id)
     try:
-        if not paper.pages:
-            intake.prepare(paper, "manual")
-        else:
-            paper = intake.select_manual(paper)
-    except (OSError, ValueError, RuntimeError):
-        return _error("原文件暂时无法准备，请检查原件；已有成果已保留", 409)
-    return JsonResponse({"paper": paper_json(paper)})
+        paper, changed = intake.switch_to_manual(paper, expected_revision=revision)
+    except (intake.ManualSwitchConflict, intake.ManualPreparationError) as exc:
+        paper.refresh_from_db()
+        return JsonResponse({"error": str(exc), "paper": paper_json(paper), "manual_ready": False}, status=409)
+    return JsonResponse({"paper": paper_json(paper), "changed": changed, "manual_ready": True,
+        "message": "已停止 MinerU，原卷和已有成果已保留，可以继续手工切题。" if changed else "已可继续手工切题。"})
 
 
 # ---------------------------------------------------------------- M3 导入

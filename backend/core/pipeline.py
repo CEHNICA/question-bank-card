@@ -1286,12 +1286,12 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
 PAGE_NOTE = "页序："
 
 
-def prepare_photos(paper: Paper, *, revision: int | None = None) -> None:
+def prepare_photos(paper: Paper, *, revision: int | None = None, render_target: Path | None = None) -> None:
     """照片：拉正、扫描件效果，按初步顺序（拍摄时间/文件名）合成 PDF，交给 MinerU。"""
     folder = paper_dir(paper)
     info = dict(paper.photos)
     info["notes"] = photos.prepare_pages(folder, info)
-    target = folder / "pages.pdf"
+    target = render_target if render_target is not None else folder / "pages.pdf"
     photos.build_pdf(folder, info, target)
     info["mineru_order"] = list(info["order"])
     fields = {"photos": info, "render_path": str(target), "pages": imaging.page_sizes(target, "pdf")}

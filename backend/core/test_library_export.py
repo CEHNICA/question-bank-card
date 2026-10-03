@@ -139,6 +139,37 @@ class LibraryExportTests(TestCase):
         self.assertNotIn("参考答案", text)
         self.assertNotIn("姓名", text)
 
+    def test_combined_without_selected_answers_has_no_empty_appendix_or_page_break(self):
+        blank = self.publication(stem="无答案合卷第一题", answer=" \n ", analysis="\t ")
+        optional_ai = self.publication(stem="无答案合卷第二题", extras={"ai_answer": {"answer": "未选用的 AI 参考"}})
+        before = list(PublishedQuestion.objects.values())
+        payload = self.payload([blank, optional_ai], print_options={"document": "combined", "answers": True})
+        result = self.post(payload)
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        xml = document_xml(result.content)
+        text = "".join(xml.itertext())
+        self.assertIn("无答案合卷第一题", text)
+        self.assertIn("无答案合卷第二题", text)
+        self.assertNotIn("参考答案与解析", text)
+        self.assertNotIn("原卷未提供答案", text)
+        self.assertNotIn("未选用的 AI 参考", text)
+        self.assertFalse(xml.findall(".//w:br[@w:type='page']", NS))
+        self.assertEqual(list(PublishedQuestion.objects.values()), before)
+
+    def test_combined_with_some_answers_keeps_all_numbers_and_analysis_only_content(self):
+        missing = self.publication(stem="题目一")
+        answered = self.publication(stem="题目二", answer="原卷结果二")
+        explained = self.publication(stem="题目三", analysis="原卷仅有解析三")
+        response = self.post(self.payload([missing, answered, explained], print_options={"document": "combined"}))
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        xml = document_xml(response.content)
+        text = "".join(xml.itertext())
+        self.assertIn("参考答案与解析", text)
+        self.assertIn("1.（原卷未提供答案）", text)
+        self.assertIn("2. 原卷结果二", text)
+        self.assertIn("原卷仅有解析三", text)
+        self.assertEqual(len(xml.findall(".//w:br[@w:type='page']", NS)), 1)
+
     def test_explicit_answers_document_wins_over_legacy_answers_false(self):
         pub = self.publication(answer="参考结果", stem="题干不应印")
         payload = self.payload([pub], print_options={"answers": False, "document": "answers"})

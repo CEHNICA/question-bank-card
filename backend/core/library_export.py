@@ -370,6 +370,17 @@ def _selected(content, extras, use_ai):
     return (content, False) if str(content.get("analysis") or "").strip() else ({}, False)
 
 
+def _has_selected_answers(captured):
+    return any(str(item["selected"].get("answer") or "").strip()
+               or str(item["selected"].get("analysis") or "").strip() for item in captured)
+
+
+def _effective_document(captured, mode):
+    # Match the preview: an optional answer appendix with no real content
+    # must not produce a page of missing-answer placeholders.
+    return "questions" if mode == "combined" and not _has_selected_answers(captured) else mode
+
+
 def _images(publication, where):
     from PIL import Image
     images, total = [], 0
@@ -481,7 +492,7 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
                          "ai": is_ai, "hash": publication.content_hash, "type": publication.question_type,
                          "fields": converted, "images": images})
     if (answer_fields and options["document"] == "answers") or output_format == "split":
-        if not any(str(item["selected"].get("answer") or "").strip() or str(item["selected"].get("analysis") or "").strip() for item in captured):
+        if not _has_selected_answers(captured):
             raise ExportError("这些题没有原卷答案或所选 AI 参考，请改选题目卷，或先补齐答案再分卷导出")
     return captured, use_ai
 
@@ -885,6 +896,7 @@ def _document(captured, title, options, mode):
     from docx.shared import Mm, Pt
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    mode = _effective_document(captured, mode)
     document = Document()
     section = document.sections[0]
     section.page_width, section.page_height = Mm(210), Mm(297)
