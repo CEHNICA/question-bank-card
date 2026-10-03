@@ -115,24 +115,30 @@
         }
       }
     }
-    function addAnswer(label, value, className = "") {
+    function addAnswer(label, value, className = "", target = controls.answers) {
       if (!solutions.hasContent(value)) return;
       const part = node("section", `question-viewer-answer ${className}`.trim());
       part.append(node("h3", "", label));
       const body = node("div"); solutions.render(body, value, { node, QB, empty: "原卷未提供" });
-      part.append(body); controls.answers.append(part);
+      part.append(body); target.append(part);
     }
     function renderAnswers(item, verified = null) {
       controls.answers.replaceChildren();
       // Only explicit answer/analysis assets belong to the original solution;
       // stem/option diagrams and source-image crops appear once in the question.
       const originalFigures = (item.content?.figures || []).filter(figure => ["answer", "analysis"].includes(figure.slot));
-      addAnswer("原卷答案与解析", { answer: item.content?.answer, analysis: item.content?.analysis, figures: originalFigures });
       const saved = verified ? verified.solution : item.solution;
-      if (saved) addAnswer("题库保存的答案与解析", saved);
+      const original = { answer: item.content?.answer, analysis: item.content?.analysis, figures: originalFigures };
+      const hasSaved = solutions.hasContent(saved);
+      const ai = verified?.ai_answer && !verified.ai_answer_stale ? verified.ai_answer : null;
+      if (hasSaved) addAnswer("题库保存的答案与解析", saved);
+      const history = hasSaved && (solutions.hasContent(original) || solutions.hasContent(ai)) ? node("details", "question-viewer-answer-history") : null;
+      if (history) history.append(node("summary", "", "原卷答案与 AI 初稿历史"));
+      addAnswer("原卷答案与解析", original, "", history || controls.answers);
       // The list's legacy extras do not prove a current fingerprint. Only the
       // read-only solution endpoint validates an existing AI draft.
-      if (verified?.ai_answer && !verified.ai_answer_stale) addAnswer("AI 参考答案与解析 · 未核对", verified.ai_answer, "question-viewer-ai");
+      if (ai) addAnswer("AI 参考答案与解析 · 未核对", ai, "question-viewer-ai", history || controls.answers);
+      if (history) controls.answers.append(history);
       if (!controls.answers.children.length) controls.answers.append(node("p", "helper", "原卷未提供答案与解析。"));
     }
     async function open(item, options = {}) {
@@ -200,13 +206,17 @@
 
   function mountFocus({ node, host }) {
     if (!host) return null;
+    const headerTools = root.document.querySelector?.(".topbar-tools");
     const button = node("button", "button button-quiet button-small library-focus-toggle", "专注浏览");
     button.type = "button"; button.id = "libraryFocusBrowse"; button.setAttribute("aria-pressed", "false");
     button.title = "暂时收起筛选和试题篮，选题与草稿会保留";
     const set = active => {
+      const keepFocus = root.document.activeElement === button;
       root.document.body.classList.toggle("library-focus-mode", Boolean(active));
       button.textContent = active ? "退出专注浏览" : "专注浏览";
       button.setAttribute("aria-pressed", String(Boolean(active)));
+      (active && headerTools ? headerTools : host).append(button);
+      if (keepFocus) button.focus({ preventScroll: true });
     };
     button.addEventListener("click", () => set(!root.document.body.classList.contains("library-focus-mode")));
     host.append(button); return { button, set };

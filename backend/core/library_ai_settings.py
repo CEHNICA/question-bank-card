@@ -35,6 +35,7 @@ DEFAULTS = {
 }
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
+KEY_PROVIDER_ORDER = ("deepseek", "minimax", "doubao", "custom")
 ASSISTANT_MESSAGE = "由当前操作软件的豆包工作版或 AI 助手领取任务、看图解题，再通过本地工具写回。无需 API；软件不会自动连接桌面助手。生成结果仍需核对。"
 UNAVAILABLE = "独立 API 尚未配置并通过显式测试，已暂停 API 生成；请打开“标签与参考答案设置”。可推荐 DeepSeek Pro，也可配置 MiniMax M3.1 或其他模型；不会自动回退到 OCR 或其他服务。"
 _lock = threading.RLock()
@@ -93,6 +94,7 @@ def _load() -> dict:
     if legacy:
         config["key_states"]["doubao"] = {"revision": config["key_revision"], "configured": config["key_configured"] is True}
     state = config["key_states"].get(provider, {})
+    state = state if isinstance(state, dict) else {}
     config["key_revision"] = state.get("revision", config.get("key_revision", ""))
     config["key_configured"] = state.get("configured", config.get("key_configured", False)) is True
     return config
@@ -138,16 +140,46 @@ def _base_url(raw, provider) -> str:
     return value
 
 
+def saved_key_configuration(provider: str, config: dict | None = None) -> dict:
+    """Select only stored key metadata; never switch or save the active API."""
+    if not isinstance(provider, str) or provider not in DEFAULTS:
+        raise SettingsError("请选择有效的服务商。")
+    current = config if config is not None else _load()
+    if provider == current["provider"]:
+        return {**current}
+    state = current.get("key_states", {}).get(provider, {})
+    state = state if isinstance(state, dict) else {}
+    return {**current, "provider": provider, "key_configured": state.get("configured") is True,
+            "key_revision": state.get("revision", "")}
+
+
+def saved_key_status(config: dict | None = None) -> dict:
+    """Configured/count metadata only; missing/corrupt contents aren't opened.
+
+    A count of one means a configured encrypted file exists, not that it can
+    be decrypted or that a remote service has accepted the key.
+    """
+    current = config if config is not None else _load()
+    result = {}
+    for provider in KEY_PROVIDER_ORDER:
+        selected = saved_key_configuration(provider, current)
+        configured = selected["key_configured"] is True and key_path(provider).is_file()
+        result[provider] = {"configured": configured, "count": int(configured)}
+    return result
+
+
 def public_status() -> dict:
     config = _load()
-    key_configured = bool(config["key_configured"] and key_path(config["provider"]).is_file())
+    keys = saved_key_status(config)
+    key_configured = keys[config["provider"]]["configured"]
     configured = bool(key_configured and config.get("model") and config.get("base_url"))
     verified = configured and config.get("verified") is True
     assistant = config["mode"] == "assistant"
     switches = features.load()
     return {key: config[key] for key in ("mode", *API_FIELDS)} | {
         "endpoint_id": config["model"] if config["provider"] == "doubao" else "",
-        "key_configured": key_configured, "configured": configured, "verified": verified,
+        "key_configured": key_configured, "key_count": int(key_configured), "keys": keys,
+        "configured": configured, "verified": verified,
         "api_ready": verified, "ready": assistant or verified,
         "status": "assistant" if assistant else "verified" if verified else "unverified" if configured else "missing",
         "verified_at": str(config.get("verified_at") or "") if verified else "",

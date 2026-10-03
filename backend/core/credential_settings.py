@@ -1,9 +1,9 @@
 """Secure adapter between Django/worker code and the Windows credential store.
 
 The desktop web process receives only the path of the DPAPI-protected file and
-non-secret availability counters.  Plain credentials are loaded only while a
-settings request is being saved or by the worker at a task boundary; they are
-never returned by this module.
+non-secret availability counters. Plain credentials are loaded while saving,
+at a worker task boundary, or after an explicit local request to view one saved
+credential. Ordinary metadata/status reads never expose or decrypt them.
 """
 
 from __future__ import annotations
@@ -60,6 +60,25 @@ def save_actions(changes: Mapping[str, object]) -> dict[str, dict[str, object]]:
     """Persist one validated keep/clear/replace transaction with DPAPI."""
 
     return store.update_credentials(changes)
+
+
+def reveal_saved_key(service: str, index: int) -> str:
+    """Read one explicitly selected saved credential without mutating a pool.
+
+    Callers must enforce the local same-origin viewing guard. Environment keys
+    are deliberately excluded: this operation views the saved desktop store.
+    The same lock as replacement keeps the selected index in one snapshot.
+    """
+    if not isinstance(service, str) or service not in SERVICES:
+        raise CredentialValidationError("请选择有效的读题服务。")
+    if type(index) is not int or not 0 <= index < MAX_ACCOUNT_POOL_SIZE:
+        raise CredentialValidationError("请选择有效的密钥序号。")
+    with store._CREDENTIAL_UPDATE_LOCK:
+        values = store.load_credentials()
+        accounts = store.credential_pool(values, service)
+        if index >= len(accounts):
+            raise CredentialStoreError("这条密钥尚未保存或已经移除，请重新读取设置。")
+        return accounts[index]
 
 
 def _mineru_token_validity(_token: str) -> bool | None:

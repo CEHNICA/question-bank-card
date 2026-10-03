@@ -9,25 +9,31 @@ const vm = require("node:vm");
 
 async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }
 
-function setup() {
+function setup({ coordinator = true, ignoreAbort = false } = {}) {
   const elements = new Map();
   class Element {
     constructor(tag = "div") {
       this.value = ""; this.checked = false; this.disabled = false; this.open = false;
       this.tagName = tag.toUpperCase(); this.children = []; this.modalOpens = 0;
+      this.attributes = {};
       this.listeners = new Map(); this.classList = { toggle() {} };
     }
     set id(value) { this._id = value; elements.set(value, this); }
     get id() { return this._id; }
     set innerHTML(html) {
+      this.html = html;
       for (const match of html.matchAll(/<[^>]+id="([^"]+)"[^>]*>/g)) {
         const child = new Element();
         child.disabled = /\sdisabled(?:\s|>)/.test(match[0]);
+        child.hidden = /\shidden(?:\s|>)/.test(match[0]);
+        child.readOnly = /\sreadonly(?:\s|>)/.test(match[0]);
+        child.type = /\stype="([^"]+)"/.exec(match[0])?.[1];
         elements.set(match[1], child);
       }
     }
     addEventListener(name, fn) { this.listeners.set(name, [...(this.listeners.get(name) || []), fn]); }
-    setAttribute() {}
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    getAttribute(name) { return this.attributes[name]; }
     append(child) { this.children.push(child); child.parentElement = this; }
     showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
@@ -46,6 +52,21 @@ function setup() {
   let confirm = true;
   const window = { confirm: () => confirm, location: { hash: "" }, listeners: new Map(),
     addEventListener(name, fn) { this.listeners.set(name, fn); } };
+  const apiWindowCalls = [];
+  if (coordinator) {
+    const parent = new Element("dialog"), host = new Element("section"); parent.id = "apiSettingsDialog"; parent.append(host); document.body.append(parent);
+    window.APISettings = {
+      async open(tab) { apiWindowCalls.push(tab); if (!parent.open) parent.showModal(); await window.LibraryAISettings.mount(host, { embedded: true }); },
+      close() {
+        if (window.LibraryAISettings.isMutating()) return false;
+        if (window.LibraryAISettings.hasUnsavedChanges()) {
+          if (!window.confirm("API configuration has unsaved changes") || !window.LibraryAISettings.discard()) return false;
+        }
+        if (!window.LibraryAISettings.deactivate()) return false;
+        parent.close(); return true;
+      }
+    };
+  }
   const timers = new Map(); let nextTimer = 0;
   const sandbox = { window, document, AbortController, setTimeout: (fn, delay) => { const id = ++nextTimer; fn.delay = delay; timers.set(id, fn); return id; }, clearTimeout: (id) => timers.delete(id), CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     fetch: async (url, options = {}) => {
@@ -53,19 +74,74 @@ function setup() {
       calls.push({ url, payload, headers: options.headers, signal: options.signal });
       const result = respond(url, payload);
       const body = await new Promise((resolve, reject) => {
-        options.signal?.addEventListener("abort", () => { const error = new Error("offline aborted request"); error.name = "AbortError"; reject(error); }, { once: true });
+        if (!ignoreAbort) options.signal?.addEventListener("abort", () => { const error = new Error("offline aborted request"); error.name = "AbortError"; reject(error); }, { once: true });
         Promise.resolve(result).then(resolve, reject);
       });
       return { ok: okay, json: async () => body };
     } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "library-ai-settings.js"), "utf8"), sandbox);
-  return { window, document, current, calls, timers, get: (id) => elements.get(id),
+  return { window, document, current, calls, timers, apiWindowCalls, get: (id) => elements.get(id),
     response: (fn, ok = true) => { respond = fn; okay = ok; }, consentClose: (value) => { confirm = value; } };
 }
 
 (async () => {
   const s = setup();
   await s.window.LibraryAISettings.open();
+  assert.deepEqual(s.apiWindowCalls, ["answers"], "The legacy entry delegates to the one parent API window's answer tab");
+  assert.equal(s.get("libraryAISettingsDialog").tagName, "SECTION");
+  assert.equal(s.get("libraryAISettingsDialog").modalOpens, 0, "The answer settings never open a second dialog");
+  const routeOnly = setup({ coordinator: false }); await routeOnly.window.LibraryAISettings.open();
+  assert.equal(routeOnly.window.location.href, "/settings#api"); assert.equal(routeOnly.calls.length, 0);
+  assert.equal(routeOnly.get("libraryAISettingsDialog"), undefined, "A library-only page routes to the central API configuration instead of constructing another popup");
+
+  const embedded = setup(); embedded.current.key_configured = true;
+  await embedded.window.LibraryAISettings.open();
+  assert.equal(embedded.get("libraryAIClose").hidden, true, "Only the outer API window owns its close control");
+  embedded.get("libraryAITags").checked = true; embedded.get("libraryAITags").trigger("input");
+  embedded.get("libraryAIKey").value = "offline-embedded-unsaved-key"; embedded.get("libraryAIKey").trigger("input");
+  embedded.get("libraryAIKeyReveal").trigger("click"); await flush();
+  embedded.window.LibraryAISettings.hideSecrets();
+  assert.equal(embedded.get("libraryAIKey").value, "offline-embedded-unsaved-key"); assert.equal(embedded.get("libraryAIKey").type, "password");
+  assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), true, "Switching API tabs only hides secrets and preserves all real edits");
+  const mountedReadCount = embedded.calls.length; await embedded.window.LibraryAISettings.open(); await embedded.window.LibraryAISettings.activate();
+  assert.equal(embedded.calls.length, mountedReadCount); assert.equal(embedded.get("libraryAITags").checked, true);
+  assert.equal(embedded.get("apiSettingsDialog").modalOpens, 1, "Repeated open delegates cannot reopen or replace the shared active window");
+  assert.equal(embedded.window.LibraryAISettings.deactivate(), false, "The parent cannot deactivate an unconfirmed dirty answer panel");
+  embedded.get("libraryAICancel").trigger("click");
+  assert.equal(embedded.get("apiSettingsDialog").open, true, "The child undo button only restores its own group; it cannot close the shared API window");
+  assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), false); assert.equal(embedded.get("libraryAIKey").value, "");
+  assert.equal(embedded.window.APISettings.close(), true); assert.equal(embedded.window.LibraryAISettings.isBusy(), false);
+  const closedRequestCount = embedded.calls.length; embedded.get("libraryAISettingsForm").trigger("submit");
+  await flush(); assert.equal(embedded.calls.length, closedRequestCount, "A deactivated panel cannot submit an old form");
+  await embedded.window.LibraryAISettings.open();
+  assert.equal(embedded.calls.length, closedRequestCount + 1, "Reopening the shared window refreshes metadata rather than retaining a stale profile");
+  embedded.window.APISettings.close();
+
+  const oldRead = setup({ ignoreAbort: true }); let finishOldRead;
+  oldRead.response(() => new Promise(resolve => { finishOldRead = resolve; }));
+  const oldOpen = oldRead.window.LibraryAISettings.open(); await flush();
+  const oldSignal = oldRead.calls.at(-1).signal;
+  assert.equal(oldRead.window.LibraryAISettings.isBusy(), true); assert.equal(oldRead.window.LibraryAISettings.isMutating(), false);
+  assert.equal(oldRead.window.APISettings.close(), true, "Metadata reads must not trap the user in the central API window");
+  assert(oldSignal.aborted); assert.equal(oldRead.window.LibraryAISettings.isBusy(), false);
+  oldRead.response(() => ({ ...oldRead.current, features: { knowledge_tags: true, ai_answer: false } }));
+  await oldRead.window.LibraryAISettings.open();
+  oldRead.get("libraryAIModel").value = "offline-fresh-editor-model"; oldRead.get("libraryAIModel").trigger("input");
+  finishOldRead({ ...oldRead.current }); await oldOpen;
+  assert.equal(oldRead.get("apiSettingsDialog").open, true); assert.equal(oldRead.get("libraryAITags").checked, true);
+  assert.equal(oldRead.get("libraryAIModel").value, "offline-fresh-editor-model"); assert.equal(oldRead.window.LibraryAISettings.hasUnsavedChanges(), true, "An ignored-abort old GET cannot reset a reopened draft");
+  oldRead.window.APISettings.close();
+
+  const pendingMutation = setup(); await pendingMutation.window.LibraryAISettings.open();
+  pendingMutation.get("libraryAIAnswer").checked = true; pendingMutation.get("libraryAIAnswer").trigger("input");
+  let completeMutation; pendingMutation.response((_url, payload) => new Promise(resolve => { completeMutation = () => resolve({ ...pendingMutation.current, ...payload }); }));
+  pendingMutation.get("libraryAISettingsForm").trigger("submit"); await flush();
+  const mutationSignal = pendingMutation.calls.at(-1).signal;
+  assert.equal(pendingMutation.window.LibraryAISettings.isMutating(), true); assert.equal(pendingMutation.window.APISettings.close(), false);
+  assert.equal(pendingMutation.window.LibraryAISettings.deactivate(), false); assert.equal(mutationSignal.aborted, false, "Close cannot pretend to undo an already-issued save");
+  completeMutation(); await flush();
+  assert.equal(pendingMutation.window.LibraryAISettings.isMutating(), false); assert.equal(pendingMutation.window.LibraryAISettings.hasUnsavedChanges(), false);
+  assert.equal(pendingMutation.window.APISettings.close(), true);
   assert.equal(s.get("libraryAITags").checked, false);
   assert.equal(s.get("libraryAIAnswer").checked, false);
   assert.equal(s.get("libraryAITagsIntake").checked, false, "intake generation is opt-in, separately from the feature");
@@ -81,6 +157,53 @@ function setup() {
   assert.equal(s.get("libraryAIKey").value, "");
   assert.equal(s.get("libraryAITest").disabled, true);
   assert.equal(s.calls.length, 1, "opening only reads non-secret settings");
+  assert.equal(s.window.LibraryAISettings.hasUnsavedChanges(), false, "Showing the legacy assistant config as API-only does not manufacture a change");
+
+  const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey", "libraryAIProvider", "libraryAIMode"]) {
+    unchanged.get(id).trigger("focus"); unchanged.get(id).trigger("input"); unchanged.get(id).trigger("change");
+    assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} without an effective change stays clean`);
+  }
+  unchanged.get("libraryAITestConsent").checked = true; unchanged.get("libraryAITestConsent").trigger("input"); unchanged.get("libraryAITestConsent").trigger("change");
+  assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "Test consent is transient permission, not a saved preference");
+  unchanged.get("libraryAIKey").value = " \n "; unchanged.get("libraryAIKey").trigger("input");
+  assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "An empty replacement after trimming keeps the stored key");
+  unchanged.get("libraryAIKey").value = ""; unchanged.get("libraryAIKey").trigger("input");
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIClearKey"]) {
+    const field = unchanged.get(id), saved = field.checked;
+    field.checked = !saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true, `${id} real changes remain protected`);
+    field.checked = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} reverted to the snapshot is clean`);
+  }
+  for (const [id, edit] of [["libraryAIBaseURL", "https://offline.example/v1"], ["libraryAIModel", "offline-edited-model"], ["libraryAIKey", "offline-new-key"]]) {
+    const field = unchanged.get(id), saved = field.value;
+    field.value = edit; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true);
+    field.value = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false);
+  }
+  unchanged.get("libraryAIModel").value = ` ${unchanged.current.model} `; unchanged.get("libraryAIModel").trigger("input");
+  assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "Comparison uses the same trimmed model value as save");
+  const noChangeUnload = { prevented: false, preventDefault() { this.prevented = true; } };
+  unchanged.window.listeners.get("beforeunload")(noChangeUnload); assert.equal(noChangeUnload.prevented, false);
+  unchanged.get("libraryAIKey").value = "offline-unsaved-new-key"; unchanged.get("libraryAIKey").trigger("input");
+  unchanged.get("libraryAIProvider").trigger("change");
+  assert.equal(unchanged.get("libraryAIKey").value, "offline-unsaved-new-key", "A duplicate provider event must not discard an intentional replacement");
+  assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true);
+  unchanged.window.LibraryAISettings.discard();
+
+  const restoredProvider = setup(); Object.assign(restoredProvider.current, { provider: "custom", base_url: "https://offline-custom.example/v1", model: "offline-saved-model", supports_images: true, thinking: false });
+  await restoredProvider.window.LibraryAISettings.open();
+  restoredProvider.get("libraryAIProvider").value = "minimax"; restoredProvider.get("libraryAIProvider").trigger("input"); restoredProvider.get("libraryAIProvider").trigger("change");
+  assert.equal(restoredProvider.window.LibraryAISettings.hasUnsavedChanges(), true);
+  restoredProvider.get("libraryAIProvider").value = "custom"; restoredProvider.get("libraryAIProvider").trigger("change");
+  assert.equal(restoredProvider.get("libraryAIBaseURL").value, restoredProvider.current.base_url);
+  assert.equal(restoredProvider.get("libraryAIModel").value, restoredProvider.current.model);
+  assert.equal(restoredProvider.get("libraryAIImages").checked, true); assert.equal(restoredProvider.get("libraryAIThinking").checked, false);
+  assert.equal(restoredProvider.window.LibraryAISettings.hasUnsavedChanges(), false, "Returning to the saved provider restores its real profile instead of an unsaved default");
+  restoredProvider.consentClose(false); restoredProvider.window.APISettings.close();
+  assert.equal(restoredProvider.get("apiSettingsDialog").open, false, "A clean close does not ask for discard confirmation");
+
+  const switchStyle = unchanged.document.head.children[0].textContent, switchMarkup = unchanged.get("libraryAISettingsDialog").html;
+  assert.match(switchStyle, /\.library-ai-switch\{[^}]*display:inline-flex;[^}]*width:fit-content;[^}]*max-width:100%;[^}]*justify-self:start;/);
+  assert.match(switchMarkup, /<label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>/, "Checkbox and actual text retain native label/Space accessibility");
 
   s.get("libraryAITags").checked = true;
   s.get("libraryAITags").trigger("input");
@@ -180,11 +303,11 @@ function setup() {
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "replace", value: "retry-offline-key" });
   s.get("libraryAIBaseURL").value = "https://offline-new.example/v1"; s.get("libraryAIBaseURL").trigger("input");
   s.consentClose(false);
-  s.get("libraryAICancel").trigger("click");
-  assert.equal(s.get("libraryAISettingsDialog").open, true, "continue editing preserves dirty settings");
+  s.window.APISettings.close();
+  assert.equal(s.get("apiSettingsDialog").open, true, "continue editing preserves dirty settings");
   s.consentClose(true);
-  s.get("libraryAICancel").trigger("click");
-  assert.equal(s.get("libraryAISettingsDialog").open, false);
+  s.window.APISettings.close();
+  assert.equal(s.get("apiSettingsDialog").open, false);
 
   const legacy = setup();
   legacy.response((_url, payload) => ({ ...legacy.current, configured: true, provider: "doubao",
@@ -218,10 +341,10 @@ function setup() {
   let resolve;
   pending.response(() => new Promise((done) => { resolve = done; }));
   const opened = pending.window.LibraryAISettings.open();
-  pending.get("libraryAICancel").trigger("click");
+  pending.window.APISettings.close();
   resolve({ ...pending.current, mode: "api", configured: true, ready: true });
   await opened;
-  assert.equal(pending.get("libraryAISettingsDialog").open, false, "old requests cannot reopen a closed window");
+  assert.equal(pending.get("apiSettingsDialog").open, false, "old requests cannot reopen a closed window");
   assert.equal(pending.get("libraryAIKey").value, "");
 
   const broken = setup();
@@ -346,15 +469,19 @@ function setup() {
   eye.response(() => ({ provider: "deepseek", key: "offline-reveal-test-only" }));
   eye.get("libraryAIKeyReveal").trigger("click"); await flush();
   assert.equal(eye.calls.at(-1).url, "/api/settings/library-ai/key/reveal");
-  assert.deepEqual(eye.calls.at(-1).payload, { provider: "deepseek" });
-  assert.equal(eye.get("libraryAIKey").type, "text");
-  assert.equal(eye.get("libraryAIKey").readOnly, true);
+  assert.deepEqual(eye.calls.at(-1).payload, { provider: "deepseek", index: 0 });
+  assert.equal(eye.get("libraryAIStoredValue-deepseek").type, "text");
+  assert.equal(eye.get("libraryAIStoredValue-deepseek").readOnly, true);
+  assert.equal(eye.get("libraryAIStoredValue-deepseek").value, "offline-reveal-test-only");
+  assert.equal(eye.get("libraryAIKey").type, "password");
+  assert.equal(eye.get("libraryAIKey").value, "", "Stored viewing uses a separate readonly field, never the pending replacement input");
   assert.equal(eye.window.LibraryAISettings.hasUnsavedChanges(), false, "viewing is not a settings change");
   eye.response((_url, payload) => ({ ...eye.current, ...payload }));
   eye.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.deepEqual(eye.calls.at(-1).payload.key, { action: "keep" }, "visible saved key is never resubmitted as a replacement");
   assert.equal(eye.get("libraryAIKey").value, "");
   assert.equal(eye.get("libraryAIKey").type, "password");
+  assert.equal(eye.get("libraryAIStoredValue-deepseek").value, "");
   eye.get("libraryAIKey").value = "typed-offline-replacement"; eye.get("libraryAIKey").trigger("input");
   const count = eye.calls.length;
   eye.get("libraryAIKeyReveal").trigger("click"); await flush();
@@ -373,6 +500,7 @@ function setup() {
   resolveKey({ provider: "deepseek", key: "offline-late-secret" }); await flush();
   assert.equal(late.get("libraryAIKey").value, "", "late reveals cannot expose a previous provider's key");
   assert.equal(late.get("libraryAIKey").type, "password");
+  assert.equal(late.get("libraryAIStoredValue-deepseek").value, "");
   assert.equal(late.get("libraryAIKeyReveal").disabled, true);
 
   for (const action of ["cancel", "close", "typing", "visibility", "hash", "save"]) {
@@ -381,7 +509,7 @@ function setup() {
     let finish; h.response(() => new Promise(resolve => { finish = resolve; })); h.get("libraryAIKeyReveal").trigger("click"); await flush();
     const pendingKey = h.calls.at(-1); assert.equal(h.window.LibraryAISettings.isBusy(), false, "Key viewing does not lock settings busy");
     if (action === "cancel") h.get("libraryAIKeyReveal").trigger("click");
-    if (action === "close") h.get("libraryAIClose").trigger("click");
+    if (action === "close") h.window.APISettings.close();
     if (action === "typing") { h.get("libraryAIKey").value = "offline-new-input"; h.get("libraryAIKey").trigger("input"); }
     if (action === "visibility") { h.document.hidden = true; h.document.listeners.get("visibilitychange")(); }
     if (action === "hash") { h.window.location.hash = "#general"; h.window.listeners.get("hashchange")(); }
@@ -394,13 +522,62 @@ function setup() {
     finish({ provider: "deepseek", key: "offline-obsolete-key" }); await flush();
     assert.equal(h.get("libraryAIKey").value, action === "typing" ? "offline-new-input" : "", `${action} rejects a late revealed key`);
     assert.equal(h.get("libraryAIKey").type, "password"); assert.equal(h.window.LibraryAISettings.isBusy(), false);
+    assert.equal(h.get("libraryAIStoredValue-deepseek").value, "", `${action} rejects a late readonly stored value`);
   }
   const expires = setup(); expires.current.key_configured = true; await expires.window.LibraryAISettings.open();
   expires.response(() => ({ provider: "deepseek", key: "offline-expiring-key" })); expires.get("libraryAIKeyReveal").trigger("click"); await flush();
   assert.equal(expires.timers.size, 1); assert.equal([...expires.timers.values()][0].delay, 60000); [...expires.timers.values()][0]();
   assert.equal(expires.get("libraryAIKey").value, ""); assert.equal(expires.get("libraryAIKey").type, "password"); assert.equal(expires.get("libraryAIKey").readOnly, false);
+  assert.equal(expires.get("libraryAIStoredValue-deepseek").value, ""); assert.equal(expires.get("libraryAIStoredValue-deepseek").hidden, true);
   expires.get("libraryAIKey").value = "offline-typed-expiring-key"; expires.get("libraryAIKey").trigger("input"); expires.get("libraryAIKeyReveal").trigger("click"); await flush();
   [...expires.timers.values()][0](); assert.equal(expires.get("libraryAIKey").value, "offline-typed-expiring-key", "Expiry hides a typed key without deleting the intended replacement");
+
+  const profiles = setup(); Object.assign(profiles.current, { mode: "api", key_configured: true, key_count: 1, configured: true, ready: true,
+    keys: { deepseek: { configured: true, count: 1 }, minimax: { configured: true, count: 1 }, doubao: { configured: false, count: 0 }, custom: { configured: true, count: 1 } } });
+  await profiles.window.LibraryAISettings.open();
+  assert.equal(profiles.calls.length, 1, "Listing all saved providers reads metadata without decrypting any key");
+  for (const provider of ["deepseek", "minimax", "custom"]) {
+    assert.equal(profiles.get(`libraryAIStoredMask-${provider}`).textContent, "•••••••• · 已保存 1 条");
+    assert.equal(profiles.get(`libraryAIStoredReveal-${provider}`).hidden, false);
+    assert.equal(profiles.get(`libraryAIStoredValue-${provider}`).value, "");
+  }
+  assert.equal(profiles.get("libraryAIStoredMask-doubao").textContent, "未保存"); assert(profiles.get("libraryAIStoredReveal-doubao").hidden);
+  assert.equal(profiles.get("libraryAIStoredReveal-minimax").getAttribute("aria-label"), "查看MiniMax第 1 条已保存的密钥");
+  assert.match(profiles.get("libraryAISettingsDialog").html, /id="libraryAIStoredReveal-minimax"[^>]*>[\s\S]*?<svg viewBox="0 0 24 24" aria-hidden="true">/, "Stored-provider controls use the same eye icon with a provider-specific accessible label");
+  profiles.response((_url, payload) => ({ provider: payload.provider, index: payload.index, key: "offline-other-provider-stored-key" }));
+  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
+  assert.deepEqual(profiles.calls.at(-1).payload, { provider: "minimax", index: 0 });
+  assert.equal(profiles.get("libraryAIProvider").value, "deepseek", "Viewing a different provider does not switch the active API");
+  assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "offline-other-provider-stored-key"); assert.equal(profiles.get("libraryAIStoredValue-minimax").readOnly, true);
+  assert.equal(profiles.get("libraryAIStoredReveal-minimax").getAttribute("aria-label"), "隐藏MiniMax第 1 条已保存的密钥");
+  assert.equal(profiles.get("libraryAIKey").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
+  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "");
+  profiles.get("libraryAIKey").value = "offline-pending-active-replacement"; profiles.get("libraryAIKey").trigger("input");
+  profiles.get("libraryAIStoredReveal-custom").trigger("click"); await flush();
+  assert.equal(profiles.get("libraryAIKey").value, "offline-pending-active-replacement", "Read-only viewing does not consume or overwrite a pending replacement");
+  assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), true);
+  profiles.response((_url, payload) => ({ ...profiles.current, ...payload })); profiles.get("libraryAISettingsForm").trigger("submit"); await flush();
+  assert.deepEqual(profiles.calls.at(-1).payload.key, { action: "replace", value: "offline-pending-active-replacement" });
+  assert.equal(profiles.calls.at(-1).payload.provider, "deepseek");
+  for (const provider of ["deepseek", "minimax", "doubao", "custom"]) assert.equal(profiles.get(`libraryAIStoredValue-${provider}`).value, "", "Saving clears every readonly decrypted display");
+  assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
+  profiles.response((_url, payload) => ({ provider: payload.provider, index: payload.index, key: "offline-other-provider-stored-key" }));
+  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
+  assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false); [...profiles.timers.values()][0]();
+  assert.equal(profiles.get("libraryAIStoredValue-minimax").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false, "Automatic hiding never manufactures pending edits");
+  for (const mismatched of [{ provider: "custom", index: 0 }, { provider: "minimax", index: 1 }]) {
+    profiles.response(() => ({ ...mismatched, key: "offline-mismatched-response" }));
+    profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
+    assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "", "Foreign-provider and wrong-index reveal responses are never displayed");
+    assert.equal(profiles.get("libraryAIKey").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
+  }
+  const noStoredCalls = profiles.calls.length; profiles.get("libraryAIStoredReveal-doubao").trigger("click"); await flush();
+  assert.equal(profiles.calls.length, noStoredCalls, "An unconfigured metadata row cannot request a secret even with a forged click");
+
+  const normalized = setup(); Object.assign(normalized.current, { provider: "minimax", base_url: "https://api.minimax.cn/v1", model: "MiniMax-M2.7", supports_images: true, thinking: false });
+  await normalized.window.LibraryAISettings.open();
+  assert.equal(normalized.get("libraryAIImages").checked, false); assert.equal(normalized.get("libraryAIThinking").checked, true);
+  assert.equal(normalized.window.LibraryAISettings.hasUnsavedChanges(), false, "Rendering forced capabilities or hidden defaults does not falsely warn about user edits");
 
   const readTimeout = setup(); let finishRead;
   readTimeout.response(() => new Promise(resolve => { finishRead = resolve; })); const reading = readTimeout.window.LibraryAISettings.open(); await flush();

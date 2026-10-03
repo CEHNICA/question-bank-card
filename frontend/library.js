@@ -316,7 +316,7 @@
     box.hidden = !tools.length;
     if (tools.length) {
       if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，会用到服务额度："), ...tools);
-      else { const link = node("a", "button button-small", "配置答题 API"); link.href = "/settings#ai"; box.append(node("span", "helper", "请先为答题助手配置并测试 API。"), link); }
+      else box.append(node("span", "helper", "请到“设置 → API 配置”配置并测试答题 API。"));
     }
   }
 
@@ -324,7 +324,7 @@
     try {
       const configurationResponse = await fetch("/api/settings/library-ai", { cache: "no-store" });
       const configuration = await configurationResponse.json();
-      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请在“设置 → 标签与答案”配置并测试答题 API 后再生成。");
+      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请到“设置 → API 配置”配置并测试答题 API 后再生成。");
       const response = await fetch("/api/library/jobs", {
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
         body: JSON.stringify({ kind, ...target, api_only: true })
@@ -337,7 +337,7 @@
         : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
       load({ quiet: true });
     } catch (error) {
-      toast(error.message || "没能排上队", "error");
+      toast(`${error.message || "没能排上队"} 请到“设置 → API 配置”检查服务商、密钥和模型。`, "error");
     }
   }
 
@@ -439,7 +439,9 @@
       meta.append(origin);
     }
     if (state.features.subquestions && item.subquestions >= 2) meta.append(node("span", "library-note", `含 ${item.subquestions} 小问`));
-    if (!item.has_answer) {
+    if (solutions.hasContent(item.solution)) {
+      meta.append(node("span", "library-note quiet", "已保存答案解析"));
+    } else if (!item.has_answer) {
       const missing = node("span", "library-note quiet", item.ai_answer && state.features.ai_answer ? "原卷无答案 · 有 AI 参考" : "无答案");
       missing.title = "原卷没有给答案";
       meta.append(missing);
@@ -547,10 +549,12 @@
     box.addEventListener("toggle", () => {
       if (box.open) state.opened.add(item.id); else state.opened.delete(item.id);
     });
+    const history = saved && (original || ai) ? node("details", "library-answer-history") : null;
+    if (history) history.append(node("summary", "", ai ? "原卷答案与 AI 初稿历史" : "原卷答案历史"));
     if (original) {
       const part = node("div", "qb-answer");
       part.append(...QB.answerRows(document, content));
-      box.append(part);
+      (history || box).append(part);
     }
     if (saved) {
       const part = node("div", "qb-answer");
@@ -560,12 +564,13 @@
     if (ai) {
       const part = node("div", "qb-answer ai-answer");
       const label = node("p", "library-answer-label", "AI 参考答案 · 未核对");
-      label.title = `${ai.engine || "解题模型"} 做的，没有人核对过；用之前请自己算一遍`;
+      label.title = `${ai.engine || "解题模型"} 生成的初稿，尚未确认数学内容；保存后的答案优先显示，初稿保留作历史对照。`;
       const rows = QB.answerRows(document, ai, { empty: "（空）" });
       if (!String(ai.analysis || "").trim()) rows.pop();
       part.append(label, ...rows);
-      box.append(part);
+      (history || box).append(part);
     }
+    if (history) box.append(history);
     return box;
   }
 
@@ -587,7 +592,7 @@
     Object.entries(item.job_errors || {})
       .filter(([kind]) => (kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer))
       .forEach(([kind, message]) => box.append(node("p", "library-job-error",
-        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}`)));
+        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → API 配置”检查服务商、密钥和模型。`)));
     return box.childNodes.length ? box : null;
   }
 

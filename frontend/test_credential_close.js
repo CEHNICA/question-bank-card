@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const dom = require("./credential-test-dom.js");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const functions = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf("  function renderSettingsTask("));
@@ -28,7 +29,7 @@ function scenario() {
   const saved = Object.fromEntries(providers.map((provider) => [provider, { configured: true, count: 1 }]));
   const closeButtons = [];
   function $(id) {
-    if (!nodes.has(id)) nodes.set(id, { id, value: "", disabled: false, hidden: false, textContent: "", open: false, events: {},
+    if (!nodes.has(id)) nodes.set(id, { ...dom.node(id),
       addEventListener(type, fn) { (this.events[type] ||= []).push(fn); },
       getBoundingClientRect() { return { left: 100, top: 50, right: 500, bottom: 450, width: 400, height: 400 }; },
       querySelectorAll() { return closeButtons; },
@@ -42,11 +43,12 @@ function scenario() {
     addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }, closest() { return $("credentialDialog"); }
   });
   const dialogs = [$("credentialDialog"), $("pageDialog"), $("keysDialog")];
-  const context = vm.createContext({ $, console,
+  const context = vm.createContext({ $, console, el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
+    window: { addEventListener() {} },
     requestAnimationFrame(fn) { const id = ++frameId; frames.set(id, fn); return id; },
     cancelAnimationFrame(id) { frames.delete(id); },
     anyDialogOpen() { return dialogs.some((dialog) => dialog.open); },
-    document: { querySelectorAll(selector) { return selector === "dialog [data-close]" ? closeButtons : dialogs; } },
+    document: { addEventListener() {}, querySelectorAll(selector) { return selector === "dialog [data-close]" ? closeButtons : dialogs; } },
     toast(message, kind) { messages.push({ message, kind }); },
     confirmDialog: async () => true,
     requestPageDialogClose() { pageCloseCount++; },
@@ -87,7 +89,6 @@ function scenario() {
   const loading = scenario(), status = deferred();
   loading.context.api = (url, options) => { loading.requests.push({ url, options }); return status.promise; };
   const opened = loading.context.openCredentialSettings();
-  loading.$("credentialMinimaxInput").value = "unsaved-test-only";
   loading.clickClose();
   assert.equal(loading.$("credentialDialog").open, false);
   loading.drainNative(); loading.drainFrames();
@@ -101,7 +102,6 @@ function scenario() {
   for (const dismiss of ["cancel", "escape", "backdrop"]) {
     const closing = scenario();
     await closing.context.openCredentialSettings(); closing.drainFrames();
-    closing.$("credentialMineruInput").value = "unsaved-test-only";
     if (dismiss === "cancel") closing.clickClose(1);
     else if (dismiss === "escape") assert.equal(closing.escape(), false);
     else closing.backdrop();
@@ -130,6 +130,7 @@ function scenario() {
   assert.equal(retargeted.$("credentialDialog").open, true, "An outside press released inside must retain the credential dialog and its draft");
   assert.equal(retargeted.$("credentialMinimaxInput").value, "internal-draft-test-only");
   retargeted.backdrop();
+  await turns();
   assert.equal(retargeted.$("credentialDialog").open, false, "A genuine outside click still uses the secret draft close guard");
 
   // Native close is asynchronous: old close events and status replies cannot

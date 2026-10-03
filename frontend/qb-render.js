@@ -321,6 +321,10 @@
     "τ": "\\tau ", "φ": "\\varphi ", "ω": "\\omega ", "Δ": "\\Delta ", "Ω": "\\Omega ", "（": "(", "）": ")",
     "，": ",\\,", "：": ":", "｜": "|", "{": "\\{", "}": "\\}"
   };
+  // Some saved AI answers escape a Chinese round bracket (\（ / \）).
+  // These aren't TeX commands. Display the existing bracket, just as for an
+  // unescaped fullwidth bracket; do not invent or balance any missing one.
+  const ESCAPED_FULLWIDTH_ROUND_BRACKET = /^\\([（）])/;
   const FUNCTIONS = new Set(["sin", "cos", "tan", "cot", "sec", "csc", "log", "ln", "lg", "max", "min", "lim", "exp"]);
   const UNITS = /^(?:cm|mm|km|dm|m|kg|mg|g|ml|mL|L|s|h|min)$/;
 
@@ -449,6 +453,8 @@
     let out = "";
     for (let index = 0; index < inner.length;) {
       if (inner.startsWith("//", index) && isGeometryParallel(inner, index)) { out += "\\parallel "; index += 2; continue; }
+      const wideBracket = ESCAPED_FULLWIDTH_ROUND_BRACKET.exec(inner.slice(index));
+      if (wideBracket) { out += TO_LATEX[wideBracket[1]]; index += wideBracket[0].length; continue; }
       const command = /^\\[A-Za-z]+|^\\./.exec(inner.slice(index));
       if (command) { out += command[0]; index += command[0].length; continue; }
       const character = String.fromCodePoint(inner.codePointAt(index));

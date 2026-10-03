@@ -30,8 +30,11 @@ assert.match(html, /id="settingsInterface"/);
 assert.match(js, /function showSettingsTab\(id, \{ updateHash = true \} = \{\}\)/);
 assert.match(html, /<section id="settingsDialog" class="settings-panel"/);
 assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
-assert.match(html, /id="libraryAISettingsMount"/);
-assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAISettingsMount"\)\)/);
+assert.match(html, /id="libraryAIAPISettingsMount"/);
+assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true \}\)/);
+assert.doesNotMatch(html + js, /libraryAISettingsMount/);
+assert.match(html, /id="settingsAPIOpen"[^>]*>API 配置<\/button>/);
+assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialSettings \}\)/);
 assert.match(js, /settingsAI: "ai"/);
 // Local import is available without cloud credentials.
 assert.match(html, /id="settingsReady"/);

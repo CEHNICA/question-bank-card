@@ -4,11 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const dom = require("./credential-test-dom.js");
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
-assert.match(html, /id="settingsCredentialOpen"[^>]*>填写或更换密钥<\/button>/);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>API 配置<\/button>/);
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 
@@ -17,6 +18,7 @@ for (const provider of ["Mineru", "Modelscope", "Minimax", "Siliconflow"]) {
   assert.match(html, new RegExp(`id="credential${provider}Input"[^>]*autocomplete="off"[^>]*autocapitalize="off"[^>]*autocorrect="off"`));
   assert.match(html, new RegExp(`id="credential${provider}Delete"[^>]*type="button"[^>]*hidden>删除密钥</button>`));
   assert.match(html, new RegExp(`id="credential${provider}State"`));
+  assert.match(html, new RegExp(`id="credential${provider}Saved"[^>]*class="credential-saved-list"`));
 }
 const aiSettings = fs.readFileSync(path.join(__dirname, "library-ai-settings.js"), "utf8");
 assert.match(aiSettings, /id="libraryAIKey"[^>]*type="password"[^>]*autocomplete="off"/);
@@ -31,7 +33,8 @@ assert.match(js, /resetCredentialInputs\(\);[\s\S]*?renderCredentialStates\(resu
 assert.match(js, /async function loadStatus\(\)[\s\S]*?return false;[\s\S]*?return true;/);
 assert.match(js, /await refreshCredentialStatus\(refreshMessage, session\)/);
 assert.match(js, /function openSettings\(\)[\s\S]*?showSettingsTab\(settingsTabFromHash\(\), \{ updateHash: false \}\);[\s\S]*?void loadStatus\(\);/);
-assert.match(html, /已经保存的密钥不会再显示出来/);
+assert.match(html, /已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒/);
+assert.match(html, /id="credentialSavedTotal"/);
 assert.match(html, /不写入题库、日志或项目文件/);
 assert.match(html, /不上传文件、不消耗识读额度/);
 assert.match(html, />保存密钥<\/button>/);
@@ -62,12 +65,13 @@ function scenario() {
   const saved = Object.fromEntries(services.map((service) => [service, { configured: true, count: 1 }]));
   const closeButtons = [{ disabled: false }, { disabled: false }];
   function $(id) {
-    if (!nodes.has(id)) nodes.set(id, { id, value: "", disabled: false, hidden: false, textContent: "", open: id === "credentialDialog", events: {},
+    if (!nodes.has(id)) nodes.set(id, { ...dom.node(id), open: id === "credentialDialog",
       addEventListener(type, fn) { (this.events[type] ||= []).push(fn); },
       querySelectorAll() { return closeButtons; }, showModal() { this.open = true; }, focus() {} });
     return nodes.get(id);
   }
-  const context = vm.createContext({ $, console, requestAnimationFrame(fn) { fn(); },
+  const context = vm.createContext({ $, console, el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
+    document: { addEventListener() {} }, window: { addEventListener() {} }, requestAnimationFrame(fn) { fn(); },
     toast(message, kind) { messages.push({ message, kind }); },
     confirmDialog: async (options) => { confirmations.push(options); return true; },
     loadStatus: async () => true,

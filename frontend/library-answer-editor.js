@@ -66,9 +66,8 @@
       checkAi.title = "查询本次生成的进度和结果，不会重新生成、核对答案或覆盖正在编辑的文字。";
       const cancelAi = node("button", "button button-quiet button-small", "取消所选任务"); cancelAi.type = "button"; cancelAi.id = "answerEditorCancelAi"; cancelAi.addEventListener("click", cancelSelected);
       aiTools.append(checkAi, cancelAi);
-      const settings = node("a", "button button-small answer-api-settings", "配置答题助手 API"); settings.id = "answerEditorApiSettings"; settings.href = "/settings#ai"; settings.target = "_blank"; settings.rel = "noopener";
       const apiNote = node("p", "helper answer-api-note"); apiNote.id = "answerEditorApiNote";
-      nav.append(navHint, pickMissing, ai, aiStatus, aiTools, settings, apiNote, list);
+      nav.append(navHint, pickMissing, ai, aiStatus, aiTools, apiNote, list);
       const panel = node("section", "answer-editor-panel");
       const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const question = node("details", "answer-question"); question.append(node("summary", "", "查看本题"));
@@ -130,7 +129,7 @@
       workspace.append(inputColumn, previewColumn);
       panel.append(status, question, workspace, origin, footer);
       main.append(nav, panel); dialog.append(head, main); document.body.append(dialog);
-      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, settings, apiNote, status, question, questionBody, answer, analysis, figures, preview, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
       dialog.addEventListener("paste", event => {
         const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
@@ -164,8 +163,7 @@
       controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
       controls.checkAi.disabled = polling || checkingApi; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
       controls.cancelAi.hidden = !selectedActiveJobs().length;
-      controls.settings.textContent = ready ? "答题 API 设置" : "配置答题助手 API";
-      controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : ready ? "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。" : apiSettingsError || "尚未配置并测试答题 API。可先手工编辑，或前往设置配置；返回后点“刷新生成结果”。";
+      controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : ready ? "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → API 配置”配置并测试；可先手工编辑，返回后点“刷新生成结果”。";
       for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
       controls.history.disabled = busy;
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
@@ -365,7 +363,7 @@
         if (session !== epoch || !dialog.open) return false;
         apiSettings = value; apiSettingsError = ""; return value.api_ready === true;
       } catch (error) {
-        if (session === epoch && dialog.open) { apiSettings = null; apiSettingsError = "未能读取答题 API 设置，请刷新或前往设置检查。"; }
+        if (session === epoch && dialog.open) { apiSettings = null; apiSettingsError = "未能读取答题 API 设置，请到“设置 → API 配置”检查配置，再刷新生成结果。"; }
         return false;
       } finally { if (session === epoch) { checkingApi = false; setBusy(); } }
     }
@@ -384,7 +382,7 @@
         // Revalidate API availability immediately before this explicit batch.
         // The scoped executor never changes the shared tag/answer settings.
         if (!await readApiSettings()) {
-          if (requestEpoch === epoch && dialog.open) controls.aiStatus.textContent = "请先配置并测试答题助手 API，再生成所选题。当前编辑与已保存解析保留。";
+          if (requestEpoch === epoch && dialog.open) controls.aiStatus.textContent = "请到“设置 → API 配置”配置并测试答题 API，再生成所选题。当前编辑与已保存解析保留。";
           return;
         }
         if (requestEpoch !== epoch || !dialog.open) return;
@@ -398,7 +396,7 @@
         controls.aiStatus.textContent = `已提交所选 ${ids.length} 题给答题 API，初稿完成后显示在编辑区。保存后才用于出卷。`;
         renderList();
         void pollJobs();
-      } catch (error) { if (requestEpoch === epoch && dialog.open) { notify(error.message, "error"); controls.aiStatus.textContent = error.message; } }
+      } catch (error) { if (requestEpoch === epoch && dialog.open) { const message = `${error.message} 请到“设置 → API 配置”检查服务商、密钥和模型，再重试。`; notify(message, "error"); controls.aiStatus.textContent = message; } }
       finally { if (requestEpoch === epoch) { queueing = false; setBusy(); } }
     }
     async function cancelSelected() {
@@ -430,6 +428,7 @@
       if (saved) messages.push(`${saved} 题初稿已保存，可用于出卷`);
       if (retained) messages.push(`${retained} 题另有 AI 初稿可对照，已保存解析保留`);
       if (failed.length) messages.push(`${failed.length} 题未完成，勾选可重试${failed[0].error ? `：${failed[0].error}` : ""}`);
+      if (failed.some(job => job.status === "failed" && !job.cancelled && !job.timed_out && !["cancelled", "timed_out"].includes(job.terminal_reason))) messages.push("请到“设置 → API 配置”检查服务商、密钥和模型，再重试");
       controls.aiStatus.textContent = messages.join("；") + "。" + queueNote;
     }
     async function pollJobs() {

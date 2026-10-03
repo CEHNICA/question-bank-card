@@ -94,6 +94,63 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.assertNotIn("key", result)
         self.assertFalse(result["verified"])
 
+    def test_saved_provider_metadata_counts_without_decryption_or_switching(self):
+        service.save({"provider": "deepseek", "key": {"action": "replace", "value": "synthetic-deepseek-meta-key"}})
+        self.configure_minimax()
+        before = {path.name: path.read_bytes() for path in self.root.iterdir() if path.is_file()}
+        self.transform.reset_mock()
+        result = self.client.get("/api/settings/library-ai").json()
+        self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom"])
+        self.assertEqual(result["keys"], {"deepseek": {"configured": True, "count": 1},
+            "minimax": {"configured": True, "count": 1}, "doubao": {"configured": False, "count": 0},
+            "custom": {"configured": False, "count": 0}})
+        self.assertEqual(result["provider"], "minimax")
+        self.assertEqual(result["key_count"], 1)
+        self.assertNotIn("synthetic-deepseek", json.dumps(result))
+        self.assertNotIn("offline-minimax", json.dumps(result))
+        self.transform.assert_not_called()
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.root.iterdir() if path.is_file()})
+        self.network.assert_not_called()
+
+    def test_metadata_shows_only_configured_provider_files_not_orphaned_keys(self):
+        self.configure_minimax()
+        service.key_path("deepseek").write_bytes(b"synthetic-orphan-opaque-file")
+        service.key_path("minimax").unlink()
+        self.transform.reset_mock()
+        result = service.public_status()
+        self.assertEqual(result["key_count"], 0)
+        self.assertTrue(all(item == {"configured": False, "count": 0} for item in result["keys"].values()))
+        self.transform.assert_not_called()
+        self.network.assert_not_called()
+
+    def test_malformed_provider_key_metadata_is_safely_ignored(self):
+        self.configure_minimax()
+        config = json.loads(service.path().read_text(encoding="utf-8"))
+        config["key_states"]["deepseek"] = ["invalid-synthetic-state"]
+        config["key_states"]["custom"] = {"configured": "true", "revision": "invalid"}
+        service._write_settings(config)
+        self.transform.reset_mock()
+        result = service.public_status()
+        self.assertEqual(result["keys"]["deepseek"], {"configured": False, "count": 0})
+        self.assertEqual(result["keys"]["custom"], {"configured": False, "count": 0})
+        self.assertEqual(result["keys"]["minimax"], {"configured": True, "count": 1})
+        self.transform.assert_not_called()
+
+    def test_legacy_v1_provider_metadata_remains_visible_without_migration(self):
+        # v1 is the old single Doubao credential. Reading metadata neither
+        # upgrades settings nor opens the encrypted file.
+        service.path().write_text(json.dumps({"version": 1, "endpoint_id": "ep-legacy-test",
+            "key_configured": True, "key_revision": "legacy-test-revision"}), encoding="utf-8")
+        service.key_path("doubao").write_bytes(b"legacy-opaque-test-key")
+        before = service.path().read_bytes()
+        result = service.public_status()
+        self.assertEqual(result["provider"], "doubao")
+        self.assertEqual(result["key_count"], 1)
+        self.assertEqual(result["keys"]["doubao"], {"configured": True, "count": 1})
+        self.assertEqual(service.path().read_bytes(), before)
+        self.transform.assert_not_called()
+        self.network.assert_not_called()
+
     def test_minimax_selection_uses_official_preset_without_importing_ocr_or_enabling_features(self):
         ocr = self.root / "ocr-credentials.dat"
         ocr.write_bytes(b"preexisting opaque OCR key")

@@ -675,6 +675,7 @@ library_answer_editor_script = _frontend("library-answer-editor.js", "applicatio
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
 export_settings_script = _frontend("export-settings.js", "application/javascript; charset=utf-8")
 library_question_viewer_script = _frontend("library-question-viewer.js", "application/javascript; charset=utf-8")
+browser_interactions_script = _frontend("browser-interactions.js", "application/javascript; charset=utf-8")
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")

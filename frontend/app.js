@@ -1084,7 +1084,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // warning there; in-app navigation keeps the clearer two-action dialog.
   window.addEventListener("beforeunload", (event) => {
     QBEdits.protectBeforeUnload(event, editGuard);
-    if (window.location.pathname === "/settings" && (modelFormDirty || window.LibraryAISettings?.hasUnsavedChanges?.() || window.LibraryAISettings?.isBusy?.())) {
+    if (modelFormDirty || credentialHasNewKeys() || window.LibraryAISettings?.hasUnsavedChanges?.() || window.LibraryAISettings?.isMutating?.()) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -4374,16 +4374,111 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   const CREDENTIAL_FIELDS = {
-    mineru: { input: "credentialMineruInput", remove: "credentialMineruDelete", state: "credentialMineruState", label: "MinerU" },
-    modelscope: { input: "credentialModelscopeInput", remove: "credentialModelscopeDelete", state: "credentialModelscopeState", label: "魔搭" },
-    minimax: { input: "credentialMinimaxInput", remove: "credentialMinimaxDelete", state: "credentialMinimaxState", label: "MiniMax" },
-    siliconflow: { input: "credentialSiliconflowInput", remove: "credentialSiliconflowDelete", state: "credentialSiliconflowState", label: "硅基流动" }
+    mineru: { input: "credentialMineruInput", remove: "credentialMineruDelete", state: "credentialMineruState", list: "credentialMineruSaved", label: "MinerU" },
+    modelscope: { input: "credentialModelscopeInput", remove: "credentialModelscopeDelete", state: "credentialModelscopeState", list: "credentialModelscopeSaved", label: "魔搭" },
+    minimax: { input: "credentialMinimaxInput", remove: "credentialMinimaxDelete", state: "credentialMinimaxState", list: "credentialMinimaxSaved", label: "MiniMax" },
+    siliconflow: { input: "credentialSiliconflowInput", remove: "credentialSiliconflowDelete", state: "credentialSiliconflowState", list: "credentialSiliconflowSaved", label: "硅基流动" }
   };
   let credentialBusy = false;
   let credentialStateRequest = 0;
   let credentialSession = 0;
   let credentialFocusFrame = 0;
   let credentialServices = {};
+  let credentialTab = "reading";
+  let credentialAnswersMounted = false;
+  let credentialClosing = false;
+  let credentialCloseTask = null;
+  let credentialModelGuard = null;
+  const credentialSavedRows = new Map();
+  const CREDENTIAL_MASK = "****************";
+
+  function hideCredentialKey(row) {
+    row.epoch += 1;
+    row.controller?.abort();
+    row.controller = null;
+    clearTimeout(row.timer);
+    clearTimeout(row.timeout);
+    row.timer = row.timeout = null;
+    row.pending = row.visible = false;
+    row.value.textContent = CREDENTIAL_MASK;
+    row.value.classList.remove("revealed");
+    row.button.setAttribute("aria-pressed", "false");
+    row.button.setAttribute("aria-label", `查看 ${row.label} 第 ${row.index + 1} 个密钥`);
+    row.button.title = "临时查看密钥（60 秒后隐藏）";
+  }
+
+  function hideCredentialKeys() {
+    credentialSavedRows.forEach(hideCredentialKey);
+  }
+
+  async function toggleCredentialKey(service, index) {
+    const row = credentialSavedRows.get(`${service}:${index}`);
+    if (!row || credentialBusy || !$("credentialDialog").open) return;
+    if (row.pending || row.visible) { hideCredentialKey(row); return; }
+    const epoch = ++row.epoch, session = credentialSession;
+    const controller = new AbortController();
+    row.controller = controller;
+    row.pending = true;
+    row.button.title = "正在读取，再点眼睛可取消";
+    row.button.setAttribute("aria-label", `取消查看 ${row.label} 第 ${index + 1} 个密钥`);
+    row.timeout = setTimeout(() => controller.abort(), 15000);
+    const current = () => row.epoch === epoch && session === credentialSession
+      && credentialSavedRows.get(`${service}:${index}`) === row && $("credentialDialog").open;
+    try {
+      const result = await api("/api/settings/credentials/key/reveal", {
+        method: "POST", body: { service, index }, signal: controller.signal
+      });
+      if (!current() || controller.signal.aborted) return;
+      if (result.service !== service || result.index !== index || typeof result.key !== "string" || !result.key) {
+        throw new Error("Invalid credential response");
+      }
+      // Saved values have their own text node. They never enter the replacement
+      // inputs or the services payload sent by the Save button.
+      row.value.textContent = result.key;
+      row.value.classList.add("revealed");
+      row.visible = true;
+      row.button.setAttribute("aria-pressed", "true");
+      row.button.setAttribute("aria-label", `隐藏 ${row.label} 第 ${index + 1} 个密钥`);
+      row.button.title = "隐藏密钥";
+      row.timer = setTimeout(() => { if (current()) hideCredentialKey(row); }, 60000);
+    } catch (error) {
+      if (current()) {
+        hideCredentialKey(row);
+        $("credentialResult").textContent = error.name === "AbortError"
+          ? "查看已取消，可再次点击眼睛。" : "暂时无法查看这条密钥，请重新打开窗口后重试。";
+      }
+    } finally {
+      if (current()) {
+        clearTimeout(row.timeout);
+        row.timeout = null;
+        row.controller = null;
+        row.pending = false;
+        if (!row.visible) hideCredentialKey(row);
+      }
+    }
+  }
+
+  function renderCredentialSavedRows(service, field, count) {
+    const list = $(field.list);
+    list.replaceChildren();
+    if (!count) { list.append(el("li", "credential-saved-empty", "暂无已保存密钥")); return; }
+    for (let index = 0; index < count; index += 1) {
+      const item = el("li", "credential-saved-row");
+      const number = el("span", "credential-saved-number", `${index + 1}`);
+      const value = el("span", "credential-saved-value", CREDENTIAL_MASK);
+      const eye = el("button", "button quiet small credential-eye");
+      eye.type = "button";
+      eye.append(icon("eye"));
+      eye.disabled = credentialBusy;
+      const row = { service, index, label: field.label, value, button: eye,
+        epoch: 0, pending: false, visible: false, controller: null, timer: null, timeout: null };
+      hideCredentialKey(row);
+      credentialSavedRows.set(`${service}:${index}`, row);
+      eye.addEventListener("click", () => { void toggleCredentialKey(service, index); });
+      item.append(number, value, eye);
+      list.append(item);
+    }
+  }
 
   function cancelCredentialFocus() {
     if (credentialFocusFrame) cancelAnimationFrame(credentialFocusFrame);
@@ -4401,10 +4496,73 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
   }
 
-  function requestCredentialClose() {
-    if (credentialBusy) return false;
-    if ($("credentialDialog").open) $("credentialDialog").close();
+  function credentialMutationPending() {
+    return credentialBusy || Boolean(credentialModelGuard?.isMutating())
+      || Boolean(credentialAnswersMounted && window.LibraryAISettings?.isMutating?.());
+  }
+
+  function hideAPISecrets() {
+    hideCredentialKeys();
+    if (credentialAnswersMounted) window.LibraryAISettings?.hideSecrets?.();
+  }
+
+  function credentialHasNewKeys() {
+    return Object.values(CREDENTIAL_FIELDS).some((field) => $(field.input).value.trim() !== "");
+  }
+
+  function finishCredentialClose({ native = false } = {}) {
+    if (credentialMutationPending()) return false;
+    if (credentialAnswersMounted && window.LibraryAISettings?.deactivate?.() === false) return false;
+    hideAPISecrets();
+    credentialStateRequest += 1;
+    cancelCredentialFocus();
+    if (!native && $("credentialDialog").open) $("credentialDialog").close();
     return true;
+  }
+
+  function requestCredentialClose({ native = false } = {}) {
+    if (credentialClosing) return false;
+    if (credentialMutationPending()) { toast("API 配置正在保存或测试，请稍候再关闭。", "warn"); return false; }
+    const aiDirty = credentialAnswersMounted && window.LibraryAISettings?.hasUnsavedChanges?.();
+    if (!credentialModelGuard?.hasUnsavedChanges() && !aiDirty && !credentialHasNewKeys()) return finishCredentialClose({ native });
+    const session = credentialSession;
+    credentialClosing = true;
+    hideAPISecrets();
+    credentialCloseTask = (async () => {
+      try {
+        if (credentialModelGuard?.hasUnsavedChanges() && !(await credentialModelGuard.prepareClose())) return;
+        if (session !== credentialSession || !$("credentialDialog").open || credentialMutationPending()) return;
+        const answerDirty = credentialAnswersMounted && window.LibraryAISettings?.hasUnsavedChanges?.();
+        if (credentialHasNewKeys() || answerDirty) {
+          const discard = await confirmDialog({ title: "API 配置还没保存", text: "关闭会放弃尚未保存的新密钥与标签、答案设置；已经保存的配置保持原样。", ok: "放弃并关闭", cancel: "继续设置", focusCancel: true });
+          if (!discard || session !== credentialSession || !$("credentialDialog").open || credentialMutationPending()) return;
+          if (answerDirty && window.LibraryAISettings.discard() === false) return;
+          resetCredentialInputs();
+        }
+        if (session === credentialSession && $("credentialDialog").open) finishCredentialClose();
+      } finally { if (session === credentialSession) { credentialClosing = false; credentialCloseTask = null; } }
+    })();
+    return false;
+  }
+
+  async function showCredentialTab(tab) {
+    tab = tab === "answers" ? "answers" : "reading";
+    hideAPISecrets();
+    cancelCredentialFocus();
+    credentialTab = tab;
+    $("credentialReadingPanel").hidden = tab !== "reading";
+    $("credentialAnswerPanel").hidden = tab !== "answers";
+    $("credentialSavedTotal").hidden = tab !== "reading";
+    for (const name of ["reading", "answers"]) {
+      const button = $(name === "reading" ? "credentialReadingTab" : "credentialAnswerTab");
+      button.setAttribute("aria-selected", String(tab === name));
+      button.tabIndex = tab === name ? 0 : -1;
+    }
+    if (tab !== "answers" || !window.LibraryAISettings?.mount) return;
+    if (!credentialAnswersMounted) {
+      credentialAnswersMounted = true;
+      await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true });
+    } else await window.LibraryAISettings.activate();
   }
 
   function credentialAccounts(value) {
@@ -4413,6 +4571,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function resetCredentialInputs() {
+    hideCredentialKeys();
     Object.values(CREDENTIAL_FIELDS).forEach((field) => {
       $(field.input).value = "";
       $(field.input).disabled = false;
@@ -4421,6 +4580,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function setCredentialBusy(busy) {
     credentialBusy = busy;
+    if (busy) hideCredentialKeys();
+    credentialSavedRows.forEach((row) => { row.button.disabled = busy; });
     $("credentialSave").disabled = busy;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       $(field.input).disabled = busy;
@@ -4430,17 +4591,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function renderCredentialStates(payload) {
+    hideCredentialKeys();
+    credentialSavedRows.clear();
     const services = payload?.services || {};
     credentialServices = services;
+    let total = 0;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       const status = services[service] || {};
-      const count = Math.max(0, Number(status.count) || 0);
+      const count = status.configured ? Math.min(8, Math.max(0, Math.floor(Number(status.count) || 0))) : 0;
+      total += count;
       const node = $(field.state);
-      node.textContent = status.configured ? (count > 1 ? `已保存 ${count} 个账号` : "已保存") : "未填写";
+      node.textContent = `已保存 ${count} 个`;
       node.className = `api-state ${status.configured ? "ready" : "missing"}`;
       $(field.remove).hidden = !status.configured;
       $(field.remove).disabled = credentialBusy || !status.configured;
+      renderCredentialSavedRows(service, field, count);
     });
+    $("credentialSavedTotal").textContent = `共保存 ${total} 个密钥`;
   }
 
   async function loadCredentialStates() {
@@ -4452,24 +4619,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return payload;
   }
 
-  async function openCredentialSettings() {
-    if (credentialBusy || $("credentialDialog").open) return;
+  async function openCredentialSettings(tab = "reading") {
+    tab = tab === "answers" ? "answers" : "reading";
+    if (credentialClosing) return;
+    if ($("credentialDialog").open) return showCredentialTab(tab);
+    if (credentialBusy) return;
     const session = ++credentialSession;
     cancelCredentialFocus();
     resetCredentialInputs();
     renderCredentialStates({ services: {} });
+    $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
     Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
     $("credentialResult").textContent = "";
     $("credentialDialog").showModal();
+    const panelReady = showCredentialTab(tab);
     try {
       await loadCredentialStates();
-      if (session === credentialSession && $("credentialDialog").open) focusCredentialControl("credentialMineruInput", session, true);
+      if (session === credentialSession && $("credentialDialog").open && credentialTab === "reading") focusCredentialControl("credentialMineruInput", session, true);
     } catch (error) {
       if (session !== credentialSession || !$("credentialDialog").open) return;
+      $("credentialSavedTotal").textContent = "暂时无法读取密钥数量";
       $("credentialResult").textContent = error.message;
       toast(error.message, "error");
     }
+    await panelReady;
   }
+
+  window.APISettings = Object.freeze({ open: openCredentialSettings });
 
   async function refreshCredentialStatus(message, session) {
     let refreshed = false;
@@ -4607,7 +4783,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
   window.addEventListener("hashchange", () => {
-    if (window.location.pathname === "/settings") showSettingsTab(settingsTabFromHash(), { updateHash: false });
+    if (window.location.pathname === "/settings") {
+      showSettingsTab(settingsTabFromHash(), { updateHash: false });
+      if (window.location.hash === "#api") void openCredentialSettings("answers");
+    }
   });
 
   document.querySelectorAll("[data-settings-tab]").forEach((tab, index, tabs) => {
@@ -4696,7 +4875,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!modelFormDirty) showModelSaveResult("");
     showSettingsTab(settingsTabFromHash(), { updateHash: false });
     void loadStatus();
-    requestAnimationFrame(() => $("settingsTitle").focus({ preventScroll: true }));
+    requestAnimationFrame(() => { if (!anyDialogOpen()) $("settingsTitle").focus({ preventScroll: true }); });
   }
 
   $("settingsButton").addEventListener("click", (event) => {
@@ -4704,6 +4883,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
+  $("settingsAPIOpen").addEventListener("click", () => { void openCredentialSettings("answers"); });
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
   $("settingsAutoExpand").addEventListener("change", (event) => {
@@ -4739,7 +4919,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $(field.remove).addEventListener("click", () => deleteCredential(service));
   });
 
-  $("credentialDialog").addEventListener("cancel", (event) => { if (credentialBusy) event.preventDefault(); });
+  for (const [id, tab] of [["credentialReadingTab", "reading"], ["credentialAnswerTab", "answers"]]) {
+    $(id).addEventListener("click", () => { void showCredentialTab(tab); });
+    $(id).addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      const next = tab === "reading" ? "answers" : "reading";
+      void showCredentialTab(next);
+      $(next === "reading" ? "credentialReadingTab" : "credentialAnswerTab").focus();
+    });
+  }
+
+  $("credentialDialog").addEventListener("cancel", (event) => {
+    if (!requestCredentialClose({ native: true })) event.preventDefault();
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) hideAPISecrets(); });
+  window.addEventListener("pagehide", hideAPISecrets);
   $("credentialDialog").addEventListener("click", (event) => {
     if (credentialBusy && event.target === $("credentialDialog")) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
@@ -4748,8 +4943,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // Native close events are queued; reopening can happen before this runs.
     if ($("credentialDialog").open) return;
     const session = ++credentialSession;
+    credentialClosing = false;
+    credentialCloseTask = null;
     credentialStateRequest += 1;
     cancelCredentialFocus();
+    if (credentialAnswersMounted) window.LibraryAISettings?.deactivate?.();
     resetCredentialInputs();
     $("credentialResult").textContent = "";
     focusCredentialControl("settingsCredentialOpen", session, false);
@@ -4859,9 +5057,27 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     void saveModelSettings();
   });
 
+  credentialModelGuard = {
+    hasUnsavedChanges: () => modelFormDirty,
+    isMutating: () => Boolean(lastModelSave && !lastModelSave.succeeded && !lastModelSave.failed),
+    async prepareClose() {
+      if (!modelFormDirty) return true;
+      if (lastModelSave?.failed && lastModelSave.signature === JSON.stringify(readModelSettings())) {
+        showModelSaveResult("模型设置尚未保存，请重试保存后再关闭。", { retry: true });
+        return false;
+      }
+      await saveModelSettings();
+      return !modelFormDirty;
+    }
+  };
+
   async function prepareSettingsLeave() {
+    if ($("credentialDialog").open) {
+      if (!requestCredentialClose() && credentialCloseTask) await credentialCloseTask;
+      if ($("credentialDialog").open) return false;
+    }
     if (window.location.pathname !== "/settings") return true;
-    if (window.LibraryAISettings?.isBusy?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
+    if (window.LibraryAISettings?.isMutating?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
     if (modelFormDirty) {
       const signature = JSON.stringify(readModelSettings());
       if (lastModelSave?.failed && lastModelSave.signature === signature) {
@@ -4872,7 +5088,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       await modelSaving;
       if (modelFormDirty) return false;
     }
-    if (window.LibraryAISettings?.isBusy?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
+    if (window.LibraryAISettings?.isMutating?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
     if (window.LibraryAISettings?.hasUnsavedChanges?.()) {
       const discard = await confirmDialog({ title: "标签与答案设置还没保存", text: "离开会放弃本次设置改动；已经保存的开关和密钥保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
       if (!discard) return false;
@@ -5557,12 +5773,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderMeter(current);
   }
 
-  function clearCropDraftAttention() {
+  function clearCropDraftAttention({ deferRender = false } = {}) {
     const id = dialog.question?.id;
-    if (id == null || !state.cropDraftAttention.delete(id)) return false;
-    state.rendered.delete(id);
-    syncCropDraftClassification();
-    return true;
+    const frozen = state.cropDraftAttention.get(id);
+    if (id == null || !frozen || !state.cropDraftAttention.delete(id)) return false;
+    const q = questionById(id) || dialog.question;
+    const approved = isApproved(q);
+    const changed = frozen.dirty || frozen.wasDirty
+      || frozen.todo !== needsCheck(q) || frozen.green !== needsGeneralReview(q)
+      || frozen.approved !== approved || frozen.ai !== isAiApproved(q)
+      || frozen.waiting !== (q.state === "waiting" || q.state === "reading")
+      || frozen.red !== (!approved && q.state === "red")
+      || frozen.unpublished !== (approved && !(q.publication && q.publication.up_to_date));
+    // An untouched editor with unchanged backend classification needs no card
+    // invalidation, full-list scan or count recomputation when it closes.
+    if (!deferRender || changed) state.rendered.delete(id);
+    if (!deferRender) syncCropDraftClassification();
+    return !deferRender || Boolean(changed);
   }
 
   function freezeCropDraftClassification() {
@@ -5574,7 +5801,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // Freeze the entering classification for this editor session. Local
     // drafts must neither move a card nor disagree with its filter count.
     state.cropDraftAttention.set(id, {
-      dirty: false, todo: needsCheck(q), green: needsGeneralReview(q), approved,
+      dirty: false, wasDirty: false, todo: needsCheck(q), green: needsGeneralReview(q), approved,
       ai: isAiApproved(q), waiting: q.state === "waiting" || q.state === "reading",
       red: !approved && q.state === "red",
       unpublished: approved && !(q.publication && q.publication.up_to_date)
@@ -5591,6 +5818,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const frozen = state.cropDraftAttention.get(id);
     if (!frozen || frozen.dirty === needsAttention) return;
     frozen.dirty = needsAttention;
+    if (needsAttention) frozen.wasDirty = true;
   }
 
   function releasePageDialog() {
@@ -5599,7 +5827,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.session += 1;
     dialog.lastPage = dialog.page;
     cancelFigureSketch();
-    const clearedAttention = clearCropDraftAttention();
+    const clearedAttention = clearCropDraftAttention({ deferRender: true });
     editGuard.release(CROP_EDIT_KEY);
     if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
     dialog.zoomFrame = 0;
@@ -5618,9 +5846,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     showCropGuide("");
     if (clearedAttention) {
       const paperId = state.paperId, session = dialog.session;
-      setTimeout(() => {
-        if (state.paperId === paperId && dialog.session === session && !dialog.active) renderCards();
-      }, 0);
+      // A timer queued directly from the close event can run before paint.
+      // Let the closed dialog paint first, then rebuild only if this exact
+      // editor session still owns the cleanup. A reopened editor is untouched.
+      requestAnimationFrame(() => setTimeout(() => {
+        if (state.paperId !== paperId || dialog.session !== session || dialog.active) return;
+        syncCropDraftClassification();
+        renderCards();
+      }, 0));
     }
   }
 
@@ -8408,7 +8641,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();
-      if (window.LibraryAISettings?.mount) await window.LibraryAISettings.mount($("libraryAISettingsMount"));
+      if (window.location.hash === "#api") void openCredentialSettings("answers");
       if (window.ExportSettings?.mount) await window.ExportSettings.mount($("exportSettingsMount"));
       return;
     }

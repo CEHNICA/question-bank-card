@@ -81,6 +81,10 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   await viewer.open(item);
   const text = byClass("question-viewer-answers").textContent;
   assert(text.includes("原卷推导") && text.includes("人工保存版本") && text.includes("有效未核对参考") && text.includes("未核对"));
+  const answerHistory = byClass("question-viewer-answer-history");
+  assert(answerHistory && !answerHistory.open, "Source and old AI draft remain in closed history after saving an answer");
+  const primaryAnswer = byClass("question-viewer-answers").children.filter(child => child !== answerHistory).map(child => child.textContent).join("");
+  assert(primaryAnswer.includes("人工保存版本")); assert(!primaryAnswer.includes("有效未核对参考")); assert(!primaryAnswer.includes("原卷推导"));
   assert.equal(JSON.stringify(item), snapshot, "Viewing never changes the publication, basket or a solution selection");
 
   const source = { ...item, id: "source-pub", content: { body_mode: "source_image", answer: "A", question_images: [

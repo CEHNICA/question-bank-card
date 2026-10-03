@@ -1,23 +1,26 @@
 (() => {
   "use strict";
   const API = "/api/settings/library-ai";
-  const state = { current: null, dirty: false, busy: false, session: 0, inline: false, active: false, needsKeyReplacement: false };
+  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, needsKeyReplacement: false };
   const defaults = {
     deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-v4-pro", supports_images: false },
     doubao: { base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "", supports_images: false },
     minimax: { base_url: "https://api.minimax.cn/v1", model: "MiniMax-M3.1-Flash-Preview", supports_images: true },
     custom: { base_url: "", model: "", supports_images: false }
   };
+  const providerNames = { deepseek: "DeepSeek", minimax: "MiniMax", doubao: "豆包", custom: "其他兼容服务" };
+  const eyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
   const fields = ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
     "libraryAIModel", "libraryAIImages", "libraryAIThinking", "libraryAIKey", "libraryAIClearKey"];
   let dialog;
-  let revealEpoch = 0, revealController = null, revealTimer = null, revealedStored = false, revealing = false;
+  const requests = new Map();
+  let revealEpoch = 0, revealController = null, revealTimer = null, revealedProvider = null, revealing = false;
   const $ = (id) => document.getElementById(id);
 
   const isAPI = () => true;
   const isActive = () => state.inline ? state.active : Boolean(dialog?.open);
 
-  function create(host) {
+  function create(host, { embedded = false } = {}) {
     if (dialog) return;
     const style = document.createElement("style");
     style.textContent = `
@@ -30,9 +33,9 @@
       .library-ai-section p{margin:0;font-size:13px;line-height:1.6;color:var(--ink-2)}
       .library-ai-section label{font-size:13px;line-height:1.5}
       .library-ai-section input[type=text],.library-ai-section input[type=password],.library-ai-section select{width:100%;min-height:38px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);color:var(--ink)}
-      .library-ai-switch{display:flex;gap:9px;align-items:flex-start;cursor:pointer}
+      .library-ai-switch{display:inline-flex;width:fit-content;max-width:100%;justify-self:start;gap:9px;align-items:flex-start;cursor:pointer}
       .library-ai-switch input{flex:none;margin-top:4px;accent-color:var(--accent)}
-      .library-ai-switch span{display:grid;gap:2px}.library-ai-switch small{color:var(--muted)}
+      .library-ai-switch span{display:grid;min-width:0;gap:2px}.library-ai-switch small{color:var(--muted)}
       .library-ai-timing{margin-left:25px}.library-ai-timing[hidden]{display:none}
       .library-ai-advanced>summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:4px 0}
       .library-ai-advanced[open]>summary{margin-bottom:10px}
@@ -62,10 +65,16 @@
       .library-ai-help p{margin-top:8px}
       .library-ai-key{display:flex;gap:8px;align-items:center}.library-ai-key input{min-width:0;flex:1}
       .library-ai-key .button{flex:none;padding:9px 12px;min-height:38px}.library-ai-key svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
+      .library-ai-stored-keys{display:grid;gap:8px}.library-ai-stored-key{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px 10px;align-items:center}
+      .library-ai-stored-key>span{font-size:12px;color:var(--ink-2)}.library-ai-stored-key>input{grid-column:1/-1}
+      .library-ai-stored-key>.button{min-height:34px;padding:5px 9px;justify-self:end;font-size:12px}
+      .library-ai-stored-key>.button svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
+      .library-ai-stored-key>.button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
       @media(max-width:480px){.library-ai-body{padding:12px}.library-ai-actions{padding:12px}.library-ai-dialog .dialog-head{padding:14px}}
     `;
     document.head.append(style);
     state.inline = Boolean(host);
+    state.embedded = embedded;
     dialog = document.createElement(state.inline ? "section" : "dialog");
     dialog.id = "libraryAISettingsDialog";
     dialog.className = state.inline ? "library-ai-panel" : "library-ai-dialog";
@@ -103,6 +112,10 @@
                 </div><p id="libraryAIKeyHelp">默认隐藏。点击眼睛可临时查看，收起后恢复隐藏。</p>
                 <label class="library-ai-switch"><input id="libraryAIClearKey" type="checkbox"><span>清除已保存的 API Key</span></label>
                 <p>密钥用当前 Windows 用户加密保存。保存不联网；更换服务商后请使用对应的密钥。</p>
+                <div class="library-ai-stored-keys" aria-label="各服务商已保存的密钥">
+                  <strong>已保存的密钥</strong><p>星号仅表示已保存，不代表密钥长度。查看其他服务商不会切换当前 API 设置。</p>
+                  ${Object.entries(providerNames).map(([provider, name]) => `<div class="library-ai-stored-key"><strong>${name}</strong><span id="libraryAIStoredMask-${provider}">未保存</span><button id="libraryAIStoredReveal-${provider}" class="button" type="button" aria-label="查看${name}第 1 条已保存的密钥" title="查看${name}第 1 条已保存的密钥" aria-pressed="false" hidden>${eyeIcon}</button><input id="libraryAIStoredValue-${provider}" type="password" readonly hidden autocomplete="off" data-lpignore="true" data-1p-ignore="true" aria-label="${name}第 1 条已保存的密钥"></div>`).join("")}
+                </div>
                 <strong>先确认能力，再生成</strong><p>保存后，用软件自带的合成题测试连接与响应；开启图像时还会测试合成图，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生费用或消耗订阅额度。</p>
                 <label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>我确认发起一次可能计费的 API 测试</span></label>
                 <button id="libraryAITest" class="button" type="button" disabled>测试连接</button>
@@ -115,37 +128,39 @@
     (host || document.body).append(dialog);
     $("libraryAISettingsForm").addEventListener("submit", (event) => { event.preventDefault(); void save(); });
     for (const id of fields) {
+      if (id === "libraryAIMode") continue;
       const changed = () => {
-        if (id === "libraryAIKey" && revealing) hideKey();
-        state.dirty = true;
+        if (id === "libraryAIKey" && (revealing || revealedProvider)) hideKey();
         if (id === "libraryAIClearKey") {
           hideKey();
           $("libraryAIKey").disabled = $(id).checked;
           if ($(id).checked) { $("libraryAIKey").value = ""; state.needsKeyReplacement = false; }
         }
         if (id === "libraryAIKey" && $(id).value.trim()) state.needsKeyReplacement = false;
-        if (id === "libraryAIMode") { clearSecret(); renderMode(); }
         if (["libraryAITags", "libraryAIAnswer"].includes(id)) renderTiming();
-        if (id === "libraryAIProvider") {
-          const preset = defaults[$(id).value];
+        const switchingProvider = id === "libraryAIProvider" && $(id).value !== state.provider;
+        if (switchingProvider) {
+          state.provider = $(id).value;
+          const preset = state.current?.provider === state.provider ? state.current : defaults[state.provider];
           if (preset) {
             $("libraryAIBaseURL").value = preset.base_url;
             $("libraryAIModel").value = preset.model;
             $("libraryAIImages").checked = preset.supports_images;
-            $("libraryAIThinking").checked = true;
+            $("libraryAIThinking").checked = preset.thinking !== false;
           }
           clearSecret();
         }
-        $("libraryAIResult").textContent = id === "libraryAIProvider" ? "服务商已切换，请使用对应的密钥，再保存。" :
+        updateButtons();
+        $("libraryAIResult").textContent = !state.dirty ? "" : switchingProvider ? "服务商已切换，请使用对应的密钥，再保存。" :
           state.needsKeyReplacement ? "新密钥未保存，请重新填写 API Key 后再保存。" :
             isAPI() ? "有未保存的设置；保存后再测试。" : "有未保存的设置。";
-        updateButtons();
       };
       $(id).addEventListener("input", changed);
-      if (["libraryAIMode", "libraryAIProvider"].includes(id)) $(id).addEventListener("change", changed);
+      if (id === "libraryAIProvider") $(id).addEventListener("change", changed);
     }
     $("libraryAITestConsent").addEventListener("change", updateButtons);
     $("libraryAIKeyReveal").addEventListener("click", () => { void toggleKey(); });
+    for (const provider of Object.keys(providerNames)) $(`libraryAIStoredReveal-${provider}`).addEventListener("click", () => { void toggleStoredKey(provider); });
     $("libraryAITest").addEventListener("click", () => { void test(); });
     $("libraryAICancel").addEventListener("click", close);
     $("libraryAIClose").addEventListener("click", close);
@@ -177,42 +192,67 @@
     revealTimer = null; revealing = false;
     const input = $("libraryAIKey");
     if (!input) return;
-    if (revealedStored) input.value = "";
-    revealedStored = false; input.readOnly = false; input.type = "password";
+    revealedProvider = null; input.readOnly = false; input.type = "password";
+    for (const provider of Object.keys(providerNames)) {
+      const stored = $(`libraryAIStoredValue-${provider}`), eye = $(`libraryAIStoredReveal-${provider}`);
+      if (stored) { stored.value = ""; stored.type = "password"; stored.hidden = true; }
+      if (eye) { eye.setAttribute("aria-pressed", "false"); eye.setAttribute("aria-label", `查看${providerNames[provider]}第 1 条已保存的密钥`); eye.title = `查看${providerNames[provider]}第 1 条已保存的密钥`; }
+    }
     const button = $("libraryAIKeyReveal");
     if (button) { button.setAttribute("aria-pressed", "false"); button.setAttribute("aria-label", "查看密钥"); button.title = "查看密钥"; }
     if ($("libraryAIKeyHelp")) $("libraryAIKeyHelp").textContent = "默认隐藏。点击眼睛可临时查看，收起后恢复隐藏。";
   }
 
-  function showKey(stored) {
-    revealedStored = stored;
-    $("libraryAIKey").readOnly = stored;
+  function showKey() {
+    $("libraryAIKey").readOnly = false;
     $("libraryAIKey").type = "text";
     $("libraryAIKeyReveal").setAttribute("aria-pressed", "true");
     $("libraryAIKeyReveal").setAttribute("aria-label", "隐藏密钥");
     $("libraryAIKeyReveal").title = "隐藏密钥";
-    $("libraryAIKeyHelp").textContent = stored ? "正在查看已保存的密钥。收起后可填写新密钥；查看不会修改设置。" : "正在查看新填写的密钥，保存后会清空显示。";
+    $("libraryAIKeyHelp").textContent = "正在查看新填写的密钥，保存后会清空显示。";
     revealTimer = setTimeout(() => { hideKey(); updateButtons(); }, 60000);
   }
 
   async function toggleKey() {
     if (state.busy || !state.current || $("libraryAIClearKey").checked) return;
-    if (revealing || $("libraryAIKey").type === "text") { hideKey(); updateButtons(); return; }
-    if ($("libraryAIKey").value) { showKey(false); return; }
-    const provider = $("libraryAIProvider").value;
-    if (provider !== state.current.provider || !state.current.key_configured) return;
+    if (revealing || revealedProvider || $("libraryAIKey").type === "text") { hideKey(); updateButtons(); return; }
+    if ($("libraryAIKey").value) { showKey(); return; }
+    await toggleStoredKey($("libraryAIProvider").value);
+  }
+
+  function storedKeyCount(provider) {
+    const metadata = state.current?.keys?.[provider];
+    if (metadata) return metadata.configured === true && metadata.count === 1 ? 1 : 0;
+    return provider === state.current?.provider && state.current.key_configured === true ? 1 : 0;
+  }
+
+  function renderSavedKeys() {
+    for (const provider of Object.keys(providerNames)) {
+      const count = storedKeyCount(provider);
+      $(`libraryAIStoredMask-${provider}`).textContent = count ? "•••••••• · 已保存 1 条" : "未保存";
+      $(`libraryAIStoredReveal-${provider}`).hidden = !count;
+    }
+  }
+
+  async function toggleStoredKey(provider) {
+    if (state.busy || !state.current || !storedKeyCount(provider) || (provider === $("libraryAIProvider").value && $("libraryAIClearKey").checked)) return;
+    if (revealing || revealedProvider === provider) { hideKey(); updateButtons(); return; }
+    hideKey();
     const epoch = ++revealEpoch, session = state.session;
     const controller = new AbortController(); revealController = controller; revealing = true;
     const timeout = setTimeout(() => controller.abort(), 15000);
     $("libraryAIKeyHelp").textContent = "正在读取密钥…再点眼睛可取消。";
     try {
       const response = await fetch(`${API}/key/reveal`, { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
-        body: JSON.stringify({ provider }), cache: "no-store", signal: controller.signal });
+        body: JSON.stringify({ provider, index: 0 }), cache: "no-store", signal: controller.signal });
       const body = await response.json();
-      if (epoch !== revealEpoch || session !== state.session || !isActive() || provider !== $("libraryAIProvider").value) return;
-      if (!response.ok || body.provider !== provider || typeof body.key !== "string" || !body.key) throw new Error("无法查看密钥，请重新读取设置后重试。");
-      $("libraryAIKey").value = body.key;
-      showKey(true);
+      if (epoch !== revealEpoch || session !== state.session || !isActive() || controller.signal.aborted) return;
+      if (!response.ok || body.provider !== provider || (body.index !== undefined && body.index !== 0) || typeof body.key !== "string" || !body.key) throw new Error("无法查看密钥，请重新读取设置后重试。");
+      const stored = $(`libraryAIStoredValue-${provider}`); stored.value = body.key; stored.type = "text"; stored.hidden = false;
+      const eye = $(`libraryAIStoredReveal-${provider}`); eye.setAttribute("aria-pressed", "true"); eye.setAttribute("aria-label", `隐藏${providerNames[provider]}第 1 条已保存的密钥`); eye.title = `隐藏${providerNames[provider]}第 1 条已保存的密钥`;
+      revealedProvider = provider;
+      $("libraryAIKeyHelp").textContent = `正在查看${providerNames[provider]}已保存的密钥；查看不会修改当前服务商或待保存的新密钥。`;
+      revealTimer = setTimeout(() => { hideKey(); updateButtons(); }, 60000);
     } catch (error) {
       if (epoch === revealEpoch && session === state.session && isActive()) $("libraryAIKeyHelp").textContent = error.name === "AbortError" ? "读取已取消，可再次点击眼睛查看。" : "无法查看密钥，请重新读取设置后重试。";
     } finally {
@@ -243,7 +283,23 @@
     $("libraryAIThinking").disabled = state.busy || !state.current || forcedThinking;
   }
 
+  function effectiveSettings() {
+    return JSON.stringify({
+      features: { knowledge_tags: $("libraryAITags").checked, ai_answer: $("libraryAIAnswer").checked },
+      on_intake: { tags: $("libraryAITagsIntake").checked, answer: $("libraryAIAnswerIntake").checked },
+      provider: $("libraryAIProvider").value, base_url: $("libraryAIBaseURL").value.trim(), model: $("libraryAIModel").value.trim(),
+      supports_images: $("libraryAIImages").checked, thinking: $("libraryAIThinking").checked,
+      key: $("libraryAIClearKey").checked ? { action: "clear" } : $("libraryAIKey").value.trim() ? { action: "replace", value: $("libraryAIKey").value.trim() } : { action: "keep" }
+    });
+  }
+
+  function syncDirty() {
+    state.dirty = Boolean(isActive() && state.current && (state.needsKeyReplacement || (state.baseline !== null && effectiveSettings() !== state.baseline)));
+    return state.dirty;
+  }
+
   function updateButtons() {
+    renderCapabilities(); syncDirty();
     $("libraryAISave").disabled = state.busy || !state.current || (isAPI() && state.needsKeyReplacement);
     $("libraryAITest").disabled = state.busy || state.dirty || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked;
     for (const id of fields) $(id).disabled = state.busy || !state.current;
@@ -252,7 +308,8 @@
     $("libraryAITestConsent").disabled = state.busy || !state.current || !isAPI();
     $("libraryAIKey").disabled = state.busy || !state.current || $("libraryAIClearKey").checked;
     $("libraryAIKeyReveal").disabled = state.busy || !state.current || $("libraryAIClearKey").checked ||
-      (!revealing && !$("libraryAIKey").value && (!state.current?.key_configured || $("libraryAIProvider").value !== state.current?.provider));
+      (!revealing && !revealedProvider && !$("libraryAIKey").value && !storedKeyCount($("libraryAIProvider").value));
+    for (const provider of Object.keys(providerNames)) $(`libraryAIStoredReveal-${provider}`).disabled = state.busy || !state.current || !storedKeyCount(provider) || (provider === $("libraryAIProvider").value && $("libraryAIClearKey").checked);
     renderCapabilities();
     if (state.inline) {
       $("libraryAICancel").disabled = state.busy;
@@ -262,6 +319,7 @@
 
   async function request(url, payload) {
     const controller = new AbortController();
+    requests.set(controller, { mutating: payload !== undefined });
     const timeout = setTimeout(() => controller.abort(), url.endsWith("/test") ? 420000 : 15000);
     try {
     const response = await fetch(url, { cache: "no-store", signal: controller.signal, ...(payload === undefined ? {} : {
@@ -281,12 +339,12 @@
     } catch (error) {
       if (error.name === "AbortError") throw new Error(payload === undefined ? "读取超时，请重新读取设置。" : "操作结果尚未确认，请稍后重新读取设置；不会自动重试或再次测试。");
       throw error;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); requests.delete(controller); }
   }
 
   function render(body) {
     state.current = body;
-    state.dirty = false;
+    state.baseline = null; clearSecret(); state.provider = body.provider;
     $("libraryAITags").checked = body.features.knowledge_tags;
     $("libraryAIAnswer").checked = body.features.ai_answer;
     $("libraryAITagsIntake").checked = body.on_intake.tags;
@@ -300,29 +358,44 @@
     $("libraryAIThinking").checked = body.thinking !== false;
     $("libraryAIAdvanced").open = body.mode === "api" || $("libraryAIAdvanced").open;
     renderMode();
+    renderCapabilities(); renderSavedKeys();
+    state.baseline = effectiveSettings(); state.dirty = false;
     $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "请为答题助手配置 API，保存并测试后再生成。";
     $("libraryAIState").classList.toggle("error", !body.api_ready);
   }
 
   async function open() {
-    create();
-    if (state.inline) { window.location.hash = "ai"; return; }
-    if (isActive()) return;
-    dialog.showModal();
-    await load();
+    if (window.APISettings?.open) return window.APISettings.open("answers");
+    window.location.href = "/settings#api";
   }
 
-  async function mount(host) {
+  async function mount(host, options = {}) {
     if (!host) return;
-    create(host);
-    if (!state.inline || state.active) return;
+    create(host, options);
+    return activate();
+  }
+
+  async function activate() {
+    if (!dialog || !state.inline || state.active) return;
     state.active = true;
     await load();
   }
 
+  function deactivate() {
+    if (isMutating() || syncDirty()) return false;
+    state.active = false; ++state.session;
+    for (const [controller, request] of requests) if (!request.mutating) controller.abort();
+    clearSecret(); state.current = null; state.baseline = null;
+    state.dirty = false; state.busy = false; state.operation = null;
+    if (dialog) updateButtons();
+    return true;
+  }
+
+  function isMutating() { return state.busy && ["save", "test"].includes(state.operation); }
+
   async function load() {
     const session = ++state.session;
-    state.current = null; state.dirty = false; state.busy = true;
+    state.current = null; state.baseline = null; state.dirty = false; state.busy = true; state.operation = "load";
     clearSecret();
     $("libraryAIAdvanced").open = false;
     $("libraryAITagsTiming").hidden = true;
@@ -339,7 +412,7 @@
     } catch (error) {
       if (session === state.session && isActive()) $("libraryAIState").textContent = error.message;
     } finally {
-      if (session === state.session && isActive()) { state.busy = false; updateButtons(); }
+      if (session === state.session && isActive()) { state.busy = false; state.operation = null; updateButtons(); }
     }
   }
 
@@ -358,7 +431,7 @@
 
   function close() {
     if (state.inline) { discard(); return; }
-    if (state.dirty && !window.confirm("这些设置还没保存。放弃更改并关闭？")) return;
+    if (syncDirty() && !window.confirm("这些设置还没保存。放弃更改并关闭？")) return;
     dialog.close();
   }
 
@@ -374,14 +447,14 @@
       on_intake: { tags: $("libraryAITagsIntake").checked, answer: $("libraryAIAnswerIntake").checked } };
     let key, failedKeyAction;
     if (isAPI()) {
-      const value = revealedStored ? "" : $("libraryAIKey").value.trim();
+      const value = $("libraryAIKey").value.trim();
       key = $("libraryAIClearKey").checked ? { action: "clear" } : value ? { action: "replace", value } : { action: "keep" };
       Object.assign(payload, { provider: $("libraryAIProvider").value, base_url: $("libraryAIBaseURL").value.trim(),
         model: $("libraryAIModel").value.trim(), supports_images: $("libraryAIImages").checked,
         thinking: $("libraryAIThinking").checked, reasoning_effort: "high", key });
     }
     hideKey();
-    state.busy = true; updateButtons();
+    state.busy = true; state.operation = "save"; updateButtons();
     $("libraryAIResult").textContent = payload.mode === "api" ? "正在加密保存…" : "正在保存设置…";
     try {
       const body = await request(API, payload);
@@ -400,15 +473,15 @@
         clearSecret();
         state.needsKeyReplacement = failedKeyAction === "replace";
         $("libraryAIClearKey").checked = failedKeyAction === "clear";
-        state.busy = false; updateButtons();
+        state.busy = false; state.operation = null; updateButtons();
       }
     }
   }
 
   async function test() {
-    if (state.busy || state.dirty || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked) return;
+    if (state.busy || syncDirty() || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked) return;
     const session = state.session;
-    state.busy = true; updateButtons();
+    state.busy = true; state.operation = "test"; updateButtons();
     $("libraryAIResult").textContent = "正在用合成题测试一次，请稍候…";
     try {
       const body = await request(`${API}/test`, { confirm: true });
@@ -421,15 +494,15 @@
         try { const body = await request(API); if (session === state.session && isActive()) render(body); } catch { /* 保留实际错误 */ }
       }
     } finally {
-      if (session === state.session && isActive()) { $("libraryAITestConsent").checked = false; state.busy = false; updateButtons(); }
+      if (session === state.session && isActive()) { $("libraryAITestConsent").checked = false; state.busy = false; state.operation = null; updateButtons(); }
     }
   }
 
-  window.LibraryAISettings = Object.freeze({ open, mount, discard,
-    hasUnsavedChanges: () => state.dirty, isBusy: () => state.busy });
+  window.LibraryAISettings = Object.freeze({ open, mount, activate, deactivate, hideSecrets: hideKey, discard,
+    hasUnsavedChanges: syncDirty, isBusy: () => state.busy, isMutating });
   window.addEventListener("beforeunload", (event) => {
     hideKey();
-    if (!state.inline || !isActive() || (!state.dirty && !state.busy)) return;
+    if (!state.inline || !isActive() || (!syncDirty() && !state.busy)) return;
     event.preventDefault();
     event.returnValue = "";
   });
