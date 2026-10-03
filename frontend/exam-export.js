@@ -86,6 +86,7 @@
   }
 
   function selectedAnswer(item, options) {
+    if (item.solution_revision !== "origin" && item.solution && (String(item.solution.answer ?? "").trim() || String(item.solution.analysis ?? "").trim() || item.solution.figures?.length)) return { content: item.solution, ai: false, edited: true };
     const original = item.content || {};
     if (String(original.answer ?? "").trim()) return { content: original, ai: false };
     const ai = options.ai_answers ? item.ai_answer : null;
@@ -139,7 +140,7 @@
     return name || "试卷.docx";
   }
 
-  async function download(items, { title, print_options, format = "docx" } = {}) {
+  async function download(items, { title, print_options, solutions, format = "docx" } = {}) {
     if (downloading) throw new Error("正在导出，请稍候。");
     if (!Array.isArray(items) || !items.length) throw new Error("请先选题，再导出试卷。");
     if (!["docx", "split", "pdf"].includes(format)) throw new Error("请选择 PDF、Word 或分卷 Word。");
@@ -154,7 +155,9 @@
         rendered_fields[items[index].id] = serializeItem(items[index], options, format, index);
         if (index % 8 === 0) await new Promise((resolve) => root.setTimeout(resolve, 0));
       }
-      const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, format });
+      const selectedIds = new Set(items.map(item => item.id));
+      const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
+      const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");
       const response = await root.fetch(format === "pdf" ? "/api/library/export-pdf" : "/api/library/export-docx", { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body });
       if (!response.ok) {

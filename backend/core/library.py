@@ -367,6 +367,10 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
         # Fingerprint binding is evidence of which task was generated, never
         # evidence that the mathematical answer has been checked by a person.
         extras["ai_answer"] = deepcopy(answer)
+    if previous.extras.get("solution_id"):
+        # The old immutable solution and its assets stay with the old version.
+        # Never silently apply an edited solution to a replacement question.
+        extras["solution_needs_review_id"] = previous.extras["solution_id"]
     return extras
 
 
@@ -574,6 +578,13 @@ def withdraw(publication: PublishedQuestion) -> PublishedQuestion:
 
 
 def publication_json(publication: PublishedQuestion) -> dict:
+    from . import library_solutions
+    solution, solution_error = None, ""
+    if (publication.extras or {}).get("solution_id"):
+        try:
+            solution = library_solutions.solution_json(library_solutions.selected(publication))
+        except library_solutions.SolutionError as error:
+            solution_error = str(error)
     return {
         "id": str(publication.id),
         "draft_id": publication.question_id,
@@ -592,6 +603,10 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),
         "tags": tags_of(publication.extras),
         "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
+        "solution": solution,
+        "solution_needs_review": bool(solution_error or (publication.extras or {}).get("solution_needs_review_id")),
+        "previous_solution_id": (publication.extras or {}).get("solution_needs_review_id"),
+        "solution_error": solution_error,
     }
 
 

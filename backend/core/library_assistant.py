@@ -84,7 +84,7 @@ def _available(publication, kind):
 def _job_json(job):
     return {"id": str(job.pk), "publication_id": str(job.publication_id), "kind": job.kind,
             "executor": job.executor, "status": job.status, "fingerprint": job.fingerprint,
-            "agent": job.agent}
+            "agent": job.agent, "solution_scope": job.solution_scope, "result": job.result}
 
 
 def list_tasks(ids=None, limit=50):
@@ -106,7 +106,7 @@ def list_tasks(ids=None, limit=50):
             stale = True
         tasks.append(_job_json(job) | {"source_filename": job.publication.source_filename,
                                      "number": job.publication.number,
-                                     "enabled": features.enabled(library_jobs.FEATURE_OF[job.kind]), "stale": stale})
+                                     "enabled": job.solution_scope or features.enabled(library_jobs.FEATURE_OF[job.kind]), "stale": stale})
     state = library_ai_settings.public_status()
     return {"tasks": tasks, "total": total, "limit": limit, "mode": state["mode"],
             "message": "待当前助手通过本地工具处理；关闭的功能不会写回，过期任务需领取新版。"}
@@ -163,13 +163,15 @@ def prepare(payload):
         fingerprint = _current(publication)
         images = _images(publication)
         points = knowledge.load()
-        for kind in kinds:
-            _enabled(kind)
-            _available(publication, kind)
         jobs = []
         for kind in kinds:
+            scoped = publication.jobs.filter(kind=kind, solution_scope=True, executor="assistant", status__in=library_jobs.ACTIVE,
+                                             fingerprint=fingerprint).first() if kind == "answer" else None
+            if scoped is None:
+                _enabled(kind)
+                _available(publication, kind)
             try:
-                job = library_jobs.enqueue(publication, kind, agent=agent)
+                job = scoped or library_jobs.enqueue(publication, kind, agent=agent)
             except (library_jobs.JobError, library_ai_settings.SettingsError) as error:
                 raise AssistantError(str(error)) from None
             if job.executor != LibraryJob.Executor.ASSISTANT or job.fingerprint != fingerprint:
@@ -225,30 +227,37 @@ def complete(payload):
             raise AssistantError("执行方式已改为 API，旧助手任务未写回。")
         if not job.agent or job.agent != agent:
             raise AssistantError("请先由实际助手领取任务，并沿用领取时的助手名称。")
-        _enabled(job.kind)
+        if not job.solution_scope:
+            _enabled(job.kind)
         live = _current(publication)
         if fingerprint != job.fingerprint or fingerprint != live:
             raise AssistantError("题面、配图或入库版已变化，旧助手结果未保存；请领取当前版本。")
         _images(publication)
         # Reading/validating figures can take time; check again immediately
         # before the write, including a switch closed while images were read.
-        _enabled(job.kind)
+        if not job.solution_scope:
+            _enabled(job.kind)
         if _current(publication) != fingerprint or library_ai_settings.public_status()["mode"] != "assistant":
             raise AssistantError("核验期间题目或执行设置已变化，旧助手结果未保存。")
         if job.kind == "tags" and any(tag not in {item["point"] for item in knowledge.load()} for tag in result["tags"]):
             raise AssistantError("知识点目录已变化，请按当前目录重新提交。")
-        _available(publication, job.kind)
+        if not job.solution_scope:
+            _available(publication, job.kind)
         at = timezone.now().isoformat()
         extras = deepcopy(publication.extras or {})
-        if job.kind == "answer":
+        if job.solution_scope:
+            job.result = {**result, "engine": agent, "agent": agent, "executor": "assistant",
+                          "at": at, "publication_id": str(publication.pk), "fingerprint": fingerprint, "checked": False}
+        elif job.kind == "answer":
             extras["ai_answer"] = {**result, "engine": agent, "agent": agent, "executor": "assistant",
                                    "at": at, "publication_id": str(publication.pk), "fingerprint": fingerprint, "checked": False}
         else:
             extras.update(**result, tags_source=agent, tags_agent=agent, tags_executor="assistant", tags_checked=False,
                           tags_at=at, tags_publication_id=str(publication.pk), tags_fingerprint=fingerprint)
-        library.save_extras(publication, extras)
+        if not job.solution_scope:
+            library.save_extras(publication, extras)
         job.status, job.error = LibraryJob.Status.DONE, ""
-        job.save(update_fields=["status", "error", "updated_at"])
+        job.save(update_fields=["status", "error", "result", "updated_at"])
         return {"job": _job_json(job), "publication": library.publication_json(publication)}
 
 

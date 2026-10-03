@@ -17,10 +17,11 @@ assert.doesNotMatch(js, /ui\.answers/);
 assert.match(js, /QB\.renderQuestion\(paper, item\.content, \{ showNumber: false, showAnswer: "none" \}\);/);
 // One toggle per question, holding the paper's answer and the AI's (when switched on).
 const reveal = js.slice(js.indexOf("function answerReveal(item)"), js.indexOf("function extrasNode(item)"));
-assert.match(reveal, /if \(!original && !ai\) return null;/);
+assert.match(reveal, /if \(!original && !ai && !saved\) return null;/);
 assert.match(reveal, /node\("span", "when-closed", "看答案"\), node\("span", "when-open", "收起答案"\)/);
 assert.match(reveal, /QB\.answerRows\(document, content\)/);
 assert.match(reveal, /"AI 参考答案 · 未核对"/);
+assert.match(reveal, /solutions\.render\(body, saved, \{ node, QB \}\)/);
 // What is open stays open when the list redraws.
 assert.match(reveal, /box\.open = state\.opened\.has\(item\.id\);/);
 assert.match(js, /state\.opened\.has\(item\.id\), state\.tag\]\);/);

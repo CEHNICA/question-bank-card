@@ -372,7 +372,20 @@ def _selected(content, extras, use_ai):
 
 def _has_selected_answers(captured):
     return any(str(item["selected"].get("answer") or "").strip()
-               or str(item["selected"].get("analysis") or "").strip() for item in captured)
+               or str(item["selected"].get("analysis") or "").strip()
+               or item.get("solution_images") for item in captured)
+
+
+def _solution_selection(publication, use_ai, revision=None):
+    from . import library_solutions
+    try:
+        solution = library_solutions.selected(publication, revision)
+    except library_solutions.SolutionError as error:
+        raise ExportError(str(error), error.status) from None
+    if solution is not None:
+        return {"answer": solution.answer, "analysis": solution.analysis}, False, solution
+    selected, is_ai = _selected(publication.content, publication.extras, use_ai)
+    return selected, is_ai, None
 
 
 def _effective_document(captured, mode):
@@ -426,7 +439,12 @@ def _images(publication, where):
     return images
 
 
-def _capture(ids, rendered, options, output_format, *, word_math=None):
+def _capture(ids, rendered, options, output_format, *, word_math=None, solutions=None):
+    from . import library_solutions
+    try:
+        solutions = library_solutions.normalize_map({} if solutions is None else solutions, ids)
+    except library_solutions.SolutionError as error:
+        raise ExportError(str(error), error.status) from None
     word_math = output_format != "pdf" if word_math is None else word_math
     if not isinstance(rendered, dict) or set(rendered) != set(ids):
         raise ExportError("每道选题都需提供完整排版结果，请重新打开组卷")
@@ -448,7 +466,7 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
             _fail(where, "题目正文类型无法识别", 409)
         if any(content.get(name) is not None and not isinstance(content[name], str) for name in ("answer", "analysis", "origin")):
             _fail(where, "答案或题源快照格式不完整", 409)
-        selected, is_ai = _selected(content, extras, use_ai)
+        selected, is_ai, solution = _solution_selection(publication, use_ai, solutions.get(key))
         if any(selected.get(name) is not None and not isinstance(selected[name], str) for name in ("answer", "analysis")):
             _fail(where, "所选参考答案格式不完整", 409)
         if is_ai and ((selected.get("publication_id") and str(selected["publication_id"]) != key)
@@ -485,12 +503,19 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
                 official = str(content.get(name) or "")
             _field(given[name], official, f"{where} · {name}", word_math=word_math)
         images = _images(publication, where) if question_fields else []
-        total_bytes += sum(len(image["bytes"]) for image in images)
+        try:
+            solution_images = library_solutions.capture_images(solution) if solution is not None and answer_fields else []
+        except library_solutions.SolutionError as error:
+            _fail(where, str(error), error.status)
+        total_bytes += sum(len(image["bytes"]) for image in images + solution_images)
         if total_bytes > MAX_TOTAL_IMAGES:
             _fail(where, "本次配图总量过大，请减少选题")
         captured.append({"id": key, "where": where, "content": content, "extras": extras, "selected": deepcopy(selected),
                          "ai": is_ai, "hash": publication.content_hash, "type": publication.question_type,
-                         "fields": converted, "images": images})
+                         "fields": converted, "images": images, "solution_images": solution_images,
+                         "solution_id": str(solution.pk) if solution is not None else None,
+                         "selection_revision": solutions.get(key),
+                         "solution_explicit": key in solutions})
     if (answer_fields and options["document"] == "answers") or output_format == "split":
         if not _has_selected_answers(captured):
             raise ExportError("这些题没有原卷答案或所选 AI 参考，请改选题目卷，或先补齐答案再分卷导出")
@@ -505,7 +530,7 @@ def _recheck(captured, options, use_ai):
         if live is None or live.status != PublishedQuestion.Status.PUBLISHED or live.content_hash != item["hash"] \
                 or live.content != item["content"] or live.question_type != item["type"]:
             _fail(item["where"], "导出期间入库版本发生变化，请重新打开组卷", 409)
-        selected, is_ai = _selected(live.content, live.extras, current_ai)
+        selected, is_ai, solution = _solution_selection(live, current_ai, item.get("selection_revision") if item.get("solution_explicit") else None)
         if selected != item["selected"] or is_ai != item["ai"] or use_ai != current_ai:
             _fail(item["where"], "导出期间答案或 AI 设置发生变化，请重新打开组卷", 409)
         current_images = _images(live, item["where"]) if item["images"] else []
@@ -514,6 +539,16 @@ def _recheck(captured, options, use_ai):
         for before, after in zip(item["images"], current_images):
             if before["sha256"] != after["sha256"]:
                 _fail(item["where"], "导出期间配图发生变化，请重新打开组卷", 409)
+        if (str(solution.pk) if solution is not None else None) != item.get("solution_id"):
+            _fail(item["where"], "导出期间解析版本发生变化，请重新打开组卷", 409)
+        if item.get("solution_images"):
+            from . import library_solutions
+            try:
+                current = library_solutions.capture_images(solution)
+            except library_solutions.SolutionError as error:
+                _fail(item["where"], str(error), error.status)
+            if len(current) != len(item["solution_images"]) or any(before != after for before, after in zip(item["solution_images"], current)):
+                _fail(item["where"], "导出期间解析图片发生变化，请重新打开组卷", 409)
 
 
 def _font(run, size, bold=False):
@@ -633,6 +668,67 @@ def _write_images(document, item, slot):
         paragraph = document.add_paragraph()
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
         paragraph.paragraph_format.keep_together = True
+
+
+def _analysis_parts(blocks):
+    """Split rendered analysis at blank source lines without flattening math/tables."""
+    parts, current = [], []
+    for block in blocks:
+        if block["type"] == "table":
+            current.append(block)
+            continue
+        segments = []
+        for segment in block["segments"]:
+            if segment["type"] != "text":
+                segments.append(segment)
+                continue
+            pieces = re.split(r"\r?\n(?:[ \t]*\r?\n)+", segment["raw"])
+            for index, raw in enumerate(pieces):
+                if raw:
+                    segments.append({**segment, "raw": raw})
+                if index < len(pieces) - 1:
+                    if segments:
+                        current.append({"type": "text", "segments": segments})
+                    if current:
+                        parts.append(current)
+                    current, segments = [], []
+        if segments:
+            current.append({"type": "text", "segments": segments})
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _write_solution_image(document, image):
+    from docx.shared import Mm
+    width, height = image["size"]
+    scale = min(float(image["display_width"]) / width, 235 / height)
+    paragraph = document.add_paragraph()
+    paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
+    paragraph.paragraph_format.keep_together = True
+
+
+def _write_solution(document, item, size, label):
+    selected, images = item["selected"], item.get("solution_images", [])
+    if not str(selected.get("answer") or "").strip() and not str(selected.get("analysis") or "").strip() and not images:
+        _font(document.add_paragraph().add_run(label + "（原卷未提供答案）"), size)
+        return
+    if str(selected.get("answer") or "").strip():
+        _write_field(document, item["fields"]["answer"], size, prefix=label + " ", where=item["where"])
+    else:
+        _font(document.add_paragraph().add_run(label + " 解析："), size)
+    for image in images:
+        if image["position"] == "before":
+            _write_solution_image(document, image)
+    parts = _analysis_parts(item["fields"].get("analysis", []))
+    for index, blocks in enumerate(parts):
+        _write_field(document, blocks, size, prefix="解析：" if index == 0 and selected.get("answer") else "", where=item["where"])
+        for image in images:
+            if image["position"] == "paragraph" and image["paragraph"] == index:
+                _write_solution_image(document, image)
+    for image in images:
+        if image["position"] == "after" or (image["position"] == "paragraph" and image["paragraph"] >= len(parts)):
+            _write_solution_image(document, image)
 
 
 def _text_em(value):
@@ -897,6 +993,7 @@ def _document(captured, title, options, mode):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     mode = _effective_document(captured, mode)
+    inline_answers = mode == "combined" and options.get("answer_layout", "appendix") == "inline"
     document = Document()
     section = document.sections[0]
     section.page_width, section.page_height = Mm(210), Mm(297)
@@ -957,17 +1054,22 @@ def _document(captured, title, options, mode):
                     elif any(image["slot"] == letter for image in item["images"]):
                         _font(document.add_paragraph().add_run(f"{letter}."), size)
                     _write_images(document, item, letter)
-            if item["type"] == "free_response" and options["answer_space"] != "none":
+            if item["type"] == "free_response" and options["answer_space"] != "none" and not inline_answers:
                 paragraph = document.add_paragraph()
                 paragraph.paragraph_format.space_after = Mm(30 if options["answer_space"] == "medium" else 60)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
+            if inline_answers:
+                # A long solution may cross pages; never keep it with the entire
+                # question or add student writing space to a teacher copy.
+                _write_solution(document, item, size, "【答案解析】" + ("（AI 参考 · 未核对）" if item["ai"] else ""))
+                _question_gap(document)
             if number > 1 and item["id"] in options["question_breaks"]:
                 if item is group[0] and section_title is not None:
                     section_title.paragraph_format.page_break_before = True
                 else:
                     _question_page_break(document, unit_start)
-    if mode != "questions":
+    if mode != "questions" and not inline_answers:
         if mode == "combined":
             document.add_page_break()
         answer_heading = document.add_paragraph()
@@ -976,17 +1078,10 @@ def _document(captured, title, options, mode):
         for number, item in numbered:
             unit_start = len(document._element.body) - 1
             label = f"{number}." + ("（AI 参考 · 未核对）" if item["ai"] else "")
-            selected = item["selected"]
-            if not str(selected.get("answer") or "").strip() and not str(selected.get("analysis") or "").strip():
-                _font(document.add_paragraph().add_run(label + "（原卷未提供答案）"), size)
-                _question_gap(document)
-                _pagination(document, unit_start, options["pagination"], size)
-                continue
-            _write_field(document, item["fields"]["answer"], size, prefix=label + " ", where=item["where"])
-            if str(selected.get("analysis") or "").strip():
-                _write_field(document, item["fields"]["analysis"], size, prefix="解析：", where=item["where"])
+            _write_solution(document, item, size, label)
             _question_gap(document)
-            _pagination(document, unit_start, options["pagination"], size)
+            # Even keep-whole-question mode must allow a long solution to flow.
+            _pagination(document, unit_start, "compact", size)
     footer = section.footer.paragraphs[0]
     footer.alignment = 2
     _font(footer.add_run(f"共 {len(captured)} 题 · 第 "), 9)
@@ -1007,12 +1102,12 @@ def safe_filename(title):
 
 
 def export(payload):
-    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format"}:
+    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions"}:
         raise ExportError("导出请求包含不支持的字段")
     try:
         ids = normalize_ids(payload.get("ids"))
         title = _title(payload.get("title", "练习"))
-        options = _print_options(payload.get("print_options", {}), ids=ids)
+        options = _print_options(payload.get("print_options", {}), {"answer_layout": "appendix"}, ids=ids)
     except (BrowseError, DraftError) as error:
         raise ExportError(str(error)) from None
     if not ids:
@@ -1023,7 +1118,7 @@ def export(payload):
     output_format = payload.get("format", "docx")
     if not isinstance(output_format, str) or output_format not in {"docx", "split"}:
         raise ExportError("导出格式只能选 docx 或 split")
-    captured, use_ai = _capture(ids, payload.get("rendered_fields"), options, output_format)
+    captured, use_ai = _capture(ids, payload.get("rendered_fields"), options, output_format, solutions=payload.get("solutions"))
     name = safe_filename(title)
     if output_format == "split":
         questions = _document(captured, title, options, "questions")

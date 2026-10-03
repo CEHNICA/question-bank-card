@@ -53,16 +53,18 @@ def split_answer_tags(raw: str) -> dict[str, str]:
     return result
 
 
-def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "") -> LibraryJob:
+def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solution_scope: bool = False) -> LibraryJob:
     """Queue one job; an identical job already waiting is reused."""
     if kind not in FEATURE_OF:
         raise JobError("不认识的任务")
-    if not features.enabled(FEATURE_OF[kind]):
+    if solution_scope and kind != LibraryJob.Kind.ANSWER:
+        raise JobError("本次组卷建议仅支持答案解析")
+    if not solution_scope and not features.enabled(FEATURE_OF[kind]):
         raise JobError("这个功能在“标签与参考答案设置”里关着，打开后再用")
     if publication.status != PublishedQuestion.Status.PUBLISHED:
         raise JobError("这道题已不在正式题库里")
     try:
-        state = library_ai_settings.ensure_ready(kind)
+        state = library_ai_settings.ensure_ready(None if solution_scope else kind)
     except library_ai_settings.SettingsError as error:
         raise JobError(str(error)) from None
     executor = state.get("mode", "assistant")
@@ -72,13 +74,15 @@ def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "") -> Li
         publication = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
         if live_version(publication) is None:
             raise JobError("这道题已撤回或被新版替代，请使用当前入库版。")
-        _no_existing_result(publication, kind)
+        if not solution_scope:
+            _no_existing_result(publication, kind)
         fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
-        existing = publication.jobs.filter(kind=kind, executor=executor, fingerprint=fingerprint, status__in=ACTIVE).first()
+        existing = publication.jobs.filter(kind=kind, executor=executor, fingerprint=fingerprint, solution_scope=solution_scope, status__in=ACTIVE).first()
         if existing is not None:
             return existing
         return LibraryJob.objects.create(publication=publication, kind=kind, executor=executor,
                                          fingerprint=fingerprint, agent=agent,
+                                         solution_scope=solution_scope,
                                          api_snapshot=library_ai_settings.execution_snapshot() if executor == "api" else {})
 
 
@@ -213,10 +217,10 @@ def _figure_urls(publication: PublishedQuestion) -> list[str]:
 
 # ---------------------------------------------------------------- 后台执行
 
-def run_answer(publication: PublishedQuestion) -> dict:
+def run_answer(publication: PublishedQuestion, *, explicit_once=False) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)
-    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures)), figures, kind="answer")
+    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures)), figures, kind=None if explicit_once else "answer")
     tags = split_answer_tags(raw)
     answer = str(tags.get("答案") or "").strip()
     if not answer:
@@ -266,11 +270,12 @@ def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: 
             or live_version(current) is None or current.content_hash != content_hash
             or library.generation_fingerprint(current.content or {}, current.pk) != fingerprint):
         raise JobError("生成期间题面、配图或入库版本已变化，旧结果未保存；请在当前版本重新生成。")
-    if not features.enabled(FEATURE_OF[job.kind]):
+    if not job.solution_scope and not features.enabled(FEATURE_OF[job.kind]):
         raise JobError("生成期间这个功能已关闭，结果未保存。")
-    library_ai_settings.ensure_ready(job.kind)
+    library_ai_settings.ensure_ready(None if job.solution_scope else job.kind)
     library_ai_settings.require_snapshot(current_job.api_snapshot)
-    _no_existing_result(current, job.kind)
+    if not job.solution_scope:
+        _no_existing_result(current, job.kind)
     return current
 
 
@@ -297,20 +302,25 @@ def process_pending(limit: int = 5) -> int:
             publication = live_version(job.publication)
             if publication is None:
                 raise JobError("这道题已撤回或被新版替代，旧任务未执行；请在当前版本重新生成。")
-            if not features.enabled(FEATURE_OF[job.kind]):
+            if not job.solution_scope and not features.enabled(FEATURE_OF[job.kind]):
                 raise JobError("这个功能已在设置里关掉")
-            _no_existing_result(publication, job.kind)
+            if not job.solution_scope:
+                _no_existing_result(publication, job.kind)
             fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
             if not job.fingerprint or job.fingerprint != fingerprint:
                 raise JobError("排队后题面或配图已变化，旧任务未执行；请在当前版本重新排队。")
             library_ai_settings.require_snapshot(job.api_snapshot)
             initial_hash = publication.content_hash
             if job.kind == LibraryJob.Kind.ANSWER:
-                result = run_answer(publication)
+                result = run_answer(publication, explicit_once=True) if job.solution_scope else run_answer(publication)
                 with transaction.atomic():
                     publication = _bound_target(job, publication, fingerprint, initial_hash)
                     result.update(fingerprint=fingerprint, publication_id=str(publication.pk), checked=False)
-                    library.save_extras(publication, {**(publication.extras or {}), "ai_answer": result})
+                    if job.solution_scope:
+                        job.result = result
+                        job.save(update_fields=["result", "updated_at"])
+                    else:
+                        library.save_extras(publication, {**(publication.extras or {}), "ai_answer": result})
             else:
                 tags, engine = run_tags(publication)
                 with transaction.atomic():

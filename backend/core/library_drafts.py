@@ -26,8 +26,9 @@ MAX_TITLE_LENGTH = 120
 LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
 PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False,
                   "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True,
-                  "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": []}
-INPUT_FIELDS = {"title", "ids", "print_options", "revision"}
+                  "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": [],
+                  "answer_layout": "inline"}
+INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
 
@@ -66,6 +67,8 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("分页只能选紧凑排版或尽量整题同页")
     if "option_layout" in value and value["option_layout"] not in ("auto", "four", "two"):
         raise DraftError("选项排版只能选 auto、four、two")
+    if "answer_layout" in value and value["answer_layout"] not in ("inline", "appendix"):
+        raise DraftError("答案位置只能选 inline 或 appendix")
     result = {**deepcopy(PRINT_DEFAULTS), **deepcopy(defaults or {}), **deepcopy(value)}
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
@@ -114,7 +117,7 @@ def _read() -> dict:
             raise ValueError()
         seen = set()
         for draft in data["drafts"]:
-            if not isinstance(draft, dict) or set(draft) != STORED_FIELDS:
+            if not isinstance(draft, dict) or set(draft) - STORED_FIELDS - {"solutions"} or not STORED_FIELDS <= set(draft):
                 raise ValueError()
             key = str(uuid.UUID(draft["id"]))
             if key != draft["id"] or key in seen:
@@ -124,7 +127,14 @@ def _read() -> dict:
                 raise ValueError()
             if not isinstance(draft["print_options"], dict) or not LEGACY_PRINT_KEYS <= set(draft["print_options"]):
                 raise ValueError()
-            draft["print_options"] = _print_options(draft["print_options"], ids=draft["ids"])
+            # Old saved papers intentionally retain their appendix layout.
+            draft["print_options"] = _print_options(draft["print_options"], {"answer_layout": "appendix"}, ids=draft["ids"])
+            from .library_solutions import normalize_map, SolutionError
+            try:
+                fixed = normalize_map(draft.get("solutions", {}), draft["ids"])
+                draft["solutions"] = {key: fixed.get(key, "origin") for key in draft["ids"]}
+            except SolutionError as error:
+                raise DraftError(str(error)) from None
             _revision(draft["revision"])
             for field in ("created_at", "updated_at"):
                 if not isinstance(draft[field], str) or len(draft[field]) > 40:
@@ -239,9 +249,21 @@ def _save(payload: dict, draft_id=None) -> dict:
         defaults["option_overrides"] = {key: mode for key, mode in defaults["option_overrides"].items() if key in ids}
         defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
         options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
+        from .library_solutions import normalize_map, SolutionError
+        try:
+            previous_solutions = {key: value for key, value in (draft.get("solutions", {}) if draft else {}).items() if key in ids}
+            solutions = normalize_map(payload.get("solutions", previous_solutions), ids)
+            # Newly added entries capture their current library overlay once;
+            # an original selection is explicit so later edits cannot alter it.
+            from .models import PublishedQuestion
+            current = {str(item.pk): (item.extras or {}).get("solution_id") for item in PublishedQuestion.objects.filter(pk__in=ids)}
+            for key in ids:
+                solutions.setdefault(key, current.get(key) or "origin")
+        except SolutionError as error:
+            raise DraftError(str(error), error.status) from None
         now = timezone.now().isoformat()
         result = {"id": str(draft_id) if draft else str(uuid.uuid4()), "title": title, "ids": ids,
-                  "print_options": options, "created_at": draft["created_at"] if draft else now,
+                  "print_options": options, "solutions": solutions, "created_at": draft["created_at"] if draft else now,
                   "updated_at": now, "revision": draft["revision"] + 1 if draft else 1}
         if draft is None:
             data["drafts"].append(result)

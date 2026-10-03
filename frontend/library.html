@@ -116,6 +116,17 @@
     <p id="draftsStatus" class="helper" role="status" aria-live="polite"></p><div id="draftsList" class="drafts-list"></div>
   </dialog>
 
+  <dialog id="answerMissingDialog" class="confirm-dialog" aria-labelledby="answerMissingTitle">
+    <form method="dialog">
+      <div class="confirm-body"><h3 id="answerMissingTitle">有题目缺少答案解析</h3><p id="answerMissingText" class="confirm-text"></p></div>
+      <div class="confirm-actions">
+        <button class="button" value="manual" type="submit">手工补充</button>
+        <button class="button primary" value="ai" type="submit">选择 AI 补齐</button>
+        <button class="button button-quiet" value="skip" type="submit">本次跳过并导出</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="sourceDialog" class="source-dialog" aria-labelledby="sourceTitle">
     <div class="source-dialog-head">
       <div>
@@ -196,6 +207,7 @@
         </div>
       </details>
       <span class="print-spacer"></span>
+      <button id="managePrintAnswers" class="button" type="button">答案解析</button>
       <button id="exportWord" class="button button-primary" type="button">导出 Word</button>
       <button id="exportPdf" class="button button-primary" type="button">导出 PDF</button>
       <button id="printButton" class="button button-quiet print-legacy" type="button" title="打开系统打印窗口">打印</button>
@@ -207,6 +219,7 @@
         <div class="print-options-body">
           <label class="print-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
           <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目</option><option value="answers">答案与解析</option><option value="combined" selected>题目＋答案</option></select></label>
+          <label id="printAnswerLayoutBox" class="print-field">答案解析位置 <select id="printAnswerLayout"><option value="inline" selected>逐题紧跟</option><option value="appendix">卷末集中</option></select></label>
           <label class="print-field">分页 <select id="printPagination"><option value="compact" selected>连续排版，节省纸张</option><option value="keep">尽量保持单题完整</option></select></label>
           <label class="print-field">选择题选项 <select id="printOptionLayout"><option value="auto" selected>自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option></select></label>
           <p id="printImageHint" class="print-options-note" hidden>原图题保留卷面排版，选项与字号不会重新排列。转为文字题后可调整选项排版。</p>
@@ -246,6 +259,8 @@
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js" defer></script>
   <script src="/library-workspace.js" defer></script>
+  <script src="/library-solutions.js" defer></script>
+  <script src="/library-answer-editor.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/exam-export.js" defer></script>
   <script src="/exam-layout.js" defer></script>

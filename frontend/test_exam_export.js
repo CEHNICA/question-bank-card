@@ -65,11 +65,13 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
     "Content-Type": mime, "X-Question-Count": "1", "Content-Disposition": "attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.docx", ...changes
   } });
   global.fetch = async (url, request) => { requests.push({ url, request }); return response(); };
-  const result = await Export.download([item], { title: "数学", print_options: { document: "questions" } });
+  const result = await Export.download([item], { title: "数学", print_options: { document: "questions", answer_layout: "inline" }, solutions: { [item.id]: "origin", removed: "obsolete-revision" } });
   assert.deepEqual(result, { filename: "数学.docx", question_count: 1 });
   assert.equal(requests[0].url, "/api/library/export-docx");
   assert.equal(requests[0].request.headers["X-QB-Request"], "1");
   assert(!JSON.parse(requests[0].request.body).rendered_fields[item.id].answer);
+  assert.deepEqual(JSON.parse(requests[0].request.body).solutions, { [item.id]: "origin" }, "The export retains explicit original choices and excludes removed questions");
+  assert.equal(JSON.parse(requests[0].request.body).print_options.answer_layout, "inline");
   assert.equal(links.length, 1); assert(links[0].clicked && links[0].removed);
   timers.shift()(); assert.deepEqual(revoked, ["blob:test-local-export"]);
 

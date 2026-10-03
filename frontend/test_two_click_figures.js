@@ -12,6 +12,7 @@ const pageCancel = source.slice(source.indexOf('  $("pageDialog").addEventListen
   source.indexOf("  function openPageDialog("));
 const save = source.slice(source.indexOf("  async function savePageCrop("),
   source.indexOf('  $("pageDialogSave").addEventListener("click"'));
+const backdrop = source.slice(source.indexOf("  const backdropPresses = new WeakMap();"), source.indexOf("  setLens(state.lens);", source.indexOf("  const backdropPresses = new WeakMap();")));
 const detached = (value) => JSON.parse(JSON.stringify(value));
 
 class Node {
@@ -25,7 +26,7 @@ class Node {
   remove() { this.isConnected = false; if (this.parent) this.parent.children = this.parent.children.filter((node) => node !== this); }
   focus() {}
   setAttribute(key, value) { this.attrs[key] = value; }
-  getBoundingClientRect() { return this.rect || { left: 100, top: 50, width: 500, height: 1000 }; }
+  getBoundingClientRect() { return this.rect || { left: 100, top: 50, right: 600, bottom: 1050, width: 500, height: 1000 }; }
   querySelector() { return this.frame; }
   addEventListener(name, handler, options) {
     if (!this.events.has(name)) this.events.set(name, []);
@@ -56,6 +57,8 @@ function harness(mode = "figures") {
     el: (_tag, classes) => new Node(classes),
     placeBox: (node, bbox) => { node.bbox = [...bbox]; },
     showCropResult: (message, error = false) => statuses.push({ message, error }),
+    showCropGuide: () => {},
+    updateCropDraftAttention() {},
     copyDialogBoxes: () => context.dialog.boxes.map((box) => ({ ...box, bbox: [...box.bbox] })),
     rememberDialogBoxes: (before) => history.push(detached(before)),
     renderStage() { context.renders = (context.renders || 0) + 1; context.cancelFigureSketch(); },
@@ -65,9 +68,11 @@ function harness(mode = "figures") {
       context.dialog.pendingFigure = target; context.dialog.slotAnchor = preview;
       assignments.push({ preview, target: detached(target) });
     },
-    requestPageDialogClose: () => { context.closeRequests = (context.closeRequests || 0) + 1; }
+    requestPageDialogClose: () => { context.closeRequests = (context.closeRequests || 0) + 1; },
+    requestDialogClose: () => context.requestPageDialogClose(),
+    document: { querySelectorAll: () => [nodes.pageDialog] }
   };
-  vm.runInNewContext(functions + surfaceEvents + pageCancel + save, context);
+  vm.runInNewContext(functions + surfaceEvents + pageCancel + save + backdrop, context);
   const event = (x, y, extra = {}) => ({ clientX: x, clientY: y, button: 0, pointerId: 1,
     target: surface, currentTarget: surface, preventDefault() { this.prevented = true; },
     stopPropagation() { this.stopped = true; }, stopImmediatePropagation() { this.stopped = true; }, ...extra });
@@ -147,14 +152,37 @@ function harness(mode = "figures") {
   assert.ok(saving.context.dialog.sketch, "Save cannot silently throw away an unfinished outline");
   assert.match(saving.statuses.at(-1).message, /先再点一下固定/);
 
-  for (const mode of ["new", "regions", "read"]) {
-    const legacy = harness(mode);
-    legacy.surface.emit("pointerdown", legacy.event(150, 150));
-    assert.equal(legacy.context.dialog.sketch, null);
-    assert.equal(typeof legacy.context.dialog.drag, "function", `${mode} preserves its drag-to-create behavior`);
-    legacy.emitWindow("pointerup", legacy.event(300, 400));
-    assert.deepEqual(detached(legacy.context.dialog.boxes), [{ page_idx: 2, bbox: [100, 100, 400, 350] }]);
+  for (const mode of ["new", "regions"]) {
+    const cut = harness(mode);
+    cut.context.dialog.boxes.push({ page_idx: 0, bbox: [20, 30, 500, 100] });
+    cut.surface.emit("pointerdown", cut.event(150, 150));
+    assert.ok(cut.context.dialog.sketch, `${mode} also creates ranges with two single clicks`);
+    assert.equal(cut.context.dialog.drag, null);
+    cut.emitWindow("pointerup", cut.event(150, 150));
+    cut.emitWindow("pointermove", cut.event(300, 400, { buttons: 0 }));
+    assert.equal(cut.context.dialog.boxes.length, 1, "The unfinished range cannot be submitted as a question");
+    cut.surface.emit("pointerdown", cut.event(300, 400));
+    assert.deepEqual(detached(cut.context.dialog.boxes), [
+      { page_idx: 0, bbox: [20, 30, 500, 100] }, { page_idx: 2, bbox: [100, 100, 400, 350] }
+    ], "A new piece keeps existing cross-page pieces and their order");
+    assert.equal(cut.assignments.length, 0, "Cutting never opens a figure ownership or OCR prompt");
+    assert.deepEqual(cut.history[0], [{ page_idx: 0, bbox: [20, 30, 500, 100] }], "Creating a piece is a single undoable action");
+    assert.equal(cut.context.dialog.sketch, null);
+    cut.surface.emit("pointerdown", cut.event(400, 650));
+    cut.nodes.pageDialog.emit("cancel", cut.event(0, 0));
+    assert.equal(cut.context.dialog.boxes.length, 2, "Escape cancels only the unfinished piece, preserving fixed ranges");
+    assert.equal(cut.context.closeRequests || 0, 0);
   }
+  const limited = harness("new");
+  limited.context.dialog.boxes = Array.from({ length: 12 }, () => ({ page_idx: 2, bbox: [20, 30, 500, 100] }));
+  limited.surface.emit("pointerdown", limited.event(150, 150));
+  assert.equal(limited.context.dialog.sketch, null, "The two-click tool still respects the maximum fragments per question");
+  const read = harness("read");
+  read.surface.emit("pointerdown", read.event(150, 150));
+  assert.equal(read.context.dialog.sketch, null);
+  assert.equal(typeof read.context.dialog.drag, "function", "Explicit region rereading keeps its established drag behavior");
+  read.emitWindow("pointerup", read.event(300, 400));
+  assert.deepEqual(detached(read.context.dialog.boxes), [{ page_idx: 2, bbox: [100, 100, 400, 350] }]);
 
   for (const [handle, end, expected] of [
     ["move", [600, 1050], [800, 800, 1000, 1000]],
@@ -194,7 +222,7 @@ function harness(mode = "figures") {
   double.surface.emit("dblclick", double.event(400, 650, { detail: 2 }));
   assert.equal(double.context.dialog.sketch, null);
   assert.equal(double.assignments.length, 1, "A real double-click sequence creates exactly one pending assignment");
-  assert.deepEqual(double.assignments[0].target, { kind: "new", box: { page_idx: 2, bbox: [500, 525, 700, 675] } });
+  assert.deepEqual(double.assignments[0].target, { kind: "new", box: { page_idx: 2, bbox: [600, 600, 800, 750] } }, "Double-click position is exactly the copied frame's top-left corner");
   assert.deepEqual(template, old, "Copying does not move or reassign the original figure");
   assert.deepEqual(detached(double.context.dialog.boxes), [old], "Copied dimensions stay temporary until ownership is chosen");
   assert.equal(double.surface.children.filter((node) => node.classList.contains("drawing")).length, 0);
@@ -208,7 +236,10 @@ function harness(mode = "figures") {
   );
   nearest.context.dialog.selected = 0;
   nearest.surface.emit("dblclick", nearest.event(570, 650));
-  assert.deepEqual(nearest.assignments[0].target.box.bbox, [700, 550, 1000, 650], "Use the nearest frame on this page, shifting inward at its edge without shrinking");
+  assert.equal(nearest.assignments.length, 0, "An overflowing copy is not silently moved or shrunk");
+  assert.match(nearest.statuses.at(-1).message, /放不下.*左上角/);
+  nearest.surface.emit("dblclick", nearest.event(400, 650));
+  assert.deepEqual(nearest.assignments[0].target.box.bbox, [600, 600, 900, 700], "Use the nearest frame on this page at the requested top-left position");
   assert.equal(nearest.assignments[0].target.box.bbox[2] - nearest.assignments[0].target.box.bbox[0], 300);
   assert.equal(nearest.assignments[0].target.box.bbox[3] - nearest.assignments[0].target.box.bbox[1], 100);
 
@@ -220,7 +251,7 @@ function harness(mode = "figures") {
   assert.deepEqual(otherPage.assignments[0].target.box.bbox, [0, 0, 150, 300], "Without a same-page frame, use the last selected dimensions and keep them at page edges");
   otherPage.context.dialog.selected = null;
   otherPage.surface.emit("dblclick", otherPage.event(350, 550));
-  assert.deepEqual(otherPage.assignments[1].target.box.bbox, [350, 400, 650, 600], "Without a selected frame, reuse the most recently added figure's dimensions");
+  assert.deepEqual(otherPage.assignments[1].target.box.bbox, [500, 500, 800, 700], "Without a selected frame, reuse the most recently added figure's dimensions");
   assert.equal(otherPage.surface.children.filter((node) => node.classList.contains("pending-assignment")).length, 1, "Repeating a double click replaces only an unfinished pending assignment");
 
   const jitter = harness(); jitter.context.dialog.boxes.push({ page_idx: 2, bbox: [0, 0, 200, 200], slot: "A" });
@@ -232,7 +263,7 @@ function harness(mode = "figures") {
   jitter.surface.emit("click", jitter.event(305, 360, { detail: 2 }));
   assert.equal(jitter.assignments.length, 1, "Mouse jitter can temporarily finish a two-point outline");
   jitter.surface.emit("dblclick", jitter.event(305, 360, { detail: 2 }));
-  assert.deepEqual(jitter.assignments.at(-1).target.box.bbox, [310, 210, 510, 410]);
+  assert.deepEqual(jitter.assignments.at(-1).target.box.bbox, [410, 310, 610, 510]);
   assert.equal(jitter.surface.children.filter((node) => node.classList.contains("pending-assignment")).length, 1, "The subsequent double click removes that outline and leaves exactly one same-size frame");
   assert.equal(jitter.context.dialog.boxes.length, 1);
 
@@ -256,5 +287,34 @@ function harness(mode = "figures") {
   touch.surface.emit("pointerdown", touch.event(300, 400, { pointerType: "touch", pointerId: 9 }));
   assert.equal(touch.assignments.length, 1, "Two taps may have different pointer IDs");
 
-  console.log("Two-click figures: released-mouse preview, double-click dimension copying, browser click sequences, ownership, edge/zoom geometry, cancellation, save protection and existing crop controls: OK");
+  for (const mode of ["figures", "new", "regions"]) {
+    const retargeted = harness(mode);
+    for (const [x, y] of [[150, 150], [300, 400]]) {
+      const down = retargeted.event(x, y);
+      retargeted.nodes.pageDialog.emit("pointerdown", down);
+      retargeted.surface.emit("pointerdown", down);
+      retargeted.emitWindow("pointerup", retargeted.event(x, y));
+      // Fixed regions/figure ownership can replace the original down target.
+      // Chromium's synthesized click may consequently name the dialog itself.
+      retargeted.nodes.pageDialog.emit("click", retargeted.event(x, y, { target: retargeted.nodes.pageDialog }));
+    }
+    assert.equal(retargeted.context.closeRequests || 0, 0, `${mode}: a canvas click retargeted after fixing a frame must never close the editor`);
+    assert.equal(mode === "figures" ? retargeted.assignments.length : retargeted.context.dialog.boxes.length, 1);
+    const modal = retargeted.nodes.pageDialog;
+    modal.emit("pointerdown", retargeted.event(200, 200, { target: modal }));
+    modal.emit("click", retargeted.event(200, 200, { target: modal }));
+    assert.equal(retargeted.context.closeRequests || 0, 0, "Clicking internal blank dialog padding is not clicking the backdrop");
+    modal.emit("pointerdown", retargeted.event(10, 10, { target: modal }));
+    modal.emit("click", retargeted.event(200, 200, { target: modal }));
+    assert.equal(retargeted.context.closeRequests || 0, 0, "Dragging an outside press into the dialog must not close it");
+    modal.emit("pointerdown", retargeted.event(10, 10, { target: modal }));
+    modal.emit("pointercancel", retargeted.event(10, 10, { target: modal }));
+    modal.emit("click", retargeted.event(10, 10, { target: modal }));
+    assert.equal(retargeted.context.closeRequests || 0, 0, "A cancelled backdrop gesture cannot leave a stale close trigger");
+    modal.emit("pointerdown", retargeted.event(10, 10, { target: modal }));
+    modal.emit("click", retargeted.event(10, 10, { target: modal }));
+    assert.equal(retargeted.context.closeRequests, 1, "A genuine outside press and click retains the normal close/unsaved guard");
+  }
+
+  console.log("Two-click question/figure ranges: released-mouse preview, top-left copies, geometry, cross-page history, cancellation, retargeted click/backdrop protection and crop controls: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

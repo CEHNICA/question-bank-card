@@ -11,18 +11,18 @@ const start = source.indexOf("  function continueManualCut(");
 const end = source.indexOf('  $("pageDialogSave").addEventListener', start);
 assert.ok(start > 0 && end > start);
 const actions = source.slice(source.indexOf("  function configureCropActions("), source.indexOf('  $("pageDialog").addEventListener("cancel"'));
-assert.match(actions, /\$\("pageDialogSave"\)\.hidden = dialog\.mode === "view" \|\| dialog\.practiceRead;/);
+assert.match(actions, /\$\("pageDialogSave"\)\.hidden = \["view", "new"\]\.includes\(dialog\.mode\) \|\| dialog\.practiceRead;/);
 assert.match(actions, /\$\("pageDialogSaveNext"\)\.hidden = dialog\.mode !== "new";/);
 assert.match(actions, /\$\("pageDialogComplete"\)\.hidden = dialog\.mode !== "new";/);
-assert.match(actions, /dialog\.mode === "new" \? "保存并关闭"/);
-assert.match(source, /\$\(dialog\.mode === "new" \? "pageDialogComplete" : "pageDialogSave"\)\.click\(\)/);
-function harness({ count = 25, number = count + 1, boxes = [], mode = "new", failure = false } = {}) {
+assert.doesNotMatch(actions, /保存并关闭/);
+function harness({ count = 25, number = count + 1, boxes = [], mode = "new", failure = false, waitForWrite = null } = {}) {
   const requests = [], stages = [], messages = [], releases = [];
   const nodes = {
     pageDialog: { open: true, close() { this.open = false; } },
     numberInput: { value: String(number), focus() {} },
     cropTypeSelect: { value: "free_response" }, groupSelect: { value: "" },
     readTargetSelect: { value: "auto" }, pageDialogClose: {}
+    , pageStage: { focus() {} }
   };
   const question = { id: 7, number: 1, regions: [{ page_idx: 0, bbox: [10, 10, 300, 100] }] };
   const state = { paperId: "qa-paper", paper: { demo: false },
@@ -36,12 +36,14 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
     setCropSaving(value) { dialog.saving = value; },
     readingOrder(value) { return value.map(({ page_idx, bbox }) => ({ page_idx, bbox: [...bbox] })); },
     closeFigureSlotMenu() {}, trackCropDraft() {}, renderPageTabs() {}, renderStage() {},
+    cropSnapshot: () => ({ boxes: dialog.boxes }), clearCropDraftAttention() {},
     refreshPaper() {}, applyQuestion(data) {
       const idx = state.questions.findIndex((q) => q.id === data.question.id);
       if (idx < 0) state.questions.push(data.question); else state.questions[idx] = data.question;
     },
     async api(url, options) {
       requests.push({ url, ...options });
+      if (waitForWrite) await waitForWrite;
       if (failure) throw Error("storage unavailable");
       return { question: { ...(mode === "new" ? { id: count + 1 } : question), ...options.body } };
     },
@@ -95,6 +97,19 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   assert.equal(failed.dialog.saving, false);
   assert.equal(failed.stages.length, 0, "A failed final save must not advance the workflow");
   assert.match(failed.messages.at(-1), /storage unavailable/);
+
+  let releaseWrite;
+  const slow = harness({ boxes: [{ page_idx: 0, bbox: [10, 10, 900, 200] }],
+    waitForWrite: new Promise((resolve) => { releaseWrite = resolve; }) });
+  const saving = slow.save({ next: true });
+  await slow.save({ next: true });
+  await slow.save({ complete: true });
+  assert.equal(slow.requests.length, 1, "Repeated Enter or completion clicks share the existing save instead of duplicating questions");
+  assert.equal(slow.stages.length, 0);
+  releaseWrite(); await saving;
+  assert.equal(slow.dialog.boxes.length, 0);
+  assert.equal(slow.state.questions.length, 26);
+  assert.equal(slow.dialog.saving, false);
 
   const adjusted = harness({ mode: "regions", boxes: [{ page_idx: 0, bbox: [10, 10, 500, 150] }] });
   await adjusted.save();

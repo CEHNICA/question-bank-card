@@ -188,7 +188,7 @@ def _assets(frontend):
         return 'url("data:' + mime + ';base64,' + base64.b64encode(path.read_bytes()).decode("ascii") + '")'
     katex_css = re.sub(r"url\(([^)]+)\)", font, katex_css)
     css = "\n".join([read("styles.css"), katex_css, read("library.css")])
-    scripts = [read(name) for name in ("vendor/katex/katex.min.js", "qb-render.js", "exam-layout.js")]
+    scripts = [read(name) for name in ("vendor/katex/katex.min.js", "qb-render.js", "library-solutions.js", "exam-layout.js")]
     return css, scripts
 
 
@@ -200,10 +200,20 @@ window.__qbPdfStatus = {ready:false};
   const o = input.options;
   source.style.setProperty('--exam-font-size',o.font_size+'pt');
   source.dataset.answerSpace=o.answer_space;source.dataset.document=o.document;
+  source.dataset.answerLayout=o.answer_layout;
   const node=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
   source.append(node('h2','print-title',input.title));
   if(o.student_info && o.document!=='answers')source.append(node('p','print-info','姓名 ____________　班级 ____________　得分 ________'));
   let number=0;const numbered=[];
+  const inline=o.document==='combined' && o.answer_layout==='inline';
+  const solutionRow=(n,item,isInline)=>{
+    const row=node('div','print-answer-row'+(isInline?' print-answer-inline':'')),body=node('div','');
+    row.dataset.questionId=item.id;row.append(node('strong','',isInline?'':n+'.'));
+    LibrarySolutions.render(body,{...(item.selected||{}),figures:(item.solution_images||[]).map(f=>({...f,url:f.file}))},
+      {node,QB:QBRender,empty:'（原卷未提供答案解析）'});
+    if(item.ai)body.append(node('span','print-ai-note','（AI参考，未核对）'));
+    row.append(body);return row;
+  };
   const types=[['single_choice','选择题'],['multiple_choice','多选题'],['fill_blank','填空题'],['true_false','判断题'],['free_response','解答题']];
   const known=new Set(types.map(x=>x[0]));types.push(['other','其他']);
   let section=0;
@@ -217,20 +227,16 @@ window.__qbPdfStatus = {ready:false};
       QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file,resolveQuestionImageUrl:x=>x.file});
       block.dataset.questionId=item.id;
       if(o.origin && item.content.origin)(block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem')).prepend(node('span','print-origin','（'+item.content.origin+'）'));
-      if(item.type==='free_response' && o.answer_space!=='none')block.append(node('div','print-answer-space'));
+      if(item.type==='free_response' && o.answer_space!=='none'&&!inline)block.append(node('div','print-answer-space'));
       source.append(block);
+      if(inline)source.append(solutionRow(number,item,true));
     }
   }
-  if(o.document!=='questions'){
+  if(o.document!=='questions'&&!inline){
     const key=node('section','print-answers');if(o.document==='answers')key.classList.add('print-answers-only');
     key.append(node('h3','print-section','参考答案与解析'));
     for(const [n,item] of numbered){
-      const row=node('div','print-answer-row'),body=node('div',''),answer=node('span','');row.append(node('strong','',n+'.'));
-      const selected=item.selected||{},text=String(selected.answer||'');
-      if(/^\s*[A-E]{1,5}\s*$/.test(text))answer.textContent=text.trim();else QBRender.renderTypeset(answer,text,{empty:'（原卷未提供答案）'});
-      body.append(answer);if(item.ai)body.append(node('span','print-ai-note','（AI参考，未核对）'));
-      if(String(selected.analysis||'').trim()){const a=node('div','qb-analysis');QBRender.renderTypeset(a,selected.analysis);body.append(a);}
-      row.append(body);key.append(row);
+      key.append(solutionRow(n,item,false));
     }
     source.append(key);
   }
@@ -265,6 +271,9 @@ def _html_document(captured, title, options):
                                   for image in item["images"]]
         items.append({"id": item["id"], "type": item["type"], "content": content,
                       "selected": item["selected"] if options["document"] != "questions" else {},
+                      "solution_images": [{**{key: image[key] for key in ("position", "paragraph", "display_width")},
+                          "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
+                          for image in item.get("solution_images", [])] if options["document"] != "questions" else [],
                       "ai": item["ai"] if options["document"] != "questions" else False})
     data = json.dumps({"items": items, "title": title, "options": options}, ensure_ascii=False)
     data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
@@ -393,18 +402,18 @@ def _render(document):
 
 
 def export(payload):
-    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format"} or payload.get("format", "pdf") != "pdf":
+    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions"} or payload.get("format", "pdf") != "pdf":
         raise word.ExportError("PDF 导出内容格式不正确")
     try:
         ids = normalize_ids(payload.get("ids"))
         title = _title(payload.get("title", "练习"))
-        options = _print_options(payload.get("print_options", {}), ids=ids)
+        options = _print_options(payload.get("print_options", {}), {"answer_layout": "appendix"}, ids=ids)
     except (BrowseError, DraftError) as error:
         raise word.ExportError(str(error)) from None
     if not ids or len(ids) != len(payload["ids"]):
         raise word.ExportError("请检查选题编号后重新打开组卷")
     word._utf16_map(title, "卷名")
-    captured, use_ai = word._capture(ids, payload.get("rendered_fields"), options, "pdf")
+    captured, use_ai = word._capture(ids, payload.get("rendered_fields"), options, "pdf", solutions=payload.get("solutions"))
     document = _html_document(captured, title, options)
     data, pages = _render(document)
     word._recheck(captured, options, use_ai)

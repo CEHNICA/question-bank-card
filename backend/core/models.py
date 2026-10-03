@@ -346,6 +346,10 @@ class LibraryJob(models.Model):
     executor = models.CharField(max_length=12, choices=Executor.choices, default=Executor.API, db_index=True)
     fingerprint = models.CharField(max_length=64, blank=True, default="")
     api_snapshot = models.JSONField(default=dict, blank=True)
+    # Explicit one-off exam suggestions never change the global AI switches or
+    # overwrite an existing library answer. The user saves the suggestion later.
+    solution_scope = models.BooleanField(default=False)
+    result = models.JSONField(default=dict, blank=True)
     agent = models.CharField(max_length=120, blank=True, default="")
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
     error = models.CharField(max_length=300, blank=True, default="")
@@ -354,6 +358,22 @@ class LibraryJob(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class LibrarySolution(models.Model):
+    """Immutable user-edited solution, independent of the original publication."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="solutions")
+    parent = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True)
+    fingerprint = models.CharField(max_length=64)
+    answer = models.TextField(blank=True, default="")
+    analysis = models.TextField(blank=True, default="")
+    figures = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
 
 
 class RegionRead(models.Model):

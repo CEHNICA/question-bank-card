@@ -669,6 +669,8 @@ app_script = _frontend("app.js", "application/javascript; charset=utf-8")
 render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
 library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
+library_solutions_script = _frontend("library-solutions.js", "application/javascript; charset=utf-8")
+library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
@@ -2978,8 +2980,22 @@ def feature_settings(request):
 @csrf_exempt
 def library_jobs_view(request):
     """排队补知识点或 AI 参考答案：{kind, ids} 或 {kind, missing: true}（所有还没有的）。"""
+    if request.method == "GET":
+        ids = request.GET.get("ids", "").split(",")
+        if not 1 <= len(ids) <= 500 or any(not value for value in ids):
+            return _error("请明确提供本次选题编号 ids，最多 500 题")
+        try:
+            wanted = [uuid.UUID(value) for value in ids]
+        except ValueError:
+            return _error("题库条目编号格式不正确")
+        scoped = request.GET.get("solution_scope") == "true"
+        rows = LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped).order_by("-created_at")[:1000]
+        return JsonResponse({"jobs": [{"id": str(row.pk), "publication_id": str(row.publication_id),
+            "kind": row.kind, "executor": row.executor, "status": row.status, "error": row.error,
+            "solution_scope": row.solution_scope, "result": row.result, "fingerprint": row.fingerprint,
+            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()} for row in rows]})
     if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
+        return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request)
     if rejected:
         return rejected
@@ -2987,6 +3003,9 @@ def library_jobs_view(request):
     kind = payload.get("kind")
     if kind not in {LibraryJob.Kind.TAGS, LibraryJob.Kind.ANSWER}:
         return _error("kind 只能是 tags 或 answer")
+    solution_scope = payload.get("solution_scope", False)
+    if type(solution_scope) is not bool or (solution_scope and (kind != "answer" or payload.get("missing") is True)):
+        return _error("本次答案解析建议必须明确选择题目，只能用于 answer")
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
     if payload.get("missing") is True:
         if kind == LibraryJob.Kind.TAGS:
@@ -3004,7 +3023,7 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         targets = list(live.filter(pk__in=wanted))
-        targets = [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
+        targets = targets if solution_scope else [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
             item for item in targets if not str((item.content or {}).get("answer") or "").strip()
             and not (item.extras or {}).get("ai_answer")]
     requested = len(set(str(value) for value in payload.get("ids", []))) if payload.get("missing") is not True else len(targets)
@@ -3013,7 +3032,7 @@ def library_jobs_view(request):
     try:
         with transaction.atomic():
             for publication in targets:
-                job = library_jobs.enqueue(publication, kind)
+                job = library_jobs.enqueue(publication, kind, solution_scope=solution_scope)
                 executors.add(job.executor)
                 queued += 1
     except library_jobs.JobError as error:

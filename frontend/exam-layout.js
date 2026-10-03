@@ -67,7 +67,8 @@
   // Character boundaries permit prose to continue, while complete maths, figures,
   // option groups and table rows remain indivisible. DOM Range keeps their markup.
   function boundaries(node, pageHeight) {
-    const out = [{ node, offset: 0 }];
+    const content = node.matches(".print-answer-row") ? node.lastElementChild : node;
+    const out = [{ node: content, offset: 0 }];
     const atomic = ".qb-math, .qb-math-display-group, .katex, figure, img, .print-answer-space, tr";
     function visit(child) {
       if (child.nodeType === 3) {
@@ -81,14 +82,22 @@
         out.push({ node: child.parentNode, offset: Array.prototype.indexOf.call(child.parentNode.childNodes, child) + 1 });
       } else Array.from(child.childNodes).forEach(visit);
     }
-    Array.from(node.childNodes).forEach(visit);
-    out.push({ node, offset: node.childNodes.length });
+    Array.from(content.childNodes).forEach(visit);
+    out.push({ node: content, offset: content.childNodes.length });
     return out;
   }
   function fragment(node, points, from, to, continued) {
     const range = node.ownerDocument.createRange();
     range.setStart(points[from].node, points[from].offset); range.setEnd(points[to].node, points[to].offset);
-    const result = node.cloneNode(false); result.append(range.cloneContents());
+    const result = node.cloneNode(false);
+    if (node.matches(".print-answer-row")) {
+      // A range wholly inside the answer body may return several sibling
+      // paragraphs. Rebuild the two grid cells instead of placing those
+      // paragraphs directly in the row's narrow number column.
+      const label = node.firstElementChild.cloneNode(true), body = node.lastElementChild.cloneNode(false);
+      if (continued) label.textContent = label.textContent ? `${label.textContent}（续）` : "续";
+      body.append(range.cloneContents()); result.append(label, body);
+    } else result.append(range.cloneContents());
     result.classList.add("exam-fragment");
     if (continued) {
       result.dataset.continuation = "1";
@@ -126,7 +135,9 @@
         if (!image.naturalWidth) throw new Error("试卷配图未能载入，请重试");
         // Match Word's natural 150 dpi size, capped to printable bounds. This is
         // independent of remaining space and never changes library thumbnails.
-        const imageScale = Math.min(96 / 150, BODY_WIDTH / image.naturalWidth, 210 * MM / image.naturalHeight);
+        const chosenWidth = Number(image.dataset.solutionWidth);
+        const imageScale = Math.min(chosenWidth > 0 ? Math.max(5, Math.min(178, chosenWidth)) * MM / image.naturalWidth : 96 / 150,
+          BODY_WIDTH / image.naturalWidth, 210 * MM / image.naturalHeight);
         image.style.width = `${image.naturalWidth * imageScale}px`;
         image.style.height = "auto";
       }));
@@ -155,7 +166,7 @@
       function compose(node, forceBreak = false) {
         const h = height(node.cloneNode(true));
         const pendingHeight = pending.reduce((sum, heading) => sum + height(heading.cloneNode(true)), 0);
-        const full = keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination);
+        const full = !node.matches(".print-answer-row") && keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination);
         const minimum = full ? h : Math.min(h, 62);
         if (used && (forceBreak || used + pendingHeight + minimum > BODY_HEIGHT + .5)) newPage();
         pending.forEach(heading => atomic(heading)); pending = [];
@@ -192,6 +203,7 @@
           return;
         }
         if (node.matches(".print-question")) { compose(node.cloneNode(true), hasQuestion && options.question_breaks.includes(node.dataset.questionId)); hasQuestion = true; }
+        else if (node.matches(".print-answer-row")) compose(node.cloneNode(true));
         else atomic(node.cloneNode(true));
       });
       if (pending.length) warnings.push("分区标题后没有题目，已省略空分区。");

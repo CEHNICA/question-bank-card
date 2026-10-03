@@ -30,6 +30,7 @@ function scenario() {
   function $(id) {
     if (!nodes.has(id)) nodes.set(id, { id, value: "", disabled: false, hidden: false, textContent: "", open: false, events: {},
       addEventListener(type, fn) { (this.events[type] ||= []).push(fn); },
+      getBoundingClientRect() { return { left: 100, top: 50, right: 500, bottom: 450, width: 400, height: 400 }; },
       querySelectorAll() { return closeButtons; },
       showModal() { assert.equal(this.open, false); this.open = true; },
       close() { if (!this.open) return; this.open = false; nativeTasks.push(() => this.events.close?.forEach((fn) => fn({ target: this }))); },
@@ -63,6 +64,12 @@ function scenario() {
   const drainNative = () => { while (nativeTasks.length) nativeTasks.shift()(); };
   const drainFrames = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach((fn) => fn()); };
   const clickClose = (index = 0) => closeButtons[index].events.click.forEach((fn) => fn());
+  const backdrop = () => {
+    const modal = $("credentialDialog");
+    const event = { target: modal, button: 0, clientX: 20, clientY: 20 };
+    modal.events.pointerdown.forEach((fn) => fn(event));
+    modal.events.click.forEach((fn) => fn(event));
+  };
   const escape = () => {
     let prevented = false;
     $("credentialDialog").events.cancel.forEach((fn) => fn({ preventDefault() { prevented = true; } }));
@@ -71,7 +78,7 @@ function scenario() {
   };
   const submit = () => $("credentialForm").events.submit[0]({ preventDefault() {} });
   const values = () => providers.map((provider) => $(context.fields[provider].input).value);
-  return { context, $, requests, messages, focuses, saved, closeButtons, nativeTasks, drainNative, drainFrames, clickClose, escape, submit, values,
+  return { context, $, requests, messages, focuses, saved, closeButtons, nativeTasks, drainNative, drainFrames, clickClose, backdrop, escape, submit, values,
     pageCloseCount: () => pageCloseCount };
 }
 
@@ -97,7 +104,7 @@ function scenario() {
     closing.$("credentialMineruInput").value = "unsaved-test-only";
     if (dismiss === "cancel") closing.clickClose(1);
     else if (dismiss === "escape") assert.equal(closing.escape(), false);
-    else closing.$("credentialDialog").events.click.forEach((fn) => fn({ target: closing.$("credentialDialog") }));
+    else closing.backdrop();
     assert.equal(closing.$("credentialDialog").open, false);
     closing.drainNative(); closing.drainFrames();
     assert.ok(closing.values().every((value) => value === ""));
@@ -108,6 +115,22 @@ function scenario() {
     assert.ok(closing.values().every((value) => value === ""));
     assert.ok(Object.values(closing.saved).every((item) => item.configured));
   }
+
+  const retargeted = scenario();
+  await retargeted.context.openCredentialSettings();
+  retargeted.$("credentialMinimaxInput").value = "internal-draft-test-only";
+  retargeted.$("credentialDialog").events.pointerdown.forEach((fn) => fn({ target: retargeted.$("credentialMinimaxInput"), button: 0, clientX: 200, clientY: 150 }));
+  // The internal pointer target can be rebuilt before the browser dispatches
+  // click. A retargeted dialog click must not count as a backdrop click.
+  retargeted.$("credentialDialog").events.click.forEach((fn) => fn({ target: retargeted.$("credentialDialog"), clientX: 200, clientY: 150 }));
+  assert.equal(retargeted.$("credentialDialog").open, true);
+  assert.equal(retargeted.$("credentialMinimaxInput").value, "internal-draft-test-only");
+  retargeted.$("credentialDialog").events.pointerdown.forEach((fn) => fn({ target: retargeted.$("credentialDialog"), button: 0, clientX: 20, clientY: 20 }));
+  retargeted.$("credentialDialog").events.click.forEach((fn) => fn({ target: retargeted.$("credentialDialog"), clientX: 200, clientY: 150 }));
+  assert.equal(retargeted.$("credentialDialog").open, true, "An outside press released inside must retain the credential dialog and its draft");
+  assert.equal(retargeted.$("credentialMinimaxInput").value, "internal-draft-test-only");
+  retargeted.backdrop();
+  assert.equal(retargeted.$("credentialDialog").open, false, "A genuine outside click still uses the secret draft close guard");
 
   // Native close is asynchronous: old close events and status replies cannot
   // clear the second session's draft or take its focus.

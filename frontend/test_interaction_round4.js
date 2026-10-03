@@ -31,7 +31,7 @@ assert.match(js, /item\.classList\.add\("fresh"\)/);
 // The review meter is one row; its explanation opens on demand.
 assert.match(html, /<details class="meter-note">/);
 assert.match(css, /\.review-meter \{[^}]*display: flex/);
-assert.match(js, /先处理 \$\{c\.todo\} 张需核对的卡/);
+assert.match(js, /先处理 \$\{c\.todo\} 张重点核查的卡/);
 
 // Long cards keep their buttons on screen; while editing, the original stays
 // in the sticky left column (1.10.1: every card is crop left, text right).

@@ -5,13 +5,21 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const lib = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 const libHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 
-assert.match(js, /function isAiApproved\(q\) \{\s*return isApproved\(q\) && q\.approved_by === "ai";/);
+const review = { state: { cropDraftAttention: new Map() } };
+vm.runInNewContext(js.slice(js.indexOf("  function approvalNeedsReview(q)"), js.indexOf("  function anyDialogOpen()")), review);
+const aiQuestion = { id: 1, approved: true, approved_by: "ai", state: "green" };
+assert.equal(review.isAiApproved(aiQuestion), true);
+assert.equal(review.isHumanApproved(aiQuestion), false);
+assert.equal(review.isAiApproved({ ...aiQuestion, approved_by: "human" }), false);
+assert.equal(review.isHumanApproved({ ...aiQuestion, approved_by: "human" }), true);
+assert.equal(review.isAiApproved({ ...aiQuestion, approval_valid: false }), false);
 // Its own chip, a dashed tick, a dashed bar; it does not fold away.
 assert.match(js, /el\("span", "chip ai-approved", `\$\{agentLabel\(q\)\} 已通过 · 待你核对`\)/);
 assert.match(js, /const tick = el\("button", `card-tick\$\{byAi \? " ai" : ""\}`\);/);

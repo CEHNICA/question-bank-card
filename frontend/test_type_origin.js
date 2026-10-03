@@ -6,6 +6,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const QB = require("./qb-render.js");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
@@ -27,7 +28,13 @@ assert.match(js, /else if \(typeBlocksApproval\(q\)\) focusTypePicker\(q\);/);
 assert.match(js, /if \(typeBlocksApproval\(q\)\) \{ focusTypePicker\(q\); return; \}/);
 assert.match(js, /typeBlocked \? "先选题型"/);
 // Such a card counts as one to check, never as a green card waiting for a tick.
-assert.match(js, /return !isApproved\(q\) && \(figureBlocksApproval\(q\) \|\| typeBlocksApproval\(q\) \|\|/);
+const review = { state: { cropDraftAttention: new Map() } };
+vm.runInNewContext(js.slice(js.indexOf("  function approvalNeedsReview(q)"), js.indexOf("  function anyDialogOpen()")), review);
+const undecided = { id: 1, state: "green", stem: "Question", type_blocked: true };
+assert.equal(review.needsCheck(undecided), true);
+assert.equal(review.needsGeneralReview(undecided), false);
+assert.equal(review.canApprove(undecided), false);
+assert.equal(review.needsGeneralReview({ ...undecided, type_blocked: false }), true);
 
 // The picker sits in the card head and saves only the type.
 assert.match(js, /head\.append\(el\("span", "qnum", questionLabel\(q\)\), typePicker\(q\), stateChip\(q\)\);/);

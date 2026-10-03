@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions
 
 urlpatterns = [
     path("", views.index_page),
@@ -10,6 +10,8 @@ urlpatterns = [
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
     path("library-workspace.js", views.library_workspace_script),
+    path("library-solutions.js", views.library_solutions_script),
+    path("library-answer-editor.js", views.library_answer_editor_script),
     path("exam-export.js", views.exam_export_script),
     path("exam-layout.js", views.exam_layout_script),
     path("static/library-ai-settings.js", views.library_ai_script),
@@ -70,6 +72,9 @@ urlpatterns = [
     path("api/library/assistant/tasks", views.library_assistant_tasks),
     path("api/library/assistant/prepare", views.library_assistant_prepare),
     path("api/library/assistant/complete", views.library_assistant_complete),
+    path("api/library/<uuid:publication_id>/solution", library_solutions.solution_view),
+    path("api/library/<uuid:publication_id>/solution-images", library_solutions.image_upload),
+    path("api/library/<uuid:publication_id>/solution-images/<uuid:asset_id>", library_solutions.image_view),
     path("api/library/<uuid:publication_id>", views.library_detail),
     path("api/library/<uuid:publication_id>/figures/<str:name>", views.library_figure),
     path("api/library/<uuid:publication_id>/question-images/<str:name>", views.library_question_image),

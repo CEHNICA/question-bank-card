@@ -57,12 +57,16 @@ function harness(options = {}) {
   for (const status of ["queued", "parsing", "segmenting"]) {
     const visible = harness({ paper: cloudPaper({ status }) }); visible.context.renderSettingsTask();
     assert.equal(visible.$("settingsManualFallback").hidden, false, `MinerU ${status} offers the direct switch`);
+    assert.equal(visible.$("paperManualEntry").hidden, false, `${status} also exposes the primary recovery action beside the status, without opening a menu`);
+    assert.equal(visible.$("paperManualFallback").textContent, "改为手工切题");
+    assert.match(visible.$("paperManualHint").textContent, /停止等待.*已有题目保留/);
   }
   for (const paper of [cloudPaper({ parse_mode: "native" }), cloudPaper({ parse_mode: "manual" }),
     cloudPaper({ parse_mode: "auto", status: "queued" }), cloudPaper({ status: "reading" }),
     cloudPaper({ status: "ready" }), cloudPaper({ archived: true }), cloudPaper({ demo: true })]) {
     const hidden = harness({ paper }); hidden.context.renderSettingsTask();
     assert.equal(hidden.$("settingsManualFallback").hidden, true, "Other routes/stages must not be mislabeled MinerU");
+    assert.equal(hidden.$("paperManualEntry").hidden, true);
     assert.equal(await hidden.context.switchToManual(null, { stopMinerU: true }), false);
     assert.equal(hidden.calls.length, 0);
   }
@@ -84,12 +88,16 @@ function harness(options = {}) {
   const pending = harness({ api: () => new Promise((resolve) => { release = resolve; }) });
   const first = pending.context.switchToManual(null, { stopMinerU: true });
   assert.equal(pending.$("settingsManualFallback").disabled, true);
-  for (const id of ["settingsStop", "settingsReparse", "manualProcessing", "pageManualCut"]) assert.equal(pending.$(id).disabled, true);
+  for (const id of ["settingsStop", "settingsReparse", "manualProcessing", "pageManualCut", "paperManualFallback"]) assert.equal(pending.$(id).disabled, true);
+  assert.equal(pending.$("paperManualEntry").hidden, false);
+  assert.match(pending.$("paperManualFallback").textContent, /正在准备/);
   assert.equal(await pending.context.switchToManual(null, { stopMinerU: true }), false);
   assert.equal(pending.calls.length, 1, "Repeated clicks share the one in-flight switch");
   release({ paper: manualPaper(), manual_ready: true }); await first;
   assert.equal(pending.openings.length, 1);
   assert.equal(pending.$("settingsStop").disabled, false);
+  assert.equal(pending.$("paperManualFallback").disabled, false);
+  assert.equal(pending.$("paperManualEntry").hidden, true);
 
   for (const options of [{ failure: true }, { timeout: true }, { refreshed: false },
     { response: { paper: manualPaper(), manual_ready: false } },
@@ -123,6 +131,11 @@ function harness(options = {}) {
   queuedClick.context.state.paperId = "different";
   queuedClick.frames[0]();
   assert.equal(queuedClick.calls.length, 0, "A delayed menu close cannot apply the user's old click to the newly selected paper");
+
+  const direct = harness();
+  direct.$("paperManualFallback").events.click();
+  assert.equal(direct.calls.length, 1, "The visible recovery button immediately calls the same guarded local transition, without a menu or confirmation");
+  assert.equal(direct.frames.length, 0);
 
   const existing = harness({ paper: cloudPaper({ parse_mode: "manual", status: "failed" }) });
   assert.equal(await existing.context.switchToManual(3), true);
