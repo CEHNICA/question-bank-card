@@ -135,6 +135,7 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-card.compact .paper { padding-top: 10px; padding-bottom: 8px; }
 .library-card.compact .qb-figures { justify-content: flex-start; margin: 10px 0 0; }
 .library-card.compact .qb-figures img { max-height: 108px; max-width: 200px; width: auto; object-fit: contain; }
+.library-card.compact .qb-question-image img { max-height: 220px; width: auto; object-position: left top; }
 .library-preview-note { font: 12px/1.5 var(--ui-font); color: var(--muted); margin: 9px 0 0; }
 .library-card-actions { border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .library-card-more { position: relative; font: 12.5px/1.5 var(--ui-font); }

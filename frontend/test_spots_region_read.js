@@ -64,12 +64,12 @@ assert.match(js, /button\("框选识读", "", \(\) => openPageDialog\("read", q\
 assert.match(html, /<label id="readTargetField" class="number-field" hidden>读出来的字填到/);
 assert.match(html, /<option value="A">选项 A<\/option>/);
 assert.match(js, /\$\("readTargetField"\)\.hidden = mode !== "read";/);
-assert.match(js, /\$\("pageDialogSave"\)\.textContent = mode === "read" \? "识读这一块" : "保存";/);
+assert.match(js, /\$\("pageDialogSave"\)\.textContent = mode === "read" \? "识读这一块" : mode === "new" \? "保存原图题" : "保存";/);
 // One box: a new one replaces the old.
 assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
 assert.match(js, /api\(`\/api\/questions\/\$\{q\.id\}\/region-read`, \{\s*method: "POST", body: \{ page_idx: box\.page_idx, bbox: box\.bbox, target \}/);
 // The page keeps polling while a region is read, and the result fills an option through 改字.
-assert.match(js, /q\.state === "reading" \|\| regionReadPending\(q\)/);
+assert.match(js, /q\.state === "reading" \|\| q\.ocr_pending \|\| regionReadPending\(q\)/);
 assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: target, value: read\.text \} \}\)/);
 assert.match(js, /function openEditor\(card, q, \{ prefill = null \} = \{\}\)/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);

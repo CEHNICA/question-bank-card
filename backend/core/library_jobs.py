@@ -8,6 +8,7 @@ AI 答案和原卷答案分开放，题库和打印里都标着“AI 参考 · �
 from __future__ import annotations
 
 import logging
+import io
 import re
 from pathlib import Path
 
@@ -133,6 +134,8 @@ def pending() -> bool:
 # ---------------------------------------------------------------- 提示词
 
 def _question_text(content: dict) -> str:
+    if content.get("body_mode") == "source_image":
+        return "题型：" + qtypes.label(content.get("question_type")) + "\n题面为按阅读顺序附上的原卷截图，必须看清全部片段；不能从空文字猜题。"
     lines = [f"题型：{qtypes.label(content.get('question_type'))}", "题面：", str(content.get("stem") or "")]
     options = content.get("options") or {}
     for key in library.OPTION_KEYS:
@@ -176,6 +179,20 @@ def tags_prompt(content: dict, points: list[dict]) -> str:
 
 def _figure_urls(publication: PublishedQuestion) -> list[str]:
     urls = []
+    if (publication.content or {}).get("body_mode") == "source_image":
+        # Use the same immutable PNG/hash checks as export. Do not give the
+        # model an empty stem while silently dropping the real question body.
+        from . import library_export
+        try:
+            images = library_export._images(publication, "原卷图片题")
+        except library_export.ExportError as error:
+            raise JobError(str(error)) from None
+        if len(images) > 6:
+            raise JobError("原图题超过 6 个片段，当前独立模型接口无法完整接收；请使用当前助手或先补齐文字。")
+        for item in images:
+            with Image.open(io.BytesIO(item["bytes"])) as image:
+                urls.append(imaging.jpeg_data_url(image, long_side=2400))
+        return urls
     folder = Path(settings.DATA_ROOT) / "library" / str(publication.id)
     for figure in (publication.content or {}).get("figures") or []:
         name = str(figure.get("file") or "")

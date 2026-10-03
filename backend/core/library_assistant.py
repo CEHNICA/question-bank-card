@@ -114,6 +114,20 @@ def list_tasks(ids=None, limit=50):
 
 def _images(publication):
     figures = []
+    if (publication.content or {}).get("body_mode") == "source_image":
+        from . import library_export
+        try:
+            images = library_export._images(publication, "原卷图片题")
+        except library_export.ExportError as error:
+            raise AssistantError(str(error)) from None
+        body = [{"index": index, "url": f"/api/library/{publication.pk}/question-images/{item['name']}",
+                 "image_sha256": item["sha256"], "width": item["size"][0], "height": item["size"][1]}
+                for index, item in enumerate(images)]
+        pages = sorted({item["page_idx"] for item in (publication.content or {}).get("sources") or []
+                        if isinstance(item, dict) and type(item.get("page_idx")) is int and item["page_idx"] >= 0})
+        return {"crop": f"/api/library/{publication.pk}/crop" if pages else None, "figures": [],
+                "question_images": body,
+                "originals": [{"page_idx": page, "url": f"/api/library/{publication.pk}/pages/{page}"} for page in pages]}
     # Validate all figure bytes before handing out the task. Never omit a lost
     # mathematical diagram and let the assistant guess from text alone.
     try:

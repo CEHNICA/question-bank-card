@@ -29,6 +29,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/C
 
 ## 处理题目
 
+1.11.5 起，`upload --parse-mode manual` 支持无密钥导入 PDF/照片，手工框题和配图；`--parse-mode native` 从文字 PDF 本地提取题号/范围，仍保留原图待核对；`--parse-mode mineru` 才明确要求自动云服务。软件返回的原图题通过 `show` 或 MCP 提供按序正文裁片，题干空白不代表空题；实际查看全部片段后才核对入库。需要补文字时显式识读并确认采用，再重新审核。先检查安装版 `upload --help`，旧版不支持这些参数。
+
 首次核对或改字前读 [references/question-workflow.md](references/question-workflow.md)。命令、JSON 字段与 MCP 参数需要时查 [references/commands.md](references/commands.md)。以下用 `tiyouju` 作简称，实际执行用完整 EXE 路径。
 
 ```powershell
@@ -47,7 +49,7 @@ tiyouju publish latest
 - AI 通过与人工通过分开记录。人工通过的题不自行改动或撤销；用户明确授权修改才使用 `--force`。只撤销自己 AI 打的勾。
 - 删除题卡、撤回入库由用户在软件中决定。截图范围、配图候选或字迹有问题时说明题号和原因，不猜答案、不硬选配图。
 - 不索要、不代填密钥。缺密钥时请用户自己在“设置 → 读题服务 → 填写或更换密钥”填写；第三方额度、费用、有效期以当前账户规则为准。
-- 更改读题方式先取得用户选择；`config --reader assistant` 只省去看图模型，处理新原卷仍需 MinerU。已有题卡和示例教学不因此失去可用性。
+- 更改读题方式先取得用户选择；`config --reader assistant` 用于助手读题。旧版新原卷仍需 MinerU；1.11.5 可选择手工或本地文字 PDF，无密钥也能导入。自动云解析仍需配置服务。
 - `--json` 输出便于解析，中文为 ASCII 转义；不加时为 UTF-8。`--agent 你的名字` 记录 AI 身份。
 - 退出码 `0` 成功、`1` 出错、`2` 应用未启动（用 `start`）、`3` 需用户处理。遇 `3` 说明具体原因，暂停受影响步骤，继续独立且已授权的工作。
 

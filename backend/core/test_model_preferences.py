@@ -64,8 +64,10 @@ class ModelPreferenceTests(SimpleTestCase):
             first = SimpleNamespace(display_name="甲", get_status_display=lambda: "等待")
             second = SimpleNamespace(display_name="乙", get_status_display=lambda: "等待")
             first_query = mock.Mock()
+            first_query.exclude.return_value = first_query
             first_query.order_by.return_value = [first, second]
             empty_query = mock.Mock()
+            empty_query.exclude.return_value = empty_query
             empty_query.order_by.return_value = []
             observations: list[tuple[str, str]] = []
             active_statuses: list[dict] = []
@@ -105,6 +107,7 @@ class ModelPreferenceTests(SimpleTestCase):
             preferences.save_configuration(roles, new)
             preferences.save_applied_configuration({"roles": roles, "models": old})
             empty_query = mock.Mock()
+            empty_query.exclude.return_value = empty_query
             empty_query.order_by.return_value = []
             with mock.patch.object(run_worker, "SingleInstance"), \
                     mock.patch.object(run_worker.Paper.objects, "filter", return_value=empty_query), \

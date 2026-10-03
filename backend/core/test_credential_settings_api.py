@@ -224,8 +224,10 @@ class WorkerCredentialReloadTests(SimpleTestCase):
             first = SimpleNamespace(display_name="甲", get_status_display=lambda: "等待")
             second = SimpleNamespace(display_name="乙", get_status_display=lambda: "等待")
             first_query = mock.Mock()
+            first_query.exclude.return_value = first_query
             first_query.order_by.return_value = [first, second]
             empty_query = mock.Mock()
+            empty_query.exclude.return_value = empty_query
             empty_query.order_by.return_value = []
             observations: list[tuple[str, str, str]] = []
 

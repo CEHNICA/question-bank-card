@@ -368,6 +368,7 @@
       node("span", "", `原卷第 ${item.number} 题`),
       typeChip(item)
     );
+    if (item.content?.body_mode === "source_image") meta.append(node("span", "library-note", "原图题"));
     if (item.origin) {
       const origin = node("span", "library-origin", `题源：${item.origin}`);
       origin.title = "题源：题干前印的出处。组卷打印时默认不印";
@@ -388,11 +389,13 @@
     const summary = workspace.summaryStem(item.content?.stem, QB);
     const expanded = state.expanded.has(item.id);
     if (expanded) QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
-    else QB.renderQuestion(paper, { ...item.content, stem: summary.text, options: {}, figures: (item.content?.figures || []).filter((figure) => figure.slot === "stem").slice(0, 2) }, { showNumber: false, showAnswer: "none" });
+    else QB.renderQuestion(paper, { ...item.content, stem: summary.text, options: {}, figures: (item.content?.figures || []).filter((figure) => figure.slot === "stem").slice(0, 2),
+      question_images: (item.content?.question_images || []).slice(0, 1) }, { showNumber: false, showAnswer: "none" });
     article.classList.toggle("compact", !expanded);
     article.classList.toggle("is-selected", state.selected.has(item.id));
     if (!expanded) {
       const notes = [];
+      if (item.content?.body_mode === "source_image") notes.push(`原卷截图 ${(item.content.question_images || []).length} 段`);
       if (summary.folded) notes.push("还有题干与小问");
       if (Object.keys(item.content?.options || {}).length) notes.push("含选项");
       if ((item.content?.figures || []).length > 2) notes.push(`含 ${(item.content.figures || []).length} 张配图`);
@@ -1260,6 +1263,7 @@
     $("exportPdf").disabled = blocked || answerEmpty || !!printState.tooWide || printState.layoutPending || !!printState.layoutError;
     $("exportWord").disabled = blocked || answerEmpty;
     $("exportSplit").disabled = blocked || !printState.availableAnswers;
+    $("printOptionLayout").disabled = printState.exporting || (printState.items.length > 0 && printState.items.every(item => item.content?.body_mode === "source_image"));
   }
 
   function printAnswerContent(item) {
@@ -1484,6 +1488,7 @@
 
   function renderPrint(items) {
     printState.items = items;
+    $("printImageHint").hidden = !items.some(item => item.content?.body_mode === "source_image");
     renderPrintMissing();
     syncPrintAnswers(items);
     ui.paper.replaceChildren();
@@ -1591,10 +1596,10 @@
     const id = $("printIndividualQuestion").value;
     const item = printState.items.find(item => item.id === id);
     $("printIndividualOption").value = printState.optionOverrides[id] || "";
-    $("printIndividualOption").disabled = printState.exporting || !item || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
+    $("printIndividualOption").disabled = printState.exporting || !item || item.content?.body_mode === "source_image" || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
     $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
     $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
-    $("printIndividualHint").textContent = id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
+    $("printIndividualHint").textContent = item?.content?.body_mode === "source_image" ? "原图题保留卷面排版，可调整顺序和分页；转成文字后可重排选项。" : id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
   }
 
   async function refreshPrintPages(flow) {
@@ -1752,7 +1757,7 @@
     });
     optionLayout.value = printState.optionOverrides[item.id] || "";
     optionLayout.disabled = printState.exporting;
-    optionLayout.hidden = !Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot));
+    optionLayout.hidden = item.content?.body_mode === "source_image" || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
     optionLayout.addEventListener("change", () => {
       if (optionLayout.value) printState.optionOverrides[item.id] = optionLayout.value;
       else delete printState.optionOverrides[item.id];

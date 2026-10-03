@@ -1204,6 +1204,45 @@
     const view = opts.literal ? renderLiteral : renderTypeset;
     container.replaceChildren();
     container.classList.add("qb-question");
+    const sourceImage = content.body_mode === "source_image";
+    container.classList.toggle("qb-source-image", sourceImage);
+    if (sourceImage) {
+      if (opts.showNumber !== false) {
+        const heading = make("div", "qb-stem");
+        heading.append(make("span", "qb-number", `${opts.number ?? content.number ?? "?"}.`));
+        container.append(heading);
+      }
+      const pieces = Array.isArray(content.question_images) ? content.question_images : [];
+      const row = make("div", "qb-question-images");
+      // The server's order is the saved, possibly cross-page reading order.
+      // Do not sort by page or repeat figures/options already in these crops.
+      pieces.forEach((piece, index) => {
+        const frame = make("figure", "qb-question-image");
+        const image = make("img");
+        image.loading = opts.imageLoading || "lazy";
+        image.alt = `原图题第 ${index + 1} 段${Number.isInteger(piece.page_idx) ? ` · 原卷第 ${piece.page_idx + 1} 页` : ""}`;
+        image.src = opts.resolveQuestionImageUrl ? opts.resolveQuestionImageUrl(piece, index) : piece.url;
+        if (piece.width > 0 && piece.height > 0) {
+          image.width = piece.width;
+          image.height = piece.height;
+        }
+        image.addEventListener("error", () => {
+          if (!frame.querySelector(".qb-image-error")) frame.append(make("p", "qb-image-error", "原图未能加载，请重新打开原卷核对。"));
+        });
+        frame.append(image);
+        row.append(frame);
+      });
+      if (!pieces.length) row.append(make("p", "qb-image-error", "原图范围尚未生成，请调整范围后保存。"));
+      container.append(row);
+      const answerMode = opts.showAnswer || "collapsed";
+      if (answerMode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || opts.showEmptyAnswer)) {
+        const answer = make("details", "qb-answer");
+        if (answerMode === "open") answer.open = true;
+        answer.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal, trackSource: opts.trackSource }));
+        container.append(answer);
+      }
+      return container;
+    }
     const figures = Array.isArray(content.figures) ? content.figures : [];
     const stem = make("div", "qb-stem");
     if (opts.showNumber !== false) stem.append(make("span", "qb-number", `${opts.number ?? content.number ?? "?"}.`));

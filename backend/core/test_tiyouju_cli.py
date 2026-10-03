@@ -240,7 +240,8 @@ class TiyoujuCliTests(LiveServerTestCase):
         with mock.patch.dict(os.environ, nothing):
             code, status = run_json("status")
             self.assertEqual(code, 0)
-            self.assertFalse(status["upload_enabled"])
+            self.assertTrue(status["upload_enabled"])
+            self.assertFalse(status["automatic_parse_ready"])
             self.assertEqual([item["what"] for item in status["missing"]], ["mineru", "vision"])
             self.assertIn("mineru.net", status["missing"][0]["signup"])
             self.assertEqual([item["service"] for item in status["missing"][1]["options"]], ["modelscope"])

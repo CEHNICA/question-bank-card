@@ -624,6 +624,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .page-search-results .page-tab { width: 100%; }
 .page-stage { flex: 1 1 auto; min-height: 0; padding: 20px; overflow: auto; background: var(--surface-2); overscroll-behavior: contain; overflow-anchor: none; }
 .page-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.region-pieces { flex: none; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 13px; }
+.region-pieces > strong { display: inline-block; margin-right: 12px; }
+.region-piece-list { display: flex; gap: 6px; overflow-x: auto; list-style: none; padding: 0; margin: 6px 0 0; max-height: 100px; }
+.region-piece-list li { display: flex; flex: none; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 3px; }
+.region-piece-list li.selected { border-color: var(--accent); background: var(--accent-soft); }
+.region-piece-list .button { padding: 4px 6px; white-space: nowrap; }
+.page-stage.pan-ready .edit-box .grip { pointer-events: none; }
 .page-stage.read-only .stage-surface, .page-stage.pan-ready .stage-surface { cursor: grab; }
 .page-stage.panning, .page-stage.panning .stage-surface, .page-stage.panning .stage-surface * { cursor: grabbing !important; }
 .page-stage.pan-ready .stage-surface * { cursor: grab; }
@@ -1071,6 +1078,15 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .qb-option .qb-figure { grid-column: 2; }
 .qb-figures { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin: .6em 0 .2em; }
 .qb-figure { margin: 0; }
+.qb-question-images { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.qb-question-image { margin: 0; min-width: 0; max-width: 100%; break-inside: avoid; }
+.qb-question-image img { display: block; max-width: 100%; height: auto; object-fit: contain; }
+.qb-image-error { font-family: var(--ui-font); color: var(--red); font-size: 14px; }
+.reading-suggestion { border: 1px solid var(--accent); border-radius: 9px; background: var(--surface); padding: 14px; margin-block: 14px; }
+.reading-suggestion-body { margin-top: 10px; }
+.intake-mode { display: grid; gap: 7px; margin-top: 12px; font-size: 13px; font-weight: 600; }
+.intake-mode select { width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 8px 9px; font-weight: 500; }
+.intake-mode small { font-weight: 400; color: var(--muted); line-height: 1.65; }
 .qb-figure img { display: block; max-width: min(100%, 320px); max-height: 220px; object-fit: contain; mix-blend-mode: multiply; }
 .qb-option .qb-figure img { max-height: 150px; }
 .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 4px; }

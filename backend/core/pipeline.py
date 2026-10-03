@@ -1108,7 +1108,15 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
     return desired
 
 def parse(paper: Paper) -> None:
-    _set(paper, status=Paper.Status.PARSING, error="")
+    paper.refresh_from_db()
+    plan_revision = int((paper.processing_plan or {}).get("revision", 0))
+    if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
+        from . import intake
+        if not paper.pages:
+            intake.prepare(paper, paper.processing_plan["mode"])
+        return
+    if not _set_if_plan_current(paper, plan_revision, status=Paper.Status.PARSING, error=""):
+        return
     folder = paper_dir(paper)
     source = Path(paper.source_path)
     if paper.kind == "docx" and not paper.render_path:
@@ -1181,6 +1189,9 @@ def parse(paper: Paper) -> None:
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])
     structure, needs_confirmation = _plan_structure(paper, blocks)
     with transaction.atomic():
+        current = Paper.objects.select_for_update().get(pk=paper.pk)
+        if int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+            return  # A person transferred this task while cloud parsing ran.
         paper.blocks.all().delete()
         Block.objects.bulk_create([Block(paper=paper, **block) for block in blocks], batch_size=300)
         _set(
@@ -1317,9 +1328,13 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
             if not any(figure.get("source") == "manual" for figure in question.figures):
                 question.figure_review = {}
             _invalidate_approval(question)
+            question.content_revision += 1
+            question.ocr_suggestion = {}
+            question.ocr_pending = False
+            question.reread_requested = False
             question.save(update_fields=[
                 "regions", "regions_auto", "figures", "figure_candidates", "figure_review",
-                "approved", "approved_at", "approved_content_hash", "updated_at",
+                "approved", "approved_at", "approved_content_hash", "content_revision", "ocr_suggestion", "ocr_pending", "reread_requested", "updated_at",
             ])
         # Question groups are source scopes, so their page membership must move
         # with the pages just like blocks and cards.  Leaving this stale can put a
@@ -1355,6 +1370,12 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
         # must not silently bypass the safeguard that prevented two exams from
         # being merged in the first place.
         paper.pages = new_pages
+        if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
+            plan = deepcopy(paper.processing_plan)
+            plan["revision"] = int(plan.get("revision", 0)) + 1
+            plan["pages"] = [{**item, "page_idx": mapping[item["page_idx"]]} for item in plan.get("pages", [])]
+            _set(paper, photos=info, pages=new_pages, processing_plan=plan, status=Paper.Status.READY, error="")
+            return
         structure_before = dict(paper.structure or {})
         for key in ("confirmed", "confirmed_at", "confirmed_groups", "confirmed_scopes"):
             structure_before.pop(key, None)
@@ -2207,6 +2228,9 @@ def preview_resegment(paper: Paper) -> dict:
 def segment_paper(paper: Paper) -> None:
     """切题。已有题卡时（重新切题）：内容没变的题卡原样保留（包括已通过的），变了的才重读；
     人工调整过范围或手动补的题卡不动。"""
+    if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
+        return
+    plan_revision = int((paper.processing_plan or {}).get("revision", 0))
     planned_structure: dict | None = None
     if paper.material_type == Paper.MaterialType.BOOK:
         groups, planned_structure = _prospective_book_groups(paper, _block_dicts(paper))
@@ -2223,6 +2247,10 @@ def segment_paper(paper: Paper) -> None:
     pairs, unmatched = _match_segmentation_items(existing_questions, questions, groups)
     kept = reread = locally_trimmed = preserved = excluded = 0
     with transaction.atomic():
+        current = Paper.objects.select_for_update().get(pk=paper.pk)
+        if int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+            return
+        manual_pages = {p["page_idx"] for p in (current.processing_plan or {}).get("pages", []) if p.get("mode") == "manual"}
         if planned_structure is not None:
             # Plan, group reconciliation, card migration and final status form
             # one transaction.  If any later safeguard fails, the old 99-style
@@ -2242,6 +2270,8 @@ def segment_paper(paper: Paper) -> None:
             group = item["group"]
             regions = item["regions"]
             candidates = _label_candidates(item["figure_candidates"])
+            if any(r["page_idx"] in manual_pages for r in regions):
+                continue
             if question is None:
                 Question.objects.create(
                     paper=paper, group=group, number=item["number"], section=item["section"][:120],
@@ -2256,7 +2286,7 @@ def segment_paper(paper: Paper) -> None:
             group_changed = question.group_id != group.id
             if group_changed:
                 question.group = group
-            if question.start_source == "manual" or (
+            if question.processing_mode != "auto" or question.body_mode == "source_image" or question.start_source == "manual" or (
                     question.regions_auto and question.regions != question.regions_auto):
                 fields = []
                 if group_changed:
@@ -2394,6 +2424,9 @@ def segment_paper(paper: Paper) -> None:
         system_deleted_ids: list[int] = []
         for question in unmatched:
             if question.deleted_at is not None:
+                continue
+            if (question.processing_mode != "auto" or question.body_mode == "source_image"
+                    or any(r["page_idx"] in manual_pages for r in question.regions)):
                 continue
             if _question_is_human_protected(question):
                 # 自动重切不能物理删除人工改字、已通过草稿或已入库的来源卡。
@@ -3384,7 +3417,8 @@ def _snapshot(question: Question) -> dict:
     return {"id": question.id, "number": question.number, "group_id": question.group_id,
             "start_source": question.start_source, "regions": question.regions,
             "candidates": question.figure_candidates, "question_type": question.question_type,
-            "section": question.section,
+            "section": question.section, "content_revision": question.content_revision,
+            "body_mode": question.body_mode, "processing_mode": question.processing_mode,
             "stem": question.stem, "options": question.options, "edited": question.edited,
             "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
             "segmentation_flags": [
@@ -3444,11 +3478,13 @@ def _set_backlog(paper_pk, value: int | None) -> None:
 
 
 def read_questions(paper: Paper, questions: list[Question]) -> None:
+    questions = [question for question in questions if question.processing_mode == "auto" or question.reread_requested]
     if not questions:
         return
     workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
+    snapshots_by_id = {snapshot["id"]: snapshot for snapshot in snapshots}
     # MinerU's own text for each range is an independent second engine.  Only
     # prose blocks are used: on marked papers the student's working is mostly
     # recognised as separate equation blocks, which would never match.
@@ -3489,13 +3525,13 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             item["html"] for item in table_list
             if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
         ]
-    Question.objects.filter(pk__in=[q.id for q in questions]).update(
-        state=Question.State.READING,
-        reread_requested=False,
-        approved=False,
-        approved_at=None,
-        approved_content_hash="",
-    )
+    for question in questions:
+        update = {"reread_requested": False}
+        if question.body_mode == "source_image":
+            update["ocr_pending"] = True
+        if question.body_mode != "source_image":
+            update.update(state=Question.State.READING, approved=False, approved_at=None, approved_content_hash="")
+        Question.objects.filter(pk=question.pk, content_revision=question.content_revision).update(**update)
 
     def work(snapshot: dict) -> tuple[int, dict]:
         try:
@@ -3514,11 +3550,29 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             close_old_connections()
 
     foreign: list[dict] = []
-    def persist(question_id: int, fields: dict) -> None:
-        foreign.extend(fields.pop("foreign_figures", []))
-        question = Question.objects.filter(pk=question_id).first()
+    def _persist_locked(question_id: int, fields: dict) -> None:
+        question = Question.objects.select_for_update().filter(pk=question_id).first()
         if question is None:
             return
+        snapshot = snapshots_by_id[question_id]
+        if (question.content_revision != snapshot["content_revision"]
+                or question.processing_mode != snapshot["processing_mode"]
+                or question.body_mode != snapshot["body_mode"] or question.regions != snapshot["regions"]):
+            return
+        if question.body_mode == "source_image":
+            # Recognition is a candidate next to the original body. Approval
+            # and published snapshots stay valid until someone adopts it.
+            fields.pop("foreign_figures", None)
+            question.ocr_suggestion = {"revision": question.content_revision,
+                **{key: value for key, value in fields.items() if key in {
+                    "stem", "options", "question_type", "origin", "text_source", "figures", "figure_review", "flags", "error", "state"}}}
+            for key in ("read_a", "read_b", "read_c"):
+                if key in fields:
+                    setattr(question, key, fields[key])
+            question.ocr_pending = False
+            question.save(update_fields=["ocr_suggestion", "ocr_pending", "read_a", "read_b", "read_c", "updated_at"])
+            return
+        foreign.extend(fields.pop("foreign_figures", []))
         # Figures handed over from another question's range survive a reread.
         # A row figure that lies in this question's own range is re-decided by
         # the new reading instead.
@@ -3589,6 +3643,10 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
             updated_at=timezone.now(),
         )
 
+    def persist(question_id: int, fields: dict) -> None:
+        with transaction.atomic():
+            _persist_locked(question_id, fields)
+
     # Keep at most PARALLEL card jobs in flight.  Submitting the complete book
     # up front prevents a confirmed quota failure from stopping queued work.
     # A bounded window lets us cancel every not-yet-started card immediately;
@@ -3632,6 +3690,10 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
     assign_foreign_figures(paper, foreign)
     distribute_figure_rows(paper)
     if quota_error is not None:
+        for snapshot in snapshots:
+            if snapshot["body_mode"] == "source_image":
+                Question.objects.filter(pk=snapshot["id"], content_revision=snapshot["content_revision"], ocr_pending=True).update(
+                    ocr_pending=False, ocr_suggestion={"revision": snapshot["content_revision"], "error": str(quota_error)[:280]})
         raise quota_error
 
 
@@ -3690,7 +3752,7 @@ def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Questio
 
 def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> None:
     """A reader's “this is question N's figure” guess loses to the row order."""
-    for question in paper.questions.exclude(id__in=keep):
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").exclude(id__in=keep):
         figures = [
             figure for figure in question.figures or []
             if not (figure.get("source") == "other" and _same_box(figure, boxes))
@@ -3721,7 +3783,7 @@ def distribute_figure_rows(paper: Paper) -> int:
     card so a person confirms the pairing.  No model call is made.
     """
     changed = 0
-    questions = list(paper.questions.order_by("group_id", "number", "id"))
+    questions = list(paper.questions.filter(processing_mode="auto", body_mode="text").order_by("group_id", "number", "id"))
     by_key = {(question.group_id, question.number): question for question in questions}
     for owner in questions:
         if owner.approved or any(f.get("source") == "manual" for f in owner.figures or []):
@@ -3765,7 +3827,7 @@ def distribute_figure_rows(paper: Paper) -> int:
 def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
     """读 A 题时发现某张图印着"第 N 题图"：把它交给第 N 题（常见于几道题的图排在同一行）。"""
     for item in foreign:
-        targets = paper.questions.filter(number=item["number"])
+        targets = paper.questions.filter(number=item["number"], processing_mode="auto", body_mode="text")
         if item.get("group_id") is not None:
             targets = targets.filter(group_id=item["group_id"])
         # 老数据可能没有题组。遇到同题号多于一张时宁可不猜，也不能把图跨章节贴错。
@@ -3801,8 +3863,26 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
 
 # ---------------------------------------------------------------- 总控
 
+def _set_if_plan_current(paper: Paper, revision: int, **fields) -> bool:
+    with transaction.atomic():
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+            return False
+        _set(current, **fields)
+        for key, value in fields.items():
+            setattr(paper, key, value)
+        return True
+
+
 def process_paper(paper: Paper) -> None:
+    paper.refresh_from_db()
+    run_revision = int((paper.processing_plan or {}).get("revision", 0))
     try:
+        if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
+            from . import intake
+            if not paper.pages:
+                intake.prepare(paper, paper.processing_plan["mode"])
+            return
         if paper.status in (Paper.Status.QUEUED, Paper.Status.PARSING):
             parse(paper)
             paper.refresh_from_db()
@@ -3810,23 +3890,23 @@ def process_paper(paper: Paper) -> None:
             segment_paper(paper)
             paper.refresh_from_db()
         if paper.status == Paper.Status.READING:
-            pending = list(paper.questions.filter(state__in=[Question.State.WAITING, Question.State.READING]))
+            pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]))
             read_questions(paper, pending)
-            _set(paper, status=Paper.Status.READY)
+            _set_if_plan_current(paper, run_revision, status=Paper.Status.READY)
     except mineru.MineruCancelled as error:
         logger.info("paper %s stopped on request", paper.pk)
-        _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
+        _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
     except readers.ReaderQuotaExhausted as error:
         # Quota exhaustion is recoverable after the user replenishes the plan.
         # Unfinished cards deliberately remain READING and paper_retry resumes
         # them without parsing, segmenting, or touching completed/protected cards.
         logger.warning("paper paused because the configured vision plan is exhausted")
-        _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
+        _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
     except Exception as error:
         logger.exception("paper failed")
         message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
             f"处理出错：{type(error).__name__}"
-        _set(paper, status=Paper.Status.FAILED, error=message[:500])
+        _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
 
 
 def parse_ahead(paper: Paper) -> bool:
@@ -3837,21 +3917,23 @@ def parse_ahead(paper: Paper) -> bool:
     SEGMENTING without waiting for MinerU.  Failures are recorded exactly as
     ``process_paper`` records them.
     """
+    run_revision = int((paper.processing_plan or {}).get("revision", 0))
     try:
         paper.refresh_from_db()
-        if paper.status != Paper.Status.QUEUED:
+        run_revision = int((paper.processing_plan or {}).get("revision", 0))
+        if paper.status != Paper.Status.QUEUED or (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
             return False
         parse(paper)
         return True
     except mineru.MineruCancelled as error:
         logger.info("paper %s stopped on request", paper.pk)
-        _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
+        _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
         return False
     except Exception as error:
         logger.exception("paper failed while parsing ahead")
         message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
             f"处理出错：{type(error).__name__}"
-        _set(paper, status=Paper.Status.FAILED, error=message[:500])
+        _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
         return False
 
 
@@ -3872,12 +3954,13 @@ def process_rereads(*, idle_papers_only: bool = False) -> int:
     if idle_papers_only:
         papers = papers.exclude(status__in=ACTIVE_PAPER_STATUSES)
     for paper in papers.distinct():
+        run_revision = int((paper.processing_plan or {}).get("revision", 0))
         questions = list(paper.questions.filter(reread_requested=True))
         try:
             read_questions(paper, questions)
         except readers.ReaderQuotaExhausted as error:
             logger.warning("reread paused because the configured vision plan is exhausted")
-            _set(paper, status=Paper.Status.FAILED, error=str(error)[:500])
+            _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
             break
         count += len(questions)
     return count

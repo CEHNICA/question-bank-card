@@ -109,7 +109,7 @@ def parse_lane(stop: threading.Event, interval: float = 2.0) -> None:
             with LANES_LOCK:
                 current = MAIN_CURRENT["paper"]
             if current is not None:
-                candidate = (Paper.objects.filter(status=Paper.Status.QUEUED).exclude(pk=current)
+                candidate = (Paper.objects.filter(status=Paper.Status.QUEUED).exclude(processing_plan__mode__in=["manual", "native"], processing_plan__mode__isnull=False).exclude(pk=current)
                              .order_by("created_at").first())
                 if candidate is not None:
                     with LANES_LOCK:
@@ -149,7 +149,7 @@ def overlap_lane(stop: threading.Event, interval: float = 1.0) -> None:
             with LANES_LOCK:
                 current = MAIN_CURRENT["paper"]
             if current is not None and reading_tail(current) and not settings_pending():
-                candidate = (Paper.objects.filter(status__in=ACTIVE).exclude(pk=current)
+                candidate = (Paper.objects.filter(status__in=ACTIVE).exclude(processing_plan__mode__in=["manual", "native"], processing_plan__mode__isnull=False).exclude(pk=current)
                              .order_by("created_at").first())
                 # Strictly in upload order: never jump past a paper still at MinerU.
                 if candidate is not None and candidate.status in (
@@ -314,7 +314,7 @@ class Command(BaseCommand):
             close_old_connections()
             worked = False
             try:
-                for paper in Paper.objects.filter(status__in=ACTIVE).order_by("created_at"):
+                for paper in Paper.objects.filter(status__in=ACTIVE).exclude(processing_plan__mode__in=["manual", "native"], processing_plan__mode__isnull=False).order_by("created_at"):
                     if not claim_for_main_lane(paper):
                         continue
                     try:

@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import features, imaging, prose, qtypes
+from . import features, imaging, prose, qtypes, source_images
 from .figure_policy import (
     DECISION_FLAGS,
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
@@ -102,7 +102,7 @@ def final_content(question: Question) -> dict:
     is_choice = question.question_type in CHOICE_TYPES or bool(question.options)
     source_origin = "manual" if question.start_source == "manual" or question.regions != question.regions_auto \
         else question.start_source
-    return {
+    content = {
         "number": question.number,
         "section": question.section,
         "question_type": question.question_type,
@@ -132,9 +132,15 @@ def final_content(question: Question) -> dict:
             "approved_content_hash": question.approved_content_hash,
             "text_source": question.text_source,
             "edited": question.edited,
-            "figure_review": deepcopy(stored_or_derived_review(question)),
+            "figure_review": deepcopy(source_images.review(question)),
         },
     }
+    if source_images.is_image(question):
+        content["body_mode"] = "source_image"
+        content["question_images"] = source_images.assets(question)
+        # The complete body crop already includes all original illustrations.
+        content["figures"] = []
+    return content
 
 
 def content_hash(content: dict) -> str:
@@ -153,6 +159,12 @@ def content_hash(content: dict) -> str:
         {k: source.get(k) for k in ("page_idx", "bbox", "type", "source")}
         for source in content.get("sources", [])
     ]
+    if content.get("body_mode") == "source_image":
+        material["body_mode"] = "source_image"
+        material["question_images"] = [
+            {key: item.get(key) for key in ("page_idx", "bbox", "order", "source", "render_sha256", "image_sha256", "width", "height")}
+            for item in content.get("question_images", [])
+        ]
     # 题源为空时不进校验：升级前通过、入库的题，校验值和以前一模一样。
     if str(content.get("origin") or "").strip():
         material["origin"] = content["origin"]
@@ -227,13 +239,13 @@ def type_blocks_approval(question: Question) -> bool:
 
 
 def approval_is_current(question: Question) -> bool:
-    if blocks_approval(stored_or_derived_review(question)) or type_blocks_approval(question):
+    if blocks_approval(source_images.review(question)) or type_blocks_approval(question):
         return False
     return bool(
         question.approved
         and question.approved_content_hash
         and question.state in REVIEWABLE_STATES
-        and question.stem.strip()
+        and source_images.body_valid(question)
         and question.approved_content_hash == approval_hash(question)
     )
 
@@ -289,6 +301,28 @@ def generation_fingerprint(content: dict, publication_id=None) -> str:
     Paths are restricted to this publication's immutable local asset folder.
     """
     material = {key: deepcopy(content.get(key)) for key in ("question_type", "stem", "options")}
+    if content.get("body_mode") == "source_image":
+        material["body_mode"] = "source_image"
+        material["question_images"] = [
+            {key: deepcopy(item.get(key)) for key in ("page_idx", "bbox", "order", "image_sha256")}
+            for item in content.get("question_images", [])
+        ]
+        for item, image in zip(material["question_images"], content.get("question_images", [])):
+            owner = str(publication_id or "")
+            if not owner:
+                match = re.fullmatch(r"/api/library/([0-9a-fA-F-]{36})/question-images/[^/]+", str(image.get("url") or ""))
+                owner = match.group(1) if match else ""
+            name = str(image.get("file") or "")
+            try:
+                owner = str(uuid.UUID(owner))
+                if not re.fullmatch(r"question-\d{1,2}\.png", name):
+                    raise ValueError
+                actual = hashlib.sha256((Path(settings.DATA_ROOT) / "library" / owner / name).read_bytes()).hexdigest()
+                if actual != image.get("image_sha256"):
+                    item["invalid"] = True
+                item["actual_sha256"] = actual
+            except (ValueError, OSError):
+                item["missing"] = True
     images = []
     for figure in content.get("figures") or []:
         if not isinstance(figure, dict):
@@ -378,9 +412,9 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
             raise ValueError(f"第 {question.number} 题还没有通过终审")
         if question.state not in REVIEWABLE_STATES:
             raise ValueError(f"第 {question.number} 题当前状态不能入库，请先完成识读或人工修正")
-        if not question.stem.strip():
-            raise ValueError(f"第 {question.number} 题题干为空")
-        figure_review = stored_or_derived_review(question)
+        if not source_images.body_valid(question):
+            raise ValueError(f"第 {question.number} 题没有有效正文或原卷裁片")
+        figure_review = source_images.review(question)
         if blocks_approval(figure_review):
             raise ValueError(f"第 {question.number} 题暂时不能入库：{blocking_message(figure_review)}")
         if type_blocks_approval(question):
@@ -402,6 +436,14 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
         folder = settings.DATA_ROOT / "library" / str(publication_id)
         folder.mkdir(parents=True, exist_ok=False)
         try:
+            for index, image in enumerate(content.get("question_images", [])):
+                name = f"question-{index + 1}.png"
+                original = Path(settings.DATA_ROOT) / str(question.paper_id) / "question-images" / image["file"]
+                shutil.copyfile(original, folder / name)
+                if hashlib.sha256((folder / name).read_bytes()).hexdigest() != image["image_sha256"]:
+                    raise ValueError("原卷裁片已变化，请重新终审")
+                image["file"] = name
+                image["url"] = f"/api/library/{publication_id}/question-images/{name}"
             for index, figure in enumerate(content["figures"]):
                 name = f"figure-{index + 1}.png"
                 shutil.copyfile(figure_file(question, index), folder / name)
@@ -554,6 +596,7 @@ def publication_json(publication: PublishedQuestion) -> dict:
 
 
 HISTORY_FIELDS = (
+    ("body_mode", "正文形式"), ("question_images", "原图正文"),
     ("stem", "题干"), ("options", "选项"), ("answer", "答案"),
     ("analysis", "解析"), ("origin", "题源"), ("question_type", "题型"),
     ("figures", "配图"), ("sources", "原卷位置"),
@@ -563,6 +606,11 @@ HISTORY_FIELDS = (
 
 def _history_value(content: dict, key: str):
     value = content.get(key)
+    if key == "body_mode":
+        return "原图正文" if value == "source_image" else "文字正文"
+    if key == "question_images":
+        return [{name: image.get(name) for name in ("page_idx", "bbox", "order", "image_sha256")}
+                for image in (value or [])]
     if key == "figures":
         # Every publication gets new file names/URLs. Compare the actual crop,
         # slot and provenance instead, including all cross-page pieces.
@@ -586,7 +634,7 @@ def publication_changes(before: PublishedQuestion, after: PublishedQuestion, *, 
         if old == new:
             continue
         field = {"key": key, "label": label}
-        if with_text and key not in {"figures", "sources"}:
+        if with_text and key not in {"figures", "sources", "question_images"}:
             if key == "options":
                 old = "\n".join(f"{name}. {old[name]}" for name in sorted(old))
                 new = "\n".join(f"{name}. {new[name]}" for name in sorted(new))
@@ -686,7 +734,7 @@ def _source_match_text(value: str, *, possible: bool = False) -> list[list[str]]
 def source_match_fingerprint(publication: PublishedQuestion, *, possible: bool = False) -> str | None:
     """Conservative identity for a text-only stored question, without writes."""
     content = publication.content
-    if not isinstance(content, dict) or content.get("figures") \
+    if not isinstance(content, dict) or content.get("body_mode") == "source_image" or content.get("figures") \
             or ("figures" in content and not isinstance(content["figures"], list)):
         return None
     kind = content.get("question_type")
@@ -990,9 +1038,9 @@ def tidy_saved_cards() -> dict[str, int]:
 
 def approval_is_current_ignoring_hash(question: Question) -> bool:
     """Whether the card could carry an approval at all (figures settled, type chosen…)."""
-    if blocks_approval(stored_or_derived_review(question)) or type_blocks_approval(question):
+    if blocks_approval(source_images.review(question)) or type_blocks_approval(question):
         return False
-    return bool(question.approved and question.state in REVIEWABLE_STATES and question.stem.strip())
+    return bool(question.approved and question.state in REVIEWABLE_STATES and source_images.body_valid(question))
 
 
 # 1.5.1 name for the same cleanup.

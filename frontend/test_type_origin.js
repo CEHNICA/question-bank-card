@@ -21,7 +21,8 @@ assert.match(library, /\["true_false", "判断题"\]/);
 
 // An undecided type blocks the tick, Enter and the viewer button, and each of them leads to the picker.
 assert.match(js, /function typeBlocksApproval\(q\) \{\s*return Boolean\(q\.type_blocked\) && \(q\.state === "green" \|\| q\.state === "yellow"\);/);
-assert.match(js, /function canApprove\(q\) \{\s*return Boolean\(q\.stem && !figureBlocksApproval\(q\) && !typeBlocksApproval\(q\)/);
+assert.match(js, /function canApprove\(q\) \{[\s\S]*?q\.body_mode === "source_image" \? Boolean\(q\.question_images\?\.length\) : Boolean\(q\.stem\)/);
+assert.match(js, /return Boolean\(hasBody && !figureBlocksApproval\(q\) && !typeBlocksApproval\(q\)/);
 assert.match(js, /else if \(typeBlocksApproval\(q\)\) focusTypePicker\(q\);/);
 assert.match(js, /if \(typeBlocksApproval\(q\)\) \{ focusTypePicker\(q\); return; \}/);
 assert.match(js, /typeBlocked \? "先选题型"/);

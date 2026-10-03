@@ -1,6 +1,6 @@
 # MinerU 云 API：当前规则与故障排查
 
-调查日期：**2026-10-02**。面向中国区 `mineru.net` 云服务，依据当日公开官方页面与官方生态仓库。
+调查日期：**2026-10-03**。面向中国区 `mineru.net` 云服务，依据公开官方页面、官方生态仓库及一次自制文件的免登录小测试。未登录账户、未读取密钥、未上传用户资料；精准 API 未做真实识读。
 
 题有据使用需要 Token 的**精准解析 API**，取得结构化结果来切题、找图和保存出处。当前 API 管理页写明单文件不超过 **200 MB、200 页**；每天 **1000 页是最高优先级额度**，超出后降低优先级，并非“到 1000 页就不能解析”。[官方 API 文档](https://mineru.net/apiManage/docs)
 
@@ -20,13 +20,15 @@
 
 当前页面的模式总表也写“批量最多 200 个”，但 `file-urls/batch` 和 URL 批量提交的具体章节都写最多 50 个。调用时以具体接口的 50 个为保守上限，不据此扩大批量。
 
-这些是 **2026-10-02 实际可见的文档差异**；页面没有说明准确生效日期，不能由此声称服务是在某一天统一切换限制。官方生态仓库的当前说明也列出精准 API 的 200 MB / 200 页限制。[MinerU-Ecosystem](https://github.com/opendatalab/MinerU-Ecosystem#-supported-apis)
+这些是 **2026-10-02 调查、2026-10-03 再次核实的文档差异**；页面没有说明准确生效日期，不能由此声称服务是在某一天统一切换限制。官方生态仓库的当前说明也列出精准 API 的 200 MB / 200 页限制。[MinerU-Ecosystem](https://github.com/opendatalab/MinerU-Ecosystem#-supported-apis)
 
 ## Token、额度与费用
 
 精准 API 使用 `Authorization: Bearer <Token>`。Token 在 [API 管理页](https://mineru.net/apiManage/token) 登录后创建；凭据由使用者在题有据的“设置 → 常用 → 填写或更换密钥”中填写，不发给 AI、不放进公开日志。
 
 **有效期以 Token 管理页显示的实际到期日期为准。** 当前公开 API 文档只区分 Token 错误 `A0202` 与过期 `A0211`，未给出适用于所有账户的固定有效天数。2026-01-24 的 [旧讨论 #4412](https://github.com/opendatalab/MinerU/discussions/4412) 是用户提出的 14 天续期诉求，不能作为当前“所有 Token 每 14 天过期”的依据。
+
+用户本次提供的官网通知截图显示“API Token 有效期”从 **14 天延长至 90 天**。这是通知截图证据；2026-10-03 匿名获取的公开 API 文档中未找到 90 天说明，未登录核验已有 Token 是否同步延长。软件不应提示固定 14 天更换，也不能替用户推算所有凭据的到期日，仍以 [本人 Token 管理页](https://mineru.net/apiManage/token) 为准。
 
 管理页的公开前端按服务返回的 `expired_at` 显示到期状态，并包含账户验证与手机号绑定流程；是否需要完成某项验证，以本人账户页面及创建 Token 时的提示为准。本次没有登录账户，也未读取任何 Token。
 
@@ -56,6 +58,24 @@
 | 结果 | ZIP 中的 Markdown、JSON，可额外导出其他格式 | Markdown 的 CDN 链接 |
 
 来源：[官方模式对比](https://mineru.net/apiManage/docs)。题有据保留原卷位置、切题和配图需要结构化结果，因此不能直接把轻量接口的 Markdown 当作同等替代品。免 Token 也不意味着无限使用或不向云端发送资料。
+
+### 网友说的“CLI 可用”可能是三种不同入口
+
+| 入口 | 是否使用云 Token | 能取得什么 | 对题有据的意义 |
+| --- | --- | --- | --- |
+| 本地开源 `mineru-kit parse` | 本地模式无需官网 Token；显式 `--remote` 才访问远端 | 4.0 中间 JSON / ZIP，含原页号、块坐标、公式和图块 | 可做独立本地 OCR 后端，需要安装依赖和模型、适配新协议 |
+| 官方云 CLI `mineru-open-api extract` | 需要，与精准云 API 相同 | 云结果包、Markdown / 内容列表 JSON / 图片等 | 是现有云接口的包装，不能绕过 Token、限流或同一云服务故障 |
+| 官方云 CLI `mineru-open-api flash-extract` | 无需，按 IP 限频 | 轻量 Markdown，无完整原页块坐标契约 | 可辅助手工题框后的文字识读，不能直接替代整卷定位与切题 |
+
+官方云 CLI 的 Windows x64 / ARM64 资产来自 [官方安装脚本](https://cdn-mineru.openxlab.org.cn/open-api-cli/install.ps1)；本次仅将 x64 文件下载到临时目录，未执行安装器、修改 PATH 或登录。实测 `version` 返回 **v0.5.9**（构建于 2026-04-10），`--help`、`extract --help`、`flash-extract --help` 均能在本机 Windows 运行。官方生态仓库的 `VERSION` 文件写 v0.1.0，不能当作 CDN 二进制的实际版本。[官方云 CLI 说明](https://github.com/opendatalab/MinerU-Ecosystem/tree/main/cli/mineru-open-api)
+
+这个二进制的 `extract --help` 仍写 600 页，与当日 API 管理页及当前仓库 README 的 **200 页**不一致；使用时按 API 管理页限制。`flash-extract --help` 又同时写“图片、表格、公式为占位符”和公式识别默认开启，因此不能只读帮助就保证公式完整。
+
+**免登录通道已做一次实际验证。** 官方 [生态仓库](https://github.com/opendatalab/MinerU-Ecosystem)明确说明 Flash 免费、免 API Key、每次最多 20 页 / 10 MB。2026-10-03 用自制的一页 PDF（994 字节、两行英文题干、分式与指数、简单三角形），隔离空用户配置目录并移除凭据环境，执行一次 `flash-extract --ocr --formula --table`：6.86 秒返回 Markdown，退出码 0；两行题号正文识出，几何图只剩 `<!-- image-->`，分式中的分母和指数丢失，未返回 bbox 或结构化原页号。未记录各阶段原始 HTTP 状态码，不把退出码写成 HTTP 200。测试只证明当时的匿名 Flash 通道能够处理这一个合成文件，不能证明精准 v4 API 已恢复、用户账户可用或数学试卷识读可靠。
+
+本地开源版已发布 **4.0.10**（2026-09-29），与上述云 CLI 是两个独立产品。4.0 在 Windows 的 **Basic 档**使用 ONNX / CPU 小模型，官方说明支持 OCR、公式与表格；无需 NVIDIA 显卡或官网 Token。Standard / Advanced 加用 VLM，速度与内存取决于引擎；本机 Intel UHD 770 的性能尚未实测，不能因为支持 llama.cpp 就承诺流畅。[官方发布](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.0.10-released)、[档位与环境](https://opendatalab.github.io/MinerU/usage/tiers/)
+
+4.0 的一次性转换入口应使用 `mineru-kit parse input.pdf -o result.zip --tier basic --format zip --ocr-mode auto`。其默认全页，ZIP 含 `middle_json.json`、`structured_content.json`、Markdown 与素材；中间协议的页号从 0 开始、bbox 为 0–1，不能当作云 v4 的内容列表直接读。`mineru parse --json` 是含继续阅读信息的文档库命令响应，PDF 默认前 10 页，也不是完整内容列表。新版结构需单独适配并做原页坐标验证。本次未安装本地模型、未执行该转换指令。[输出协议](https://opendatalab.github.io/MinerU/reference/output_files/)、[4.0 迁移指南](https://opendatalab.github.io/MinerU/reference/migration_4/)
 
 ## 本地文件上传与结果格式
 
@@ -111,7 +131,7 @@
 
 这些是**官方仓库里的用户报告**，本次查看没有找到维护者确认其根因或修复时间的回复，也未找到覆盖全站的正式停服公告。不能据此认定“MinerU 全面关停”，更不能认定某位用户的问题就是登录同步、未实名或 Token 过期。
 
-本次能核实的是公开页面可访问、当前文档内容、接口与输出约定；**未读取本机密钥、未登录账户、未提交用户原卷、未发起实际识读**。因此不宣告云服务已恢复或当前用户账户已经可用。实际失败原因仍应结合本人操作时的具体错误与账户提示判断。
+本次能核实的是公开页面、接口与输出约定，以及上述一次匿名 Flash 合成文件测试；**未读取本机密钥、未登录账户、未提交用户原卷、未发起精准 API 识读**。因此不宣告精准云服务已恢复或当前用户账户已经可用。实际失败原因仍应结合本人操作时的具体错误与账户提示判断。
 
 ## 本次软件与验证方向
 

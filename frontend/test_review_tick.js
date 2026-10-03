@@ -28,7 +28,7 @@ assert.match(js, /\{ label: "恢复通过", onClick: \(\) => approveQuestion\(fr
 assert.match(css, /\.cards:not\(\.selecting\) \.card-select, \.cards\.selecting \.card-tick \{ display: none; \}/);
 assert.match(css, /\.card-select \{ border-radius: 50%; \}/);
 assert.match(css, /\.card-tick\[aria-pressed="true"\]/);
-assert.match(html, /id="selectionStart"[^>]*>批量删除题卡…<\/button>/);
+assert.match(html, /id="selectionStart"[^>]*>批量处理题卡…<\/button>/);
 assert.match(html, /id="selectionCancel"[^>]*>完成<\/button>/);
 assert.match(js, /function startSelecting\(\)/);
 assert.match(js, /function stopSelecting\(\{ render = true \} = \{\}\)/);

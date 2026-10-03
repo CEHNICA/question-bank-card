@@ -206,8 +206,16 @@
           <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
           <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
         </div>
-        <small id="bookChunkHint" class="material-hint">书籍 PDF 会先在本机按每 100 页稳定分片，再逐片解析；原文件不会改动。</small>
+        <small id="bookChunkHint" class="material-hint">自动解析书籍 PDF 时，每 100 页稳定分片；本地手工切题保留全部原页，原文件不会改动。</small>
       </fieldset>
+      <label class="intake-mode">处理方式
+        <select id="parseMode">
+          <option value="manual" selected>本地手工切题（无需密钥）</option>
+          <option value="native">文字版 PDF（本地提取）</option>
+          <option value="mineru">MinerU 自动切题</option>
+        </select>
+        <small id="parseModeHint">保留原卷，在页面上框出题目；保存原图题，不会自动调用 AI。</small>
+      </label>
       <p id="uploadNote" class="side-note" hidden></p>
       <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
@@ -227,12 +235,12 @@
           <circle cx="104" cy="82" r="14" fill="#1f6b5f"/>
           <path d="m97.5 82 4.5 4.5 8.5-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <h2>上传试卷或教材，剩下的交给 AI</h2>
-        <p>AI 会自动切题、读题、挑配图，并让两位“读者”各读一遍互相核对。</p>
+        <h2>把题目留下，也把出处留下</h2>
+        <p>无需密钥也能导入原卷、手工切题。文字版 PDF 可在本机提取，AI 识读由你主动发起。</p>
         <button id="emptyLearn" class="button primary" type="button">先用示例试卷学一遍（不用密钥）</button>
         <ol class="empty-steps">
-          <li><b>1</b>左侧选择资料类型，再上传 PDF、Word 或几张照片</li>
-          <li><b>2</b>AI 切题、双读核对；页面会如实显示当前阶段和完成数</li>
+          <li><b>1</b>选择处理方式，再上传原卷；手工切题无需密钥</li>
+          <li><b>2</b>框出题目、选项与配图；跨页片段可自由调整顺序</li>
           <li><b>3</b>对照原卷看一眼：对了就通过，错了就改</li>
         </ol>
       </section>
@@ -309,9 +317,10 @@
               <summary class="toggle-pill"><svg class="icon"><use href="#i-tools"/></svg>工具<svg class="icon" style="width:13px;height:13px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
                 <button id="addQuestion" class="link-button" type="button">漏了一题？手动框出</button>
+                <button id="manualProcessing" class="link-button" type="button">改用本地手工切题</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
-                <button id="selectionStart" class="link-button" type="button">批量删除题卡…</button>
+                <button id="selectionStart" class="link-button" type="button">批量处理题卡…</button>
                 <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
               </div>
             </details>
@@ -321,6 +330,7 @@
           <span class="selection-summary"><strong id="selectionCount">已选择 0 道题</strong><small id="selectionHint">删除后可以撤销。</small></span>
           <span class="selection-actions">
             <button id="selectionCancel" class="button quiet" type="button">完成</button>
+            <button id="selectionReread" class="button" type="button">识读所选题</button>
             <button id="selectionDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>移到回收站</button>
           </span>
         </div>
@@ -409,6 +419,14 @@
       </div>
     </div>
     <div class="page-zoom-toolbar">
+      <div id="pageToolControls" class="zoom-controls" role="group" aria-label="原卷操作工具">
+        <button id="pageToolPan" class="button" type="button" aria-pressed="false">手形 · 浏览</button>
+        <button id="pageToolDraw" class="button" type="button" aria-pressed="true">框选</button>
+      </div>
+      <div id="pageHistoryControls" class="zoom-controls" role="group" aria-label="撤销范围调整">
+        <button id="pageUndo" class="button" type="button" disabled>撤销</button>
+        <button id="pageRedo" class="button" type="button" disabled>重做</button>
+      </div>
       <div class="zoom-controls" role="group" aria-label="缩放整页原卷">
         <button id="pageZoomFit" class="button" type="button" aria-pressed="false" title="完整显示这一页（0）">适页</button>
         <button id="pageZoomWidth" class="button" type="button" aria-pressed="true" title="铺满可用宽度（W）">适宽</button>
@@ -419,6 +437,7 @@
       <span id="pageCanvasHint" class="hint"></span>
       <span id="pageImageState" class="hint" role="status" hidden></span>
       <button id="pageImageRetry" class="button small" type="button" hidden>重新加载原卷</button>
+      <button id="pageManualCut" class="button small" type="button" hidden>在这页手工切题</button>
     </div>
     <nav class="page-navigation" aria-label="原卷翻页">
       <button id="pagePrevious" class="button small" type="button" aria-label="上一页">上一页</button>
@@ -437,6 +456,7 @@
         </div>
       </details>
     </nav>
+    <div id="regionPieces" class="region-pieces" role="region" aria-label="题目片段顺序" hidden></div>
     <div id="pageStage" class="page-stage" tabindex="0" aria-label="整页原卷画布"></div>
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
       <div class="figure-slot-head">
@@ -649,10 +669,10 @@
     <div class="welcome-body">
       <img class="welcome-mark" src="/favicon.png" width="52" height="52" alt="" aria-hidden="true">
       <h2 id="welcomeTitle">欢迎使用题有据</h2>
-      <p class="welcome-lead">把试卷变成能搜索、能组卷的题库，每道题都对照原卷核对过。</p>
+      <p class="welcome-lead">保留原卷，核对后入库。每道题都有出处，随时回看原页。</p>
       <ol class="welcome-steps">
-        <li><b>1</b><span><strong>上传</strong>PDF、Word 或手机拍的照片，拖进窗口就行。AI 会自动切题、读题。</span></li>
-        <li><b>2</b><span><strong>核对</strong>每张题卡左边是原卷截图，右边是读出来的题面。对了就在题号左边打勾，错了就改字。</span></li>
+        <li><b>1</b><span><strong>上传</strong>PDF 或照片可在本地手工切题，无需密钥。文字版 PDF 可本地提取；自动切题需先配置服务。</span></li>
+        <li><b>2</b><span><strong>核对</strong>完整框出题目、选项与配图，选好题型。可以直接保留原图，也可以主动识读，确认后转成文字。</span></li>
         <li><b>3</b><span><strong>入库</strong>核对完点“入库”，题目就进了“正式题库”，可以搜索、组卷。</span></li>
       </ol>
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
@@ -663,7 +683,7 @@
       </div>
     </div>
     <footer class="welcome-actions">
-      <button id="welcomeKeys" class="button" type="button" hidden>先去填写密钥</button>
+      <button id="welcomeKeys" class="button" type="button" hidden>配置自动切题（可稍后）</button>
       <span class="welcome-spacer"></span>
       <button id="welcomeSkip" class="button quiet" type="button">直接开始</button>
       <button id="welcomeTour" class="button" type="button">只看一遍界面</button>

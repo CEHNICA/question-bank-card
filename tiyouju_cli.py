@@ -304,6 +304,9 @@ def card_summary(question: dict) -> dict:
         # mineru: MinerU's draft nobody has checked against the page yet (AI 助手读题).
         "text_source": question.get("text_source") or "",
         "stem": question.get("stem") or "",
+        "body_mode": question.get("body_mode", "text"),
+        "processing_mode": question.get("processing_mode", "auto"),
+        "question_images": question.get("question_images") or [],
     }
 
 
@@ -423,6 +426,7 @@ def cmd_status(client: Client, args) -> dict:
         "app_version": status.get("app_version"),
         "cli_version": VERSION,
         "upload_enabled": bool(status.get("upload_enabled")),
+        "automatic_parse_ready": bool(status.get("automatic_parse_ready", status.get("upload_enabled"))),
         **reading_summary(status),
         "papers": len(items),
         "papers_by_status": counts,
@@ -453,7 +457,8 @@ def show_status(result: dict) -> str:
     lines = [
         f"题有据 {result['app_version']} 正在运行（{result['url']}）",
         *reading_lines(result),
-        f"可以上传新卷子：{'是' if result['upload_enabled'] else '否——请使用者在软件“设置 → 常用 → 填写或更换密钥”里填好上面缺的密钥'}",
+        f"可以导入原卷：{'是，可手工切题或本地处理文字 PDF' if result['upload_enabled'] else '当前不可用，请查看软件中的具体错误'}",
+        f"自动云识读：{'已配置，真实服务仍以任务结果为准' if result.get('automatic_parse_ready') else '需要配置读题服务；手工录入可以继续'}",
         f"试卷：{result['papers']} 份" + (
             "（" + "，".join(f"{label} {count}" for label, count in result["papers_by_status"].items()) + "）"
             if result["papers_by_status"] else ""),
@@ -549,6 +554,7 @@ def paper_summary(item: dict) -> dict:
         "total": counts.get("total", item.get("total", 0)), "approved": counts.get("approved", 0),
         "published": counts.get("published", 0), "yellow": counts.get("yellow", 0), "red": counts.get("red", 0),
         "error": item.get("error") or "",
+        "processing_plan": item.get("processing_plan") or {},
     }
 
 
@@ -573,7 +579,13 @@ def cmd_upload(client: Client, args) -> dict:
     missing = [str(item) for item in files if not item.is_file()]
     if missing:
         raise CliError("找不到文件：" + "、".join(missing))
-    result = client.upload(files, {"material_type": "book" if args.book else "exam"})
+    parameters = {"material_type": "book" if args.book else "exam"}
+    parse_mode = getattr(args, "parse_mode", None)
+    if parse_mode is not None:
+        if parse_mode not in {"manual", "native", "mineru"}:
+            raise CliError("处理方式只能是 manual、native 或 mineru")
+        parameters["parse_mode"] = parse_mode
+    result = client.upload(files, parameters)
     paper = result["paper"]
     summary = {"paper": paper_summary(paper), "duplicate": bool(result.get("duplicate"))}
     if args.wait:
@@ -588,7 +600,10 @@ def show_upload(result: dict) -> str:
     if "wait" in result:
         text += "\n" + show_wait(result["wait"])
     else:
-        text += f"\n用 `tiyouju wait {short(paper['id'])}` 等它读完。"
+        if paper.get("processing_plan", {}).get("mode") == "manual":
+            text += "\n原卷已在本机准备好，可在软件中手工框题；没有发起识读。"
+        else:
+            text += f"\n用 `tiyouju wait {short(paper['id'])}` 等它读完。"
     return text
 
 
@@ -627,6 +642,8 @@ def show_wait(result: dict) -> str:
     paper = result["paper"]
     if not result["done"]:
         return f"{short(paper['id'])} 还在处理（{paper['status_label']}），再运行一次 wait 接着等。"
+    if paper.get("processing_plan", {}).get("mode") == "manual":
+        return f"{short(paper['id'])} 原卷准备好了：{result['cards']} 道手工题，需核对 {result['todo']} 道。可以继续手工框题和配图。"
     return (f"{short(paper['id'])} 读完了：{result['cards']} 道题，需逐题核对 {result['todo']} 道，"
             f"识读一致 {result['green']} 道。下一步：`tiyouju cards {short(paper['id'])} --filter todo`。")
 
@@ -653,7 +670,8 @@ def show_cards(result: dict) -> str:
     for card in result["cards"]:
         state = approval_label(card) or STATES.get(card["state"], card["state"])
         group = f"[{card['group']}] " if card["group"] else ""
-        lines.append(f"  第 {card['number']} 题 {group}#{card['id']}  {state}  {first_line(card['stem'], 46)}")
+        caption = "原卷图片题" if card.get("body_mode") == "source_image" else first_line(card["stem"], 46)
+        lines.append(f"  第 {card['number']} 题 {group}#{card['id']}  {state}  {caption}")
         for issue in card["issues"][:3]:
             lines.append(f"      ! {issue}")
     return "\n".join(lines)
@@ -701,6 +719,13 @@ def card_detail(client: Client, paper_ref: str, card_ref: str, out: str | None =
             target.write_bytes(client.get_bytes(f"/api/questions/{question['id']}/figures/{index}"))
             figures.append(str(target))
         result["images"]["figures"] = figures
+        if question.get("body_mode") == "source_image":
+            fragments = []
+            for index, fragment in enumerate(question.get("question_images") or []):
+                target = folder / f"{tag}-question{index + 1}.png"
+                target.write_bytes(client.get_bytes(f"/api/questions/{question['id']}/question-images/{index}"))
+                fragments.append(str(target))
+            result["images"]["question_images"] = fragments
     return result
 
 
@@ -713,7 +738,10 @@ def show_card(result: dict) -> str:
              f"{approval_label(result) or STATES.get(result['state'], result['state'])}"]
     if result.get("origin"):
         lines.append(f"题源：{result['origin']}（题干前印的出处，单独存放）")
-    lines += [f"题干：{result['stem'] or '（空）'}"]
+    if result.get("body_mode") == "source_image":
+        lines.append("题面：原卷图片题，按下列片段顺序核对；可以后补识读文字。")
+    else:
+        lines += [f"题干：{result['stem'] or '（空）'}"]
     for key, value in result["options"].items():
         lines.append(f"  {key}. {value}")
     if result["answer"]:
@@ -736,6 +764,8 @@ def show_card(result: dict) -> str:
     if images:
         lines.append("图片（请打开看）：")
         lines.append(f"  原卷截图：{images['crop']}")
+        for index, path in enumerate(images.get("question_images") or [], 1):
+            lines.append(f"  题目片段 {index}：{path}")
         if images.get("candidates"):
             lines.append(f"  候选图编号：{images['candidates']}")
         for path in images.get("figures") or []:
@@ -1057,6 +1087,7 @@ def _enrichment_resource(client: Client, publication_id: str, url) -> tuple[str,
     allowed = suffix == "crop" or (len(parts) == 2 and (
         (parts[0] == "pages" and parts[1].isdigit())
         or (parts[0] == "figures" and re.fullmatch(r"figure-\d{1,3}\.png", parts[1]))))
+    allowed = allowed or (len(parts) == 2 and parts[0] == "question-images" and bool(re.fullmatch(r"question-\d{1,3}\.png", parts[1])))
     if (parsed.scheme, parsed.netloc) != (local.scheme, local.netloc) or parsed.fragment or not allowed:
         raise CliError("任务图片必须来自本机同一道入库题的原卷或配图接口")
     path = urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, ""))
@@ -1080,10 +1111,15 @@ def cmd_enrich_prepare(client: Client, args) -> dict:
     for index, figure in enumerate(images.get("figures") or [], 1):
         path, figure["url"] = _enrichment_resource(client, publication_id, figure.get("url"))
         resources.append((f"figure-{index}.png", path))
+    for index, fragment in enumerate(images.get("question_images") or [], 1):
+        path, fragment["url"] = _enrichment_resource(client, publication_id, fragment.get("url"))
+        resources.append((f"question-{index}.png", path))
     for original in images.get("originals") or []:
         _, original["url"] = _enrichment_resource(client, publication_id, original.get("url"))
     result["images"] = images
     local_images = {"crop": None, "figures": []}
+    if images.get("question_images"):
+        local_images["question_images"] = []
     if not getattr(args, "no_images", False) and resources:
         try:
             folder = Path(args.out).expanduser() if getattr(args, "out", None) else Path(tempfile.mkdtemp(prefix="tiyouju-enrich-"))
@@ -1093,6 +1129,8 @@ def cmd_enrich_prepare(client: Client, args) -> dict:
                 target.write_bytes(client.get_bytes(path))
                 if filename == "crop.png":
                     local_images["crop"] = str(target.resolve())
+                elif filename.startswith("question-"):
+                    local_images["question_images"].append(str(target.resolve()))
                 else:
                     local_images["figures"].append(str(target.resolve()))
         except OSError as error:
@@ -1200,6 +1238,8 @@ MCP_TOOLS = [
     ("upload_paper", "上传一份试卷（PDF、Word，或几张照片合成一份）。", _schema({
         "paths": {"type": "array", "items": {"type": "string"}, "description": "本机文件的完整路径"},
         "book": {"type": "boolean", "description": "是一本书/讲义而不是一份试卷"},
+        "parse_mode": {"type": "string", "enum": ["manual", "native", "mineru"],
+                       "description": "manual 无密钥手工切题；native 本地文字PDF；mineru 明确使用云解析"},
     }, ["paths"])),
     ("wait_paper", "等一份试卷读完（最多等 timeout 秒，没读完可以再调一次）。", _schema({
         "paper": PAPER, "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
@@ -1274,7 +1314,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "list_papers":
         return cmd_papers(client, _ns()), []
     if name == "upload_paper":
-        return cmd_upload(client, _ns(files=a.get("paths") or [], book=bool(a.get("book")), wait=False, timeout=0)), []
+        return cmd_upload(client, _ns(files=a.get("paths") or [], book=bool(a.get("book")),
+                                      parse_mode=a.get("parse_mode"), wait=False, timeout=0)), []
     if name == "wait_paper":
         return wait_for(client, find_paper(client, a.get("paper", "")), min(600, int(a.get("timeout") or 300)), quiet=True), []
     if name == "list_cards":
@@ -1282,7 +1323,7 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "show_card":
         result = card_detail(client, a.get("paper", ""), a.get("card", ""))
         images = result.get("images") or {}
-        paths = [images.get("candidates") or images.get("crop"), *(images.get("figures") or [])]
+        paths = images.get("question_images") or [images.get("candidates") or images.get("crop"), *(images.get("figures") or [])]
         return result, [path for path in paths if path]
     if name == "fix_card":
         options = a.get("options") or {}
@@ -1317,7 +1358,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         result = cmd_enrich_prepare(client, _ns(publication_id=a.get("publication_id"),
                                                kinds=a.get("kinds"), agent=a.get("agent")))
         images = result.get("local_images") or {}
-        return result, [path for path in [images.get("crop"), *(images.get("figures") or [])] if path]
+        paths = images.get("question_images") or [images.get("crop"), *(images.get("figures") or [])]
+        return result, [path for path in paths if path]
     if name == "submit_enrichment":
         return cmd_enrich_submit(client, _ns(job_id=a.get("job_id"), fingerprint=a.get("fingerprint"),
                                              agent=a.get("agent"), tags=a.get("tags"),
@@ -1444,6 +1486,8 @@ def build_parser() -> argparse.ArgumentParser:
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
     upload.add_argument("files", nargs="+")
     upload.add_argument("--book", action="store_true", help="是一本书/讲义")
+    upload.add_argument("--parse-mode", choices=["manual", "native", "mineru"],
+                        help="manual 无密钥手工切题；native 本地文字PDF；mineru 云解析")
     upload.add_argument("--wait", action="store_true", help="上传后等它读完")
     upload.add_argument("--timeout", type=int, default=3600)
 

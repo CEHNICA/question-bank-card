@@ -33,9 +33,9 @@ assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
 assert.match(html, /id="libraryAISettingsMount"/);
 assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAISettingsMount"\)\)/);
 assert.match(js, /settingsAI: "ai"/);
-// “常用”先用一句话说明能不能上传新资料；缺什么密钥就直接说出来。
+// Local import is available without cloud credentials.
 assert.match(html, /id="settingsReady"/);
-assert.match(js, /导入新资料还需 \$\{missing\.join\("、"\)\} 密钥/);
+assert.match(js, /本地导入、手工切题可直接使用。自动切题还需 \$\{missing\.join\("、"\)\} 密钥/);
 // 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
 assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
 assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);

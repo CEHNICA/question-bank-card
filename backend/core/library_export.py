@@ -373,15 +373,17 @@ def _selected(content, extras, use_ai):
 def _images(publication, where):
     from PIL import Image
     images, total = [], 0
-    figures = publication.content.get("figures", [])
-    if not isinstance(figures, list):
+    image_body = publication.content.get("body_mode", "text") == "source_image"
+    figures = publication.content.get("question_images" if image_body else "figures", [])
+    if not isinstance(figures, list) or len(figures) > 64 or (image_body and not figures):
         _fail(where, "配图快照不完整", 409)
     for index, figure in enumerate(figures):
-        label = f"{where} · 配图 {index + 1}"
-        if not isinstance(figure, dict) or figure.get("slot") not in {"stem", *"ABCDE", *(f"option_{key}" for key in "ABCDE")}:
+        label = f"{where} · {'题目片段' if image_body else '配图'} {index + 1}"
+        if not isinstance(figure, dict) or (not image_body and figure.get("slot") not in {"stem", *"ABCDE", *(f"option_{key}" for key in "ABCDE")}):
             _fail(label, "配图位置无法识别，不能省略", 409)
         name = figure.get("file")
-        if not isinstance(name, str) or not re.fullmatch(r"figure-\d{1,3}\.png", name):
+        pattern = r"question-\d{1,3}\.png" if image_body else r"figure-\d{1,3}\.png"
+        if not isinstance(name, str) or not re.fullmatch(pattern, name):
             _fail(label, "缺少入库配图文件", 409)
         folder = Path(settings.DATA_ROOT) / "library" / str(publication.id)
         target = folder / name
@@ -399,9 +401,16 @@ def _images(publication, where):
                     if image.format != "PNG" or image.width < 1 or image.height < 1:
                         raise ValueError
                     image.verify()
-            images.append({"slot": figure["slot"].removeprefix("option_"), "bytes": data, "size": size,
-                           "name": name, "sha256": hashlib.sha256(data).hexdigest()})
-        except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+                with Image.open(io.BytesIO(data)) as image:
+                    image.load()
+            digest = hashlib.sha256(data).hexdigest()
+            if image_body and (figure.get("image_sha256") != digest
+                               or type(figure.get("width")) is not int or type(figure.get("height")) is not int
+                               or (figure["width"], figure["height"]) != size):
+                _fail(label, "正文截图与已核对的入库版不一致，请检查原图题", 409)
+            images.append({"slot": "body" if image_body else figure["slot"].removeprefix("option_"),
+                           "bytes": data, "size": size, "name": name, "sha256": digest})
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
             _fail(label, "文件缺失、损坏或过大，请检查这道题的入库配图", 409)
     return images
 
@@ -423,6 +432,9 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
         if not isinstance(publication.content, dict) or not isinstance(publication.content.get("stem"), str):
             _fail(where, "题目快照不完整", 409)
         content, extras = deepcopy(publication.content), deepcopy(publication.extras)
+        image_body = content.get("body_mode", "text") == "source_image"
+        if content.get("body_mode", "text") not in {"text", "source_image"}:
+            _fail(where, "题目正文类型无法识别", 409)
         if any(content.get(name) is not None and not isinstance(content[name], str) for name in ("answer", "analysis", "origin")):
             _fail(where, "答案或题源快照格式不完整", 409)
         selected, is_ai = _selected(content, extras, use_ai)
@@ -434,7 +446,7 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
         required = {}
         if question_fields:
             required["stem"] = content["stem"]
-            if not required["stem"].strip():
+            if not image_body and not required["stem"].strip():
                 _fail(where, "题干为空，不能导出空题", 409)
             option_values = content.get("options") or {}
             if not isinstance(option_values, dict) or set(option_values) - set("ABCDE"):
@@ -442,7 +454,7 @@ def _capture(ids, rendered, options, output_format, *, word_math=None):
             for letter, text in option_values.items():
                 if not isinstance(text, str):
                     _fail(where, "选项快照不完整", 409)
-                if text.strip():
+                if text.strip() and not image_body:
                     required[f"options.{letter}"] = text
             if options["origin"] and str(content.get("origin") or "").strip():
                 required["origin"] = content["origin"]
@@ -485,7 +497,10 @@ def _recheck(captured, options, use_ai):
         selected, is_ai = _selected(live.content, live.extras, current_ai)
         if selected != item["selected"] or is_ai != item["ai"] or use_ai != current_ai:
             _fail(item["where"], "导出期间答案或 AI 设置发生变化，请重新打开组卷", 409)
-        for before, after in zip(item["images"], _images(live, item["where"]) if item["images"] else []):
+        current_images = _images(live, item["where"]) if item["images"] else []
+        if len(current_images) != len(item["images"]):
+            _fail(item["where"], "导出期间图片数量发生变化，请重新打开组卷", 409)
+        for before, after in zip(item["images"], current_images):
             if before["sha256"] != after["sha256"]:
                 _fail(item["where"], "导出期间配图发生变化，请重新打开组卷", 409)
 
@@ -603,7 +618,7 @@ def _write_images(document, item, slot):
             continue
         width, height = image["size"]
         # 150 dpi natural size, capped to the A4 text area and one-page height.
-        scale = min(178 / width, 210 / height, 25.4 / 150)
+        scale = min(178 / width, (235 if slot == "body" else 210) / height, 25.4 / 150)
         paragraph = document.add_paragraph()
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
         paragraph.paragraph_format.keep_together = True
@@ -916,13 +931,15 @@ def _document(captured, title, options, mode):
                 else:
                     _write_field(document, origin_blocks, size, prefix=prefix + "（题源）", where=item["where"])
                     prefix = ""
-            _write_field(document, item["fields"]["stem"], size, prefix=prefix, where=item["where"], lead_segments=lead_segments)
-            _write_images(document, item, "stem")
-            columns = _option_columns(item, options)
+            image_body = item["content"].get("body_mode", "text") == "source_image"
+            _write_field(document, [] if image_body else item["fields"]["stem"], size,
+                         prefix=prefix, where=item["where"], lead_segments=lead_segments)
+            _write_images(document, item, "body" if image_body else "stem")
+            columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)
             else:
-                for letter in "ABCDE":
+                for letter in ("" if image_body else "ABCDE"):
                     if f"options.{letter}" in item["fields"]:
                         _write_field(document, item["fields"][f"options.{letter}"], size, prefix=f"{letter}. ", where=item["where"])
                     elif any(image["slot"] == letter for image in item["images"]):

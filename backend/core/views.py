@@ -29,7 +29,7 @@ from PIL import Image
 from .version import APP_VERSION
 from . import (
     credential_settings, demo, features, imaging, import_planning, knowledge, library, library_jobs, m3import,
-    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables,
+    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables, intake, source_images,
 )
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, DECISION_FLAGS, FLAG_FOREIGN_FIGURE, FLAG_NO_FIGURE,
@@ -198,12 +198,12 @@ def _unclassified_candidate_details(
 
 
 def _valid_regions(paper: Paper, value) -> list[dict] | None:
-    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+    if not isinstance(value, list) or not 1 <= len(value) <= 12:
         return None
     pages = {page["page_idx"] for page in paper.pages}
     regions = []
     for item in value:
-        if not isinstance(item, dict) or item.get("page_idx") not in pages:
+        if not isinstance(item, dict) or type(item.get("page_idx")) is not int or item.get("page_idx") not in pages:
             return None
         bbox = _valid_bbox(item.get("bbox"))
         if bbox is None:
@@ -349,7 +349,7 @@ def _verdict(row: Question) -> tuple[str, bool, bool]:
     """(state, approval current, figures block approval).  The state is read after
     the figure review: a review saved under an older rule can turn a yellow card
     green on screen (“已自动排除疑似多余图”), and the counts must say the same."""
-    approved, blocked = library.approval_is_current(row), blocks_approval(stored_or_derived_review(row))
+    approved, blocked = library.approval_is_current(row), blocks_approval(source_images.review(row))
     return row.state, approved, blocked
 
 
@@ -413,6 +413,8 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         "trash_count": Question.all_objects.filter(paper=paper, deleted_at__isnull=False).count(),
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
+        "processing_plan": paper.processing_plan or {},
+        "parse_mode": (paper.processing_plan or {}).get("mode", "mineru"),
         "demo": demo.is_demo(paper),
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
         "suggested_groups": (paper.structure or {}).get("suggested_groups") or [],
@@ -467,7 +469,7 @@ def _reading(value: dict) -> dict:
 
 
 def question_json(question: Question, table_blocks: list[dict] | None = None) -> dict:
-    figure_review = stored_or_derived_review(question)
+    figure_review = source_images.review(question)
     if table_blocks is None and question.figures:
         table_blocks = tables.table_blocks(question.paper)
     valid_candidate_keys = _candidate_keys(question)
@@ -510,8 +512,24 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         if table_blocks and tables.table_for_figure(question.paper, figure, table_blocks):
             shown_figure["table"] = True
         figures.append({**shown_figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
+    question_images = []
+    if source_images.is_image(question):
+        try:
+            question_images = source_images.assets(question)
+        except (OSError, ValueError, IndexError, RuntimeError):
+            pass  # Missing originals block approval, but the task remains editable.
+    suggestion = deepcopy(question.ocr_suggestion or {})
+    if suggestion.get("revision") == question.content_revision:
+        suggestion["figures"] = [{**figure, "url": f"/api/questions/{question.pk}/ocr-figures/{index}?v={question.content_revision}"}
+                                 for index, figure in enumerate(suggestion.get("figures") or [])]
+    else:
+        suggestion = {}
     return {
         "id": question.id, "source_key": str(question.source_key), "number": question.number,
+        "body_mode": question.body_mode, "processing_mode": question.processing_mode,
+        "content_revision": question.content_revision, "ocr_suggestion": suggestion,
+        "ocr_pending": question.ocr_pending,
+        "question_images": question_images,
         "group": ({"id": question.group_id, "title": question.group.title,
                    "sequence": question.group.sequence} if question.group_id else None),
         "section": question.section,
@@ -703,7 +721,8 @@ def status(request):
     return JsonResponse({
         # AI 助手读题只需要 MinerU：题卡先用 MinerU 的文字，再由 AI 助手对照原卷核对。
         # Both follow the saved choice, which the next paper will use.
-        "upload_enabled": readers.configured("mineru") and _reading_ready(),
+        "upload_enabled": True,
+        "automatic_parse_ready": readers.configured("mineru") and _reading_ready(),
         "assistant_mode": readers.assistant_mode(saved_preferences)
         if saved_preferences is not None else readers.assistant_mode(applied_preferences),
         "mineru": readers.configured("mineru"),
@@ -844,7 +863,10 @@ def papers(request):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    if not readers.configured("mineru") or not _reading_ready():
+    mode = request.POST.get("parse_mode", "mineru" if readers.configured("mineru") and _reading_ready() else "manual")
+    if mode not in intake.MODES:
+        return _error("请选择手工框题、本地文字 PDF 或 MinerU 自动解析")
+    if mode == "mineru" and (not readers.configured("mineru") or not _reading_ready()):
         return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
                       "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
                       "密钥在“设置 → 常用 → 填写或更换密钥”里填写")
@@ -867,7 +889,7 @@ def papers(request):
     if kinds[0] == "image" or len(uploads) > 1:
         if any(kind != "image" for kind in kinds):
             return _error("几个文件一起上传时只能都是照片（合成一份试卷）；PDF 和 Word 请一份一份上传")
-        return _upload_photos(request, uploads, material_type=material_type)
+        return _upload_photos(request, uploads, material_type=material_type, parse_mode=mode)
     upload = uploads[0]
     suffix = Path(upload.name).suffix.lower()
     kind = kinds[0]
@@ -881,6 +903,8 @@ def papers(request):
     paper = Paper(
         filename=Path(upload.name).name[:255], kind=kind, sha256=digest.hexdigest(),
         material_type=material_type,
+        processing_plan={"schema": 1, "mode": mode, "revision": 0},
+        status=Paper.Status.READY if mode != "mineru" else Paper.Status.QUEUED,
     )
     folder = settings.DATA_ROOT / str(paper.id)
     staged = settings.DATA_ROOT / f".uploading-{paper.id}-{uuid.uuid4().hex}"
@@ -906,7 +930,7 @@ def papers(request):
         paper.source_path = str(folder / target.name)
         with transaction.atomic():
             paper.save()
-            if kind == "pdf" and import_planning.pdf_requires_chunks(
+            if mode == "mineru" and kind == "pdf" and import_planning.pdf_requires_chunks(
                 len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES,
             ):
                 chunk_limit = import_planning.pdf_chunk_page_limit(
@@ -928,10 +952,16 @@ def papers(request):
         except OSError:
             pass
         raise
+    if mode != "mineru":
+        try:
+            intake.prepare(paper, mode)
+        except Exception as exc:
+            paper.status, paper.error = Paper.Status.FAILED, f"本地准备失败（{type(exc).__name__}），原文件已保留，可转手工重试。"
+            paper.save(update_fields=["status", "error", "updated_at"])
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
-def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM) -> JsonResponse:
+def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM, parse_mode: str = "mineru") -> JsonResponse:
     """一张或几张照片合成一份试卷。页序先按拍摄时间/文件名粗排，MinerU 读完后按卷面题号排定。"""
     if len(uploads) > photos.MAX_PHOTOS:
         return _error(f"一份试卷最多 {photos.MAX_PHOTOS} 张照片")
@@ -954,7 +984,9 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
-    paper = Paper(filename=name[:255], kind="image", sha256=combined, material_type=material_type)
+    paper = Paper(filename=name[:255], kind="image", sha256=combined, material_type=material_type,
+                  processing_plan={"schema": 1, "mode": parse_mode, "revision": 0},
+                  status=Paper.Status.READY if parse_mode != "mineru" else Paper.Status.QUEUED)
     folder = settings.DATA_ROOT / str(paper.id)
     folder.mkdir(parents=True, exist_ok=False)
     files = []
@@ -974,6 +1006,12 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     paper.photos = {"files": files, "enhance": enhance, "order": order, "basis": basis, "check": "", "notes": []}
     paper.source_path = str(folder / files[0]["file"])
     paper.save()
+    if parse_mode != "mineru":
+        try:
+            intake.prepare(paper, parse_mode)
+        except Exception as exc:
+            paper.status, paper.error = Paper.Status.FAILED, f"照片本地准备失败（{type(exc).__name__}），原照片已保留。"
+            paper.save(update_fields=["status", "error", "updated_at"])
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
@@ -992,7 +1030,7 @@ def paper_page_order(request, paper_id):
     if Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exists():
         return _error("回收站里还有题卡；请先恢复这些题卡，再调整页序", 409)
     if paper.status not in (Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING) \
-            or not paper.blocks.exists():
+            or (not paper.blocks.exists() and (paper.processing_plan or {}).get("mode") not in {"manual", "native"}):
         return _error("这份试卷还在处理中，稍后再调整页序")
     payload = _body(request) or {}
     order = payload.get("order")
@@ -1084,6 +1122,9 @@ def _copy_split_question(
         read_c=deepcopy(question.read_c),
         stem=question.stem,
         options=deepcopy(question.options),
+        body_mode=question.body_mode,
+        processing_mode=question.processing_mode,
+        content_revision=question.content_revision + 1,
         text_source=question.text_source,
         state=question.state,
         flags=deepcopy(question.flags),
@@ -1165,7 +1206,13 @@ def paper_split(request, paper_id):
                     sha256=hashlib.sha256(
                         f"{paper.sha256}:split:{','.join(map(str, source_pages))}".encode()
                     ).hexdigest(),
-                    status=Paper.Status.SEGMENTING if selected_blocks else Paper.Status.QUEUED,
+                    status=(Paper.Status.READY if (paper.processing_plan or {}).get("mode") in {"manual", "native"}
+                            else Paper.Status.SEGMENTING if selected_blocks else Paper.Status.QUEUED),
+                    processing_plan=({"schema": 1, "revision": 0, "mode": paper.processing_plan["mode"],
+                        "pages": [{"page_idx": page_mapping[item["page_idx"]], "mode": item.get("mode", "manual"),
+                                   "warnings": deepcopy(item.get("warnings", []))}
+                                  for item in paper.processing_plan.get("pages", []) if item["page_idx"] in page_mapping]}
+                        if (paper.processing_plan or {}).get("mode") in {"manual", "native"} else {}),
                     structure={
                         "confirmed": True,
                         "confirmed_groups": [list(range(len(source_pages)))],
@@ -1883,10 +1930,21 @@ def add_question(request, paper_id):
         return _error(f"已经有第 {number} 题了；如果它在回收站中，请先恢复")
     if group is None and existing_source.filter(group__isnull=True).exists():
         return _error(f"已经有第 {number} 题了；如果它在回收站中，请先恢复")
+    default_mode = "manual" if (paper.processing_plan or {}).get("mode") in {"manual", "native"} else "auto"
+    processing_mode = payload.get("processing_mode", default_mode)
+    body_mode = payload.get("body_mode", "source_image" if processing_mode == "manual" else "text")
+    kind = payload.get("question_type", "unknown")
+    if processing_mode not in {"manual", "auto", "assistant"} or body_mode not in {"text", "source_image"} or kind not in TYPES:
+        return _error("题目正文模式或题型不正确")
+    manual = processing_mode != "auto" or body_mode == "source_image"
     question = Question.objects.create(
         paper=paper, group=group, number=number, regions=regions, regions_auto=regions, start_source="manual",
         source_kind=Question.SourceKind.MANUAL, source_anchor_seq=None,
-        figure_candidates=candidates_in(paper, regions), reread_requested=True,
+        figure_candidates=candidates_in(paper, regions), reread_requested=not manual,
+        processing_mode=processing_mode, body_mode=body_mode, question_type=kind,
+        type_locked=manual and qtypes.decided(kind),
+        state=Question.State.YELLOW if manual else Question.State.WAITING,
+        flags=["请对照原卷确认范围完整。"] if manual else [],
     )
     return JsonResponse({"question": question_json(question)}, status=201)
 
@@ -2014,6 +2072,8 @@ def question_action(request, question_id, action: str):
         actor = _approver(payload)
         if actor is None:
             return _error("by 只能是 human 或 ai")
+        if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != question.content_revision):
+            return _error("题目已发生变化，请刷新后再操作", 409)
         if action == "approve":
             if question.paper.status == Paper.Status.NEEDS_GROUPING:
                 return _error("请先确认资料结构或拆分任务，再标记题卡通过")
@@ -2023,9 +2083,9 @@ def question_action(request, question_id, action: str):
             approver = actor
             if value and question.state not in library.REVIEWABLE_STATES:
                 return _error("这道题尚未进入可审核状态，请先完成识读或人工修正")
-            if value and not question.stem.strip():
-                return _error("题干为空，请先改字")
-            review = stored_or_derived_review(question)
+            if value and not source_images.body_valid(question):
+                return _error("缺少有效正文或原卷裁片，请先修正范围或改字")
+            review = source_images.review(question)
             if value and blocks_approval(review):
                 return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
             if value and library.type_blocks_approval(question):
@@ -2037,6 +2097,39 @@ def question_action(request, question_id, action: str):
                 return _error("这道题是人工通过的，AI 助手不能撤销；需要的话请使用者自己在题卡上取消", 409)
             else:
                 _clear_approval(question)
+        elif action == "apply-reading":
+            suggestion = question.ocr_suggestion or {}
+            if (type(payload.get("revision")) is not int or suggestion.get("revision") != question.content_revision
+                    or payload["revision"] != question.content_revision or not str(suggestion.get("stem") or "").strip()):
+                return _error("识读建议已过期或没有可采用的正文，请重新识读", 409)
+            question.stem = suggestion["stem"]
+            question.options = suggestion.get("options") or {}
+            if not question.type_locked:
+                question.question_type = suggestion.get("question_type", question.question_type)
+            question.body_mode = "text"
+            question.edited = True
+            question.text_source = "assistant" if actor[0] == "ai" else "human"
+            question.figures = suggestion.get("figures") or []
+            question.figure_review = suggestion.get("figure_review") or {}
+            question.flags = qtypes.with_flag(suggestion.get("flags") or [], question.question_type)
+            question.state = Question.State.YELLOW
+            question.error = ""
+            question.ocr_suggestion = {}
+            _clear_approval(question)
+        elif action == "body" or action == "manual":
+            body_mode = payload.get("body_mode", "source_image" if action == "manual" else None)
+            if body_mode not in {"text", "source_image"}:
+                return _error("请选择原图正文或文字正文")
+            if body_mode == "text" and not question.stem.strip():
+                return _error("文字正文还为空，请先改字或采用识读建议")
+            if body_mode == "source_image" and not source_images.valid_regions(question.paper, question.regions):
+                return _error("原图正文需要有效的原卷范围")
+            question.body_mode = body_mode
+            question.processing_mode = "manual"
+            question.reread_requested = False
+            question.state = Question.State.YELLOW
+            question.error = ""
+            _clear_approval(question)
         elif action == "text":
             previous_ignored = _saved_ignored_candidates(question)
             stem = payload.get("stem")
@@ -2072,6 +2165,8 @@ def question_action(request, question_id, action: str):
             if question.question_type != previous_type and qtypes.decided(question.question_type):
                 question.type_locked = True
             question.edited = True
+            question.body_mode = "text"
+            question.reread_requested = False
             # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
             question.text_source = "assistant" if actor[0] == "ai" else "human"
             # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
@@ -2110,16 +2205,29 @@ def question_action(request, question_id, action: str):
                 return _error("范围不正确")
             question.regions = regions
             question.figure_candidates = candidates_in(question.paper, regions)
-            question.figures = []
-            question.figure_review = {}
-            question.edited = False
-            question.type_locked = False
             _clear_approval(question)
-            question.flags = []
-            question.state = Question.State.WAITING
-            question.reread_requested = True
+            manual = payload.get("processing_mode", question.processing_mode) in {"manual", "assistant"} or source_images.is_image(question)
+            if manual:
+                question.processing_mode = "manual"
+                # Range changes do not erase manually corrected text, type or
+                # illustrations. Whole-image bodies only use the new regions.
+                question.state = Question.State.YELLOW
+                question.flags = qtypes.with_flag(["原卷范围已修改，请重新对照确认。"], question.question_type)
+                question.reread_requested = False
+                question.error = ""
+            else:
+                question.figures = []
+                question.figure_review = {}
+                question.edited = False
+                question.type_locked = False
+                question.flags = []
+                question.state = Question.State.WAITING
+                question.reread_requested = True
         elif action == "reread":
-            question.edited = False
+            if source_images.is_image(question) and (not _reading_ready() or readers.assistant_mode()):
+                return _error("请先配置一家看图读题模型；也可以直接由当前 AI 助手对照原图改字。", 409)
+            if not source_images.is_image(question):
+                question.edited = False
             current_review = question.figure_review if isinstance(question.figure_review, dict) else {}
             has_manual_figure = any(
                 isinstance(figure, dict) and figure.get("source") == "manual"
@@ -2131,9 +2239,11 @@ def question_action(request, question_id, action: str):
             )
             if not has_manual_figure and not has_human_no_figure:
                 question.figure_review = {}
-            _clear_approval(question)
-            question.state = Question.State.WAITING
+            if not source_images.is_image(question):
+                _clear_approval(question)
+                question.state = Question.State.WAITING
             question.reread_requested = True
+            question.ocr_pending = source_images.is_image(question)
         elif action == "figure-table":
             # A crop MinerU read as a table becomes a text table in the stem.
             index = payload.get("figure")
@@ -2342,6 +2452,11 @@ def question_action(request, question_id, action: str):
             _clear_approval(question)
         else:
             raise Http404()
+        if action != "approve":
+            question.content_revision += 1
+            if action != "reread":
+                question.ocr_suggestion = {}
+                question.ocr_pending = False
         question.save()
     return JsonResponse({"question": question_json(question), "paper": paper_json(question.paper)})
 
@@ -2405,6 +2520,57 @@ def question_figure(request, question_id, index: int):
     if not 0 <= index < len(question.figures):
         raise Http404()
     return _file(library.figure_file(question, index), "image/png")
+
+
+def question_image(request, question_id, index: int):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    question = _question(question_id)
+    if not source_images.is_image(question):
+        raise Http404()
+    try:
+        return _file(source_images.asset_file(question, index), "image/png")
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return _error("原卷裁片无法生成，请检查原文件和范围", 409)
+
+
+def question_ocr_figure(request, question_id, index: int):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    question = _question(question_id)
+    suggestion = question.ocr_suggestion or {}
+    figures = suggestion.get("figures") or []
+    if suggestion.get("revision") != question.content_revision or not 0 <= index < len(figures):
+        raise Http404()
+    question.figures = figures
+    return _file(library.figure_file(question, index), "image/png")
+
+
+@csrf_exempt
+def paper_processing(request, paper_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None or payload.get("mode") != "manual":
+        return _error("目前支持保留成果并转为手工框题")
+    pages = payload.get("pages")
+    if pages is not None:
+        # Per-page read suppression is insufficient: the current cloud parser
+        # still uploads the whole original document. Do not advertise a page
+        # isolation contract until providers honor it before uploading bytes.
+        return _error("本版仅支持整份转为手工框题；已有成功题目和人工修改会保留。")
+    paper = get_object_or_404(Paper, pk=paper_id)
+    try:
+        if not paper.pages:
+            intake.prepare(paper, "manual")
+        else:
+            paper = intake.select_manual(paper)
+    except (OSError, ValueError, RuntimeError):
+        return _error("原文件暂时无法准备，请检查原件；已有成果已保留", 409)
+    return JsonResponse({"paper": paper_json(paper)})
 
 
 # ---------------------------------------------------------------- M3 导入
@@ -2495,6 +2661,24 @@ def library_figure(request, publication_id, name):
     if not re.fullmatch(r"figure-\d{1,3}\.png", name):
         raise Http404()
     return _file(settings.DATA_ROOT / "library" / str(publication_id) / name, "image/png")
+
+
+def library_question_image(request, publication_id, name):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    if not re.fullmatch(r"question-\d{1,2}\.png", name):
+        raise Http404()
+    image = next((item for item in (publication.content or {}).get("question_images", []) if item.get("file") == name), None)
+    if (publication.content or {}).get("body_mode") != "source_image" or image is None:
+        raise Http404()
+    path = settings.DATA_ROOT / "library" / str(publication_id) / name
+    try:
+        if hashlib.sha256(path.read_bytes()).hexdigest() != image["image_sha256"]:
+            return _error("正式题原图校验失败，请检查快照文件", 409)
+    except (OSError, KeyError):
+        raise Http404()
+    return _file(path, "image/png")
 
 
 def library_source_page(request, publication_id, page):

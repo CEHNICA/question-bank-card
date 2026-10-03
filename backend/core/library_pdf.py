@@ -214,9 +214,9 @@ window.__qbPdfStatus = {ready:false};
     for(const item of items){
       number++;numbered.push([number,item]);if(o.document==='answers')continue;
       const block=node('div','print-question');
-      QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file});
+      QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file,resolveQuestionImageUrl:x=>x.file});
       block.dataset.questionId=item.id;
-      if(o.origin && item.content.origin)block.querySelector('.qb-stem-body').prepend(node('span','print-origin','（'+item.content.origin+'）'));
+      if(o.origin && item.content.origin)(block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem')).prepend(node('span','print-origin','（'+item.content.origin+'）'));
       if(item.type==='free_response' && o.answer_space!=='none')block.append(node('div','print-answer-space'));
       source.append(block);
     }
@@ -252,8 +252,15 @@ def _html_document(captured, title, options):
     items = []
     for item in captured:
         content = {name: item["content"].get(name) for name in ("stem", "options", "origin")}
-        content["figures"] = [{"slot": image["slot"], "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
-                              for image in item["images"]]
+        if item["content"].get("body_mode", "text") == "source_image":
+            content["body_mode"] = "source_image"
+            content["question_images"] = [{"file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
+                                            "width": image["size"][0], "height": image["size"][1], "order": order}
+                                           for order, image in enumerate(item["images"])]
+            content["figures"] = []
+        else:
+            content["figures"] = [{"slot": image["slot"], "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
+                                  for image in item["images"]]
         items.append({"id": item["id"], "type": item["type"], "content": content,
                       "selected": item["selected"] if options["document"] != "questions" else {},
                       "ai": item["ai"] if options["document"] != "questions" else False})

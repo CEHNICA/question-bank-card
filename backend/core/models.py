@@ -50,6 +50,9 @@ class Paper(models.Model):
     # 跨文件格式的资料结构判断：suggested_groups、signals 以及人工 confirmed 结果。
     # 不放进 photos，因为 PDF 和书籍同样需要这份可追溯记录。
     structure = models.JSONField(default=dict, blank=True)
+    # Local intake is independent of cloud recognition. Per-page decisions and
+    # warnings stay with the original document; an empty plan is legacy MinerU.
+    processing_plan = models.JSONField(default=dict, blank=True)
     # 手机照片（一张或几张合成一份卷）：
     # {"files": [{"name", "file", "taken", "straightened"}]（选择顺序）, "enhance": 是否做扫描件效果,
     #  "order": 当前第 i 页是 files[order[i]], "mineru_order": 交给 MinerU 时的页序,
@@ -190,6 +193,13 @@ class Question(models.Model):
     question_type = models.CharField(max_length=24, default="unknown")
     regions = models.JSONField(default=list)             # [{page_idx, bbox}]，按阅读顺序
     regions_auto = models.JSONField(default=list)
+    body_mode = models.CharField(max_length=16, default="text")
+    processing_mode = models.CharField(max_length=16, default="auto")
+    # Every content gesture invalidates in-flight OCR, including a range edit
+    # followed by an edit back to the same coordinates.
+    content_revision = models.PositiveIntegerField(default=0)
+    ocr_suggestion = models.JSONField(default=dict, blank=True)
+    ocr_pending = models.BooleanField(default=False)
     start_source = models.CharField(max_length=16, default="mineru")
     # 题号会在书籍中反复从 1 开始，不能单独充当身份。来源类型与 MinerU
     # 起始块序号共同提供一次解析内稳定、无需模型的匹配锚点。
