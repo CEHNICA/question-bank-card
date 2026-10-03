@@ -278,12 +278,13 @@
           </div>
           <div class="paper-actions">
             <button id="approveGreen" class="button" type="button">批量通过</button>
-            <button id="publishButton" class="button primary" type="button">入库</button>
+            <button id="publishButton" class="button primary" type="button" hidden>入库</button>
           </div>
         </div>
         <div id="paperManualEntry" class="manual-cut-entry" hidden>
           <button id="paperManualFallback" class="button primary" type="button">改为手工切题</button>
-          <span id="paperManualHint">可以停止等待，直接框题；原卷和已有题目保留。</span>
+          <button id="paperContinueAi" class="button" type="button">继续 AI 切题</button>
+          <span id="paperManualHint" role="status">可以停止等待，直接框题；原卷和已有题目保留。</span>
         </div>
         <section id="cutReadingStage" class="cut-reading-stage" aria-labelledby="cutReadingTitle" hidden>
           <ol id="cutReadingSteps" class="cut-reading-steps" aria-label="整理题目步骤"></ol>
@@ -305,7 +306,7 @@
           <span class="meter-percent" id="meterPercent"></span>
           <details class="meter-note">
             <summary title="识读完成后如何入库"><svg class="icon" aria-hidden="true"><use href="#i-question"/></svg>入库说明</summary>
-            <p class="review-boundary">识读完成的题可以标记通过后入库；有待处理问题的题先调整内容、范围或配图。</p>
+            <p class="review-boundary">识读完成的题标记通过后自动入库；有待处理问题的题先调整内容、范围或配图。</p>
           </details>
           <div class="meter-legend" id="meterLegend" hidden></div>
         </div>
@@ -711,7 +712,7 @@
       <ol class="welcome-steps">
         <li><b>1</b><span><strong>上传</strong>PDF、Word 或照片先保存在本机，程序自动尝试切题；未切出的题可以从原卷选取，无需密钥。</span></li>
         <li><b>2</b><span><strong>核对</strong>完整框出题目、选项与配图，选好题型。可以直接保留原图，也可以主动识读，确认后转成文字。</span></li>
-        <li><b>3</b><span><strong>入库</strong>核对完点“入库”，题目就进了“正式题库”，可以搜索、组卷。</span></li>
+        <li><b>3</b><span><strong>入库</strong>核对后标记“通过”，题目自动进入“正式题库”，可以搜索、组卷。</span></li>
       </ol>
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
@@ -796,7 +797,7 @@
       <div class="key-row"><span>鼠标所在位置缩放</span><span><kbd>Ctrl</kbd>+滚轮</span></div>
       <div class="key-row"><span>拖动原卷 / 题面（Alt+拖动可选字）</span><span>鼠标左键</span></div>
       <h4>筛选与其他</h4>
-      <div class="key-row"><span>全部 / 重点核查 / 需要核查 / 已通过</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
+      <div class="key-row"><span>全部 / 需要核查 / 已通过</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
       <div class="key-row"><span>改字时保存</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
       <div class="key-row"><span>关闭窗口 / 取消改字</span><span><kbd>Esc</kbd></span></div>
       <div class="key-row"><span>打开这张说明</span><span><kbd>?</kbd></span></div>

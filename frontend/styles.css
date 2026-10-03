@@ -260,6 +260,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .processing-reparse { margin-top: 8px; }
 .manual-cut-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0 4px; padding: 12px 16px; border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface); }
 .manual-cut-entry[hidden] { display: none; }
+.manual-cut-entry > button { flex-shrink: 0; }
 .manual-cut-entry > span { color: var(--muted); font-size: 14px; }
 .paper-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .paper-actions .button { min-height: 38px; padding-inline: 16px; }

@@ -1100,9 +1100,12 @@ def cmd_enrich_prepare(client: Client, args) -> dict:
     kinds = getattr(args, "kinds", None) or list(ENRICH_KINDS)
     if not isinstance(kinds, (list, tuple)) or not kinds or any(kind not in ENRICH_KINDS for kind in kinds):
         raise CliError("kinds 只能包含 tags 和 answer")
-    result = client.post("/api/library/assistant/prepare", {
+    payload = {
         "publication_id": publication_id, "kinds": list(dict.fromkeys(kinds)), "agent": _enrichment_agent(client, args),
-    })
+    }
+    if getattr(args, "job_id", None):
+        payload["job_id"] = _enrichment_ids([args.job_id])[0]
+    result = client.post("/api/library/assistant/prepare", payload)
     result = json.loads(json.dumps(result))
     images = result.get("images") or {}
     resources = []
@@ -1286,6 +1289,7 @@ MCP_TOOLS = [
     })),
     ("prepare_enrichment", "为指定入库题准备标签或参考答案任务，返回题面、原卷/配图、知识点目录、prompt和fingerprint。当前助手自己看图完成，不调用API。", _schema({
         "publication_id": {"type": "string"},
+        "job_id": {"type": "string", "description": "本次待办的精确任务ID；取消或完成后拒绝，不重新创建任务"},
         "kinds": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "enum": list(ENRICH_KINDS)}},
         "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
     }, ["publication_id"])),
@@ -1359,7 +1363,7 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_enrich_auto(client, _ns(tags=a.get("tags"), answer=a.get("answer"))), []
     if name == "prepare_enrichment":
         result = cmd_enrich_prepare(client, _ns(publication_id=a.get("publication_id"),
-                                               kinds=a.get("kinds"), agent=a.get("agent")))
+                                               kinds=a.get("kinds"), agent=a.get("agent"), job_id=a.get("job_id")))
         images = result.get("local_images") or {}
         paths = images.get("question_images") or [images.get("crop"), *(images.get("figures") or [])]
         return result, [path for path in paths if path]
@@ -1571,6 +1575,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--answer", choices=["on", "off"])
     prepare = enrichment.add_parser("prepare", parents=[common], help="领取题面、图片、目录、prompt和任务指纹")
     prepare.add_argument("publication_id", help="入库题 UUID")
+    prepare.add_argument("--job-id", help="只领取此明确任务，不替代已取消/完成任务")
     prepare.add_argument("--kinds", nargs="+", choices=ENRICH_KINDS, default=list(ENRICH_KINDS))
     prepare.add_argument("--out", help="原卷截图与配图保存目录（默认新建临时目录）")
     prepare.add_argument("--no-images", action="store_true", help="只返回本机图片URL，不下载图片")

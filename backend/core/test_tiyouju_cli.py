@@ -144,8 +144,12 @@ class TiyoujuCliTests(LiveServerTestCase):
         code, green = run_json("approve", "期中", "--green")
         self.assertEqual(green["approved"], 1)
 
+        versions = list(PublishedQuestion.objects.order_by("number").values_list("pk", "version"))
+        self.assertEqual(len(versions), 3)
+        self.assertEqual([version for _identity, version in versions], [1, 1, 1])
         code, published = run_json("publish", "期中")
-        self.assertEqual((code, published["created"], published["not_approved"]), (0, 3, []))
+        self.assertEqual((code, published["created"], published["unchanged"], published["not_approved"]), (0, 0, 3, []))
+        self.assertEqual(list(PublishedQuestion.objects.order_by("number").values_list("pk", "version")), versions)
         self.assertEqual(set(PublishedQuestion.objects.values_list("review_source", flat=True)), {"ai"})
         code, found = run_json("library", "--review", "ai")
         self.assertEqual(found["total"], 3)

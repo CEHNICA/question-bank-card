@@ -442,7 +442,9 @@
     });
     const editAnswer = iconButton("button", "button button-quiet button-small", "编辑答案解析", "plus");
     editAnswer.addEventListener("click", () => openAnswerEditor([item], { scope: "library" }));
-    menu.append(editAnswer, history, review, withdraw, ...jobButtons(item));
+    const editQuestion = node("button", "button button-quiet button-small", "修改题目");
+    editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
+    menu.append(editQuestion, editAnswer, history, review, withdraw, ...jobButtons(item));
     more.append(menu);
     actions.append(origin, full, expand, more, node("span", "actions-spacer"), basket);
     article.append(meta, paper, actions);
@@ -811,7 +813,9 @@
     });
     const editAnswer = iconButton("button", "button button-small", "编辑答案解析", "plus");
     editAnswer.addEventListener("click", () => openAnswerEditor([item], { scope: "library" }));
-    actions.append(source, editAnswer, history, ...jobButtons(item), node("span", "actions-spacer"), add);
+    const editQuestion = node("button", "button button-small", "修改题目");
+    editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
+    actions.append(source, editQuestion, editAnswer, history, ...jobButtons(item), node("span", "actions-spacer"), add);
     if (!dialog.open) { state.questionReturnFocus = document.activeElement; dialog.showModal(); }
     state.questionReturnId = item.id;
     state.questionSignature = questionSignature(item);
@@ -1218,27 +1222,52 @@
 
   let printAnswersPreference = ui.printAnswers.checked;
   const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
-    optionOverrides: {}, questionBreaks: [], layoutToken: 0, layoutPending: false, layoutError: "", solutions: {}, solutionRecords: new Map(), missingAcknowledged: "" };
+    optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "", solutions: {}, solutionRecords: new Map(), missingAcknowledged: "" };
   const printNames = new Map();
   let answerEditor = null;
+  let questionEditor = null;
+  function openQuestionEditor(item) {
+    if (!questionEditor) questionEditor = window.LibraryQuestionEditor.create({ node, QB, notify: toast, confirm: confirmDialog,
+      onSaved: (before, after) => {
+        state.catalog.set(after.id, after);
+        if ($("questionDialog").open && state.questionReturnId === before.id) openQuestion(after);
+        void load({ quiet: true });
+      } });
+    return questionEditor.open(item);
+  }
+  let answerRefreshPending = false;
+  let answerPrintContext = null;
+  const sameAnswerContext = context => context && context.token === printState.token
+    && context.draftId === (state.draft?.id || null);
+  function deferAnswerRefresh(context, sync) {
+    answerRefreshPending ||= sync;
+    if (sameAnswerContext(context)) answerPrintContext = context;
+    const flush = () => requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (answerEditor?.isOpen()) { $("answerEditorDialog")?.addEventListener("close", flush, { once: true }); return; }
+      if (answerRefreshPending) { answerRefreshPending = false; render(); }
+      if (answerPrintContext && sameAnswerContext(answerPrintContext) && ui.sheet.open) renderPrint(printState.items);
+      answerPrintContext = null;
+    }));
+    if (answerEditor?.isOpen()) $("answerEditorDialog")?.addEventListener("close", flush, { once: true });
+    else flush();
+  }
   function openAnswerEditor(items = printState.items, options = {}) {
     if (printState.exporting || state.draftSaving) { toast("请等待当前导出或保存完成"); return; }
     if (!items.length) { toast("先选题，再补充答案解析"); return; }
     if (!answerEditor) answerEditor = window.LibraryAnswerEditor.create({ node, QB, notify: toast, confirm: confirmDialog,
-      onSaved: (item, solution, { sync, scope }) => {
-        if (scope === "paper") {
+      onSaved: (item, solution, { sync, scope, scopeContext }) => {
+        if (scope === "paper" && sameAnswerContext(scopeContext)) {
           printState.solutions[item.id] = solution.id; printState.solutionRecords.set(solution.id, solution);
           const chosen = printState.items.find(value => value.id === item.id); if (chosen) { chosen.solution = solution; chosen.solution_revision = solution.id; }
-          markDraftDirty(); if (ui.sheet.open) renderPrint(printState.items);
+          markDraftDirty();
         }
         if (sync) {
           const stored = state.catalog.get(item.id); if (stored) stored.solution = solution;
           for (const value of state.items) if (value.id === item.id) value.solution = solution;
-          render();
-          if ($("questionDialog").open && state.questionReturnId === item.id) openQuestion(state.catalog.get(item.id) || item);
         }
+        deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync);
       } });
-    return answerEditor.open(items, options);
+    return answerEditor.open(items, { ...options, scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
   }
 
   function printAnswerRow(number, item, inline = false) {
@@ -1285,11 +1314,12 @@
       answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
       answer_layout: options.answer_layout === "appendix" ? "appendix" : "inline",
       document, font_size: [12, 14, 16].includes(Number(options.font_size)) ? Number(options.font_size) : 12,
-      answer_space: ["none", "medium", "large"].includes(options.answer_space) ? options.answer_space : "none",
+      answer_space: ["none", "small", "medium", "large"].includes(options.answer_space) ? options.answer_space : "none",
+      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {}).filter(([, value]) => ["none", "small", "medium", "large"].includes(value))),
       student_info: options.student_info !== false,
       pagination: options.pagination === "keep" ? "keep" : "compact",
-      option_layout: ["auto", "four", "two"].includes(options.option_layout) ? options.option_layout : "auto",
-      option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two"].includes(value))),
+      option_layout: ["auto", "four", "two", "vertical"].includes(options.option_layout) ? options.option_layout : "auto",
+      option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two", "vertical"].includes(value))),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : []
     };
   }
@@ -1303,6 +1333,7 @@
       student_info: $("printStudentInfo").checked,
       pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
       option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
+      answer_space_overrides: Object.fromEntries(Object.entries(printState.answerSpaceOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
       question_breaks: (printState.questionBreaks || []).filter(id => !state.basket || state.basket.includes(id))
     });
   }
@@ -1310,6 +1341,7 @@
   function prunePrintChoices() {
     const ids = new Set(state.basket);
     printState.optionOverrides = Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => ids.has(id)));
+    printState.answerSpaceOverrides = Object.fromEntries(Object.entries(printState.answerSpaceOverrides || {}).filter(([id]) => ids.has(id)));
     printState.questionBreaks = (printState.questionBreaks || []).filter(id => ids.has(id));
     printState.solutions = solutions.fixedSelections(printState.solutions, state.basket);
   }
@@ -1324,6 +1356,7 @@
     $("printOptionLayout").value = restored.option_layout;
     $("printAnswerLayout").value = options.answer_layout ? restored.answer_layout : "appendix";
     printState.optionOverrides = restored.option_overrides;
+    printState.answerSpaceOverrides = restored.answer_space_overrides;
     printState.questionBreaks = restored.question_breaks;
     printAnswersPreference = restored.answers;
     ui.printAnswers.checked = restored.answers;
@@ -1624,7 +1657,12 @@
           const origin = item.origin || item.content?.origin;
           if (ui.printOrigin.checked && origin) block.querySelector(".qb-stem-body")?.prepend(node("span", "print-origin", `（${origin}）`));
           block.dataset.questionId = item.id;
-          if (item.question_type === "free_response" && options.answer_space !== "none" && !(options.document === "combined" && options.answer_layout === "inline")) block.append(node("div", "print-answer-space"));
+          block.dataset.questionType = item.question_type;
+          const space = window.ExamLayout.answerSpace(item.question_type, item.id, options);
+          if (space !== "none") {
+            const blank = node("div", "print-answer-space"); blank.dataset.answerSpace = space;
+            block.append(blank);
+          }
           block.append(printTools(items, group, position, number));
           ui.paper.append(block);
           if (options.document === "combined" && options.answer_layout === "inline" && ui.printAnswers.checked) ui.paper.append(printAnswerRow(number, item, true));
@@ -1676,6 +1714,9 @@
     const item = printState.items.find(item => item.id === id);
     $("printIndividualOption").value = printState.optionOverrides[id] || "";
     $("printIndividualOption").disabled = printState.exporting || !item || item.content?.body_mode === "source_image" || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
+    $("printIndividualSpace").value = printState.answerSpaceOverrides?.[id] || "";
+    $("printIndividualSpace").disabled = printState.exporting || !item || item.question_type !== "free_response"
+      || $("printDocument").value === "answers" || ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline");
     $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
     $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
     $("printIndividualHint").textContent = item?.content?.body_mode === "source_image" ? "原图题保留卷面排版，可调整顺序和分页；转成文字后可重排选项。" : id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
@@ -1778,10 +1819,22 @@
   // Move up / down within the same section, or take the question out of the
   // basket, without leaving the preview.  Hidden when printing.
   function printTools(items, group, position, number) {
-    const tools = node("div", "print-question-tools no-print");
-    tools.setAttribute("role", "group");
-    tools.setAttribute("aria-label", `第 ${number} 题排序与移除`);
+    const tools = node("details", "print-question-tools no-print");
+    const toggle = node("summary", "", "调整");
+    toggle.setAttribute("aria-label", `第 ${number} 题排版操作`);
+    tools.append(toggle);
+    const actions = node("div", "print-question-actions");
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `第 ${number} 题排序与排版`);
     const item = group[position];
+    tools.open = printState.activeToolId === item.id;
+    tools.addEventListener("toggle", () => {
+      if (!tools.isConnected) return;
+      if (tools.open) {
+        printState.activeToolId = item.id;
+        ui.paper.querySelectorAll(".print-question-tools[open]").forEach(other => { if (other !== tools) other.open = false; });
+      } else if (printState.activeToolId === item.id) printState.activeToolId = null;
+    });
     const move = (step) => {
       const other = group[position + step];
       if (!other) return;
@@ -1826,12 +1879,12 @@
       items.splice(items.indexOf(item), 1);
       renderPrint(items);
       render();
-      const next = ui.paper.querySelectorAll(".print-question-tools .remove")[Math.min(number - 1, items.length - 1)];
+      const next = ui.paper.querySelectorAll(".print-question-tools > summary")[Math.min(number - 1, items.length - 1)];
       (next || $("closePrint")).focus({ preventScroll: true });
     });
     const optionLayout = node("select", "print-single-layout");
     optionLayout.setAttribute("aria-label", `第 ${number} 题选项排版`);
-    [["", "跟随全卷"], ["auto", "自动排版"], ["four", "一行四个"], ["two", "两行两个"]].forEach(([value, label]) => {
+    [["", "跟随全卷"], ["auto", "自动排版"], ["four", "一行四个"], ["two", "两行两个"], ["vertical", "四个选项竖排"]].forEach(([value, label]) => {
       const choice = node("option", "", label); choice.value = value; optionLayout.append(choice);
     });
     optionLayout.value = printState.optionOverrides[item.id] || "";
@@ -1840,6 +1893,20 @@
     optionLayout.addEventListener("change", () => {
       if (optionLayout.value) printState.optionOverrides[item.id] = optionLayout.value;
       else delete printState.optionOverrides[item.id];
+      markDraftDirty(); renderPrint(items);
+    });
+    const answerSpace = node("select", "print-single-space");
+    answerSpace.setAttribute("aria-label", `第 ${number} 题解答留白`);
+    [["", "留白跟随全卷"], ["none", "不留白"], ["small", "少量（12 毫米）"], ["medium", "适中（30 毫米）"], ["large", "较多（60 毫米）"]].forEach(([value, label]) => {
+      const choice = node("option", "", label); choice.value = value; answerSpace.append(choice);
+    });
+    answerSpace.value = printState.answerSpaceOverrides[item.id] || "";
+    answerSpace.hidden = item.question_type !== "free_response";
+    answerSpace.disabled = printState.exporting || $("printDocument").value === "answers"
+      || ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline");
+    answerSpace.addEventListener("change", () => {
+      if (answerSpace.value) printState.answerSpaceOverrides[item.id] = answerSpace.value;
+      else delete printState.answerSpaceOverrides[item.id];
       markDraftDirty(); renderPrint(items);
     });
     const pageBreak = node("button", "", printState.questionBreaks.includes(item.id) ? "取消另起页" : "另起一页");
@@ -1854,7 +1921,8 @@
     editAnswer.disabled = printState.exporting;
     editAnswer.setAttribute("aria-label", `第 ${number} 题编辑答案解析`);
     editAnswer.addEventListener("click", () => openAnswerEditor(printState.items.map(value => ({ ...value, exam_number: groupedQuestionNumber(value) })), { scope: "paper", focus: item.id }));
-    tools.append(up, down, remove, optionLayout, pageBreak, editAnswer);
+    actions.append(up, down, remove, optionLayout, answerSpace, pageBreak, editAnswer);
+    tools.append(actions);
     return tools;
   }
 
@@ -2011,6 +2079,11 @@
   $("printIndividualOption").addEventListener("change", () => {
     const id = $("printIndividualQuestion").value, value = $("printIndividualOption").value;
     if (value) printState.optionOverrides[id] = value; else delete printState.optionOverrides[id];
+    markDraftDirty(); renderPrint(printState.items);
+  });
+  $("printIndividualSpace").addEventListener("change", () => {
+    const id = $("printIndividualQuestion").value, value = $("printIndividualSpace").value;
+    if (value) printState.answerSpaceOverrides[id] = value; else delete printState.answerSpaceOverrides[id];
     markDraftDirty(); renderPrint(printState.items);
   });
   $("printIndividualBreak").addEventListener("change", () => {

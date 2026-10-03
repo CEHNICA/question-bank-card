@@ -24,15 +24,19 @@ from . import credential_settings, features
 
 ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_URL = ARK_BASE + "/chat/completions"
+MINIMAX_BASE = "https://api.minimax.cn/v1"
+MINIMAX_MODEL = "MiniMax-M3.1-Flash-Preview"
+MINIMAX_TEXT_MODELS = {"MiniMax-M2", *(f"MiniMax-M2.{version}{speed}" for version in (1, 5, 7) for speed in ("", "-highspeed"))}
 DEFAULTS = {
     "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-v4-pro", "supports_images": False},
     "doubao": {"base_url": ARK_BASE, "model": "", "supports_images": False},
+    "minimax": {"base_url": MINIMAX_BASE, "model": MINIMAX_MODEL, "supports_images": True},
     "custom": {"base_url": "", "model": "", "supports_images": False},
 }
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
 ASSISTANT_MESSAGE = "由当前操作软件的豆包工作版或 AI 助手领取任务、看图解题，再通过本地工具写回。无需 API；软件不会自动连接桌面助手。生成结果仍需核对。"
-UNAVAILABLE = "独立 API 尚未配置并通过显式测试，已暂停 API 生成；请打开“标签与参考答案设置”。可推荐 DeepSeek Pro，也可配置其他模型；不会自动回退到 OCR 或其他服务。"
+UNAVAILABLE = "独立 API 尚未配置并通过显式测试，已暂停 API 生成；请打开“标签与参考答案设置”。可推荐 DeepSeek Pro，也可配置 MiniMax M3.1 或其他模型；不会自动回退到 OCR 或其他服务。"
 _lock = threading.RLock()
 API_FIELDS = ("provider", "model", "base_url", "supports_images", "thinking", "reasoning_effort")
 
@@ -129,6 +133,8 @@ def _base_url(raw, provider) -> str:
         raise SettingsError("豆包 API 请使用火山方舟的官方服务地址。")
     if provider == "deepseek" and value != DEFAULTS["deepseek"]["base_url"]:
         raise SettingsError("DeepSeek 请使用官方服务地址；其他兼容地址请选自定义。")
+    if provider == "minimax" and value not in {MINIMAX_BASE, "https://api.minimaxi.com/v1"}:
+        raise SettingsError("MiniMax 请使用中国区官方 OpenAI 地址 https://api.minimax.cn/v1；其他兼容地址请选自定义。")
     return value
 
 
@@ -148,7 +154,7 @@ def public_status() -> dict:
         "resolved_model": str(config.get("resolved_model") or "") if verified else "",
         "features": {key: switches[key] for key in sorted(FEATURE_KEYS)},
         "on_intake": config["on_intake"],
-        "message": ASSISTANT_MESSAGE if assistant else "独立 API 已通过连接及所选思考/图像响应测试；这不保证题目答案正确。" if verified else UNAVAILABLE,
+        "message": ASSISTANT_MESSAGE if assistant else "独立 API 已通过合成题连接测试；按所选图像与思考设置生成，答案仍需核对。" if verified else UNAVAILABLE,
     }
 
 
@@ -199,6 +205,11 @@ def save(payload: dict) -> dict:
         config["base_url"] = _base_url(config["base_url"], provider)
         if type(config["thinking"]) is not bool or type(config["supports_images"]) is not bool or config["reasoning_effort"] != "high":
             raise SettingsError("思考与图像能力使用 true 或 false；数学默认思考强度为 high。")
+        if provider == "minimax":
+            if config["model"] in {MINIMAX_MODEL, *MINIMAX_TEXT_MODELS} and not config["thinking"]:
+                raise SettingsError("这个 MiniMax 模型始终开启思考，不能关闭；M3.1 使用 adaptive 思考。")
+            if config["model"] in MINIMAX_TEXT_MODELS and config["supports_images"]:
+                raise SettingsError("MiniMax M2 系列仅支持文字；含图题请明确选择 M3.1、M3 或其他图文模型。")
         if action == "replace" and not (config["model"] and config["base_url"]):
             raise SettingsError("保存 API Key 前，请填写服务地址和模型 ID。")
         state = config["key_states"].get(provider, {}) if switching else {"revision": previous["key_revision"], "configured": previous["key_configured"]}
@@ -268,6 +279,34 @@ def _mark_unverified(config: dict) -> None:
             _write_settings({**current, "verified": False, "verified_at": "", "resolved_model": ""})
 
 
+def _response_content(message: dict) -> tuple[str, bool]:
+    """Compatible reasoning may be separate or wrapped; only return the answer."""
+    if not isinstance(message, dict):
+        raise ValueError
+    text = message.get("content")
+    if not isinstance(text, str):
+        raise ValueError
+    reasoning = message.get("reasoning_content")
+    details = message.get("reasoning_details")
+    thinking = isinstance(reasoning, str) and bool(reasoning.strip())
+    if isinstance(details, list):
+        thinking = thinking or any(isinstance(item, dict) and isinstance(item.get("text"), str) and bool(item["text"].strip()) for item in details)
+    blocks = re.findall(r"<think>(.*?)</think>", text, flags=re.S)
+    thinking = thinking or any(part.strip() for part in blocks)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    if not text or "<think>" in text or "</think>" in text:
+        raise ValueError
+    return text, thinking
+
+
+def _needs_reasoning_evidence(config: dict) -> bool:
+    # MiniMax's adaptive models choose how much reasoning to expose. A valid
+    # final answer to a trivial probe is not invalid merely because one SDK
+    # omitted the private reasoning field. The request still follows the
+    # model's documented thinking controls; image probes verify their result.
+    return config["thinking"] and config["provider"] != "minimax"
+
+
 def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None) -> tuple[str, dict]:
     if image_urls and not config["supports_images"]:
         raise ServiceError("这道题有配图，所选 API 未声明支持图片；已暂停，改用当前助手或明确支持图文的模型。")
@@ -279,7 +318,23 @@ def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, 
     content = [{"type": "text", "text": prompt}]
     content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
     payload = {"model": config["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens, "stream": False}
-    if config["thinking"]:
+    if config["provider"] == "minimax":
+        # Official Chinese OpenAI contract (2026-10-03). M3.1 requires
+        # adaptive thinking; M3 has no effort control and M2 is text-only.
+        # Unknown editable IDs get the common protocol without guessing
+        # unsupported reasoning parameters. Never retry a different service.
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        payload["reasoning_split"] = True
+        if config["model"] == MINIMAX_MODEL:
+            if not config["thinking"]:
+                raise ServiceError("MiniMax M3.1 的思考不能关闭，请重新保存模型设置。")
+            payload["thinking"] = {"type": "adaptive"}
+            payload["reasoning_effort"] = config["reasoning_effort"]
+        elif config["model"] == "MiniMax-M3":
+            payload["thinking"] = {"type": "adaptive" if config["thinking"] else "disabled"}
+        if config["model"] in MINIMAX_TEXT_MODELS and image_urls:
+            raise ServiceError("MiniMax M2 系列不能读取图片，已暂停；请明确选择图文模型。")
+    elif config["thinking"]:
         payload["thinking"] = {"type": "enabled"}
         if config["provider"] != "doubao":
             payload["reasoning_effort"] = "high"
@@ -297,10 +352,8 @@ def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, 
         if choice.get("finish_reason") == "length":
             raise ConnectionError("答案超过本次长度限制，未保存不完整结果。")
         message = choice["message"]
-        text = message.get("content")
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError
-        return text, {"model": str(body.get("model") or config["model"]), "thinking": bool(str(message.get("reasoning_content") or "").strip())}
+        text, thinking = _response_content(message)
+        return text, {"model": str(body.get("model") or config["model"]), "thinking": thinking}
     except ServiceError:
         raise
     except requests.RequestException:
@@ -316,7 +369,7 @@ def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 120
         raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
     try:
         text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
-        if config["thinking"] and not evidence["thinking"]:
+        if _needs_reasoning_evidence(config) and not evidence["thinking"]:
             raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")
     except ConnectionError:
         _mark_unverified(config)
@@ -347,7 +400,7 @@ def test_connection(payload: dict) -> dict:
     try:
         text, evidence = _request(config, prompt, urls, 12000)
         expected = r"【答案】\s*\$?2\$?\s*【图示】\s*\$?2\$?" if urls else r"【答案】\s*\$?2\$?"
-        if not re.search(expected, text) or (config["thinking"] and not evidence["thinking"]):
+        if not re.search(expected, text) or (_needs_reasoning_evidence(config) and not evidence["thinking"]):
             raise ServiceError("API 未通过所选合成数学/图像与思考响应测试，API 生成保持暂停；这不是答案质量评估。")
     except ServiceError:
         _mark_unverified(config)

@@ -1,9 +1,9 @@
 "use strict";
 const assert = require("node:assert/strict");
 const layout = require("./exam-layout.js");
-assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, question_breaks: [] });
+assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, answer_space: "none", answer_space_overrides: {}, question_breaks: [] });
 assert.deepEqual(layout.normalize({ pagination: "keep", option_layout: "four", option_overrides: { a: "two", b: "no" }, question_breaks: ["a", "a", 3] }),
-  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, question_breaks: ["a"] });
+  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, answer_space: "none", answer_space_overrides: {}, question_breaks: ["a"] });
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "compact"), false);
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "keep"), true);
 assert.equal(layout.keepWhole(1200, layout.BODY_HEIGHT, "keep"), false, "An oversized question must be allowed to continue instead of creating an empty sheet");
@@ -11,6 +11,28 @@ assert.equal(layout.requestedColumns("four", 4), 4);
 assert.equal(layout.requestedColumns("four", 5), 2, "Five real options must survive a four-column preference");
 assert.equal(layout.requestedColumns("two", 4), 2);
 assert.equal(layout.requestedColumns("auto", 4), 0);
+assert.equal(layout.requestedColumns("vertical", 4), 1);
+assert.equal(layout.requestedColumns("vertical", 5), 1, "A vertical layout retains a genuine fifth option");
+assert.equal(layout.normalize({ option_layout: "vertical", option_overrides: { a: "vertical" }, answer_space: "small", answer_space_overrides: { a: "large", b: "none", invalid: "custom" } }).option_overrides.a, "vertical");
+assert.deepEqual(layout.normalize({ answer_space_overrides: { a: "large", b: "none", invalid: "custom" } }).answer_space_overrides, { a: "large", b: "none" });
+for (const [mode, mm] of [["none", 0], ["small", 12], ["medium", 30], ["large", 60]]) assert.equal(layout.answerSpaceMm(mode), mm);
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small" }), "small");
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small", answer_space_overrides: { a: "none" } }), "none");
+assert.equal(layout.answerSpace("free_response", "a", { document: "combined", answer_layout: "appendix", answer_space_overrides: { a: "large" } }), "large");
+for (const mode of [{ document: "answers" }, { document: "combined", answer_layout: "inline" }]) {
+  assert.equal(layout.answerSpace("free_response", "a", { ...mode, answer_space: "large", answer_space_overrides: { a: "medium" } }), "none", "Answers and inline teacher papers cannot acquire student space via an override");
+}
+assert.equal(layout.answerSpace("single_choice", "a", { document: "questions", answer_space: "large" }), "none");
+assert.equal(layout.answerSpace("free_response", "a", {}), "none", "Legacy drafts without a choice remain unchanged");
+for (const [first, expected] of [
+  [{ nodeType: 3, textContent: "如图，求 " }, "inline"],
+  [{ nodeType: 1, matches: () => false }, "inline"],
+  [{ nodeType: 1, matches: () => true }, "block"]
+]) {
+  const stem = { dataset: {}, querySelector: () => ({ childNodes: [{ nodeType: 3, textContent: "  " }, first] }) };
+  layout.alignQuestionNumber({ querySelector: () => stem });
+  assert.equal(stem.dataset.examFirstLine, expected);
+}
 assert(Math.abs(layout.BODY_HEIGHT - 986.45669) < .001);
 assert(Math.abs(layout.BODY_WIDTH - 672.755906) < .001);
 assert.rejects(layout.paginate(null), /缺少/).then(() => console.log("A4 layout options and pagination boundaries: OK"));
@@ -51,3 +73,17 @@ for (const continued of [false, true]) {
   assert.equal(part.lastElementChild.textContent, first.textContent + second.textContent);
 }
 console.log("Long answer fragments retain one full-width body cell and preserve every paragraph: OK");
+
+// Explicit vertical must win over the renderer's compact default, including
+// picture-only options and a fifth real choice; labels/content stay untouched.
+const fit = { requestedColumns: layout.requestedColumns };
+vm.runInNewContext(source.slice(source.indexOf("  function fitOptions("), source.indexOf("  // Character boundaries")), fit);
+const optionNodes = ["A", "B", "C", "D", "E"].map(label => ({ label }));
+const list = { children: optionNodes, dataset: { cols: "4" }, style: {},
+  classList: { contains: () => true, remove() {}, add() {} }, querySelectorAll: () => [] };
+const question = { dataset: { questionId: "a" }, querySelectorAll: () => [list] };
+fit.fitOptions(question, layout.normalize({ option_layout: "two", option_overrides: { a: "vertical" } }), []);
+assert.equal(list.dataset.examColumns, "1");
+assert.equal(list.style.gridTemplateColumns, "repeat(1, minmax(0, 1fr))");
+assert.deepEqual(list.children.map(option => option.label), ["A", "B", "C", "D", "E"]);
+console.log("Explicit vertical option layout preserves all option nodes: OK");

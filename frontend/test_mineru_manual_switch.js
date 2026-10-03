@@ -22,10 +22,15 @@ function harness(options = {}) {
     return nodes.get(id);
   };
   const context = {
+    pageOpenIntent: 0, AbortController,
     state: { paperId: "paper", paper: options.paper || cloudPaper(), papers: [], questions: [{ id: 8, stem: "Existing edited question", figures: ["unchanged"], approved: true }] },
     QBProgress: App, ACTIVE_STATUS: new Set(["queued", "parsing", "segmenting", "reading"]),
     newUploadReadContinuations: new Set(["paper"]), $,
+    paperReadSubmissionPending: () => false,
     syncTrashControls() {}, suggestedSplitGroups: () => [], paperSummary: () => "解析中", el: () => ({}),
+    paperReadSubmissionPending: () => false,
+    renderCutReadingStage() { order.push("entries"); },
+    closePageDialog() { $("pageDialog").close(); },
     toast: (message, kind) => messages.push({ message, kind }),
     updatePaperFromResponse: (paper) => { context.state.paper = paper; order.push("update"); },
     refreshPaper: async () => {
@@ -66,7 +71,7 @@ function harness(options = {}) {
     cloudPaper({ status: "ready" }), cloudPaper({ archived: true }), cloudPaper({ demo: true })]) {
     const hidden = harness({ paper }); hidden.context.renderSettingsTask();
     assert.equal(hidden.$("settingsManualFallback").hidden, true, "Other routes/stages must not be mislabeled MinerU");
-    assert.equal(hidden.$("paperManualEntry").hidden, true);
+    assert.equal(hidden.$("paperManualEntry").hidden, !App.canContinueAiCut(paper));
     assert.equal(await hidden.context.switchToManual(null, { stopMinerU: true }), false);
     assert.equal(hidden.calls.length, 0);
   }
@@ -75,11 +80,14 @@ function harness(options = {}) {
   assert.equal(await success.context.switchToManual(null, { stopMinerU: true }), true);
   assert.deepEqual(success.calls, [{ url: "/api/papers/paper/processing", method: "POST", body: { mode: "manual" } }]);
   assert.deepEqual(success.openings, [["new", null, { page: null }]], "Switching opens the cutting canvas directly without another user choice");
-  assert.deepEqual(success.order, ["request", "update", "refresh", "open"]);
+  assert.deepEqual(success.order.filter(item => item !== "entries"), ["request", "update", "refresh", "open"]);
+  assert.equal(success.order.filter(item => item === "entries").length, 2, "Ready papers release the cutting entry's busy state without waiting for another poll");
   assert.deepEqual(success.context.state.questions, before, "Existing edited/approved content and figures are kept");
   assert.equal(success.context.newUploadReadContinuations.has("paper"), false, "Switching never starts automatic reading");
   assert.equal(success.context.busy.size, 0);
   assert.equal(success.$("settingsManualFallback").hidden, true, "The cloud-only action disappears after conversion");
+  assert.equal(success.$("paperManualEntry").hidden, false, "The saved manual pages keep a visible continuation back to automatic cutting");
+  assert.equal(success.$("paperContinueAi").hidden, false);
   const alreadyManual = harness({ response: { paper: manualPaper(), manual_ready: true, changed: false } });
   assert.equal(await alreadyManual.context.switchToManual(null, { stopMinerU: true }), true);
   assert.equal(alreadyManual.openings.length, 1, "A concurrently completed, idempotent switch still opens the saved manual pages");
@@ -97,7 +105,8 @@ function harness(options = {}) {
   assert.equal(pending.openings.length, 1);
   assert.equal(pending.$("settingsStop").disabled, false);
   assert.equal(pending.$("paperManualFallback").disabled, false);
-  assert.equal(pending.$("paperManualEntry").hidden, true);
+  assert.equal(pending.$("paperManualEntry").hidden, false);
+  assert.equal(pending.$("paperManualFallback").hidden, true, "The manual action stays in the cutting stage instead of being duplicated in the continuation card");
 
   for (const options of [{ failure: true }, { timeout: true }, { refreshed: false },
     { response: { paper: manualPaper(), manual_ready: false } },

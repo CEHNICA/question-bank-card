@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor
 
 urlpatterns = [
     path("", views.index_page),
@@ -12,6 +12,7 @@ urlpatterns = [
     path("library-workspace.js", views.library_workspace_script),
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),
+    path("library-question-editor.js", views.library_question_editor_script),
     path("exam-export.js", views.exam_export_script),
     path("exam-layout.js", views.exam_layout_script),
     path("static/library-ai-settings.js", views.library_ai_script),
@@ -31,6 +32,7 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>", views.paper_detail),
     path("api/papers/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
     path("api/papers/<uuid:paper_id>/processing", views.paper_processing),
+    path("api/papers/<uuid:paper_id>/continue-ai-cut", views.paper_continue_ai_cut),
     path("api/papers/<uuid:paper_id>/retry", views.paper_retry),
     path("api/papers/<uuid:paper_id>/reparse", views.paper_reparse),
     path("api/papers/<uuid:paper_id>/stop", views.paper_stop),
@@ -69,10 +71,12 @@ urlpatterns = [
     path("api/library/drafts", library_drafts.drafts_view),
     path("api/library/drafts/<uuid:draft_id>", library_drafts.draft_detail),
     path("api/library/jobs", views.library_jobs_view),
+    path("api/library/jobs/cancel", views.library_jobs_cancel),
     path("api/library/assistant/tasks", views.library_assistant_tasks),
     path("api/library/assistant/prepare", views.library_assistant_prepare),
     path("api/library/assistant/complete", views.library_assistant_complete),
     path("api/library/<uuid:publication_id>/solution", library_solutions.solution_view),
+    path("api/library/<uuid:publication_id>/question", library_question_editor.question_editor),
     path("api/library/<uuid:publication_id>/solution-images", library_solutions.image_upload),
     path("api/library/<uuid:publication_id>/solution-images/<uuid:asset_id>", library_solutions.image_view),
     path("api/library/<uuid:publication_id>", views.library_detail),

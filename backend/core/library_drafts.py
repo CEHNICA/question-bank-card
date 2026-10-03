@@ -27,7 +27,7 @@ LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
 PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False,
                   "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True,
                   "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": [],
-                  "answer_layout": "inline"}
+                  "answer_layout": "inline", "answer_space_overrides": {}}
 INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -61,12 +61,12 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("字号只能选 12、14、16 磅")
     if "document" in value and value["document"] not in ("questions", "answers", "combined"):
         raise DraftError("请选择题目卷、答案解析卷或题目与答案合卷")
-    if "answer_space" in value and value["answer_space"] not in ("none", "medium", "large"):
-        raise DraftError("答题留白只能选 none、medium、large")
+    if "answer_space" in value and value["answer_space"] not in ("none", "small", "medium", "large"):
+        raise DraftError("答题留白只能选 none、small、medium、large")
     if "pagination" in value and value["pagination"] not in ("compact", "keep"):
         raise DraftError("分页只能选紧凑排版或尽量整题同页")
-    if "option_layout" in value and value["option_layout"] not in ("auto", "four", "two"):
-        raise DraftError("选项排版只能选 auto、four、two")
+    if "option_layout" in value and value["option_layout"] not in ("auto", "four", "two", "vertical"):
+        raise DraftError("选项排版只能选 auto、four、two、vertical")
     if "answer_layout" in value and value["answer_layout"] not in ("inline", "appendix"):
         raise DraftError("答案位置只能选 inline 或 appendix")
     result = {**deepcopy(PRINT_DEFAULTS), **deepcopy(defaults or {}), **deepcopy(value)}
@@ -75,19 +75,24 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     result["answers"] = result["document"] != "questions"
     overrides = result["option_overrides"]
     if not isinstance(overrides, dict) or len(overrides) > 500 \
-            or any(mode not in ("auto", "four", "two") for mode in overrides.values()):
-        raise DraftError("单题选项排版应为题目编号到 auto、four、two 的映射，最多 500 题")
+            or any(mode not in ("auto", "four", "two", "vertical") for mode in overrides.values()):
+        raise DraftError("单题选项排版应为题目编号到 auto、four、two、vertical 的映射，最多 500 题")
+    spaces = result["answer_space_overrides"]
+    if not isinstance(spaces, dict) or len(spaces) > 500 or any(mode not in ("none", "small", "medium", "large") for mode in spaces.values()):
+        raise DraftError("单题留白应为题目编号到 none、small、medium、large 的映射，最多500题")
     try:
         keys = normalize_ids(list(overrides))
+        space_keys = normalize_ids(list(spaces))
         breaks = normalize_ids(result["question_breaks"])
         selected = set(normalize_ids(ids)) if ids is not None else None
     except BrowseError as error:
         raise DraftError("单题排版或另起页的题目编号不正确：" + str(error)) from None
-    if len(keys) != len(overrides) or len(breaks) != len(result["question_breaks"]):
+    if len(keys) != len(overrides) or len(space_keys) != len(spaces) or len(breaks) != len(result["question_breaks"]):
         raise DraftError("单题排版或另起页的题目编号不能重复")
-    if selected is not None and (set(keys) - selected or set(breaks) - selected):
+    if selected is not None and (set(keys) - selected or set(space_keys) - selected or set(breaks) - selected):
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
+    result["answer_space_overrides"] = dict(zip(space_keys, spaces.values()))
     result["question_breaks"] = breaks
     return result
 
@@ -247,6 +252,7 @@ def _save(payload: dict, draft_id=None) -> dict:
         # Removing a question also removes its saved layout hint. Explicit new
         # hints for an unselected ID still fail validation rather than disappearing.
         defaults["option_overrides"] = {key: mode for key, mode in defaults["option_overrides"].items() if key in ids}
+        defaults["answer_space_overrides"] = {key: mode for key, mode in defaults["answer_space_overrides"].items() if key in ids}
         defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
         options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
         from .library_solutions import normalize_map, SolutionError

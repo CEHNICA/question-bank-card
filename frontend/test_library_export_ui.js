@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 
 const controls = Object.fromEntries([
-  "printDocument", "printAnswerLayout", "printPagination", "printOptionLayout", "printFontSize", "printAnswerSpace", "printStudentInfo", "printButton", "exportPdf", "exportWord", "exportSplit", "printIndividualQuestion", "printIndividualOption", "printIndividualBreak", "printIndividualHint"
+  "printDocument", "printAnswerLayout", "printPagination", "printOptionLayout", "printFontSize", "printAnswerSpace", "printStudentInfo", "printButton", "exportPdf", "exportWord", "exportSplit", "printIndividualQuestion", "printIndividualOption", "printIndividualSpace", "printIndividualBreak", "printIndividualHint"
 ].map(id => [id, { value: "", checked: false, disabled: false }]));
 const ui = { printAnswers: {}, printOrigin: {}, printAi: {}, paper: { querySelectorAll: () => [] } };
 const state = { features: { ai_answer: false } };
@@ -28,24 +28,29 @@ assert.equal(controls.printDocument.value, "combined");
 
 state.features.ai_answer = true;
 sandbox.applyPrintOptions({ document: "answers", answers: false, font_size: 16, answer_space: "large", student_info: false, ai_answers: true });
-assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: "large", student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, question_breaks: [] });
+assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: "large", answer_space_overrides: {}, student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, question_breaks: [] });
 assert.equal(controls.printAnswerLayout.value, "appendix", "A draft saved before answer positions existed keeps its original appendix layout");
 sandbox.applyPrintOptions({ document: "combined", answer_layout: "inline", answer_space: "large" });
 assert.equal(sandbox.currentPrintOptions().answer_layout, "inline");
 assert.equal(sandbox.currentPrintOptions().answer_space, "none", "An inline teacher paper never inserts student writing space");
 assert.equal(sandbox.normalizePrintOptions({ font_size: 6, answer_space: "custom", document: "invalid" }).font_size, 12);
 assert.equal(controls.printPagination.value, "compact", "Old drafts use the paper-saving default");
-sandbox.applyPrintOptions({ pagination: "keep", option_layout: "four", option_overrides: { a: "two", b: "auto", bad: "invalid" }, question_breaks: ["b", "b"] });
+sandbox.applyPrintOptions({ pagination: "keep", option_layout: "vertical", option_overrides: { a: "vertical", b: "auto", bad: "invalid" }, answer_space: "small", answer_space_overrides: { a: "none", b: "large", bad: "invalid" }, question_breaks: ["b", "b"] });
 state.basket = ["a", "b"];
-assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "two", b: "auto" });
+assert.equal(sandbox.currentPrintOptions().option_layout, "vertical");
+assert.equal(sandbox.currentPrintOptions().answer_space, "small");
+assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "vertical", b: "auto" });
+assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: "none", b: "large" });
 assert.deepEqual(plain(sandbox.currentPrintOptions()).question_breaks, ["b"]);
 state.basket = ["a"];
-assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "two" }, "Dropped publications must not remain in export overrides");
+assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "vertical" }, "Dropped publications must not remain in export overrides");
+assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: "none" }, "Dropped writing-space overrides cannot enter an export");
 assert.deepEqual(plain(sandbox.currentPrintOptions()).question_breaks, []);
 state.basket = [];
 sandbox.prunePrintChoices();
 state.basket = ["a", "b"];
 assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, {}, "Clearing and re-adding questions must not revive old overrides");
+assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, {});
 assert.deepEqual(plain(sandbox.currentPrintOptions()).question_breaks, []);
 delete state.basket;
 
@@ -82,9 +87,15 @@ printState.exporting = true;
 sandbox.syncIndividualControls();
 assert.equal(controls.printIndividualOption.disabled, true, "Reloading the paper during export must not re-enable mutable controls");
 assert.equal(controls.printIndividualBreak.disabled, true);
+assert.equal(controls.printIndividualSpace.disabled, true);
 printState.exporting = false;
 sandbox.syncIndividualControls(); assert.equal(controls.printIndividualOption.disabled, false); assert.equal(controls.printIndividualBreak.disabled, false);
 printState.firstQuestion = "second"; sandbox.syncIndividualControls(); assert.equal(controls.printIndividualBreak.disabled, true, "The first question must not create an empty cover page");
+printState.items[0].question_type = "free_response"; controls.printDocument.value = "questions";
+printState.answerSpaceOverrides = { second: "none" }; sandbox.syncIndividualControls();
+assert.equal(controls.printIndividualSpace.value, "none"); assert.equal(controls.printIndividualSpace.disabled, false);
+controls.printDocument.value = "combined"; controls.printAnswerLayout.value = "inline"; sandbox.syncIndividualControls();
+assert.equal(controls.printIndividualSpace.disabled, true, "Inline teacher layout disables per-question student space");
 printState.missing = []; printState.tooWide = 0; printState.exporting = true;
 sandbox.syncExportButtons();
 assert(controls.printButton.disabled && controls.exportWord.disabled && controls.exportSplit.disabled);

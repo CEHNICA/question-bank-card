@@ -9,7 +9,7 @@ const classification = source.slice(source.indexOf("  function approvalNeedsRevi
 const counts = source.slice(source.indexOf("  function counts()"), source.indexOf("  function renderMeter(c)"));
 const visibility = source.slice(source.indexOf("  function visible(q)"), source.indexOf("  function questionDeleteBlockReason(q)"));
 const snapshot = source.slice(source.indexOf("  function cropSnapshot()"), source.indexOf("  function trackCropDraft()"));
-const attention = source.slice(source.indexOf("  function syncCropDraftClassification()"), source.indexOf("  async function requestPageDialogClose()"));
+const attention = source.slice(source.indexOf("  function syncCropDraftClassification()"), source.indexOf("  function releasePageDialog()"));
 const save = source.slice(source.indexOf("  async function savePageCrop("), source.indexOf('  $("pageDialogSave").addEventListener("click"'));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -72,14 +72,14 @@ function harness(origin = "todo", seed = {}) {
   await unfinished.context.savePageCrop();
   assert.equal(unfinished.modal.open, false);
   assert.equal(unfinished.context.state.cropDraftAttention.size, 0);
-  assert.equal(unfinished.context.counts().todo, 0);
+  assert.equal(unfinished.context.counts().todo, 1);
   assert.equal(unfinished.context.counts().green, 1, "Only a successful complete save returns the card to the backend's normal review class");
   assert.equal(unfinished.context.counts().approved, 0, "Saving a figure never approves or publishes the question");
   assert.equal(unfinished.requests.length, 2);
 
   const openedGreen = harness("green", { state: "green", figure_review: { status: "ready" } });
   const enteringCounts = clone(openedGreen.context.counts());
-  assert.equal(openedGreen.context.counts().todo, 0, "Merely opening the figure editor is not a pending change");
+  assert.equal(openedGreen.context.counts().todo, 1, "Merely opening the figure editor is not a pending change");
   openedGreen.context.dialog.sketch = {};
   openedGreen.context.updateCropDraftAttention();
   assert.deepEqual(clone(openedGreen.context.counts()), enteringCounts, "Beginning a frame must keep every entering count unchanged");
@@ -90,12 +90,12 @@ function harness(origin = "todo", seed = {}) {
   assert.deepEqual(clone(openedGreen.context.counts()), enteringCounts, "Cancelling just an unfinished outline keeps the editor-session classification");
   openedGreen.context.dialog.boxes.push({ page_idx: 0, bbox: [10, 20, 200, 220], slot: "B" });
   openedGreen.context.updateCropDraftAttention();
-  assert.deepEqual(clone(openedGreen.context.counts()), enteringCounts, "A fixed but unsaved option frame cannot move需要核查to重点核查");
+  assert.deepEqual(clone(openedGreen.context.counts()), enteringCounts, "A fixed but unsaved option frame keeps the merged review membership");
   const changedGreen = { ...openedGreen.q, state: "red", figure_review: { status: "blocked_missing" } };
   openedGreen.context.state.questions = [changedGreen];
   for (const filter of ["all", "todo", "green", "approved", "ai"]) {
     openedGreen.context.state.filter = filter;
-    const member = filter === "all" || filter === "green";
+    const member = filter === "all" || filter === "green" || filter === "todo";
     assert.equal(openedGreen.context.visible(changedGreen), member, `Frozen visible membership is consistent with ${filter} count`);
   }
   openedGreen.context.state.filter = "green";
@@ -107,7 +107,7 @@ function harness(origin = "todo", seed = {}) {
   openedGreen.context.clearCropDraftAttention();
   assert.equal(openedGreen.context.counts().green, 0);
   assert.equal(openedGreen.context.counts().todo, 1);
-  assert.equal(openedGreen.context.visible(changedGreen), false, "Explicit discard releases the freeze and returns real filter membership");
+  assert.equal(openedGreen.context.visible(changedGreen), true, "Explicit discard releases the freeze and returns real filter membership");
 
   const published = harness("approved", { state: "green", figure_review: { status: "ready" }, approved: true,
     publication: { up_to_date: true, id: "saved-version" } });
@@ -130,7 +130,7 @@ function harness(origin = "todo", seed = {}) {
   fromAll.context.state.filter = "green";
   assert.equal(fromAll.context.visible(fromAll.context.state.questions[0]), true);
   fromAll.context.state.filter = "todo";
-  assert.equal(fromAll.context.visible(fromAll.context.state.questions[0]), false);
+  assert.equal(fromAll.context.visible(fromAll.context.state.questions[0]), true);
 
   const openingOnly = harness();
   openingOnly.context.state.questions = [{ ...openingOnly.q, state: "green", figure_review: { status: "ready" } }];
@@ -138,8 +138,8 @@ function harness(origin = "todo", seed = {}) {
   assert.equal(openingOnly.context.counts().green, 0);
   assert.equal(openingOnly.context.visible(openingOnly.context.state.questions[0]), true);
 
-  assert.match(source, /key: "todo", label: "重点核查"/);
-  assert.match(source, /key: "green", label: "需要核查"/);
+  assert.match(source, /key: "todo", label: "需要核查"/);
+  assert.doesNotMatch(source, /key: "green", label:/);
   assert.match(source, /key: "approved", label: "已通过"/);
   assert.doesNotMatch(source, /filterSelect|filterSelectionState/);
   console.log("Crop review: entering classification/counts frozen through sketch/assignment/dirty/undo/poll replacement; real classes released after save/discard; approval/publication immutable: OK");

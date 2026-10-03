@@ -101,12 +101,15 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
     requests.push({url,request});
     return response({"Content-Type":"application/pdf","Content-Disposition":"attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.pdf"},new TextEncoder().encode("%PDF-1.7\nsynthetic\n%%EOF"));
   };
-  const pdf = await Export.download([item], {title:"数学",format:"pdf",print_options:{document:"questions",pagination:"compact",option_layout:"four",option_overrides:{[item.id]:"two"}}});
+  const pdf = await Export.download([item], {title:"数学",format:"pdf",print_options:{document:"questions",pagination:"compact",option_layout:"vertical",option_overrides:{[item.id]:"vertical",removed:"two"},answer_space:"small",answer_space_overrides:{[item.id]:"large",removed:"medium",invalid:"custom"}}});
   assert.deepEqual(pdf,{filename:"数学.pdf",question_count:1});
   assert.equal(requests.at(-1).url,"/api/library/export-pdf");
   const pdfBody=JSON.parse(requests.at(-1).request.body);
   assert.equal(pdfBody.print_options.pagination,"compact");
-  assert.equal(pdfBody.print_options.option_overrides[item.id],"two");
+  assert.equal(pdfBody.print_options.option_layout,"vertical");
+  assert.deepEqual(pdfBody.print_options.option_overrides,{[item.id]:"vertical"});
+  assert.equal(pdfBody.print_options.answer_space,"small");
+  assert.deepEqual(pdfBody.print_options.answer_space_overrides,{[item.id]:"large"});
   assert.equal(Object.hasOwn(pdfBody,"html"),false);
   const previous=links.length;
   global.fetch=async()=>response({"Content-Type":"application/pdf"});

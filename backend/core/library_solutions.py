@@ -214,6 +214,13 @@ def solution_view(request, publication_id):
             return JsonResponse({"solution": solution_json(row), "base_revision": (publication.extras or {}).get("solution_id")}, status=201)
         row = selected(publication, request.GET.get("revision"))
         fingerprint = library.generation_fingerprint(publication.content, publication.pk)
+        raw_ai = (publication.extras or {}).get("ai_answer")
+        ai_answer = None
+        ai_stale = False
+        if isinstance(raw_ai, dict) and (raw_ai.get("answer") or raw_ai.get("analysis")):
+            ai_stale = raw_ai.get("fingerprint") != fingerprint
+            if not ai_stale:
+                ai_answer = deepcopy(raw_ai)
         history = []
         for item in publication.solutions.select_related("publication")[:100]:
             try:
@@ -227,6 +234,7 @@ def solution_view(request, publication_id):
         return JsonResponse({"solution": solution_json(row) if row else None,
             "base_revision": (publication.extras or {}).get("solution_id"),
             "origin": {"answer": str((publication.content or {}).get("answer") or ""), "analysis": str((publication.content or {}).get("analysis") or "")},
+            "ai_answer": ai_answer, "ai_answer_stale": ai_stale,
             "history": history})
     except SolutionError as error:
         return JsonResponse({"error": str(error)}, status=error.status)

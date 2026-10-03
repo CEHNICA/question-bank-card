@@ -401,7 +401,7 @@ def already_published(question: Question) -> bool:
         and approval_is_current(question)
 
 
-def publish(question: Question) -> tuple[PublishedQuestion, bool]:
+def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[PublishedQuestion, bool]:
     """入库一题。内容没变就不重复生成版本。返回 (快照, 是否新建)。"""
     with transaction.atomic():
         try:
@@ -466,8 +466,9 @@ def publish(question: Question) -> tuple[PublishedQuestion, bool]:
                 pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
             # A queued or running enrichment job keeps its original snapshot.
             # The worker rejects replaced versions; a new version needs its own job.
-            from .library_jobs import queue_on_intake
-            queue_on_intake(publication)
+            if queue_enrichment:
+                from .library_jobs import queue_on_intake
+                queue_on_intake(publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise

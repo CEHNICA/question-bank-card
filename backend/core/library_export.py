@@ -811,6 +811,8 @@ def _option_columns(item, options, *, text_width_mm=178):
                 width += _text_em(segment["raw"]) if segment["type"] == "text" else 4.5
         widths.append(width * options["font_size"] * 25.4 / 72)
     requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
+    if requested == "vertical":
+        return 1
     candidates = (4, 2) if requested != "two" and len(letters) == 4 else (2,)
     for columns in candidates:
         # Cell margins and a 10% reserve absorb font/rendering variation.
@@ -1054,9 +1056,10 @@ def _document(captured, title, options, mode):
                     elif any(image["slot"] == letter for image in item["images"]):
                         _font(document.add_paragraph().add_run(f"{letter}."), size)
                     _write_images(document, item, letter)
-            if item["type"] == "free_response" and options["answer_space"] != "none" and not inline_answers:
+            answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
+            if item["type"] == "free_response" and answer_space != "none" and not inline_answers:
                 paragraph = document.add_paragraph()
-                paragraph.paragraph_format.space_after = Mm(30 if options["answer_space"] == "medium" else 60)
+                paragraph.paragraph_format.space_after = Mm({"small": 12, "medium": 30, "large": 60}[answer_space])
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
             if inline_answers:

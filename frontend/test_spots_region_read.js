@@ -74,11 +74,11 @@ assert.match(js, /revision: submission\.revision, client_request_id: submission\
 // The page keeps polling while a region is read, and the result fills an option through 改字.
 assert.match(js, /q\.state === "reading" \|\| q\.ocr_pending \|\| regionReadPending\(q\)/);
 assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: target, value: read\.text \} \}\)/);
-assert.match(js, /function openEditor\(card, q, \{ prefill = null \} = \{\}\)/);
+assert.match(js, /function openEditor\(card, q, \{ prefill = null, regionInsert = null \} = \{\}\)/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
 assert.match(js, /method: "DELETE", body, signal/);
 // Without a clipboard (an older browser) it says so instead of failing silently.
-assert.match(js, /: Promise\.reject\(new Error\("clipboard unavailable"\)\);/);
+assert.match(js, /openEditor\(card, q, \{ regionInsert: read\.text \}\)/);
 // New reads offer AI positioning while an explicitly chosen target is retained.
 const guess = js.slice(js.indexOf("function readTargetGuess(q)"), js.indexOf("function regionReadPending(q)"));
 assert.match(guess, /return "auto"/);

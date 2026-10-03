@@ -55,6 +55,8 @@ def split_answer_tags(raw: str) -> dict[str, str]:
 
 def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solution_scope: bool = False) -> LibraryJob:
     """Queue one job; an identical job already waiting is reused."""
+    from .library_job_control import expire_api_jobs
+    expire_api_jobs()
     if kind not in FEATURE_OF:
         raise JobError("不认识的任务")
     if solution_scope and kind != LibraryJob.Kind.ANSWER:
@@ -149,13 +151,14 @@ def _question_text(content: dict) -> str:
     return "\n".join(lines)
 
 
-def answer_prompt(content: dict, with_figures: bool) -> str:
+def answer_prompt(content: dict, with_figures: bool, *, detailed=False) -> str:
     return "\n".join([
         "你是中学数学老师。请认真解下面这道题，给出最终答案和简要解析。",
         "题面里的公式用 LaTeX，$...$ 包住。" + ("题目的配图按顺序附在后面。" if with_figures else ""),
         "要求：",
         "- 选择题的【答案】只写选项字母（多选写全，如 ACD）；填空题写要填的内容；判断题写“对”或“错”；"
         "解答题分小问写结论，如“(1) 3≤m≤4；(2) 3≤m≤9/2”。",
+        "- 【解析】逐小问写完整推导和理由，空行分段，公式用 $...$；不只给结论。总长度不超过6000字。" if detailed else
         "- 【解析】写关键步骤，不超过 300 字，公式用 $...$。",
         "- 条件不够、题目看不懂或缺图时，【答案】写“无法确定”，在【解析】里说明原因，不要硬猜。",
         "只按下面的格式输出，不要输出别的内容：",
@@ -220,7 +223,7 @@ def _figure_urls(publication: PublishedQuestion) -> list[str]:
 def run_answer(publication: PublishedQuestion, *, explicit_once=False) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)
-    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures)), figures, kind=None if explicit_once else "answer")
+    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures), detailed=explicit_once), figures, kind=None if explicit_once else "answer")
     tags = split_answer_tags(raw)
     answer = str(tags.get("答案") or "").strip()
     if not answer:
@@ -261,6 +264,8 @@ def live_version(publication: PublishedQuestion) -> PublishedQuestion | None:
 
 def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: str, content_hash: str) -> PublishedQuestion:
     """Called inside the write transaction after a potentially long model call."""
+    from .library_job_control import expire_api_jobs
+    expire_api_jobs()
     if publication.question_id:
         Question.all_objects.select_for_update().filter(pk=publication.question_id).first()
     current_job = LibraryJob.objects.select_for_update().get(pk=job.pk)
@@ -280,13 +285,18 @@ def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: 
 
 
 def _finish(job: LibraryJob, status: str, error: str = "") -> None:
-    job.status = status
-    job.error = error[:300]
-    job.save(update_fields=["status", "error", "updated_at"])
+    # Cancellation/expiry owns its terminal state, including while a request
+    # is outside this transaction. A late success or failure cannot replace it.
+    changed = LibraryJob.objects.filter(pk=job.pk, status=LibraryJob.Status.RUNNING).update(
+        status=status, error=error[:300], updated_at=timezone.now())
+    if changed:
+        job.status, job.error = status, error[:300]
 
 
 def process_pending(limit: int = 5) -> int:
     """Run queued jobs (worker only).  Returns how many were handled."""
+    from .library_job_control import expire_api_jobs
+    expire_api_jobs()
     handled = 0
     for _ in range(limit):
         close_old_connections()
@@ -321,6 +331,7 @@ def process_pending(limit: int = 5) -> int:
                         job.save(update_fields=["result", "updated_at"])
                     else:
                         library.save_extras(publication, {**(publication.extras or {}), "ai_answer": result})
+                    _finish(job, LibraryJob.Status.DONE)
             else:
                 tags, engine = run_tags(publication)
                 with transaction.atomic():
@@ -329,10 +340,12 @@ def process_pending(limit: int = 5) -> int:
                                                       "tags_source": engine, "tags_at": timezone.now().isoformat(),
                                                       "tags_executor": "api", "tags_checked": False,
                                                       "tags_fingerprint": fingerprint, "tags_publication_id": str(publication.pk)})
-            _finish(job, LibraryJob.Status.DONE)
+                    _finish(job, LibraryJob.Status.DONE)
         except (JobError, library_ai_settings.SettingsError) as error:
+            expire_api_jobs()
             _finish(job, LibraryJob.Status.FAILED, str(error) or "失败了，请稍后再试")
         except Exception as error:  # 一道题失败不影响别的题，也不让工作者退出
+            expire_api_jobs()
             logger.error("library job failed (%s)", type(error).__name__)
             _finish(job, LibraryJob.Status.FAILED, "本机生成任务未完成，结果未保存；请稍后重试。")
     return handled
@@ -340,4 +353,6 @@ def process_pending(limit: int = 5) -> int:
 
 def recover_interrupted() -> int:
     """Jobs left running by a worker that stopped go back to the queue."""
+    from .library_job_control import expire_api_jobs
+    expire_api_jobs()
     return LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.RUNNING).update(status=LibraryJob.Status.QUEUED)

@@ -29,7 +29,7 @@ from PIL import Image
 from .version import APP_VERSION
 from . import (
     credential_settings, demo, features, imaging, import_planning, knowledge, library, library_jobs, m3import,
-    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables, intake, source_images,
+    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables, intake, source_images, continue_ai_cut,
 )
 from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, DECISION_FLAGS, FLAG_FOREIGN_FIGURE, FLAG_NO_FIGURE,
@@ -670,6 +670,7 @@ render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
 library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
 library_solutions_script = _frontend("library-solutions.js", "application/javascript; charset=utf-8")
+library_question_editor_script = _frontend("library-question-editor.js", "application/javascript; charset=utf-8")
 library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
@@ -1941,7 +1942,14 @@ def paper_resegment(request, paper_id):
             return _error(error, 409)
         paper.status = Paper.Status.SEGMENTING
         paper.error = ""
-        paper.save(update_fields=["status", "error", "updated_at"])
+        fields = ["status", "error", "updated_at"]
+        if (paper.processing_plan or {}).get("continue_preserve_existing") is True:
+            plan = deepcopy(paper.processing_plan)
+            for key in ("continue_preserve_existing", "continue_revision", "continue_existing_question_ids", "continue_render_sha256"):
+                plan.pop(key, None)
+            paper.processing_plan = plan
+            fields.append("processing_plan")
+        paper.save(update_fields=fields)
     return JsonResponse({"paper": paper_json(paper)})
 
 
@@ -1960,6 +1968,7 @@ def approve_green(request, paper_id):
         return _error("by 只能是 human 或 ai")
     now = timezone.now()
     changed = []
+    publication_problems = []
     with transaction.atomic():
         # Yellow too: a figure review saved under an older rule can make a card
         # green on screen (“已自动排除疑似多余图”) while the database still says
@@ -1990,8 +1999,17 @@ def approve_green(request, paper_id):
         ])
         for question in changed:
             library.confirm_published_review(question)
-    count = len(changed)
-    return JsonResponse({"approved": count, "paper": paper_json(paper)})
+            if not demo.is_demo(paper):
+                try:
+                    library.publish(question)
+                except (ValueError, OSError):
+                    # A card is not passed if its immutable bank copy cannot be
+                    # saved. Other successfully passed cards stay intact.
+                    _clear_approval(question)
+                    question.save()
+                    publication_problems.append(f"第 {question.number} 题保存未完成，请重试或修复来源图片。")
+    count = sum(question.approved for question in changed)
+    return JsonResponse({"approved": count, "problems": publication_problems, "paper": paper_json(paper)})
 
 
 @csrf_exempt
@@ -2649,6 +2667,12 @@ def question_action(request, question_id, action: str):
                 question.ocr_suggestion = {}
                 question.ocr_pending = False
         question.save()
+        if action == "approve" and value and not demo.is_demo(question.paper):
+            try:
+                library.publish(question)
+            except (ValueError, OSError) as error:
+                transaction.set_rollback(True)
+                return _error(f"通过未保存，题库写入失败：{error}。请重试，原题保留。", 409)
     return JsonResponse({"question": question_json(question), "paper": paper_json(question.paper)})
 
 
@@ -2735,6 +2759,11 @@ def question_ocr_figure(request, question_id, index: int):
         raise Http404()
     question.figures = figures
     return _file(library.figure_file(question, index), "image/png")
+
+
+@csrf_exempt
+def paper_continue_ai_cut(request, paper_id):
+    return continue_ai_cut.continue_ai_cut(request, paper_id)
 
 
 @csrf_exempt
@@ -2980,6 +3009,7 @@ def feature_settings(request):
 @csrf_exempt
 def library_jobs_view(request):
     """排队补知识点或 AI 参考答案：{kind, ids} 或 {kind, missing: true}（所有还没有的）。"""
+    from . import library_job_control
     if request.method == "GET":
         ids = request.GET.get("ids", "").split(",")
         if not 1 <= len(ids) <= 500 or any(not value for value in ids):
@@ -2989,11 +3019,10 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         scoped = request.GET.get("solution_scope") == "true"
-        rows = LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped).order_by("-created_at")[:1000]
-        return JsonResponse({"jobs": [{"id": str(row.pk), "publication_id": str(row.publication_id),
-            "kind": row.kind, "executor": row.executor, "status": row.status, "error": row.error,
-            "solution_scope": row.solution_scope, "result": row.result, "fingerprint": row.fingerprint,
-            "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()} for row in rows]})
+        library_job_control.expire_api_jobs()
+        rows = list(LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped).order_by("-created_at")[:1000])
+        return JsonResponse({"jobs": [library_job_control.job_json(row) for row in rows],
+                             "assistant_handoff": library_job_control.assistant_handoff(rows)})
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request)
@@ -3029,19 +3058,37 @@ def library_jobs_view(request):
     requested = len(set(str(value) for value in payload.get("ids", []))) if payload.get("missing") is not True else len(targets)
     queued = 0
     executors = set()
+    jobs = []
     try:
         with transaction.atomic():
             for publication in targets:
                 job = library_jobs.enqueue(publication, kind, solution_scope=solution_scope)
                 executors.add(job.executor)
+                jobs.append(job)
                 queued += 1
     except library_jobs.JobError as error:
         return _error(str(error), 409)
     from . import library_ai_settings
     mode = next(iter(executors)) if len(executors) == 1 else "mixed" if executors else library_ai_settings.public_status()["mode"]
     return JsonResponse({"queued": queued, "skipped": requested - queued, "executor": mode,
+                         "jobs": [library_job_control.job_json(job) for job in jobs],
+                         "assistant_handoff": library_job_control.assistant_handoff(jobs),
                          "message": "已加入待助手处理；请让正在操作软件的豆包或 AI 助手领取并写回。" if mode == "assistant"
                          else "已加入独立模型任务队列。"})
+
+
+@csrf_exempt
+def library_jobs_cancel(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    from . import library_job_control
+    try:
+        return JsonResponse(library_job_control.cancel_jobs(_body(request)))
+    except library_job_control.ControlError as error:
+        return _error(str(error), error.status)
 
 
 @csrf_exempt

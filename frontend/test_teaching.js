@@ -68,7 +68,8 @@ assert.ok(!lessonDone("fix", { type: "text", number: 9, stem: "向右移动 4 �
 assert.match(lessonHint("fix", { type: "text", number: 9, stem: "向右移动 4 个单位" }), /原卷印的是“向右移动 5 个单位”/);
 assert.ok(lessonDone("figure", { type: "figures", number: 2, figures: 1 }));
 assert.ok(!lessonDone("figure", { type: "figures", number: 2, figures: 0 }));
-assert.ok(lessonDone("publish", { type: "publish" }));
+assert.ok(TEACH_LESSONS.find(lesson => lesson.key === "publish").manual);
+assert.ok(!lessonDone("publish", { type: "publish" }), "Automatic bank saving is explained with next-step, without a separate publish button");
 assert.ok(!lessonDone("card", { type: "approve" }), "a reading step moves on only with 下一步");
 for (const key of ["library", "basket", "drafts", "ai"]) {
   assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === key).manual);

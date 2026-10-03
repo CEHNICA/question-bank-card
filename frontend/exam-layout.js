@@ -7,17 +7,35 @@
   "use strict";
   const MM = 96 / 25.4;
   const PAGE_WIDTH = 210 * MM, BODY_WIDTH = 178 * MM, BODY_HEIGHT = 261 * MM;
-  const choices = new Set(["auto", "four", "two"]);
+  const choices = new Set(["auto", "four", "two", "vertical"]);
+  const writingSpace = Object.freeze({ none: 0, small: 12, medium: 30, large: 60 });
   function normalize(options = {}) {
     return {
       pagination: options.pagination === "keep" ? "keep" : "compact",
       option_layout: choices.has(options.option_layout) ? options.option_layout : "auto",
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => choices.has(value))),
+      answer_space: Object.hasOwn(writingSpace, options.answer_space) ? options.answer_space : "none",
+      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {}).filter(([, value]) => Object.hasOwn(writingSpace, value))),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(value => typeof value === "string"))] : []
     };
   }
   function keepWhole(height, pageHeight, mode) { return mode === "keep" && height <= pageHeight + .5; }
-  function requestedColumns(layout, count) { return layout === "four" && count <= 4 ? 4 : layout === "auto" ? 0 : 2; }
+  function requestedColumns(layout, count) { return layout === "vertical" ? 1 : layout === "four" && count <= 4 ? 4 : layout === "auto" ? 0 : 2; }
+  function answerSpace(type, id, options = {}) {
+    if (type !== "free_response" || options.document === "answers"
+      || (options.document === "combined" && options.answer_layout === "inline")) return "none";
+    const normalized = normalize(options);
+    return normalized.answer_space_overrides[id] || normalized.answer_space;
+  }
+  function answerSpaceMm(mode) { return Object.hasOwn(writingSpace, mode) ? writingSpace[mode] : 0; }
+  function alignQuestionNumber(question) {
+    const stem = question.querySelector(".qb-stem"), body = stem?.querySelector(".qb-stem-body");
+    if (!stem || !body) return;
+    const first = Array.from(body.childNodes).find(child => child.nodeType === 1 || (child.nodeType === 3 && child.textContent.trim()));
+    // A real inline first line shares its baseline with the number. A table
+    // or standalone display starts at the top instead of using its last row.
+    stem.dataset.examFirstLine = first?.nodeType === 1 && first.matches(".qb-math.is-display, .qb-math-display-group, .qb-table-wrap, table, figure, img") ? "block" : "inline";
+  }
   function element(doc, tag, className, text) {
     const node = doc.createElement(tag); node.className = className;
     if (text !== undefined) node.textContent = text;
@@ -141,7 +159,10 @@
         image.style.width = `${image.naturalWidth * imageScale}px`;
         image.style.height = "auto";
       }));
-      work.querySelectorAll(".print-question").forEach(question => fitOptions(question, options, warnings));
+      work.querySelectorAll(".print-question").forEach(question => {
+        alignQuestionNumber(question);
+        fitOptions(question, options, warnings);
+      });
       work.querySelectorAll("table").forEach((table, index) => { table.dataset.examTable = String(index); });
       // Strip tools from measurements; preview actions are overlaid afterwards.
       const probe = element(doc, "div", "exam-layout-probe"); measure.append(probe);
@@ -229,5 +250,5 @@
     });
     return factor;
   }
-  return { paginate, scale, normalize, keepWhole, requestedColumns, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
+  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
 });

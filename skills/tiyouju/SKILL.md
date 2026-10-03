@@ -3,6 +3,14 @@ name: tiyouju
 description: 安装和操作题有据 Windows 本机软件，把数学试卷、题目整理成可追溯题库。用户发题有据项目地址、要安装或升级题有据、处理试卷、核对题卡、整理题库时使用；显式要求审代码或介绍项目时先按该要求工作。
 ---
 
+## 1.11.13：通过入库与补答案任务
+
+题卡人工或明确授权的 AI 审核“通过”后自动保存当前版本到题库，不需另点入库；示例卷不进正式题库。publish 旧命令仍兼容，重复执行不新增版本。题库的“修改题目”可直接改题干、选项、题型和已有配图归属/删除，保存保留历史版与原卷，旧组卷不会被静默换版。
+
+用户从答案解析窗口明确勾题补答案时，这是仅本次 solution_scope:true 任务，**无需打开全局 AI 标签/答案或自动生成开关**。使用交接文本中的同一个 job_id：enrich prepare <publication_id> --kinds answer --job-id <job_id> --agent <真实助手名> --json，实际查看返回的 local_images，逐小问解答，立即 enrich submit <job_id> --fingerprint <返回值> --result-file <UTF-8结果JSON绝对路径> --agent <真实助手名> --json。结果JSON是 answer 与 analysis 两字段，不做OCR、切题或审批。不要只领取后宣称已写回。若客户端无本机命令/MCP能力，说明限制并交付逐题解答；不要让用户反复等。
+
+只有普通附加标签/答案任务才遵循后文先启用对应功能的规则。solution_scope 结果写任务初稿，显示在答案编辑器；用户保存后才用于出卷。取消后的任务不能重新提交或新建任务顶替，已失效题面必须重新核对。现有、指纹有效的 AI 附加答案会自动预填编辑器缺失的原卷字段；已保存人工解析优先，原卷答案保留，初稿须保存后使用。
+
 # 题有据（tiyouju）
 
 把 PDF、Word、照片中的数学题整理成题卡，逐题对照原卷截图核对文字和配图，确认后入库。通过附带的 `tiyouju.exe` 命令行或 `tiyouju.exe mcp` 操作；默认程序目录为 `%LOCALAPPDATA%\Programs\QuestionBankCard\`。

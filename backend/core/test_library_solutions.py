@@ -50,6 +50,27 @@ class LibrarySolutionTests(TestCase):
         return PublishedQuestion.objects.create(paper=paper, question=question, source_filename=paper.filename,
             number=1, question_type=qtype, version=1, content=content, content_hash=library.content_hash(content))
 
+    def test_editor_get_exposes_existing_valid_ai_draft_without_saving_overlay(self):
+        fingerprint = library.generation_fingerprint(self.pub.content, self.pub.pk)
+        self.pub.extras = {"ai_answer": {"answer": "参考 C", "analysis": "所有小问步骤",
+                                       "fingerprint": fingerprint, "engine": "doubao", "checked": False}}
+        self.pub.save(update_fields=["extras"])
+        data = self.client.get(f"/api/library/{self.pub.pk}/solution").json()
+        self.assertEqual(data["ai_answer"]["analysis"], "所有小问步骤")
+        self.assertFalse(data["ai_answer_stale"])
+        self.assertEqual(data["origin"]["answer"], "原卷 B")
+        self.assertIsNone(data["solution"])
+        self.assertEqual(LibrarySolution.objects.count(), 0)
+
+    def test_stale_ai_draft_is_not_prefilled_even_when_origin_selected(self):
+        self.pub.extras = {"ai_answer": {"answer": "旧答案", "analysis": "旧步骤", "fingerprint": "0" * 64}}
+        self.pub.save(update_fields=["extras"])
+        data = self.client.get(f"/api/library/{self.pub.pk}/solution?revision=origin").json()
+        self.assertIsNone(data["ai_answer"])
+        self.assertTrue(data["ai_answer_stale"])
+        self.assertEqual(data["origin"]["answer"], "原卷 B")
+        self.assertEqual(LibrarySolution.objects.count(), 0)
+
     def save(self, pub=None, **changes):
         pub = pub or self.pub
         return library_solutions.save(pub, {"answer": "C", "analysis": "第一段\n\n第二段", "figures": [],

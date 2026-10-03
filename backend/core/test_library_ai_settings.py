@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import tempfile
@@ -61,6 +62,10 @@ class IndependentAISettingsTests(SimpleTestCase):
         payload.update(extra)
         return service.save(payload)
 
+    def configure_minimax(self, **extra):
+        return service.save({"mode": "api", "provider": "minimax",
+                             "key": {"action": "replace", "value": "offline-minimax-subscription-key"}, **extra})
+
     def verify(self):
         self.network.side_effect = None
         self.network.return_value = answer_response()
@@ -88,6 +93,144 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.transform.assert_not_called()
         self.assertNotIn("key", result)
         self.assertFalse(result["verified"])
+
+    def test_minimax_selection_uses_official_preset_without_importing_ocr_or_enabling_features(self):
+        ocr = self.root / "ocr-credentials.dat"
+        ocr.write_bytes(b"preexisting opaque OCR key")
+        with mock.patch.dict(os.environ, {"MINIMAX_API_KEY": "offline-existing-ocr-key"}):
+            result = service.save({"provider": "minimax"})
+        self.assertEqual(result["mode"], "assistant", "selecting a model never switches to a paid API")
+        self.assertEqual(result["model"], "MiniMax-M3.1-Flash-Preview")
+        self.assertEqual(result["base_url"], "https://api.minimax.cn/v1")
+        self.assertTrue(result["supports_images"])
+        self.assertFalse(result["configured"])
+        self.assertFalse(result["api_ready"])
+        self.assertEqual(result["features"], {"ai_answer": False, "knowledge_tags": False})
+        self.assertEqual(result["on_intake"], {"tags": False, "answer": False})
+        self.assertEqual(ocr.read_bytes(), b"preexisting opaque OCR key")
+        self.assertFalse(service.key_path("minimax").exists())
+        self.transform.assert_not_called()
+        self.network.assert_not_called()
+
+    def test_minimax_key_is_independent_and_provider_switch_or_clear_never_reuses_other_keys(self):
+        self.configure(provider="deepseek", endpoint_id="deepseek-v4-pro", supports_images=False)
+        other_key = service.key_path("deepseek").read_bytes()
+        self.configure_minimax()
+        own_path = service.key_path("minimax")
+        self.assertEqual(service._key(service._load()), "offline-minimax-subscription-key")
+        self.assertNotEqual(own_path, service.key_path("deepseek"))
+        self.assertEqual(service.key_path("deepseek").read_bytes(), other_key)
+        public = service.public_status()
+        self.assertNotIn("offline-minimax", json.dumps(public) + service.path().read_text())
+        service.save({"key": {"action": "clear"}})
+        self.assertFalse(own_path.exists())
+        self.assertEqual(service.key_path("deepseek").read_bytes(), other_key)
+        self.assertTrue(service.save({"provider": "deepseek"})["key_configured"])
+        self.assertFalse(service.save({"provider": "minimax"})["key_configured"])
+        self.network.assert_not_called()
+
+    def test_minimax_m31_probe_and_generation_use_actual_multimodal_adaptive_contract(self):
+        self.configure_minimax(features={"knowledge_tags": True, "ai_answer": True})
+        self.network.side_effect = None
+        # The gateway/SDK may omit reasoning_content for a trivial answer.
+        # A correct explicit image probe must still succeed without storing it.
+        self.network.return_value = answer_response(model=service.MINIMAX_MODEL, thinking=False)
+        self.assertTrue(service.test_connection({"confirm": True})["verified"])
+        args, kwargs = self.network.call_args
+        self.assertEqual(args, ("https://api.minimax.cn/v1/chat/completions",))
+        sent = kwargs["json"]
+        self.assertEqual(sent["model"], service.MINIMAX_MODEL)
+        self.assertEqual(sent["thinking"], {"type": "adaptive"})
+        self.assertEqual(sent["reasoning_effort"], "high")
+        self.assertIs(sent["reasoning_split"], True)
+        self.assertEqual(sent["max_completion_tokens"], 12000)
+        self.assertNotIn("max_tokens", sent)
+        self.assertNotIn("service_tier", sent)
+        self.assertFalse(kwargs["allow_redirects"])
+        urls = [part["image_url"]["url"] for part in sent["messages"][0]["content"] if part["type"] == "image_url"]
+        self.assertEqual(len(urls), 1)
+        with Image.open(io.BytesIO(base64.b64decode(urls[0].split(",", 1)[1]))) as image:
+            self.assertEqual(image.size, (120, 70))
+        for kind in ("answer", "tags", None):
+            with self.subTest(kind=kind):
+                text, engine = service.chat("offline synthetic question", [], kind=kind)
+                self.assertIn("【答案】2", text)
+                self.assertIn(service.MINIMAX_MODEL, engine)
+                self.assertTrue(service.public_status()["verified"])
+
+    def test_minimax_reasoning_formats_only_return_final_answer_and_do_not_false_fail(self):
+        self.configure_minimax(features={"ai_answer": True}, supports_images=False)
+        self.network.side_effect = None
+        for message in [
+            {"content": "【答案】2", "reasoning_content": "private reasoning"},
+            {"content": "【答案】2", "reasoning_details": [{"type": "reasoning.text", "text": "private reasoning"}]},
+            {"content": "<think>private reasoning</think>【答案】2"},
+            {"content": "【答案】2"},
+        ]:
+            with self.subTest(fields=list(message)):
+                response = answer_response(model=service.MINIMAX_MODEL)
+                response.json.return_value["choices"][0]["message"] = message
+                self.network.return_value = response
+                self.assertTrue(service.test_connection({"confirm": True})["ready"])
+                self.assertEqual(service.chat("offline", [], kind="answer")[0], "【答案】2")
+                self.assertNotIn("private reasoning", json.dumps(service.public_status()) + service.path().read_text())
+
+    def test_minimax_m3_and_m2_never_send_unsupported_effort_or_assume_vision(self):
+        self.network.side_effect = None
+        self.network.return_value = answer_response(text="【答案】2", thinking=False, model="MiniMax-M3")
+        for model, thinking in [("MiniMax-M3", True), ("MiniMax-M3", False), ("MiniMax-M2.7", True), ("future-explicit-model", True)]:
+            with self.subTest(model=model, thinking=thinking):
+                self.configure_minimax(model=model, thinking=thinking, supports_images=False)
+                self.assertTrue(service.test_connection({"confirm": True})["ready"])
+                sent = self.network.call_args.kwargs["json"]
+                self.assertNotIn("reasoning_effort", sent)
+                self.assertEqual([part["type"] for part in sent["messages"][0]["content"]], ["text"])
+                if model == "MiniMax-M3":
+                    self.assertEqual(sent["thinking"], {"type": "adaptive" if thinking else "disabled"})
+                else:
+                    self.assertNotIn("thinking", sent)
+                self.network.reset_mock()
+                with self.assertRaisesRegex(service.ServiceError, "未声明支持图片"):
+                    service._request(service._load(), "offline", ["data:image/png;base64,offline"], 500)
+                self.network.assert_not_called()
+
+    def test_minimax_invalid_model_controls_reject_before_saving_or_network(self):
+        self.configure_minimax()
+        original_config = service.path().read_bytes()
+        original_key = service.key_path().read_bytes()
+        for changes in [
+            {"thinking": False},
+            {"model": "MiniMax-M2.7", "supports_images": True},
+            {"model": "MiniMax-M2.7", "supports_images": False, "thinking": False},
+            {"base_url": "https://not-minimax.invalid/v1"},
+            {"base_url": "https://api.minimax.io/v1"},
+        ]:
+            with self.subTest(changes=changes):
+                with self.assertRaises(service.SettingsError):
+                    service.save(changes)
+                self.assertEqual(service.path().read_bytes(), original_config)
+                self.assertEqual(service.key_path().read_bytes(), original_key)
+        for confirmation in [{}, {"confirm": False}]:
+            with self.assertRaises(service.SettingsError):
+                service.test_connection(confirmation)
+        self.network.assert_not_called()
+
+    def test_minimax_still_rejects_wrong_image_or_incomplete_final_answer_without_fallback(self):
+        self.configure_minimax()
+        self.network.side_effect = None
+        wrong_image = answer_response(text="【答案】2【图示】3", thinking=False, model=service.MINIMAX_MODEL)
+        unfinished = answer_response(text="<think>unfinished private reasoning", model=service.MINIMAX_MODEL)
+        truncated = answer_response(model=service.MINIMAX_MODEL)
+        truncated.json.return_value["choices"][0]["finish_reason"] = "length"
+        missing_answer = answer_response(text="", model=service.MINIMAX_MODEL)
+        for response in (wrong_image, unfinished, truncated, missing_answer):
+            with self.subTest(response_type=response.json.return_value["choices"][0]["finish_reason"]):
+                self.network.return_value = response
+                with mock.patch.object(readers, "chat", side_effect=AssertionError("OCR fallback")):
+                    with self.assertRaises(service.ServiceError):
+                        service.test_connection({"confirm": True})
+                self.assertFalse(service.public_status()["api_ready"])
+        self.assertEqual(self.network.call_count, 4, "a failed probe never retries another model, key or endpoint")
 
     @skipUnless(os.name == "nt", "Windows DPAPI integration")
     def test_real_windows_dpapi_roundtrip_uses_only_a_disposable_key_file(self):

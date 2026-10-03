@@ -41,7 +41,9 @@ assert.match(select, /state\.selecting = true;/);
 // Esc, 完成, switching paper and a finished delete all leave the mode.
 assert.match(js, /case "Escape":\s*if \(state\.selecting && !state\.selectionBusy\) \{ event\.preventDefault\(\); stopSelecting\(\); \}/);
 assert.match(js, /\$\("selectionCancel"\)\.addEventListener\("click", \(\) => stopSelecting\(\)\)/);
-assert.match(js, /if \(state\.paperId !== id\) \{\s*stopSelecting\(\{ render: false \}\);/);
+const paperChange = js.slice(js.indexOf("  async function selectPaper(id)"), js.indexOf("  async function clearPaperSelection()"));
+assert.match(paperChange, /if \(state\.paperId !== id\) \{[\s\S]*?stopSelecting\(\{ render: false \}\);[\s\S]*?state\.paperId = id;/);
+assert.ok(paperChange.indexOf("cancelPendingPageOpening();") < paperChange.indexOf("state.paperId = id;"), "Paper navigation invalidates an old manual opening before selecting another paper");
 assert.match(js, /state\.editing\.delete\(id\); \}\);\s*stopSelecting\(\{ render: false \}\);/);
 
 // The toast sits at the right, clear of the left-aligned card buttons.

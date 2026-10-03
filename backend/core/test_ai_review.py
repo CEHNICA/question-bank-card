@@ -105,7 +105,13 @@ class AiReviewTests(TestCase):
     def test_publish_carries_who_reviewed_and_the_library_can_filter(self):
         self.approve(self.green, approved=True, by="ai", agent="豆包")
         self.approve(self.yellow, approved=True)
-        self.assertEqual(self.post(f"/api/papers/{self.paper.pk}/publish", {}).json()["created"], 2)
+        # Passing saves the bank copies immediately; the older publish command
+        # remains available and must not duplicate those versions.
+        identities = set(PublishedQuestion.objects.values_list("pk", flat=True))
+        self.assertEqual(len(identities), 2)
+        repeated = self.post(f"/api/papers/{self.paper.pk}/publish", {}).json()
+        self.assertEqual((repeated["created"], repeated["unchanged"]), (0, 2))
+        self.assertEqual(set(PublishedQuestion.objects.values_list("pk", flat=True)), identities)
         reviews = {item.number: (item.review_source, item.review_agent) for item in PublishedQuestion.objects.all()}
         self.assertEqual(reviews, {1: ("ai", "豆包"), 2: ("human", "")})
 

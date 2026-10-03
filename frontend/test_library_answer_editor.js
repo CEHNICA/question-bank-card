@@ -11,6 +11,9 @@ class Element {
   showModal() { this.open = true; }
   close() { this.open = false; void this.emit("close"); }
   focus() {}
+  select() {}
+  querySelectorAll(selector) { const tags = selector.split(",").map(value => value.trim().toUpperCase()); return descend(this).slice(1).filter(value => tags.includes(value.tagName)); }
+  getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; }
   get textContent() { return (this._text || "") + this.children.map(child => typeof child === "string" ? child : child.textContent || "").join(""); }
   set textContent(value) { this._text = value; this.children = []; }
 }
@@ -21,26 +24,32 @@ const byId = id => descend(document.body).find(element => element.id === id);
 const byText = text => descend(document.body).find(element => element.tagName === "BUTTON" && element.textContent === text);
 const original = { id: "pub-1", number: 1, content: { stem: "问题一", answer: "原卷结果", analysis: "" } };
 const other = { id: "pub-2", number: 2, content: { stem: "问题二", answer: "", analysis: "" } };
-const requests = [], saved = [], notices = [];
-let jobResult = null, failSave = false, revision = null, saveGate = null, jobNumber = 0, figureFixture = null;
-const root = { LibrarySolutions: require("./library-solutions.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout, clearTimeout,
+const requests = [], saved = [], notices = [], clipboardWrites = [], confirmations = [], timers = [];
+let clock = Date.now(), confirmDecision = true;
+class ControlledDate extends Date { static now() { return clock; } }
+let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done";
+const handoffText = '仅处理本批任务：job_id=job-wait, publication_id=pub-1, kind=answer, solution_scope=true。使用后端给出的真实本机CLI领取题面并逐题回写结果，不开启全局功能。检查初稿并保存后才用于出卷。';
+const root = { LibrarySolutions: require("./library-solutions.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout: (callback, delay) => { timers.push({ callback, delay }); return setTimeout(callback, delay); }, clearTimeout,
+  navigator: { clipboard: { writeText: async value => clipboardWrites.push(value) } },
   fetch: async (url, opts = {}) => {
     requests.push({ url, opts }); let body;
-    if (opts.method === "POST" && url === "/api/library/jobs") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, ["pub-1"]); assert.equal(payload.solution_scope, true); jobResult = { id: `job-${++jobNumber}`, publication_id: "pub-1", status: "done", result: { answer: "AI结果", analysis: "AI详细步骤" } }; body = { queued: 1, executor: "assistant" }; }
-    else if (url.startsWith("/api/library/jobs?")) body = { jobs: jobResult ? [jobResult] : [] };
+    if (opts.method === "POST" && url === "/api/library/jobs") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, ["pub-1"]); assert.equal(payload.solution_scope, true); jobResult = { id: `job-${++jobNumber}`, publication_id: "pub-1", executor: jobMode === "api_running" ? "api" : "assistant", status: jobMode === "done" ? "done" : jobMode === "api_running" ? "running" : "queued", ...(jobMode === "done" ? { result: { answer: "AI结果", analysis: "AI详细步骤" } } : {}) }; body = { queued: 1, executor: jobResult.executor, jobs: [jobResult], assistant_handoff: jobResult.executor === "assistant" ? { text: handoffText, publication_ids: ["pub-1"] } : null }; }
+    else if (opts.method === "POST" && url === "/api/library/jobs/cancel") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, [jobResult.id]); assert.equal(payload.solution_scope, true); jobResult = { ...jobResult, status: "failed", terminal_reason: "cancelled", cancelled: true }; body = { jobs: [jobResult], cancelled: 1 }; }
+    else if (url.startsWith("/api/library/jobs?")) { body = { jobs: jobResult ? [jobResult] : [], assistant_handoff: { text: handoffText, publication_ids: ["pub-1"] } }; if (pollGate) await pollGate; }
     else if (opts.method === "POST" && url.endsWith("/solution")) {
       if (saveGate) await saveGate;
       if (failSave) return { ok: false, json: async () => ({ error: "另一窗口已修改，当前文字保留" }) };
       const payload = JSON.parse(opts.body); revision = { id: "saved-1", publication_id: "pub-1", answer: payload.answer, analysis: payload.analysis, figures: [] }; body = { solution: revision, base_revision: payload.sync_library ? revision.id : null };
     } else if (url.endsWith("/solution?revision=origin")) body = { solution: null, base_revision: "later-library-head", origin: { answer: original.content.answer, analysis: "" }, history: [] };
-    else if (url.endsWith("/solution")) body = { solution: figureFixture, base_revision: null, origin: { answer: original.content.answer, analysis: "" }, history: [] };
+    else if (url.endsWith("/solution")) { body = { solution: figureFixture, base_revision: null, origin: originFixture || { answer: original.content.answer, analysis: "" }, ai_answer: aiFixture, ai_answer_stale: aiStale, history: [] }; if (readGate) await readGate; }
+    else if (url.startsWith("/api/papers/")) { body = { paper: { pages: [{ page_idx: 0 }, { page_idx: 1 }] } }; if (paperGate) await paperGate; }
     else throw new Error("unexpected request " + url);
     return { ok: true, json: async () => body };
   } };
 const QB = { renderQuestion: (target, value) => { target.replaceChildren(node("p", "", value.stem)); }, renderTypeset: (target, value) => target.replaceChildren(node("span", "", value)) };
-const context = { window: root, document, AbortController, FormData, setTimeout, clearTimeout }; vm.createContext(context);
+const context = { window: root, document, AbortController, FormData, Date: ControlledDate, setTimeout, clearTimeout }; vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "library-answer-editor.js"), "utf8"), context);
-const editor = root.LibraryAnswerEditor.create({ node, QB, notify: (...value) => notices.push(value), confirm: async () => true, onSaved: (...value) => saved.push(value) });
+const editor = root.LibraryAnswerEditor.create({ node, QB, notify: (...value) => notices.push(value), confirm: async value => { confirmations.push(value); return confirmDecision; }, onSaved: (...value) => saved.push(value) });
 const settle = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };
 (async () => {
   await editor.open([original, other], { scope: "paper", focus: original.id, selected: [original.id] }); await settle();
@@ -91,9 +100,155 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   position.value = "paragraph"; await position.emit("change");
   const paragraph = descend(document.body).find(element => element["aria-label"] === "插入到第几段后");
   paragraph.value = "2"; await paragraph.emit("input");
+  let releaseImageSave; saveGate = new Promise(resolve => { releaseImageSave = resolve; });
   await byId("answerEditorDialog").emit("keydown", { key: "s", ctrlKey: true }); await settle();
+  assert.equal(width.disabled, true); assert.equal(position.disabled, true); assert.equal(paragraph.disabled, true);
+  assert.equal(descend(document.body).find(element => element["aria-label"] === "已保存的答案解析历史").disabled, true, "History and image editing are locked while a save is in flight");
+  releaseImageSave(); await settle(); saveGate = null;
   const noBlurSave = JSON.parse(requests.filter(value => value.opts.method === "POST" && value.url.endsWith("/solution")).at(-1).opts.body);
   assert.equal(noBlurSave.figures[0].display_width, 50); assert.equal(noBlurSave.figures[0].paragraph, 1);
   await byText("返回").emit("click");
+
+  figureFixture = null; jobResult = null; jobMode = "assistant_waiting";
+  await editor.open([original, other], { scope: "paper", selected: [original.id] }); await settle();
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert(document.body.textContent.includes("等待当前助手领取"), "Assistant jobs say they await pickup, never pretend an API is generating");
+  assert.equal(byId("answerEditorCopyTask").hidden, false);
+  await byId("answerEditorCopyTask").emit("click");
+  assert.equal(clipboardWrites.at(-1), handoffText);
+  const handoffRequest = requests.filter(value => value.url.startsWith("/api/library/jobs?")).at(-1);
+  assert.equal(new URL(handoffRequest.url, "http://test.invalid").searchParams.get("ids"), "pub-1", "Task instructions are requested only for selected jobs");
+  assert(!clipboardWrites.at(-1).includes("pub-2"));
+  const queuedPoll = timers.filter(value => value.callback.name === "pollJobs").at(-1);
+  assert.equal(queuedPoll.delay, 30000, "Unclaimed assistant tasks are checked at a low frequency");
+  const timerCount = timers.filter(value => value.callback.name === "pollJobs").length;
+  clock += 10 * 60 * 1000 + 1; await queuedPoll.callback(); await settle();
+  assert.equal(timers.filter(value => value.callback.name === "pollJobs").length, timerCount, "Background checks stop after a bounded watch session");
+  assert(document.body.textContent.includes("自动检查已暂停"));
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert(timers.filter(value => value.callback.name === "pollJobs").length > timerCount, "Manual checking can restart a watch session");
+  const handEdit = byId("answerEditorResult"); handEdit.value = "取消任务也保留此文字"; await handEdit.emit("input");
+  confirmDecision = false; await byText("返回").emit("click"); assert.equal(editor.isOpen(), true); assert.equal(handEdit.value, "取消任务也保留此文字", "Declining return preserves unsaved edits"); confirmDecision = true;
+  await byId("answerEditorCancelAi").emit("click"); await settle();
+  assert(document.body.textContent.includes("已取消，勾选可重试")); assert.equal(handEdit.value, "取消任务也保留此文字");
+  await byText("返回").emit("click");
+
+  jobResult = null; aiFixture = { answer: "豆包既有结果", analysis: "豆包已给出的详细解析", fingerprint: "current-fingerprint" }; originFixture = { answer: "", analysis: "" };
+  const aiSavedBefore = saved.length, aiPostsBefore = requests.filter(value => value.opts.method === "POST").length;
+  await editor.open([{ ...original, ai_answer: aiFixture }]); await settle();
+  assert.equal(byId("answerEditorResult").value, "豆包既有结果"); assert.equal(byId("answerEditorAnalysis").value, "豆包已给出的详细解析");
+  assert(document.body.textContent.includes("现有 AI 参考初稿，尚未核对")); assert(!document.body.textContent.includes("尚未补齐答案解析"));
+  assert.equal(saved.length, aiSavedBefore); assert.equal(requests.filter(value => value.opts.method === "POST").length, aiPostsBefore, "Prefilling an existing validated AI draft never starts generation or persists it");
+  await byText("返回").emit("click");
+  originFixture = { answer: "原卷确切答案", analysis: "" };
+  await editor.open([original]); await settle();
+  assert.equal(byId("answerEditorResult").value, "原卷确切答案"); assert.equal(byId("answerEditorAnalysis").value, "豆包已给出的详细解析", "Validated existing AI fills only the missing source field");
+  await byText("返回").emit("click");
+  figureFixture = { id: "manual", answer: "人工答案", analysis: "", figures: [] };
+  await editor.open([original]); await settle();
+  assert.equal(byId("answerEditorResult").value, "人工答案"); assert.equal(byId("answerEditorAnalysis").value, "", "An explicit manual solution never gets AI fields mixed in");
+  await byText("返回").emit("click");
+  figureFixture = null; originFixture = { answer: "", analysis: "" }; aiStale = true;
+  await editor.open([{ ...original, ai_answer: aiFixture }]); await settle();
+  assert.equal(byId("answerEditorResult").value, ""); assert.equal(byId("answerEditorAnalysis").value, "");
+  assert(document.body.textContent.includes("题面已变化，未自动填入")); await byText("返回").emit("click");
+  aiFixture = null; aiStale = false; originFixture = null;
+
+  // Completed jobs remain available for comparison, but their task status must
+  // not claim a successfully saved draft is still waiting to be saved.
+  jobResult = null; jobMode = "done"; figureFixture = null; originFixture = { answer: "", analysis: "" };
+  await editor.open([original], { selected: [original.id] }); await settle();
+  await byId("answerEditorAi").emit("click"); await settle();
+  const aiStatus = () => descend(document.body).find(element => element.className === "helper answer-ai-status").textContent;
+  const taskState = () => descend(document.body).find(element => element.className === "answer-job-state done").textContent;
+  assert(aiStatus().includes("检查并保存后才出卷"));
+  failSave = true; await byId("answerEditorSave").emit("click");
+  assert(aiStatus().includes("检查并保存后才出卷"), "A failed save must not label an AI draft as saved");
+  failSave = false; await byId("answerEditorSave").emit("click");
+  assert.equal(taskState(), "该初稿已保存"); assert(aiStatus().includes("初稿已保存，可用于出卷"));
+  assert(!aiStatus().includes("检查并保存后才出卷"), "Successful save immediately updates the summary without waiting for another poll");
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert.equal(taskState(), "该初稿已保存");
+  assert.equal(descend(document.body).find(element => element.className === "answer-ai-draft").hidden, true);
+
+  jobResult = { ...jobResult, id: "later-different-draft", result: { answer: "另一份 AI 答案", analysis: "另一份 AI 解析" } };
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert.equal(byId("answerEditorResult").value, "AI结果"); assert.equal(byId("answerEditorAnalysis").value, "AI详细步骤", "Checking a new draft preserves the already saved version even for a previously requested publication");
+  assert(taskState().includes("已保存解析保留")); assert(aiStatus().includes("另有 AI 初稿可对照"));
+  const savedManualEdit = byId("answerEditorAnalysis"); savedManualEdit.value = "保存后又做了人工修改"; await savedManualEdit.emit("input");
+  jobResult = { ...jobResult, id: "late-for-edited-saved", result: { answer: "AI结果", analysis: "AI详细步骤" } };
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert.equal(savedManualEdit.value, "保存后又做了人工修改", "A matching saved AI job never resets subsequent unsaved human edits");
+  assert.equal(taskState(), "该初稿已保存"); await byText("返回").emit("click");
+
+  figureFixture = { id: "existing-manual-with-image", answer: "  AI结果  ", analysis: "AI详细步骤\n", figures: [{ id: "manual-image", url: "/local/manual-image", display_width: 50, position: "after" }] };
+  await editor.open([original], { selected: [original.id] }); await settle();
+  assert.equal(taskState(), "该初稿已保存", "Saved text matches ignore edge whitespace and are independent of manually added figures");
+  assert.equal(descend(document.body).find(element => element.className === "answer-ai-draft").hidden, true, "An already saved matching draft is not presented as an extra unsaved suggestion on reopen");
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert.equal(byId("answerEditorResult").value, "  AI结果  "); assert.equal(byId("answerEditorAnalysis").value, "AI详细步骤\n");
+  assert.equal(descend(document.body).filter(element => element.className === "answer-image-row").length, 1, "Checking or requesting AI cannot erase existing saved image placements");
+  await byText("返回").emit("click");
+  figureFixture = { id: "existing-human", answer: "人工保存答案", analysis: "人工保存解析", figures: [] };
+  await editor.open([original], { selected: [original.id] }); await settle();
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert.equal(byId("answerEditorResult").value, "人工保存答案"); assert.equal(byId("answerEditorAnalysis").value, "人工保存解析", "An explicit supplementary AI request supplies a comparison draft instead of silently replacing an existing human solution");
+  assert(taskState().includes("已保存解析保留"));
+  await byText("返回").emit("click"); figureFixture = null; originFixture = null;
+
+  jobResult = null; jobMode = "api_running";
+  await editor.open([original], { selected: [original.id] }); await settle();
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert(document.body.textContent.includes("AI 正在解题")); assert.equal(byId("answerEditorCopyTask").hidden, true);
+  jobResult = { ...jobResult, status: "failed", terminal_reason: "timed_out", timed_out: true, error: "执行超过时限" };
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert(document.body.textContent.includes("处理超时，勾选可重试")); assert(document.body.textContent.includes("执行超过时限"));
+  await byText("返回").emit("click");
+
+  jobResult = null; let releaseRead;
+  readGate = new Promise(resolve => { releaseRead = resolve; }); figureFixture = { answer: "迟到旧内容", analysis: "旧解析" };
+  const delayedOpen = editor.open([original]); await settle();
+  const pendingRead = requests.filter(value => value.url.endsWith("/solution") && !value.opts.method).at(-1);
+  await byText("返回").emit("click"); assert.equal(editor.isOpen(), false); assert.equal(pendingRead.opts.signal.aborted, true, "Return aborts a slow editor read immediately");
+  readGate = null; figureFixture = { answer: "重新打开的内容", analysis: "新解析" };
+  const firstPaperContext = { draft: "原组卷" }, laterPaperContext = { draft: "另一份组卷" };
+  await editor.open([original], { scopeContext: firstPaperContext }); await settle(); releaseRead(); await delayedOpen;
+  assert.equal(byId("answerEditorResult").value, "重新打开的内容", "A late aborted read cannot write into a newly opened editor");
+
+  let releaseSave; saveGate = new Promise(resolve => { releaseSave = resolve; });
+  const pendingResult = byId("answerEditorResult"); pendingResult.value = "关闭前已提交的保存"; await pendingResult.emit("input");
+  const delayedSave = byId("answerEditorSave").emit("click"); await settle();
+  const saveBeforeClose = requests.filter(value => value.opts.method === "POST" && value.url.endsWith("/solution")).at(-1), savedCount = saved.length;
+  await byText("返回").emit("click"); assert.equal(editor.isOpen(), false);
+  assert.equal(saveBeforeClose.opts.signal.aborted, false, "An already submitted save is still checked because abort cannot undo server persistence");
+  assert(confirmations.at(-1).text.includes("返回不会撤销保存"));
+  await editor.open([original], { scopeContext: laterPaperContext }); await settle();
+  const reopenedResult = byId("answerEditorResult"); reopenedResult.value = "新一轮人工编辑"; await reopenedResult.emit("input");
+  assert.equal(byId("answerEditorSave").disabled, true, "The same publication cannot start a duplicate save while the first result is unresolved");
+  releaseSave(); await delayedSave; saveGate = null;
+  assert.equal(saved.length, savedCount + 1, "A confirmed save still refreshes the outer paper after return");
+  assert.equal(saved.at(-1)[2].scopeContext, firstPaperContext, "A late saved callback carries the original paper context by reference, never the reopened paper");
+  assert.equal(reopenedResult.value, "新一轮人工编辑", "Save completion never overwrites fields of a reopened editor");
+  assert.equal(byId("answerEditorSave").disabled, false); assert(notices.some(value => value[0].includes("返回后已确认")));
+  await byText("返回").emit("click");
+
+  let releasePoll; pollGate = new Promise(resolve => { releasePoll = resolve; });
+  await editor.open([original]); await settle();
+  const pendingPoll = requests.filter(value => value.url.startsWith("/api/library/jobs?")).at(-1);
+  await byText("返回").emit("click"); assert(pendingPoll.opts.signal.aborted, "Return aborts in-flight status polling");
+  pollGate = null; releasePoll(); await settle(); assert.equal(editor.isOpen(), false);
+
+  figureFixture = null; jobResult = null;
+  const cropItem = { ...original, document_id: "doc", content: { ...original.content, sources: [{ page_idx: 1 }] } };
+  await editor.open([cropItem]); await settle(); await byText("从原卷裁图").emit("click");
+  const cropImage = descend(document.body).find(element => element.alt === "原卷解析图来源页"), cropSurface = descend(document.body).find(element => element.className === "answer-crop-surface");
+  cropImage.naturalWidth = 100; await cropImage.emit("load"); assert.equal(cropImage.dataset.ready, "true");
+  await byText("收起").emit("click"); let releasePaper;
+  paperGate = new Promise(resolve => { releasePaper = resolve; }); const reopenCrop = byText("从原卷裁图").emit("click"); await settle();
+  assert.equal(cropImage.dataset.ready, "false", "Reopening immediately invalidates the previous page image before the slow page list returns");
+  await cropSurface.emit("click", { button: 0, clientX: 10, clientY: 10 }); await cropSurface.emit("click", { button: 0, clientX: 50, clientY: 50 });
+  assert.equal(byText("加入解析图").disabled, true, "A stale previous page cannot be cropped while the new page list is unresolved");
+  releasePaper(); await reopenCrop; paperGate = null; await byText("返回").emit("click");
+  const noticesBeforeImage = notices.length; await cropImage.emit("error"); assert.equal(notices.length, noticesBeforeImage, "A late image error cannot disturb the returned screen");
   console.log("Answer editor: explicit selected AI, direct unsaved drafts, failure preservation, source protection, scope and repeated-save guards: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1166,6 +1166,7 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         return
     if paper.status not in {Paper.Status.QUEUED, Paper.Status.PARSING}:
         raise mineru.MineruCancelled()
+    _check_continued_original(paper)
     if not _set_if_plan_current(paper, plan_revision, status=Paper.Status.PARSING, error=""):
         return
     folder = paper_dir(paper)
@@ -1233,6 +1234,18 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
                         if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
                             raise mineru.MineruCancelled()
                         download.replace(archive)
+                        if _preserve_continued_cards(current) and current.photos:
+                            # A new upload reads the current render's order. The
+                            # old photos.mineru_order belongs to an earlier ZIP;
+                            # keep those original photo records unchanged.
+                            updated_plan = deepcopy(current.processing_plan)
+                            updated_plan["continue_photo_archive"] = {
+                                "sha256": _file_sha256(archive),
+                                "order": list(current.photos.get("order") or []),
+                            }
+                            current.processing_plan = updated_plan
+                            current.save(update_fields=["processing_plan", "updated_at"])
+                            paper.processing_plan = updated_plan
                     return
                 except mineru.MineruRestart:
                     _check_run(paper.pk, plan_revision)
@@ -1262,7 +1275,19 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
                 shutil.rmtree(run_folder, ignore_errors=True)
     _check_run(paper.pk, plan_revision)
     if paper.photos:
-        blocks = arrange_photo_pages(paper, blocks)
+        preserve_order = _preserve_continued_cards(paper) and bool(_continued_existing_ids(paper))
+        parsed_order = None
+        saved_archive = (paper.processing_plan or {}).get("continue_photo_archive") or {}
+        if preserve_order and archive is None:
+            # Chunked results are mapped from slices of the current render;
+            # applying an older whole-document ZIP's order would move them twice.
+            parsed_order = list(paper.photos.get("order") or [])
+        elif archive is not None and saved_archive.get("sha256") and saved_archive.get("sha256") == _file_sha256(archive):
+            parsed_order = saved_archive.get("order")
+        if preserve_order or parsed_order is not None:
+            blocks = arrange_photo_pages(paper, blocks, preserve_order=preserve_order, parsed_order=parsed_order)
+        else:
+            blocks = arrange_photo_pages(paper, blocks)
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])
     structure, needs_confirmation = _plan_structure(paper, blocks)
     with transaction.atomic():
@@ -1319,16 +1344,22 @@ def _store_ranges(info: dict, ranges: dict[int, tuple | None]) -> None:
     info["ranges"] = {str(info["order"][page]): list(span) if span else None for page, span in ranges.items()}
 
 
-def arrange_photo_pages(paper: Paper, blocks: list[dict]) -> list[dict]:
+def arrange_photo_pages(paper: Paper, blocks: list[dict], *, preserve_order: bool = False,
+                        parsed_order: list[int] | None = None) -> list[dict]:
     """MinerU 读完后、切题之前：按卷面题号把照片排成正确的页序。
 
     blocks 的页码是交给 MinerU 时的页序；返回按最终页序改好页码的 blocks。
     """
     info = dict(paper.photos)
     current = info["order"]
-    parsed = info.get("mineru_order") or current
+    parsed = parsed_order if parsed_order is not None else info.get("mineru_order") or current
     position = {file_index: page for page, file_index in enumerate(current)}
     blocks = [photos.remap_page({page: position[index] for page, index in enumerate(parsed)}, b) for b in blocks]
+    if preserve_order:
+        # Existing card coordinates refer to these exact pages. Continuing AI
+        # cutting may locate missing cards, but cannot reorder/rewrite originals
+        # or even replace the human's saved photo metadata.
+        return blocks
     if len(current) < 2:
         return blocks
     ranges = photos.page_ranges(paper.pages, blocks)
@@ -2306,6 +2337,55 @@ def preview_resegment(paper: Paper) -> dict:
     }
 
 
+def _preserve_continued_cards(paper: Paper) -> bool:
+    plan = paper.processing_plan or {}
+    return plan.get("continue_preserve_existing") is True and plan.get("continue_revision") == plan.get("revision", 0)
+
+
+def _continued_existing_ids(paper: Paper) -> set[int]:
+    if not _preserve_continued_cards(paper):
+        return set()
+    return {value for value in (paper.processing_plan or {}).get("continue_existing_question_ids", [])
+            if type(value) is int and value > 0}
+
+
+def _check_continued_original(paper: Paper) -> None:
+    expected = (paper.processing_plan or {}).get("continue_render_sha256")
+    if expected and _continued_existing_ids(paper):
+        _path, _kind, digest = source_images.source_identity(paper)
+        if digest != expected:
+            raise RuntimeError("原卷在继续任务提交后发生变化，已保留已有题目并停止自动切题；请先恢复原件。")
+
+
+def _continuation_already_cut(item: dict, questions: list[Question]) -> bool:
+    """Respect original source ownership even when manual groups lack anchors."""
+    anchor = item.get("source_anchor_seq")
+    regions = item.get("regions") or []
+    for question in questions:
+        if anchor is not None and question.source_anchor_seq == anchor:
+            return True
+        same_number = item.get("number") == question.number
+        for region in regions:
+            box = region.get("bbox") or []
+            if len(box) != 4:
+                continue
+            area = max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+            if area <= 0:
+                continue
+            for old in question.regions or []:
+                old_box = old.get("bbox") or []
+                if old.get("page_idx") != region.get("page_idx") or len(old_box) != 4:
+                    continue
+                old_area = max(0, old_box[2] - old_box[0]) * max(0, old_box[3] - old_box[1])
+                overlap = max(0, min(box[2], old_box[2]) - max(box[0], old_box[0])) * \
+                    max(0, min(box[3], old_box[3]) - max(box[1], old_box[1]))
+                # Stable printed number plus substantial shared area, or a
+                # candidate already inside a saved crop, is already owned.
+                if overlap / area >= .8 or (same_number and old_area > 0 and overlap / min(area, old_area) >= .2):
+                    return True
+    return False
+
+
 def segment_paper(paper: Paper) -> None:
     """切题。已有题卡时（重新切题）：内容没变的题卡原样保留（包括已通过的），变了的才重读；
     人工调整过范围或手动补的题卡不动。"""
@@ -2313,8 +2393,19 @@ def segment_paper(paper: Paper) -> None:
         return
     plan_revision = int((paper.processing_plan or {}).get("revision", 0))
     _check_run(paper.pk, plan_revision)
+    _check_continued_original(paper)
+    preserve_existing = _preserve_continued_cards(paper)
     planned_structure: dict | None = None
-    if paper.material_type == Paper.MaterialType.BOOK:
+    if preserve_existing:
+        with transaction.atomic():
+            current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+            if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+                raise mineru.MineruCancelled()
+            # Keep every previous group row and every card's group reference.
+            # Prospective book regrouping belongs to the ordinary resegment
+            # operation, never this explicitly additive continuation.
+            groups = list(current.question_groups.order_by("sequence", "id")) or _ensure_question_groups(current)
+    elif paper.material_type == Paper.MaterialType.BOOK:
         groups, planned_structure = _prospective_book_groups(paper, _block_dicts(paper))
     else:
         with transaction.atomic():
@@ -2354,6 +2445,8 @@ def segment_paper(paper: Paper) -> None:
                     raise RuntimeError("教材题组重建不完整，已停止重新切题")
                 item["group"] = real_by_sequence[sequence]
         for item, question in pairs:
+            if preserve_existing and (question is not None or _continuation_already_cut(item, existing_questions)):
+                continue
             group = item["group"]
             regions = item["regions"]
             candidates = _label_candidates(item["figure_candidates"])
@@ -2510,6 +2603,8 @@ def segment_paper(paper: Paper) -> None:
             question.save()
         system_deleted_ids: list[int] = []
         for question in unmatched:
+            if preserve_existing:
+                continue
             if question.deleted_at is not None:
                 continue
             if (question.processing_mode != "auto" or question.body_mode == "source_image"
@@ -2557,8 +2652,11 @@ def segment_paper(paper: Paper) -> None:
             )
             excluded = len(system_deleted_ids)
         desired_group_ids = [group.pk for group in groups]
-        paper.question_groups.exclude(pk__in=desired_group_ids).filter(questions__isnull=True).delete()
-        if existing_questions:
+        if not preserve_existing:
+            paper.question_groups.exclude(pk__in=desired_group_ids).filter(questions__isnull=True).delete()
+        if preserve_existing and existing_questions:
+            notes.append(f"继续自动切题：保留 {len(existing_questions)} 张已有题卡，只补充尚未切出的题目。")
+        elif existing_questions:
             notes.append(f"重新切题：{kept} 张题卡内容没变，原样保留；{reread} 张范围变了，已重新识读。")
         if locally_trimmed:
             notes.append(
@@ -3994,7 +4092,8 @@ def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Questio
 
 def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> None:
     """A reader's “this is question N's figure” guess loses to the row order."""
-    for question in paper.questions.filter(processing_mode="auto", body_mode="text").exclude(id__in=keep):
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text")\
+            .exclude(id__in=keep | _continued_existing_ids(paper)):
         figures = [
             figure for figure in question.figures or []
             if not (figure.get("source") == "other" and _same_box(figure, boxes))
@@ -4025,7 +4124,8 @@ def distribute_figure_rows(paper: Paper) -> int:
     card so a person confirms the pairing.  No model call is made.
     """
     changed = 0
-    questions = list(paper.questions.filter(processing_mode="auto", body_mode="text").order_by("group_id", "number", "id"))
+    questions = list(paper.questions.filter(processing_mode="auto", body_mode="text")
+        .exclude(pk__in=_continued_existing_ids(paper)).order_by("group_id", "number", "id"))
     by_key = {(question.group_id, question.number): question for question in questions}
     for owner in questions:
         if owner.approved or any(f.get("source") == "manual" for f in owner.figures or []):
@@ -4070,6 +4170,7 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
     """读 A 题时发现某张图印着"第 N 题图"：把它交给第 N 题（常见于几道题的图排在同一行）。"""
     for item in foreign:
         targets = paper.questions.filter(number=item["number"], processing_mode="auto", body_mode="text")
+        targets = targets.exclude(pk__in=_continued_existing_ids(paper))
         if item.get("group_id") is not None:
             targets = targets.filter(group_id=item["group_id"])
         # 老数据可能没有题组。遇到同题号多于一张时宁可不猜，也不能把图跨章节贴错。
@@ -4133,7 +4234,8 @@ def process_paper(paper: Paper) -> None:
             segment_paper(paper)
             paper.refresh_from_db()
         if paper.status == Paper.Status.READING:
-            pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]))
+            pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING])
+                .exclude(pk__in=_continued_existing_ids(paper)))
             read_questions(paper, pending, revision=run_revision)
             _set_if_plan_current(paper, run_revision, status=Paper.Status.READY)
     except mineru.MineruCancelled as error:

@@ -5,6 +5,7 @@
   const defaults = {
     deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-v4-pro", supports_images: false },
     doubao: { base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "", supports_images: false },
+    minimax: { base_url: "https://api.minimax.cn/v1", model: "MiniMax-M3.1-Flash-Preview", supports_images: true },
     custom: { base_url: "", model: "", supports_images: false }
   };
   const fields = ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
@@ -87,19 +88,20 @@
             <details class="library-ai-help"><summary>助手如何处理待办？</summary><p>新题入库时生成会创建待办。当前助手需支持本机工具，并实际领取任务、生成结果、写回题库；网页按钮不会自动唤醒桌面豆包。</p></details>
           </section>
           <details id="libraryAIAdvanced" class="library-ai-advanced">
-            <summary>独立模型配置 · 推荐 DeepSeek，也支持其他模型</summary>
+            <summary>独立模型配置 · DeepSeek、MiniMax、豆包及其他模型</summary>
             <section class="library-ai-section" aria-label="可选处理方式">
               <div id="libraryAIAPIFields" class="library-ai-api-fields" hidden>
-                <p>推荐 DeepSeek Pro，也可配置豆包或其他兼容服务。模型名以服务商实际提供的 ID 为准，与读题服务分开保存。</p>
-                <label for="libraryAIProvider">服务商</label><select id="libraryAIProvider"><option value="deepseek">DeepSeek（推荐）</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></select>
+                <p>推荐 DeepSeek Pro，也可选择 MiniMax M3.1、豆包或其他兼容服务。模型名以服务商实际提供的 ID 为准，与读题服务分开保存。</p>
+                <label for="libraryAIProvider">服务商</label><select id="libraryAIProvider"><option value="deepseek">DeepSeek（推荐）</option><option value="minimax">MiniMax M3.1（M Plan）</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></select>
+                <p id="libraryAIMinimaxHelp" hidden></p>
                 <label for="libraryAIBaseURL">API 地址</label><input id="libraryAIBaseURL" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
                 <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>仅在服务商确认支持时开启；纯文本模型不会跳过配图处理含图题。</small></span></label>
                 <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
-                <label for="libraryAIKey">API Key · 已保存的密钥不会回显</label><input id="libraryAIKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore="true" placeholder="留空保留当前服务商的密钥" spellcheck="false">
+                <label for="libraryAIKey">API Key / MiniMax 订阅 Key · 已保存的密钥不会回显</label><input id="libraryAIKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore="true" placeholder="留空保留当前服务商的密钥" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIClearKey" type="checkbox"><span>清除已保存的 API Key</span></label>
                 <p>密钥用当前 Windows 用户加密保存。保存不联网；更换服务商后请使用对应的密钥。</p>
-                <strong>先确认能力，再生成</strong><p>保存后，用软件自带的合成题测试服务响应及所选的图像、思考能力，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生 API 费用。</p>
+                <strong>先确认能力，再生成</strong><p>保存后，用软件自带的合成题测试连接与响应；开启图像时还会测试合成图，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生费用或消耗订阅额度。</p>
                 <label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>我确认发起一次可能计费的 API 测试</span></label>
                 <button id="libraryAITest" class="button" type="button" disabled>测试连接</button>
               </div>
@@ -167,6 +169,23 @@
     $("libraryAIAnswerTiming").hidden = !$("libraryAIAnswer").checked;
   }
 
+  function renderCapabilities() {
+    const minimax = $("libraryAIProvider").value === "minimax";
+    const model = $("libraryAIModel").value.trim();
+    const latest = minimax && model === defaults.minimax.model;
+    const textOnly = minimax && /^MiniMax-M2(?:\.(?:1|5|7)(?:-highspeed)?)?$/.test(model);
+    const forcedThinking = latest || textOnly;
+    $("libraryAIMinimaxHelp").hidden = !minimax;
+    $("libraryAIMinimaxHelp").textContent = latest
+      ? "M3.1 支持文字与图片，始终开启思考。当前需要 M Plan 订阅 Key，与按量 API Key 不通用；请在这里单独保存并显式测试。"
+      : textOnly ? "M2 系列仅支持文字，始终开启思考；含图题请选择 M3.1、M3 或其他图文模型。"
+        : "MiniMax M3 支持图文，思考可以关闭；其他型号的能力以官方文档和显式测试为准。读题密钥不会自动用于标签或答案。";
+    if (textOnly) $("libraryAIImages").checked = false;
+    if (forcedThinking) $("libraryAIThinking").checked = true;
+    $("libraryAIImages").disabled = state.busy || !state.current || textOnly;
+    $("libraryAIThinking").disabled = state.busy || !state.current || forcedThinking;
+  }
+
   function updateButtons() {
     $("libraryAISave").disabled = state.busy || !state.current || (isAPI() && state.needsKeyReplacement);
     $("libraryAITest").disabled = state.busy || state.dirty || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked;
@@ -175,6 +194,7 @@
     $("libraryAIAnswerIntake").disabled = state.busy || !state.current || !$("libraryAIAnswer").checked;
     $("libraryAITestConsent").disabled = state.busy || !state.current || !isAPI();
     $("libraryAIKey").disabled = state.busy || !state.current || $("libraryAIClearKey").checked;
+    renderCapabilities();
     if (state.inline) {
       $("libraryAICancel").disabled = state.busy;
       $("libraryAICancel").textContent = state.current ? "撤销更改" : "重新读取";

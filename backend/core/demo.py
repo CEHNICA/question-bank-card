@@ -22,7 +22,7 @@ from django.db import transaction
 from .models import Block, Paper, Question
 
 DEMO_MARK = "demo"
-PUBLISH_REFUSED = "示例试卷只用来练习，不会进入正式题库。你自己的试卷核对完，点“入库”就会进入正式题库。"
+PUBLISH_REFUSED = "示例试卷只用来练习，不会进入正式题库。你自己的试卷核对后标记通过，就会自动进入题库。"
 
 
 def data_root() -> Path:

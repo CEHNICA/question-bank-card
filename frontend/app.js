@@ -261,7 +261,14 @@ const QBProgress = (() => {
       && ["queued", "parsing", "segmenting"].includes(paper.status);
   }
 
-  return { STAGES, formatDuration, formatAge, processingPresentation, canStopPaper, canSwitchMinerUToManual };
+  function canContinueAiCut(paper) {
+    if (!paper || paper.archived || paper.demo) return false;
+    return canSwitchMinerUToManual(paper)
+      || (["manual", "native"].includes(paper.parse_mode) && ["ready", "failed"].includes(paper.status))
+      || (paper.parse_mode === "mineru" && paper.status === "failed");
+  }
+
+  return { STAGES, formatDuration, formatAge, processingPresentation, canStopPaper, canSwitchMinerUToManual, canContinueAiCut };
 })();
 
 const QBSelection = (() => {
@@ -523,10 +530,10 @@ const QBTeach = (() => {
       text: "第 9 题原卷是“向右移动 5 个单位”。点“改字”，把 3 改成 5：预览的绿线、选区或公式框会指出修改位置。点“保存”；改完还需重新核对、打勾。" },
     { key: "figure", title: "补上配图",
       text: "第 2 题缺图。点“补选配图”，点蓝色候选图，选“题干”，再保存。也可单击图片的一个角，移动鼠标到另一个角，再单击固定范围；不用按住鼠标。四个选项图大小相同，先框一张，再双击下一张图的左上角，复制附近框的尺寸并选择归属。需要移动原卷时用空格＋左键或中键。" },
-    { key: "publish", title: "核对过的题，才入库",
-      text: "点右上角“入库”看看说明。只入库已通过的题；表格要逐格核对，绿卡也要看原卷。示例只练操作，不会进入正式题库。" },
+    { key: "publish", title: "通过后自动入库", manual: true,
+      text: "核对后点通过，题目自动进入题库，无需再点入库。示例只练操作，仍不会进入正式题库。" },
     { key: "basics", title: "基础练习完成", manual: true, checkpoint: true,
-      text: "你已练过对照、打勾、改字、补图和入库入口。接下来可以看新版常用功能，也可以先结束；以后在“设置 → 帮助”里继续看。" },
+      text: "你已练过对照、打勾、改字、补图和通过后入库。接下来可以看新版常用功能，也可以先结束；以后在“设置 → 帮助”里继续看。" },
     { key: "original", title: "整份原卷也能放大", manual: true,
       text: "从“试卷操作 → 查看整份原卷”看完整页面。Ctrl＋滚轮缩放，左键拖动画布；适页看整页，适宽看细节，还能输入页码跳页。" },
     { key: "preview", title: "不懂公式写法，也能看位置", manual: true,
@@ -923,8 +930,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D", E: "选项E" };
   const FILTERS = [
     { key: "all", label: "全部" },
-    { key: "todo", label: "重点核查" },
-    { key: "green", label: "需要核查" },
+    { key: "todo", label: "需要核查" },
     { key: "approved", label: "已通过" },
     // AI 助手（tiyouju 命令行）打的勾：只在有这样的题时出现，方便人抽查。
     { key: "ai", label: "AI 通过", optional: true }
@@ -1190,6 +1196,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       && !typeBlocksApproval(q) && q.state === "green";
   }
 
+  function needsReview(q) {
+    return needsCheck(q) || needsGeneralReview(q);
+  }
+
   function anyDialogOpen() {
     return [...document.querySelectorAll("dialog")].some((dialog) => dialog.open);
   }
@@ -1410,6 +1420,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (state.paperId !== id && !(await discardEdits())) return;
     if (finishedUnseen.delete(id)) document.title = QBNotify.title(BASE_TITLE, finishedUnseen.size);
     if (state.paperId !== id) {
+      cancelPendingPageOpening();
+      if ($("pageDialog").open) closePageDialog();
       stopSelecting({ render: false });
       state.paperId = id;
       state.rendered.clear();
@@ -1433,6 +1445,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function clearPaperSelection() {
     if (!(await discardEdits())) return false;
+    cancelPendingPageOpening();
+    if ($("pageDialog").open) closePageDialog();
     clearTimeout(state.pollTimer);
     state.paperId = null;
     state.paper = null;
@@ -1499,7 +1513,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const qs = state.questions;
     return {
       all: qs.length,
-      todo: qs.filter(needsCheck).length,
+      todo: qs.filter(needsReview).length,
+      attention: qs.filter(needsCheck).length,
       green: qs.filter(needsGeneralReview).length,
       approved: qs.filter(isApproved).length,
       ai: qs.filter(isAiApproved).length,
@@ -1513,12 +1528,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const meter = $("reviewMeter");
     meter.hidden = !c.all;
     if (!c.all) return;
-    const yellow = c.todo - c.red;
     const segments = [
       ["approved", c.approved, "已通过", "var(--accent)"],
-      ["green", c.green, "需要核查", "var(--green-bar)"],
-      ["yellow", yellow, "重点核查", "var(--amber-bar)"],
-      ["red", c.red, "识读失败", "var(--red)"],
+      ["yellow", c.todo, "需要核查", "var(--amber-bar)"],
       ["waiting", c.waiting, "识读中", "#c7cfc8"]
     ];
     const bar = $("meterBar");
@@ -1550,13 +1562,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     banner.hidden = !done;
     if (!done) return;
     const text = el("span");
-    text.append(icon("check"), document.createTextNode((c.unpublished
-      ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。`
-      : `全部 ${c.all} 题已标记通过并入库。`) + aiNote(c)));
+    text.append(icon("check"), document.createTextNode(`全部 ${c.all} 题已通过。` + aiNote(c)));
     banner.replaceChildren(text);
     const actions = el("span", "done-actions");
-    if (c.unpublished) actions.append(button(`入库（${c.unpublished} 题）`, "primary", publish, "", { iconName: "archive" }));
-    else {
+    {
       const link = el("a", "button", "去正式题库看看");
       link.href = "/library";
       actions.append(link);
@@ -1604,14 +1613,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (c.todo) {
       // What to do next, not a second copy of the counts shown in the bar and tabs.
       statusText.replaceChildren(
-        document.createTextNode(`${c.all} 道题。先处理 ${c.todo} 张重点核查的卡（按 `),
+        document.createTextNode(`${c.all} 道题，${c.todo} 题需要核查（按 `),
         el("kbd", "", "N"),
-        document.createTextNode(c.green ? ` 逐张跳过去），还有 ${c.green} 张需要核查的题卡。` : " 逐张跳过去）。"),
+        document.createTextNode(" 逐张跳过去）。确认后通过即入库。"),
       );
     } else if (c.green) {
       statusText.textContent = `${c.all} 道题：${c.green} 张题卡需要核查，确认后标记通过并入库。`;
     } else {
-      statusText.textContent = (c.unpublished ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。` : `全部 ${c.all} 题已标记通过并入库。`) + aiNote(c);
+      statusText.textContent = `全部 ${c.all} 题已通过。` + aiNote(c);
     }
     if (!isProcessing && paper.parse_mode === "native") {
       const manualPages = (paper.processing_plan?.pages || []).filter((page) => page.mode === "manual");
@@ -1744,7 +1753,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (stage === 1) {
       const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "手工切题", "primary", openManualCut,
         "从原卷框出每道题，完成切题后自动识读，再核对文字和配图");
-      cut.disabled = manualSwitches.has(paper.id);
+      cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
     } else if (summary.eligibleIds.length) {
       const read = button(`识读未完成题目（${summary.eligibleIds.length} 题）`, "primary", () => readCutQuestions());
@@ -1762,7 +1771,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       actions.append(button("直接原图审核", "quiet", () => { directImageReview.add(paper.id); renderCutReadingStage(); focusCutReview(); }));
     }
     if (stage === 3) actions.append(button("开始审核", "", () => focusCutReview()));
-    if (stage !== 1) actions.append(button("继续手工切题", "quiet", openManualCut));
+    if (stage !== 1) {
+      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "继续手工切题", "quiet", openManualCut);
+      cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
+      actions.append(cut);
+    }
     const stopError = cutReadingStopErrors.get(paper.id);
     const error = stopError || cutReadingErrors.get(paper.id);
     $("cutReadingError").hidden = !error;
@@ -1771,7 +1784,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function openManualCut() {
-    if (manualSwitches.has(state.paperId)) return;
+    if (manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId)) return;
     if (state.paper?.status === "ready") openPageDialog("new"); else void switchToManual();
   }
 
@@ -1922,8 +1935,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function visible(q) {
-    if (state.filter === "todo") return needsCheck(q);
-    if (state.filter === "green") return needsGeneralReview(q);
+    if (state.filter === "todo" || state.filter === "green") return needsReview(q);
     if (state.filter === "approved") return isApproved(q);
     if (state.filter === "ai") return isAiApproved(q);
     return true;
@@ -2128,11 +2140,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
-        empty.append(el("strong", "", "原卷已保存，从这里选取题目"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。保存为原图题，不会自动识读。"),
-          button("从原卷选题", "primary", () => openPageDialog("new")));
+        empty.append(el("strong", "", "原卷已保存"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。完成切题后自动识读已保存的题目。"));
+        // The cutting panel already supplies the primary entry. Only show
+        // this fallback when that panel is absent, and use the same guard.
+        if ($("cutReadingStage").hidden) {
+          const cut = button("手工切题", "primary", openManualCut);
+          cut.id = "emptyManualCut";
+          cut.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
+          empty.append(cut);
+        }
       } else if (!state.questions.length) empty.append(el("strong", "", "题卡还没生成"), el("span", "", "原卷处理完成后会显示题卡，也可以手工补题。"));
-      else if (state.filter === "todo") empty.append(el("strong", "", "没有需要逐题核对的卡"), el("span", "", "黄卡、红卡和内容变更都处理完了。"));
-      else if (state.filter === "green") empty.append(el("strong", "", "没有需要核查的题卡"), el("span", "", "有待处理问题的题目请先在“重点核查”中处理。"));
+      else if (state.filter === "todo" || state.filter === "green") empty.append(el("strong", "", "没有需要核查的题卡"), el("span", "", "本卷题目已核查完毕。"));
       else empty.append(el("strong", "", "这一栏没有题卡"));
       container.append(empty);
     } else container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
@@ -3749,9 +3767,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const fresh = questionById(q.id) || q;
       if (approved) {
         const c = counts();
-        const left = c.todo + c.green;
+        const left = c.todo;
         toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
-          : left ? `第 ${q.number} 题已标记通过` : "本卷已全部标记通过，可以点“入库”了",
+          : left ? `第 ${q.number} 题已通过并入库` : "本卷已全部通过并入库",
           left ? "" : "success", { label: "撤销", onClick: () => approveQuestion(fresh, false, { advance: false }) });
         teach({ type: "approve", number: q.number });
         if (advance) focusNext(q);
@@ -4504,19 +4522,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const stoppable = QBProgress.canStopPaper(paper);
     $("settingsStop").hidden = !stoppable;
     const switchingManual = manualSwitches.has(paper.id);
+    const continuingAi = aiCutContinuations.has(paper.id), changingCutMode = switchingManual || continuingAi;
     $("settingsManualFallback").hidden = !switchingManual && !QBProgress.canSwitchMinerUToManual(paper);
-    $("settingsManualFallback").disabled = switchingManual;
+    $("settingsManualFallback").disabled = changingCutMode;
     $("settingsManualFallback").textContent = switchingManual ? "正在停止并准备手工切题…" : "停止 MinerU，改为手工切题";
-    $("settingsStop").disabled = switchingManual;
-    $("settingsReparse").disabled = switchingManual;
-    $("manualProcessing").disabled = $("pageManualCut").disabled = switchingManual;
+    $("settingsStop").disabled = changingCutMode;
+    $("settingsReparse").disabled = changingCutMode;
+    $("manualProcessing").disabled = $("pageManualCut").disabled = changingCutMode;
     // Keep the recovery action beside the processing status. The local
     // fallback already has a primary cutting action in its three-step panel.
-    $("paperManualEntry").hidden = !switchingManual && !QBProgress.canSwitchMinerUToManual(paper);
-    $("paperManualFallback").disabled = switchingManual;
+    const cloudCutting = QBProgress.canSwitchMinerUToManual(paper), canContinue = QBProgress.canContinueAiCut(paper);
+    $("paperManualEntry").hidden = !changingCutMode && !cloudCutting && !canContinue;
+    $("paperManualFallback").hidden = !switchingManual && !cloudCutting;
+    $("paperManualFallback").disabled = changingCutMode;
     $("paperManualFallback").textContent = switchingManual ? "正在准备手工切题…" : "改为手工切题";
+    $("paperContinueAi").hidden = !continuingAi && !canContinue;
+    $("paperContinueAi").disabled = changingCutMode || (!cloudCutting && (paperReadSubmissionPending(paper.id)
+      || state.questions.some(q => q.ocr_pending || q.reread_requested)));
+    $("paperContinueAi").textContent = continuingAi ? "正在继续 AI 切题…" : "继续 AI 切题";
+    $("paperContinueAi").title = cloudCutting ? "保留当前任务，继续等待，不重新提交"
+      : "优先使用本机已有解析；需要重新提交原稿时会先说明";
     $("paperManualHint").textContent = switchingManual ? "正在停止本机等待并准备原卷，已有成果保留。"
-      : "可以停止等待，直接框题；原卷和已有题目保留。";
+      : continuingAi ? "正在恢复自动切题，原卷和已保存题目保留。"
+        : cloudCutting ? "可以停止等待，直接框题；原卷和已有题目保留。"
+          : "手工范围和已保存题目保留，也可继续 AI 切题补充未切出的题目。";
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -4690,6 +4719,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("paperManualFallback").addEventListener("click", () => {
     void switchToManual(null, { stopMinerU: true });
   });
+  $("paperContinueAi").addEventListener("click", () => { void continueAiCut(); });
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
@@ -4880,13 +4910,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!count) return;
     const ok = await confirmDialog({
       title: `把 ${count} 道题批量标记为通过？`,
-      text: "请先对照原卷确认“需要核查”中的这些题目；标记通过后即可入库。",
+      text: "请先对照原卷确认这些无未处理提醒的题目；通过后自动入库。",
       ok: `标记 ${count} 张通过`
     });
     if (!ok) return;
     try {
       const data = await api(`/api/papers/${state.paperId}/approve-green`, { method: "POST", body: {} });
-      toast(`已将 ${data.approved} 道题标记通过；审批绑定当前题面版本`, "success");
+      toast(`已将 ${data.approved} 道题通过并入库`, "success");
+      if (data.problems?.length) toast(data.problems.join(" "), "error");
       teach({ type: "approveGreen" });
       refreshPaper();
     } catch (error) { toast(error.message, "error"); }
@@ -4894,6 +4925,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function renderPublishButton(c = counts(), structureBlocked = state.paper?.status === "needs_grouping") {
     const button = $("publishButton");
+    button.hidden = true;
     const running = state.publishing && state.publishing.paperId === state.paperId ? state.publishing : null;
     button.classList.toggle("is-busy", Boolean(running));
     button.setAttribute("aria-busy", String(Boolean(running)));
@@ -4963,9 +4995,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 改字
 
-  function openEditor(card, q, { prefill = null } = {}) {
+  function openEditor(card, q, { prefill = null, regionInsert = null } = {}) {
     if (card.querySelector(".editor")) {
-      if (prefill) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
+      if (prefill || regionInsert) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
       card.querySelector(".stem-input")?.focus();
       return;
     }
@@ -5002,6 +5034,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     const stemRow = el("label", "field");
     stemRow.append(el("span", "", "题干（公式用 $…$ 包住的 LaTeX）"), stem);
+    if (regionInsert) {
+      const insert = el("div", "region-read-insert");
+      insert.append(el("p", "hint", "在题干里选中要改的文字，或点一下放置光标，再点“填入识读文字”。保存后生效。"));
+      const value = el("div", "region-read-text");
+      R.renderTypeset(value, regionInsert);
+      insert.append(value, button("填入识读文字", "small primary", () => {
+        const start = stem.selectionStart, end = stem.selectionEnd;
+        stem.value = stem.value.slice(0, start) + regionInsert + stem.value.slice(end);
+        stem.focus(); stem.setSelectionRange(start, start + regionInsert.length);
+        stem.dispatchEvent(new Event("input", { bubbles: true }));
+      }));
+      stemRow.append(insert);
+    }
     // Tables are text: pipe rows under the stem, previewed as a real table.
     const tableTools = el("div", "table-tools");
     const editTable = (change) => {
@@ -5390,14 +5435,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       openEditor(card, q, { prefill: { field: target, value: read.text } });
       return;
     }
-    // A piece of the stem: copy it, the person pastes it where it belongs.
-    openEditor(card, q);
-    const copied = navigator.clipboard?.writeText
-      ? navigator.clipboard.writeText(read.text)
-      : Promise.reject(new Error("clipboard unavailable"));
-    copied.then(
-      () => toast("读出来的字已复制，粘贴到题干里要改的位置", "success"),
-      () => toast("没能复制，请从题卡上的识读结果里手动复制", "error"));
+    openEditor(card, q, { regionInsert: read.text });
   }
 
   function regionReadPanel(card, q) {
@@ -5452,25 +5490,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           suggestion.append(el("strong", "", r.status === "stale" ? "题目已改过，这次位置建议已失效" : "没有确定的替换位置"),
             el("p", "hint", r.why || "识读文字已保留。可以重新框选，或手动选择它属于哪一部分。"));
         }
-        const manual = el("details", "region-manual-target");
-        manual.open = !prefill;
-        manual.append(el("summary", "", prefill ? "改选其他位置" : "手动选择替换位置"));
-        const select = el("select");
-        select.setAttribute("aria-label", "手动选择替换位置");
-        [["stem", "题干（复制后自行粘贴）"], ...OPTION_KEYS.map((key) => [key, `选项 ${key}`])].forEach(([value, label]) => {
-          const option = el("option", "", label);
-          option.value = value;
-          select.append(option);
+        const manual = el("div", "region-manual-target");
+        manual.append(el("strong", "", "这段文字放在哪里？"));
+        const destinations = el("div", "region-read-actions");
+        destinations.append(button("放到题干", "small", () => fillRegionRead(card, q, "stem")));
+        OPTION_KEYS.filter(key => key !== "E" || q.options?.E || q.region_read?.target === "E").forEach(key => {
+          destinations.append(button(`填到选项 ${key}`, "small", () => fillRegionRead(card, q, key)));
         });
-        const fill = button("复制并打开改字", "small", () => fillRegionRead(card, q, select.value));
-        select.addEventListener("change", () => {
-          fill.textContent = select.value === "stem" ? "复制并打开改字" : `填入选项 ${select.value}（打开改字）`;
-        });
-        manual.append(select, fill, el("p", "hint", "手动选择选项会替换整个选项；题干文字先复制，再粘贴到你选的位置。填入后仍需保存。"));
+        manual.append(destinations, el("p", "hint", "选项会替换整个选项；题干可在改字中选择替换的一段。填入后保存即可。"));
         suggestion.append(manual);
         panel.append(suggestion);
       } else {
-        const label = read.target === "stem" ? "复制并打开改字" : `填入${read.target_name || read.target}（打开改字）`;
+        const label = read.target === "stem" ? "放到题干" : `填到${read.target_name || read.target}`;
         actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
       }
     }
@@ -5489,8 +5520,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     history: [], future: [],
     zoom: 1, zoomMode: "width", zoomFrame: 0, spacePan: false, imageReady: false,
     slotTarget: null, slotAnchor: null, pendingFigure: null, ignoredCandidates: new Set(),
-    saving: false, closing: false, paperId: null, lastPage: null, session: 0, cutQuestionIds: []
+    saving: false, closing: false, active: false, reopenIntent: null,
+    paperId: null, lastPage: null, session: 0, cutQuestionIds: []
   };
+  let pageOpenIntent = 0;
   const CROP_EDIT_KEY = "original-crop";
   const CROP_GUIDANCE_PREF = "qb-crop-guidance";
   let cropGuidanceEnabled = readPref(CROP_GUIDANCE_PREF, "1") !== "0";
@@ -5509,9 +5542,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (dialog.mode === "view") return;
     editGuard.track(CROP_EDIT_KEY, cropSnapshot, () => {
       editGuard.release(CROP_EDIT_KEY);
-      const clearedAttention = clearCropDraftAttention();
-      $("pageDialog").close();
-      if (clearedAttention && state.paper) renderPaper();
+      closePageDialog({ preserveIntent: dialog.reopenIntent === pageOpenIntent });
     }, () => $("pageStage").focus({ preventScroll: true }));
   }
 
@@ -5558,7 +5589,44 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     frozen.dirty = needsAttention;
   }
 
-  async function requestPageDialogClose() {
+  function releasePageDialog() {
+    if (!dialog.active || $("pageDialog").open) return;
+    dialog.active = false;
+    dialog.session += 1;
+    dialog.lastPage = dialog.page;
+    cancelFigureSketch();
+    const clearedAttention = clearCropDraftAttention();
+    editGuard.release(CROP_EDIT_KEY);
+    if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
+    dialog.zoomFrame = 0;
+    clearPagePanKey();
+    if (dialog.drag) dialog.drag();
+    closeFigureSlotMenu({ cancelPending: true, rerender: false });
+    dialog.imageReady = false;
+    if (dialog.saving) setCropSaving(false);
+    // Detach the large page and stitched previews immediately. Hidden
+    // dialogs otherwise keep downloading/decoding them after the user exits.
+    ["pageStage", "pageCropPreviewBody", "regionPieces"].forEach((id) => {
+      const host = $(id);
+      host.querySelectorAll("img").forEach((image) => image.removeAttribute("src"));
+      host.replaceChildren();
+    });
+    showCropGuide("");
+    if (clearedAttention) {
+      const paperId = state.paperId, session = dialog.session;
+      setTimeout(() => {
+        if (state.paperId === paperId && dialog.session === session && !dialog.active) renderCards();
+      }, 0);
+    }
+  }
+
+  function closePageDialog({ preserveIntent = false } = {}) {
+    if (!preserveIntent) cancelPendingPageOpening();
+    if ($("pageDialog").open) $("pageDialog").close();
+    releasePageDialog();
+  }
+
+  async function requestPageDialogClose({ reopenIntent = null } = {}) {
     cancelFigureSketch();
     if (dialog.saving) {
       if (dialog.question && hasRegionReadSubmission(dialog.question.id)) {
@@ -5567,15 +5635,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         showCropResult("识读已取消，框选仍保留。");
       } else { toast("正在保存，请等保存完成", "error"); return false; }
     }
+    if (reopenIntent === null) cancelPendingPageOpening();
     if (dialog.closing) return false;
+    // No changes means no asynchronous leave flow or card rebuilding before
+    // closing. Opening and immediately returning must respond at once.
+    if (!dialog.cropBaseline || (!dialog.pendingFigure && JSON.stringify(cropSnapshot()) === dialog.cropBaseline)) {
+      closePageDialog({ preserveIntent: reopenIntent === pageOpenIntent });
+      return true;
+    }
     dialog.closing = true;
+    dialog.reopenIntent = reopenIntent;
     try {
       const leave = await editGuard.discard(() => confirmDialog({ title: "框选还没保存",
         text: "这些范围、片段顺序或配图归属还没保存。你可以继续调整，也可以丢弃本次改动。",
         ok: "丢弃改动", cancel: "继续调整", danger: true, focusCancel: true }), [CROP_EDIT_KEY]);
-      if (leave) $("pageDialog").close();
+      if (leave) closePageDialog({ preserveIntent: reopenIntent === pageOpenIntent });
       return leave;
-    } finally { dialog.closing = false; }
+    } finally { dialog.closing = false; dialog.reopenIntent = null; }
   }
 
   function showCropResult(text, error = false) {
@@ -5631,13 +5707,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function openPageDialog(mode, q = null, { page: requestedPage = null } = {}) {
     if (!state.paper?.pages?.length) { toast("原卷页面尚未生成", "error"); return; }
     if (dialog.saving || dialog.closing) { toast("请先完成当前操作", "error"); return; }
+    if (manualSwitchRequests.size) cancelPendingPageOpening();
+    const intent = ++pageOpenIntent, paperId = state.paperId;
     if ($("pageDialog").open) {
-      requestPageDialogClose().then((closed) => { if (closed) openPageDialog(mode, q, { page: requestedPage }); });
+      requestPageDialogClose({ reopenIntent: intent }).then((closed) => {
+        if (closed && pageOpenIntent === intent && state.paperId === paperId && !$("pageDialog").open) {
+          openPageDialog(mode, q, { page: requestedPage });
+        }
+      });
       return;
     }
     if (mode === "figures" && q?.body_mode === "source_image") mode = "regions";
     const previousPage = dialog.paperId === state.paperId ? dialog.lastPage : null;
     dialog.session += 1;
+    dialog.active = true;
     dialog.paperId = state.paperId;
     dialog.mode = mode;
     dialog.cropFilter = state.filter;
@@ -5781,8 +5864,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function requestPageZoom(mode = null) {
     if (mode && dialog.drag) return false;
     if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
+    const session = dialog.session;
     dialog.zoomFrame = requestAnimationFrame(() => {
+      if (dialog.session !== session || !$("pageDialog").open) return;
       dialog.zoomFrame = requestAnimationFrame(() => {
+        if (dialog.session !== session || !$("pageDialog").open) return;
         dialog.zoomFrame = 0;
         if (mode && dialog.drag) return;
         if (mode) dialog.zoomMode = mode;
@@ -5849,9 +5935,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("pageToolPan").addEventListener("click", () => selectPageTool("pan"));
   $("pageToolDraw").addEventListener("click", () => selectPageTool("draw"));
   $("pageManualCut").addEventListener("click", () => {
+    if (manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId)) return;
     const page = dialog.page;
     if (state.paper?.status === "ready") {
-      requestPageDialogClose().then((closed) => { if (closed) openPageDialog("new", null, { page }); });
+      openPageDialog("new", null, { page });
     } else switchToManual(page);
   });
   const copyDialogBoxes = () => dialog.boxes.map((box) => ({ ...box, bbox: [...box.bbox] }));
@@ -6351,17 +6438,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (menuIsOpen() && dialog.slotAnchor?.isConnected) positionFigureSlotMenu(dialog.slotAnchor);
   }, { passive: true });
   $("pageDialog").addEventListener("close", () => {
-    if ($("pageDialog").open) return;
-    cancelFigureSketch();
-    const clearedAttention = clearCropDraftAttention();
-    editGuard.release(CROP_EDIT_KEY);
-    dialog.lastPage = dialog.page;
-    if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
-    dialog.zoomFrame = 0;
-    clearPagePanKey();
-    if (dialog.drag) dialog.drag();
-    closeFigureSlotMenu({ cancelPending: true, rerender: false });
-    if (clearedAttention && state.paper) renderPaper();
+    // Native close events can arrive after an intentional close/reopen.
+    // Never tear down a new editor in response to the previous event.
+    if ($("pageDialog").open || !dialog.active) return;
+    cancelPendingPageOpening();
+    releasePageDialog();
   });
 
   function renderStage() {
@@ -6379,19 +6460,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageImageRetry").hidden = true;
     const page = pageInfo(dialog.page);
     const surface = el("div", "stage-surface");
+    const session = dialog.session, paperId = dialog.paperId;
+    const currentImage = () => surface.isConnected && $("pageDialog").open
+      && dialog.session === session && dialog.paperId === paperId && state.paperId === paperId;
     surface.style.aspectRatio = `${page.width} / ${page.height}`;
     const image = el("img");
     image.src = previewUrl(state.paperId, dialog.page);
     image.alt = `原卷第 ${dialog.page + 1} 页`;
     image.draggable = false;
     image.addEventListener("load", () => {
-      if (!surface.isConnected || !$("pageDialog").open) return;
+      if (!currentImage()) return;
       dialog.imageReady = true;
       $("pageImageState").hidden = true;
       applyPageZoom();
     }, { once: true });
     image.addEventListener("error", () => {
-      if (!surface.isConnected || !$("pageDialog").open) return;
+      if (!currentImage()) return;
       dialog.imageReady = false;
       $("pageImageState").hidden = false;
       $("pageImageState").textContent = "原卷图片没能加载，请重试。";
@@ -7002,44 +7086,118 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
 
   $("manualProcessing").addEventListener("click", () => {
-    if (manualSwitches.has(state.paperId)) return;
     $("toolsMenu").open = false;
-    if (state.paper?.status === "ready") openPageDialog("new"); else switchToManual();
+    openManualCut();
   });
 
   const manualSwitches = new Set();
+  const manualSwitchRequests = new Map();
+
+  function renderManualEntryState() {
+    renderSettingsTask();
+    renderCutReadingStage();
+    const emptyEntry = $("emptyManualCut");
+    if (emptyEntry) {
+      emptyEntry.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
+      emptyEntry.textContent = manualSwitches.has(state.paperId) ? "正在准备原卷…" : "手工切题";
+    }
+  }
+
+  function cancelPendingPageOpening() {
+    pageOpenIntent += 1;
+    const changed = manualSwitchRequests.size > 0;
+    manualSwitchRequests.forEach((request, id) => {
+      request.controller.abort();
+      manualSwitches.delete(id);
+    });
+    manualSwitchRequests.clear();
+    if (changed) renderManualEntryState();
+  }
+
+  const aiCutContinuations = new Set();
+
+  async function continueAiCut() {
+    const paper = state.paper, id = state.paperId;
+    if (!id || paper?.id !== id || manualSwitches.has(id) || aiCutContinuations.has(id)
+      || !QBProgress.canContinueAiCut(paper)) return false;
+    if (QBProgress.canSwitchMinerUToManual(paper)) {
+      // This is a choice to keep waiting, not a new cloud task or retry.
+      toast(`已保留当前 AI 切题任务：${QBProgress.processingPresentation(paper).headline}。不会重新提交原稿。`);
+      return true;
+    }
+    if (paperReadSubmissionPending(id) || state.questions.some(q => q.ocr_pending || q.reread_requested)) {
+      toast("已有题目正在识读，请先等待或停止本次识读，再继续 AI 切题；已保存内容保留。", "error");
+      return false;
+    }
+    const revision = Number(paper.processing_plan?.revision) || 0;
+    aiCutContinuations.add(id); renderManualEntryState();
+    try {
+      const confirmed = await confirmDialog({
+        title: "继续 AI 切题？",
+        text: "原卷、已保存的题目、手工范围和修改，以及已通过或入库的版本都会保留，只补充尚未切出的题目。\n\n有可用 MinerU 解析时，会优先在本机继续；否则将重新提交已上传的整份原稿给已配置的 MinerU，可能使用服务额度。已停止的远端旧任务不会被当作可续用的任务。",
+        ok: "继续 AI 切题", cancel: "继续手工切题", focusCancel: true
+      });
+      if (!confirmed || state.paperId !== id) return false;
+      if ((Number(state.paper?.processing_plan?.revision) || 0) !== revision) {
+        throw new Error("原卷处理状态已经变化，请先查看最新状态再继续。");
+      }
+      newUploadReadContinuations.delete(id);
+      const data = await QBRegionWait.boundedRequest(signal => api(`/api/papers/${id}/continue-ai-cut`, {
+        method: "POST", signal, body: { revision, allow_cloud: true }
+      }), { timeoutMs: 30000 });
+      if (state.paperId !== id) return false;
+      if (data.paper?.id !== id || data.paper.parse_mode !== "mineru"
+        || !["queued", "parsing", "segmenting", "reading", "ready", "needs_grouping"].includes(data.paper.status)) {
+        throw new Error("继续 AI 切题的结果尚未确认，请查看最新处理状态；已有成果保留。");
+      }
+      updatePaperFromResponse(data.paper); renderPaper();
+      toast(data.message || (data.action === "local_segmentation" ? "已使用本机解析继续切题，已有题目保留。" : "已继续 AI 切题，原卷和已有题目保留。"), "success");
+      void refreshPaper(); void loadPapers();
+      return true;
+    } catch (error) {
+      if (state.paperId !== id) return false;
+      toast(error.name === "TimeoutError" ? "提交结果尚未确认，原卷和已有题目保留。请查看最新处理状态后再试。"
+        : `未能继续 AI 切题：${error.message}`, "error");
+      void refreshPaper(); return false;
+    } finally { aiCutContinuations.delete(id); renderManualEntryState(); }
+  }
 
   async function switchToManual(page = null, { stopMinerU = false } = {}) {
     const id = state.paperId;
-    if (!id || manualSwitches.has(id) || (stopMinerU && !QBProgress.canSwitchMinerUToManual(state.paper))) return false;
+    if (!id || manualSwitches.has(id) || aiCutContinuations.has(id)
+      || (stopMinerU && !QBProgress.canSwitchMinerUToManual(state.paper))) return false;
+    const request = { intent: ++pageOpenIntent, controller: new AbortController() };
+    manualSwitchRequests.set(id, request);
+    const current = () => state.paperId === id && pageOpenIntent === request.intent
+      && manualSwitchRequests.get(id) === request && !request.controller.signal.aborted;
     manualSwitches.add(id);
     // Switching to manual is only the cutting step. A pending local-upload
     // continuation must not queue OCR while the original pages are prepared.
     newUploadReadContinuations.delete(id);
-    renderSettingsTask();
+    renderManualEntryState();
     try {
       // The API switches the whole paper. `page` only positions the canvas;
       // sending it as a page-restriction would imply unsupported cloud scope.
       const data = await QBRegionWait.boundedRequest((signal) => api(`/api/papers/${id}/processing`, {
         method: "POST", signal, body: { mode: "manual" }
-      }), { timeoutMs: 30000 });
-      if (state.paperId !== id) return false;
+      }), { timeoutMs: 30000, signal: request.controller.signal });
+      if (!current()) return false;
       if (data.paper?.id !== id || data.paper.status !== "ready" || data.paper.parse_mode !== "manual"
         || !data.paper.pages?.length || (stopMinerU && data.manual_ready !== true)) {
         throw new Error("手工切题的原页尚未准备好，原卷和已有题卡保留，请稍后查看任务状态。");
       }
       updatePaperFromResponse(data.paper);
       const refreshed = await refreshPaper();
-      if (state.paperId !== id) return false;
+      if (!current()) return false;
       if (!refreshed || state.paper?.status !== "ready" || state.paper.parse_mode !== "manual" || !state.paper.pages?.length) {
         throw new Error("已请求转为手工切题，但界面尚未确认最新原页和题卡，请稍后重试。");
       }
-      if ($("pageDialog").open) $("pageDialog").close();
+      if ($("pageDialog").open) closePageDialog({ preserveIntent: true });
       toast(data.message || "已转为手工切题，原卷、已有题目和修改已保留；先框题，尚未开始 AI 识读。", "success");
       openPageDialog("new", null, { page });
       return true;
     } catch (error) {
-      if (state.paperId !== id) return false;
+      if (!current() || error.name === "AbortError") return false;
       const message = error.name === "TimeoutError"
         ? "切换结果尚未确认，原卷和已有题卡保留；请稍后查看任务状态或重试。"
         : `未能进入手工切题：${error.message}`;
@@ -7047,8 +7205,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       void refreshPaper();
       return false;
     } finally {
-      manualSwitches.delete(id);
-      renderSettingsTask();
+      // An aborted older request must not clear a newer entry's busy state.
+      if (manualSwitchRequests.get(id) === request) {
+        manualSwitchRequests.delete(id);
+        manualSwitches.delete(id);
+        renderManualEntryState();
+      }
     }
   }
 
@@ -8134,7 +8296,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "table": focusCard(3); later(() => cardFor(3)?.querySelector(".qb-table") || cardFor(3),
         "对照这张表", "逐格看一遍，没问题就给第 3 题打勾。"); break;
       case "green": later(() => $("approveGreen"), "点这里", "核对“需要核查”中的题目后，可以一起标记通过。"); break;
-      case "publish": later(() => $("publishButton"), "点“入库”", "示例试卷不会真的入库。"); break;
+      case "publish": later(() => $("approveGreen"), "点“入库”", "示例试卷不会真的入库。"); break;
       case "basics": later(() => $("settingsButton"), "以后从这里继续", "设置 → 帮助：可以重做基础练习，也可以只看新版功能。"); break;
       case "original": {
         if (!$("pageDialog").open) openPageDialog("view");

@@ -14,7 +14,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from . import imaging, intake, library, native_pdf, pipeline, source_images
-from .models import Paper, Question
+from .models import Paper, PublishedQuestion, Question
 
 
 class ImmediateExecutor:
@@ -122,8 +122,11 @@ class ManualIntakeReviewTests(TestCase):
             result = self.post(f"/api/questions/{question.pk}/approve", {"approved": True})
             self.assertEqual(result.status_code, 200, result.content)
             question.refresh_from_db()
-            publication, created = library.publish(question)
-            self.assertTrue(created)
+            publication = PublishedQuestion.objects.get(question=question, version=1)
+            repeated, created = library.publish(question)
+            self.assertFalse(created)
+            self.assertEqual(repeated.pk, publication.pk)
+            self.assertEqual(question.publications.count(), 1)
             self.assertEqual(len(publication.content["question_images"]), 1)
 
     def test_every_fragment_is_required_and_published_pixels_are_immutable(self):

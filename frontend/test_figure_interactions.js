@@ -34,7 +34,7 @@ assert.match(js, /confirmCurrentFigures[\s\S]*ignored_candidates: \[\.\.\.ignore
 assert.match(js, /slot: figure\.slot \|\| "stem"/);
 
 // 标签可单独拖动；偏移随保存负载发送，而框本身的 bbox 不会在标签拖动函数里被改写。
-const labelDrag = js.match(/function startLabelDrag[\s\S]*?\n  }\n\n  \$\("figureSlotMenu"\)/)?.[0] || "";
+const labelDrag = js.match(/function startLabelDrag[\s\S]*?\r?\n  }\r?\n\r?\n  \$\("figureSlotMenu"\)/)?.[0] || "";
 assert.match(labelDrag, /box\.label_offset\s*=/);
 assert.doesNotMatch(labelDrag, /box\.bbox\s*=/);
 assert.match(js, /label_offset:\s*\{ \.\.\.box\.label_offset \}/);

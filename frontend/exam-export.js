@@ -156,6 +156,12 @@
         if (index % 8 === 0) await new Promise((resolve) => root.setTimeout(resolve, 0));
       }
       const selectedIds = new Set(items.map(item => item.id));
+      // Carry the same paper-only choices to both PDF and Word. Removed
+      // publications cannot revive an old option or writing-space override.
+      if (options.option_overrides) options.option_overrides = Object.fromEntries(Object.entries(options.option_overrides)
+        .filter(([id, value]) => selectedIds.has(id) && ["auto", "four", "two", "vertical"].includes(value)));
+      if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
+        .filter(([id, value]) => selectedIds.has(id) && ["none", "small", "medium", "large"].includes(value)));
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
       const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");

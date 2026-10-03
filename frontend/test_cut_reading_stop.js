@@ -65,6 +65,7 @@ function scenario() {
     questions: [{ ...manualText.questions[0], ocr_pending: true }] }, QBCutReading: Cut,
     cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(),
     cutReadingRequests: new Set(), cutReadingStops: new Set(), paperReadSubmissionPending: () => false,
+    manualSwitches: new Set(), aiCutContinuations: new Set(),
     $: (id) => { if (!stageNodes.has(id)) stageNodes.set(id, node()); return stageNodes.get(id); },
     document: { createTextNode: (text) => text }, el: () => node(),
     button: (label) => { buttons.push(label); return node(); }, stopCutReading() {}, openManualCut() {}, focusCutReview() {}, readCutQuestions() {} };

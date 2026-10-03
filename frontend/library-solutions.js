@@ -41,6 +41,25 @@
     return { answer: text(value.answer), analysis: text(value.analysis), figures: figuresOf(value).map(({ id, display_width, position, paragraph }) => ({ id, display_width, position, paragraph })) };
   }
   function signature(value) { return JSON.stringify(payload(value)); }
+  function editorInitial(item, response = {}) {
+    const manual = response.solution || (item.solution_revision === "origin" ? null : item.solution);
+    if (manual) return { value: editable(manual), saved: signature(manual), ai_fields: [], ai_stale: false };
+    const original = { ...editable(response.origin || item.content || {}), figures: [] };
+    const value = editable(original), ai_fields = [];
+    // The solution endpoint validates the publication/fingerprint binding.
+    // An unvalidated catalogue ai_answer must never silently enter the fields.
+    const ai = response.ai_answer_stale ? null : response.ai_answer;
+    for (const field of ["answer", "analysis"]) if (!text(value[field]).trim() && text(ai?.[field]).trim()) { value[field] = text(ai[field]); ai_fields.push(field); }
+    return { value, saved: signature(original), ai_fields, ai_stale: Boolean(response.ai_answer_stale), ai_error: text(response.ai_answer_error) };
+  }
+  function jobLabel(job = {}) {
+    if (job.cancelled || job.terminal_reason === "cancelled" || job.status === "cancelled") return "已取消，勾选可重试";
+    if (job.timed_out || job.terminal_reason === "timed_out" || job.status === "timed_out") return "处理超时，勾选可重试";
+    if (job.status === "failed") return "处理失败，勾选可重试";
+    if (["done", "completed", "succeeded", "success"].includes(job.status)) return job.result ? "初稿已到，保存后出卷" : "任务结束，暂无初稿";
+    if (job.executor === "assistant") return job.status === "running" ? "当前助手正在处理" : "等待当前助手领取";
+    return job.status === "running" ? "AI 正在解题" : "AI 任务排队中";
+  }
   function render(container, value, { node, QB, label = true, empty = "尚未补充答案解析" } = {}) {
     container.replaceChildren();
     if (!hasContent(value)) { container.append(node("p", "helper", empty)); return; }
@@ -66,5 +85,5 @@
     });
     figures.filter(figure => figure.position === "after" || (figure.position === "paragraph" && figure.paragraph >= paragraphs.length)).forEach(addFigure);
   }
-  return Object.freeze({ hasContent, selected, completeness, fixedSelections, draftSelections, figuresOf, editable, payload, signature, render });
+  return Object.freeze({ hasContent, selected, completeness, fixedSelections, draftSelections, figuresOf, editable, payload, signature, editorInitial, jobLabel, render });
 });

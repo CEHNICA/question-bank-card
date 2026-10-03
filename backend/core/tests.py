@@ -1508,10 +1508,12 @@ class ApiTests(TestCase):
         self.assertEqual(data["approved"], 1)
         self.q.refresh_from_db()
         self.assertTrue(self.q.approved_content_hash)
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+        publication = PublishedQuestion.objects.get(question=self.q, version=1)
+        self.assertEqual(publication.status, PublishedQuestion.Status.PUBLISHED)
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         again = self.post(f"/api/papers/{self.paper.id}/publish").json()
         self.assertEqual((again["created"], again["unchanged"]), (0, 1))
-        publication = PublishedQuestion.objects.get()
+        self.assertEqual(PublishedQuestion.objects.get().pk, publication.pk)
         self.assertEqual(publication.content["figures"][0]["url"], f"/api/library/{publication.id}/figures/figure-1.png")
         self.assertEqual(publication.content["figures"][0]["source"], "auto")
         # 测试题没有 regions_auto，对系统来说是人工框定的来源范围。
@@ -1527,7 +1529,10 @@ class ApiTests(TestCase):
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         self.assertEqual(PublishedQuestion.objects.count(), 1)
         self.assertEqual(self.post(f"/api/questions/{self.q.id}/approve", {"approved": True}).status_code, 200)
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+        second = PublishedQuestion.objects.get(question=self.q, version=2)
+        self.assertEqual(second.content["stem"], "如图，已知 $x=2$")
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
+        self.assertEqual(PublishedQuestion.objects.count(), 2)
         self.assertEqual(list(PublishedQuestion.objects.order_by("version").values_list("status", flat=True)),
                          ["superseded", "published"])
         library = self.client.get("/api/library").json()
@@ -1829,9 +1834,11 @@ class ApiTests(TestCase):
         approved = self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True})
         self.assertEqual(approved.status_code, 200, approved.content)
 
+        publication = PublishedQuestion.objects.get(question=self.q2, version=1)
         published = self.post(f"/api/papers/{self.paper.id}/publish").json()
-        self.assertEqual(published["created"], 1, published)
-        snapshot = PublishedQuestion.objects.get(question=self.q2).content
+        self.assertEqual((published["created"], published["unchanged"]), (0, 1), published)
+        self.assertEqual(PublishedQuestion.objects.get(question=self.q2).pk, publication.pk)
+        snapshot = publication.content
         self.assertEqual(snapshot["review"]["figure_review"]["status"], "confirmed_no_figure")
         self.assertEqual(snapshot["review"]["figure_review"]["source"], "human")
 
@@ -1902,9 +1909,10 @@ class ApiTests(TestCase):
             self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
             200,
         )
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
         first = PublishedQuestion.objects.get(question=self.q2, version=1)
         original_snapshot = json.loads(json.dumps(first.content))
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
+        self.assertEqual(self.q2.publications.count(), 1)
 
         changed = self.post(f"/api/questions/{self.q2.id}/text", {
             "stem": "如图所示，求证：AB=CD",
@@ -1916,10 +1924,12 @@ class ApiTests(TestCase):
             self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
             200,
         )
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
+        second = PublishedQuestion.objects.get(question=self.q2, version=2)
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
+        self.assertEqual(self.q2.publications.count(), 2)
 
         first.refresh_from_db()
-        second = PublishedQuestion.objects.get(question=self.q2, version=2)
+        second.refresh_from_db()
         self.assertEqual(first.content, original_snapshot)
         self.assertEqual(first.status, PublishedQuestion.Status.SUPERSEDED)
         self.assertEqual(second.content["review"]["figure_review"]["status"], "confirmed_no_figure")
@@ -1942,9 +1952,11 @@ class ApiTests(TestCase):
             self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
             200,
         )
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 1)
         first = PublishedQuestion.objects.get(question=self.q2, version=1)
         self.assertEqual(first.content["review"]["figure_review"]["source"], "automatic")
+        original_snapshot = json.loads(json.dumps(first.content))
+        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
+        self.assertEqual(self.q2.publications.count(), 1)
 
         confirmed = self.post(
             f"/api/questions/{self.q2.id}/figure-review",
@@ -1956,11 +1968,14 @@ class ApiTests(TestCase):
             self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
             200,
         )
+        second = PublishedQuestion.objects.get(question=self.q2, version=2)
         published = self.post(f"/api/papers/{self.paper.id}/publish").json()
-        self.assertEqual(published["created"], 1, published)
+        self.assertEqual((published["created"], published["unchanged"]), (0, 1), published)
+        self.assertEqual(self.q2.publications.count(), 2)
 
         first.refresh_from_db()
-        second = PublishedQuestion.objects.get(question=self.q2, version=2)
+        second.refresh_from_db()
+        self.assertEqual(first.content, original_snapshot)
         self.assertEqual(first.status, PublishedQuestion.Status.SUPERSEDED)
         self.assertEqual(second.content["review"]["figure_review"]["status"], "confirmed_no_figure")
         self.assertEqual(second.content["review"]["figure_review"]["source"], "human")
@@ -1979,11 +1994,16 @@ class ApiTests(TestCase):
 
     def test_publish_rejects_stale_approval_hash(self):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        original = PublishedQuestion.objects.get(question=self.q, version=1)
+        snapshot = json.loads(json.dumps(original.content))
         Question.objects.filter(pk=self.q.id).update(stem="如图，审批后被其他代码改过")
         result = self.post(f"/api/papers/{self.paper.id}/publish").json()
         self.assertEqual(result["created"], 0)
         self.assertTrue(any("重新终审" in problem for problem in result["problems"]))
-        self.assertFalse(PublishedQuestion.objects.exists())
+        original.refresh_from_db()
+        self.assertEqual(original.content, snapshot)
+        self.assertEqual(original.status, PublishedQuestion.Status.PUBLISHED)
+        self.assertEqual(PublishedQuestion.objects.count(), 1)
 
     def test_publish_rejects_red_even_with_matching_hash(self):
         self.q.state = Question.State.RED
@@ -1997,6 +2017,8 @@ class ApiTests(TestCase):
 
     def test_source_range_change_creates_new_version_after_reapproval(self):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        first = PublishedQuestion.objects.get(question=self.q, version=1)
+        original_snapshot = json.loads(json.dumps(first.content))
         self.post(f"/api/papers/{self.paper.id}/publish")
         self.post(f"/api/questions/{self.q.id}/regions",
                   {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]})
@@ -2007,10 +2029,13 @@ class ApiTests(TestCase):
         self.post(f"/api/questions/{self.q.id}/text",
                   {"stem": self.q.stem, "options": self.q.options, "question_type": self.q.question_type})
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
+        second = PublishedQuestion.objects.get(question=self.q, version=2)
         result = self.post(f"/api/papers/{self.paper.id}/publish").json()
-        self.assertEqual(result["created"], 1)
+        self.assertEqual((result["created"], result["unchanged"]), (0, 1))
         versions = list(PublishedQuestion.objects.order_by("version"))
         self.assertEqual([item.version for item in versions], [1, 2])
+        self.assertEqual(versions[0].content, original_snapshot)
+        self.assertEqual(versions[1].pk, second.pk)
         self.assertNotEqual(versions[0].content_hash, versions[1].content_hash)
         self.assertEqual(versions[1].content["sources"][0]["source"], "manual")
 

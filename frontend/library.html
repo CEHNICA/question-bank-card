@@ -221,7 +221,7 @@
           <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目</option><option value="answers">答案与解析</option><option value="combined" selected>题目＋答案</option></select></label>
           <label id="printAnswerLayoutBox" class="print-field">答案解析位置 <select id="printAnswerLayout"><option value="inline" selected>逐题紧跟</option><option value="appendix">卷末集中</option></select></label>
           <label class="print-field">分页 <select id="printPagination"><option value="compact" selected>连续排版，节省纸张</option><option value="keep">尽量保持单题完整</option></select></label>
-          <label class="print-field">选择题选项 <select id="printOptionLayout"><option value="auto" selected>自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option></select></label>
+          <label class="print-field">选择题选项 <select id="printOptionLayout"><option value="auto" selected>自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option><option value="vertical">四个选项竖排</option></select></label>
           <p id="printImageHint" class="print-options-note" hidden>原图题保留卷面排版，选项与字号不会重新排列。转为文字题后可调整选项排版。</p>
           <input id="printAnswers" type="checkbox" checked hidden aria-hidden="true" tabindex="-1">
           <label class="library-toggle switch" title="题号后印上原有题源"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
@@ -231,12 +231,14 @@
           <p class="print-options-note">PDF 按右侧分页保存；Word 可继续编辑。选项过长时自动换行，保留完整内容。</p>
           <details class="print-advanced"><summary>更多排版</summary><div class="print-options-body">
             <label class="print-field">正文字号 <select id="printFontSize"><option value="12" selected>12 磅</option><option value="14">14 磅</option><option value="16">16 磅</option></select></label>
-            <label class="print-field">解答题留白 <select id="printAnswerSpace"><option value="none">不留白</option><option value="medium">适中</option><option value="large">较多</option></select></label>
+            <label class="print-field">解答题留白 <select id="printAnswerSpace"><option value="none">不留白</option><option value="small" selected>少量（12 毫米）</option><option value="medium">适中（30 毫米）</option><option value="large">较多（60 毫米）</option></select></label>
+            <p class="print-options-note">学生卷默认给解答题留少量思路空间；逐题紧跟答案时不留白。可在“调整单题”里单独设置。</p>
             <label class="library-toggle switch"><input id="printStudentInfo" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>姓名、班级与得分栏</label>
           </div></details>
           <details class="print-individual"><summary>调整单题</summary><div class="print-options-body">
             <label class="print-field">题目 <select id="printIndividualQuestion" aria-label="要调整的题目"></select></label>
-            <label class="print-field">本题选项 <select id="printIndividualOption"><option value="">跟随全卷</option><option value="auto">自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option></select></label>
+            <label class="print-field">本题选项 <select id="printIndividualOption"><option value="">跟随全卷</option><option value="auto">自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option><option value="vertical">四个选项竖排</option></select></label>
+            <label class="print-field">本题留白 <select id="printIndividualSpace"><option value="">跟随全卷</option><option value="none">不留白</option><option value="small">少量（12 毫米）</option><option value="medium">适中（30 毫米）</option><option value="large">较多（60 毫米）</option></select></label>
             <label class="library-toggle switch"><input id="printIndividualBreak" type="checkbox"><span class="switch-track" aria-hidden="true"></span>这题另起一页</label>
             <p id="printIndividualHint" class="print-options-note"></p>
           </div></details>
@@ -248,7 +250,7 @@
         <div id="printLayoutNotice" class="print-notice no-print" role="alert" hidden></div>
         <p id="printPageStatus" class="print-page-status no-print" role="status" aria-live="polite">正在排版…</p>
         <p id="printLayoutWarnings" class="print-layout-warnings no-print" role="status" hidden></p>
-        <p class="print-order-hint no-print">A4 · 按题型分组。题目旁可调整顺序、选项或另起一页。Esc 返回题库。</p>
+        <p class="print-order-hint no-print">A4 · 按题型分组。点题目旁“调整”可改顺序、选项、留白或另起一页。Esc 返回题库。</p>
         <article id="printPaper" class="print-paper"></article>
       </section>
     </div>
@@ -261,6 +263,7 @@
   <script src="/library-workspace.js" defer></script>
   <script src="/library-solutions.js" defer></script>
   <script src="/library-answer-editor.js" defer></script>
+  <script src="/library-question-editor.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/exam-export.js" defer></script>
   <script src="/exam-layout.js" defer></script>

@@ -15,7 +15,7 @@ from django.test import TestCase, RequestFactory, override_settings
 from django.utils import timezone
 
 from . import intake, library, native_pdf, pipeline, source_images, views
-from .models import Paper, Question, QuestionGroup, Block
+from .models import Paper, PublishedQuestion, Question, QuestionGroup, Block
 
 
 class InlineExecutor:
@@ -153,8 +153,11 @@ class LocalIntakeTests(TestCase):
         key = question.source_key
         self.assertEqual(self.action(question, "approve").status_code, 200)
         question.refresh_from_db()
-        publication, created = library.publish(question)
-        self.assertTrue(created)
+        publication = PublishedQuestion.objects.get(question=question, version=1)
+        repeated, created = library.publish(question)
+        self.assertFalse(created)
+        self.assertEqual(repeated.pk, publication.pk)
+        self.assertEqual(question.publications.count(), 1)
         self.assertEqual(publication.content["body_mode"], "source_image")
         self.assertEqual(publication.content["stem"], "")
         self.assertEqual(publication.content["figures"], [])

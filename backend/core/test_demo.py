@@ -66,6 +66,7 @@ class DemoPaperTests(TestCase):
         paper = self.post("/api/demo").json()["paper"]["id"]
         question = Question.objects.get(paper_id=paper, number=1)
         self.assertEqual(self.post(f"/api/questions/{question.pk}/approve", {"approved": True}).status_code, 200)
+        self.assertEqual(PublishedQuestion.objects.count(), 0, "Practice pass must not auto-publish")
         response = self.post(f"/api/papers/{paper}/publish")
         self.assertEqual(response.status_code, 409)
         self.assertIn("示例试卷只用来练习", response.json()["error"])

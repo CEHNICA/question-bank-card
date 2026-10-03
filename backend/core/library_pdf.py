@@ -227,7 +227,11 @@ window.__qbPdfStatus = {ready:false};
       QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file,resolveQuestionImageUrl:x=>x.file});
       block.dataset.questionId=item.id;
       if(o.origin && item.content.origin)(block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem')).prepend(node('span','print-origin','（'+item.content.origin+'）'));
-      if(item.type==='free_response' && o.answer_space!=='none'&&!inline)block.append(node('div','print-answer-space'));
+      const space=(o.answer_space_overrides||{})[item.id]||o.answer_space;
+      if(item.type==='free_response' && space!=='none'&&!inline){
+        const blank=node('div','print-answer-space');blank.dataset.answerSpace=space;
+        blank.style.height=({small:12,medium:30,large:60}[space]||0)+'mm';block.append(blank);
+      }
       source.append(block);
       if(inline)source.append(solutionRow(number,item,true));
     }
