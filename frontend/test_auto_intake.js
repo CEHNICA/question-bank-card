@@ -53,7 +53,7 @@ const Upload = require("./app.js");
   assert.match(library, /upload\.href = "\/#dropZone"/);
   assert.match(js, /window\.location\.hash === "#dropZone"/);
   assert.match(js, /button\("继续整理", "small primary", \(\) => switchToManual\(\)\)/);
-  assert.match(js, /crop-missing", "[^"\n]*点“原卷与识读”[^"\n]*保存范围不会自动识读/);
+  assert.match(js, /crop-missing", "[^"\n]*点“调整范围”[^"\n]*保存范围不会自动识读/);
   assert.doesNotMatch(js, /框出来，AI 会自动读题/);
   console.log("automatic intake permission checks: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

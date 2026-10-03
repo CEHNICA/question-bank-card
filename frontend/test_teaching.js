@@ -16,13 +16,15 @@ assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === "basics").checkpoint);
 // Instructions name the current entry point and keep local import available
 // even when no reading service has been configured.
 const regionLesson = TEACH_LESSONS.find((lesson) => lesson.key === "region");
-assert.match(regionLesson.text, /点“原卷与识读”/);
-assert.match(regionLesson.text, /识读选中片段/);
+assert.match(regionLesson.text, /更多 → 框选识读（纠错）/);
+assert.match(regionLesson.text, /手工切题后用第二步的 AI 识读，无需再次画框/);
 assert.match(regionLesson.text, /框选识读/);
 assert.doesNotMatch(regionLesson.text, /点“框选识读”/);
 const finishLesson = TEACH_LESSONS.find((lesson) => lesson.key === "finish");
 assert.match(finishLesson.text, /导入资料无需密钥/);
 assert.match(finishLesson.text, /从原卷框选保存/);
+assert.match(finishLesson.text, /完成切题.*第二步.*AI 识读已切题目/);
+assert.match(finishLesson.text, /切题本身不会调用 AI/);
 assert.doesNotMatch(finishLesson.text, /上传、重新识读.*需要读题服务/);
 
 // Stable keys and the old course's indexes must refer to learning content,
@@ -95,8 +97,8 @@ assert.match(js, /if \(dialog\.mode === "view" \|\| dialog\.practiceRead\) retur
 const regionPointer = js.match(/case "region": \{([\s\S]*?)\n      \}/)[1];
 assert.match(regionPointer, /later\(\(\) => \$\("readTargetSelect"\)/);
 assert.match(html, /id="readTargetSelect"/);
-assert.match(regionPointer, /真实题目的入口是“原卷与识读”/);
-assert.match(html, /<dt>框选识读<\/dt><dd>从题卡的“原卷与识读”进入/);
+assert.match(regionPointer, /文字纠错入口是“更多 → 框选识读（纠错）”/);
+assert.match(html, /<dt>框选识读纠错<\/dt><dd>文字题可从“更多 → 框选识读（纠错）”进入/);
 assert.match(html, /id="settingsNewFeatures"/);
 // “指给我看” does not block the page, and Esc still closes an open window first.
 assert.match(js, /if \(event\.key === "Escape" && !anyDialogOpen\(\)\) \{ endTour\(\);/);

@@ -1672,6 +1672,133 @@ def paper_stop(request, paper_id):
 
 
 @csrf_exempt
+def paper_read_cut_questions(request, paper_id):
+    """Queue recognition of saved question crops; never adopt or approve it."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    ids = payload.get("question_ids", [])
+    if (not isinstance(ids, list) or len(ids) > 2000
+            or any(type(value) is not int or value < 1 for value in ids) or len(set(ids)) != len(ids)):
+        return _error("请提供不重复的题目编号列表")
+    revisions = payload.get("revisions", {})
+    if (not isinstance(revisions, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key)
+            or type(value) is not int or value < 0 for key, value in revisions.items())):
+        return _error("题目版本格式不正确")
+    skipped, queued_ids, question_revisions = [], [], {}
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        plan_revision = int((paper.processing_plan or {}).get("revision", 0))
+        if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != plan_revision):
+            return _error("原卷处理方式已发生变化，请刷新后再识读", 409)
+        if paper.archived or paper.status != Paper.Status.READY:
+            return _error("请先完成原卷处理、继续手工或重试，并确认资料结构，再识读已切题目", 409)
+        query = paper.questions.select_for_update().select_related("paper")
+        if ids:
+            query = query.filter(pk__in=ids)
+        questions = list(query.order_by("number", "id"))
+        selected_ids = {question.pk for question in questions}
+        if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
+            return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
+        published_ids = set(PublishedQuestion.objects.filter(question_id__in=selected_ids).values_list("question_id", flat=True))
+        candidates = []
+        for question in questions:
+            suggestion = question.ocr_suggestion if isinstance(question.ocr_suggestion, dict) else {}
+            if question.approved or question.pk in published_ids:
+                reason = "已审核或有入库记录，已保留"
+            elif not source_images.is_image(question):
+                reason = "已有文字正文，已保留"
+            elif question.ocr_pending or question.reread_requested:
+                reason = "已在识读队列中"
+            elif (suggestion.get("revision") == question.content_revision and not suggestion.get("error")
+                    and isinstance(suggestion.get("stem"), str) and suggestion["stem"].strip()):
+                reason = "已有识读建议，请先核对并确认采用"
+            elif not source_images.valid_regions(paper, question.regions):
+                reason = "尚未保存有效切题范围"
+            else:
+                reason = ""
+            if reason:
+                skipped.append({"id": question.pk, "reason": reason})
+            else:
+                expected_revision = revisions.get(str(question.pk), question.content_revision)
+                if expected_revision != question.content_revision:
+                    return _error("所选题目的范围或内容已发生变化，请刷新后再识读", 409)
+                candidates.append(question)
+        if candidates and not _vision_ready():
+            return _error("AI 识读已切题目需要看图读题服务：请先在“设置 → 读题服务”中配置；"
+                          "也可以直接原图审核，或由当前 AI 助手对照原图改字。", 409)
+        now = timezone.now()
+        for question in candidates:
+            # Same invalidation as a single reread, once per newly queued card.
+            # Keep the ordered regions, body, manual figures and review evidence.
+            question.content_revision += 1
+            question.reread_requested = True
+            question.ocr_pending = True
+            question.updated_at = now
+            question.save(update_fields=["content_revision", "reread_requested", "ocr_pending", "updated_at"])
+            queued_ids.append(question.pk)
+            question_revisions[str(question.pk)] = question.content_revision
+    message = (f"已提交 {len(queued_ids)} 道已切题目，等待读题后台识读；结果须确认采用后再审核。"
+               if queued_ids else "没有新的题目需要识读；请查看已有建议，或继续切题、直接原图审核。")
+    return JsonResponse({"paper": paper_json(paper), "queued": len(queued_ids), "queued_ids": queued_ids,
+                         "question_revisions": question_revisions, "skipped": skipped, "message": message})
+
+
+@csrf_exempt
+def paper_stop_cut_reading(request, paper_id):
+    """Stop only pending image-body reads, keeping the paper and its results."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    ids = payload.get("question_ids", [])
+    if (not isinstance(ids, list) or len(ids) > 2000
+            or any(type(value) is not int or value < 1 for value in ids) or len(set(ids)) != len(ids)):
+        return _error("请提供不重复的题目编号列表")
+    revisions = payload.get("revisions", {})
+    if (not isinstance(revisions, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key)
+            or type(value) is not int or value < 0 for key, value in revisions.items())):
+        return _error("题目版本格式不正确")
+    stopped_ids, question_revisions = [], {}
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        plan_revision = int((paper.processing_plan or {}).get("revision", 0))
+        if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != plan_revision):
+            return _error("原卷处理方式已发生变化，请刷新后再停止识读", 409)
+        query = paper.questions.select_for_update()
+        if ids:
+            query = query.filter(pk__in=ids)
+        questions = list(query)
+        selected_ids = {question.pk for question in questions}
+        if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
+            return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
+        pending = [question for question in questions if source_images.is_image(question)
+                   and (question.ocr_pending or question.reread_requested)]
+        if any(revisions.get(str(question.pk), question.content_revision) != question.content_revision for question in pending):
+            return _error("识读请求已发生变化，请刷新后再停止", 409)
+        for question in pending:
+            question.content_revision += 1
+            question.ocr_pending = False
+            question.reread_requested = False
+            question.save(update_fields=["content_revision", "ocr_pending", "reread_requested", "updated_at"])
+            stopped_ids.append(question.pk)
+            question_revisions[str(question.pk)] = question.content_revision
+    return JsonResponse({"paper": paper_json(paper), "stopped": len(stopped_ids), "stopped_ids": stopped_ids,
+        "question_revisions": question_revisions,
+        "message": "已停止本机识读，原图和已有成果已保留；本机不再采用本轮结果，已发出的远端请求可能仍在结束。"
+                   if stopped_ids else "没有正在等待的原图题识读，已有成果已保留。"})
+
+
+@csrf_exempt
 def paper_retry(request, paper_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -2279,6 +2406,8 @@ def question_action(request, question_id, action: str):
                 question.state = Question.State.WAITING
                 question.reread_requested = True
         elif action == "reread":
+            if source_images.is_image(question) and (question.paper.archived or question.paper.status != Paper.Status.READY):
+                return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
             if source_images.is_image(question) and (not _reading_ready() or readers.assistant_mode()):
                 return _error("请先配置一家看图读题模型；也可以直接由当前 AI 助手对照原图改字。", 409)
             if not source_images.is_image(question):

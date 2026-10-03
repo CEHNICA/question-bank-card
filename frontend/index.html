@@ -169,7 +169,8 @@
               <dl class="explain-list">
                 <div><dt>看原卷</dt><dd>题卡截图、查看整份原卷、正式题库的查看出处，都支持 Ctrl＋滚轮缩放和左键拖动。画框编辑时，改用空格＋左键或中键拖动画布。</dd></div>
                 <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
-                <div><dt>框选识读</dt><dd>从题卡的“原卷与识读”进入，框住印刷字，再点“识读选中片段”。自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
+                <div><dt>切题后 AI 识读</dt><dd>手工切题只保存题目范围。点“完成切题”回到第二步，再点“AI 识读已切题目”，直接读取保存的范围，无需重新框选。读法先确认采用，再审核；没有读题服务也能直接原图审核。</dd></div>
+                <div><dt>框选识读纠错</dt><dd>文字题可从“更多 → 框选识读（纠错）”进入，只读需要纠正的一小块。自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
                 <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
                 <div><dt>快速找题和选题</dt><dd>正式题库先显示完整段落或公式摘要；点“完整题目”查看所有条件、选项和配图。可勾选当前已显示的题批量加入试题篮；换来源、筛选或翻页后，篮中的题会保留。</dd></div>
                 <div><dt>继续上次组卷</dt><dd>在组卷预览里填写标题、点“保存草稿”。下次从“组卷草稿”继续；已撤回或更新的题会提示处理，不会自动换题或漏印。</dd></div>
@@ -231,9 +232,9 @@
         <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
         <button id="emptyLearn" class="button primary" type="button">先用示例试卷学一遍（不用密钥）</button>
         <ol class="empty-steps">
-          <li><b>1</b>上传原卷，程序自动判断怎么切题</li>
-          <li><b>2</b>核对题目范围；未切出的题从原卷补齐</li>
-          <li><b>3</b>对照原卷看一眼：对了就通过，错了就改</li>
+          <li><b>1</b>上传原卷，程序先尝试切题；未切出的题手工补齐</li>
+          <li><b>2</b>用已保存的题目 AI 识读，也可直接保留原图</li>
+          <li><b>3</b>对照原卷确认读法，审核后入库</li>
         </ol>
       </section>
 
@@ -275,6 +276,14 @@
             <button id="publishButton" class="button primary" type="button">入库</button>
           </div>
         </div>
+        <section id="cutReadingStage" class="cut-reading-stage" aria-labelledby="cutReadingTitle" hidden>
+          <ol id="cutReadingSteps" class="cut-reading-steps" aria-label="整理题目步骤"></ol>
+          <h3 id="cutReadingTitle" tabindex="-1"></h3>
+          <p id="cutReadingDetail"></p>
+          <div id="cutReadingActions" class="cut-reading-actions"></div>
+          <p id="cutReadingError" class="cut-reading-error" role="status" hidden></p>
+          <a id="cutReadingSettings" href="/settings#services" hidden>设置读题服务密钥</a>
+        </section>
         <div id="processingPanel" class="processing-panel" hidden>
           <div id="processingStages" class="processing-stages" aria-label="处理阶段"></div>
           <div id="progress" class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span id="progressBar"></span></div>
@@ -308,8 +317,7 @@
             <details class="menu" id="toolsMenu">
               <summary class="toggle-pill"><svg class="icon"><use href="#i-tools"/></svg>工具<svg class="icon" style="width:13px;height:13px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
-                <button id="addQuestion" class="link-button" type="button">漏了一题？手动框出</button>
-                <button id="manualProcessing" class="link-button" type="button">从原卷补题</button>
+                <button id="manualProcessing" class="link-button" type="button">手工切题</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
                 <button id="selectionStart" class="link-button" type="button">批量处理题卡…</button>
@@ -409,7 +417,7 @@
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
         <button id="pageDialogSaveNext" class="button primary" type="button" hidden>保存并切下一题</button>
-        <button id="pageCropRead" class="button" type="button" hidden>识读文字</button>
+        <button id="pageDialogComplete" class="button primary" type="button" hidden>完成切题</button>
         <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
     </div>

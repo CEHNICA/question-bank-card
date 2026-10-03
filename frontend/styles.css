@@ -261,6 +261,19 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .paper-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .paper-actions .button { min-height: 38px; padding-inline: 16px; }
 
+.cut-reading-stage { margin-top: 16px; padding: 16px 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); }
+.cut-reading-steps { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 0; margin: 0 0 12px; list-style: none; font-size: 13px; color: var(--muted); }
+.cut-reading-steps li { display: flex; gap: 7px; align-items: center; }
+.cut-reading-steps b { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line-strong); border-radius: 50%; font-size: 12px; }
+.cut-reading-steps .current { color: var(--accent); font-weight: 700; }
+.cut-reading-steps .current b { color: white; background: var(--accent); border-color: var(--accent); }
+.cut-reading-steps .done b { color: var(--accent); border-color: var(--accent); }
+.cut-reading-stage h3 { margin: 0; font-size: 17px; line-height: 1.5; }
+.cut-reading-stage > p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.cut-reading-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cut-reading-stage .cut-reading-error { color: var(--red); overflow-wrap: anywhere; }
+.cut-reading-stage > a { display: inline-block; margin-top: 6px; font-size: 13px; }
+
 .review-meter { position: relative; display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
 .meter-figure { flex: none; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .meter-figure strong { font-size: 17px; color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 2px; }
@@ -318,7 +331,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .toolbar-paper strong { color: var(--ink); font-weight: 700; }
 :root.review-fullscreen { --topbar-h: 0px; }
 :root.review-fullscreen .topbar, :root.review-fullscreen .sidebar, :root.review-fullscreen .paper-head,
-:root.review-fullscreen #reviewMeter, :root.review-fullscreen .key-hints { display: none !important; }
+:root.review-fullscreen #reviewMeter, :root.review-fullscreen #cutReadingStage, :root.review-fullscreen .key-hints { display: none !important; }
 :root.review-fullscreen .layout { grid-template-columns: minmax(0, 1fr); min-height: 100vh; }
 :root.review-fullscreen .main { width: 100%; max-width: 1600px; margin: 0 auto; padding-top: 0; }
 :root.review-fullscreen .toolbar { margin-top: 0; }

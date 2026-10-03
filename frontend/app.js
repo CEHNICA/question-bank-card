@@ -527,7 +527,7 @@ const QBTeach = (() => {
     { key: "preview", title: "不懂公式写法，也能看位置", manual: true,
       text: "在“改字”输入框中点一个位置，或选中几个字。预览用绿线、浅绿选区和公式框对应标出；公式内绿色符号帮助定位，实际插入位置仍看输入框光标。" },
     { key: "region", title: "只重读一小块，先确认替换", manual: true,
-      text: "点“原卷与识读”，框住印刷字，选“自动推荐（AI）”，再点“识读选中片段”。框选识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里只练画框，不调用读题服务。" },
+      text: "文字题需要纠错时，点“更多 → 框选识读（纠错）”，框住印刷字，选“自动推荐（AI）”。识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里只练画框，不调用读题服务。手工切题后用第二步的 AI 识读，无需再次画框。" },
     { key: "library", title: "找题，还要看完整题目", manual: true,
       text: "“正式题库”先显示题目摘要，点“完整题目”看所有条件、选项和配图。用来源、题型和排序找题；“更多筛选”放其他条件。“查看出处”和“版本历史”仍保留。示例不会入库，这一步只认识入口。" },
     { key: "basket", title: "选好题，再看试题篮", manual: true,
@@ -539,7 +539,7 @@ const QBTeach = (() => {
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
-      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可以从原卷框选保存，已有题卡也能继续审核。需要 AI 识读文字和推荐替换位置时，再配置读题服务。遇到问题打开“设置 → 帮助”；可重做基础练习，也可只看新版功能。" }
+      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可用“手工切题”从原卷框选保存。点“完成切题”后进入第二步，再点“AI 识读已切题目”，直接读取保存的范围；确认读法后审核入库，也能跳过 AI 直接原图审核。切题本身不会调用 AI。遇到问题打开“设置 → 帮助”。" }
   ].map((lesson, index) => ({ ...lesson, section: index <= 6 ? "basic" : "review" }));
 
   const OLD_KEYS = ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"];
@@ -840,12 +840,44 @@ const QBManualCrop = (() => {
   return { nextCropNumber, cropDraftSnapshot, moveCropBox };
 })();
 
+const QBCutReading = (() => {
+  "use strict";
+
+  function hasCurrentReading(q) {
+    const suggestion = q.ocr_suggestion;
+    return Boolean(suggestion && suggestion.revision === q.content_revision
+      && !suggestion.error && String(suggestion.stem || "").trim());
+  }
+
+  function cutReadingSummary(questions = []) {
+    const saved = questions.filter((q) => q.body_mode === "source_image" && q.regions?.length);
+    const pending = saved.filter((q) => q.ocr_pending);
+    const suggestions = saved.filter((q) => !q.ocr_pending && hasCurrentReading(q));
+    const eligible = saved.filter((q) => !q.ocr_pending && !q.approved && !q.publication && !hasCurrentReading(q));
+    return { saved: saved.length, pending: pending.length, suggestions: suggestions.length,
+      eligibleIds: eligible.map((q) => q.id),
+      revisions: Object.fromEntries(eligible.map((q) => [String(q.id), q.content_revision])),
+      suggestionIds: suggestions.map((q) => q.id),
+      stage: pending.length ? 2 : suggestions.length ? 3 : eligible.length ? 2 : questions.length ? 3 : 1 };
+  }
+
+  function cutReadingRequest(questions, questionIds = null, revision = null) {
+    const summary = cutReadingSummary(questions);
+    const ids = Array.isArray(questionIds) ? summary.eligibleIds.filter((id) => questionIds.includes(id)) : summary.eligibleIds;
+    return { question_ids: ids, revisions: Object.fromEntries(ids.map((id) => [String(id), summary.revisions[String(id)]])),
+      ...(Number.isInteger(revision) ? { revision } : {}) };
+  }
+
+  return { hasCurrentReading, cutReadingSummary, cutReadingRequest };
+})();
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify, ...QBFigureJoin, ...QBFocus,
     ...QBEdits,
     ...QBRegionAssist,
     ...QBRegionWait,
     ...QBManualCrop,
+    ...QBCutReading,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
     TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint,
     restoreTeaching: QBTeach.restore, teachingProgress: QBTeach.progress };
@@ -1381,20 +1413,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return true;
   }
 
+  let paperRefreshToken = 0;
   async function refreshPaper() {
     clearTimeout(state.pollTimer);
-    if (!state.paperId) return;
+    if (!state.paperId) return false;
     const paperId = state.paperId;
+    const refreshToken = ++paperRefreshToken;
     let data;
     try {
       data = await api(`/api/papers/${paperId}`);
     } catch (error) {
+      if (state.paperId !== paperId || refreshToken !== paperRefreshToken) return false;
       toast(error.message, "error");
       // 本机服务短暂重启或网页一次请求失败时，不能让进度永久停在旧画面。
       if (state.paperId === paperId) state.pollTimer = setTimeout(refreshPaper, 5000);
-      return;
+      return false;
     }
-    if (state.paperId !== paperId) return;
+    if (state.paperId !== paperId || refreshToken !== paperRefreshToken) return false;
     state.paper = data.paper;
     $("archivedPaperNotice").hidden = !data.paper.archived;
     state.questions = data.questions.map(normalizeRegionRead);
@@ -1408,6 +1443,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const busy = ACTIVE_STATUS.has(state.paper.status)
       || state.questions.some((q) => q.state === "waiting" || q.state === "reading" || q.ocr_pending || regionReadPending(q));
     if (busy) state.pollTimer = setTimeout(refreshPaper, 2500);
+    return true;
   }
 
   // AI 助手通过、还等你核对的题数，接在“全部通过”后面说一句。
@@ -1590,13 +1626,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
     $("notesBox").hidden = true;
     $("notesList").replaceChildren(...notes.map((note) => el("li", "", note)));
-    $("addQuestion").hidden = structureBlocked || (ACTIVE_STATUS.has(paper.status) && paper.status !== "reading");
-    $("manualProcessing").hidden = !["ready", "failed"].includes(paper.status);
+    $("manualProcessing").hidden = structureBlocked || !paper.pages?.length;
     $("resegment").hidden = !["ready", "failed"].includes(paper.status);
     const canReorder = Boolean(paper.photos) && (paper.pages || []).length > 1 && ["ready", "failed", "needs_grouping"].includes(paper.status);
     $("pageOrder").hidden = !canReorder;
     syncTrashControls();
-    $("toolsMenu").hidden = $("addQuestion").hidden && $("resegment").hidden && $("pageOrder").hidden && $("questionTrash").hidden;
+    $("toolsMenu").hidden = $("manualProcessing").hidden && $("resegment").hidden && $("pageOrder").hidden && $("questionTrash").hidden;
     const check = $("orderCheck");
     const hasConflict = Boolean(paper.structure_conflict);
     check.hidden = !(hasConflict || (paper.photos && paper.photos.check));
@@ -1612,8 +1647,161 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       check.replaceChildren(el("span", "", message), actions);
     }
     renderSettingsTask();
+    renderCutReadingStage();
     renderFilters(c);
     renderCards();
+  }
+
+  const cutReadingRequests = new Set();
+  const cutReadingStops = new Set();
+  const cutReadingErrors = new Map();
+  const cutReadingStopErrors = new Map();
+  const directImageReview = new Set();
+  const questionReadingRequests = new Set();
+
+  function paperReadSubmissionPending(paperId = state.paperId) {
+    return cutReadingRequests.has(paperId) || cutReadingStops.has(paperId) || (state.paperId === paperId
+      && state.questions.some((q) => questionReadingRequests.has(q.id)));
+  }
+
+  function renderReadingControls() {
+    state.questions.forEach((q) => { if (q.body_mode === "source_image") state.rendered.delete(q.id); });
+    renderCards();
+    renderCutReadingStage();
+  }
+
+  function renderCutReadingStage() {
+    const paper = state.paper;
+    const host = $("cutReadingStage");
+    const summary = QBCutReading.cutReadingSummary(state.questions);
+    host.hidden = !paper || paper.demo || paper.status === "needs_grouping" || (!summary.saved && !["manual", "native"].includes(paper.parse_mode));
+    if (host.hidden) return;
+    if (summary.pending || summary.suggestions) cutReadingErrors.delete(paper.id);
+    if (!summary.pending) cutReadingStopErrors.delete(paper.id);
+    const stage = directImageReview.has(paper.id) && !summary.pending && !summary.suggestions ? 3 : summary.stage;
+    host.dataset.stage = String(stage);
+    $("cutReadingSteps").replaceChildren(...["切题", "AI 识读", "审核入库"].map((label, index) => {
+      const step = el("li", index + 1 === stage ? "current" : index + 1 < stage ? "done" : "");
+      step.append(el("b", "", String(index + 1)), document.createTextNode(label));
+      if (index + 1 === stage) step.setAttribute("aria-current", "step");
+      return step;
+    }));
+    $("cutReadingTitle").textContent = stage === 1 ? "先切出每道题"
+      : summary.pending ? `${summary.pending} 道题正在 AI 识读`
+        : summary.suggestions ? `${summary.suggestions} 道题的读法待确认`
+          : stage === 2 ? `已保存 ${summary.saved} 道原图题，可以开始 AI 识读` : "对照原卷审核，确认后入库";
+    $("cutReadingDetail").textContent = stage === 1
+      ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
+      : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。原图保留，结果出来后由你确认。"
+        : summary.suggestions ? "逐题对照原图，确认采用读法，再审核题目。AI 不会自动替换原图或标记通过。"
+          : stage === 2 ? "直接识读已保存的范围，无需重新框选。你也可以保留原图题，直接审核。"
+            : "检查题目是否完整、题型是否正确。原图题也可以审核入库，标签与参考答案仍默认关闭。";
+    const actions = $("cutReadingActions");
+    actions.replaceChildren();
+    if (stage === 1) {
+      actions.append(button("手工切题", "primary", openManualCut));
+    } else if (summary.eligibleIds.length) {
+      const read = button(`${summary.pending || summary.suggestions || stage === 3 ? "AI 识读剩余题目" : "AI 识读已切题目"}（${summary.eligibleIds.length} 题）`, "primary", () => readCutQuestions());
+      read.disabled = paperReadSubmissionPending(paper.id) || paper.status !== "ready";
+      if (paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
+      if (cutReadingRequests.has(paper.id)) read.textContent = "正在提交识读……";
+      actions.append(read);
+    }
+    if (summary.pending) {
+      const stop = button(cutReadingStops.has(paper.id) ? "正在停止识读……" : "停止识读", "", stopCutReading, "停止本机等待，保留题目裁片和已经成功的识读建议；不再采用本轮迟到结果");
+      stop.disabled = paperReadSubmissionPending(paper.id);
+      actions.append(stop);
+    }
+    if (stage !== 1 && !summary.pending && !summary.suggestions && stage !== 3) {
+      actions.append(button("直接原图审核", "quiet", () => { directImageReview.add(paper.id); renderCutReadingStage(); focusCutReview(); }));
+    }
+    if (summary.suggestions) actions.append(button("查看待确认读法", "", () => focusCutReview(summary.suggestionIds[0])));
+    if (stage === 3 && !summary.suggestions) actions.append(button("开始审核", "", () => focusCutReview()));
+    if (stage !== 1) actions.append(button("继续手工切题", "quiet", openManualCut));
+    const stopError = cutReadingStopErrors.get(paper.id);
+    const error = stopError || cutReadingErrors.get(paper.id);
+    $("cutReadingError").hidden = !error;
+    $("cutReadingError").textContent = error || "";
+    $("cutReadingSettings").hidden = !error || Boolean(stopError) || !/(配置.*(?:读题|看图)|(?:读题|看图).*(?:配置|密钥))/.test(error);
+  }
+
+  function openManualCut() {
+    if (state.paper?.status === "ready") openPageDialog("new"); else void switchToManual();
+  }
+
+  function focusCutReview(questionId = null) {
+    stopSelecting({ render: false });
+    state.filter = "all";
+    const q = questionById(questionId) || state.questions.find((item) => !isApproved(item)) || state.questions[0];
+    if (q) setExpanded(q.id, true);
+    renderPaper();
+    if (q) setCurrent(q.id, { scroll: true, focus: true });
+  }
+
+  async function enterCutReadingStage(paperId = state.paperId) {
+    if (!paperId || state.paperId !== paperId) return false;
+    if ($("pageDialog").open) $("pageDialog").close();
+    directImageReview.delete(paperId);
+    const refreshed = await refreshPaper();
+    if (!refreshed || state.paperId !== paperId) return false;
+    $("cutReadingStage").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("cutReadingTitle").focus({ preventScroll: true });
+    return true;
+  }
+
+  async function readCutQuestions(questionIds = null) {
+    const paperId = state.paperId;
+    if (!paperId || paperReadSubmissionPending(paperId) || state.paper?.demo || state.paper?.status !== "ready") return;
+    const body = QBCutReading.cutReadingRequest(state.questions, questionIds, state.paper?.processing_plan?.revision);
+    if (!body.question_ids.length) return;
+    cutReadingRequests.add(paperId);
+    cutReadingErrors.delete(paperId);
+    cutReadingStopErrors.delete(paperId);
+    directImageReview.delete(paperId);
+    renderReadingControls();
+    try {
+      const data = await QBRegionWait.boundedRequest((signal) => api(`/api/papers/${paperId}/read-cut-questions`, {
+        method: "POST", signal, body
+      }), { timeoutMs: 30000 });
+      if (state.paperId !== paperId) return;
+      await refreshPaper();
+      toast(data.message || (data.queued ? `已提交 ${data.queued} 道题识读，完成后请逐题确认` : "没有需要新识读的题目"), data.queued ? "success" : "");
+    } catch (error) {
+      if (state.paperId !== paperId) return;
+      const message = error.name === "TimeoutError" ? "识读提交结果尚未确认，请稍后查看题卡。保存的范围与原图都保留。" : error.message;
+      cutReadingErrors.set(paperId, message);
+      toast(message, "error");
+      if (error.name === "TimeoutError") void refreshPaper();
+    } finally {
+      cutReadingRequests.delete(paperId);
+      if (state.paperId === paperId) renderReadingControls();
+    }
+  }
+
+  async function stopCutReading() {
+    const paperId = state.paperId;
+    if (!paperId || paperReadSubmissionPending(paperId) || !QBCutReading.cutReadingSummary(state.questions).pending) return;
+    cutReadingStops.add(paperId);
+    cutReadingStopErrors.delete(paperId);
+    renderReadingControls();
+    try {
+      const data = await QBRegionWait.boundedRequest((signal) => api(`/api/papers/${paperId}/stop-cut-reading`, {
+        method: "POST", body: {}, signal
+      }), { timeoutMs: 30000 });
+      if (state.paperId !== paperId) return;
+      cutReadingErrors.delete(paperId);
+      await refreshPaper();
+      toast(data.message || "已停止本机识读等待，原图裁片和成功的读法保留；本机不再采用本轮迟到结果。", "success");
+    } catch (error) {
+      if (state.paperId !== paperId) return;
+      const message = error.name === "TimeoutError" ? "停止识读的结果尚未确认，请稍后查看状态或重试；原图裁片保留。" : `未能停止识读：${error.message}`;
+      cutReadingStopErrors.set(paperId, message);
+      toast(message, "error");
+      if (error.name === "TimeoutError") void refreshPaper();
+    } finally {
+      cutReadingStops.delete(paperId);
+      if (state.paperId === paperId) renderReadingControls();
+    }
   }
 
   function setFilter(key) {
@@ -2224,7 +2412,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function cropView(regions, { figures = [], spots = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
-      wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点“原卷与识读”框出题目范围并保存；需要 AI 读字时，再点识读按钮。保存范围不会自动识读。"));
+      wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点“调整范围”框出题目范围并保存；需要 AI 读字时，再点题卡上的“AI 识读这题”。保存范围不会自动识读。"));
       return wrap;
     }
     const widest = Math.max(...regions.map((r) => r.bbox[2] - r.bbox[0]));
@@ -3271,19 +3459,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
-      button("原卷与识读", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "在同一个原卷窗口调整范围、片段顺序，或按需识读文字（R）"),
+      button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "调整题目的原卷范围和片段顺序，只保存范围，不调用 AI（R）"),
       ...(q.body_mode === "source_image" ? [] : [button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })])
     );
+    if (q.body_mode === "source_image") {
+      const read = button(q.ocr_pending ? "AI 识读中……" : QBCutReading.hasCurrentReading(q) ? "重新 AI 识读" : "AI 识读这题", "primary", () => rereadQuestion(q), "直接读取这道题已保存的全部片段，无需重新框选；结果由你确认后采用");
+      read.disabled = Boolean(q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
+        || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready");
+      if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
+      actions.append(read);
+    }
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
     summary.append(icon("chevron"));
     more.append(summary);
     const menu = el("div", "more-menu");
     menu.append(button("看两位读者的原始读法", "quiet small", () => { more.open = false; toggleReads(card, q); }));
-    menu.append(button(q.body_mode === "source_image" ? "识读这道原图题" : "让 AI 重读这题", "quiet small", () => {
-      more.open = false;
-      if (q.body_mode === "source_image") openPageDialog("regions", q); else rereadQuestion(q);
-    }));
+    if (q.body_mode !== "source_image") {
+      menu.append(button("框选识读（纠错）", "quiet small", () => { more.open = false; openPageDialog("read", q); }, "只重读需要纠正的一小块，确认替换位置后再保存"));
+      menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }));
+    }
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
     more.append(menu);
     actions.append(more);
@@ -3296,7 +3491,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function readingSuggestionPanel(q) {
     const suggestion = q.ocr_suggestion;
     const panel = el("section", "reading-suggestion");
-    panel.append(el("strong", "", "识读建议 · 原图尚未替换"));
+    panel.append(el("strong", "", "第三步 · 确认识读结果，再审核"));
     if (suggestion.revision !== q.content_revision) {
       panel.append(el("p", "hint", "题目范围或内容已经变化，这份建议已过期。请重新识读。"));
       return panel;
@@ -3464,17 +3659,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function rereadQuestion(q) {
+    if (state.paper?.demo || q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)) return;
+    if (q.body_mode === "source_image" && (q.approved || q.publication || !q.regions.length || state.paper?.status !== "ready")) return;
     if (q.body_mode !== "source_image" && q.edited && !(await confirmDialog({ title: "让 AI 重读这道题？", text: "这道题的文字改过。重读会用 AI 的新读法替换你改的文字。", ok: "重读", danger: true }))) return;
+    const paperId = state.paperId;
+    questionReadingRequests.add(q.id);
+    renderReadingControls();
     try {
-      applyQuestion(await api(`/api/questions/${q.id}/reread`, { method: "POST", body: {} }));
-      refreshPaper();
+      const data = await QBRegionWait.boundedRequest((signal) => api(`/api/questions/${q.id}/reread`, {
+        method: "POST", body: { revision: q.content_revision }, signal
+      }), { timeoutMs: 30000 });
+      if (state.paperId !== paperId || questionById(q.id)?.content_revision !== q.content_revision) return;
+      cutReadingErrors.delete(paperId);
+      cutReadingStopErrors.delete(paperId);
+      applyQuestion(data);
+      void refreshPaper();
       toast(q.body_mode === "source_image" ? `第 ${q.number} 题开始识读，原图保留；结果需你确认` : `第 ${q.number} 题已交给 AI 重读`);
-    } catch (error) { toast(error.message, "error"); }
+    } catch (error) {
+      if (state.paperId === paperId) toast(error.name === "TimeoutError" ? "识读提交结果尚未确认，稍后查看题卡；原图与保存范围保留。" : error.message, "error");
+    } finally {
+      questionReadingRequests.delete(q.id);
+      if (state.paperId === paperId) renderReadingControls();
+    }
   }
 
   async function rereadSelectedQuestions() {
     const questions = [...state.selected].map(questionById).filter(Boolean);
     if (!questions.length || state.selectionBusy) return;
+    if (questions.every((q) => q.body_mode === "source_image")) {
+      state.selectionBusy = true;
+      renderSelectionState();
+      try { await readCutQuestions(questions.map((q) => q.id)); }
+      finally { state.selectionBusy = false; renderSelectionState(); }
+      return;
+    }
     if (questions.some((q) => q.body_mode !== "source_image" && q.edited)
       && !(await confirmDialog({ title: `识读 ${questions.length} 道所选题？`, text: "其中有人工修改过的文字题，AI 新读法会替换文字。原图题只生成待确认的建议。", ok: "识读所选题", danger: true }))) return;
     state.selectionBusy = true;
@@ -5099,16 +5317,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function configureCropActions() {
-    const imageBody = dialog.mode === "new" || dialog.question?.body_mode === "source_image";
     $("pageDialogSaveNext").hidden = dialog.mode !== "new";
-    $("pageCropRead").hidden = !["new", "regions"].includes(dialog.mode);
-    $("pageCropRead").textContent = imageBody ? "保存并识读文字" : "识读选中片段";
-    $("pageCropRead").title = imageBody ? "显式识读当前片段，原图保留；结果需要确认采用" : "只识读选中的范围，不保存或改变题目范围；读完在题卡确认替换";
-    $("pageCropRead").disabled = Boolean(state.paper.demo);
-    if (state.paper.demo) $("pageCropRead").title = "示例只练画框；真实识读需要可用的读题服务";
+    $("pageDialogComplete").hidden = dialog.mode !== "new";
+    $("pageDialogSave").hidden = ["view", "new"].includes(dialog.mode) || dialog.practiceRead;
     $("pageDialogSave").classList.toggle("primary", dialog.mode !== "new");
-    $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : dialog.mode === "new" ? "保存并关闭" : "保存";
-    $("readTargetField").hidden = !(dialog.mode === "read" || (dialog.mode === "regions" && !imageBody));
+    $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : "保存";
+    $("readTargetField").hidden = dialog.mode !== "read";
     $("numberField").hidden = dialog.mode !== "new";
     $("cropTypeField").hidden = dialog.mode !== "new";
     $("groupField").hidden = dialog.mode !== "new" || (state.paper.question_groups || []).length < 2;
@@ -5175,21 +5389,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageStage").scrollTo({ top: 0, left: 0 });
     dialog.ignoredCandidates = new Set(Array.isArray(q?.figure_review?.ignored_candidates)
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
-    $("pageDialogTitle").textContent = mode === "regions" ? `第 ${q.number} 题 · 原卷与识读`
+    $("pageDialogTitle").textContent = mode === "regions" ? `第 ${q.number} 题 · 调整题目范围`
       : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读`
-        : mode === "view" ? "查看整份原卷" : "从原卷选题";
+        : mode === "view" ? "查看整份原卷" : "手工切题";
     $("pageDialogHint").textContent = mode === "regions"
-      ? "拖边角改大小、拖框内部移动；可跨页添加片段、调整顺序。保存范围不会自动识读。原图题可直接识读现有全部片段；文字题点选一段再识读，结果在题卡确认。"
+      ? "拖边角改大小、拖框内部移动；可跨页添加片段、调整顺序。这里只调整题目范围，保存后关闭窗口。"
       : mode === "figures"
         ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
         : mode === "read"
           ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
           : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
-            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段，按下面的顺序保存为原图题。不会自动识读、生成标签或答案。";
+            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段，按下面的顺序保存为原图题。切完点“完成切题”，再进入 AI 识读；空白下一题可以直接完成。";
     // The offline practice can demonstrate drawing and the real target picker,
     // but must not dispatch recognition or invent an AI recommendation.
     dialog.practiceRead = mode === "read" && Boolean(state.paper.demo);
-    $("pageDialogSave").hidden = mode === "view";
     $("pageDialogSave").disabled = dialog.practiceRead;
     $("pageDialogSave").title = dialog.practiceRead ? "示例只练画框；真实识读需要可用的读题服务" : "";
     if (dialog.practiceRead) $("pageDialogHint").textContent = "离线示例：可练画框和选择自动推荐，不会调用 AI 或生成识读结果。真实题目识读后，先确认替换前后，再填入改字、核对保存。";
@@ -5200,7 +5413,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("numberField").hidden = mode !== "new";
     $("readTargetField").hidden = mode !== "read";
     configureCropActions();
-    if (mode === "read" || mode === "regions") $("readTargetSelect").value = readTargetGuess(q);
+    if (mode === "read") $("readTargetSelect").value = readTargetGuess(q);
     const groups = state.paper.question_groups || [];
     $("groupField").hidden = mode !== "new" || groups.length < 2;
     if (mode === "new") {
@@ -6161,13 +6374,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     trackCropDraft();
     renderPageTabs();
     renderStage();
-    showCropResult(`第 ${number} 题已保存。继续框下一题；题号可以修改。`);
+    showCropResult(`第 ${number} 题已保存。可以继续框下一题；全部切完点“完成切题”，进入 AI 识读。`);
   }
 
-  async function savePageCrop({ next = false, recognize = false, onlyRead = false } = {}) {
-    if (dialog.saving) return;
+  async function savePageCrop({ next = false, complete = false } = {}) {
+    if (dialog.saving || !$("pageDialog").open) return;
     if (dialog.mode === "view" || dialog.practiceRead) return;
-    if (state.paper?.demo && (onlyRead || recognize || dialog.mode === "read")) {
+    if (state.paper?.demo && dialog.mode === "read") {
       showCropResult("示例只练习框选，不会调用识读服务。"); return;
     }
     if (state.paperId !== dialog.paperId) { showCropResult("当前试卷已变化，请重新打开原卷", true); return; }
@@ -6176,6 +6389,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const session = dialog.session;
     let savedQuestion = null;
     let saved = false;
+    if (complete && dialog.mode === "new" && !dialog.boxes.length) {
+      // Saving the last real question opens an empty next draft. Finishing
+      // that draft must not demand another box or create an extra question.
+      const paperId = dialog.paperId;
+      closeFigureSlotMenu({ cancelPending: true, rerender: false });
+      editGuard.release(CROP_EDIT_KEY);
+      $("pageDialog").close();
+      await enterCutReadingStage(paperId);
+      return;
+    }
     if (["new", "regions"].includes(dialog.mode) && !dialog.boxes.length) {
       showCropResult("请先框出题目范围", true); return;
     }
@@ -6183,22 +6406,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       showCropResult("请填写题号（1–999）", true); $("numberInput").focus(); return;
     }
     setCropSaving(true);
-    showCropResult(onlyRead ? "正在提交选中片段…" : "正在保存…");
+    showCropResult(dialog.mode === "read" ? "正在提交选中片段…" : "正在保存…");
     try {
-      if (onlyRead) {
-        const box = dialog.boxes[dialog.selected] || (dialog.boxes.length === 1 ? dialog.boxes[0] : null);
-        if (!box) { showCropResult("请先点选要识读的片段", true); return; }
-        const target = $("readTargetSelect").value;
-        const pending = queueRegionRead(q, box, target);
-        $("pageDialogClose").disabled = false;
-        $("pageDialogClose").textContent = "取消识读";
-        const data = await pending;
-        if (dialog.session !== session) return;
-        dialog.question = data.question || q;
-        showCropResult("已开始识读选中片段，题目范围没有改变。关闭窗口后，在题卡查看并确认替换。 ");
-        refreshPaper();
-        return;
-      } else if (dialog.mode === "regions") {
+      if (dialog.mode === "regions") {
         if (!dialog.boxes.length) { toast("至少要有一个框", "error"); return; }
         const manual = true;
         const regions = readingOrder(dialog.boxes);
@@ -6257,20 +6467,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         toast(`第 ${number} 题已保存为原图题；${body.question_type === "unknown" ? "请选题型并" : "请"}核对后入库`);
         refreshPaper();
       }
-      if (recognize && savedQuestion) {
-        // Once the image question exists, a failed OCR request must retry on
-        // that question rather than create a duplicate with the same number.
-        dialog.mode = "regions";
-        dialog.question = savedQuestion;
-        $("pageDialogTitle").textContent = `第 ${savedQuestion.number} 题 · 原卷与识读`;
-        configureCropActions();
-        trackCropDraft();
-        editGuard.setSaving(CROP_EDIT_KEY, true);
-        applyQuestion(await QBRegionWait.boundedRequest((signal) => api(`/api/questions/${savedQuestion.id}/reread`,
-          { method: "POST", body: {}, signal }), { timeoutMs: 30000 }));
-        refreshPaper();
-        toast(`第 ${savedQuestion.number} 题已开始识读，原图保留；请在题卡确认采用文字`);
-      }
       if (next && savedQuestion) {
         continueManualCut(savedQuestion.number, savedQuestion);
         return;
@@ -6278,27 +6474,32 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       closeFigureSlotMenu({ cancelPending: true, rerender: false });
       editGuard.release(CROP_EDIT_KEY);
       $("pageDialog").close();
+      if (complete && savedQuestion) {
+        setCropSaving(false);
+        await enterCutReadingStage(dialog.paperId);
+      }
     } catch (error) {
       if (dialog.session !== session || !$("pageDialog").open) return;
       if (saved) trackCropDraft();
       if (error.name === "AbortError") showCropResult("识读已取消，框选仍保留。");
       else {
-        showCropResult(saved && recognize ? error.name === "TimeoutError"
-          ? `原图题已保存，识读请求未确认：${error.message}。可以返回题卡查看，框选不会丢失。`
-          : `原图题已保存，识读未开始：${error.message}`
-          : onlyRead || dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动改字。`
+        showCropResult(dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动改字。`
           : `未保存：${error.message}。框选仍保留，请重试。`, true);
         toast(error.message, "error");
       }
-    } finally { if (dialog.session === session) setCropSaving(false); }
+    } finally { if (dialog.session === session && dialog.saving) setCropSaving(false); }
   }
 
-  $("pageDialogSave").addEventListener("click", () => savePageCrop());
+  $("pageDialogSave").addEventListener("click", () => savePageCrop({ complete: dialog.mode === "new" }));
   $("pageDialogSaveNext").addEventListener("click", () => savePageCrop({ next: true }));
-  $("pageCropRead").addEventListener("click", () => savePageCrop(dialog.mode === "new" || dialog.question?.body_mode === "source_image"
-    ? { recognize: true } : { onlyRead: true }));
+  $("pageDialogComplete").addEventListener("click", () => savePageCrop({ complete: true }));
+  $("pageDialog").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || dialog.mode === "view" || dialog.practiceRead) return;
+    event.preventDefault();
+    if (dialog.saving) return;
+    $(dialog.mode === "new" ? "pageDialogComplete" : "pageDialogSave").click();
+  });
 
-  $("addQuestion").addEventListener("click", () => { $("toolsMenu").open = false; openPageDialog("new"); });
   $("manualProcessing").addEventListener("click", () => {
     $("toolsMenu").open = false;
     if (state.paper?.status === "ready") openPageDialog("new"); else switchToManual();
@@ -6991,7 +7192,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "对了就打勾",
       text: "对照原卷没问题，就在题号左边的方框打勾（或按 Enter），会自动跳到下一张要看的题。点错了再点一下就撤销。" },
     { target: () => firstTourCard()?.querySelector(".card-actions"), title: "不对就改",
-      text: "字错了点“改字”，预览会对应输入光标和选区。范围或原图不对，点“原卷与识读”；文字题的配图可以点“配图”调整。框选识读也在“原卷与识读”里：点“识读选中片段”，先确认替换位置再保存；识读需要可用的读题服务。" },
+      text: "字错了点“改字”，预览会对应输入光标和选区。范围不对点“调整范围”，只保存范围；原图题的“AI 识读这题”直接读保存的全部片段。文字题可点“配图”，或从“更多 → 框选识读（纠错）”只重读一小块，先确认替换位置再保存。" },
     { target: () => $("paperMenu").querySelector("summary"), title: "看整份原卷",
       text: "点“试卷操作 → 查看整份原卷”。Ctrl＋滚轮缩放，左键拖动，还能适页、适宽和跳页。画框编辑时用空格＋左键或中键拖动。" },
     { target: () => $("filters"), title: "先看有疑点的",
@@ -7386,7 +7587,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "region": {
         focusCard(9);
         if (!$("pageDialog").open && lessonNumber(9)) openPageDialog("read", lessonNumber(9));
-        later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "真实题目的入口是“原卷与识读”。示例只练框选识读，不调用 AI；识读结果先确认替换位置，再填入改字并保存。");
+        later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "文字纠错入口是“更多 → 框选识读（纠错）”。示例只练框选识读，不调用 AI；识读结果先确认替换位置，再填入改字并保存。");
         break;
       }
       case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "列表先看摘要，点“完整题目”再核对条件、选项和配图；查看出处和版本历史仍在。示例不会入库。"); break;
@@ -7442,7 +7643,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (lesson?.final) {
       if (!(await closeTeachingSurface())) return;
       exitTeaching();
-      toast("教学完成。导入资料无需密钥，可从原卷框选保存；需要 AI 识读时再配置读题服务。", "success");
+      toast("教学完成。先切题，再按需 AI 识读，确认后审核入库；也可直接原图审核。", "success");
       return;
     }
     advanceTeaching();

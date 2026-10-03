@@ -3625,7 +3625,18 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     def work(snapshot: dict) -> tuple[int, dict]:
         try:
             with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
+                if snapshot["body_mode"] == "source_image":
+                    def cut_cancelled() -> bool:
+                        return not Question.objects.filter(pk=snapshot["id"],
+                            content_revision=snapshot["content_revision"], body_mode="source_image", ocr_pending=True).exists()
+                    # Keep the existing request timeouts. Cancellation also
+                    # covers account/HTTP-slot waiting and unstarted crops;
+                    # an already-sent request can only be discarded locally.
+                    with readers.cancellable_request(cut_cancelled):
+                        return snapshot["id"], read_card(snapshot, store)
                 return snapshot["id"], read_card(snapshot, store)
+        except readers.ReaderRequestStopped:
+            return snapshot["id"], {"state": Question.State.RED, "error": "已停止本机识读，本轮结果不再采用", "flags": []}
         except readers.ReaderQuotaExhausted:
             # This is a task-wide pause signal.  Converting it into one red
             # card would make the worker repeat the same permanent failure for

@@ -103,6 +103,17 @@ def selected_services_only(enabled: bool = True):
 
 
 @contextmanager
+def cancellable_request(cancel):
+    """Add local cancellation without changing a whole-card request policy."""
+    token = _REQUEST_LIMITS.set({"deadline": float("inf"), "cancel": cancel, "cancel_only": True})
+    try:
+        _check_request()
+        yield
+    finally:
+        _REQUEST_LIMITS.reset(token)
+
+
+@contextmanager
 def bounded_request(seconds: float, *, cancel=None):
     """Interactive reads use the chosen service only, with one total budget."""
     token = _REQUEST_LIMITS.set({"deadline": time.monotonic() + max(0, seconds), "cancel": cancel})
@@ -681,7 +692,7 @@ def _post(url: str, key: str, payload: dict, timeout=(10, 150)) -> requests.Resp
             with _http_slot():
                 limits = _REQUEST_LIMITS.get()
                 actual_timeout = timeout
-                if limits is not None:
+                if limits is not None and not limits.get("cancel_only"):
                     remaining = max(0.1, limits["deadline"] - time.monotonic())
                     actual_timeout = (min(timeout[0], remaining), min(timeout[1], remaining, 30))
                 response = requests.post(url, json=payload, timeout=actual_timeout, allow_redirects=False,
@@ -781,7 +792,8 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     turn the rest of the paper red.  A content error (HTTP 400…) is not retried
     elsewhere.  ``QB_PROVIDER_FALLBACK=0`` turns this off."""
     _ANSWERED_BY.set(None)
-    if _REQUEST_LIMITS.get() is not None:
+    limits = _REQUEST_LIMITS.get()
+    if limits is not None and not limits.get("cancel_only"):
         # A person chose this reader for one small crop. Neither duplicate
         # hedges nor another configured/paid service are implicitly authorised.
         _check_request()

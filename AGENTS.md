@@ -35,7 +35,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/C
 
 ## 处理题目的规矩
 
-1.11.6 起，`tiyouju upload <PDF或照片>` 默认 `auto`，先尝试本机文字 PDF；不能可靠切题则保留原页供框题，不让用户选择技术路线。只有显式 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动分流到已配置 MinerU，保存过密钥不代表本次发云许可；云失败也保留原页和已成功题卡。工具仍可指定 `--parse-mode manual`、`native`，或明确选择云解析的 `mineru`。原图题无文字题干也可核对、入库和导出，不能因为空题干替它编造文字；`show`/MCP 返回有序正文裁片。原卷范围与按需识读在同一窗口，识读先存建议，确认采用后重审，标签和答案仍默认关闭。先检查安装版 `upload --help`，旧版不支持 auto / allow-cloud 时按其实际能力操作。
+1.11.6 起，`tiyouju upload <PDF或照片>` 默认 `auto`，先尝试本机文字 PDF；不能可靠切题则保留原页供框题，不让用户选择技术路线。只有显式 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动分流到已配置 MinerU，保存过密钥不代表本次发云许可；云失败也保留原页和已成功题卡。工具仍可指定 `--parse-mode manual`、`native`，或明确选择云解析的 `mineru`。原图题无文字题干也可核对、入库和导出，不能因为空题干替它编造文字；`show`/MCP 返回有序正文裁片。1.11.7 将手工流程分为切题、AI识读、审核：裁剪只保存范围，完成切题进入下一步，显式开始识读才提交已经保存的完整裁片，无需重框；识读先存建议，确认采用后重审，标签和答案仍默认关闭。先检查安装版 `upload --help`，旧版不支持 auto / allow-cloud 时按其实际能力操作。
 
 - 密钥由用户自己在“设置 → 读题服务 → 填写或更换密钥”中填写；不索要、不代填，不展示密钥内容。第三方服务的额度、费用和有效期以当前账户规则为准。
 - 没打开原卷截图核对过的题不通过，绿卡也要看。AI 通过与人工通过分开记录。

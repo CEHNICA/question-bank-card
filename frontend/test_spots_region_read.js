@@ -60,12 +60,13 @@ assert.match(css, /\.crop-spot \{ position: absolute; border: 2px dashed #c2410c
 assert.match(css, /mark\.qb-mark\.spot \{/);
 
 // ---- 框选识读
-assert.match(js, /button\("原卷与识读",[^\n]*openPageDialog\("regions", q\)/);
-assert.match(js, /\$\("pageCropRead"\)\.addEventListener\("click"/);
+assert.match(js, /openPageDialog\("read", q\)/);
+assert.doesNotMatch(html, /id="pageCropRead"/);
+assert.match(js, /\$\("pageDialogComplete"\)\.addEventListener\("click"/);
 assert.match(html, /<label id="readTargetField" class="number-field" hidden>读出来的字填到/);
 assert.match(html, /<option value="A">选项 A<\/option>/);
-assert.match(js, /\$\("readTargetField"\)\.hidden = !\(dialog\.mode === "read" \|\| \(dialog\.mode === "regions" && !imageBody\)\)/);
-assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读这一块" : dialog\.mode === "new" \? "保存并关闭" : "保存";/);
+assert.match(js, /\$\("readTargetField"\)\.hidden = dialog\.mode !== "read"/);
+assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读这一块" : "保存";/);
 // One box: a new one replaces the old.
 assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
 assert.match(js, /function queueRegionRead\(q, box, target\)/);
