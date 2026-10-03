@@ -10,4 +10,4 @@ MinerU 不可用时，也能保存原卷、手工框出题目与配图，并以�
 - 原图题保留原有排版；补成可编辑文字后再全文搜索、重排选项。标签和 AI 参考答案保持默认关闭。
 - CLI/MCP 支持新的导入模式和原图裁片；MinerU CLI 的实际能力、限制及测试见 [接口调查](MINERU_API.md)。
 
-本轮本地源码更新不代表 GitHub Releases 已发布新版；下载安装包以发布页版本为准。Doc2X/PaddleOCR 等新增服务仍需数学卷真实对照，不因框架支持公式就宣称准确。
+Windows 安装包、对应源码、安装脚本与校验文件见 [v1.11.5 发布页](https://github.com/CEHNICA/question-bank-card/releases/tag/v1.11.5)。本机已验证无密钥导入、手工切题与真实 PDF/Word 导出。Doc2X/PaddleOCR 等新增服务仍需数学卷真实对照；AI 规划整页题目组成仍是后续开发项，本版没有接入。
