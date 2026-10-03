@@ -208,7 +208,18 @@ class ShortcutTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "real Windows shortcut")
     def test_real_powershell_fallback_keeps_unicode_paths_and_source_arguments(self):
         with mock.patch.object(shortcut, "_write_with_com", side_effect=ImportError("pywin32 unavailable")):
-            self.assertTrue(shortcut.create(self.link, spec=self.spec))
+            try:
+                self.assertTrue(shortcut.create(self.link, spec=self.spec))
+            except setup.SetupError as error:
+                cause = error.__cause__
+                if isinstance(cause, subprocess.CalledProcessError):
+                    # This fixture contains no user data. Keep the native Windows
+                    # diagnostic visible rather than losing it behind exit code 1.
+                    diagnostic = cause.stderr or b""
+                    if isinstance(diagnostic, bytes):
+                        diagnostic = diagnostic.decode("utf-8", errors="replace")
+                    self.fail(f"{error}\nWindows shortcut diagnostic:\n{diagnostic[:8000]}")
+                raise
         info = setup.WindowsShortcuts().read(self.link)
         self.assertTrue(shortcut._same_path(info["target"], self.pythonw))
         self.assertEqual(info["arguments"], self.spec["arguments"])
