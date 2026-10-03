@@ -298,6 +298,8 @@ class MainFlowTests(unittest.TestCase):
                  "_write_instance": Mock(), "_clear_instance": Mock()})
         self.assertEqual(result, 0)
         worker, web = environments["worker.log"], environments["web.log"]
+        self.assertEqual(web["QB_DESKTOP_EXPORT"], "1")
+        self.assertNotIn("QB_DESKTOP_EXPORT", worker)
         self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]), ("m-token", "mm-key", "sf-key"))
         self.assertEqual(json.loads(worker["MINERU_TOKENS_JSON"]), ["m-token", "m-token-2"])
         self.assertEqual(json.loads(worker["MINIMAX_API_KEYS_JSON"]), ["mm-key", "mm-key-2"])

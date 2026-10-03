@@ -40,6 +40,7 @@
     basketVisible: window.matchMedia("(min-width: 980px)").matches,
     draft: null,
     draftDirty: false,
+    draftBaseline: null,
     // 1.10.5: 翻开了答案的题（每题单独翻开，不再一键全部展开）。
     opened: new Set(),
     features: {},
@@ -96,7 +97,7 @@
     toastTimer = window.setTimeout(() => show(false), kind === "error" ? 6000 : 3500);
   }
 
-  function confirmDialog({ title, text = "", ok = "确定", danger = false }) {
+  function confirmDialog({ title, text = "", ok = "确定", danger = false, focusCancel = false }) {
     const dialog = $("confirmDialog");
     $("confirmTitle").textContent = title;
     $("confirmText").textContent = text;
@@ -106,7 +107,7 @@
     dialog.classList.toggle("danger", danger);
     dialog.returnValue = "";
     dialog.showModal();
-    $("confirmOk").focus();
+    (focusCancel ? dialog.querySelector('[value="cancel"]') : $("confirmOk")).focus();
     return new Promise((resolve) => {
       dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
     });
@@ -129,7 +130,8 @@
     ui.basketButton.classList.remove("bump");
     void ui.basketButton.offsetWidth;
     ui.basketButton.classList.add("bump");
-    if (state.draft) markDraftDirty();
+    if (state.draft || state.draftDirty) markDraftDirty();
+    else if (state.draftBaseline !== null) state.draftBaseline = draftSignature();
     renderBasket();
     syncSelection();
     void refreshBasket();
@@ -156,7 +158,7 @@
         if (response.ok) {
           const settings = await response.json();
           state.features = { ...state.features, ...settings.features };
-          state.ai = { mode: settings.mode, provider: settings.provider, message: settings.message };
+          state.ai = { mode: settings.mode, provider: settings.provider, message: settings.message, api_ready: settings.api_ready };
         }
       } catch (_) { /* Keep the last known settings when a local refresh fails. */ }
       await refreshBasket({ force: true });
@@ -301,24 +303,26 @@
       tools.push(answers);
     }
     box.hidden = !tools.length;
-    if (tools.length) box.append(node("span", "helper", state.ai.mode === "api"
-      ? "由独立模型生成，会用到已配置服务的额度："
-      : "交给正在操作软件的豆包或 AI 助手处理，无需额外豆包 API："), ...tools);
+    if (tools.length) {
+      if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，会用到服务额度："), ...tools);
+      else { const link = node("a", "button button-small", "配置答题 API"); link.href = "/settings#ai"; box.append(node("span", "helper", "请先为答题助手配置并测试 API。"), link); }
+    }
   }
 
   async function queueJobs(kind, target) {
     try {
+      const configurationResponse = await fetch("/api/settings/library-ai", { cache: "no-store" });
+      const configuration = await configurationResponse.json();
+      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请在“设置 → 标签与答案”配置并测试答题 API 后再生成。");
       const response = await fetch("/api/library/jobs", {
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
-        body: JSON.stringify({ kind, ...target })
+        body: JSON.stringify({ kind, ...target, api_only: true })
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "没能排上队");
       const what = kind === "tags" ? "打知识点标签" : "做 AI 参考答案";
       const skipped = body.skipped ? `；${body.skipped} 道已有结果或当前不能生成` : "";
-      toast(body.queued ? body.executor === "assistant"
-        ? `已加入待助手处理：${body.queued} 道题，请把任务交给豆包${skipped}`
-        : `已排队${what}：${body.queued} 道题，做好会自动显示${skipped}`
+      toast(body.queued ? `已排队${what}：${body.queued} 道题，做好会自动显示${skipped}`
         : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
       load({ quiet: true });
     } catch (error) {
@@ -349,6 +353,13 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN");
   }
+
+  let questionViewer = null;
+  function openQuestionViewer(item, returnFocus) {
+    if (!questionViewer) questionViewer = window.LibraryQuestionViewer.create({ node, QB, solutions });
+    return questionViewer.open(item, { returnFocus });
+  }
+  window.LibraryQuestionViewer.mountFocus({ node, host: document.querySelector(".library-results-head") });
 
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}`);
@@ -400,7 +411,7 @@
       if (summary.folded) notes.push("还有题干与小问");
       if (Object.keys(item.content?.options || {}).length) notes.push("含选项");
       if ((item.content?.figures || []).length > 2) notes.push(`含 ${(item.content.figures || []).length} 张配图`);
-      if (notes.length) paper.append(node("p", "library-preview-note", notes.join(" · ") + " · 点完整题目查看"));
+      if (notes.length) paper.append(node("p", "library-preview-note", notes.join(" · ") + " · 点全屏看题查看"));
     }
     const reveal = answerReveal(item);
     if (reveal) paper.append(reveal);
@@ -409,9 +420,9 @@
     const actions = node("footer", "library-card-actions");
     const origin = iconButton("button", "button button-quiet button-small", "查看出处", "source");
     origin.addEventListener("click", () => openSource(item));
-    const full = node("button", "button button-small library-full-button", "完整题目");
+    const full = node("button", "button button-small library-full-button", "全屏看题");
     full.type = "button";
-    full.addEventListener("click", () => openQuestion(item));
+    full.addEventListener("click", () => openQuestionViewer(item, full));
     const expand = node("button", "button button-quiet button-small", expanded ? "收起题面" : "展开题面");
     expand.type = "button";
     expand.setAttribute("aria-expanded", String(expanded));
@@ -530,6 +541,7 @@
 
   function jobButtons(item) {
     const buttons = [];
+    if (state.ai.mode !== "api" || state.ai.api_ready !== true) return buttons;
     const details = item.job_details || [];
     const waiting = new Set(details.length ? details.filter((job) => job.executor === state.ai.mode).map((job) => job.kind) : item.jobs || []);
     if (state.features.knowledge_tags && !(item.tags || []).length) {
@@ -545,7 +557,7 @@
       const assistant = state.ai.mode === "assistant" && details.some((job) => job.kind === "answer" && job.executor === "assistant");
       const button = iconButton("button", "button button-quiet button-small", busy ? (assistant ? "待助手解答" : "AI 正在解答…") : "AI 解答", busy ? "" : "plus");
       button.disabled = busy;
-      button.title = "原卷没有答案：由当前助手或选定的独立模型生成，结果标着“AI 参考 · 未核对”";
+      button.title = "原卷没有答案：使用已配置的 API 生成，结果标着“AI 参考 · 未核对”";
       button.addEventListener("click", () => queueJobs("answer", { ids: [item.id] }));
       buttons.push(button);
     }
@@ -554,11 +566,9 @@
 
   function render() {
     renderFacets();
-    const pendingAssistant = state.ai.mode === "assistant" && visibleItems().some((item) => (item.job_details || []).some((job) => job.executor === "assistant"
-      && (job.kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer)));
     const notice = $("assistantTaskNotice");
-    notice.hidden = !pendingAssistant;
-    if (pendingAssistant) notice.textContent = "有题目等待助手处理。告诉正在操作题有据的豆包：“请完成题库里的待处理标签和参考答案。”助手写回后会显示在这里；网页排队不会自动唤醒桌面豆包。";
+    notice.hidden = true;
+    notice.textContent = "";
     renderActiveFilters();
     renderBasket();
     syncSelection();
@@ -672,7 +682,7 @@
     $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
     for (const [id, feature] of [["generateSelectedTags", "knowledge_tags"], ["generateSelectedAnswers", "ai_answer"]]) {
       const button = $(id);
-      button.hidden = !state.features[feature];
+      button.hidden = !state.features[feature] || state.ai.mode !== "api" || state.ai.api_ready !== true;
       button.disabled = !state.selected.size;
     }
     $("addSelected").disabled = !state.selected.size;
@@ -1237,19 +1247,56 @@
   }
   let answerRefreshPending = false;
   let answerPrintContext = null;
+  let answerRefreshScheduled = false, answerRefreshWaiting = false;
+  const answerChangedIds = new Set();
   const sameAnswerContext = context => context && context.token === printState.token
     && context.draftId === (state.draft?.id || null);
-  function deferAnswerRefresh(context, sync) {
+  function refreshSavedAnswerRows(ids) {
+    syncPrintAnswers(printState.items);
+    if (currentPrintOptions().document === "questions") { syncExportButtons(); return; }
+    const flow = printState.layoutSource;
+    const rows = flow ? Array.from(flow.querySelectorAll(".print-answer-row")) : [];
+    const replacements = [...ids].map(id => ({ item: printState.items.find(item => item.id === id), row: rows.find(row => row.dataset.questionId === id) }));
+    if (!flow || replacements.some(value => !value.item || !value.row)) { renderPrint(printState.items); return; }
+    // The source already holds the original typeset question bodies. Replace
+    // only edited answers and paginate once, preserving all unedited math/images.
+    replacements.forEach(({ item, row }) => {
+      const inline = row.classList.contains("print-answer-inline");
+      if (inline && !printAnswerContent(item)) row.remove();
+      else row.replaceWith(printAnswerRow(groupedQuestionNumber(item), item, inline));
+    });
+    printState.layoutPromise = refreshPrintPages(flow);
+  }
+  function deferAnswerRefresh(context, sync, id) {
     answerRefreshPending ||= sync;
-    if (sameAnswerContext(context)) answerPrintContext = context;
-    const flush = () => requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (answerEditor?.isOpen()) { $("answerEditorDialog")?.addEventListener("close", flush, { once: true }); return; }
-      if (answerRefreshPending) { answerRefreshPending = false; render(); }
-      if (answerPrintContext && sameAnswerContext(answerPrintContext) && ui.sheet.open) renderPrint(printState.items);
-      answerPrintContext = null;
-    }));
-    if (answerEditor?.isOpen()) $("answerEditorDialog")?.addEventListener("close", flush, { once: true });
-    else flush();
+    if (sameAnswerContext(context)) {
+      if (!sameAnswerContext(answerPrintContext)) answerChangedIds.clear();
+      answerPrintContext = context; if (id) answerChangedIds.add(id);
+    }
+    const schedule = () => {
+      if (answerRefreshScheduled) return;
+      answerRefreshScheduled = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const flush = () => {
+          answerRefreshScheduled = false;
+          if (answerEditor?.isOpen()) { waitForClose(); return; }
+          const refreshLibrary = answerRefreshPending, refreshContext = answerPrintContext, ids = [...answerChangedIds];
+          answerRefreshPending = false; answerPrintContext = null; answerChangedIds.clear();
+          if (refreshLibrary) render();
+          if (sameAnswerContext(refreshContext) && ui.sheet.open) refreshSavedAnswerRows(ids);
+        };
+        // Closing paints first. Expensive A4 work begins in a later idle/task,
+        // and a reopened editor postpones it again without duplicating listeners.
+        if (window.requestIdleCallback) window.requestIdleCallback(flush, { timeout: 600 });
+        else window.setTimeout(flush, 0);
+      }));
+    };
+    const waitForClose = () => {
+      if (answerRefreshWaiting) return;
+      answerRefreshWaiting = true;
+      $("answerEditorDialog")?.addEventListener("close", () => { answerRefreshWaiting = false; schedule(); }, { once: true });
+    };
+    if (answerEditor?.isOpen()) waitForClose(); else schedule();
   }
   function openAnswerEditor(items = printState.items, options = {}) {
     if (printState.exporting || state.draftSaving) { toast("请等待当前导出或保存完成"); return; }
@@ -1260,12 +1307,17 @@
           printState.solutions[item.id] = solution.id; printState.solutionRecords.set(solution.id, solution);
           const chosen = printState.items.find(value => value.id === item.id); if (chosen) { chosen.solution = solution; chosen.solution_revision = solution.id; }
           markDraftDirty();
+          if (ui.sheet.open && currentPrintOptions().document !== "questions") {
+            // Until the deferred answer rows are laid out, old visible pages
+            // must not be printed/exported as if they contain the saved edit.
+            printState.layoutPending = true; syncExportButtons();
+          }
         }
         if (sync) {
           const stored = state.catalog.get(item.id); if (stored) stored.solution = solution;
           for (const value of state.items) if (value.id === item.id) value.solution = solution;
         }
-        deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync);
+        deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync, item.id);
       } });
     return answerEditor.open(items, { ...options, scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
   }
@@ -1438,6 +1490,7 @@
   async function openPrint() {
     const token = ++printState.token;
     const opening = !ui.sheet.open;
+    if (opening && !state.draftDirty) state.draftBaseline = draftSignature();
     if (opening) printState.returnFocus = document.activeElement;
     if (!printState.settingsInitialized) {
       $("printSettings").open = !window.matchMedia("(max-width: 979px)").matches;
@@ -1471,6 +1524,9 @@
       missing = ids.map((id, index) => ({ id, label: printNames.get(id) || `未载入的第 ${index + 1} 道选题`, reason: error.message || "读取失败，请重试" }));
     }
     if (token !== printState.token || !ui.sheet.open) return;
+    // Merely opening a paper can resolve its fixed answer revisions. That is
+    // initialization, not an edit; a user's concurrent changes remain dirty.
+    if (!state.draftDirty) state.draftBaseline = draftSignature();
     printState.loading = false;
     printState.missing = missing;
     renderPrint(items);
@@ -1478,13 +1534,28 @@
   }
 
   function markDraftDirty() {
-    state.draftDirty = true;
-    $("draftSaveStatus").textContent = state.draft ? `“${state.draft.title}”有未保存的改动` : "当前组卷尚未保存为草稿";
+    if (state.draftBaseline === null && (state.draft || state.basket.length)) state.draftDirty = true;
+    state.draftDirty = hasUnsavedDraft();
+    $("draftSaveStatus").textContent = state.draftDirty
+      ? state.draft ? `“${state.draft.title}”有未保存的改动` : "当前组卷尚未保存为草稿"
+      : state.draft ? `正在编辑“${state.draft.title}”` : "";
   }
 
   function draftPayload() {
     return { title: ui.printTitle.value.trim() || "练习", ids: [...state.basket],
       print_options: currentPrintOptions(), solutions: solutions.draftSelections(printState.solutions, state.basket) };
+  }
+
+  function draftSignature() {
+    return JSON.stringify(draftPayload());
+  }
+
+  function hasUnsavedDraft() {
+    // A cleared, unassociated basket has no paper that can be lost. A saved
+    // draft's removed questions still count as a real, uncommitted edit.
+    if (!state.draft && !state.basket.length) { state.draftBaseline = null; state.draftDirty = false; return false; }
+    if (state.draftBaseline !== null) return state.draftDirty = draftSignature() !== state.draftBaseline;
+    return state.draftDirty;
   }
 
   async function saveDraft({ copy = false } = {}) {
@@ -1504,7 +1575,8 @@
       if (!response.ok) throw new Error(body.error || "草稿未保存");
       if (state.draft === previousDraft) {
         state.draft = body.draft;
-        state.draftDirty = JSON.stringify(draftPayload()) !== submitted;
+        state.draftBaseline = submitted;
+        state.draftDirty = draftSignature() !== submitted;
         $("draftSaveStatus").textContent = `已保存“${body.draft.title}” · ${body.draft.ids.length} 题${state.draftDirty ? " · 后续改动尚未保存" : body.draft.validity?.valid === false ? " · 有选题需要处理" : ""}`;
       }
       toast("组卷草稿已保存", "success");
@@ -1556,6 +1628,7 @@
             state.draftDirty = false;
             ui.printTitle.value = current.title;
             applyPrintOptions(current.print_options);
+            state.draftBaseline = draftSignature();
             $("draftSaveStatus").textContent = `正在编辑“${current.title}”`;
             dialog.close();
             render();
@@ -1665,7 +1738,7 @@
           }
           block.append(printTools(items, group, position, number));
           ui.paper.append(block);
-          if (options.document === "combined" && options.answer_layout === "inline" && ui.printAnswers.checked) ui.paper.append(printAnswerRow(number, item, true));
+          if (options.document === "combined" && options.answer_layout === "inline" && ui.printAnswers.checked && printAnswerContent(item)) ui.paper.append(printAnswerRow(number, item, true));
         }
         answers.push([number, item]);
       });
@@ -1764,33 +1837,10 @@
     }
   }
 
-  // 只适配组卷排版；KaTeX 顶层运算符可以换行，分数/矩阵内部不拆。
-  // 按 A4 正文宽度预检，禁止为了塞进页面把公式缩成难以阅读的小字。
+  // Width fitting happens in the shared A4 paginator for both preview and PDF.
+  // This UI check only reports its result; it must not rescale a paginated page.
   function preparePrintLayout() {
-    ui.paper.querySelectorAll(".print-formula-fallback").forEach((el) => el.remove());
-    ui.paper.querySelectorAll(".katex").forEach((math) => math.style.removeProperty("--print-math-size"));
-    ui.paper.classList.add("print-layout-check");
-    let tooWide = 0;
-    ui.paper.querySelectorAll(".qb-math").forEach((span) => {
-      const math = span.querySelector(".katex");
-      const html = math?.querySelector(".katex-html");
-      if (!html) return;
-      const field = span.closest(".qb-stem-body, .qb-option-body, .qb-analysis, .print-answer-row > div") || span.parentElement;
-      const available = field.clientWidth - 6;
-      const widest = Math.max(0, ...Array.from(html.children, (base) => base.getBoundingClientRect().width));
-      if (!available || widest <= available + 1) return;
-      const size = parseFloat(getComputedStyle(math).fontSize);
-      const fitted = size * available / widest;
-      if (fitted >= 12) math.style.setProperty("--print-math-size", `${fitted}px`);
-      else {
-        tooWide += 1;
-        const fallback = node("span", "print-formula-fallback");
-        fallback.append(node("strong", "", "公式超出当前纸张宽度。完整公式写法："),
-          node("code", "", math.querySelector('annotation[encoding="application/x-tex"]')?.textContent || span.textContent));
-        span.append(fallback);
-      }
-    });
-    ui.paper.classList.remove("print-layout-check");
+    const tooWide = ui.paper.querySelectorAll('.katex[data-exam-math-overflow="1"]').length;
     const notice = $("printLayoutNotice");
     notice.textContent = tooWide ? `${tooWide} 处公式超出 A4 正文。可调整本次正文字号，或导出 Word 继续排版；题库内容不受影响。` : "";
     notice.hidden = !tooWide;
@@ -1815,6 +1865,37 @@
       field.after(hint);
     });
   }
+
+  function closePrintTools({ restoreFocus = false } = {}) {
+    const opened = [...ui.paper.querySelectorAll(".print-question-tools[open]")];
+    const summary = opened[0]?.querySelector("summary");
+    opened.forEach(tools => { tools.open = false; });
+    // Clear immediately, before a queued details toggle or layout redraw can
+    // restore the dismissed menu from activeToolId.
+    printState.activeToolId = null;
+    if (restoreFocus) summary?.focus({ preventScroll: true });
+    return opened.length > 0;
+  }
+
+  function dismissPrintToolsOutside(event) {
+    if (ui.sheet.hidden || (event.button != null && event.button !== 0)) return;
+    const opened = [...ui.paper.querySelectorAll(".print-question-tools[open]")];
+    if (!opened.length || opened.some(tools => tools.contains(event.target))) return;
+    closePrintTools();
+    // Do not consume the click or move focus: the clicked input, export
+    // action or another question's summary must still work normally.
+  }
+
+  function handlePrintEscape(event) {
+    if (event.key !== "Escape" || ui.sheet.hidden || event.defaultPrevented
+      || event.isComposing || event.keyCode === 229
+      || document.querySelector("dialog[open]:not(#printSheet)")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!closePrintTools({ restoreFocus: true })) closePrint();
+  }
+
+  document.addEventListener("pointerdown", dismissPrintToolsOutside);
 
   // Move up / down within the same section, or take the question out of the
   // basket, without leaving the preview.  Hidden when printing.
@@ -1989,8 +2070,9 @@
         status.textContent = format === "pdf" ? "正在生成 PDF 文件…" : "正在生成 Word 文件…";
         const result = await window.ExamExport.download(printState.items, { title: ui.printTitle.value.trim() || "练习", print_options: options, format,
           solutions: solutions.fixedSelections(printState.solutions, printState.items.map(item => item.id)) });
-        status.textContent = `已导出 ${result.filename}`;
-        toast(format === "pdf" ? "PDF 文件已生成" : "Word 文件已生成", "success");
+        status.textContent = result.saved ? `已保存到 ${result.path}` : `已导出 ${result.filename}`;
+        if (result.warning) status.textContent += `；${result.warning}`;
+        toast(result.saved ? "文件已保存到设置的文件夹" : format === "pdf" ? "PDF 文件已生成" : "Word 文件已生成", "success");
       }
     } catch (error) {
       status.textContent = error.message || "导出失败，请重试";
@@ -2010,6 +2092,46 @@
     document.body.classList.remove("printing");
     const target = printState.returnFocus;
     (target?.isConnected && !target.hidden ? target : ui.search).focus({ preventScroll: true });
+  }
+
+  let libraryNavigationPending = false, draftLeaveApproved = false;
+  async function leaveLibraryFor(url) {
+    if (libraryNavigationPending) return false;
+    libraryNavigationPending = true;
+    try {
+      if (state.draftSaving || printState.exporting) { toast("请等待当前保存或导出完成", "error"); return false; }
+      if (hasUnsavedDraft()) {
+        const snapshot = draftSignature();
+        if (!await confirmDialog({ title: "组卷还没保存", text: "本次组卷的设置或选题改动还没保存为草稿。离开后这些改动不会用于出卷；试题篮、题库和已保存的草稿保留。", ok: "放弃组卷并离开", danger: true, focusCancel: true })) return false;
+        if (snapshot !== draftSignature()) { toast("组卷又有新改动，请先保存或重新确认离开", "error"); return false; }
+      }
+      if (state.draftSaving || printState.exporting) { toast("请等待当前保存或导出完成", "error"); return false; }
+      // Bypass only this confirmed navigation's draft warning. Do not clear
+      // the draft or disable other editors' genuine beforeunload protection.
+      draftLeaveApproved = true;
+      try { window.location.assign(url); }
+      catch (error) { draftLeaveApproved = false; throw error; }
+      return true;
+    } finally { libraryNavigationPending = false; }
+  }
+
+  function handleLibraryNavigation(event) {
+    const link = event.target.closest?.("a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+      || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
+    const url = new URL(link.href, window.location.href), here = new URL(window.location.href);
+    if (url.origin !== here.origin) return;
+    if (link.closest(".topnav") && link.getAttribute("aria-current") === "page" && url.pathname === here.pathname) { event.preventDefault(); return; }
+    if (url.pathname === here.pathname && url.search === here.search && url.hash) return;
+    if (!["/", "/library", "/settings"].includes(url.pathname) || (!hasUnsavedDraft() && !state.draftSaving && !printState.exporting)) return;
+    event.preventDefault();
+    void leaveLibraryFor(url.href);
+  }
+
+  function protectLibraryBeforeUnload(event) {
+    if (draftLeaveApproved) { draftLeaveApproved = false; if (!state.draftSaving && !printState.exporting) return; }
+    if (!hasUnsavedDraft() && !state.draftSaving && !printState.exporting) return;
+    event.preventDefault(); event.returnValue = "";
   }
 
   // ---------------------------------------------------------------- 事件
@@ -2111,11 +2233,8 @@
   });
   window.addEventListener("resize", () => { if (ui.sheet.open) window.ExamLayout?.scale(ui.paper); });
   $("printSettings").addEventListener("toggle", () => { if (ui.sheet.open) requestAnimationFrame(() => window.ExamLayout?.scale(ui.paper)); });
-  window.addEventListener("beforeunload", (event) => {
-    if (!state.draftDirty && !state.draftSaving && !printState.exporting) return;
-    event.preventDefault();
-    event.returnValue = "";
-  });
+  window.addEventListener("beforeunload", protectLibraryBeforeUnload);
+  document.addEventListener("click", handleLibraryNavigation);
   ui.tagSelect.addEventListener("change", () => { state.tag = ui.tagSelect.value; syncUrl(); load(); });
   ui.sourceDialog.addEventListener("click", (event) => {
     if (event.target === ui.sourceDialog || event.target.closest("[data-close]")) ui.sourceDialog.close();
@@ -2180,7 +2299,7 @@
       event.preventDefault();
       ui.search.focus();
     }
-    if (event.key === "Escape" && !ui.sheet.hidden) closePrint();
+    handlePrintEscape(event);
   });
 
   if (state.document) ui.source.value = state.document;

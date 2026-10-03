@@ -233,7 +233,7 @@ window.__qbPdfStatus = {ready:false};
         blank.style.height=({small:12,medium:30,large:60}[space]||0)+'mm';block.append(blank);
       }
       source.append(block);
-      if(inline)source.append(solutionRow(number,item,true));
+      if(inline && (String(item.selected?.answer||'').trim() || String(item.selected?.analysis||'').trim() || (item.solution_images||[]).length))source.append(solutionRow(number,item,true));
     }
   }
   if(o.document!=='questions'&&!inline){
@@ -250,6 +250,7 @@ window.__qbPdfStatus = {ready:false};
   await document.fonts.ready;
   const result=await ExamLayout.paginate(source,{...o,host});
   if(!result.page_count || result.page_count>200)throw new Error('试卷页数过多，请减少选题后重试');
+  if(result.formula_overflow)throw new Error('有公式超出 A4 正文，请调整字号或导出 Word 继续排版');
   await document.fonts.ready;
   window.__qbPdfStatus={ready:true,page_count:result.page_count,warnings:result.warnings||[]};
 })().catch(e=>{window.__qbPdfStatus={ready:false,error:e.message||'试卷排版未完成'};});
@@ -447,4 +448,5 @@ def export_pdf_view(request):
     response["Content-Disposition"] = "attachment; filename=practice.pdf; filename*=UTF-8''" + quote(filename)
     response["X-Question-Count"], response["X-Page-Count"] = str(count), str(pages)
     response["Cache-Control"] = "no-store"
-    return response
+    from .export_preferences import deliver
+    return deliver(request, response, data, filename, count=count, pages=pages)

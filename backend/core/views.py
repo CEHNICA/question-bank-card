@@ -673,6 +673,8 @@ library_solutions_script = _frontend("library-solutions.js", "application/javasc
 library_question_editor_script = _frontend("library-question-editor.js", "application/javascript; charset=utf-8")
 library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
+export_settings_script = _frontend("export-settings.js", "application/javascript; charset=utf-8")
+library_question_viewer_script = _frontend("library-question-viewer.js", "application/javascript; charset=utf-8")
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
@@ -3035,6 +3037,10 @@ def library_jobs_view(request):
     solution_scope = payload.get("solution_scope", False)
     if type(solution_scope) is not bool or (solution_scope and (kind != "answer" or payload.get("missing") is True)):
         return _error("本次答案解析建议必须明确选择题目，只能用于 answer")
+    if "executor" in payload and (payload["executor"] != "api" or not solution_scope):
+        return _error("指定 API 执行只能用于明确选择的答案解析任务")
+    if "api_only" in payload and type(payload["api_only"]) is not bool:
+        return _error("api_only 应为 true 或 false")
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
     if payload.get("missing") is True:
         if kind == LibraryJob.Kind.TAGS:
@@ -3062,7 +3068,12 @@ def library_jobs_view(request):
     try:
         with transaction.atomic():
             for publication in targets:
-                job = library_jobs.enqueue(publication, kind, solution_scope=solution_scope)
+                options = {"solution_scope": solution_scope}
+                if "executor" in payload:
+                    options["executor"] = payload["executor"]
+                if payload.get("api_only") is True:
+                    options["api_only"] = True
+                job = library_jobs.enqueue(publication, kind, **options)
                 executors.add(job.executor)
                 jobs.append(job)
                 queued += 1

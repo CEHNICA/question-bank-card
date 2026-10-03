@@ -57,7 +57,7 @@
     if (job.timed_out || job.terminal_reason === "timed_out" || job.status === "timed_out") return "处理超时，勾选可重试";
     if (job.status === "failed") return "处理失败，勾选可重试";
     if (["done", "completed", "succeeded", "success"].includes(job.status)) return job.result ? "初稿已到，保存后出卷" : "任务结束，暂无初稿";
-    if (job.executor === "assistant") return job.status === "running" ? "当前助手正在处理" : "等待当前助手领取";
+    if (job.executor === "assistant") return "保留旧生成任务，未自动重新提交";
     return job.status === "running" ? "AI 正在解题" : "AI 任务排队中";
   }
   function render(container, value, { node, QB, label = true, empty = "尚未补充答案解析" } = {}) {

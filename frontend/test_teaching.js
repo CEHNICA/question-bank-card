@@ -24,7 +24,8 @@ const finishLesson = TEACH_LESSONS.find((lesson) => lesson.key === "finish");
 assert.match(finishLesson.text, /导入资料无需密钥/);
 assert.match(finishLesson.text, /从原卷框选保存/);
 assert.match(finishLesson.text, /完成切题.*自动 AI 识读.*文字.*配图.*审核入库/);
-assert.match(finishLesson.text, /单击两角固定范围.*Enter 保存下一题.*Ctrl\+Enter 完成切题.*自动 AI 识读/);
+assert.match(finishLesson.text, /单击两角固定范围.*S 保存下一题.*Ctrl\+S 完成切题.*自动 AI 识读/);
+assert.match(finishLesson.text, /Enter \/ Ctrl\+Enter 也可继续使用/);
 assert.doesNotMatch(finishLesson.text, /上传、重新识读.*需要读题服务/);
 
 // Stable keys and the old course's indexes must refer to learning content,

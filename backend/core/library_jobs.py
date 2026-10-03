@@ -53,7 +53,8 @@ def split_answer_tags(raw: str) -> dict[str, str]:
     return result
 
 
-def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solution_scope: bool = False) -> LibraryJob:
+def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solution_scope: bool = False,
+            executor: str | None = None, api_only: bool = False) -> LibraryJob:
     """Queue one job; an identical job already waiting is reused."""
     from .library_job_control import expire_api_jobs
     expire_api_jobs()
@@ -61,15 +62,20 @@ def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solut
         raise JobError("不认识的任务")
     if solution_scope and kind != LibraryJob.Kind.ANSWER:
         raise JobError("本次组卷建议仅支持答案解析")
+    explicit_api = executor is not None
+    if explicit_api and (executor != "api" or solution_scope is not True or kind != LibraryJob.Kind.ANSWER):
+        raise JobError("指定 API 执行只能用于本次明确选择的答案解析任务。")
     if not solution_scope and not features.enabled(FEATURE_OF[kind]):
         raise JobError("这个功能在“标签与参考答案设置”里关着，打开后再用")
     if publication.status != PublishedQuestion.Status.PUBLISHED:
         raise JobError("这道题已不在正式题库里")
     try:
-        state = library_ai_settings.ensure_ready(None if solution_scope else kind)
+        state = library_ai_settings.ensure_api_ready() if explicit_api else library_ai_settings.ensure_ready(None if solution_scope else kind)
     except library_ai_settings.SettingsError as error:
         raise JobError(str(error)) from None
     executor = state.get("mode", "assistant")
+    if api_only and (executor != "api" or state.get("api_ready") is not True):
+        raise JobError("答题 API 配置已变化，请重新配置并测试；本次未创建助手任务。")
     with transaction.atomic():
         if publication.question_id:
             Question.all_objects.select_for_update().filter(pk=publication.question_id).first()
@@ -79,13 +85,24 @@ def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solut
         if not solution_scope:
             _no_existing_result(publication, kind)
         fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
-        existing = publication.jobs.filter(kind=kind, executor=executor, fingerprint=fingerprint, solution_scope=solution_scope, status__in=ACTIVE).first()
+        snapshot = library_ai_settings.execution_snapshot(explicit_api=explicit_api) if executor == "api" else {}
+        waiting = publication.jobs.filter(kind=kind, executor=executor, fingerprint=fingerprint, solution_scope=solution_scope, status__in=ACTIVE)
+        if explicit_api:
+            # A stale API job may still be waiting after settings changed. Do
+            # not let that invalid binding consume a new explicit request.
+            from django.db.models import Q
+            compatible = Q(api_snapshot=snapshot)
+            ordinary = library_ai_settings.execution_snapshot()
+            if ordinary.get("mode") == "api":
+                compatible |= Q(api_snapshot=ordinary)
+            waiting = waiting.filter(compatible)
+        existing = waiting.first()
         if existing is not None:
             return existing
         return LibraryJob.objects.create(publication=publication, kind=kind, executor=executor,
                                          fingerprint=fingerprint, agent=agent,
                                          solution_scope=solution_scope,
-                                         api_snapshot=library_ai_settings.execution_snapshot() if executor == "api" else {})
+                                         api_snapshot=snapshot)
 
 
 def pending_kinds(publication_ids) -> dict[str, list[str]]:
@@ -220,10 +237,13 @@ def _figure_urls(publication: PublishedQuestion) -> list[str]:
 
 # ---------------------------------------------------------------- 后台执行
 
-def run_answer(publication: PublishedQuestion, *, explicit_once=False) -> dict:
+def run_answer(publication: PublishedQuestion, *, explicit_once=False, force_api=False) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)
-    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures), detailed=explicit_once), figures, kind=None if explicit_once else "answer")
+    options = {"kind": None if explicit_once else "answer"}
+    if force_api:
+        options["explicit_api"] = True
+    raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures), detailed=explicit_once), figures, **options)
     tags = split_answer_tags(raw)
     answer = str(tags.get("答案") or "").strip()
     if not answer:
@@ -277,7 +297,10 @@ def _bound_target(job: LibraryJob, publication: PublishedQuestion, fingerprint: 
         raise JobError("生成期间题面、配图或入库版本已变化，旧结果未保存；请在当前版本重新生成。")
     if not job.solution_scope and not features.enabled(FEATURE_OF[job.kind]):
         raise JobError("生成期间这个功能已关闭，结果未保存。")
-    library_ai_settings.ensure_ready(None if job.solution_scope else job.kind)
+    if job.solution_scope and current_job.api_snapshot.get("explicit_api") is True:
+        library_ai_settings.ensure_api_ready()
+    else:
+        library_ai_settings.ensure_ready(None if job.solution_scope else job.kind)
     library_ai_settings.require_snapshot(current_job.api_snapshot)
     if not job.solution_scope:
         _no_existing_result(current, job.kind)
@@ -322,7 +345,10 @@ def process_pending(limit: int = 5) -> int:
             library_ai_settings.require_snapshot(job.api_snapshot)
             initial_hash = publication.content_hash
             if job.kind == LibraryJob.Kind.ANSWER:
-                result = run_answer(publication, explicit_once=True) if job.solution_scope else run_answer(publication)
+                if job.solution_scope and job.api_snapshot.get("explicit_api") is True:
+                    result = run_answer(publication, explicit_once=True, force_api=True)
+                else:
+                    result = run_answer(publication, explicit_once=True) if job.solution_scope else run_answer(publication)
                 with transaction.atomic():
                     publication = _bound_target(job, publication, fingerprint, initial_hash)
                     result.update(fingerprint=fingerprint, publication_id=str(publication.pk), checked=False)

@@ -537,9 +537,14 @@ def _main(arguments: list[str] | None = None) -> int:
             base_env.update(launcher._parallel_environment(base_env, credential_pools, preferences))
             # 模型角色和型号可供网页展示；三类密钥仍只交给后台工作者。
             web_env = dict(base_env)
+            # Native export delivery is available only to the desktop-owned
+            # loopback service; console/browser deployments keep attachments.
+            # This is a capability flag, never a credential or browser token.
+            web_env["QB_DESKTOP_EXPORT"] = "1"
             web_env.update(launcher._credential_status_environment(credential_pools))
             web_env.update(model_env)
             worker_env = launcher._worker_credential_environment(base_env, credential_pools)
+            worker_env.pop("QB_DESKTOP_EXPORT", None)
             worker_env.update(model_env)
             del credential_pools, preferences, model_env
             ui.say("正在启动后台服务…")

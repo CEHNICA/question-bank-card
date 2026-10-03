@@ -210,7 +210,7 @@
       <button id="managePrintAnswers" class="button" type="button">答案解析</button>
       <button id="exportWord" class="button button-primary" type="button">导出 Word</button>
       <button id="exportPdf" class="button button-primary" type="button">导出 PDF</button>
-      <button id="printButton" class="button button-quiet print-legacy" type="button" title="打开系统打印窗口">打印</button>
+      <button id="printButton" type="button" hidden aria-hidden="true">打印</button>
     </div>
     <p id="printExportStatus" class="print-export-status no-print" role="status" aria-live="polite" hidden></p>
     <div class="print-workspace">
@@ -267,6 +267,7 @@
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/exam-export.js" defer></script>
   <script src="/exam-layout.js" defer></script>
+  <script src="/library-question-viewer.js" defer></script>
   <script src="/library.js" defer></script>
 </body>
 </html>

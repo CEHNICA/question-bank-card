@@ -28,17 +28,16 @@ const context = {
   removeBox: (index) => calls.push(["remove", index])
 };
 vm.runInNewContext(source.slice(start, end), context);
-const target = (kind = "canvas") => ({ tagName: kind === "input" ? "INPUT" : "DIV",
+const target = (kind = "canvas") => ({ tagName: ["input", "textarea", "select", "button", "summary", "a"].includes(kind) ? kind.toUpperCase() : "DIV",
   closest(selector) {
     if (kind === "canvas" && selector === "#pageStage") return this;
-    if (kind === "input" && selector.includes("input")) return this;
-    if (kind === "button" && selector.includes("button")) return this;
+    if (["input", "textarea", "select", "button", "summary", "a"].includes(kind) && selector.split(/[, ]+/).includes(kind)) return this;
     if (kind === "contenteditable" && selector.includes("contenteditable")) return this;
     return null;
   }
 });
 function press(key, extra = {}, kind = "canvas") {
-  const event = { key, target: target(kind), preventDefault() { this.defaultPrevented = true; }, ...extra };
+  const event = { key, target: target(kind), preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, ...extra };
   listeners.get("keydown")(event);
   return event;
 }
@@ -46,19 +45,28 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 
 press("Enter"); press("Enter", { ctrlKey: true });
 assert.deepEqual(clone(calls.splice(0)), [["save", { next: true }], ["save", { complete: true }]]);
+assert.equal(press("s").stopped, true);
+press("S"); press("s", { ctrlKey: true }); press("s", { metaKey: true });
+assert.deepEqual(clone(calls.splice(0)), [["save", { next: true }], ["save", { next: true }], ["save", { complete: true }], ["save", { complete: true }]], "Left-hand S/Ctrl+S are primary while Caps Lock and the existing Enter actions remain compatible");
 for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }]) {
   press("Enter", extra); press("Enter", { ctrlKey: true, ...extra });
+  press("s", extra); press("s", { ctrlKey: true, ...extra });
 }
-for (const kind of ["input", "contenteditable", "button"]) {
-  for (const [key, extra] of [["Enter", {}], ["Enter", { ctrlKey: true }], ["z", { ctrlKey: true }], ["PageDown", {}], ["Delete", {}]]) press(key, extra, kind);
+for (const kind of ["input", "textarea", "select", "contenteditable", "button", "summary", "a"]) {
+  for (const [key, extra] of [["Enter", {}], ["Enter", { ctrlKey: true }], ["s", {}], ["s", { ctrlKey: true }], ["z", { ctrlKey: true }], ["PageDown", {}], ["Delete", {}]]) press(key, extra, kind);
 }
-assert.deepEqual(calls, [], "Typing, composition, native controls, held Enter and already handled events never save, delete or navigate");
+assert.deepEqual(calls, [], "Typing, composition, native controls, held save keys and already handled events never save, delete or navigate");
+assert.equal(press("s", { ctrlKey: true }, "input").defaultPrevented, true, "Blocked Ctrl+S never opens the browser Save Page prompt instead of saving a question");
+assert.equal(press("s", { ctrlKey: true, isComposing: true }, "input").defaultPrevented, undefined, "IME events remain untouched");
+press("s", {}, "outside"); press("s", { ctrlKey: true }, "outside");
+for (const extra of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }, { ctrlKey: true, altKey: true }]) press("s", extra);
+assert.equal(calls.length, 0, "S requires canvas focus; Shift/Alt combinations cannot complete a paper accidentally");
 for (const field of ["saving", "closing"]) {
-  context.dialog[field] = true; press("Enter"); press("PageDown"); press("z", { ctrlKey: true }); context.dialog[field] = false;
+  context.dialog[field] = true; press("Enter"); press("s"); press("s", { ctrlKey: true }); press("PageDown"); press("z", { ctrlKey: true }); context.dialog[field] = false;
 }
-context.otherModal = true; press("Enter"); press("z", { ctrlKey: true }); context.otherModal = false;
-context.menuOpen = true; press("Enter"); press("Delete"); context.menuOpen = false;
-modal.open = false; press("Enter"); modal.open = true;
+context.otherModal = true; press("Enter"); press("s"); assert.equal(press("s", { ctrlKey: true }).defaultPrevented, undefined); press("z", { ctrlKey: true }); context.otherModal = false;
+context.menuOpen = true; press("Enter"); press("s"); press("s", { ctrlKey: true }); press("Delete"); context.menuOpen = false;
+modal.open = false; press("Enter"); press("s"); press("s", { ctrlKey: true }); modal.open = true;
 assert.deepEqual(calls, [], "Another dialog, ownership menu, closing or saving locks out crop shortcuts");
 
 press("z", { ctrlKey: true }); press("Z", { ctrlKey: true, shiftKey: true });
@@ -70,11 +78,11 @@ press(" "); press("Delete"); press("+"); press("-"); press("0"); press("w");
 assert.deepEqual(calls.splice(0), [["cancel-sketch"], ["class", "pan-ready"], ["remove", 0], ["zoom", 1.25], ["zoom", 0.8], ["zoom-mode", "fit"], ["zoom-mode", "width"]]);
 for (const mode of ["regions", "figures", "read"]) {
   context.dialog.mode = mode;
-  press("Enter"); assert.equal(calls.length, 0, `${mode} does not accidentally save the next new question`);
+  press("Enter"); press("s"); press("s", { ctrlKey: true }); assert.equal(calls.length, 0, `${mode} does not accidentally save the next new question or consume S for figure ownership`);
   press("Enter", { ctrlKey: true }); assert.deepEqual(clone(calls.splice(0)), [["save", {}]]);
 }
 context.dialog.mode = "view";
-press("Enter", { ctrlKey: true }); press("Delete"); press("z", { ctrlKey: true });
+press("Enter", { ctrlKey: true }); press("s"); press("s", { ctrlKey: true }); press("Delete"); press("z", { ctrlKey: true });
 assert.equal(calls.length, 0, "A read-only original cannot submit crop edits");
 
 const slotStart = source.indexOf("  const SLOT_KEYS =");
@@ -95,4 +103,8 @@ slotListeners.get("keydown")({ key: "a", isComposing: true });
 slotContext.dialog.saving = true; slotListeners.get("keydown")({ key: "a" });
 assert.equal(slots.length, 4, "Composition and saving cannot reassign a figure");
 
-console.log("Crop shortcuts: scoped save/next, composition/native controls, modal/save locks, sparse page navigation, undo/redo, pan/zoom and ownership bubbling: OK");
+const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+assert.match(html, /id="pageDialogSaveNext"[^>]*aria-keyshortcuts="S Enter"[^>]*>保存下一题<span class="kbd-hint">S<\/span>/);
+assert.match(html, /id="pageDialogComplete"[^>]*aria-keyshortcuts="Control\+S Control\+Enter"[^>]*>完成切题<span class="kbd-hint">Ctrl\+S<\/span>/);
+
+console.log("Crop shortcuts: left-hand S/Ctrl+S, Enter compatibility, browser-save suppression, scoped input/IME/modal/save locks, page navigation, undo/redo and S figure ownership: OK");

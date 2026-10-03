@@ -788,16 +788,18 @@ def _math_extent(element):
 
 def _option_columns(item, options, *, text_width_mm=178):
     values = item["content"].get("options") or {}
-    letters = [key for key in "ABCDE" if str(values.get(key) or "").strip()]
-    if len(letters) < 2 or any(image["slot"] != "stem" for image in item["images"]):
+    requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
+    letters = [key for key in "ABCDE" if str(values.get(key) or "").strip() or any(image["slot"] == key for image in item["images"])]
+    pictures = any(image["slot"] in "ABCDE" for image in item["images"])
+    if len(letters) < 2 or requested == "vertical" or (pictures and requested == "auto"):
         return 1
     widths = []
     for letter in letters:
         blocks = item["fields"].get(f"options.{letter}", [])
-        if re.search(r"[\r\n]", values[letter]) or len(blocks) != 1 or blocks[0]["type"] != "text":
+        if re.search(r"[\r\n]", values.get(letter, "")) or (blocks and (len(blocks) != 1 or blocks[0]["type"] != "text")):
             return 1
         width = 1.8  # letter, period and breathing room
-        for segment in blocks[0]["segments"]:
+        for segment in blocks[0]["segments"] if blocks else []:
             if segment.get("display") or segment.get("displayGroup"):
                 return 1
             if segment["type"] == "math":
@@ -809,11 +811,10 @@ def _option_columns(item, options, *, text_width_mm=178):
                 width += extent[0]
             elif segment["type"] != "delimiter":
                 width += _text_em(segment["raw"]) if segment["type"] == "text" else 4.5
-        widths.append(width * options["font_size"] * 25.4 / 72)
-    requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
-    if requested == "vertical":
-        return 1
-    candidates = (4, 2) if requested != "two" and len(letters) == 4 else (2,)
+        image_width = max((image["size"][0] * min(178 / image["size"][0], 210 / image["size"][1], 25.4 / 150)
+                           for image in item["images"] if image["slot"] == letter), default=0)
+        widths.append(max(width * options["font_size"] * 25.4 / 72, image_width))
+    candidates = (4, 2) if requested != "two" and (len(letters) == 4 or (requested == "four" and len(letters) <= 4)) else (2,)
     for columns in candidates:
         # Cell margins and a 10% reserve absorb font/rendering variation.
         if max(widths) <= (text_width_mm / columns - 4.0) * 0.90:
@@ -825,7 +826,7 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
     from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    letters = [key for key in "ABCDE" if f"options.{key}" in item["fields"]]
+    letters = [key for key in "ABCDE" if f"options.{key}" in item["fields"] or any(image["slot"] == key for image in item["images"])]
     table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
     for column in table.columns:
@@ -837,10 +838,13 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
         borders.append(border)
     table._tbl.tblPr.append(borders)
     for index, letter in enumerate(letters):
-        paragraph = table.cell(index // columns, index % columns).paragraphs[0]
+        cell = table.cell(index // columns, index % columns)
+        paragraph = cell.paragraphs[0]
         _font(paragraph.add_run(letter + ". "), size)
-        _write_segments(paragraph, item["fields"][f"options.{letter}"][0]["segments"], size)
+        blocks = item["fields"].get(f"options.{letter}", [])
+        _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         paragraph.paragraph_format.line_spacing = LINE_SPACING
+        _write_images(cell, item, letter)
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
@@ -1062,7 +1066,7 @@ def _document(captured, title, options, mode):
                 paragraph.paragraph_format.space_after = Mm({"small": 12, "medium": 30, "large": 60}[answer_space])
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
-            if inline_answers:
+            if inline_answers and _has_selected_answers([item]):
                 # A long solution may cross pages; never keep it with the entire
                 # question or add student writing space to a teacher copy.
                 _write_solution(document, item, size, "【答案解析】" + ("（AI 参考 · 未核对）" if item["ai"] else ""))
@@ -1104,7 +1108,7 @@ def safe_filename(title):
     return value[:100]
 
 
-def export(payload):
+def export(payload, *, warnings=None):
     if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions"}:
         raise ExportError("导出请求包含不支持的字段")
     try:
@@ -1123,6 +1127,14 @@ def export(payload):
         raise ExportError("导出格式只能选 docx 或 split")
     captured, use_ai = _capture(ids, payload.get("rendered_fields"), options, output_format, solutions=payload.get("solutions"))
     name = safe_filename(title)
+    if warnings is not None and (options["document"] != "answers" or output_format == "split"):
+        numbered = [item for _, group in _ordered(captured) for item in group]
+        for number, item in enumerate(numbered, 1):
+            requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
+            wanted = 4 if requested == "four" else 2 if requested == "two" else 1
+            actual = _option_columns(item, options)
+            if wanted > actual and (item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"])):
+                warnings.append(f"第 {number} 题选项较宽，Word 已使用{'两列' if actual == 2 else '竖排'}，内容和配图完整保留。")
     if output_format == "split":
         questions = _document(captured, title, options, "questions")
         answers = _document(captured, title, options, "answers")
@@ -1152,7 +1164,8 @@ def export_docx_view(request):
         payload = _body(request, limit=MAX_BODY)
         if payload is None:
             raise ExportError("导出内容格式不正确或超过 2 MiB，请减少选题、分批导出", 413 if len(request.body) > MAX_BODY else 400)
-        data, filename, mime, count = export(payload)
+        warnings = []
+        data, filename, mime, count = export(payload, warnings=warnings)
     except RequestDataTooBig:
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
     except ExportError as error:
@@ -1161,4 +1174,7 @@ def export_docx_view(request):
     response["Content-Disposition"] = "attachment; filename=practice." + ("zip" if mime == "application/zip" else "docx") + "; filename*=UTF-8''" + quote(filename)
     response["X-Question-Count"] = str(count)
     response["Cache-Control"] = "no-store"
-    return response
+    if warnings:
+        response["X-QB-Layout-Warning"] = quote(" ".join(warnings), safe="")
+    from .export_preferences import deliver
+    return deliver(request, response, data, filename, count=count)

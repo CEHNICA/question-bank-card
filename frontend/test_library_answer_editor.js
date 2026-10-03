@@ -6,6 +6,7 @@ class Element {
   append(...children) { this.children.push(...children); for (const value of children) if (value && typeof value === "object") value.parentNode = this; }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(name, value) { this[name] = value; }
+  removeAttribute(name) { delete this[name]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
   async emit(name, event = {}) { await Promise.all((this.listeners[name] || []).map(fn => fn({ preventDefault() {}, stopPropagation() {}, ...event }))); }
   showModal() { this.open = true; }
@@ -27,13 +28,16 @@ const other = { id: "pub-2", number: 2, content: { stem: "问题二", answer: ""
 const requests = [], saved = [], notices = [], clipboardWrites = [], confirmations = [], timers = [];
 let clock = Date.now(), confirmDecision = true;
 class ControlledDate extends Date { static now() { return clock; } }
-let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done";
+let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done", apiConfigured = true, settingsGate = null;
+const paintFrames = [];
 const handoffText = '仅处理本批任务：job_id=job-wait, publication_id=pub-1, kind=answer, solution_scope=true。使用后端给出的真实本机CLI领取题面并逐题回写结果，不开启全局功能。检查初稿并保存后才用于出卷。';
 const root = { LibrarySolutions: require("./library-solutions.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout: (callback, delay) => { timers.push({ callback, delay }); return setTimeout(callback, delay); }, clearTimeout,
+  requestAnimationFrame: callback => { paintFrames.push(callback); },
   navigator: { clipboard: { writeText: async value => clipboardWrites.push(value) } },
   fetch: async (url, opts = {}) => {
     requests.push({ url, opts }); let body;
-    if (opts.method === "POST" && url === "/api/library/jobs") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, ["pub-1"]); assert.equal(payload.solution_scope, true); jobResult = { id: `job-${++jobNumber}`, publication_id: "pub-1", executor: jobMode === "api_running" ? "api" : "assistant", status: jobMode === "done" ? "done" : jobMode === "api_running" ? "running" : "queued", ...(jobMode === "done" ? { result: { answer: "AI结果", analysis: "AI详细步骤" } } : {}) }; body = { queued: 1, executor: jobResult.executor, jobs: [jobResult], assistant_handoff: jobResult.executor === "assistant" ? { text: handoffText, publication_ids: ["pub-1"] } : null }; }
+    if (url === "/api/settings/library-ai") { assert(!opts.method, "The answer editor must never alter shared model/tag settings"); const configured = apiConfigured; if (settingsGate) await settingsGate; body = { mode: "assistant", configured, api_ready: configured, features: { knowledge_tags: false, ai_answer: false } }; }
+    else if (opts.method === "POST" && url === "/api/library/jobs") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, ["pub-1"]); assert.equal(payload.solution_scope, true); assert.equal(payload.executor, "api"); assert(apiConfigured, "No job without a configured API"); jobResult = { id: `job-${++jobNumber}`, publication_id: "pub-1", executor: "api", status: jobMode === "done" ? "done" : jobMode === "api_running" ? "running" : "queued", ...(jobMode === "done" ? { result: { answer: "AI结果", analysis: "AI详细步骤" } } : {}) }; body = { queued: 1, executor: "api", jobs: [jobResult] }; }
     else if (opts.method === "POST" && url === "/api/library/jobs/cancel") { const payload = JSON.parse(opts.body); assert.deepEqual(payload.ids, [jobResult.id]); assert.equal(payload.solution_scope, true); jobResult = { ...jobResult, status: "failed", terminal_reason: "cancelled", cancelled: true }; body = { jobs: [jobResult], cancelled: 1 }; }
     else if (url.startsWith("/api/library/jobs?")) { body = { jobs: jobResult ? [jobResult] : [], assistant_handoff: { text: handoffText, publication_ids: ["pub-1"] } }; if (pollGate) await pollGate; }
     else if (opts.method === "POST" && url.endsWith("/solution")) {
@@ -53,6 +57,13 @@ const editor = root.LibraryAnswerEditor.create({ node, QB, notify: (...value) =>
 const settle = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };
 (async () => {
   await editor.open([original, other], { scope: "paper", focus: original.id, selected: [original.id] }); await settle();
+  const workspace = descend(document.body).find(element => element.className === "answer-editor-workspace");
+  assert.deepEqual(workspace.children.map(element => element.className), ["answer-editor-input-column", "answer-editor-preview-column"]);
+  assert(workspace.children[0].children.some(element => element.className === "answer-editor-fields"));
+  assert(workspace.children[1].children.some(element => element.className === "paper answer-editor-preview"));
+  assert.equal(byId("answerEditorCopyTask"), undefined); assert(!document.body.textContent.includes("复制助手任务说明"));
+  assert.equal(byId("answerEditorCheckAi").textContent, "刷新生成结果");
+  assert(byId("answerEditorCheckAi").title.includes("不会重新生成"));
   assert.equal(requests.filter(value => value.opts.method === "POST").length, 0, "Opening an editor never starts AI or saves anything");
   assert.equal(byId("answerEditorResult").value, "原卷结果");
   await byId("answerEditorAi").emit("click"); await settle();
@@ -109,29 +120,22 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   assert.equal(noBlurSave.figures[0].display_width, 50); assert.equal(noBlurSave.figures[0].paragraph, 1);
   await byText("返回").emit("click");
 
-  figureFixture = null; jobResult = null; jobMode = "assistant_waiting";
-  await editor.open([original, other], { scope: "paper", selected: [original.id] }); await settle();
-  await byId("answerEditorAi").emit("click"); await settle();
-  assert(document.body.textContent.includes("等待当前助手领取"), "Assistant jobs say they await pickup, never pretend an API is generating");
-  assert.equal(byId("answerEditorCopyTask").hidden, false);
-  await byId("answerEditorCopyTask").emit("click");
-  assert.equal(clipboardWrites.at(-1), handoffText);
-  const handoffRequest = requests.filter(value => value.url.startsWith("/api/library/jobs?")).at(-1);
-  assert.equal(new URL(handoffRequest.url, "http://test.invalid").searchParams.get("ids"), "pub-1", "Task instructions are requested only for selected jobs");
-  assert(!clipboardWrites.at(-1).includes("pub-2"));
-  const queuedPoll = timers.filter(value => value.callback.name === "pollJobs").at(-1);
-  assert.equal(queuedPoll.delay, 30000, "Unclaimed assistant tasks are checked at a low frequency");
+  figureFixture = null; apiConfigured = false;
+  jobResult = { id: "legacy-wait", publication_id: "pub-1", executor: "assistant", status: "queued" };
   const timerCount = timers.filter(value => value.callback.name === "pollJobs").length;
-  clock += 10 * 60 * 1000 + 1; await queuedPoll.callback(); await settle();
-  assert.equal(timers.filter(value => value.callback.name === "pollJobs").length, timerCount, "Background checks stop after a bounded watch session");
-  assert(document.body.textContent.includes("自动检查已暂停"));
-  await byId("answerEditorCheckAi").emit("click"); await settle();
-  assert(timers.filter(value => value.callback.name === "pollJobs").length > timerCount, "Manual checking can restart a watch session");
+  await editor.open([original, other], { scope: "paper", selected: [original.id] }); await settle();
+  const generationPosts = requests.filter(value => value.url === "/api/library/jobs" && value.opts.method === "POST").length;
+  assert.equal(byId("answerEditorAi").hidden, true); assert.equal(byId("answerEditorApiSettings").textContent, "配置答题助手 API");
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert.equal(requests.filter(value => value.url === "/api/library/jobs" && value.opts.method === "POST").length, generationPosts, "Missing API cannot fall back to the current desktop assistant");
+  assert.equal(timers.filter(value => value.callback.name === "pollJobs").length, timerCount, "Legacy assistant queues never start an endless background wait");
+  assert(!document.body.textContent.includes("等待当前助手")); assert.equal(clipboardWrites.length, 0);
   const handEdit = byId("answerEditorResult"); handEdit.value = "取消任务也保留此文字"; await handEdit.emit("input");
   confirmDecision = false; await byText("返回").emit("click"); assert.equal(editor.isOpen(), true); assert.equal(handEdit.value, "取消任务也保留此文字", "Declining return preserves unsaved edits"); confirmDecision = true;
   await byId("answerEditorCancelAi").emit("click"); await settle();
   assert(document.body.textContent.includes("已取消，勾选可重试")); assert.equal(handEdit.value, "取消任务也保留此文字");
   await byText("返回").emit("click");
+  apiConfigured = true;
 
   jobResult = null; aiFixture = { answer: "豆包既有结果", analysis: "豆包已给出的详细解析", fingerprint: "current-fingerprint" }; originFixture = { answer: "", analysis: "" };
   const aiSavedBefore = saved.length, aiPostsBefore = requests.filter(value => value.opts.method === "POST").length;
@@ -199,7 +203,17 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   jobResult = null; jobMode = "api_running";
   await editor.open([original], { selected: [original.id] }); await settle();
   await byId("answerEditorAi").emit("click"); await settle();
-  assert(document.body.textContent.includes("AI 正在解题")); assert.equal(byId("answerEditorCopyTask").hidden, true);
+  assert(document.body.textContent.includes("AI 正在解题")); assert.equal(byId("answerEditorCopyTask"), undefined);
+  const apiPoll = timers.filter(value => value.callback.name === "pollJobs").at(-1);
+  assert.equal(apiPoll.delay, 4000);
+  const beforeWatchPause = timers.filter(value => value.callback.name === "pollJobs").length;
+  clock += 10 * 60 * 1000 + 1; await apiPoll.callback(); await settle();
+  assert.equal(timers.filter(value => value.callback.name === "pollJobs").length, beforeWatchPause);
+  assert(document.body.textContent.includes("自动刷新已暂停"));
+  const beforeRefreshPosts = requests.filter(value => value.opts.method === "POST").length;
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert.equal(requests.filter(value => value.opts.method === "POST").length, beforeRefreshPosts, "Refresh is read-only, not a request to generate or modify tags/API settings");
+  assert(timers.filter(value => value.callback.name === "pollJobs").length > beforeWatchPause);
   jobResult = { ...jobResult, status: "failed", terminal_reason: "timed_out", timed_out: true, error: "执行超过时限" };
   await byId("answerEditorCheckAi").emit("click"); await settle();
   assert(document.body.textContent.includes("处理超时，勾选可重试")); assert(document.body.textContent.includes("执行超过时限"));
@@ -250,5 +264,39 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   assert.equal(byText("加入解析图").disabled, true, "A stale previous page cannot be cropped while the new page list is unresolved");
   releasePaper(); await reopenCrop; paperGate = null; await byText("返回").emit("click");
   const noticesBeforeImage = notices.length; await cropImage.emit("error"); assert.equal(notices.length, noticesBeforeImage, "A late image error cannot disturb the returned screen");
+  assert(cropImage.src, "Returning closes the UI before synchronously releasing the large image");
+  const paint = () => { const callbacks = paintFrames.splice(0); callbacks.forEach(callback => callback()); };
+  paint(); paint();
+  await editor.open([original]); await settle();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(byId("answerEditorResult").value, "原卷结果", "A deferred old-close cleanup cannot clear a quickly reopened editor");
+  await byText("返回").emit("click");
+  const preview = descend(document.body).find(element => element.className === "paper answer-editor-preview");
+  assert(preview.children.length > 0, "Rendered math is retained until the return screen can paint");
+  paint(); assert(preview.children.length > 0); paint();
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(preview.children.length, 0); assert.equal(cropImage.src, undefined, "Large hidden images release after both paint frames");
+
+  // An old settings request must not re-enable API generation on a later
+  // editor session whose configuration is missing.
+  let releaseSettings; apiConfigured = true;
+  settingsGate = new Promise(resolve => { releaseSettings = resolve; });
+  const oldSettingsOpen = editor.open([original], { selected: [original.id] }); await settle();
+  const oldSettingsRequest = requests.filter(value => value.url === "/api/settings/library-ai").at(-1);
+  await byText("返回").emit("click"); assert.equal(oldSettingsRequest.opts.signal.aborted, true);
+  settingsGate = null; apiConfigured = false;
+  await editor.open([original], { selected: [original.id] }); await settle();
+  releaseSettings(); await oldSettingsOpen; await settle();
+  assert.equal(byId("answerEditorAi").hidden, true, "Late old configuration cannot enable generation in a new session");
+  const missingPosts = requests.filter(value => value.opts.method === "POST").length;
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert.equal(requests.filter(value => value.opts.method === "POST").length, missingPosts);
+  apiConfigured = true;
+  await byId("answerEditorCheckAi").emit("click"); await settle();
+  assert.equal(byId("answerEditorAi").hidden, false, "Read-only refresh observes a newly configured API without changing shared assistant mode");
+  apiConfigured = false;
+  await byId("answerEditorAi").emit("click"); await settle();
+  assert.equal(requests.filter(value => value.opts.method === "POST").length, missingPosts, "Generation rechecks a configuration that was cleared after the button appeared");
+  await byText("返回").emit("click"); paint(); paint(); await new Promise(resolve => setTimeout(resolve, 5));
   console.log("Answer editor: explicit selected AI, direct unsaved drafts, failure preservation, source protection, scope and repeated-save guards: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

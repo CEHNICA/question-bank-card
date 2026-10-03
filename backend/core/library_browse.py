@@ -167,7 +167,7 @@ def library_list(request):
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS,
-        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message")},
+        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready")},
         "sort": sort, "limit": limit, "offset": offset,
         "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
     })

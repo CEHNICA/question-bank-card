@@ -647,6 +647,53 @@ class LibraryExportTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
 
+    def test_explicit_picture_columns_retain_all_labels_images_and_natural_width(self):
+        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True)
+        pub.content["figures"] = []
+        for index, key in enumerate("ABCD", 1):
+            target = folder / (f"figure-{index}.png")
+            Image.new("RGB", (200, 90), "red").save(target)
+            pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        for mode, columns in (("four", 4), ("two", 2), ("vertical", 0), ("auto", 0)):
+            with self.subTest(mode=mode):
+                response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": mode}))
+                self.assertEqual(response.status_code, 200, response.content[:100])
+                tree = document_xml(response.content)
+                table = tree.find(".//w:tbl", NS)
+                self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)) if table is not None else 0, columns)
+                self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
+                for letter in "ABCD":
+                    self.assertIn(letter + ".", "".join(tree.itertext()))
+                extents = tree.xpath("//*[local-name()='extent' and namespace-uri()='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")
+                self.assertTrue(all(abs(int(width) / 36000 - 200 * 25.4 / 150) < .01 for width in extents))
+
+        # A wide image downgrades the requested grid and is never shrunk just
+        # to preserve the number of columns. The transport explains the change.
+        Image.new("RGB", (600, 90), "red").save(folder / "figure-1.png")
+        response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four"}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
+        self.assertIn("X-QB-Layout-Warning", response)
+
+    def test_inline_missing_solution_does_not_emit_a_separate_placeholder(self):
+        complete = self.publication(answer="2", analysis="有答案的过程")
+        missing = self.publication(stem="末尾无解答题干")
+        payload = self.payload([complete, missing], print_options={"document": "combined", "answer_layout": "inline"})
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200)
+        text = "".join(document_xml(response.content).itertext())
+        self.assertIn("末尾无解答题干", text)
+        self.assertIn("有答案的过程", text)
+        self.assertNotIn("未提供", text)
+        # The numbered answer sheet continues to identify missing solutions.
+        response = self.post(self.payload([complete, missing], print_options={"document": "answers"}))
+        text = "".join(document_xml(response.content).itertext())
+        self.assertIn("未提供", text)
+
     def test_change_during_build_never_returns_an_old_or_partial_file(self):
         pub = self.publication(answer="原答案")
         original = export._document

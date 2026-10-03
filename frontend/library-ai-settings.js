@@ -11,9 +11,10 @@
   const fields = ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
     "libraryAIModel", "libraryAIImages", "libraryAIThinking", "libraryAIKey", "libraryAIClearKey"];
   let dialog;
+  let revealEpoch = 0, revealController = null, revealTimer = null, revealedStored = false, revealing = false;
   const $ = (id) => document.getElementById(id);
 
-  const isAPI = () => $("libraryAIMode").value === "api";
+  const isAPI = () => true;
   const isActive = () => state.inline ? state.active : Boolean(dialog?.open);
 
   function create(host) {
@@ -59,6 +60,8 @@
       .library-ai-panel .library-ai-api-fields .library-ai-switch{border:0;padding:4px 0}
       .library-ai-help>summary{cursor:pointer;font-size:13px;color:var(--muted)}
       .library-ai-help p{margin-top:8px}
+      .library-ai-key{display:flex;gap:8px;align-items:center}.library-ai-key input{min-width:0;flex:1}
+      .library-ai-key .button{flex:none;padding:9px 12px;min-height:38px}.library-ai-key svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
       @media(max-width:480px){.library-ai-body{padding:12px}.library-ai-actions{padding:12px}.library-ai-dialog .dialog-head{padding:14px}}
     `;
     document.head.append(style);
@@ -79,14 +82,10 @@
             <label class="library-ai-switch"><input id="libraryAIAnswer" type="checkbox"><span><strong>补充 AI 参考答案</strong><small>原卷无答案时补充解答，保存为“AI 参考 · 未核对”。</small></span></label>
             <label id="libraryAIAnswerTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAIAnswerIntake" type="checkbox"><span>新题入库时生成参考答案</span></label>
           </section>
-          <section class="library-ai-section" aria-label="生成方式">
-            <label for="libraryAIMode"><strong>由谁生成</strong></label>
-            <select id="libraryAIMode"><option value="assistant">当前 AI 助手（默认）</option><option value="api">独立模型 API</option></select>
+          <section class="library-ai-section" aria-label="生成方式" hidden>
+            <input id="libraryAIMode" type="hidden" value="api">
           </section>
-          <section id="libraryAIAssistantHelp" class="library-ai-section" aria-label="当前 AI 助手处理">
-            <p>由正在帮你操作的豆包或其他助手完成并交回，无需填写豆包 API。</p>
-            <details class="library-ai-help"><summary>助手如何处理待办？</summary><p>新题入库时生成会创建待办。当前助手需支持本机工具，并实际领取任务、生成结果、写回题库；网页按钮不会自动唤醒桌面豆包。</p></details>
-          </section>
+          <section id="libraryAIAssistantHelp" class="library-ai-section" hidden></section>
           <details id="libraryAIAdvanced" class="library-ai-advanced">
             <summary>独立模型配置 · DeepSeek、MiniMax、豆包及其他模型</summary>
             <section class="library-ai-section" aria-label="可选处理方式">
@@ -98,7 +97,10 @@
                 <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>仅在服务商确认支持时开启；纯文本模型不会跳过配图处理含图题。</small></span></label>
                 <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
-                <label for="libraryAIKey">API Key / MiniMax 订阅 Key · 已保存的密钥不会回显</label><input id="libraryAIKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore="true" placeholder="留空保留当前服务商的密钥" spellcheck="false">
+                <label for="libraryAIKey">API Key / MiniMax 订阅 Key</label>
+                <div class="library-ai-key"><input id="libraryAIKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore="true" placeholder="留空保留当前服务商的密钥" spellcheck="false">
+                  <button id="libraryAIKeyReveal" class="button" type="button" aria-label="查看密钥" title="查看密钥" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div><p id="libraryAIKeyHelp">默认隐藏。点击眼睛可临时查看，收起后恢复隐藏。</p>
                 <label class="library-ai-switch"><input id="libraryAIClearKey" type="checkbox"><span>清除已保存的 API Key</span></label>
                 <p>密钥用当前 Windows 用户加密保存。保存不联网；更换服务商后请使用对应的密钥。</p>
                 <strong>先确认能力，再生成</strong><p>保存后，用软件自带的合成题测试连接与响应；开启图像时还会测试合成图，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生费用或消耗订阅额度。</p>
@@ -114,8 +116,10 @@
     $("libraryAISettingsForm").addEventListener("submit", (event) => { event.preventDefault(); void save(); });
     for (const id of fields) {
       const changed = () => {
+        if (id === "libraryAIKey" && revealing) hideKey();
         state.dirty = true;
         if (id === "libraryAIClearKey") {
+          hideKey();
           $("libraryAIKey").disabled = $(id).checked;
           if ($(id).checked) { $("libraryAIKey").value = ""; state.needsKeyReplacement = false; }
         }
@@ -141,6 +145,7 @@
       if (["libraryAIMode", "libraryAIProvider"].includes(id)) $(id).addEventListener("change", changed);
     }
     $("libraryAITestConsent").addEventListener("change", updateButtons);
+    $("libraryAIKeyReveal").addEventListener("click", () => { void toggleKey(); });
     $("libraryAITest").addEventListener("click", () => { void test(); });
     $("libraryAICancel").addEventListener("click", close);
     $("libraryAIClose").addEventListener("click", close);
@@ -149,6 +154,7 @@
   }
 
   function clearSecret() {
+    hideKey();
     state.needsKeyReplacement = false;
     $("libraryAIKey").value = "";
     $("libraryAIClearKey").checked = false;
@@ -158,10 +164,61 @@
 
   function renderMode() {
     $("libraryAIAPIFields").hidden = !isAPI();
-    $("libraryAIAssistantHelp").hidden = isAPI();
+    $("libraryAIAssistantHelp").hidden = true;
     $("libraryAIAdvanced").hidden = !isAPI();
     if (isAPI()) $("libraryAIAdvanced").open = true;
-    $("libraryAISave").textContent = isAPI() ? "加密保存设置" : "保存设置";
+    $("libraryAISave").textContent = "保存 API 设置";
+  }
+
+  function hideKey() {
+    ++revealEpoch;
+    revealController?.abort(); revealController = null;
+    if (revealTimer !== null) clearTimeout(revealTimer);
+    revealTimer = null; revealing = false;
+    const input = $("libraryAIKey");
+    if (!input) return;
+    if (revealedStored) input.value = "";
+    revealedStored = false; input.readOnly = false; input.type = "password";
+    const button = $("libraryAIKeyReveal");
+    if (button) { button.setAttribute("aria-pressed", "false"); button.setAttribute("aria-label", "查看密钥"); button.title = "查看密钥"; }
+    if ($("libraryAIKeyHelp")) $("libraryAIKeyHelp").textContent = "默认隐藏。点击眼睛可临时查看，收起后恢复隐藏。";
+  }
+
+  function showKey(stored) {
+    revealedStored = stored;
+    $("libraryAIKey").readOnly = stored;
+    $("libraryAIKey").type = "text";
+    $("libraryAIKeyReveal").setAttribute("aria-pressed", "true");
+    $("libraryAIKeyReveal").setAttribute("aria-label", "隐藏密钥");
+    $("libraryAIKeyReveal").title = "隐藏密钥";
+    $("libraryAIKeyHelp").textContent = stored ? "正在查看已保存的密钥。收起后可填写新密钥；查看不会修改设置。" : "正在查看新填写的密钥，保存后会清空显示。";
+    revealTimer = setTimeout(() => { hideKey(); updateButtons(); }, 60000);
+  }
+
+  async function toggleKey() {
+    if (state.busy || !state.current || $("libraryAIClearKey").checked) return;
+    if (revealing || $("libraryAIKey").type === "text") { hideKey(); updateButtons(); return; }
+    if ($("libraryAIKey").value) { showKey(false); return; }
+    const provider = $("libraryAIProvider").value;
+    if (provider !== state.current.provider || !state.current.key_configured) return;
+    const epoch = ++revealEpoch, session = state.session;
+    const controller = new AbortController(); revealController = controller; revealing = true;
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    $("libraryAIKeyHelp").textContent = "正在读取密钥…再点眼睛可取消。";
+    try {
+      const response = await fetch(`${API}/key/reveal`, { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ provider }), cache: "no-store", signal: controller.signal });
+      const body = await response.json();
+      if (epoch !== revealEpoch || session !== state.session || !isActive() || provider !== $("libraryAIProvider").value) return;
+      if (!response.ok || body.provider !== provider || typeof body.key !== "string" || !body.key) throw new Error("无法查看密钥，请重新读取设置后重试。");
+      $("libraryAIKey").value = body.key;
+      showKey(true);
+    } catch (error) {
+      if (epoch === revealEpoch && session === state.session && isActive()) $("libraryAIKeyHelp").textContent = error.name === "AbortError" ? "读取已取消，可再次点击眼睛查看。" : "无法查看密钥，请重新读取设置后重试。";
+    } finally {
+      clearTimeout(timeout);
+      if (epoch === revealEpoch) { revealController = null; revealing = false; updateButtons(); }
+    }
   }
 
   function renderTiming() {
@@ -194,6 +251,8 @@
     $("libraryAIAnswerIntake").disabled = state.busy || !state.current || !$("libraryAIAnswer").checked;
     $("libraryAITestConsent").disabled = state.busy || !state.current || !isAPI();
     $("libraryAIKey").disabled = state.busy || !state.current || $("libraryAIClearKey").checked;
+    $("libraryAIKeyReveal").disabled = state.busy || !state.current || $("libraryAIClearKey").checked ||
+      (!revealing && !$("libraryAIKey").value && (!state.current?.key_configured || $("libraryAIProvider").value !== state.current?.provider));
     renderCapabilities();
     if (state.inline) {
       $("libraryAICancel").disabled = state.busy;
@@ -202,9 +261,12 @@
   }
 
   async function request(url, payload) {
-    const response = await fetch(url, payload === undefined ? {} : {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), url.endsWith("/test") ? 420000 : 15000);
+    try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal, ...(payload === undefined ? {} : {
       method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify(payload)
-    });
+    }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || "设置未完成，请重试。");
     if (!body || !["assistant", "api"].includes(body.mode) || !Object.hasOwn(defaults, body.provider)
@@ -216,6 +278,10 @@
       throw new Error("设置状态读取不完整，请重新读取设置后再试。");
     }
     return body;
+    } catch (error) {
+      if (error.name === "AbortError") throw new Error(payload === undefined ? "读取超时，请重新读取设置。" : "操作结果尚未确认，请稍后重新读取设置；不会自动重试或再次测试。");
+      throw error;
+    } finally { clearTimeout(timeout); }
   }
 
   function render(body) {
@@ -226,7 +292,7 @@
     $("libraryAITagsIntake").checked = body.on_intake.tags;
     $("libraryAIAnswerIntake").checked = body.on_intake.answer;
     renderTiming();
-    $("libraryAIMode").value = body.mode;
+    $("libraryAIMode").value = "api";
     $("libraryAIProvider").value = body.provider;
     $("libraryAIBaseURL").value = body.base_url || "";
     $("libraryAIModel").value = body.model || "";
@@ -234,9 +300,8 @@
     $("libraryAIThinking").checked = body.thinking !== false;
     $("libraryAIAdvanced").open = body.mode === "api" || $("libraryAIAdvanced").open;
     renderMode();
-    $("libraryAIState").textContent = body.mode === "assistant" ? "当前 AI 助手处理 · 无需额外豆包 API" :
-      body.message || (body.ready ? "独立 API 已通过测试，结果仍需核对。" : "请在下方配置并显式测试独立 API。");
-    $("libraryAIState").classList.toggle("error", body.mode === "api" && !body.ready);
+    $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "请为答题助手配置 API，保存并测试后再生成。";
+    $("libraryAIState").classList.toggle("error", !body.api_ready);
   }
 
   async function open() {
@@ -263,7 +328,7 @@
     $("libraryAITagsTiming").hidden = true;
     $("libraryAIAnswerTiming").hidden = true;
     $("libraryAIAPIFields").hidden = true;
-    $("libraryAIAssistantHelp").hidden = false;
+    $("libraryAIAssistantHelp").hidden = true;
     $("libraryAIResult").textContent = "";
     $("libraryAIState").textContent = "正在读取本机设置…";
     updateButtons();
@@ -304,17 +369,18 @@
       return;
     }
     const session = state.session;
-    const payload = { mode: $("libraryAIMode").value,
+    const payload = { mode: "api",
       features: { knowledge_tags: $("libraryAITags").checked, ai_answer: $("libraryAIAnswer").checked },
       on_intake: { tags: $("libraryAITagsIntake").checked, answer: $("libraryAIAnswerIntake").checked } };
     let key, failedKeyAction;
     if (isAPI()) {
-      const value = $("libraryAIKey").value.trim();
+      const value = revealedStored ? "" : $("libraryAIKey").value.trim();
       key = $("libraryAIClearKey").checked ? { action: "clear" } : value ? { action: "replace", value } : { action: "keep" };
       Object.assign(payload, { provider: $("libraryAIProvider").value, base_url: $("libraryAIBaseURL").value.trim(),
         model: $("libraryAIModel").value.trim(), supports_images: $("libraryAIImages").checked,
         thinking: $("libraryAIThinking").checked, reasoning_effort: "high", key });
     }
+    hideKey();
     state.busy = true; updateButtons();
     $("libraryAIResult").textContent = payload.mode === "api" ? "正在加密保存…" : "正在保存设置…";
     try {
@@ -362,10 +428,13 @@
   window.LibraryAISettings = Object.freeze({ open, mount, discard,
     hasUnsavedChanges: () => state.dirty, isBusy: () => state.busy });
   window.addEventListener("beforeunload", (event) => {
+    hideKey();
     if (!state.inline || !isActive() || (!state.dirty && !state.busy)) return;
     event.preventDefault();
     event.returnValue = "";
   });
+  window.addEventListener("hashchange", () => { if (state.inline && window.location.hash !== "#ai") { hideKey(); updateButtons(); } });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { hideKey(); if (dialog) updateButtons(); } });
   document.addEventListener("click", (event) => {
     if (event.target.closest?.("[data-library-ai-settings]")) { event.preventDefault(); void open(); }
   });

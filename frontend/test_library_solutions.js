@@ -44,8 +44,8 @@ assert.equal(S.payload(smallValue).figures[0].display_width, 5, "Saving/export d
 assert.equal(S.figuresOf({ figures: [{ id: "default" }] })[0].display_width, 20);
 assert.equal(S.figuresOf({ figures: [{ id: "rounded", display_width: 164.59199999999998 }] })[0].display_width, 164.59);
 assert.equal(S.payload({ figures: [{ id: "rounded", display_width: 164.59199999999998 }] }).figures[0].display_width, 164.59, "UI and saved widths share at most two decimals");
-assert.equal(S.jobLabel({ executor: "assistant", status: "queued" }), "等待当前助手领取");
-assert.equal(S.jobLabel({ executor: "assistant", status: "running" }), "当前助手正在处理");
+assert.equal(S.jobLabel({ executor: "assistant", status: "queued" }), "保留旧生成任务，未自动重新提交");
+assert.equal(S.jobLabel({ executor: "assistant", status: "running" }), "保留旧生成任务，未自动重新提交");
 assert.equal(S.jobLabel({ executor: "api", status: "queued" }), "AI 任务排队中");
 assert.equal(S.jobLabel({ executor: "api", status: "running" }), "AI 正在解题");
 assert.equal(S.jobLabel({ status: "failed", terminal_reason: "cancelled" }), "已取消，勾选可重试");

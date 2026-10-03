@@ -247,13 +247,25 @@ def ensure_ready(kind: str | None = None) -> dict:
     return result
 
 
-def execution_snapshot() -> dict:
+def ensure_api_ready() -> dict:
+    """An explicitly selected answer job uses the API without changing settings."""
+    result = public_status()
+    if result.get("api_ready") is not True:
+        raise ServiceError(UNAVAILABLE)
+    return {**result, "mode": "api"}
+
+
+def execution_snapshot(*, explicit_api: bool = False) -> dict:
     config = _load()
-    return {key: config.get(key) for key in ("mode", *API_FIELDS, "revision", "key_revision")}
+    snapshot = {key: config.get(key) for key in ("mode", *API_FIELDS, "revision", "key_revision")}
+    if explicit_api:
+        snapshot.update(mode="api", explicit_api=True)
+    return snapshot
 
 
 def require_snapshot(snapshot: dict) -> None:
-    if not snapshot or snapshot != execution_snapshot() or snapshot.get("mode") != "api":
+    explicit = isinstance(snapshot, dict) and snapshot.get("explicit_api") is True
+    if not snapshot or snapshot != execution_snapshot(explicit_api=explicit) or snapshot.get("mode") != "api":
         raise ServiceError("执行方式或 API 设置已变化，旧 API 任务未执行/写回；请重新排队。")
 
 
@@ -307,10 +319,10 @@ def _needs_reasoning_evidence(config: dict) -> bool:
     return config["thinking"] and config["provider"] != "minimax"
 
 
-def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None) -> tuple[str, dict]:
+def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None, explicit_api=False) -> tuple[str, dict]:
     if image_urls and not config["supports_images"]:
         raise ServiceError("这道题有配图，所选 API 未声明支持图片；已暂停，改用当前助手或明确支持图文的模型。")
-    if config["mode"] != "api" or not _same_configuration(config, _load()) or _load()["mode"] != "api":
+    if not _same_configuration(config, _load()) or (not explicit_api and (config["mode"] != "api" or _load()["mode"] != "api")):
         raise ServiceError("请求前执行方式或 API 设置已变化，旧任务未发起。")
     if kind:
         ensure_ready(kind)
@@ -362,21 +374,26 @@ def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, 
         raise ConnectionError("独立 API 没有返回完整可用的答案，未保存结果。") from None
 
 
-def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 12000) -> tuple[str, str]:
-    ensure_ready(kind)
+def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 12000, explicit_api=False) -> tuple[str, str]:
+    if explicit_api and kind is not None:
+        raise ServiceError("本次 API 执行仅适用于明确选择的答案解析任务。")
+    ensure_api_ready() if explicit_api else ensure_ready(kind)
     config = _load()
-    if config["mode"] != "api":
+    if not explicit_api and config["mode"] != "api":
         raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
     try:
-        text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
+        if explicit_api:
+            text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind, explicit_api=True)
+        else:
+            text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
         if _needs_reasoning_evidence(config) and not evidence["thinking"]:
             raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")
     except ConnectionError:
         _mark_unverified(config)
         raise
-    if not _same_configuration(config, _load()) or _load()["mode"] != "api":
+    if not _same_configuration(config, _load()) or (not explicit_api and _load()["mode"] != "api"):
         raise ServiceError("生成期间执行方式或 API 设置已变化，旧结果未保存。")
-    ensure_ready(kind)
+    ensure_api_ready() if explicit_api else ensure_ready(kind)
     return text, f"{config['provider']} API · {evidence['model']}"
 
 

@@ -59,7 +59,7 @@
       <div class="settings-nav" role="tablist" aria-label="设置分区">
         <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">读题服务</button>
         <button type="button" role="tab" data-settings-tab="settingsAI" aria-selected="false">标签与答案</button>
-        <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">题面与显示</button>
+        <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">显示与导出</button>
         <button type="button" role="tab" data-settings-tab="settingsReview" aria-selected="false">帮助</button>
         <button type="button" role="tab" data-settings-tab="settingsAbout" aria-selected="false">关于</button>
       </div>
@@ -136,6 +136,7 @@
           <div id="libraryAISettingsMount"></div>
         </div>
         <div id="settingsDisplay" class="settings-page" role="tabpanel" hidden>
+          <div id="exportSettingsMount"></div>
           <section id="settingsFeatures" class="settings-section" aria-labelledby="settingsFeaturesTitle">
             <h3 id="settingsFeaturesTitle">题面整理</h3>
             <p class="settings-footnote">整理显示方式，不改原卷。</p>
@@ -173,12 +174,12 @@
               <dl class="explain-list">
                 <div><dt>看原卷</dt><dd>题卡截图、查看整份原卷、正式题库的查看出处，都支持 Ctrl＋滚轮缩放和左键拖动。画框编辑时，改用空格＋左键或中键拖动画布。</dd></div>
                 <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
-                <div><dt>切题后 AI 识读</dt><dd>点两次固定题目范围，按 Enter 保存下一题，只保存范围。点“完成切题”或按 Ctrl+Enter 后自动识读已保存的题目，文字显示在原图旁，再核对文字和配图并审核。没有读题服务时保留原图，可设置服务后重试，也可直接原图审核。</dd></div>
+                <div><dt>切题后 AI 识读</dt><dd>点两次固定题目范围，按 S 保存下一题，只保存范围。点“完成切题”或按 Ctrl+S 后自动识读已保存的题目；Enter / Ctrl+Enter 也可使用。文字显示在原图旁，再核对文字和配图并审核。没有读题服务时保留原图，可设置服务后重试，也可直接原图审核。</dd></div>
                 <div><dt>框选识读纠错</dt><dd>文字题可从“更多 → 框选识读（纠错）”进入，只读需要纠正的一小块。自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
                 <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
                 <div><dt>快速找题和选题</dt><dd>正式题库先显示完整段落或公式摘要；点“完整题目”查看所有条件、选项和配图。可勾选当前已显示的题批量加入试题篮；换来源、筛选或翻页后，篮中的题会保留。</dd></div>
                 <div><dt>继续上次组卷</dt><dd>在组卷预览里填写标题、点“保存草稿”。下次从“组卷草稿”继续；已撤回或更新的题会提示处理，不会自动换题或漏印。</dd></div>
-                <div><dt>标签和参考答案</dt><dd>所有页面共用“设置 → 标签与答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，或在正式题库单题、勾选批量生成。默认由当前 AI 助手生成并写回，安装桌面豆包不代表已对接。独立模型可选；答案始终标为“AI 参考 · 未核对”。</dd></div>
+                <div><dt>标签和参考答案</dt><dd>在“设置 → 标签与答案”配置并测试独立 API。两项全局开关默认关闭、默认手动；开启后可在题库单题、批量或入库时生成。答案解析窗口也可仅勾选本次需要补充的题，不改变全局开关；初稿检查并保存后用于出卷，原卷答案保留。AI 答案始终标为“AI 参考 · 未核对”。</dd></div>
               </dl>
             </details>
           </section>
@@ -427,8 +428,8 @@
           </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
-        <button id="pageDialogSaveNext" class="button primary" type="button" aria-keyshortcuts="Enter" hidden>保存下一题<span class="kbd-hint">Enter</span></button>
-        <button id="pageDialogComplete" class="button" type="button" aria-keyshortcuts="Control+Enter" hidden>完成切题<span class="kbd-hint">Ctrl+Enter</span></button>
+        <button id="pageDialogSaveNext" class="button primary" type="button" aria-keyshortcuts="S Enter" hidden>保存下一题<span class="kbd-hint">S</span></button>
+        <button id="pageDialogComplete" class="button" type="button" aria-keyshortcuts="Control+S Control+Enter" hidden>完成切题<span class="kbd-hint">Ctrl+S</span></button>
         <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
     </div>
@@ -452,7 +453,8 @@
       <details class="page-shortcuts">
         <summary>快捷键</summary>
         <div class="page-shortcuts-panel">
-          <p><kbd>Enter</kbd> 保存下一题 · <kbd>Ctrl+Enter</kbd> 完成切题 / 保存</p>
+          <p>手工切题：<kbd>S</kbd> 保存下一题 · <kbd>Ctrl+S</kbd> 完成切题</p>
+          <p><kbd>Enter</kbd> / <kbd>Ctrl+Enter</kbd> 仍可切下一题 / 完成切题；调整范围、配图和框选识读用 <kbd>Ctrl+Enter</kbd> 保存</p>
           <p><kbd>Ctrl+Z</kbd> 撤销 · <kbd>Ctrl+Shift+Z</kbd> 重做</p>
           <p><kbd>PageUp</kbd> 上一页 · <kbd>PageDown</kbd> 下一页</p>
           <p><kbd>Esc</kbd> 取消新框 / 返回 · <kbd>Delete</kbd> 删除选中框</p>
@@ -821,6 +823,7 @@
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
+  <script src="/static/export-settings.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

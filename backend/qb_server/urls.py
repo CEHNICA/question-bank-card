@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, api_key_reveal, export_preferences
 
 urlpatterns = [
     path("", views.index_page),
@@ -13,9 +13,11 @@ urlpatterns = [
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),
     path("library-question-editor.js", views.library_question_editor_script),
+    path("library-question-viewer.js", views.library_question_viewer_script),
     path("exam-export.js", views.exam_export_script),
     path("exam-layout.js", views.exam_layout_script),
     path("static/library-ai-settings.js", views.library_ai_script),
+    path("static/export-settings.js", views.export_settings_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
     path("favicon.png", views.favicon),
@@ -27,6 +29,9 @@ urlpatterns = [
     path("api/settings/features", views.feature_settings),
     path("api/settings/library-ai", views.library_ai_settings_view),
     path("api/settings/library-ai/test", views.library_ai_test_view),
+    path("api/settings/library-ai/key/reveal", api_key_reveal.reveal_view),
+    path("api/export-preferences", export_preferences.preferences_view),
+    path("api/export-preferences/open", export_preferences.open_export_view),
     path("api/papers", views.papers),
     path("api/demo", views.demo_paper),
     path("api/papers/<uuid:paper_id>", views.paper_detail),

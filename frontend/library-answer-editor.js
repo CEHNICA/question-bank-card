@@ -5,7 +5,8 @@
     const S = root.LibrarySolutions;
     let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map();
     let token = 0, epoch = 0, loading = false, saving = false, uploading = false, queueing = false, cancelling = false, polling = false, closing = false;
-    let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), handoff = null, watchedSince = 0, queueNote = "";
+    let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
+    let apiSettings = null, checkingApi = false, apiSettingsError = "";
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
     const jobsSucceeded = new Set(["done", "completed", "succeeded", "success"]);
@@ -36,6 +37,10 @@
       for (const [controller, request] of requests) if (!request.keepAfterClose) controller.abort();
     }
     function schedulePreview() { root.clearTimeout(previewTimer); previewTimer = root.setTimeout(() => { if (dialog?.open && current) renderPreview(); }, 120); }
+    function afterPaint(callback) {
+      if (root.requestAnimationFrame) root.requestAnimationFrame(() => root.requestAnimationFrame(() => root.setTimeout(callback, 0)));
+      else root.setTimeout(callback, 0);
+    }
     const itemLabel = item => `第 ${item.exam_number || item.number} 题`;
     const endpoint = item => `/api/library/${encodeURIComponent(item.id)}/solution`;
     function init() {
@@ -50,21 +55,20 @@
       head.append(heading, close);
       const main = node("div", "answer-editor-layout");
       const nav = node("aside", "answer-editor-nav");
-      const navHint = node("p", "helper", "勾选要交给 AI 补充的题，点题号手工编辑。");
+      const navHint = node("p", "helper", "点题号编辑答案解析；需要生成时，只勾选本次要处理的题。");
       const pickMissing = node("button", "button button-small", "勾选缺解析的题"); pickMissing.type = "button";
-      pickMissing.addEventListener("click", () => { selection = new Set(items.filter(item => S.completeness(item) !== "ready").map(item => item.id)); showHandoff(null); renderList(); });
+      pickMissing.addEventListener("click", () => { selection = new Set(items.filter(item => S.completeness(item) !== "ready").map(item => item.id)); renderList(); });
       const ai = node("button", "button button-primary button-small", "AI 补充所选题"); ai.type = "button"; ai.id = "answerEditorAi"; ai.addEventListener("click", queueSelected);
       const list = node("div", "answer-editor-list"); list.setAttribute("aria-label", "本次题目与 AI 选择");
       const aiStatus = node("p", "helper answer-ai-status"); aiStatus.setAttribute("role", "status"); aiStatus.setAttribute("aria-live", "polite");
       const aiTools = node("div", "answer-ai-tools");
-      const copyTask = node("button", "button button-small", "复制助手任务说明"); copyTask.type = "button"; copyTask.id = "answerEditorCopyTask"; copyTask.hidden = true; copyTask.addEventListener("click", copyHandoff);
-      const checkAi = node("button", "button button-small", "检查初稿"); checkAi.type = "button"; checkAi.id = "answerEditorCheckAi"; checkAi.addEventListener("click", () => { watchedSince = Date.now(); void pollJobs(); });
+      const checkAi = node("button", "button button-small", "刷新生成结果"); checkAi.type = "button"; checkAi.id = "answerEditorCheckAi"; checkAi.addEventListener("click", refreshAiResults);
+      checkAi.title = "查询本次生成的进度和结果，不会重新生成、核对答案或覆盖正在编辑的文字。";
       const cancelAi = node("button", "button button-quiet button-small", "取消所选任务"); cancelAi.type = "button"; cancelAi.id = "answerEditorCancelAi"; cancelAi.addEventListener("click", cancelSelected);
-      aiTools.append(copyTask, checkAi, cancelAi);
-      const taskDetails = node("details", "answer-task-details"); taskDetails.hidden = true; taskDetails.append(node("summary", "", "助手任务说明"));
-      const taskText = node("textarea"); taskText.readOnly = true; taskText.rows = 8; taskText.setAttribute("aria-label", "复制给当前助手的任务说明"); taskDetails.append(taskText);
-      const settings = node("a", "helper", "设置解题模型"); settings.href = "/settings#ai"; settings.target = "_blank";
-      nav.append(navHint, pickMissing, ai, aiStatus, aiTools, taskDetails, settings, list);
+      aiTools.append(checkAi, cancelAi);
+      const settings = node("a", "button button-small answer-api-settings", "配置答题助手 API"); settings.id = "answerEditorApiSettings"; settings.href = "/settings#ai"; settings.target = "_blank"; settings.rel = "noopener";
+      const apiNote = node("p", "helper answer-api-note"); apiNote.id = "answerEditorApiNote";
+      nav.append(navHint, pickMissing, ai, aiStatus, aiTools, settings, apiNote, list);
       const panel = node("section", "answer-editor-panel");
       const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const question = node("details", "answer-question"); question.append(node("summary", "", "查看本题"));
@@ -101,7 +105,7 @@
       cropImage.addEventListener("error", () => { if (!dialog.open || crop.hidden) return; cropImage.dataset.ready = "false"; clearCrop(); notify("这页原卷暂时无法显示，请换页重试，或上传、粘贴解析图。", "error"); });
       const cropBox = node("div", "answer-crop-box"); cropBox.hidden = true;
       cropSurface.append(cropImage, cropBox); cropScroll.append(cropSurface, cropHint); crop.append(cropBar, cropScroll);
-      const previewTitle = node("h4", "", "保存后的显示效果"); const preview = node("div", "paper answer-editor-preview");
+      const previewTitle = node("h4", "", "实时预览"); const preview = node("div", "paper answer-editor-preview");
       const aiDraft = node("details", "answer-ai-draft"); aiDraft.hidden = true; aiDraft.append(node("summary", "", "AI 初稿（当前编辑内容已保留）")); const aiPreview = node("div", "paper"); aiDraft.append(aiPreview);
       const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷答案解析与历史")); const originBody = node("div", "paper");
       origin.addEventListener("toggle", () => { if (origin.open && current) S.render(originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" }); });
@@ -118,9 +122,15 @@
       syncLabel.append(sync, document.createTextNode("同时保存到题库"));
       const save = node("button", "button button-primary", "保存答案解析"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
       footer.append(syncLabel, save);
-      panel.append(status, question, fields, imageTools, figures, crop, aiDraft, previewTitle, preview, origin, footer);
+      const workspace = node("div", "answer-editor-workspace");
+      const inputColumn = node("div", "answer-editor-input-column"), previewColumn = node("section", "answer-editor-preview-column");
+      previewColumn.setAttribute("aria-label", "答案解析实时预览");
+      inputColumn.append(fields, imageTools, figures, crop);
+      previewColumn.append(previewTitle, node("p", "helper", "公式与配图随输入更新。保存后用于出卷。"), preview, aiDraft);
+      workspace.append(inputColumn, previewColumn);
+      panel.append(status, question, workspace, origin, footer);
       main.append(nav, panel); dialog.append(head, main); document.body.append(dialog);
-      controls = { subtitle, nav, list, ai, aiStatus, copyTask, checkAi, cancelAi, taskDetails, taskText, status, question, questionBody, answer, analysis, figures, preview, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, settings, apiNote, status, question, questionBody, answer, analysis, figures, preview, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
       dialog.addEventListener("paste", event => {
         const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
@@ -149,25 +159,30 @@
       const busy = loading || saving || uploading;
       controls.save.disabled = busy || !current || pendingSaves.has(current?.item.id); controls.answer.disabled = busy; controls.analysis.disabled = busy;
       controls.sync.disabled = busy || scope === "library"; controls.upload.disabled = busy; controls.cropToggle.disabled = busy || !current?.item.document_id;
-      controls.ai.disabled = busy || queueing || !selection.size;
-      controls.checkAi.disabled = polling; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
-      controls.copyTask.hidden = !selectedActiveJobs().some(job => job.executor === "assistant");
+      const ready = apiSettings?.api_ready === true;
+      controls.ai.hidden = controls.pickMissing.hidden = !ready;
+      controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
+      controls.checkAi.disabled = polling || checkingApi; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
+      controls.cancelAi.hidden = !selectedActiveJobs().length;
+      controls.settings.textContent = ready ? "答题 API 设置" : "配置答题助手 API";
+      controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : ready ? "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。" : apiSettingsError || "尚未配置并测试答题 API。可先手工编辑，或前往设置配置；返回后点“刷新生成结果”。";
+      for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
       controls.history.disabled = busy;
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
     }
     function selectedActiveJobs() { return [...jobs.values()].filter(job => selection.has(job.publication_id || job.publication) && jobsPending.has(job.status)); }
-    function isDirty() { return Boolean(current && (current.dirty || S.signature(current.value) !== current.saved)); }
+    function isDirty() { return Boolean(current?.dirty); }
     function remember() { if (current) drafts.set(current.item.id, current); }
     async function open(supplied, options = {}) {
-      init(); ++token; ++epoch; stopWaiting(); current = null; drafts = new Map(); jobs = new Map(); requestedIds = new Set(); handoff = null; watchedSince = Date.now(); queueNote = "";
+      init(); ++token; ++epoch; stopWaiting(); current = null; drafts = new Map(); jobs = new Map(); requestedIds = new Set(); watchedSince = Date.now(); queueNote = "";
+      apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
-      controls.copyTask.hidden = controls.taskDetails.hidden = true; controls.taskText.value = "";
       items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null; selection = new Set((options.selected || []).filter(id => items.some(item => item.id === id)));
       controls.subtitle.textContent = scope === "library" ? "保存到题库供以后使用，原卷答案保留。" : "保存后用于当前组卷；勾选后也可同步到题库。";
-      controls.aiStatus.textContent = "AI 仅处理这里勾选的题，不改变全局自动生成开关。";
+      controls.aiStatus.textContent = "刷新只查询生成进度和结果；初稿保存后才用于出卷。";
       returnFocus = document.activeElement; if (!dialog.open) dialog.showModal(); renderList();
       const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
-      if (item) await choose(item);
+      await Promise.all([readApiSettings(), item ? choose(item) : Promise.resolve()]);
     }
     async function choose(item) {
       if (saving || uploading) { notify("请等待当前保存或上传完成"); return; }
@@ -179,7 +194,8 @@
           const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
           const body = await api(endpoint(item) + query);
           const initial = S.editorInitial(item, body);
-          record = { item, ...initial, loaded: S.signature(initial.value), dirty: false, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], aiJob: null };
+          const loaded = S.signature(initial.value);
+          record = { item, ...initial, loaded, dirty: loaded !== initial.saved, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], aiJob: null };
         }
         if (requestToken !== token || !dialog.open) return;
         current = record; renderFields(); renderList();
@@ -194,7 +210,7 @@
       items.forEach(item => {
         const row = node("div", `answer-list-row${current?.item.id === item.id ? " active" : ""}`);
         const box = node("input"); box.type = "checkbox"; box.checked = selection.has(item.id); box.setAttribute("aria-label", `AI 补充${itemLabel(item)}`);
-        box.addEventListener("change", () => { if (box.checked) selection.add(item.id); else selection.delete(item.id); showHandoff(null); setBusy(); });
+        box.addEventListener("change", () => { if (box.checked) selection.add(item.id); else selection.delete(item.id); setBusy(); });
         const button = node("button", "answer-list-question"); button.type = "button";
         const record = current?.item.id === item.id ? current : drafts.get(item.id);
         const quality = record ? S.completeness({ solution: record.value }) : S.completeness(item); const labels = { missing: "缺答案解析", result_only: "只有结果，待补过程", ready: "已有解析" };
@@ -342,42 +358,48 @@
       } catch (error) { if (requestToken === token && dialog.open) { notify(error.message, "error"); controls.cropSave.disabled = false; } }
       finally { if (requestEpoch === epoch) { uploading = false; setBusy(); } }
     }
+    async function readApiSettings() {
+      const session = epoch; checkingApi = true; setBusy();
+      try {
+        const value = await api("/api/settings/library-ai");
+        if (session !== epoch || !dialog.open) return false;
+        apiSettings = value; apiSettingsError = ""; return value.api_ready === true;
+      } catch (error) {
+        if (session === epoch && dialog.open) { apiSettings = null; apiSettingsError = "未能读取答题 API 设置，请刷新或前往设置检查。"; }
+        return false;
+      } finally { if (session === epoch) { checkingApi = false; setBusy(); } }
+    }
+    async function refreshAiResults() {
+      if (!dialog?.open || polling || checkingApi) return;
+      const session = epoch; watchedSince = Date.now();
+      await readApiSettings();
+      if (session === epoch && dialog.open) await pollJobs();
+    }
     async function queueSelected() {
-      if (!selection.size || saving || loading || uploading || queueing) return;
+      if (!selection.size || saving || loading || uploading || queueing || checkingApi) return;
       const ids = items.filter(item => selection.has(item.id)).map(item => item.id), requestEpoch = epoch;
-      ids.forEach(id => requestedIds.add(id));
       queueing = true;
       controls.ai.disabled = true;
       try {
-        const body = await post("/api/library/jobs", { kind: "answer", ids, solution_scope: true });
+        // Revalidate API availability immediately before this explicit batch.
+        // The scoped executor never changes the shared tag/answer settings.
+        if (!await readApiSettings()) {
+          if (requestEpoch === epoch && dialog.open) controls.aiStatus.textContent = "请先配置并测试答题助手 API，再生成所选题。当前编辑与已保存解析保留。";
+          return;
+        }
         if (requestEpoch !== epoch || !dialog.open) return;
+        const body = await post("/api/library/jobs", { kind: "answer", ids, solution_scope: true, executor: "api" });
+        if (requestEpoch !== epoch || !dialog.open) return;
+        ids.forEach(id => requestedIds.add(id));
         for (const job of body.jobs || []) jobs.set(job.publication_id || job.publication, job);
-        handoff = body.assistant_handoff || null; watchedSince = Date.now();
+        watchedSince = Date.now();
         queueNote = body.skipped ? `${body.skipped} 题未加入任务，请检查该题是否仍在正式题库。` : "";
-        showHandoff(handoff);
-        controls.aiStatus.textContent = body.executor === "assistant" ? "等待当前助手处理。点“复制助手任务说明”，粘贴给豆包或当前 AI 助手；收到初稿后检查并保存，才会用于出卷。" : `已提交所选 ${ids.length} 题，初稿完成后显示在编辑区。检查并保存后才用于出卷。`;
+        if (body.executor && body.executor !== "api") throw new Error("本次没有进入答题 API 生成，请刷新设置后重试；未改变已有编辑。");
+        controls.aiStatus.textContent = `已提交所选 ${ids.length} 题给答题 API，初稿完成后显示在编辑区。保存后才用于出卷。`;
         renderList();
         void pollJobs();
       } catch (error) { if (requestEpoch === epoch && dialog.open) { notify(error.message, "error"); controls.aiStatus.textContent = error.message; } }
       finally { if (requestEpoch === epoch) { queueing = false; setBusy(); } }
-    }
-    function showHandoff(value) {
-      handoff = value?.text ? value : null;
-      controls.taskText.value = handoff?.text || ""; controls.taskDetails.hidden = !handoff;
-    }
-    async function copyHandoff() {
-      const ids = [...new Set(selectedActiveJobs().filter(job => job.executor === "assistant").map(job => job.publication_id || job.publication))];
-      if (!ids.length) return;
-      const session = epoch;
-      try {
-        // Ask for only the selected publications, never hand off unselected jobs.
-        const body = await api(`/api/library/jobs?ids=${encodeURIComponent(ids.join(","))}&solution_scope=true`);
-        if (session !== epoch || !dialog.open) return;
-        showHandoff(body.assistant_handoff);
-        if (!handoff) throw new Error("暂时没有可交给助手的任务说明，请检查初稿或重新提交所选题。");
-        try { await root.navigator.clipboard.writeText(handoff.text); if (session === epoch && dialog.open) controls.aiStatus.textContent = "任务说明已复制。粘贴给当前助手，完成后回到这里检查初稿并保存。"; }
-        catch { if (session !== epoch || !dialog.open) return; controls.taskDetails.open = true; controls.taskText.focus(); controls.taskText.select(); controls.aiStatus.textContent = "请复制下方完整任务说明，粘贴给当前助手。"; }
-      } catch (error) { if (session === epoch && dialog.open) { controls.aiStatus.textContent = error.message; notify(error.message, "error"); } }
     }
     async function cancelSelected() {
       const active = selectedActiveJobs(); if (!active.length || cancelling) return;
@@ -389,20 +411,20 @@
         if (session !== epoch || !dialog.open) return;
         for (const job of body.jobs || []) jobs.set(job.publication_id || job.publication, job);
         controls.aiStatus.textContent = `已取消 ${body.cancelled || 0} 个任务。编辑内容保留，需要时重新勾选并提交。`;
-        showHandoff(null); renderList(); void pollJobs();
+        renderList(); void pollJobs();
       } catch (error) { if (session === epoch && dialog.open) controls.aiStatus.textContent = error.message; }
       finally { if (session === epoch) { cancelling = false; setBusy(); } }
     }
     function showJobSummary() {
-      const values = [...jobs.values()]; if (!values.length) { controls.aiStatus.textContent = requestedIds.size ? "暂未查到这批任务的状态。点“检查初稿”重新查询，当前编辑内容保留。" : "勾选后可让 AI 补充。使用当前助手时，请复制任务说明交给助手；初稿保存后才出卷。"; return; }
-      const waiting = values.filter(job => job.executor === "assistant" && jobsPending.has(job.status) && job.status !== "running").length;
-      const running = values.filter(job => jobsPending.has(job.status) && (job.executor !== "assistant" || job.status === "running")).length;
+      const values = [...jobs.values()]; if (!values.length) { controls.aiStatus.textContent = requestedIds.size ? "暂未查到这批任务的状态。点“刷新生成结果”重新查询，当前编辑内容保留。" : "刷新只查询生成进度和结果，不会重新生成或覆盖编辑内容。初稿保存后才用于出卷。"; return; }
+      const running = values.filter(job => job.executor === "api" && jobsPending.has(job.status)).length;
       const finished = values.filter(job => job.result && jobsSucceeded.has(job.status));
       const states = finished.map(job => { const id = job.publication_id || job.publication; return jobDraftState(job, current?.item.id === id ? current : drafts.get(id), items.find(item => item.id === id)); });
       const unsaved = states.filter(state => state === "draft").length, saved = states.filter(state => state === "saved").length, retained = states.filter(state => state === "retained").length;
       const failed = values.filter(job => job.status === "failed" || ["cancelled", "timed_out"].includes(job.status));
       const messages = [];
-      if (waiting) messages.push(`${waiting} 题等待当前助手领取：复制任务说明后粘贴给豆包或当前助手`);
+      const legacyActive = values.filter(job => job.executor === "assistant" && jobsPending.has(job.status)).length;
+      if (legacyActive) messages.push(`${legacyActive} 题保留旧生成任务，未自动重新提交`);
       if (running) messages.push(`${running} 题正在排队或处理，可取消所选任务`);
       if (unsaved) messages.push(`${unsaved} 题初稿已到，检查并保存后才出卷`);
       if (saved) messages.push(`${saved} 题初稿已保存，可用于出卷`);
@@ -430,7 +452,7 @@
           if (job.result && record && record.aiJob !== job.id && jobsSucceeded.has(job.status)) {
             record.aiJob = job.id;
             if (jobDraftState(job, record) === "saved") { record.suggestion = null; if (current === record) controls.aiDraft.hidden = true; }
-            else if (requestedIds.has(id) && !record.hasSavedSolution && !record.dirty && S.signature(record.value) === record.loaded) {
+            else if (requestedIds.has(id) && !record.hasSavedSolution && !record.dirty) {
               record.value.answer = String(job.result.answer ?? ""); record.value.analysis = String(job.result.analysis ?? ""); record.dirty = true;
               record.ai_fields = ["answer", "analysis"]; record.ai_stale = false;
               if (current === record) { renderFields(); controls.status.textContent = "AI 初稿已显示，请检查后保存。"; }
@@ -438,9 +460,9 @@
           }
         }
         jobs = fresh; renderList(); showJobSummary();
-        const active = [...jobs.values()].filter(job => jobsPending.has(job.status));
-        if (active.length && Date.now() - watchedSince < MAX_WATCH) pollTimer = root.setTimeout(pollJobs, active.some(job => job.executor !== "assistant" || job.status === "running") ? 4000 : 30000);
-        else if (active.length) controls.aiStatus.textContent += " 自动检查已暂停，点“检查初稿”可继续；页面不会替助手生成答案。";
+        const active = [...jobs.values()].filter(job => job.executor === "api" && jobsPending.has(job.status));
+        if (active.length && Date.now() - watchedSince < MAX_WATCH) pollTimer = root.setTimeout(pollJobs, 4000);
+        else if (active.length) controls.aiStatus.textContent += " 自动刷新已暂停，点“刷新生成结果”可继续查询。";
       } catch (error) { if (dialog.open && session === epoch) { controls.aiStatus.textContent = `${error.message}。本地编辑内容保留，稍后重新勾选可重试。`; } }
       finally { if (session === epoch) { polling = false; setBusy(); if (pollAgain && dialog.open) { pollAgain = false; void pollJobs(); } } }
     }
@@ -448,15 +470,26 @@
       if (closing || !dialog.open) return;
       closing = true; const session = epoch, hasPendingSave = saving;
       remember();
-      const dirty = [...drafts.values()].some(record => record.dirty || S.signature(record.value) !== record.saved);
+      const dirty = [...drafts.values()].some(record => record.dirty);
       if ((dirty || hasPendingSave) && !await confirm({ title: hasPendingSave ? "返回并继续核对保存结果？" : "返回并保留已保存的解析？", text: hasPendingSave ? "保存请求已发出，返回不会撤销保存。收到结果后会提示是否保存成功；其他未保存的编辑不会用于出卷。" : "未保存的编辑内容不会用于出卷。要继续修改，请取消返回。", ok: "返回" })) { if (session === epoch) closing = false; return; }
       if (session !== epoch || !dialog.open) return;
-      ++token; ++epoch; stopWaiting(); dialog.close(); clearCrop(); controls.crop.hidden = true; controls.cropImage.dataset.ready = "false"; controls.cropImage.removeAttribute?.("src"); loading = saving = uploading = queueing = cancelling = polling = closing = false;
+      ++token; const closedEpoch = ++epoch; stopWaiting(); dialog.close();
+      cropStart = cropRange = null; controls.cropImage.dataset.ready = "false";
+      loading = saving = uploading = queueing = cancelling = polling = closing = checkingApi = false;
       if (hasPendingSave && pendingSaves.size) notify("已返回，仍在核对刚才的保存结果。请留意保存成功或未完成的提示。");
-      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+      const focus = returnFocus;
+      // Release large crops and rendered math only after the returned screen
+      // can paint. A fast reopen owns the same controls and cancels old cleanup.
+      afterPaint(() => {
+        if (dialog.open || closedEpoch !== epoch) return;
+        clearCrop(); controls.crop.hidden = true; controls.cropImage.removeAttribute?.("src");
+        for (const container of [controls.preview, controls.figures, controls.questionBody, controls.aiPreview, controls.originBody]) container.replaceChildren();
+        current = null; drafts.clear();
+        if (focus?.isConnected) focus.focus({ preventScroll: true });
+      });
     }
     root.addEventListener?.("beforeunload", event => {
-      if (!pendingSaves.size && (!dialog?.open || (!saving && !uploading && !isDirty() && ![...drafts.values()].some(record => record.dirty || S.signature(record.value) !== record.saved)))) return;
+      if (!pendingSaves.size && (!dialog?.open || (!saving && !uploading && !isDirty() && ![...drafts.values()].some(record => record.dirty)))) return;
       event.preventDefault(); event.returnValue = "";
     });
     return Object.freeze({ open, isOpen: () => Boolean(dialog?.open) });

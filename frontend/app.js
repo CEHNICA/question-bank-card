@@ -551,7 +551,7 @@ const QBTeach = (() => {
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
-      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可用“手工切题”从原卷框选保存。MinerU 解析一直没结果时，可点处理状态下的“改为手工切题”，保留原卷和已切出的题，直接开始手工框题。单击两角固定范围，按 Enter 保存下一题，按 Ctrl+Enter 完成切题并自动 AI 识读；文字显示在原图旁，再核对文字、配图并审核入库。没有读题服务时原图仍保留。遇到问题打开“设置 → 帮助”。" }
+      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可用“手工切题”从原卷框选保存。MinerU 解析一直没结果时，可点处理状态下的“改为手工切题”，保留原卷和已切出的题，直接开始手工框题。单击两角固定范围，按 S 保存下一题，按 Ctrl+S 完成切题并自动 AI 识读；Enter / Ctrl+Enter 也可继续使用。文字显示在原图旁，再核对文字、配图并审核入库。没有读题服务时原图仍保留。遇到问题打开“设置 → 帮助”。" }
   ].map((lesson, index) => ({ ...lesson, section: index <= 6 ? "basic" : "review" }));
 
   const OLD_KEYS = ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"];
@@ -856,13 +856,16 @@ const QBManualCrop = (() => {
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (event.altKey) return null;
     if (modified) {
+      if (key === "s" && !event.shiftKey && !event.repeat && context.mode === "new"
+        && context.canvasFocused && !context.practiceRead) return "complete";
       if (key === "Enter" && !event.repeat && !context.practiceRead && context.mode !== "view") {
         return context.mode === "new" ? "complete" : "save";
       }
       if (key === "z" && ["new", "regions"].includes(context.mode)) return event.shiftKey ? "redo" : "undo";
       return null;
     }
-    if (key === "Enter" && context.mode === "new" && context.canvasFocused && !event.repeat) return "next";
+    if ((key === "Enter" || (key === "s" && !event.shiftKey)) && context.mode === "new"
+      && context.canvasFocused && !event.repeat && !context.practiceRead) return "next";
     if (key === "PageUp") return "previous-page";
     if (key === "PageDown") return "next-page";
     if (key === " ") return "pan";
@@ -1089,10 +1092,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
     const link = event.target.closest?.("a[href]");
     if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
-      || link.hasAttribute("download") || (link.target && link.target !== "_self")
-      || !(editGuard.hasPendingWork() || window.location.pathname === "/settings")) return;
+      || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
     const url = new URL(link.href, window.location.href);
     const here = new URL(window.location.href);
+    if (url.origin === here.origin && url.pathname === here.pathname && link.closest(".topnav") && link.getAttribute("aria-current") === "page") { event.preventDefault(); return; }
+    if (!(editGuard.hasPendingWork() || window.location.pathname === "/settings")) return;
     if (url.origin === here.origin && url.pathname === here.pathname && url.search === here.search && url.hash) return;
     event.preventDefault();
     leaveFor(url.href);
@@ -5688,10 +5692,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogSave").classList.toggle("primary", dialog.mode !== "new");
     $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : "保存";
     $("pageDialogSave").title = "保存当前改动（Ctrl+Enter）";
-    $("pageDialogSaveNext").replaceChildren(document.createTextNode("保存下一题"), el("span", "kbd-hint", "Enter"));
-    $("pageDialogComplete").replaceChildren(document.createTextNode("完成切题"), el("span", "kbd-hint", "Ctrl+Enter"));
+    $("pageDialogSaveNext").replaceChildren(document.createTextNode("保存下一题"), el("span", "kbd-hint", "S"));
+    $("pageDialogSaveNext").title = "保存下一题（S，也支持 Enter；仅画布中生效）";
+    $("pageDialogComplete").replaceChildren(document.createTextNode("完成切题"), el("span", "kbd-hint", "Ctrl+S"));
     $("pageDialogClose").textContent = dialog.mode === "view" ? "关闭" : dialog.mode === "new" ? "返回" : "取消";
-    $("pageDialogComplete").title = "结束切题，自动识读已保存的题目；空白下一题不会新建题目";
+    $("pageDialogComplete").title = "完成切题（Ctrl+S，也支持 Ctrl+Enter），自动识读已保存的题目；空白下一题不会新建题目";
     $("readTargetField").hidden = dialog.mode !== "read";
     $("numberField").hidden = dialog.mode !== "new";
     $("cropTypeField").hidden = dialog.mode !== "new";
@@ -5784,7 +5789,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         : mode === "read"
           ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
           : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
-            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段。点两次固定范围，按 Enter 保存并切下一题；完成切题后自动识读已保存的题目。空白下一题可以直接完成。";
+            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段。点两次固定范围，按 S 保存下一题，Ctrl+S 完成切题；Enter / Ctrl+Enter 也可使用。完成后自动识读已保存的题目。空白下一题可以直接完成。";
     // The offline practice can demonstrate drawing and the real target picker,
     // but must not dispatch recognition or invent an AI recommendation.
     dialog.practiceRead = mode === "read" && Boolean(state.paper.demo);
@@ -5916,7 +5921,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         : dialog.mode === "figures"
           ? "单击两角画框 · 双击下一图左上角复制框尺寸 · Esc 取消新框 · Ctrl+滚轮缩放"
           : dialog.mode === "new"
-            ? "单击两角画框 · Enter 保存下一题 · Ctrl+Enter 完成切题 · 空格+拖动平移"
+            ? "单击两角画框 · S 保存下一题 · Ctrl+S 完成切题 · 空格+拖动平移"
             : dialog.mode === "regions" ? "单击两角画框 · Ctrl+Enter 保存 · 空格+拖动平移"
             : "左键画框 · 空格+左键或中键拖画布 · Ctrl+滚轮缩放";
   }
@@ -7059,15 +7064,27 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("pageDialogSaveNext").addEventListener("click", () => savePageCrop({ next: true }));
   $("pageDialogComplete").addEventListener("click", () => savePageCrop({ complete: true }));
   $("pageDialog").addEventListener("keydown", (event) => {
-    const action = QBManualCrop.cropShortcutAction(event, {
+    const shortcutContext = {
       open: $("pageDialog").open, mode: dialog.mode, practiceRead: dialog.practiceRead,
       saving: dialog.saving, closing: dialog.closing,
       otherDialog: Boolean(document.querySelector('dialog[open]:not(#pageDialog)')), menuOpen: menuIsOpen(),
       editing: QBUpload.isEditingTarget(event.target), onControl: Boolean(event.target.closest?.("button, a, summary")),
       canvasFocused: Boolean(event.target.closest?.("#pageStage"))
-    });
-    if (!action) return;
+    };
+    const action = QBManualCrop.cropShortcutAction(event, shortcutContext);
+    if (!action) {
+      // Ctrl+S is an app operation in the cutting window. A blocked save
+      // (typing, unfinished operation, control focus) must not open the
+      // browser's Save Page dialog instead. Composition remains untouched.
+      if (shortcutContext.open && shortcutContext.mode === "new" && !shortcutContext.otherDialog
+        && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229
+        && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
+        event.preventDefault(); event.stopPropagation?.();
+      }
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation?.();
     if (action === "next") void savePageCrop({ next: true });
     else if (action === "complete") void savePageCrop({ complete: true });
     else if (action === "save") void savePageCrop();
@@ -8392,6 +8409,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();
       if (window.LibraryAISettings?.mount) await window.LibraryAISettings.mount($("libraryAISettingsMount"));
+      if (window.ExportSettings?.mount) await window.ExportSettings.mount($("exportSettingsMount"));
       return;
     }
     await loadPapers();

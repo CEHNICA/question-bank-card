@@ -165,12 +165,30 @@
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
       const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");
-      const response = await root.fetch(format === "pdf" ? "/api/library/export-pdf" : "/api/library/export-docx", { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body });
+      const headers = { "Content-Type": "application/json", "X-QB-Request": "1" };
+      // A machine preference is deliberately separate from this paper/draft.
+      // Browser-only servers and an unavailable settings endpoint still return
+      // the normal attachment; no client path is sent to the export builder.
+      try {
+        const preferences = await root.fetch("/api/export-preferences", { headers: { "X-QB-Request": "1" }, cache: "no-store" });
+        const value = preferences.ok ? await preferences.json() : null;
+        if (value?.desktop_capable === true && typeof value.directory === "string" && value.directory) headers["X-QB-Export-Delivery"] = "configured";
+      } catch { /* An ordinary download remains available. */ }
+      const response = await root.fetch(format === "pdf" ? "/api/library/export-pdf" : "/api/library/export-docx", { method: "POST", headers, body });
       if (!response.ok) {
         let detail; try { detail = await response.json(); } catch { /* Keep the local error. */ }
         throw new Error(detail?.error || `${format === "pdf" ? "PDF" : "Word"} 未能导出，请稍后重试。`);
       }
       const mime = response.headers.get("Content-Type")?.split(";", 1)[0].trim();
+      if (mime === "application/json") {
+        const receipt = await response.json();
+        if (receipt?.saved !== true || receipt.question_count !== items.length
+            || Number(response.headers.get("X-Question-Count")) !== items.length
+            || typeof receipt.filename !== "string" || !receipt.filename
+            || typeof receipt.path !== "string" || typeof receipt.directory !== "string"
+            || typeof receipt.file_token !== "string" || !/^[A-Za-z0-9_-]{20,80}$/.test(receipt.file_token)) throw new Error("导出保存记录不完整，请在导出目录中确认文件。");
+        return receipt;
+      }
       const expected = format === "pdf" ? "application/pdf" : format === "split" ? "application/zip" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (mime !== expected || Number(response.headers.get("X-Question-Count")) !== items.length) throw new Error("导出文件或题目数量有出入，未下载不完整的试卷。");
       const blob = await response.blob();
@@ -181,7 +199,9 @@
       link.href = url; link.download = filename; link.hidden = true;
       root.document.body.append(link);
       try { link.click(); } finally { link.remove(); root.setTimeout(() => root.URL.revokeObjectURL(url), 60000); }
-      return { filename, question_count: items.length };
+      let warning = [response.headers.get("X-QB-Layout-Warning"), response.headers.get("X-QB-Export-Warning")].filter(Boolean).join(" ");
+      try { warning = decodeURIComponent(warning); } catch { warning = "导出设置有调整，请检查下载的完整试卷。"; }
+      return { filename, question_count: items.length, ...(warning ? { warning } : {}) };
     } finally { downloading = false; }
   }
 

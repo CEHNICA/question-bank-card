@@ -87,3 +87,21 @@ assert.equal(list.dataset.examColumns, "1");
 assert.equal(list.style.gridTemplateColumns, "repeat(1, minmax(0, 1fr))");
 assert.deepEqual(list.children.map(option => option.label), ["A", "B", "C", "D", "E"]);
 console.log("Explicit vertical option layout preserves all option nodes: OK");
+
+// A preview/PDF fit is based on the final field width, clears a stale screen
+// size, and reports an unfit formula instead of silently shrinking below 12px.
+const fitted=[];
+function formula(width, fieldWidth, fontSize) {
+  const math={dataset:{},style:{removeProperty:()=>{},setProperty:(key,value)=>fitted.push([key,value])}};
+  const html={children:[{getBoundingClientRect:()=>({width})}]};
+  const span={querySelector:selector=>selector===".katex"?math:null,closest:()=>({clientWidth:fieldWidth})};
+  math.querySelector=()=>html;
+  const root={ownerDocument:{defaultView:{getComputedStyle:()=>({fontSize:String(fontSize)})}},querySelectorAll:selector=>selector===".katex"?[math]:[span]};
+  return {root,math};
+}
+let sample=formula(700,674,18);
+assert.equal(layout.fitFormulas(sample.root),0);assert.equal(fitted.at(-1)[0],"--print-math-size");
+assert(Math.abs(parseFloat(fitted.at(-1)[1])-18*668/700)<.0001);
+sample=formula(1800,674,18);assert.equal(layout.fitFormulas(sample.root),1);assert.equal(sample.math.dataset.examMathOverflow,"1");
+sample=formula(100,674,18);assert.equal(layout.fitFormulas(sample.root),0);
+console.log("Shared A4 formula fit retains readable minimum width and reports overflow: OK");

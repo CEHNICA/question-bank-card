@@ -134,6 +134,30 @@
     }
     return result;
   }
+  // Apply the same formula fit to the final A4 width in preview and PDF.
+  // Screen-only preprocessing used to alter the preview clone while the PDF
+  // retained the original size, changing line breaks and sometimes pagination.
+  function fitFormulas(root) {
+    let overflow = 0;
+    root.querySelectorAll(".katex").forEach(math => {
+      math.style.removeProperty("--print-math-size");
+      delete math.dataset.examMathOverflow;
+    });
+    root.querySelectorAll(".qb-math").forEach(span => {
+      const math = span.querySelector(".katex"), html = math?.querySelector(".katex-html");
+      if (!html) return;
+      const field = span.closest(".qb-stem-body, .qb-option-body, .qb-analysis, .print-answer-row > div") || span.parentElement;
+      const available = field.clientWidth - 6;
+      const widest = Math.max(0, ...Array.from(html.children, base => base.getBoundingClientRect().width));
+      if (!available || widest <= available + 1) return;
+      const size = parseFloat((root.ownerDocument?.defaultView || globalThis).getComputedStyle(math).fontSize);
+      const fitted = size * available / widest;
+      if (Number.isFinite(fitted) && fitted >= 12) math.style.setProperty("--print-math-size", `${fitted}px`);
+      else { math.dataset.examMathOverflow = "1"; overflow += 1; }
+    });
+    return overflow;
+  }
+
   async function paginate(source, supplied = {}) {
     if (!source?.ownerDocument || !supplied.host) throw new Error("缺少 A4 排版容器");
     const options = normalize(supplied), host = supplied.host, doc = source.ownerDocument;
@@ -163,6 +187,8 @@
         alignQuestionNumber(question);
         fitOptions(question, options, warnings);
       });
+      const formulaOverflow = fitFormulas(work);
+      if (formulaOverflow) warnings.push(`${formulaOverflow} 处公式超出 A4 正文，请调整字号或导出 Word 继续排版。`);
       work.querySelectorAll("table").forEach((table, index) => { table.dataset.examTable = String(index); });
       // Strip tools from measurements; preview actions are overlaid afterwards.
       const probe = element(doc, "div", "exam-layout-probe"); measure.append(probe);
@@ -238,7 +264,7 @@
       host.replaceChildren(...pages);
       host.dataset.pageCount = String(pages.length);
       scale(host);
-      return { page_count: pages.length, pages, warnings: [...new Set(warnings)] };
+      return { page_count: pages.length, pages, warnings: [...new Set(warnings)], formula_overflow: formulaOverflow };
     } finally { measure.remove(); }
   }
   function scale(host) {
@@ -246,9 +272,20 @@
     const factor = Math.min(1, available / PAGE_WIDTH);
     host.style.setProperty("--exam-scale", String(factor));
     host.querySelectorAll(".exam-page").forEach(page => {
-      page.style.zoom = String(factor);
+      // CSS zoom recalculates glyph advances and line boxes, so a scaled
+      // preview can wrap differently from the full-size PDF. Transform keeps
+      // the exact A4 layout; a frame reserves only its visible dimensions.
+      let frame = page.parentElement;
+      if (!frame?.classList.contains("exam-page-frame")) {
+        frame = element(page.ownerDocument, "div", "exam-page-frame");
+        page.before(frame); frame.append(page);
+      }
+      frame.style.width = `${PAGE_WIDTH * factor}px`;
+      frame.style.height = `${297 * MM * factor}px`;
+      page.style.zoom = "1";
+      page.style.transform = `scale(${factor})`;
     });
     return factor;
   }
-  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
+  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, fitFormulas, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
 });

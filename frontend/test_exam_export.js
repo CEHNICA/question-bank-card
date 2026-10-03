@@ -64,7 +64,10 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
   const response = (changes = {}, data = new Uint8Array([80, 75, 3, 4, 0])) => new Response(data, { headers: {
     "Content-Type": mime, "X-Question-Count": "1", "Content-Disposition": "attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.docx", ...changes
   } });
-  global.fetch = async (url, request) => { requests.push({ url, request }); return response(); };
+  const attachmentOnly = fn => (url, request) => url === "/api/export-preferences"
+    ? Promise.resolve(new Response(JSON.stringify({ directory: "", desktop_capable: false }), { headers: { "Content-Type": "application/json" } }))
+    : fn(url, request);
+  global.fetch = attachmentOnly(async (url, request) => { requests.push({ url, request }); return response(); });
   const result = await Export.download([item], { title: "数学", print_options: { document: "questions", answer_layout: "inline" }, solutions: { [item.id]: "origin", removed: "obsolete-revision" } });
   assert.deepEqual(result, { filename: "数学.docx", question_count: 1 });
   assert.equal(requests[0].url, "/api/library/export-docx");
@@ -82,7 +85,7 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
     [response({ "Content-Type": "text/html" }), /导出文件/],
     [response({}, new Uint8Array([1, 2, 3, 4])), /不完整/]
   ]) {
-    global.fetch = async () => reply;
+    global.fetch = attachmentOnly(async () => reply);
     await assert.rejects(Export.download([item], { print_options: { document: "questions" } }), message);
     assert.equal(links.length, 1);
   }
@@ -91,16 +94,16 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
 
   // A second click is blocked while the original immutable request is in flight.
   let resolveReply;
-  global.fetch = () => new Promise(resolve => { resolveReply = resolve; });
+  global.fetch = attachmentOnly(() => new Promise(resolve => { resolveReply = resolve; }));
   const first = Export.download([item], { print_options: { document: "questions" } });
   while (!resolveReply) await new Promise(resolve => realTimeout(resolve, 1));
   await assert.rejects(Export.download([item], { print_options: { document: "questions" } }), /正在导出/);
   resolveReply(response()); await first;
   assert.equal(links.length, 2);
-  global.fetch = async (url, request) => {
+  global.fetch = attachmentOnly(async (url, request) => {
     requests.push({url,request});
     return response({"Content-Type":"application/pdf","Content-Disposition":"attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.pdf"},new TextEncoder().encode("%PDF-1.7\nsynthetic\n%%EOF"));
-  };
+  });
   const pdf = await Export.download([item], {title:"数学",format:"pdf",print_options:{document:"questions",pagination:"compact",option_layout:"vertical",option_overrides:{[item.id]:"vertical",removed:"two"},answer_space:"small",answer_space_overrides:{[item.id]:"large",removed:"medium",invalid:"custom"}}});
   assert.deepEqual(pdf,{filename:"数学.pdf",question_count:1});
   assert.equal(requests.at(-1).url,"/api/library/export-pdf");
@@ -112,8 +115,29 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
   assert.deepEqual(pdfBody.print_options.answer_space_overrides,{[item.id]:"large"});
   assert.equal(Object.hasOwn(pdfBody,"html"),false);
   const previous=links.length;
-  global.fetch=async()=>response({"Content-Type":"application/pdf"});
+  global.fetch=attachmentOnly(async()=>response({"Content-Type":"application/pdf"}));
   await assert.rejects(Export.download([item],{format:"pdf",print_options:{document:"questions"}}),/不完整/);
   assert.equal(links.length,previous);
+  // Desktop receipts must be complete, and must not also download a second
+  // copy; a folder failure instead downloads the very same validated bytes.
+  const nativeReceipt={saved:true,filename:"数学 (2).pdf",path:"C:\\exports\\数学 (2).pdf",directory:"C:\\exports",question_count:1,file_token:"a".repeat(32)};
+  let nativeHeader;
+  const nativeFetch=(fn)=>async(url,request)=>url==="/api/export-preferences"
+    ?new Response(JSON.stringify({directory:"C:\\exports",desktop_capable:true}),{headers:{"Content-Type":"application/json"}})
+    :fn(url,request);
+  global.fetch=nativeFetch(async(url,request)=>{
+    nativeHeader=request.headers["X-QB-Export-Delivery"];
+    return new Response(JSON.stringify(nativeReceipt),{headers:{"Content-Type":"application/json","X-Question-Count":"1"}});
+  });
+  assert.deepEqual(await Export.download([item],{format:"pdf",print_options:{document:"questions"}}),nativeReceipt);
+  assert.equal(nativeHeader,"configured");assert.equal(links.length,previous);
+  global.fetch=nativeFetch(async()=>new Response(JSON.stringify({...nativeReceipt,question_count:0}),{headers:{"Content-Type":"application/json","X-Question-Count":"1"}}));
+  await assert.rejects(Export.download([item],{format:"pdf",print_options:{document:"questions"}}),/记录不完整/);
+  assert.equal(links.length,previous);
+  global.fetch=nativeFetch(async()=>response({"X-QB-Export-Warning":encodeURIComponent("文件夹不可写，已改用浏览器下载。") }));
+  const fallback=await Export.download([item],{print_options:{document:"questions"}});
+  assert.equal(fallback.warning,"文件夹不可写，已改用浏览器下载。");assert.equal(links.length,previous+1);
+  global.fetch=async(url)=>{if(url==="/api/export-preferences")throw new Error("settings unavailable");return response();};
+  await Export.download([item],{print_options:{document:"questions"}});assert.equal(links.length,previous+2);
   console.log("Word download transport, failure containment and repeated-click protection: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
