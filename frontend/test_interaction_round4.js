@@ -22,7 +22,7 @@ const papers = [
 ];
 assert.deepEqual(App.justFinished(previous, papers, "b").map((paper) => paper.id), ["a"]);
 assert.equal(App.finishedMessage(papers[0], "gaokao"), "“gaokao”已读完：23 题，1 张要看");
-assert.equal(App.finishedMessage(papers[1], "lingxing"), "“lingxing”已读完：20 题，全部识读一致");
+assert.equal(App.finishedMessage(papers[1], "lingxing"), "“lingxing”已读完：20 题，全部识读完成");
 assert.equal(App.finishedMessage({ status: "failed" }, "x"), "“x”处理失败");
 assert.equal(App.title("题有据", 2), "（2 份读完）题有据");
 assert.equal(App.title("题有据", 0), "题有据");

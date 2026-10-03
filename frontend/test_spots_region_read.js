@@ -44,9 +44,9 @@ assert.equal(QB.tidiedMarks(prose, tidied, 0, [{ start: 6, end: 7 }]), null);
 assert.match(QB.tidiedMarks.toString(), /text\[j\] !== raw\[i\]\) return null/);
 
 // ---- spots on the card
-assert.match(js, /function cropView\(regions, \{ figures = \[\], spots = \[\], onZoom, capToNatural = false \} = \{\}\)/);
+assert.match(js, /function cropView\(regions, \{ figures = \[\], spots = \[\], fallbackImages = \[\], onZoom, capToNatural = false \} = \{\}\)/);
 assert.match(js, /cropView\(q\.regions, \{ figures: q\.figures, spots: q\.check_spots,/);
-assert.match(js, /cropView\(regions, \{ figures: q\.figures \|\| \[\], spots: q\.check_spots \}\)/);
+assert.match(js, /cropView\(regions, \{ figures: q\.figures \|\| \[\], spots: q\.check_spots, fallbackImages: q\.body_mode === "source_image" \? q\.question_images \|\| \[\] : \[\] \}\)/);
 assert.match(js, /const box = el\("span", `crop-spot\$\{\(Math\.max\(sy0, y0\) - y0\) \/ rh < 0\.15 \? " label-below" : ""\}`\);/);
 // One box per line, labelled with every number in it.
 assert.match(js, /box\.numbers\.join\(""\)/);

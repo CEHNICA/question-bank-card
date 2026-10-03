@@ -2961,8 +2961,11 @@ def feature_settings(request):
             knowledge.ensure_file()
         except OSError:
             pass
+    message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
+    if "double_read" in (payload or {}).get("features", {}):
+        message = "已保存。第二次 AI 比对的设置从下一次识读开始生效，仍需人工采用和审核。"
     return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path()),
-                         "message": "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"})
+                         "message": message})
 
 
 @csrf_exempt

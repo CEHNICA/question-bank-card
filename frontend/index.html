@@ -85,6 +85,10 @@
               <button id="settingsCredentialOpen" class="button" type="button">填写或更换密钥</button>
             </div>
           </section>
+          <section class="settings-section" aria-labelledby="settingsReadingTitle">
+            <h3 id="settingsReadingTitle">识读方式</h3>
+            <div id="readingSwitches"><p class="settings-footnote">正在读取…</p></div>
+          </section>
           <details id="settingsModels" class="settings-section settings-models">
             <summary>读题模型（可选）</summary>
           <section class="settings-models-body" aria-labelledby="settingsModelsTitle">
@@ -295,8 +299,8 @@
           <div class="meter-bar" id="meterBar" role="img"></div>
           <span class="meter-percent" id="meterPercent"></span>
           <details class="meter-note">
-            <summary title="绿卡和“标记通过”分别代表什么"><svg class="icon" aria-hidden="true"><use href="#i-question"/></svg>绿卡≠已核对</summary>
-            <p class="review-boundary">绿卡表示机器识读彼此一致（两次识读一致，或与 MinerU 文字逐字一致）；“标记通过”表示你接受当前题面版本，并不自动证明已经逐题对照原卷。</p>
+            <summary title="识读完成后如何入库"><svg class="icon" aria-hidden="true"><use href="#i-question"/></svg>入库说明</summary>
+            <p class="review-boundary">识读完成的题可以标记通过后入库；有待处理问题的题先调整内容、范围或配图。</p>
           </details>
           <div class="meter-legend" id="meterLegend" hidden></div>
         </div>
@@ -355,29 +359,30 @@
           <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">生成 Token</a>（到期日见管理页）</label>
           <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
-          <label class="credential-clear"><input id="credentialMineruClear" type="checkbox">删除已保存的 MinerU Token</label>
+          <div class="credential-service-actions"><button id="credentialMineruDelete" class="button small credential-delete" type="button" aria-label="删除 MinerU 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="modelscope">
           <div class="credential-service-head"><strong>魔搭访问令牌 <small>看图读题 · 免费，每天几百次（推荐）</small></strong><span id="credentialModelscopeState" class="api-state">正在读取…</span></div>
           <label for="credentialModelscopeInput">新的令牌（留空就不改）· <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">免费申请</a></label>
           <input id="credentialModelscopeInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴魔搭“访问令牌”页里复制的 Access Token">
-          <label class="credential-clear"><input id="credentialModelscopeClear" type="checkbox">删除已保存的魔搭令牌</label>
+          <div class="credential-service-actions"><button id="credentialModelscopeDelete" class="button small credential-delete" type="button" aria-label="删除魔搭密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="minimax">
           <div class="credential-service-head"><strong>MiniMax API Key <small>看图读题 · 付费会员</small></strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
           <label for="credentialMinimaxInput">新的 Key（留空就不改）</label>
           <input id="credentialMinimaxInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴 MiniMax 开放平台里复制的 API Key">
-          <label class="credential-clear"><input id="credentialMinimaxClear" type="checkbox">删除已保存的 MiniMax Key</label>
+          <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="siliconflow">
           <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 付费，可做复核和备用</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
           <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
           <input id="credentialSiliconflowInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴硅基流动里复制的 API Key">
-          <label class="credential-clear"><input id="credentialSiliconflowClear" type="checkbox">删除已保存的硅基流动 Key</label>
+          <div class="credential-service-actions"><button id="credentialSiliconflowDelete" class="button small credential-delete" type="button" aria-label="删除硅基流动密钥" hidden>删除密钥</button></div>
         </section>
+        <p class="credential-storage-note">密钥只加密保存在这台电脑上，保存后不再显示出来。</p>
         <details class="credential-more">
           <summary>有多个账号？密钥存在哪里？</summary>
           <p>同一家有多个账号时，把它们一起粘贴进去，用英文分号 ; 隔开（每家最多 8 个）；读题时会轮流使用，一个账号额度用完会换下一个。</p>
@@ -386,7 +391,7 @@
       </div>
       <footer class="credential-actions">
         <span id="credentialResult" class="settings-save-result" role="status"></span>
-        <button id="credentialSave" class="button primary" type="submit">加密保存</button>
+        <button id="credentialSave" class="button primary" type="submit">保存密钥</button>
         <button class="button" type="button" data-close>取消</button>
       </footer>
     </form>
@@ -767,7 +772,7 @@
       <div class="key-row"><span>鼠标所在位置缩放</span><span><kbd>Ctrl</kbd>+滚轮</span></div>
       <div class="key-row"><span>拖动原卷 / 题面（Alt+拖动可选字）</span><span>鼠标左键</span></div>
       <h4>筛选与其他</h4>
-      <div class="key-row"><span>全部 / 需核对 / 识读一致 / 已通过</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
+      <div class="key-row"><span>全部 / 需核对 / 识读完成 / 已通过</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
       <div class="key-row"><span>改字时保存</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
       <div class="key-row"><span>关闭窗口 / 取消改字</span><span><kbd>Esc</kbd></span></div>
       <div class="key-row"><span>打开这张说明</span><span><kbd>?</kbd></span></div>

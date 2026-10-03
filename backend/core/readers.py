@@ -90,6 +90,17 @@ class ReaderRequestStopped(ReaderError):
 
 _REQUEST_LIMITS = contextvars.ContextVar("qb_reader_request_limits", default=None)
 _SELECTED_SERVICES_ONLY = contextvars.ContextVar("qb_selected_services_only", default=False)
+_SPECULATIVE_DUPLICATES = contextvars.ContextVar("qb_speculative_duplicates", default=True)
+
+
+@contextmanager
+def without_speculative_duplicates():
+    """Single-reading tasks keep normal timeouts/recovery, without a hedge."""
+    token = _SPECULATIVE_DUPLICATES.set(False)
+    try:
+        yield
+    finally:
+        _SPECULATIVE_DUPLICATES.reset(token)
 
 
 @contextmanager
@@ -844,7 +855,7 @@ def _chat_hedged(engine: Engine, prompt: str, image_urls: list[str], max_tokens:
     identical request is sent and whichever answers first is used.  At
     temperature 0 both answers are equivalent, so this changes latency only.
     """
-    delay = _hedge_after()
+    delay = _hedge_after() if _SPECULATIVE_DUPLICATES.get() else 0
     if not delay:
         return _chat_once(engine, prompt, image_urls, max_tokens)
     started = threading.Event()

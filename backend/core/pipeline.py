@@ -3167,7 +3167,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         return assistant_draft(snapshot)
     number = snapshot["number"]
     source_kind = snapshot.get("source_kind") or Question.SourceKind.UNKNOWN
-    primary, checker = readers.primary_engine(), readers.checker_engine()
+    double_read = snapshot["double_read"] if "double_read" in snapshot else features.enabled("double_read")
+    primary = readers.primary_engine()
+    checker = readers.checker_engine() if double_read else None
     if primary is None:
         return {"state": Question.State.RED, "error": "没有配置所选主读模型的 API Key，无法读题", "flags": []}
     if not snapshot["regions"]:
@@ -3189,7 +3191,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         )
         if engine is not None
     ]
-    if checker is None:
+    if double_read and checker is None:
         errors["b"] = "所选复核模型没有可用的 API Key"
 
     unavailable: set[str] = set()
@@ -3202,12 +3204,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             # Keep the long-standing call contract for ordinary exam cards and
             # older integrations that replace read_question in tests/plugins.
             # Typed textbook cards opt into the richer prompt explicitly.
-            if source_kind == Question.SourceKind.UNKNOWN:
-                result = readers.read_question(engine, url, number, with_figures=figures)
-            else:
-                result = readers.read_question(
+            def recognise():
+                if source_kind == Question.SourceKind.UNKNOWN:
+                    return readers.read_question(engine, url, number, with_figures=figures)
+                return readers.read_question(
                     engine, url, number, with_figures=figures, source_kind=source_kind,
                 )
+            if double_read:
+                result = recognise()
+            else:
+                # A slow single read must not silently start a second copy.
+                # Network recovery and the original request/cancel policy stay.
+                with readers.without_speculative_duplicates():
+                    result = recognise()
             return name, result, "", None
         except readers.ReaderQuotaExhausted as error:
             # The independent reader may use a different provider/account.
@@ -3252,7 +3261,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # emitted by the deterministic textbook segmenter must survive rereads.
     flags: list[str] = list(snapshot.get("segmentation_flags") or [])
     update: dict = {"read_a": results.get("a", {"error": errors.get("a", "")}),
-                    "read_b": results.get("b", {"error": errors.get("b", "")}), "read_c": {}}
+                    "read_b": (results.get("b", {"error": errors.get("b", "")})
+                               if double_read else {"skipped": "disabled"}), "read_c": {}}
     if not results and quota_errors:
         raise quota_errors[0]
     asked = {name for name, *_rest in jobs}
@@ -3271,7 +3281,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     a_text = _without_inferred_figure_text(a, figure_source)
     b_text = _without_inferred_figure_text(b, figure_source)
     normalized_results = [result for result in (a_text, b_text) if result]
-    if a and not b and "b" not in errors and textnorm.witness_agrees(a_text, witness):
+    if not double_read:
+        # Deliberate single reading is neither a failed second reading nor
+        # cross-engine agreement, even when stored OCR happens to match.
+        final, source = a_text, "single"
+    elif a and not b and "b" not in errors and textnorm.witness_agrees(a_text, witness):
         # Cross-engine agreement: the vision reading and MinerU's OCR match.
         final, source = a_text, "witness"
         # Kept as audit evidence and shown in the reading history; it has no
@@ -3375,7 +3389,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # made the card yellow (“原卷可能有图没有被找到”) although nothing was
     # missing; ask once, about just those boxes.
     unjudged = sorted(set(labels) - set((figure_source.get("figures") or {})), key=lambda value: int(value))
-    if a and unjudged:
+    if double_read and a and unjudged:
         try:
             extra = readers.classify_figures(primary, marked_url, number, unjudged)
         except readers.ReaderError:
@@ -3573,6 +3587,10 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
+    # Freeze the setting for this task; changes apply to the next read/reread.
+    double_read = features.enabled("double_read")
+    for snapshot in snapshots:
+        snapshot["double_read"] = double_read
     snapshots_by_id = {snapshot["id"]: snapshot for snapshot in snapshots}
     # MinerU's own text for each range is an independent second engine.  Only
     # prose blocks are used: on marked papers the student's working is mostly

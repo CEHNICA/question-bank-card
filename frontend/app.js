@@ -312,7 +312,7 @@ const QBReviewDiff = (() => {
 
   function analyze(question, renderer) {
     const empty = { marks: {}, observedOnly: [], hasContentDifference: false, hasVisibleMarks: false };
-    if (!question || question.edited || question.state !== "yellow" || !renderer) return empty;
+    if (!question || question.body_mode === "source_image" || question.edited || question.state !== "yellow" || !renderer) return empty;
     const reads = Object.entries(question.reads || {}).filter(([, reading]) => readingOk(reading));
     if (reads.length < 2) return empty;
 
@@ -412,7 +412,7 @@ const QBNotify = (() => {
     const todo = (c.yellow || 0) + (c.red || 0);
     if (paper.status === "failed") return paper.stopped ? `“${name}”已停止` : `“${name}”处理失败`;
     if (paper.status === "needs_grouping") return `“${name}”需要确认资料结构`;
-    return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读一致"}`;
+    return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读完成"}`;
   }
 
   function title(base, unseen) {
@@ -896,7 +896,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const FILTERS = [
     { key: "all", label: "全部" },
     { key: "todo", label: "需逐题核对" },
-    { key: "green", label: "识读一致" },
+    { key: "green", label: "识读完成" },
     { key: "approved", label: "已标记通过" },
     // AI 助手（tiyouju 命令行）打的勾：只在有这样的题时出现，方便人抽查。
     { key: "ai", label: "AI 通过", optional: true }
@@ -1472,7 +1472,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const yellow = c.todo - c.red;
     const segments = [
       ["approved", c.approved, "已标记通过", "var(--accent)"],
-      ["green", c.green, "识读一致待审", "var(--green-bar)"],
+      ["green", c.green, "识读完成待审", "var(--green-bar)"],
       ["yellow", yellow, "需逐题核对", "var(--amber-bar)"],
       ["red", c.red, "识读失败", "var(--red)"],
       ["waiting", c.waiting, "识读中", "#c7cfc8"]
@@ -1562,10 +1562,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       statusText.replaceChildren(
         document.createTextNode(`${c.all} 道题。先处理 ${c.todo} 张需核对的卡（按 `),
         el("kbd", "", "N"),
-        document.createTextNode(c.green ? ` 逐张跳过去），再核对 ${c.green} 张识读一致的绿卡。` : " 逐张跳过去）。"),
+        document.createTextNode(c.green ? ` 逐张跳过去），还有 ${c.green} 张已读完的题卡可审核。` : " 逐张跳过去）。"),
       );
     } else if (c.green) {
-      statusText.textContent = `${c.all} 道题：剩下 ${c.green} 张 AI 识读一致的绿卡；它们仍需按你的审核标准确认。`;
+      statusText.textContent = `${c.all} 道题：${c.green} 张题卡已识读完成，可标记通过后入库。`;
     } else {
       statusText.textContent = (c.unpublished ? `全部 ${c.all} 题已标记通过，还有 ${c.unpublished} 题没入库。` : `全部 ${c.all} 题已标记通过并入库。`) + aiNote(c);
     }
@@ -1620,7 +1620,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const structureBlocked = paper.status === "needs_grouping";
     $("approveGreen").disabled = !c.green || structureBlocked;
     $("approveGreen").textContent = c.green ? `批量标记绿卡通过（${c.green}）` : "批量标记绿卡通过";
-    $("approveGreen").title = "绿卡只表示机器识读彼此一致。批量标记前，请确认这些题符合你的审核标准。";
+    $("approveGreen").title = "将识读完成、没有待处理问题的题卡标记通过，随后可入库。";
     renderPublishButton(c, structureBlocked);
     const notes = paper.notes || [];
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
@@ -1693,7 +1693,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("cutReadingDetail").textContent = stage === 1
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。原图保留，结果出来后由你确认。"
-        : summary.suggestions ? "逐题对照原图，确认采用读法，再审核题目。AI 不会自动替换原图或标记通过。"
+        : summary.suggestions ? "采用读法后转为文字题，再标记通过并入库。原图和出处仍保留。"
           : stage === 2 ? "直接识读已保存的范围，无需重新框选。你也可以保留原图题，直接审核。"
             : "检查题目是否完整、题型是否正确。原图题也可以审核入库，标签与参考答案仍默认关闭。";
     const actions = $("cutReadingActions");
@@ -2064,7 +2064,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           button("从原卷选题", "primary", () => openPageDialog("new")));
       } else if (!state.questions.length) empty.append(el("strong", "", "题卡还没生成"), el("span", "", "原卷处理完成后会显示题卡，也可以手工补题。"));
       else if (state.filter === "todo") empty.append(el("strong", "", "没有需要逐题核对的卡"), el("span", "", "黄卡、红卡和内容变更都处理完了。"));
-      else if (state.filter === "green") empty.append(el("strong", "", "没有待审的绿卡"), el("span", "", "识读一致的题都已标记通过。"));
+      else if (state.filter === "green") empty.append(el("strong", "", "没有待审的绿卡"), el("span", "", "没有可直接标记通过的题卡。"));
       else empty.append(el("strong", "", "这一栏没有题卡"));
       container.append(empty);
     } else container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
@@ -2409,7 +2409,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return marks;
   }
 
-  function cropView(regions, { figures = [], spots = [], onZoom, capToNatural = false } = {}) {
+  function cropView(regions, { figures = [], spots = [], fallbackImages = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
       wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点“调整范围”框出题目范围并保存；需要 AI 读字时，再点题卡上的“AI 识读这题”。保存范围不会自动识读。"));
@@ -2448,6 +2448,41 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       image.style.width = `${(1000 / rw) * 100}%`;
       image.style.left = `${(-x0 / rw) * 100}%`;
       image.style.top = `${(-y0 / rh) * 100}%`;
+      const imageNotice = el("p", "hint");
+      imageNotice.hidden = true;
+      const saved = Array.isArray(fallbackImages) ? fallbackImages[index] : null;
+      // A saved crop is already cut to this region. Match the full source range
+      // before using it, so a stale or reordered piece can never stand in for it.
+      const canFallback = Boolean(saved?.url && saved.page_idx === region.page_idx
+        && Array.isArray(saved.bbox) && saved.bbox.length === 4
+        && saved.bbox.every((value, i) => value === region.bbox[i]));
+      let fallbackAttempted = false;
+      image.addEventListener("load", () => {
+        if (fallbackAttempted) image.dataset.cropFallback = "ready";
+        imageNotice.hidden = true;
+      });
+      image.addEventListener("error", () => {
+        if (!fallbackAttempted && canFallback) {
+          fallbackAttempted = true;
+          image.dataset.cropSource = "saved";
+          image.dataset.cropFallback = "loading";
+          imageNotice.textContent = "原卷预览暂不可用，正在加载已保存的题目裁片…";
+          imageNotice.hidden = false;
+          image.style.width = "100%";
+          image.style.left = "0";
+          image.style.top = "0";
+          if (saved.width > 0 && saved.height > 0) {
+            image.width = saved.width;
+            image.height = saved.height;
+            segment.style.aspectRatio = `${saved.width} / ${saved.height}`;
+          }
+          image.src = saved.url;
+          return;
+        }
+        if (fallbackAttempted) image.dataset.cropFallback = "failed";
+        imageNotice.textContent = "题目图片未能加载。重新打开放大窗口重试，或在“调整范围”里恢复并保存。";
+        imageNotice.hidden = false;
+      });
       segment.append(image);
       figures.flatMap((figure) => [figure, ...(Array.isArray(figure.parts) ? figure.parts.map((part) => ({ ...part, slot: figure.slot })) : [])])
         .filter((figure) => figure.page_idx === region.page_idx).forEach((figure) => {
@@ -2476,7 +2511,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         segment.append(box);
       });
       if (index > 0) wrap.append(el("div", "crop-join", `接第 ${region.page_idx + 1} 页`));
-      wrap.append(segment);
+      wrap.append(segment, imageNotice);
     });
     if (onZoom) {
       wrap.classList.add("zoomable");
@@ -2709,7 +2744,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const regions = q.regions || [];
     if (!regions.length && viewer.mode === "fit") viewer.zoom = 1;
     viewer.imageReady = false;
-    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots }));
+    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [] }));
     const images = [...crop.querySelectorAll("img")];
     const imageStates = new Map(images.map((image) => [image, "pending"]));
     const syncImages = () => {
@@ -2717,10 +2752,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const values = [...imageStates.values()];
       viewer.imageReady = values.includes("ready");
       const failed = values.includes("failed");
+      const pending = values.includes("pending");
       const status = $("viewerImageState");
-      status.hidden = !images.length || (viewer.imageReady && !failed);
+      status.hidden = !images.length || (viewer.imageReady && !failed && !pending);
       status.classList.toggle("image-error", failed);
-      status.textContent = failed ? (viewer.imageReady ? "部分原卷图片没能加载，关闭窗口后重试。" : "原卷图片没能加载，关闭窗口后重试。") : "正在加载原卷…";
+      status.textContent = failed ? (viewer.imageReady ? "部分题目图片未能加载，关闭窗口后重试，或调整范围后保存。" : "题目图片未能加载，关闭窗口后重试，或调整范围后保存。")
+        : images.some((image) => image.dataset.cropFallback === "loading") ? "原卷预览暂不可用，正在加载已保存的题目裁片…" : "正在加载原卷…";
       if (!viewer.imageReady) stopViewerSourcePan();
       syncViewerZoom();
       if (viewer.imageReady && viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
@@ -2728,8 +2765,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     images.forEach((image) => {
       const finish = (result) => { imageStates.set(image, result); syncImages(); };
       image.addEventListener("load", () => finish("ready"));
-      image.addEventListener("error", () => finish("failed"));
-      if (image.complete) imageStates.set(image, image.naturalWidth ? "ready" : "failed");
+      image.addEventListener("error", () => finish(image.dataset.cropFallback === "loading" ? "pending" : "failed"));
+      if (image.complete) imageStates.set(image, image.naturalWidth ? "ready" : image.dataset.cropFallback === "loading" ? "pending" : "failed");
     });
     syncImages();
     // 又宽又矮的截图（一两行字的题）改成上下排：原卷能占满整个窗口宽度。
@@ -2737,13 +2774,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     applyZoom();
     const text = $("viewerText");
     text.replaceChildren();
-    const figurePanel = figureReviewPanel(q);
+    const figurePanel = q.body_mode === "source_image" ? null : figureReviewPanel(q);
     if (figurePanel) text.append(figurePanel);
     const flags = flagsNode(q);
     if (flags) text.append(flags);
     const disagreement = disagreementPanel(q);
     if (disagreement) text.append(disagreement);
-    if (q.stem) {
+    if (q.body_mode === "source_image" && regions.length) {
+      if (q.ocr_suggestion && Object.keys(q.ocr_suggestion).length) text.append(readingSuggestionPanel(q));
+      else text.append(el("p", "hint", q.ocr_pending ? "AI 正在读取左侧原图……" : "原图已保留在左侧。需要文字时，可在题卡上开始 AI 识读。"));
+    } else if (q.stem || q.body_mode === "source_image") {
       const body = el("div");
       R.renderQuestion(body, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed" });
       text.append(body);
@@ -3217,7 +3257,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (!/两次识读不一致.*请看标黄/.test(String(flag))) return flag;
       if (difference.hasVisibleMarks) return "两次识读不一致，已由第三次识读裁决；请核对题面中标黄的位置";
       if (difference.observedOnly.length) return "两次识读不一致；当前稿没有可标黄的文字，另一读法多出的内容见下方";
-      return "两次识读曾有出入；当前题面只剩排版或公式写法差异，可展开原始读法核对";
+      return "识读记录中曾有出入；可在“更多 → 查看识读记录”中查看。";
     });
     if (!flags.length && !q.error) return null;
     const list = el("ul", "flags");
@@ -3261,6 +3301,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return chip;
     }
     if (isApproved(q)) return el("span", "chip approved", "已标记通过");
+    if (q.text_source === "single" && ["green", "yellow"].includes(q.state)) {
+      const chip = el("span", "chip waiting", "AI 一次识读");
+      chip.title = "本题只识读一次；有问题时可重新识读或改字。";
+      return chip;
+    }
     if (q.state === "green") {
       const copy = {
         majority: ["AI 三读多数一致 · 未人工审核", "前两次 AI 识读不同，第三次与其中一次相同；仍需人工对照原卷。"],
@@ -3300,8 +3345,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function disagreementPanel(q) {
     const difference = reviewDiff(q);
     if (!difference.observedOnly.length) return null;
-    const panel = el("section", "reading-difference");
-    panel.append(el("strong", "reading-difference-title", "另一次识读在下面标出的位置多读了文字，当前题面没有，请对照原卷"));
+    const panel = el("details", "reading-difference");
+    const fields = [...new Set(difference.observedOnly.map((item) => item.fieldName))];
+    panel.append(el("summary", "reading-difference-title", `其他读法还有不同内容 · ${fields.join("、")}（展开查看）`));
     const list = el("ul", "reading-difference-list");
     difference.observedOnly.forEach((item) => {
       const row = el("li");
@@ -3323,7 +3369,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       row.append(el("span", "reading-difference-source", `${item.readerName} · ${item.fieldName}`), text);
       list.append(row);
     });
-    const show = button("查看三次原始读法", "small", () => toggleReadsNear(panel, q));
+    const show = button("查看识读记录", "small", () => toggleReadsNear(panel, q));
     panel.append(list, show);
     return panel;
   }
@@ -3393,7 +3439,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
     // 1.10.1：每张卡都是左图右文（以前宽的截图会改成上图下文，版式和打勾位置跟着变）。
-    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, onZoom: () => openViewer(q), capToNatural: true }));
+    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [], onZoom: () => openViewer(q), capToNatural: true }));
     // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
     const sourceNote = el("button", "source-note");
     sourceNote.type = "button";
@@ -3438,7 +3484,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const regionPanel = regionReadPanel(card, q);
     if (regionPanel) body.append(regionPanel);
     const rendered = el("div", "rendered");
-    if (q.stem || q.body_mode === "source_image") R.renderQuestion(rendered, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed",
+    if (q.body_mode === "source_image" && q.regions?.length) {
+      rendered.hidden = true;
+      if (!q.ocr_suggestion || !Object.keys(q.ocr_suggestion).length) {
+        rendered.hidden = false;
+        rendered.append(el("p", "hint", q.ocr_pending ? "AI 正在读取左侧原图……" : "原图题已保留在左侧，可直接审核，也可识读为文字。"));
+      }
+    } else if (q.stem || q.body_mode === "source_image") R.renderQuestion(rendered, content(q), { showNumber: false, marks: reviewMarks(q), showAnswer: "collapsed",
       figureAction: (figure) => tableAction(q, figure) });
     else rendered.append(el("p", "hint", "还没有题面"));
     body.append(rendered);
@@ -3474,7 +3526,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     summary.append(icon("chevron"));
     more.append(summary);
     const menu = el("div", "more-menu");
-    menu.append(button("看两位读者的原始读法", "quiet small", () => { more.open = false; toggleReads(card, q); }));
+    menu.append(button("查看识读记录", "quiet small", () => { more.open = false; toggleReads(card, q); }));
     if (q.body_mode !== "source_image") {
       menu.append(button("框选识读（纠错）", "quiet small", () => { more.open = false; openPageDialog("read", q); }, "只重读需要纠正的一小块，确认替换位置后再保存"));
       menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }));
@@ -3491,7 +3543,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function readingSuggestionPanel(q) {
     const suggestion = q.ocr_suggestion;
     const panel = el("section", "reading-suggestion");
-    panel.append(el("strong", "", "第三步 · 确认识读结果，再审核"));
+    panel.append(el("strong", "", "AI 识读结果"));
     if (suggestion.revision !== q.content_revision) {
       panel.append(el("p", "hint", "题目范围或内容已经变化，这份建议已过期。请重新识读。"));
       return panel;
@@ -3502,12 +3554,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const preview = el("div", "reading-suggestion-body");
     R.renderQuestion(preview, { ...suggestion, body_mode: "text", figures: (suggestion.figures || []).filter((figure) => figure.url) }, { showNumber: false, showAnswer: "none" });
-    panel.append(preview, el("p", "hint", "对照上方原图检查公式、选项和配图。确认后转为文字题，原卷范围和来源仍保留。"));
-    const accept = button("已核对，采用此读法", "primary small", async () => {
+    panel.append(preview, el("p", "hint", "采用后转为文字题，原图和出处仍保留。"));
+    const accept = button("采用此读法", "primary small", async () => {
       accept.disabled = true;
       try {
         applyQuestion(await api(`/api/questions/${q.id}/apply-reading`, { method: "POST", body: { revision: suggestion.revision } }));
-        toast(`第 ${q.number} 题已转为文字题，请核对后重新审核`, "success");
+        if ($("viewerDialog").open && Number(viewer.id) === Number(q.id)) renderViewer();
+        toast(`第 ${q.number} 题已采用读法，可继续审核入库`, "success");
       } catch (error) { accept.disabled = false; toast(error.message, "error"); }
     });
     panel.append(accept);
@@ -4240,11 +4293,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   const CREDENTIAL_FIELDS = {
-    mineru: { input: "credentialMineruInput", clear: "credentialMineruClear", state: "credentialMineruState", label: "MinerU" },
-    modelscope: { input: "credentialModelscopeInput", clear: "credentialModelscopeClear", state: "credentialModelscopeState", label: "魔搭" },
-    minimax: { input: "credentialMinimaxInput", clear: "credentialMinimaxClear", state: "credentialMinimaxState", label: "MiniMax" },
-    siliconflow: { input: "credentialSiliconflowInput", clear: "credentialSiliconflowClear", state: "credentialSiliconflowState", label: "硅基流动" }
+    mineru: { input: "credentialMineruInput", remove: "credentialMineruDelete", state: "credentialMineruState", label: "MinerU" },
+    modelscope: { input: "credentialModelscopeInput", remove: "credentialModelscopeDelete", state: "credentialModelscopeState", label: "魔搭" },
+    minimax: { input: "credentialMinimaxInput", remove: "credentialMinimaxDelete", state: "credentialMinimaxState", label: "MiniMax" },
+    siliconflow: { input: "credentialSiliconflowInput", remove: "credentialSiliconflowDelete", state: "credentialSiliconflowState", label: "硅基流动" }
   };
+  let credentialBusy = false;
+  let credentialStateRequest = 0;
+  let credentialServices = {};
 
   function credentialAccounts(value) {
     return [...new Set(String(value || "").split(/[;\r\n]+/)
@@ -4255,38 +4311,90 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     Object.values(CREDENTIAL_FIELDS).forEach((field) => {
       $(field.input).value = "";
       $(field.input).disabled = false;
-      $(field.clear).checked = false;
     });
+  }
+
+  function setCredentialBusy(busy) {
+    credentialBusy = busy;
+    $("credentialSave").disabled = busy;
+    Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
+      $(field.input).disabled = busy;
+      $(field.remove).disabled = busy || !credentialServices[service]?.configured;
+    });
+    $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = busy; });
   }
 
   function renderCredentialStates(payload) {
     const services = payload?.services || {};
+    credentialServices = services;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       const status = services[service] || {};
       const count = Math.max(0, Number(status.count) || 0);
       const node = $(field.state);
       node.textContent = status.configured ? (count > 1 ? `已保存 ${count} 个账号` : "已保存") : "未填写";
       node.className = `api-state ${status.configured ? "ready" : "missing"}`;
+      $(field.remove).hidden = !status.configured;
+      $(field.remove).disabled = credentialBusy || !status.configured;
     });
   }
 
   async function loadCredentialStates() {
-    const payload = await api("/api/settings/credentials");
-    renderCredentialStates(payload);
+    const request = ++credentialStateRequest;
+    let payload;
+    try { payload = await api("/api/settings/credentials"); }
+    catch (error) { if (request !== credentialStateRequest) return null; throw error; }
+    if (request === credentialStateRequest && $("credentialDialog").open) renderCredentialStates(payload);
     return payload;
   }
 
   async function openCredentialSettings() {
+    if (credentialBusy || $("credentialDialog").open) return;
     resetCredentialInputs();
+    renderCredentialStates({ services: {} });
+    Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
     $("credentialResult").textContent = "";
     $("credentialDialog").showModal();
     try {
       await loadCredentialStates();
-      requestAnimationFrame(() => $("credentialMineruInput").focus());
+      if ($("credentialDialog").open) requestAnimationFrame(() => $("credentialMineruInput").focus());
     } catch (error) {
       $("credentialResult").textContent = error.message;
       toast(error.message, "error");
     }
+  }
+
+  async function refreshCredentialStatus(message) {
+    let refreshed = false;
+    try { refreshed = await loadStatus(); } catch { /* The mutation already succeeded. */ }
+    if (!refreshed && $("credentialDialog").open) {
+      $("credentialResult").textContent = `${message} 当前状态暂未刷新，重新打开设置或刷新页面即可查看。`;
+    }
+  }
+
+  async function deleteCredential(service) {
+    const field = CREDENTIAL_FIELDS[service];
+    if (!field || credentialBusy || !credentialServices[service]?.configured) return;
+    setCredentialBusy(true);
+    try {
+      const confirmed = await confirmDialog({
+        title: `删除 ${field.label} 的密钥？`,
+        text: "只删除这家服务已保存的密钥。其他服务和输入框里尚未保存的内容都会保留；正在运行的任务不会中途切换账号。",
+        ok: "删除密钥", danger: true, focusCancel: true
+      });
+      if (!confirmed) return;
+      credentialStateRequest += 1;
+      $("credentialResult").textContent = `正在删除 ${field.label} 密钥…`;
+      const result = await api("/api/settings/credentials", { method: "POST", body: { services: { [service]: { action: "clear" } } } });
+      renderCredentialStates(result);
+      const message = `已删除 ${field.label} 密钥，其他服务和未保存的内容已保留。`;
+      $("credentialResult").textContent = message;
+      toast(message, "success");
+      await refreshCredentialStatus(message);
+    } catch (error) {
+      const message = `未能删除 ${field.label} 密钥：${error.message}`;
+      $("credentialResult").textContent = message;
+      toast(message, "error");
+    } finally { setCredentialBusy(false); }
   }
 
   function renderSettingsTask() {
@@ -4398,17 +4506,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       renderFeatureSwitches(data);
     } catch (error) {
       box.replaceChildren(el("p", "settings-footnote", `没读到功能开关：${error.message}`));
+      $("readingSwitches").replaceChildren(el("p", "settings-footnote", `没读到识读方式：${error.message}`));
     }
   }
 
   function renderFeatureSwitches(data) {
     const box = $("featureSwitches");
     box.replaceChildren();
+    const readingBox = $("readingSwitches");
+    readingBox.replaceChildren();
     (data.features || []).filter((item) => !["knowledge_tags", "ai_answer"].includes(item.key)).forEach((item) => {
       const label = el("label", "settings-switch");
       const text = el("span");
-      const labels = { origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数" };
-      const descriptions = { origin_split: "将题干开头的出处移到题源字段。", chinese_quotes: "统一中文句子的引号，保留公式。", subquestions: "在题库标注题目包含的小问数量。" };
+      const labels = { origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数", double_read: "二次 AI 识读对比" };
+      const descriptions = { origin_split: "将题干开头的出处移到题源字段。", chinese_quotes: "统一中文句子的引号，保留公式。", subquestions: "在题库标注题目包含的小问数量。", double_read: "关闭后每题只读一次；开启后再读一次作对比，有分歧时裁决。下次识读生效，已有题目不重读。" };
       text.append(el("strong", "", labels[item.key] || item.label));
       if (descriptions[item.key]) text.append(el("small", "", descriptions[item.key]));
       const input = el("input");
@@ -4429,7 +4540,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
       });
       label.append(text, input);
-      box.append(label);
+      (item.key === "double_read" ? readingBox : box).append(label);
     });
     const note = $("featureNote");
     const tags = (data.features || []).find((item) => item.key === "knowledge_tags");
@@ -4477,29 +4588,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("selectionStart").addEventListener("click", () => { $("toolsMenu").open = false; startSelecting(); });
   $("selectionDelete").addEventListener("click", deleteSelectedQuestions);
 
-  Object.values(CREDENTIAL_FIELDS).forEach((field) => {
-    $(field.clear).addEventListener("change", () => {
-      const clearing = $(field.clear).checked;
-      if (clearing) $(field.input).value = "";
-      $(field.input).disabled = clearing;
-    });
+  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
+    $(field.remove).addEventListener("click", () => deleteCredential(service));
   });
 
+  $("credentialDialog").addEventListener("cancel", (event) => { if (credentialBusy) event.preventDefault(); });
+  $("credentialDialog").addEventListener("click", (event) => {
+    if (credentialBusy && event.target === $("credentialDialog")) { event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
+
   $("credentialDialog").addEventListener("close", () => {
+    credentialStateRequest += 1;
     resetCredentialInputs();
     requestAnimationFrame(() => $("settingsCredentialOpen").focus());
   });
 
   $("credentialForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (credentialBusy) return;
     const services = {};
-    const clearing = [];
     for (const [service, field] of Object.entries(CREDENTIAL_FIELDS)) {
-      if ($(field.clear).checked) {
-        services[service] = { action: "clear" };
-        clearing.push(field.label);
-        continue;
-      }
       const accounts = credentialAccounts($(field.input).value);
       if (accounts.length > 8) {
         const message = `${field.label} 最多保存 8 个账号`;
@@ -4509,17 +4617,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       services[service] = accounts.length ? { action: "replace", accounts } : { action: "keep" };
     }
-    if (clearing.length) {
-      const confirmed = await confirmDialog({
-        title: `清除 ${clearing.join("、")} 的 API 配置？`,
-        text: "清除后，新上传或重新识读可能无法继续；正在运行的当前任务不会中途切换账号。",
-        ok: "确认清除",
-        danger: true
-      });
-      if (!confirmed) return;
+    if (!Object.values(services).some((change) => change.action === "replace")) {
+      $("credentialResult").textContent = "没有填写新的密钥，已保存的密钥保持不变。";
+      return;
     }
-    const save = $("credentialSave");
-    save.disabled = true;
+    setCredentialBusy(true);
+    credentialStateRequest += 1;
     $("credentialResult").textContent = "正在检查填写格式并加密保存…";
     try {
       const result = await api("/api/settings/credentials", { method: "POST", body: { services } });
@@ -4528,18 +4631,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const message = result.message || "API 配置已加密保存；下一项任务开始时生效。";
       $("credentialResult").textContent = message;
       toast(message, "success");
-      const refreshed = await loadStatus();
-      if (!refreshed) {
-        // 保存已经成功，状态区刷新失败不能被误报成“保存失败”并诱导重复提交。
-        $("credentialResult").textContent = `${message} 当前状态暂未刷新，重新打开设置或刷新页面即可查看。`;
-      }
+      await refreshCredentialStatus(message);
     } catch (error) {
-      // 无论成功与否都不让提交过的完整密钥继续留在页面内存和输入框中。
-      resetCredentialInputs();
       $("credentialResult").textContent = error.message;
       toast(error.message, "error");
     } finally {
-      save.disabled = false;
+      setCredentialBusy(false);
     }
   });
 
@@ -4662,7 +4759,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!count) return;
     const ok = await confirmDialog({
       title: `把 ${count} 张绿卡批量标记为通过？`,
-      text: "绿卡只表示 AI 的多次识读一致，不自动证明已经逐题对照原卷。请按你的使用场景确认后再继续。",
+      text: "将这些已识读完成、没有待处理问题的题卡标记通过，随后可入库。",
       ok: `标记 ${count} 张通过`
     });
     if (!ok) return;
@@ -7196,7 +7293,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("paperMenu").querySelector("summary"), title: "看整份原卷",
       text: "点“试卷操作 → 查看整份原卷”。Ctrl＋滚轮缩放，左键拖动，还能适页、适宽和跳页。画框编辑时用空格＋左键或中键拖动。" },
     { target: () => $("filters"), title: "先看有疑点的",
-      text: "“需逐题核对”只列出有疑点的题卡，先处理它们；“识读一致”是几次读法完全相同的，也要看一眼再打勾。" },
+      text: "“需逐题核对”列出有待处理问题的题卡；“识读完成”里的题卡可以标记通过后入库。" },
     { target: () => document.querySelector("#toolbar .tool-group"), title: "专注和全屏",
       text: "“专注”让正在看的题亮着、其余题暗下来；“全屏”收起顶栏和试卷列表，只留题卡。" },
     { target: () => $("publishButton"), title: "入库",

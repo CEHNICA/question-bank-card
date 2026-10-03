@@ -15,6 +15,10 @@ from pathlib import Path
 from django.conf import settings
 
 FEATURES = {
+    "double_read": {
+        "default": True, "label": "第二次 AI 比对",
+        "help": "开启后使用第二次识读比对，分歧时再裁决。关闭后只识读一次，仍需人工采用、审核和入库。更改从下一次识读开始生效。",
+    },
     # 默认开：只挪格式、不改字。
     "origin_split": {
         "default": True, "label": "拆出题源",

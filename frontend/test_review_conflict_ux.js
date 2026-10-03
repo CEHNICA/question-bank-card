@@ -26,6 +26,20 @@ assert.equal(extra.hasVisibleMarks, false);
 assert.equal(extra.observedOnly.length, 1);
 assert.match(extra.observedOnly[0].text, /\(1\) \[\?\]/);
 
+// A saved original-image draft has no adopted text yet. Its first OCR
+// suggestion is not a deletion of the full question from the draft.
+const imageDraft = App.analyze({
+  ...question, body_mode: "source_image", stem: "", options: {},
+  reads: {
+    a: { stem: finalStem, options: { A: "1", B: "2" } },
+    b: { stem: finalStem, options: { A: "×", B: "×" } },
+  }
+}, Render);
+assert.deepEqual(imageDraft.observedOnly, []);
+assert.deepEqual(imageDraft.marks, {});
+assert.equal(imageDraft.hasContentDifference, false);
+assert.equal(App.analyze({ ...question, reads: { a: question.reads.a } }, Render).hasContentDifference, false);
+
 const changed = App.analyze({
   ...question,
   stem: "求 x=3。",

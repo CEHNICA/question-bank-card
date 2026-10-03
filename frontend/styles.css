@@ -479,8 +479,10 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   border: 0; border-left: 3px solid var(--amber-bar); color: #6b4a12; font-size: 13px; line-height: 1.6; display: grid; gap: 3px; }
 .state-red .flags { background: var(--red-soft); border-left-color: var(--red); color: var(--red); }
 .flags li { display: block; }
-.reading-difference { display: grid; gap: 8px; padding: 9px 12px 10px 13px; border: 0; border-left: 3px solid var(--amber-bar); border-radius: 0 8px 8px 0; background: var(--amber-soft); color: #6b4a12; }
-.reading-difference-title { font-size: 13.5px; line-height: 1.55; }
+.reading-difference { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.reading-difference-title { cursor: pointer; font-size: 12.5px; line-height: 1.55; }
+.reading-difference[open] > .reading-difference-list { margin-top: 10px; }
+.reading-difference[open] > .button { margin-top: 9px; }
 .reading-difference-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .reading-difference-list li { display: grid; gap: 2px; padding-left: 10px; border-left: 2px solid var(--amber-line); }
 .reading-difference-source { color: #8a6422; font-size: 11.5px; font-weight: 700; }
@@ -959,11 +961,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-body { min-height: 0; overflow-y: auto; display: grid; gap: 11px; padding: 16px 20px; background: var(--bg); }
 .credential-service { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .credential-service-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.credential-service > label:not(.credential-clear) { color: var(--muted); font-size: 12px; font-weight: 650; }
+.credential-service > label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .credential-service > input[type="password"] { width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-family: var(--mono); }
 .credential-service > input[type="password"]:disabled { background: var(--surface-2); color: var(--muted); }
-.credential-clear { display: inline-flex; align-items: center; gap: 7px; width: fit-content; color: var(--muted); font-size: 12px; cursor: pointer; }
-.credential-clear input { width: 16px; height: 16px; accent-color: var(--red); }
+.credential-service-actions { display: flex; justify-content: flex-end; }
+.credential-service-actions:has(> [hidden]) { display: none; }
+.credential-delete { color: var(--red); }
+.credential-storage-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .credential-security-note { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
 .credential-actions { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .credential-actions .settings-save-result { flex: 1; }
