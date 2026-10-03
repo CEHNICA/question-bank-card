@@ -13,6 +13,18 @@ assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "basic").length
 assert.equal(TEACH_LESSONS.filter((lesson) => lesson.section === "review" && !lesson.final).length, 8);
 assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === "basics").checkpoint);
 
+// Instructions name the current entry point and keep local import available
+// even when no reading service has been configured.
+const regionLesson = TEACH_LESSONS.find((lesson) => lesson.key === "region");
+assert.match(regionLesson.text, /点“原卷与识读”/);
+assert.match(regionLesson.text, /识读选中片段/);
+assert.match(regionLesson.text, /框选识读/);
+assert.doesNotMatch(regionLesson.text, /点“框选识读”/);
+const finishLesson = TEACH_LESSONS.find((lesson) => lesson.key === "finish");
+assert.match(finishLesson.text, /导入资料无需密钥/);
+assert.match(finishLesson.text, /从原卷框选保存/);
+assert.doesNotMatch(finishLesson.text, /上传、重新识读.*需要读题服务/);
+
 // Stable keys and the old course's indexes must refer to learning content,
 // including the old finished screen; invalid progress starts safely at card.
 const oldKeys = ["card", "viewer", "tick", "fix", "fix", "figure", "figure", "publish", "publish", "publish", "basics"];
@@ -79,6 +91,12 @@ for (const event of ['type: "viewer"', 'type: "approve"', 'type: "filter"', 'typ
 // The practice paper never publishes: 入库 explains instead.
 assert.match(js, /if \(state\.paper\?\.demo\) \{\s*await confirmDialog\(\{\s*title: "示例试卷不会入库"[\s\S]*?\}\);\s*teach\(\{ type: "publish" \}\);\s*return;/);
 assert.match(js, /if \(dialog\.mode === "view" \|\| dialog\.practiceRead\) return;/);
+// The practice pointer uses a real control, rather than a removed card button.
+const regionPointer = js.match(/case "region": \{([\s\S]*?)\n      \}/)[1];
+assert.match(regionPointer, /later\(\(\) => \$\("readTargetSelect"\)/);
+assert.match(html, /id="readTargetSelect"/);
+assert.match(regionPointer, /真实题目的入口是“原卷与识读”/);
+assert.match(html, /<dt>框选识读<\/dt><dd>从题卡的“原卷与识读”进入/);
 assert.match(html, /id="settingsNewFeatures"/);
 // “指给我看” does not block the page, and Esc still closes an open window first.
 assert.match(js, /if \(event\.key === "Escape" && !anyDialogOpen\(\)\) \{ endTour\(\);/);

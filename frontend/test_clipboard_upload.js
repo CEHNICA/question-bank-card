@@ -72,12 +72,12 @@ assert.equal(screenshots[2].name, "已有名称.webp");
   assert.match(html, /name="materialType" value="book"/);
   assert.match(html, /id="bookChunkHint"[\s\S]*?每 100 页稳定分片[\s\S]*?原文件不会改动/);
   assert.match(css, /\.material-hint\s*\{/);
-  // Capture the mode/type when opening the photo preview: changing the sidebar
+  // Capture permission/type when opening the photo preview: changing settings
   // afterwards must never quietly dispatch a cloud upload.
   assert.match(js, /const materialType = selectedMaterialType\(\)/);
   assert.match(js, /form\.append\("material_type", materialType\)/);
   assert.match(js, /form\.append\("material_type", photoUpload\.materialType\)/);
-  assert.match(js, /photoUpload\.parseMode = parseMode/);
+  assert.match(js, /photoUpload\.policy = policy/);
   assert.match(js, /if \(!\$\("photoDialog"\)\.open\) \$\("photoDialog"\)\.showModal\(\)/);
 
   console.log("clipboard upload regression checks: OK");

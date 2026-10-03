@@ -10,11 +10,11 @@ from django.db import transaction
 from . import imaging, native_pdf, segment, source_images
 from .models import Block, Paper, Question, QuestionGroup
 
-MODES = {"manual", "native", "mineru"}
+MODES = {"auto", "manual", "native", "mineru"}
 
 
 def prepare(paper: Paper, mode: str) -> Paper:
-    if mode not in MODES or mode == "mineru":
+    if mode not in {"manual", "native"}:
         raise ValueError("请选择手工框题或本地文字 PDF")
     # Reuse only local rendering/conversion, never pipeline.parse.
     from .pipeline import prepare_photos, convert_docx_to_pdf
@@ -88,6 +88,57 @@ def prepare(paper: Paper, mode: str) -> Paper:
             paper.processing_plan = plan
             paper.save(update_fields=["total", "progress", "processing_plan", "updated_at"])
     return paper
+
+
+def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool = False) -> Paper:
+    """Use real local text first; cloud use requires this import's explicit consent."""
+    try:
+        prepare(paper, "native")
+    except Exception:
+        # A damaged text layer or failed segmentation must not make a valid
+        # locally viewable original dependent on cloud service recovery.
+        paper.refresh_from_db()
+        if paper.pages:
+            paper = select_manual(paper)
+        else:
+            prepare(paper, "manual")
+    with transaction.atomic():
+        paper = Paper.objects.select_for_update().get(pk=paper.pk)
+        plan = deepcopy(paper.processing_plan or {})
+        plan.update(requested_mode="auto", cloud_authorized=bool(allow_cloud), auto_fallback=True)
+        if paper.questions.exists():
+            plan["fallback_reason"] = "已从本地文字层准备题卡，请对照原卷核对；未切出的页面可手工补充。"
+        elif allow_cloud and cloud_ready:
+            plan.update(mode="mineru", revision=int(plan.get("revision", 0)) + 1)
+            plan["fallback_reason"] = "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。"
+            paper.status = Paper.Status.QUEUED
+        else:
+            plan["mode"] = "manual"
+            plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
+                if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
+            plan["pages"] = [{**page, "mode": "manual"} for page in plan.get("pages", [])]
+        paper.processing_plan = plan
+        paper.save(update_fields=["processing_plan", "status", "updated_at"])
+    return paper
+
+
+def fallback_manual(paper: Paper, revision: int, reason: str) -> bool:
+    """Recover one failed automatic run without replacing any successful draft."""
+    with transaction.atomic():
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+            return False
+        if not current.pages:
+            prepare(current, "manual")
+            current.refresh_from_db()
+        else:
+            current = select_manual(current)
+        plan = deepcopy(current.processing_plan or {})
+        plan.update(mode="manual", requested_mode="auto", fallback_reason=reason[:500])
+        current.processing_plan = plan
+        current.save(update_fields=["processing_plan", "updated_at"])
+        paper.refresh_from_db()
+        return True
 
 
 def select_manual(paper: Paper, selected_pages: list[int] | None = None) -> Paper:

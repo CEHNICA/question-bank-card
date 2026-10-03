@@ -245,6 +245,11 @@ class WorkerCredentialReloadTests(SimpleTestCase):
                     self.assertEqual(os.environ["MINIMAX_API_KEY"], "old-minimax")
 
             with mock.patch.object(run_worker, "SingleInstance"), \
+                    mock.patch.object(run_worker, "clean_saved_example_labels"), \
+                    mock.patch.object(run_worker.library_jobs, "recover_interrupted"), \
+                    mock.patch.object(run_worker.region_reads, "recover_interrupted"), \
+                    mock.patch.object(run_worker.library_jobs, "pending", return_value=False), \
+                    mock.patch.object(run_worker.region_reads, "pending", return_value=False), \
                     mock.patch.object(run_worker.Paper.objects, "filter", side_effect=[first_query, empty_query]), \
                     mock.patch.object(run_worker, "process_paper", side_effect=process), \
                     mock.patch.object(run_worker, "rereads_pending", return_value=False), \

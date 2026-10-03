@@ -60,20 +60,22 @@ assert.match(css, /\.crop-spot \{ position: absolute; border: 2px dashed #c2410c
 assert.match(css, /mark\.qb-mark\.spot \{/);
 
 // ---- 框选识读
-assert.match(js, /button\("框选识读", "", \(\) => openPageDialog\("read", q\)/);
+assert.match(js, /button\("原卷与识读",[^\n]*openPageDialog\("regions", q\)/);
+assert.match(js, /\$\("pageCropRead"\)\.addEventListener\("click"/);
 assert.match(html, /<label id="readTargetField" class="number-field" hidden>读出来的字填到/);
 assert.match(html, /<option value="A">选项 A<\/option>/);
-assert.match(js, /\$\("readTargetField"\)\.hidden = mode !== "read";/);
-assert.match(js, /\$\("pageDialogSave"\)\.textContent = mode === "read" \? "识读这一块" : mode === "new" \? "保存原图题" : "保存";/);
+assert.match(js, /\$\("readTargetField"\)\.hidden = !\(dialog\.mode === "read" \|\| \(dialog\.mode === "regions" && !imageBody\)\)/);
+assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读这一块" : dialog\.mode === "new" \? "保存并关闭" : "保存";/);
 // One box: a new one replaces the old.
 assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
-assert.match(js, /api\(`\/api\/questions\/\$\{q\.id\}\/region-read`, \{\s*method: "POST", body: \{ page_idx: box\.page_idx, bbox: box\.bbox, target \}/);
+assert.match(js, /function queueRegionRead\(q, box, target\)/);
+assert.match(js, /revision: submission\.revision, client_request_id: submission\.token/);
 // The page keeps polling while a region is read, and the result fills an option through 改字.
 assert.match(js, /q\.state === "reading" \|\| q\.ocr_pending \|\| regionReadPending\(q\)/);
 assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: target, value: read\.text \} \}\)/);
 assert.match(js, /function openEditor\(card, q, \{ prefill = null \} = \{\}\)/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
-assert.match(js, /method: "DELETE", body: \{\}/);
+assert.match(js, /method: "DELETE", body, signal/);
 // Without a clipboard (an older browser) it says so instead of failing silently.
 assert.match(js, /: Promise\.reject\(new Error\("clipboard unavailable"\)\);/);
 // New reads offer AI positioning while an explicitly chosen target is retained.

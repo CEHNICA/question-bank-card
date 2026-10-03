@@ -580,11 +580,11 @@ def cmd_upload(client: Client, args) -> dict:
     if missing:
         raise CliError("找不到文件：" + "、".join(missing))
     parameters = {"material_type": "book" if args.book else "exam"}
-    parse_mode = getattr(args, "parse_mode", None)
-    if parse_mode is not None:
-        if parse_mode not in {"manual", "native", "mineru"}:
-            raise CliError("处理方式只能是 manual、native 或 mineru")
-        parameters["parse_mode"] = parse_mode
+    parse_mode = getattr(args, "parse_mode", None) or "auto"
+    if parse_mode not in {"auto", "manual", "native", "mineru"}:
+        raise CliError("处理方式只能是 auto、manual、native 或 mineru")
+    parameters["parse_mode"] = parse_mode
+    parameters["allow_cloud"] = "1" if getattr(args, "allow_cloud", False) is True else "0"
     result = client.upload(files, parameters)
     paper = result["paper"]
     summary = {"paper": paper_summary(paper), "duplicate": bool(result.get("duplicate"))}
@@ -1238,8 +1238,9 @@ MCP_TOOLS = [
     ("upload_paper", "上传一份试卷（PDF、Word，或几张照片合成一份）。", _schema({
         "paths": {"type": "array", "items": {"type": "string"}, "description": "本机文件的完整路径"},
         "book": {"type": "boolean", "description": "是一本书/讲义而不是一份试卷"},
-        "parse_mode": {"type": "string", "enum": ["manual", "native", "mineru"],
-                       "description": "manual 无密钥手工切题；native 本地文字PDF；mineru 明确使用云解析"},
+        "parse_mode": {"type": "string", "enum": ["auto", "manual", "native", "mineru"],
+                       "description": "默认auto先处理本地文字，无可靠题卡则手工；manual手工；native本地文字；mineru明确云解析"},
+        "allow_cloud": {"type": "boolean", "description": "默认false；明确同意auto本地无可靠结果时尝试已配置MinerU，不另选付费服务"},
     }, ["paths"])),
     ("wait_paper", "等一份试卷读完（最多等 timeout 秒，没读完可以再调一次）。", _schema({
         "paper": PAPER, "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
@@ -1315,7 +1316,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_papers(client, _ns()), []
     if name == "upload_paper":
         return cmd_upload(client, _ns(files=a.get("paths") or [], book=bool(a.get("book")),
-                                      parse_mode=a.get("parse_mode"), wait=False, timeout=0)), []
+                                      parse_mode=a.get("parse_mode"), allow_cloud=a.get("allow_cloud") is True,
+                                      wait=False, timeout=0)), []
     if name == "wait_paper":
         return wait_for(client, find_paper(client, a.get("paper", "")), min(600, int(a.get("timeout") or 300)), quiet=True), []
     if name == "list_cards":
@@ -1486,8 +1488,9 @@ def build_parser() -> argparse.ArgumentParser:
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
     upload.add_argument("files", nargs="+")
     upload.add_argument("--book", action="store_true", help="是一本书/讲义")
-    upload.add_argument("--parse-mode", choices=["manual", "native", "mineru"],
-                        help="manual 无密钥手工切题；native 本地文字PDF；mineru 云解析")
+    upload.add_argument("--parse-mode", choices=["auto", "manual", "native", "mineru"], default="auto",
+                        help="默认auto本地优先；manual手工；native本地文字PDF；mineru明确云解析")
+    upload.add_argument("--allow-cloud", action="store_true", help="同意auto在本地无可靠题卡时尝试已配置的MinerU")
     upload.add_argument("--wait", action="store_true", help="上传后等它读完")
     upload.add_argument("--timeout", type=int, default=3600)
 

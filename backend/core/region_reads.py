@@ -15,6 +15,7 @@ import re
 import hashlib
 import json
 from copy import deepcopy
+from datetime import timedelta
 
 from django.db import close_old_connections, transaction
 from django.utils import timezone
@@ -28,12 +29,15 @@ logger = logging.getLogger("core")
 FIELDS = ("stem", "A", "B", "C", "D", "E")
 TARGETS = ("auto", *FIELDS)
 TARGET_NAMES = {"auto": "AI 推荐位置", "stem": "题干", **{key: f"选项 {key}" for key in "ABCDE"}}
-NO_ENGINE = "框选识读要用看图读题的服务：请先在“设置 → 常用”里填魔搭、MiniMax 或硅基流动的密钥"
+NO_ENGINE = "框选识读要用看图读题的服务，当前需要服务密钥：请先在“设置 → 读题服务”中配置；也可以直接手动改字"
 PAD = 6.0             # 框外多留一点（页面单位），免得切到笔画
 MIN_LONG_SIDE = 1100  # 小块放大到这么大再给模型看
 ACTIVE = (RegionRead.Status.QUEUED, RegionRead.Status.RUNNING)
 MAX_CONTEXT_CHARS = 24000
 MAX_FRAGMENT_CHARS = 4000
+TIME_LIMIT_SECONDS = 90
+QUEUED_TIMEOUT = "框选识读未在时限内开始。读题后台可能未运行或正等待其他任务；原题未修改，可重试或手动改字。"
+RUNNING_TIMEOUT = "本次框选识读等待超时；原题未修改，可重新框选或手动改字。"
 
 
 class RegionError(ValueError):
@@ -113,7 +117,7 @@ def context_hash(context: dict) -> str:
 
 def queued_recommendation(question) -> dict:
     base = question_context(question)
-    return {"base": base, "base_hash": context_hash(base), "status": "pending"}
+    return {"base": base, "base_hash": context_hash(base), "status": "pending", "revision": question.content_revision}
 
 
 def _manual(base: dict, text: str, why: str) -> dict:
@@ -309,7 +313,15 @@ def run(job: RegionRead) -> tuple[str, str]:
     url = imaging.jpeg_data_url(crop(page, list(job.bbox)), long_side=max(MIN_LONG_SIDE, 1600))
     stored = job.recommendation if isinstance(job.recommendation, dict) else {}
     base = stored.get("base") if isinstance(stored.get("base"), dict) else question_context(job.question)
-    raw = readers.chat(engine, prompt(job.target, base), [url], max_tokens=1800 if job.target == "auto" else 800)
+    remaining = (job.created_at + timedelta(seconds=TIME_LIMIT_SECONDS) - timezone.now()).total_seconds()
+    def cancel() -> bool:
+        active = RegionRead.objects.filter(pk=job.pk, status=RegionRead.Status.RUNNING)
+        revision = stored.get("revision")
+        if type(revision) is int:
+            active = active.filter(question__content_revision=revision)
+        return not active.exists()
+    with readers.bounded_request(remaining, cancel=cancel):
+        raw = readers.chat(engine, prompt(job.target, base), [url], max_tokens=1800 if job.target == "auto" else 800)
     if job.target == "auto":
         text, job.recommendation = _auto_reply(raw, base)
         if _crop_overlaps_figure(job, base):
@@ -317,6 +329,7 @@ def run(job: RegionRead) -> tuple[str, str]:
     else:
         text = clean(raw, job.target)
         job.recommendation = _manual(base, text, f"已按{TARGET_NAMES.get(job.target, job.target)}识读，请手动核对填入位置。")
+    job.recommendation.update({key: stored[key] for key in ("revision", "client_request_id") if key in stored})
     return text, readers.answered_by(engine).label
 
 
@@ -335,16 +348,37 @@ def _crop_overlaps_figure(job: RegionRead, base: dict) -> bool:
     return False
 
 
+def expire_pending() -> int:
+    expired = 0
+    cutoff = timezone.now() - timedelta(seconds=TIME_LIMIT_SECONDS)
+    for status, message in ((RegionRead.Status.QUEUED, QUEUED_TIMEOUT), (RegionRead.Status.RUNNING, RUNNING_TIMEOUT)):
+        expired += RegionRead.objects.filter(status=status, created_at__lte=cutoff).update(
+            status=RegionRead.Status.FAILED, error=message, updated_at=timezone.now())
+    return expired
+
+
 def pending() -> bool:
+    expire_pending()
     return RegionRead.objects.filter(status=RegionRead.Status.QUEUED).exists()
 
 
 def _finish(job: RegionRead, status: str, *, text: str = "", error: str = "", engine: str = "") -> None:
     # The person may have closed it or framed a new box meanwhile: then there is nothing to write.
+    current = RegionRead.objects.filter(pk=job.pk, status=RegionRead.Status.RUNNING).values("created_at", "recommendation").first()
+    if current is None:
+        return
     recommendation = job.recommendation if isinstance(job.recommendation, dict) else {}
+    stored = current["recommendation"] if isinstance(current["recommendation"], dict) else {}
+    request_metadata = {key: stored[key] for key in ("revision", "client_request_id") if key in stored}
+    if current["created_at"] + timedelta(seconds=TIME_LIMIT_SECONDS) <= timezone.now():
+        status, text, error = RegionRead.Status.FAILED, "", RUNNING_TIMEOUT
+    revision = request_metadata.get("revision", recommendation.get("revision"))
+    if type(revision) is int and not job.question.__class__.objects.filter(pk=job.question_id, content_revision=revision).exists():
+        status, text, error = RegionRead.Status.FAILED, "", "题目已发生变化，本次识读结果已放弃；请刷新后重新框选。"
     if status == RegionRead.Status.FAILED:
         base = recommendation.get("base") or {}
         recommendation = _manual(base, text, "识读服务这次没有返回可用文字，请手动改字或稍后重试。")
+    recommendation.update(request_metadata)
     RegionRead.objects.filter(pk=job.pk, status=RegionRead.Status.RUNNING).update(
         status=status, text=text, error=error[:300], engine=engine[:80], recommendation=recommendation,
         updated_at=timezone.now())
@@ -357,6 +391,7 @@ def process_pending(limit: int = 5) -> int:
     claimed with a conditional update, so only one of them reads it.
     """
     handled = 0
+    expire_pending()
     for _ in range(limit):
         close_old_connections()
         job = RegionRead.objects.filter(status=RegionRead.Status.QUEUED).order_by("created_at").first()
@@ -384,19 +419,37 @@ def process_pending(limit: int = 5) -> int:
 
 def recover_interrupted() -> int:
     """Reads left running by a worker that stopped go back to the queue."""
+    expire_pending()
     return RegionRead.objects.filter(status=RegionRead.Status.RUNNING).update(status=RegionRead.Status.QUEUED)
 
 
 def latest_json(question) -> dict | None:
     """The card's last region read, for the review page (uses a prefetch when there is one)."""
-    reads = list(question.region_reads.all())
+    reads = [read for read in question.region_reads.all()
+             if not (isinstance(read.recommendation, dict) and read.recommendation.get("cancelled"))]
     if not reads:
         return None
     job = max(reads, key=lambda item: (item.created_at, item.pk))
+    deadline = job.created_at + timedelta(seconds=TIME_LIMIT_SECONDS)
+    if job.status in ACTIVE and deadline <= timezone.now():
+        message = QUEUED_TIMEOUT if job.status == RegionRead.Status.QUEUED else RUNNING_TIMEOUT
+        changed = RegionRead.objects.filter(pk=job.pk, status=job.status).update(
+            status=RegionRead.Status.FAILED, error=message, updated_at=timezone.now())
+        if changed:
+            job.status, job.error = RegionRead.Status.FAILED, message
+        else:
+            job.refresh_from_db()
     return {
         "id": job.pk, "target": job.target, "target_name": TARGET_NAMES.get(job.target, job.target),
         "status": job.status, "text": job.text, "error": job.error, "engine": job.engine,
         "page_idx": job.page_idx, "bbox": job.bbox,
+        "created_at": job.created_at.isoformat(), "deadline_at": deadline.isoformat(),
+        "timeout_seconds": TIME_LIMIT_SECONDS,
+        "revision": (job.recommendation or {}).get("revision"),
+        "client_request_id": (job.recommendation or {}).get("client_request_id"),
+        "status_label": "等待读题后台" if job.status == RegionRead.Status.QUEUED else
+            "AI 正在读框里的字" if job.status == RegionRead.Status.RUNNING else
+            "已读出文字" if job.status == RegionRead.Status.DONE else "本次识读未完成",
         "recommendation": _recommendation_json(job, question),
     }
 

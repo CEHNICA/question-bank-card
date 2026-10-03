@@ -567,7 +567,10 @@
         });
         empty.append(reset);
       } else {
-        empty.append(node("p", "helper", "在“录入终审”页核对并标记题卡通过后，点“入库”，题目就会出现在这里。"));
+        empty.append(node("p", "helper", "先导入试卷，核对题卡后点“入库”，题目就会出现在这里。没有密钥也能从原卷选题。"));
+        const upload = node("a", "button button-primary", "导入试卷");
+        upload.href = "/#dropZone";
+        empty.append(upload);
       }
       ui.list.append(empty);
     }

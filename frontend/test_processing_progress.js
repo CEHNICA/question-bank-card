@@ -137,9 +137,15 @@ assert.match(appSource, /classList\.toggle\("paused"/);
 
 console.log("truthful processing progress checks: OK");
 
-// 1.10.8: 停止处理 for a queued paper or one waiting on MinerU, so it can be deleted.
+// All active stages, including chunked tasks, can stop locally.
 assert.match(indexHtml, /<button id="settingsStop" class="link-button" type="button" hidden/);
 assert.match(reparseSource, /api\(`\/api\/papers\/\$\{state\.paperId\}\/stop`, \{ method: "POST", body: \{\} \}\)/);
-assert.match(reparseSource, /const stoppable = paper\.status === "queued" \|\| \(paper\.status === "parsing" && !paper\.processing\?\.chunks\);/);
+for (const status of ["queued", "parsing", "segmenting", "reading"]) {
+  assert.equal(Progress.canStopPaper({ status }), true);
+  assert.equal(Progress.canStopPaper({ status, processing: { chunks: { total: 3 } } }), true);
+}
+for (const status of ["ready", "failed", "needs_grouping", ""]) assert.equal(Progress.canStopPaper({ status }), false);
+assert.equal(Progress.canStopPaper(null), false);
+assert.match(reparseSource, /const stoppable = QBProgress\.canStopPaper\(paper\);/);
 assert.match(reparseSource, /先点上面的“停止处理”，停下来以后就能删除。/);
 assert.match(reparseSource, /paper\.stopped \? "已停止" : "处理失败"/);

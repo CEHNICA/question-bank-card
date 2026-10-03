@@ -21,7 +21,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Callable, Iterator
 
 from . import provider_catalog
 
@@ -50,6 +50,10 @@ SERVICE_ENVIRONMENT = provider_catalog.environment_names()
 
 class AccountPoolError(RuntimeError):
     """Safe configuration/exhaustion error that never includes a secret."""
+
+
+class AccountPoolCancelled(AccountPoolError):
+    """The caller cancelled while waiting; no account was consumed."""
 
 
 def _normalise_secret(value: object, *, bearer: bool = False) -> str:
@@ -325,12 +329,12 @@ class AccountPool:
                 for state in self._states.values()
             )
 
-    def _acquire(self, exclude: frozenset[int] = frozenset()) -> AccountLease:
+    def _acquire(self, exclude: frozenset[int] = frozenset(), cancel: Callable[[], bool] | None = None) -> AccountLease:
         priority = current_priority()
         with self._condition:
             self._waiting[priority] = self._waiting.get(priority, 0) + 1
             try:
-                return self._acquire_locked(exclude, priority)
+                return self._acquire_locked(exclude, priority, cancel)
             finally:
                 left = self._waiting[priority] - 1
                 if left:
@@ -348,8 +352,10 @@ class AccountPool:
             if index not in exclude and not state.disabled and state.ready_at <= now
         )
 
-    def _acquire_locked(self, exclude: frozenset[int], priority: float) -> AccountLease:
+    def _acquire_locked(self, exclude: frozenset[int], priority: float, cancel: Callable[[], bool] | None = None) -> AccountLease:
         while True:
+            if cancel is not None and cancel():
+                raise AccountPoolCancelled("本机任务已停止")
             now = time.monotonic()
             enabled = [
                 (index, secret) for index, secret in enumerate(self._secrets)
@@ -390,6 +396,8 @@ class AccountPool:
                 and self._states[secret].ready_at > now
             ]
             timeout = max(0.01, min(ready_times) - now) if ready_times else None
+            if cancel is not None:
+                timeout = min(timeout, 0.25) if timeout is not None else 0.25
             self._condition.wait(timeout=timeout)
 
     def _release(self, lease: AccountLease) -> None:
@@ -438,8 +446,9 @@ class AccountPool:
             )
 
     @contextmanager
-    def lease(self, *, exclude: set[int] | frozenset[int] | None = None) -> Iterator[AccountLease]:
-        lease = self._acquire(frozenset(exclude or ()))
+    def lease(self, *, exclude: set[int] | frozenset[int] | None = None,
+              cancel: Callable[[], bool] | None = None) -> Iterator[AccountLease]:
+        lease = self._acquire(frozenset(exclude or ()), cancel)
         try:
             yield lease
         finally:

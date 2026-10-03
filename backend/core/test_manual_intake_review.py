@@ -207,7 +207,7 @@ class ManualIntakeReviewTests(TestCase):
 
     def test_late_parse_failure_cannot_mark_manual_task_failed(self):
         paper = self.paper(mode="mineru", status=Paper.Status.QUEUED)
-        def fail(*args):
+        def fail(*args, **kwargs):
             intake.select_manual(paper)
             raise RuntimeError("Old cloud call failed after transfer")
         with mock.patch.object(pipeline, "parse", side_effect=fail):
@@ -219,7 +219,7 @@ class ManualIntakeReviewTests(TestCase):
 
     def test_late_parse_ahead_failure_cannot_mark_manual_task_failed(self):
         paper = self.paper(mode="mineru", status=Paper.Status.QUEUED)
-        def fail(*args):
+        def fail(*args, **kwargs):
             intake.select_manual(paper)
             raise RuntimeError("Old parse lane failed after transfer")
         with mock.patch.object(pipeline, "parse", side_effect=fail):

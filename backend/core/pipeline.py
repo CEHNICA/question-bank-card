@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import threading
+import uuid
 from collections import OrderedDict, defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from copy import deepcopy
@@ -598,7 +599,18 @@ def _set(paper: Paper, **fields) -> None:
     paper.save(update_fields=[*fields, "updated_at"])
 
 
-def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None) -> None:
+def _run_current(paper_id, revision: int) -> bool:
+    plan = Paper.objects.filter(pk=paper_id).values_list("processing_plan", flat=True).first()
+    return plan is not None and int((plan or {}).get("revision", 0)) == revision
+
+
+def _check_run(paper_id, revision: int) -> None:
+    if not _run_current(paper_id, revision):
+        raise mineru.MineruCancelled()
+
+
+def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None,
+                     revision: int | None = None) -> None:
     """Touch one paper from the orchestration thread, optionally saving progress."""
 
     fields = {"updated_at": timezone.now()}
@@ -606,7 +618,10 @@ def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None
         fields["progress"] = progress
     if total is not None:
         fields["total"] = total
-    Paper.objects.filter(pk=paper_id).update(**fields)
+    with transaction.atomic():
+        paper = Paper.objects.select_for_update().filter(pk=paper_id).first()
+        if paper is not None and (revision is None or int((paper.processing_plan or {}).get("revision", 0)) == revision):
+            Paper.objects.filter(pk=paper_id).update(**fields)
 
 
 # ---------------------------------------------------------------- 1. 解析
@@ -722,20 +737,34 @@ def _chunk_error_message(error: Exception) -> str:
     return f"分片处理失败（{type(error).__name__}）"
 
 
-def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
+def _save_chunk(paper: Paper, revision: int, chunk_id: int, **fields) -> None:
+    with transaction.atomic():
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+            raise mineru.MineruCancelled()
+        ImportChunk.objects.filter(pk=chunk_id).update(**fields, updated_at=timezone.now())
+
+
+def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) -> list[dict]:
     """并行解析缺失分片，并按原始顺序无损合并结果。
 
     主线程先顺序生成本地分片；工作线程只执行 MinerU 请求和读取结果 ZIP，
     所有 ORM 更新也都由主线程完成。这样一个分片失败时，其他已完成分片
     仍能安全持久化，下次重试只提交失败或缺失的部分。
     """
+    revision = int((paper.processing_plan or {}).get("revision", 0)) if revision is None else revision
+    _check_run(paper.pk, revision)
     chunks = _ensure_import_chunks(paper)
     folder = paper_dir(paper) / "chunks"
     folder.mkdir(parents=True, exist_ok=True)
     results: dict[int, list[dict]] = {}
     jobs: list[dict] = []
+    cancelled = threading.Event()
+    cancel_file = paper_dir(paper) / mineru.CANCEL_FILE
+    run_folder = folder / f".run-{revision}-{uuid.uuid4().hex}"
 
     for chunk in chunks:
+        _check_run(paper.pk, revision)
         archive = _chunk_archive_path(folder, chunk)
         source = archive.with_suffix(".pdf")
         page_count = chunk.source_page_end - chunk.source_page_start + 1
@@ -747,11 +776,10 @@ def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
             archive.unlink(missing_ok=True)
         if blocks is not None:
             results[chunk.sequence] = blocks
-            ImportChunk.objects.filter(pk=chunk.pk).update(
+            _save_chunk(paper, revision, chunk.pk,
                 status=ImportChunk.Status.PARSED,
                 artifact_path=str(archive),
                 error="",
-                updated_at=timezone.now(),
             )
             continue
         jobs.append({
@@ -763,21 +791,22 @@ def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
             "page_count": page_count,
             "source": source,
             "archive": archive,
+            "download": run_folder / archive.name,
             "attempts": chunk.attempts + 1,
         })
 
-    _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks))
+    _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks), revision=revision)
 
     failures: list[tuple[int, Exception]] = []
     if jobs:
         ready_jobs: list[dict] = []
         for job in jobs:
-            ImportChunk.objects.filter(pk=job["pk"]).update(
+            _check_run(paper.pk, revision)
+            _save_chunk(paper, revision, job["pk"],
                 status=ImportChunk.Status.PARSING,
                 attempts=job["attempts"],
                 artifact_path=str(job["archive"]),
                 error="",
-                updated_at=timezone.now(),
             )
             try:
                 if not job["source"].is_file():
@@ -791,19 +820,23 @@ def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
                     )
             except Exception as exc:
                 failures.append((job["sequence"], exc))
-                ImportChunk.objects.filter(pk=job["pk"]).update(
+                _save_chunk(paper, revision, job["pk"],
                     status=ImportChunk.Status.FAILED,
                     error=_chunk_error_message(exc),
-                    updated_at=timezone.now(),
                 )
             else:
                 ready_jobs.append(job)
 
         def run(job: dict) -> list[dict]:
+            def cancel() -> bool:
+                return cancelled.is_set() or cancel_file.exists()
+            mineru._check_cancel(cancel)
+            job["download"].parent.mkdir(parents=True, exist_ok=True)
             request_extract_file_from_pool(
-                job["source"], job["archive"], job["page_count"],
+                job["source"], job["download"], job["page_count"], cancel=cancel,
             )
-            return load_blocks(job["archive"], job["page_count"])
+            mineru._check_cancel(cancel)
+            return load_blocks(job["download"], job["page_count"])
 
         if ready_jobs:
             try:
@@ -815,40 +848,54 @@ def _chunk_blocks(paper: Paper, render: Path) -> list[dict]:
                 raise MineruError("MinerU 账号池中没有可用账号")
 
         if ready_jobs:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_jobs = {executor.submit(run, job): job for job in ready_jobs}
-                pending = set(future_jobs)
-                while pending:
-                    done, pending = wait(
-                        pending,
-                        timeout=MINERU_HEARTBEAT_SECONDS,
-                        return_when=FIRST_COMPLETED,
-                    )
-                    if not done:
-                        _paper_heartbeat(paper.pk)
-                        continue
-                    for future in done:
-                        job = future_jobs[future]
-                        try:
-                            blocks = future.result()
-                            digest = _file_sha256(job["source"])
-                        except Exception as exc:
-                            failures.append((job["sequence"], exc))
-                            ImportChunk.objects.filter(pk=job["pk"]).update(
-                                status=ImportChunk.Status.FAILED,
-                                error=_chunk_error_message(exc),
-                                updated_at=timezone.now(),
-                            )
-                        else:
-                            results[job["sequence"]] = blocks
-                            ImportChunk.objects.filter(pk=job["pk"]).update(
-                                status=ImportChunk.Status.PARSED,
-                                sha256=digest,
-                                artifact_path=str(job["archive"]),
-                                error="",
-                                updated_at=timezone.now(),
-                            )
-                        _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks))
+            try:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_jobs = {executor.submit(run, job): job for job in ready_jobs}
+                    pending = set(future_jobs)
+                    while pending:
+                        if not _run_current(paper.pk, revision) or cancel_file.exists():
+                            cancelled.set()
+                            for future in pending:
+                                future.cancel()
+                            raise mineru.MineruCancelled()
+                        done, pending = wait(
+                            pending,
+                            timeout=0.25,
+                            return_when=FIRST_COMPLETED,
+                        )
+                        if not done:
+                            _paper_heartbeat(paper.pk, revision=revision)
+                            continue
+                        for future in done:
+                            job = future_jobs[future]
+                            _check_run(paper.pk, revision)
+                            try:
+                                blocks = future.result()
+                                _check_run(paper.pk, revision)
+                                digest = _file_sha256(job["source"])
+                            except Exception as exc:
+                                _check_run(paper.pk, revision)
+                                failures.append((job["sequence"], exc))
+                                _save_chunk(paper, revision, job["pk"],
+                                    status=ImportChunk.Status.FAILED,
+                                    error=_chunk_error_message(exc),
+                                )
+                            else:
+                                with transaction.atomic():
+                                    current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+                                    if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+                                        cancelled.set()
+                                        raise mineru.MineruCancelled()
+                                    job["download"].replace(job["archive"])
+                                    results[job["sequence"]] = blocks
+                                    ImportChunk.objects.filter(pk=job["pk"]).update(
+                                        status=ImportChunk.Status.PARSED, sha256=digest,
+                                        artifact_path=str(job["archive"]), error="", updated_at=timezone.now())
+                            _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks), revision=revision)
+            finally:
+                cancelled.set()
+                if run_folder.exists():
+                    shutil.rmtree(run_folder, ignore_errors=True)
 
     if failures:
         # Futures are all drained before reaching here, so later successes and
@@ -1107,14 +1154,18 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
         paper.structure = structure
     return desired
 
-def parse(paper: Paper) -> None:
+def parse(paper: Paper, *, revision: int | None = None) -> None:
     paper.refresh_from_db()
     plan_revision = int((paper.processing_plan or {}).get("revision", 0))
+    if revision is not None and revision != plan_revision:
+        raise mineru.MineruCancelled()
     if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
         from . import intake
         if not paper.pages:
             intake.prepare(paper, paper.processing_plan["mode"])
         return
+    if paper.status not in {Paper.Status.QUEUED, Paper.Status.PARSING}:
+        raise mineru.MineruCancelled()
     if not _set_if_plan_current(paper, plan_revision, status=Paper.Status.PARSING, error=""):
         return
     folder = paper_dir(paper)
@@ -1122,12 +1173,14 @@ def parse(paper: Paper) -> None:
     if paper.kind == "docx" and not paper.render_path:
         target = folder / "converted.pdf"
         convert_docx_to_pdf(source, target)
-        _set(paper, render_path=str(target))
+        if not _set_if_plan_current(paper, plan_revision, render_path=str(target)):
+            raise mineru.MineruCancelled()
     if paper.photos and not paper.render_path:
-        prepare_photos(paper)
+        prepare_photos(paper, revision=plan_revision)
     render, kind = render_source(paper)
     if not paper.pages:
-        _set(paper, pages=imaging.page_sizes(render, kind))
+        if not _set_if_plan_current(paper, plan_revision, pages=imaging.page_sizes(render, kind)):
+            raise mineru.MineruCancelled()
     chunked = kind == "pdf" and (
         import_planning.pdf_requires_chunks(
             len(paper.pages), paper.material_type, MAX_PDF_PAGES,
@@ -1136,12 +1189,12 @@ def parse(paper: Paper) -> None:
     )
     archive: Path | None = None
     if chunked:
-        blocks = _chunk_blocks(paper, render)
+        blocks = _chunk_blocks(paper, render, revision=plan_revision)
     else:
         archive = Path(paper.zip_path) if paper.zip_path else folder / "mineru_result.zip"
 
         def heartbeat() -> None:
-            _paper_heartbeat(paper.pk)
+            _paper_heartbeat(paper.pk, revision=plan_revision)
 
         # What MinerU says it is doing, for the page (1.10.6).
         state_file = folder / mineru.MINERU_STATE_FILE
@@ -1151,18 +1204,38 @@ def parse(paper: Paper) -> None:
         cancel_file = folder / mineru.CANCEL_FILE
 
         def on_state(info: dict) -> None:
-            mineru.record_state(state_file, info)
+            if _run_current(paper.pk, plan_revision):
+                mineru.record_state(state_file, info)
+
+        def cancel() -> bool:
+            return cancel_file.exists() or not _run_current(paper.pk, plan_revision)
+
+        run_folder = folder / f".parse-{plan_revision}-{uuid.uuid4().hex}"
+        download = run_folder / "mineru_result.zip"
 
         def extract() -> None:
+            _check_run(paper.pk, plan_revision)
             restart_file.unlink(missing_ok=True)
             while True:
                 try:
+                    _check_run(paper.pk, plan_revision)
+                    run_folder.mkdir(parents=True, exist_ok=True)
                     request_extract_file_from_pool(
-                        render, archive, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
-                        restart=restart_file.exists, cancel=cancel_file.exists,
+                        render, download, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
+                        restart=restart_file.exists, cancel=cancel,
                     )
+                    _check_run(paper.pk, plan_revision)
+                    # Validate before promoting this run's cache. Old responses
+                    # never share a .part or replace a retry's valid ZIP.
+                    load_blocks(download, len(paper.pages))
+                    with transaction.atomic():
+                        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+                        if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+                            raise mineru.MineruCancelled()
+                        download.replace(archive)
                     return
                 except mineru.MineruRestart:
+                    _check_run(paper.pk, plan_revision)
                     restart_file.unlink(missing_ok=True)
                     logger.info("paper %s sent to MinerU again on request", paper.pk)
 
@@ -1181,16 +1254,20 @@ def parse(paper: Paper) -> None:
                 extract()
                 blocks = load_blocks(archive, len(paper.pages))
         finally:
-            state_file.unlink(missing_ok=True)
-            restart_file.unlink(missing_ok=True)
-            cancel_file.unlink(missing_ok=True)
+            if _run_current(paper.pk, plan_revision):
+                state_file.unlink(missing_ok=True)
+                restart_file.unlink(missing_ok=True)
+                cancel_file.unlink(missing_ok=True)
+            if run_folder.exists():
+                shutil.rmtree(run_folder, ignore_errors=True)
+    _check_run(paper.pk, plan_revision)
     if paper.photos:
         blocks = arrange_photo_pages(paper, blocks)
         paper.refresh_from_db(fields=["photos", "pages", "structure", "updated_at"])
     structure, needs_confirmation = _plan_structure(paper, blocks)
     with transaction.atomic():
-        current = Paper.objects.select_for_update().get(pk=paper.pk)
-        if int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
             return  # A person transferred this task while cloud parsing ran.
         paper.blocks.all().delete()
         Block.objects.bulk_create([Block(paper=paper, **block) for block in blocks], batch_size=300)
@@ -1209,7 +1286,7 @@ def parse(paper: Paper) -> None:
 PAGE_NOTE = "页序："
 
 
-def prepare_photos(paper: Paper) -> None:
+def prepare_photos(paper: Paper, *, revision: int | None = None) -> None:
     """照片：拉正、扫描件效果，按初步顺序（拍摄时间/文件名）合成 PDF，交给 MinerU。"""
     folder = paper_dir(paper)
     info = dict(paper.photos)
@@ -1217,7 +1294,11 @@ def prepare_photos(paper: Paper) -> None:
     target = folder / "pages.pdf"
     photos.build_pdf(folder, info, target)
     info["mineru_order"] = list(info["order"])
-    _set(paper, photos=info, render_path=str(target), pages=imaging.page_sizes(target, "pdf"))
+    fields = {"photos": info, "render_path": str(target), "pages": imaging.page_sizes(target, "pdf")}
+    if revision is None:
+        _set(paper, **fields)
+    elif not _set_if_plan_current(paper, revision, **fields):
+        raise mineru.MineruCancelled()
 
 
 def _page_note(info: dict, ranges: dict[int, tuple | None] | None, prefix: str) -> str:
@@ -2231,14 +2312,20 @@ def segment_paper(paper: Paper) -> None:
     if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
         return
     plan_revision = int((paper.processing_plan or {}).get("revision", 0))
+    _check_run(paper.pk, plan_revision)
     planned_structure: dict | None = None
     if paper.material_type == Paper.MaterialType.BOOK:
         groups, planned_structure = _prospective_book_groups(paper, _block_dicts(paper))
     else:
-        groups = _ensure_question_groups(paper)
-    blocks, questions, notes, _diagnostics = _collect_segmentation_items(
-        paper, groups, locate_gaps=True, page_store=PageStore(paper),
-    )
+        with transaction.atomic():
+            current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+            if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+                raise mineru.MineruCancelled()
+            groups = _ensure_question_groups(paper)
+    with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
+        blocks, questions, notes, _diagnostics = _collect_segmentation_items(
+            paper, groups, locate_gaps=True, page_store=PageStore(paper),
+        )
     if not questions:
         raise RuntimeError("没有在试卷里找到印刷题号，无法切题")
     existing_questions = list(
@@ -2247,8 +2334,8 @@ def segment_paper(paper: Paper) -> None:
     pairs, unmatched = _match_segmentation_items(existing_questions, questions, groups)
     kept = reread = locally_trimmed = preserved = excluded = 0
     with transaction.atomic():
-        current = Paper.objects.select_for_update().get(pk=paper.pk)
-        if int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
             return
         manual_pages = {p["page_idx"] for p in (current.processing_plan or {}).get("pages", []) if p.get("mode") == "manual"}
         if planned_structure is not None:
@@ -3477,7 +3564,9 @@ def _set_backlog(paper_pk, value: int | None) -> None:
             _READ_BACKLOG[paper_pk] = value
 
 
-def read_questions(paper: Paper, questions: list[Question]) -> None:
+def read_questions(paper: Paper, questions: list[Question], *, revision: int | None = None) -> None:
+    revision = int((paper.processing_plan or {}).get("revision", 0)) if revision is None else revision
+    _check_run(paper.pk, revision)
     questions = [question for question in questions if question.processing_mode == "auto" or question.reread_requested]
     if not questions:
         return
@@ -3535,7 +3624,8 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
 
     def work(snapshot: dict) -> tuple[int, dict]:
         try:
-            return snapshot["id"], read_card(snapshot, store)
+            with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
+                return snapshot["id"], read_card(snapshot, store)
         except readers.ReaderQuotaExhausted:
             # This is a task-wide pause signal.  Converting it into one red
             # card would make the worker repeat the same permanent failure for
@@ -3551,6 +3641,9 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
 
     foreign: list[dict] = []
     def _persist_locked(question_id: int, fields: dict) -> None:
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+            return
         question = Question.objects.select_for_update().filter(pk=question_id).first()
         if question is None:
             return
@@ -3663,7 +3756,11 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
                 unsubmitted -= 1
             _set_backlog(paper.pk, unsubmitted)
             while pending:
-                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                if not _run_current(paper.pk, revision):
+                    for future in pending:
+                        future.cancel()
+                    return
+                done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
                 completed: list[tuple[int, dict]] = []
                 for future in done:
                     try:
@@ -3678,6 +3775,7 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
                 for question_id, fields in completed:
                     persist(question_id, fields)
                 for _ in completed:
+                    _check_run(paper.pk, revision)
                     try:
                         snapshot = next(snapshot_iter)
                     except StopIteration:
@@ -3687,6 +3785,8 @@ def read_questions(paper: Paper, questions: list[Question]) -> None:
                 _set_backlog(paper.pk, unsubmitted)
     finally:
         _set_backlog(paper.pk, None)
+    if not _run_current(paper.pk, revision):
+        return
     assign_foreign_figures(paper, foreign)
     distribute_figure_rows(paper)
     if quota_error is not None:
@@ -3884,14 +3984,15 @@ def process_paper(paper: Paper) -> None:
                 intake.prepare(paper, paper.processing_plan["mode"])
             return
         if paper.status in (Paper.Status.QUEUED, Paper.Status.PARSING):
-            parse(paper)
+            parse(paper, revision=run_revision)
             paper.refresh_from_db()
+            _check_run(paper.pk, run_revision)
         if paper.status == Paper.Status.SEGMENTING:
             segment_paper(paper)
             paper.refresh_from_db()
         if paper.status == Paper.Status.READING:
             pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]))
-            read_questions(paper, pending)
+            read_questions(paper, pending, revision=run_revision)
             _set_if_plan_current(paper, run_revision, status=Paper.Status.READY)
     except mineru.MineruCancelled as error:
         logger.info("paper %s stopped on request", paper.pk)
@@ -3901,11 +4002,19 @@ def process_paper(paper: Paper) -> None:
         # Unfinished cards deliberately remain READING and paper_retry resumes
         # them without parsing, segmenting, or touching completed/protected cards.
         logger.warning("paper paused because the configured vision plan is exhausted")
+        from . import intake
+        if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
+                paper, run_revision, "所选识读服务未完成，原页与已有成果已保留，可继续手工处理。"):
+            return
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
     except Exception as error:
         logger.exception("paper failed")
         message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
             f"处理出错：{type(error).__name__}"
+        from . import intake
+        if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
+                paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"):
+            return
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
 
 
@@ -3923,7 +4032,7 @@ def parse_ahead(paper: Paper) -> bool:
         run_revision = int((paper.processing_plan or {}).get("revision", 0))
         if paper.status != Paper.Status.QUEUED or (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
             return False
-        parse(paper)
+        parse(paper, revision=run_revision)
         return True
     except mineru.MineruCancelled as error:
         logger.info("paper %s stopped on request", paper.pk)
@@ -3933,6 +4042,10 @@ def parse_ahead(paper: Paper) -> bool:
         logger.exception("paper failed while parsing ahead")
         message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
             f"处理出错：{type(error).__name__}"
+        from . import intake
+        if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
+                paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"):
+            return False
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
         return False
 
@@ -3957,7 +4070,7 @@ def process_rereads(*, idle_papers_only: bool = False) -> int:
         run_revision = int((paper.processing_plan or {}).get("revision", 0))
         questions = list(paper.questions.filter(reread_requested=True))
         try:
-            read_questions(paper, questions)
+            read_questions(paper, questions, revision=run_revision)
         except readers.ReaderQuotaExhausted as error:
             logger.warning("reread paused because the configured vision plan is exhausted")
             _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])

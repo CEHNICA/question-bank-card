@@ -15,13 +15,14 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
+from contextlib import contextmanager
 from urllib.parse import urlsplit
 
 import requests
 
 from . import preferences, provider_catalog
 from .account_pool import (
-    MINIMAX_PLANS, AccountPoolError, account_pool, minimax_plan, provider_answered, provider_resting, rest_provider,
+    MINIMAX_PLANS, AccountPoolCancelled, AccountPoolError, account_pool, minimax_plan, provider_answered, provider_resting, rest_provider,
     secrets_from_environment,
 )
 from . import qtypes
@@ -81,6 +82,76 @@ class ReaderQuotaExhausted(ReaderUnavailable):
     to pause a whole paper instead of turning every queued card red.  The
     exception message is fixed and never contains the provider response body.
     """
+
+
+class ReaderRequestStopped(ReaderError):
+    """A bounded interactive read expired or was locally cancelled."""
+
+
+_REQUEST_LIMITS = contextvars.ContextVar("qb_reader_request_limits", default=None)
+_SELECTED_SERVICES_ONLY = contextvars.ContextVar("qb_selected_services_only", default=False)
+
+
+@contextmanager
+def selected_services_only(enabled: bool = True):
+    """Auto imports may use their configured reader roles, never new fallbacks."""
+    token = _SELECTED_SERVICES_ONLY.set(_SELECTED_SERVICES_ONLY.get() or enabled)
+    try:
+        yield
+    finally:
+        _SELECTED_SERVICES_ONLY.reset(token)
+
+
+@contextmanager
+def bounded_request(seconds: float, *, cancel=None):
+    """Interactive reads use the chosen service only, with one total budget."""
+    token = _REQUEST_LIMITS.set({"deadline": time.monotonic() + max(0, seconds), "cancel": cancel})
+    try:
+        _check_request()
+        yield
+    finally:
+        _REQUEST_LIMITS.reset(token)
+
+
+def _request_cancelled() -> bool:
+    limits = _REQUEST_LIMITS.get()
+    return limits is not None and (time.monotonic() >= limits["deadline"]
+        or (limits["cancel"] is not None and limits["cancel"]()))
+
+
+def _check_request() -> None:
+    if _request_cancelled():
+        raise ReaderRequestStopped("本次框选识读已取消或超过等待时限；原题未修改，可重新框选或手动改字")
+
+
+def _reader_pause(seconds: float) -> None:
+    if _REQUEST_LIMITS.get() is None:
+        time.sleep(seconds)
+        return
+    remaining = seconds
+    while remaining > 0:
+        _check_request()
+        duration = min(remaining, 0.25)
+        time.sleep(duration)
+        remaining -= duration
+    _check_request()
+
+
+@contextmanager
+def _http_slot():
+    if _REQUEST_LIMITS.get() is None:
+        with _IN_FLIGHT:
+            yield
+        return
+    while True:
+        _check_request()
+        if _IN_FLIGHT.acquire(timeout=0.25):
+            break
+    try:
+        _check_request()
+        yield
+    finally:
+        _IN_FLIGHT.release()
 
 
 @dataclass(frozen=True)
@@ -186,7 +257,10 @@ def primary_engine(configuration: dict | None = None) -> Engine | None:
     selected = _primary_selection(configuration)
     if selected == ASSISTANT:
         return None
-    return engine_by_key(selected, configuration) or _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
+    chosen = engine_by_key(selected, configuration)
+    if chosen is not None or _SELECTED_SERVICES_ONLY.get():
+        return chosen
+    return _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
 
 
 def checker_engine(configuration: dict | None = None) -> Engine | None:
@@ -202,7 +276,7 @@ def checker_engine(configuration: dict | None = None) -> Engine | None:
     # “自动”按提供商选择另一家，而不是写死某一家。
     other = _first_configured(provider_catalog.CHECKER_ORDER, configuration,
                               skip=primary.provider if primary is not None else "")
-    return other or primary
+    return other or (None if _SELECTED_SERVICES_ONLY.get() else primary)
 
 
 def arbiter_engine(
@@ -602,20 +676,27 @@ def _minimax_url() -> str:
 def _post(url: str, key: str, payload: dict, timeout=(10, 150)) -> requests.Response:
     response = None
     for attempt in range(len(BACKOFF) + 1):
+        _check_request()
         try:
-            with _IN_FLIGHT:
-                response = requests.post(url, json=payload, timeout=timeout, allow_redirects=False,
+            with _http_slot():
+                limits = _REQUEST_LIMITS.get()
+                actual_timeout = timeout
+                if limits is not None:
+                    remaining = max(0.1, limits["deadline"] - time.monotonic())
+                    actual_timeout = (min(timeout[0], remaining), min(timeout[1], remaining, 30))
+                response = requests.post(url, json=payload, timeout=actual_timeout, allow_redirects=False,
                                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         except (requests.Timeout, requests.ConnectionError):
             if attempt == len(BACKOFF):
                 raise ReaderUnavailable("连接模型服务超时或中断") from None
-            time.sleep(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
+            _reader_pause(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
             continue
         # 429 belongs to one account, not the whole provider.  Return it at
         # once so ``chat`` can cool down that account and lease another one.
+        _check_request()
         if response.status_code not in SERVER_RETRYABLE or attempt == len(BACKOFF):
             return response
-        time.sleep(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
+        _reader_pause(BACKOFF[attempt] * (0.8 + 0.4 * random.random()))
     return response
 
 
@@ -684,7 +765,7 @@ def answered_by(default: Engine) -> Engine:
 
 
 def _fallback_enabled() -> bool:
-    return os.environ.get("QB_PROVIDER_FALLBACK", "1").strip() != "0"
+    return not _SELECTED_SERVICES_ONLY.get() and os.environ.get("QB_PROVIDER_FALLBACK", "1").strip() != "0"
 
 
 def fallback_engines(engine: Engine) -> list[Engine]:
@@ -700,6 +781,14 @@ def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3
     turn the rest of the paper red.  A content error (HTTP 400…) is not retried
     elsewhere.  ``QB_PROVIDER_FALLBACK=0`` turns this off."""
     _ANSWERED_BY.set(None)
+    if _REQUEST_LIMITS.get() is not None:
+        # A person chose this reader for one small crop. Neither duplicate
+        # hedges nor another configured/paid service are implicitly authorised.
+        _check_request()
+        text = _chat_once(engine, prompt, image_urls, max_tokens)
+        _check_request()
+        _ANSWERED_BY.set(engine)
+        return text
     if not _fallback_enabled():
         text = _chat_hedged(engine, prompt, image_urls, max_tokens)
         _ANSWERED_BY.set(engine)
@@ -854,7 +943,8 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
     rate_limit_exhausted = False
     while True:
         try:
-            with pool.lease(exclude=attempted) as lease:
+            _check_request()
+            with pool.lease(exclude=attempted, **({"cancel": _request_cancelled} if _REQUEST_LIMITS.get() is not None else {})) as lease:
                 if started is not None:
                     started.set()
                 response = _post(url, lease.secret, variants[variant])
@@ -888,6 +978,8 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
                     round_had_rate_limit = True
                     continue
                 break
+        except AccountPoolCancelled:
+            raise ReaderRequestStopped("本次框选识读等待超时或已取消；原题未修改") from None
         except AccountPoolError:
             if pool.quota_exhausted or (
                 plan_exhausted_slots and pool.enabled_size == 0

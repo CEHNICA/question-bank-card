@@ -100,9 +100,22 @@ const QBUpload = (() => {
     return true;
   }
 
+  async function resolveUploadPolicy({ cloudReady = false, acknowledged = false } = {}, confirmCloud) {
+    // Capture permission for this upload. Local import never depends on cloud
+    // credentials or agreement to send the original document elsewhere.
+    const allowCloud = Boolean(cloudReady && (acknowledged || (typeof confirmCloud === "function" && await confirmCloud())));
+    return Object.freeze({ parseMode: "auto", allowCloud });
+  }
+
+  function appendUploadPolicy(form, policy) {
+    form.append("parse_mode", "auto");
+    form.append("allow_cloud", policy?.allowCloud === true ? "1" : "0");
+  }
+
   return {
     classifyFile, isEditingTarget, shouldInterceptPaste, screenshotName,
-    prepareClipboardFiles, routeFiles, buildClipboardBatch, runConfirmedPaste
+    prepareClipboardFiles, routeFiles, buildClipboardBatch, runConfirmedPaste,
+    resolveUploadPolicy, appendUploadPolicy
   };
 })();
 
@@ -239,7 +252,11 @@ const QBProgress = (() => {
     };
   }
 
-  return { STAGES, formatDuration, formatAge, processingPresentation };
+  function canStopPaper(paper) {
+    return ["queued", "parsing", "segmenting", "reading"].includes(paper?.status);
+  }
+
+  return { STAGES, formatDuration, formatAge, processingPresentation, canStopPaper };
 })();
 
 const QBSelection = (() => {
@@ -510,7 +527,7 @@ const QBTeach = (() => {
     { key: "preview", title: "不懂公式写法，也能看位置", manual: true,
       text: "在“改字”输入框中点一个位置，或选中几个字。预览用绿线、浅绿选区和公式框对应标出；公式内绿色符号帮助定位，实际插入位置仍看输入框光标。" },
     { key: "region", title: "只重读一小块，先确认替换", manual: true,
-      text: "点“框选识读”，框住印刷字，再选“自动推荐（AI）”。真实识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里练画框，不调用读题服务。" },
+      text: "点“原卷与识读”，框住印刷字，选“自动推荐（AI）”，再点“识读选中片段”。框选识读会建议替换题干或选项的哪段文字：先看前后对比，确认填入改字，核对后保存。这里只练画框，不调用读题服务。" },
     { key: "library", title: "找题，还要看完整题目", manual: true,
       text: "“正式题库”先显示题目摘要，点“完整题目”看所有条件、选项和配图。用来源、题型和排序找题；“更多筛选”放其他条件。“查看出处”和“版本历史”仍保留。示例不会入库，这一步只认识入口。" },
     { key: "basket", title: "选好题，再看试题篮", manual: true,
@@ -522,7 +539,7 @@ const QBTeach = (() => {
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
-      text: "已有题卡能继续审核；上传、重新识读和自动推荐需要读题服务可用。遇到问题打开“设置 → 帮助”；可重做基础练习，也可只看新版功能。" }
+      text: "导入资料无需密钥，会先在本机尝试切题；未切出的题可以从原卷框选保存，已有题卡也能继续审核。需要 AI 识读文字和推荐替换位置时，再配置读题服务。遇到问题打开“设置 → 帮助”；可重做基础练习，也可只看新版功能。" }
   ].map((lesson, index) => ({ ...lesson, section: index <= 6 ? "basic" : "review" }));
 
   const OLD_KEYS = ["card", "viewer", "tick", "todo", "fix", "tick9", "figure", "table", "green", "publish", "finish"];
@@ -753,10 +770,82 @@ const QBRegionAssist = (() => {
   return { recommendedPrefill };
 })();
 
+const QBRegionWait = (() => {
+  const REQUEST_TIMEOUT_MS = 15000;
+  const JOB_TIMEOUT_MS = 120000;
+  function abortError(message = "已取消本次识读，原题没有改变。") {
+    const error = new Error(message); error.name = "AbortError"; return error;
+  }
+  async function boundedRequest(task, { timeoutMs = REQUEST_TIMEOUT_MS, signal } = {}) {
+    const controller = new AbortController();
+    let timer, onAbort;
+    const stopped = new Promise((_, reject) => {
+      onAbort = () => { controller.abort(); reject(abortError()); };
+      if (signal?.aborted) { onAbort(); return; }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(() => {
+        controller.abort();
+        const error = new Error("本机服务没有及时回应，请检查软件是否仍在运行，再重试。原题没有改变。");
+        error.name = "TimeoutError"; reject(error);
+      }, timeoutMs);
+    });
+    try {
+      if (signal?.aborted) return await stopped;
+      return await Promise.race([Promise.resolve().then(() => task(controller.signal)), stopped]);
+    } finally {
+      clearTimeout(timer); signal?.removeEventListener("abort", onAbort);
+    }
+  }
+  function deadline(read, observedAt = Date.now()) {
+    const supplied = Date.parse(read?.deadline_at);
+    if (Number.isFinite(supplied)) return supplied;
+    const created = Date.parse(read?.created_at);
+    return (Number.isFinite(created) ? created : observedAt) + JOB_TIMEOUT_MS;
+  }
+  function isExpired(read, observedAt = Date.now(), now = Date.now()) {
+    return ["queued", "running"].includes(read?.status) && now >= deadline(read, observedAt);
+  }
+  function sameVersion(question, revision) {
+    return Boolean(question && Number(question.content_revision || 0) === Number(revision || 0));
+  }
+  return { REQUEST_TIMEOUT_MS, JOB_TIMEOUT_MS, boundedRequest, deadline, isExpired, sameVersion, abortError };
+})();
+
+const QBManualCrop = (() => {
+  // Question numbers belong to their group. An automatic group choice must
+  // avoid every currently visible number until the server resolves the group.
+  function nextCropNumber(questions, start = 1, groupId = null) {
+    const used = new Set((questions || []).filter((q) => groupId == null || Number(q.group?.id) === Number(groupId))
+      .map((q) => Number(q.number)));
+    const first = Number.isInteger(start) && start >= 1 && start <= 999 ? start : 1;
+    for (let i = 0; i < 999; i += 1) {
+      const number = (first - 1 + i) % 999 + 1;
+      if (!used.has(number)) return number;
+    }
+    return null;
+  }
+  function cropDraftSnapshot(boxes, number = "", group = "", ignored = []) {
+    return { number: String(number), group: String(group), boxes: (boxes || []).map((box) => ({
+      page_idx: box.page_idx, bbox: [...box.bbox],
+      ...(box.slot ? { slot: box.slot } : {}), ...(box.join ? { join: true } : {}),
+      ...(box.label_offset ? { label_offset: { ...box.label_offset } } : {})
+    })), ignored: [...ignored].sort() };
+  }
+  function moveCropBox(bbox, dx, dy) {
+    const [x0, y0, x1, y1] = bbox;
+    const x = Math.max(-x0, Math.min(1000 - x1, dx));
+    const y = Math.max(-y0, Math.min(1000 - y1, dy));
+    return [x0 + x, y0 + y, x1 + x, y1 + y].map((value) => Math.round(value * 10) / 10);
+  }
+  return { nextCropNumber, cropDraftSnapshot, moveCropBox };
+})();
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { ...QBUpload, ...QBProgress, ...QBSelection, ...QBReviewDiff, ...QBResegment, ...QBNotify, ...QBFigureJoin, ...QBFocus,
     ...QBEdits,
     ...QBRegionAssist,
+    ...QBRegionWait,
+    ...QBManualCrop,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
     TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint,
     restoreTeaching: QBTeach.restore, teachingProgress: QBTeach.progress };
@@ -838,8 +927,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return node;
   }
 
-  async function api(path, { method = "GET", body, form } = {}) {
+  async function api(path, { method = "GET", body, form, signal } = {}) {
     const options = { method, headers: {}, cache: "no-store" };
+    if (signal) options.signal = signal;
     if (method !== "GET") options.headers["X-QB-Request"] = "1";
     if (form) options.body = form;
     else if (body !== undefined) {
@@ -1053,10 +1143,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const s = state.status;
     brandNotice("");
-    const mineruOption = $("parseMode").querySelector('[value="mineru"]');
-    mineruOption.disabled = !automaticParseReady();
-    if (!automaticParseReady() && selectedParseMode() === "mineru") $("parseMode").value = "manual";
-    renderIntakeMode();
+    renderUploadAvailability();
     $("m3Button").hidden = !s.m3_available;
     if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}（本机安装）`;
     renderSettingsModels();
@@ -1310,7 +1397,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (state.paperId !== paperId) return;
     state.paper = data.paper;
     $("archivedPaperNotice").hidden = !data.paper.archived;
-    state.questions = data.questions;
+    state.questions = data.questions.map(normalizeRegionRead);
     const existing = new Set(state.questions.map((question) => question.id));
     state.selected = new Set([...state.selected].filter((id) => existing.has(id)));
     if (state.selectionAnchor !== null && !existing.has(state.selectionAnchor)) state.selectionAnchor = null;
@@ -1432,9 +1519,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (paper.status === "needs_grouping") {
       statusText.textContent = "检测到题号重新开始或页面可能来自不同资料；确认调整页序或拆分任务后才会继续识读。";
     } else if (!c.all) {
-      statusText.textContent = paper.parse_mode === "native"
-        ? "本地文字提取尚未切出题目，原页已保留；可以手工框题。"
-        : paper.parse_mode === "manual" ? "原卷已在本机，等待手工切题。" : "没有题卡";
+      statusText.textContent = paper.pages?.length
+        ? "原卷已保存，可以从原卷选取题目。" : "没有题卡";
     } else if (c.todo) {
       // What to do next, not a second copy of the counts shown in the bar and tabs.
       statusText.replaceChildren(
@@ -1449,9 +1535,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (!isProcessing && paper.parse_mode === "native") {
       const manualPages = (paper.processing_plan?.pages || []).filter((page) => page.mode === "manual");
-      if (manualPages.length) statusText.append(el("span", "processing-detail", `${manualPages.length} 页的文字层不适合自动切题，已保留原页供手工框题；没有调用云服务。`));
+      if (manualPages.length) statusText.append(el("span", "processing-detail", `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));
       const warnings = paper.processing_plan?.warnings;
       if (Array.isArray(warnings) && warnings.length) statusText.append(el("span", "processing-detail", warnings.map(String).join("；")));
+    }
+    if (!isProcessing && paper.processing_plan?.fallback_reason) {
+      statusText.append(el("span", "processing-detail", String(paper.processing_plan.fallback_reason)));
     }
     const processingPanel = $("processingPanel");
     processingPanel.hidden = !isProcessing;
@@ -1482,8 +1571,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     error.classList.toggle("paused", Boolean(paper.recoverable_pause));
     if (!error.hidden) {
       const actions = el("span", "error-actions");
-      actions.append(button("改用本地手工切题", "small primary", () => switchToManual()));
-      actions.append(button("重试", "small", () => retryPaper()));
+      actions.append(button("继续整理", "small primary", () => switchToManual()));
+      actions.append(button(paper.parse_mode === "mineru" ? "重试自动处理" : "重试准备原卷", "small", () => retryPaper()));
       if (paper.kind === "pdf" && paper.material_type !== "book") {
         actions.append(button("按教材重试", "small", () => retryPaper("book")));
       }
@@ -1783,8 +1872,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
-        empty.append(el("strong", "", "原卷已在本机，可以开始切题"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。保存为原图题，不会自动识读。"),
-          button("手工切一道题", "primary", () => openPageDialog("new")));
+        empty.append(el("strong", "", "原卷已保存，从这里选取题目"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。保存为原图题，不会自动识读。"),
+          button("从原卷选题", "primary", () => openPageDialog("new")));
       } else if (!state.questions.length) empty.append(el("strong", "", "题卡还没生成"), el("span", "", "原卷处理完成后会显示题卡，也可以手工补题。"));
       else if (state.filter === "todo") empty.append(el("strong", "", "没有需要逐题核对的卡"), el("span", "", "黄卡、红卡和内容变更都处理完了。"));
       else if (state.filter === "green") empty.append(el("strong", "", "没有待审的绿卡"), el("span", "", "识读一致的题都已标记通过。"));
@@ -2063,7 +2152,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
         break;
       case "r": if (q) { event.preventDefault(); openPageDialog("regions", q); } break;
-      case "f": if (q) { event.preventDefault(); openPageDialog("figures", q); } break;
+      case "f": if (q) { event.preventDefault(); openPageDialog(q.body_mode === "source_image" ? "regions" : "figures", q); } break;
       case "n": {
         event.preventDefault();
         const next = nextToReview(q, { onlyCheck: true }) || nextToReview(q);
@@ -2135,7 +2224,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function cropView(regions, { figures = [], spots = [], onZoom, capToNatural = false } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
-      wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点右边的“调整范围”，在原卷上把它框出来，AI 会自动读题。"));
+      wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点“原卷与识读”框出题目范围并保存；需要 AI 读字时，再点识读按钮。保存范围不会自动识读。"));
       return wrap;
     }
     const widest = Math.max(...regions.map((r) => r.bbox[2] - r.bbox[0]));
@@ -2564,7 +2653,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       event.preventDefault();
       const q = questionById(viewer.id);
       $("viewerDialog").close();
-      if (q) openPageDialog(key.toLowerCase() === "r" ? "regions" : "figures", q);
+      if (q) openPageDialog(key.toLowerCase() === "r" || q.body_mode === "source_image" ? "regions" : "figures", q);
     }
   }
 
@@ -3182,9 +3271,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
-      button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), q.body_mode === "source_image" ? "调整原图题的片段和顺序；保存不会自动识读（R）" : "调整原卷范围（R）"),
-      button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" }),
-      button("框选识读", "", () => openPageDialog("read", q), "在原卷上框出一小块（比如被手写盖住的选项），让 AI 单独读这一块")
+      button("原卷与识读", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "在同一个原卷窗口调整范围、片段顺序，或按需识读文字（R）"),
+      ...(q.body_mode === "source_image" ? [] : [button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })])
     );
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -3192,7 +3280,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     more.append(summary);
     const menu = el("div", "more-menu");
     menu.append(button("看两位读者的原始读法", "quiet small", () => { more.open = false; toggleReads(card, q); }));
-    menu.append(button(q.body_mode === "source_image" ? "识读这道原图题" : "让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }));
+    menu.append(button(q.body_mode === "source_image" ? "识读这道原图题" : "让 AI 重读这题", "quiet small", () => {
+      more.open = false;
+      if (q.body_mode === "source_image") openPageDialog("regions", q); else rereadQuestion(q);
+    }));
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
     more.append(menu);
     actions.append(more);
@@ -3329,6 +3420,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function applyQuestion(data) {
     if (data.question) {
+      data = { ...data, question: normalizeRegionRead(data.question) };
       const index = state.questions.findIndex((q) => q.id === data.question.id);
       if (index >= 0) state.questions[index] = data.question; else state.questions.push(data.question);
       state.questions.sort(questionCompare);
@@ -3584,20 +3676,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     loadQuestionTrash();
   }
 
-  // 停止处理（1.10.8）：排队中或在等 MinerU 的任务停下来，才能删除。
+  // 停止本机处理后，原卷和已有成果仍可继续整理。
   async function stopPaper() {
-    if (!state.paper || !["queued", "parsing"].includes(state.paper.status)) return;
+    if (!QBProgress.canStopPaper(state.paper)) return;
     const ok = await confirmDialog({
       title: "停止处理这份任务？",
-      text: "题有据不再等 MinerU。停下来以后，可以在“试卷操作”里永久删除，或点“重试”重新开始。",
-      ok: "停止处理", danger: true
+      text: "停止后保留原卷和已有题卡，可以从原卷继续整理。已经发给云服务的请求可能仍在完成，本机不会再采用这轮迟到的结果。",
+      ok: "停止处理"
     });
     if (!ok) return;
     try {
       const data = await api(`/api/papers/${state.paperId}/stop`, { method: "POST", body: {} });
-      toast(data.message || "已停止", "success");
-      refreshPaper();
-      loadPapers();
+      await refreshPaper();
+      await loadPapers();
+      toast(data.message || "已停止本机处理，原卷和已有题卡已保留。", "success");
     } catch (error) { toast(error.message, "error"); }
   }
 
@@ -3621,6 +3713,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function retryPaper(materialType = null) {
+    if (!materialType && state.paper?.parse_mode === "mineru" && !(await confirmDialog({
+      title: "重试自动处理？",
+      text: "会再次把原卷交给已配置的云服务，并按现有读题设置继续处理，可能使用服务额度。原卷和已有题卡保留；也可以选择“继续整理”，从原卷补题。",
+      ok: "重试自动处理",
+      cancel: "暂不重试",
+      focusCancel: true
+    }))) return;
     if (materialType === "book" && !(await confirmDialog({
       title: "按教材模式重试？",
       text: "程序会在本机每 100 页稳定分片，再分别交给 MinerU。原 PDF 不会被改动。",
@@ -3898,7 +3997,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       status.arbiter && `裁决 ${named(engines.arbiter, status.arbiter)}`
     ].filter(Boolean).join("；");
     $("settingsModelSummary").textContent = status.assistant_mode
-      ? "现在是 AI 助手读题：新资料的题卡先用 MinerU 的文字，需要 AI 助手或你对照原卷截图核对。"
+      ? "现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU。未切出的题可手工框选；再由 AI 助手或你对照原卷整理、核对。"
       : summary ? `当前读题：${summary}。` : "请先配置一家读题服务，或选择 AI 助手读题。";
     renderMinimaxPlan(engines);
   }
@@ -3986,7 +4085,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsRename").title = active ? "处理完成后才能修改名称" : "";
     $("settingsReparse").hidden = !(paper.status === "parsing" && !paper.processing?.chunks && !paper.processing?.parsed_ahead);
     // 1.10.8: a paper still queued or waiting on MinerU can be stopped, then deleted.
-    const stoppable = paper.status === "queued" || (paper.status === "parsing" && !paper.processing?.chunks);
+    const stoppable = QBProgress.canStopPaper(paper);
     $("settingsStop").hidden = !stoppable;
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
@@ -4068,9 +4167,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务"].filter(Boolean);
     node.className = `settings-ready ${automaticParseReady() ? "ready" : "missing"}`;
     node.textContent = automaticParseReady()
-      ? "本地手工切题可直接使用；自动切题的密钥已配置，实际可用性以处理结果为准。"
-      : missing.length ? `本地导入、手工切题可直接使用。自动切题还需 ${missing.join("、")} 密钥。`
-        : "本地导入、手工切题可直接使用。使用自动识读时再配置读题服务。";
+      ? "导入时先在本机切题。云处理已配置，经你允许后用于本机无法切出的资料；实际可用性以处理结果为准。"
+      : missing.length ? `导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 ${missing.join("、")} 密钥。`
+        : "导入资料和从原卷选题可直接使用。需要云处理时再配置读题服务。";
   }
 
   // 设置 → 题面与显示（存在数据目录的 features.json，网页和后台共用）。
@@ -4697,14 +4796,148 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return "auto";
   }
 
+  const regionSubmissions = new Map();
+  const regionWaits = new Map();
+  const regionLocalFailures = new Map();
+  const cancelledRegionTokens = new Set();
+  const cancelledRegionIds = new Set();
+  function regionWaitKey(questionId, read) { return `${questionId}:${read?.id ?? read?.client_request_id ?? "pending"}`; }
+
+  function hasRegionReadSubmission(questionId) { return regionSubmissions.has(questionId); }
+
+  function cancelServerRegion(questionId, read = {}, clientRequestId = null) {
+    const body = {};
+    if (read.id != null) body.read_id = read.id;
+    if (clientRequestId || read.client_request_id) body.client_request_id = clientRequestId || read.client_request_id;
+    return QBRegionWait.boundedRequest((signal) => api(`/api/questions/${questionId}/region-read`, {
+      method: "DELETE", body, signal
+    }), { timeoutMs: 10000 });
+  }
+
+  function cancelRegionReadSubmission(questionId) {
+    const submission = regionSubmissions.get(questionId);
+    if (!submission) return false;
+    cancelledRegionTokens.add(submission.token);
+    submission.controller.abort();
+    regionSubmissions.delete(questionId);
+    cancelServerRegion(questionId, {}, submission.token).catch((error) => {
+      toast(`本机已结束等待，后台取消尚未确认：${error.message} 迟到结果不会填入原题。`, "error");
+    });
+    return true;
+  }
+
+  function expireRegionWait(questionId, key) {
+    const wait = regionWaits.get(key);
+    if (!wait || wait.error) return;
+    wait.error = wait.read.status === "queued"
+      ? "读题后台没有及时开始，本次等待已结束。请检查软件是否仍在运行，或手动改字；原题没有改变。"
+      : "读题服务超过等待时限，本次识读已结束。可稍后重试或手动改字；原题没有改变。";
+    clearTimeout(wait.timer);
+    regionLocalFailures.set(questionId, { key, read: wait.read, error: wait.error });
+    const current = questionById(questionId);
+    if (current && regionWaitKey(questionId, current.region_read) === key) {
+      state.questions = state.questions.map((question) => question.id === questionId ? normalizeRegionRead(question) : question);
+      state.rendered.delete(questionId);
+      renderCards();
+    }
+    cancelServerRegion(questionId, wait.read).catch((error) => {
+      toast(`已结束本机等待，后台取消尚未确认：${error.message}`, "error");
+    });
+  }
+
+  function normalizeRegionRead(question) {
+    const read = question.region_read;
+    if (!read) {
+      const failed = regionLocalFailures.get(question.id);
+      return failed ? { ...question, region_read: { ...failed.read, status: "failed", text: "", error: failed.error } } : question;
+    }
+    const key = regionWaitKey(question.id, read);
+    if (cancelledRegionIds.has(key) || cancelledRegionTokens.has(read.client_request_id)) {
+      return { ...question, region_read: null };
+    }
+    if (regionLocalFailures.get(question.id)?.key !== key) regionLocalFailures.delete(question.id);
+    let wait = regionWaits.get(key);
+    if (!wait) {
+      wait = { observedAt: Date.now(), read, timer: null, error: "" };
+      regionWaits.set(key, wait);
+    }
+    if ((read.revision != null && !QBRegionWait.sameVersion(question, read.revision)) || read.recommendation?.status === "stale") {
+      wait.error = "题目已修改，这次识读属于旧版本，请重新框选。原题没有改变。";
+      regionLocalFailures.set(question.id, { key, read, error: wait.error });
+    }
+    if (wait.error) {
+      clearTimeout(wait.timer);
+      return { ...question, region_read: { ...read, status: "failed", text: "", error: wait.error } };
+    }
+    if (["queued", "running"].includes(read.status)) {
+      wait.read = read;
+      if (!wait.timer) wait.timer = setTimeout(() => expireRegionWait(question.id, key),
+        Math.max(0, QBRegionWait.deadline(read, wait.observedAt) - Date.now()));
+    } else {
+      clearTimeout(wait.timer); wait.timer = null;
+    }
+    return question;
+  }
+
+  async function queueRegionRead(q, box, target) {
+    cancelRegionReadSubmission(q.id);
+    const submission = { controller: new AbortController(), token: crypto.randomUUID(),
+      paperId: state.paperId, revision: q.content_revision || 0 };
+    regionSubmissions.set(q.id, submission);
+    try {
+      const data = await QBRegionWait.boundedRequest((signal) => api(`/api/questions/${q.id}/region-read`, {
+        method: "POST", body: { page_idx: box.page_idx, bbox: box.bbox, target,
+          revision: submission.revision, client_request_id: submission.token }, signal
+      }), { signal: submission.controller.signal });
+      if (regionSubmissions.get(q.id) !== submission || cancelledRegionTokens.has(submission.token)) throw QBRegionWait.abortError();
+      if (state.paperId !== submission.paperId || !QBRegionWait.sameVersion(questionById(q.id), submission.revision)) {
+        cancelledRegionTokens.add(submission.token);
+        cancelServerRegion(q.id, data.question?.region_read || {}, submission.token).catch(() => {});
+        throw new Error("题目已经变化，本次识读未采用。请重新打开原卷框选。");
+      }
+      if (!data.question?.region_read) throw new Error("本次识读没有开始，请重新框选；原题没有改变。");
+      data.question = normalizeRegionRead(data.question);
+      applyQuestion(data);
+      return data;
+    } catch (error) {
+      if (error.name === "TimeoutError" || error.name === "AbortError") {
+        if (!cancelledRegionTokens.has(submission.token)) {
+          cancelledRegionTokens.add(submission.token);
+          cancelServerRegion(q.id, {}, submission.token).catch((cancelError) => {
+            toast(`本机已结束等待，后台取消尚未确认：${cancelError.message}`, "error");
+          });
+        }
+      }
+      throw error;
+    } finally {
+      if (regionSubmissions.get(q.id) === submission) regionSubmissions.delete(q.id);
+    }
+  }
+
   function regionReadPending(q) {
     return Boolean(q.region_read && ["queued", "running"].includes(q.region_read.status));
   }
 
   async function dismissRegionRead(q) {
+    const read = q.region_read;
+    const submission = regionSubmissions.get(q.id);
+    if (submission && (!read || submission.token === read.client_request_id)) cancelRegionReadSubmission(q.id);
+    if (read) {
+      const key = regionWaitKey(q.id, read);
+      cancelledRegionIds.add(key);
+      if (read.client_request_id) cancelledRegionTokens.add(read.client_request_id);
+      clearTimeout(regionWaits.get(key)?.timer);
+    }
+    regionLocalFailures.delete(q.id);
+    const latest = questionById(q.id) || q;
+    if (!latest.region_read || !read || regionWaitKey(q.id, latest.region_read) === regionWaitKey(q.id, read)) {
+      applyQuestion({ question: { ...latest, region_read: null } });
+    }
     try {
-      applyQuestion(await api(`/api/questions/${q.id}/region-read`, { method: "DELETE", body: {} }));
-    } catch (error) { toast(error.message, "error"); }
+      const data = await cancelServerRegion(q.id, read || {});
+      const current = questionById(q.id);
+      if (data.question && current && QBRegionWait.sameVersion(current, data.question.content_revision)) applyQuestion(data);
+    } catch (error) { toast(`已结束本机等待，后台取消尚未确认：${error.message} 迟到结果不会填入原题。`, "error"); }
   }
 
   function fillRegionRead(card, q, target = null) {
@@ -4739,7 +4972,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     head.append(el("strong", "", `框选识读 · ${read.target_name || read.target}`));
     panel.append(head);
     if (regionReadPending(q)) {
-      panel.append(el("p", "hint", "AI 正在读框里的字……"));
+      panel.append(el("p", "hint", read.status === "queued"
+        ? "已提交，等待读题后台开始。原题没有改变。"
+        : "AI 正在读框里的字，原题没有改变。"));
+      panel.append(el("p", "hint", `本次最多等待 ${Number(read.timeout_seconds) || QBRegionWait.JOB_TIMEOUT_MS / 1000} 秒，超时会结束等待；可随时取消识读。`));
     } else if (read.status === "failed") {
       panel.append(el("p", "region-read-error", read.error || "没读出来"));
     } else {
@@ -4802,8 +5038,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
       }
     }
+    if (read.status === "failed") actions.append(button("手动改字", "small", () => openEditor(card, q)));
     actions.append(button("重新框", "small", () => openPageDialog("read", q)),
-      button(regionReadPending(q) ? "不读了" : "关闭", "small quiet", () => dismissRegionRead(q)));
+      button(regionReadPending(q) ? "取消识读" : "关闭", "small quiet", () => dismissRegionRead(q)));
     panel.append(actions);
     return panel;
   }
@@ -4815,11 +5052,81 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     tool: "draw",
     history: [], future: [],
     zoom: 1, zoomMode: "width", zoomFrame: 0, spacePan: false, imageReady: false,
-    slotTarget: null, slotAnchor: null, pendingFigure: null, ignoredCandidates: new Set()
+    slotTarget: null, slotAnchor: null, pendingFigure: null, ignoredCandidates: new Set(),
+    saving: false, closing: false, paperId: null, lastPage: null, session: 0
   };
+  const CROP_EDIT_KEY = "original-crop";
+
+  function cropSnapshot() {
+    return { ...QBManualCrop.cropDraftSnapshot(dialog.boxes, dialog.mode === "new" ? $("numberInput").value : "",
+      dialog.mode === "new" ? $("groupSelect").value : "", dialog.ignoredCandidates),
+      question_type: dialog.mode === "new" ? $("cropTypeSelect").value : "" };
+  }
+
+  function trackCropDraft() {
+    editGuard.release(CROP_EDIT_KEY);
+    if (dialog.mode === "view") return;
+    editGuard.track(CROP_EDIT_KEY, cropSnapshot, () => {
+      editGuard.release(CROP_EDIT_KEY);
+      $("pageDialog").close();
+    }, () => $("pageStage").focus({ preventScroll: true }));
+  }
+
+  async function requestPageDialogClose() {
+    if (dialog.saving) {
+      if (dialog.question && hasRegionReadSubmission(dialog.question.id)) {
+        cancelRegionReadSubmission(dialog.question.id);
+        setCropSaving(false);
+        showCropResult("识读已取消，框选仍保留。");
+      } else { toast("正在保存，请等保存完成", "error"); return false; }
+    }
+    if (dialog.closing) return false;
+    dialog.closing = true;
+    try {
+      const leave = await editGuard.discard(() => confirmDialog({ title: "框选还没保存",
+        text: "这些范围、片段顺序或配图归属还没保存。你可以继续调整，也可以丢弃本次改动。",
+        ok: "丢弃改动", cancel: "继续调整", danger: true, focusCancel: true }), [CROP_EDIT_KEY]);
+      if (leave) $("pageDialog").close();
+      return leave;
+    } finally { dialog.closing = false; }
+  }
+
+  function showCropResult(text, error = false) {
+    const node = $("pageCropResult");
+    node.textContent = text;
+    node.hidden = !text;
+    node.classList.toggle("error", error);
+  }
+
+  function configureCropActions() {
+    const imageBody = dialog.mode === "new" || dialog.question?.body_mode === "source_image";
+    $("pageDialogSaveNext").hidden = dialog.mode !== "new";
+    $("pageCropRead").hidden = !["new", "regions"].includes(dialog.mode);
+    $("pageCropRead").textContent = imageBody ? "保存并识读文字" : "识读选中片段";
+    $("pageCropRead").title = imageBody ? "显式识读当前片段，原图保留；结果需要确认采用" : "只识读选中的范围，不保存或改变题目范围；读完在题卡确认替换";
+    $("pageCropRead").disabled = Boolean(state.paper.demo);
+    if (state.paper.demo) $("pageCropRead").title = "示例只练画框；真实识读需要可用的读题服务";
+    $("pageDialogSave").classList.toggle("primary", dialog.mode !== "new");
+    $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : dialog.mode === "new" ? "保存并关闭" : "保存";
+    $("readTargetField").hidden = !(dialog.mode === "read" || (dialog.mode === "regions" && !imageBody));
+    $("numberField").hidden = dialog.mode !== "new";
+    $("cropTypeField").hidden = dialog.mode !== "new";
+    $("groupField").hidden = dialog.mode !== "new" || (state.paper.question_groups || []).length < 2;
+  }
+
+  $("pageDialog").addEventListener("cancel", (event) => { event.preventDefault(); requestPageDialogClose(); });
 
   function openPageDialog(mode, q = null, { page: requestedPage = null } = {}) {
     if (!state.paper?.pages?.length) { toast("原卷页面尚未生成", "error"); return; }
+    if (dialog.saving || dialog.closing) { toast("请先完成当前操作", "error"); return; }
+    if ($("pageDialog").open) {
+      requestPageDialogClose().then((closed) => { if (closed) openPageDialog(mode, q, { page: requestedPage }); });
+      return;
+    }
+    if (mode === "figures" && q?.body_mode === "source_image") mode = "regions";
+    const previousPage = dialog.paperId === state.paperId ? dialog.lastPage : null;
+    dialog.session += 1;
+    dialog.paperId = state.paperId;
     dialog.mode = mode;
     dialog.tool = mode === "view" ? "pan" : "draw";
     dialog.history = [];
@@ -4861,17 +5168,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const firstPage = mode === "read" && dialog.boxes.length ? dialog.boxes[0].page_idx
       : q && q.regions.length ? q.regions[0].page_idx : state.paper.pages[0].page_idx;
     dialog.page = Number.isInteger(requestedPage)
-      && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage : firstPage;
+      && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage
+      : mode === "new" && Number.isInteger(previousPage) && state.paper.pages.some((page) => page.page_idx === previousPage) ? previousPage : firstPage;
     dialog.scrolled = false;
     dialog.selected = null;
     $("pageStage").scrollTo({ top: 0, left: 0 });
     dialog.ignoredCandidates = new Set(Array.isArray(q?.figure_review?.ignored_candidates)
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
-    $("pageDialogTitle").textContent = mode === "regions" ? `调整第 ${q.number} 题的原卷范围`
+    $("pageDialogTitle").textContent = mode === "regions" ? `第 ${q.number} 题 · 原卷与识读`
       : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读`
-        : mode === "view" ? "查看整份原卷" : "手动补一道题";
+        : mode === "view" ? "查看整份原卷" : "从原卷选题";
     $("pageDialogHint").textContent = mode === "regions"
-      ? "框选时拖边角改大小、拖框内部移动；可跨页添加片段，在下面调整顺序。手形用于浏览。原图题保存范围不会自动识读。"
+      ? "拖边角改大小、拖框内部移动；可跨页添加片段、调整顺序。保存范围不会自动识读。原图题可直接识读现有全部片段；文字题点选一段再识读，结果在题卡确认。"
       : mode === "figures"
         ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
         : mode === "read"
@@ -4891,11 +5199,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       : "Ctrl+滚轮缩放 · 空格+左键或中键拖画布 · 左键仍然画框";
     $("numberField").hidden = mode !== "new";
     $("readTargetField").hidden = mode !== "read";
-    $("pageDialogSave").textContent = mode === "read" ? "识读这一块" : mode === "new" ? "保存原图题" : "保存";
-    if (mode === "read") $("readTargetSelect").value = readTargetGuess(q);
+    configureCropActions();
+    if (mode === "read" || mode === "regions") $("readTargetSelect").value = readTargetGuess(q);
     const groups = state.paper.question_groups || [];
     $("groupField").hidden = mode !== "new" || groups.length < 2;
     if (mode === "new") {
+      $("cropTypeSelect").replaceChildren(...Object.entries(TYPE_NAMES).map(([value, label]) => {
+        const option = el("option", "", label); option.value = value; return option;
+      }));
+      $("cropTypeSelect").value = "unknown";
       $("groupSelect").replaceChildren(
         el("option", "", "自动（按所框页面判断）"),
         ...groups.map((group) => {
@@ -4909,16 +5221,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         $("pageDialogHint").textContent += " 如果同一页里有多个题组，请在题号旁明确选择它属于哪一组。";
       }
     }
-    $("numberInput").value = "";
+    $("numberInput").value = mode === "new" ? (QBManualCrop.nextCropNumber(state.questions) ?? "") : "";
+    $("pageCropHelp").open = false;
+    dialog.previewWide = window.innerWidth >= 900;
+    $("pageCropPreviewDetails").open = dialog.previewWide;
+    showCropResult("");
     $("allPagesPicker").open = false;
     $("pageSearchInput").value = "";
     lens.classList.remove("on");
     renderPageTabs();
     renderStage();
     $("pageDialog").showModal();
+    trackCropDraft();
     requestPageZoom();
     if (mode !== "new") $("pageStage").focus({ preventScroll: true });
   }
+
+  $("groupSelect").addEventListener("change", () => {
+    if (dialog.mode !== "new" || dialog.saving) return;
+    $("numberInput").value = QBManualCrop.nextCropNumber(state.questions, 1, $("groupSelect").value || null) ?? "";
+  });
 
   function applyPageZoom() {
     const stage = $("pageStage");
@@ -4958,7 +5280,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function zoomPageBy(factor, pointer = null) {
-    if (dialog.drag || !dialog.imageReady) return;
+    if (dialog.saving || dialog.drag || !dialog.imageReady) return;
     if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
     dialog.zoomFrame = 0;
     dialog.zoomMode = "manual";
@@ -4988,6 +5310,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageStage").classList.toggle("pan-ready", dialog.tool === "pan");
   };
   function selectPageTool(tool) {
+    if (dialog.saving) return;
     if (dialog.drag) dialog.drag();
     stopPageCanvasPan();
     dialog.tool = tool;
@@ -4999,7 +5322,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
   $("pageToolPan").addEventListener("click", () => selectPageTool("pan"));
   $("pageToolDraw").addEventListener("click", () => selectPageTool("draw"));
-  $("pageManualCut").addEventListener("click", () => switchToManual(dialog.page));
+  $("pageManualCut").addEventListener("click", () => {
+    const page = dialog.page;
+    if (state.paper?.status === "ready") {
+      requestPageDialogClose().then((closed) => { if (closed) openPageDialog("new", null, { page }); });
+    } else switchToManual(page);
+  });
   const copyDialogBoxes = () => dialog.boxes.map((box) => ({ ...box, bbox: [...box.bbox] }));
   function rememberDialogBoxes(before) {
     if (!["new", "regions"].includes(dialog.mode)) return;
@@ -5008,6 +5336,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.future = [];
   }
   function restoreDialogBoxes(redo) {
+    if (dialog.saving) return;
     if (dialog.drag) dialog.drag();
     const from = redo ? dialog.future : dialog.history;
     const to = redo ? dialog.history : dialog.future;
@@ -5036,6 +5365,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.addEventListener("blur", clearPagePanKey);
 
   function removeBox(index) {
+    if (dialog.saving) return;
     if (index === null || index === undefined || !dialog.boxes[index]) return;
     closeFigureSlotMenu({ cancelPending: false, rerender: false });
     rememberDialogBoxes();
@@ -5051,17 +5381,34 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     panel.replaceChildren();
     $("pageUndo").disabled = !dialog.history.length;
     $("pageRedo").disabled = !dialog.future.length;
+    const preview = $("pageCropPreview");
+    preview.hidden = panel.hidden;
+    $("pageCropPreviewBody").replaceChildren();
     if (panel.hidden) return;
     panel.append(el("strong", "", `题目片段 · ${dialog.boxes.length} 段`));
-    if (!dialog.boxes.length) { panel.append(el("span", "hint", "先画一个框，再翻页继续补充。")); return; }
+    if (!dialog.boxes.length) {
+      panel.append(el("span", "hint", "拖框切题；同一道题可跨页补充。"));
+      $("pageCropPreviewBody").append(el("p", "hint", "画框后在这里看完整题目。图片也包含在题目范围内。"));
+      return;
+    }
+    $("pageCropPreviewBody").append(cropView(dialog.boxes));
+    $("pageCropPreviewBody").querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
     const list = el("ol", "region-piece-list");
     dialog.boxes.forEach((box, index) => {
       const row = el("li", dialog.selected === index ? "selected" : "");
       const locate = button(`${index + 1} · 第 ${box.page_idx + 1} 页`, "small quiet", () => {
         dialog.selected = index;
         goToDialogPage(box.page_idx);
-        requestAnimationFrame(() => $("pageStage").querySelector(`[data-box-index="${index}"]`)?.scrollIntoView({ block: "center" }));
+        requestAnimationFrame(() => {
+          const frame = $("pageStage").querySelector(`[data-box-index="${index}"]`);
+          frame?.scrollIntoView({ block: "center" });
+          frame?.focus({ preventScroll: true });
+        });
       }, `定位第 ${index + 1} 段`);
+      const thumbnail = cropView([box]);
+      thumbnail.classList.add("region-piece-thumbnail");
+      locate.prepend(thumbnail);
+      locate.classList.add("region-piece-locate");
       const move = (offset) => {
         if (dialog.drag) dialog.drag();
         const to = index + offset;
@@ -5084,6 +5431,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   document.addEventListener("keydown", (event) => {
     if (!$("pageDialog").open || !["Delete", "Backspace"].includes(event.key)) return;
+    if (dialog.saving) return;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) return;
     if (dialog.selected === null || dialog.selected === undefined) return;
     event.preventDefault();
@@ -5095,11 +5443,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function goToDialogPage(pageIdx, { focusTab = false, closePicker = false } = {}) {
+    if (dialog.saving) return;
     if (!(state.paper?.pages || []).some((page) => page.page_idx === pageIdx)) return;
     closeFigureSlotMenu({ cancelPending: true, rerender: false });
     stopPageCanvasPan();
     if (dialog.drag) dialog.drag();
     dialog.page = pageIdx;
+    dialog.lastPage = pageIdx;
     dialog.scrolled = false;
     $("pageStage").scrollTo({ top: 0, left: 0 });
     if (closePicker) $("allPagesPicker").open = false;
@@ -5163,7 +5513,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const pages = state.paper?.pages || [];
     if (!Number.isFinite(number) || !pages.length) { $("pageNumberInput").value = String(dialog.page + 1); return; }
     const exact = pages.find((page) => page.page_idx + 1 === number);
-    if (exact) goToDialogPage(exact.page_idx);
+    // Enter already changed the page. The input's later blur/change must not
+    // rebuild the canvas in the middle of the user's first pointer gesture.
+    if (exact && exact.page_idx !== dialog.page) goToDialogPage(exact.page_idx);
+    else if (exact) $("pageNumberInput").value = String(dialog.page + 1);
     else {
       const closest = [...pages].sort((left, right) => Math.abs(left.page_idx + 1 - number) - Math.abs(right.page_idx + 1 - number))[0];
       goToDialogPage(closest.page_idx);
@@ -5472,6 +5825,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.addEventListener("resize", () => {
     const surface = $("pageStage").querySelector(".stage-surface");
     if ($("pageDialog").open) {
+      const wide = window.innerWidth >= 900;
+      if (wide !== dialog.previewWide) { $("pageCropPreviewDetails").open = wide; dialog.previewWide = wide; }
       anchorCanvasZoom($("pageStage"), surface, applyPageZoom);
     }
     if ($("pageDialog").open && dialog.mode === "figures" && surface) autoPlaceFigureLabels(surface);
@@ -5481,6 +5836,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (menuIsOpen() && dialog.slotAnchor?.isConnected) positionFigureSlotMenu(dialog.slotAnchor);
   }, { passive: true });
   $("pageDialog").addEventListener("close", () => {
+    editGuard.release(CROP_EDIT_KEY);
+    dialog.lastPage = dialog.page;
     if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
     dialog.zoomFrame = 0;
     clearPagePanKey();
@@ -5638,17 +5995,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
       });
       node.addEventListener("keydown", (event) => {
+        if (dialog.saving) return;
         if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
         event.preventDefault();
         event.stopPropagation();
         const step = event.shiftKey ? 20 : 5;
         const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
         const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
-        const [x0, y0, x1, y1] = box.bbox;
-        const moveX = Math.max(-x0, Math.min(1000 - x1, dx));
-        const moveY = Math.max(-y0, Math.min(1000 - y1, dy));
         rememberDialogBoxes();
-        box.bbox = [x0 + moveX, y0 + moveY, x1 + moveX, y1 + moveY].map((value) => Math.round(value * 10) / 10);
+        box.bbox = QBManualCrop.moveCropBox(box.bbox, dx, dy);
         placeBox(node, box.bbox);
         renderRegionPieces();
       });
@@ -5685,12 +6040,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function startDrag(event, surface, index, handle) {
-    if (event.button !== 0 || dialog.mode === "view" || dialog.tool === "pan" || dialog.spacePan || !dialog.imageReady) return;
+    if (dialog.saving || event.button !== 0 || dialog.mode === "view" || dialog.tool === "pan" || dialog.spacePan || !dialog.imageReady) return;
     if (handle === "create" && ["new", "regions"].includes(dialog.mode) && dialog.boxes.length >= 12) {
       toast("一道题最多保留 12 段范围，请合并相邻片段后再添加", "error");
       return;
     }
-    $("pageStage").focus({ preventScroll: true });
+    (index === null ? $("pageStage") : surface.querySelector(`[data-box-index="${index}"]`))?.focus({ preventScroll: true });
     event.preventDefault();
     const start = pointFrom(event, surface);
     const target = index === null ? null : event.currentTarget;
@@ -5740,6 +6095,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           if (dialog.mode === "read") dialog.boxes = [];
           rememberDialogBoxes(before);
           dialog.boxes.push({ page_idx: dialog.page, bbox });
+          dialog.selected = dialog.boxes.length - 1;
           renderPageTabs();
         }
         preview.remove();
@@ -5747,6 +6103,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         rememberDialogBoxes(before);
       }
       renderStage();
+      $("pageStage").querySelector(`[data-box-index="${dialog.selected}"]`)?.focus({ preventScroll: true });
     };
     const cancel = () => {
       finish();
@@ -5772,15 +6129,84 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       : boxes.map((box) => ({ page_idx: box.page_idx, bbox: [...box.bbox] }));
   }
 
-  $("pageDialogSave").addEventListener("click", async () => {
+  function setCropSaving(saving) {
+    dialog.saving = saving;
+    editGuard.setSaving(CROP_EDIT_KEY, saving);
+    $("pageDialog").classList.toggle("saving", saving);
+    if (saving) {
+      dialog.disabledControls = [...$("pageDialog").querySelectorAll("button, input, select")].map((node) => [node, node.disabled]);
+      dialog.disabledControls.forEach(([node]) => { node.disabled = true; });
+      $("pageDialogSaveNext").textContent = "正在保存…";
+    } else {
+      (dialog.disabledControls || []).forEach(([node, disabled]) => { if (node.isConnected) node.disabled = disabled; });
+      dialog.disabledControls = [];
+      $("pageDialogSaveNext").textContent = "保存并切下一题";
+      $("pageDialogClose").textContent = dialog.mode === "view" ? "关闭" : "取消";
+      configureCropActions();
+      applyPageZoom();
+      renderRegionPieces();
+    }
+  }
+
+  function continueManualCut(number, savedQuestion) {
+    dialog.question = null;
+    dialog.mode = "new";
+    dialog.boxes = [];
+    dialog.selected = null;
+    dialog.history = [];
+    dialog.future = [];
+    dialog.scrolled = true;
+    if (!$("groupSelect").value && savedQuestion?.group?.id) $("groupSelect").value = String(savedQuestion.group.id);
+    $("numberInput").value = QBManualCrop.nextCropNumber(state.questions, number + 1, $("groupSelect").value || null) ?? "";
+    trackCropDraft();
+    renderPageTabs();
+    renderStage();
+    showCropResult(`第 ${number} 题已保存。继续框下一题；题号可以修改。`);
+  }
+
+  async function savePageCrop({ next = false, recognize = false, onlyRead = false } = {}) {
+    if (dialog.saving) return;
     if (dialog.mode === "view" || dialog.practiceRead) return;
+    if (state.paper?.demo && (onlyRead || recognize || dialog.mode === "read")) {
+      showCropResult("示例只练习框选，不会调用识读服务。"); return;
+    }
+    if (state.paperId !== dialog.paperId) { showCropResult("当前试卷已变化，请重新打开原卷", true); return; }
+    if (dialog.drag) dialog.drag();
     const q = dialog.question;
+    const session = dialog.session;
+    let savedQuestion = null;
+    let saved = false;
+    if (["new", "regions"].includes(dialog.mode) && !dialog.boxes.length) {
+      showCropResult("请先框出题目范围", true); return;
+    }
+    if (dialog.mode === "new" && (!Number.isInteger(Number($("numberInput").value)) || Number($("numberInput").value) < 1 || Number($("numberInput").value) > 999)) {
+      showCropResult("请填写题号（1–999）", true); $("numberInput").focus(); return;
+    }
+    setCropSaving(true);
+    showCropResult(onlyRead ? "正在提交选中片段…" : "正在保存…");
     try {
-      if (dialog.mode === "regions") {
+      if (onlyRead) {
+        const box = dialog.boxes[dialog.selected] || (dialog.boxes.length === 1 ? dialog.boxes[0] : null);
+        if (!box) { showCropResult("请先点选要识读的片段", true); return; }
+        const target = $("readTargetSelect").value;
+        const pending = queueRegionRead(q, box, target);
+        $("pageDialogClose").disabled = false;
+        $("pageDialogClose").textContent = "取消识读";
+        const data = await pending;
+        if (dialog.session !== session) return;
+        dialog.question = data.question || q;
+        showCropResult("已开始识读选中片段，题目范围没有改变。关闭窗口后，在题卡查看并确认替换。 ");
+        refreshPaper();
+        return;
+      } else if (dialog.mode === "regions") {
         if (!dialog.boxes.length) { toast("至少要有一个框", "error"); return; }
-        const manual = q.body_mode === "source_image" || q.processing_mode === "manual";
-        const data = await api(`/api/questions/${q.id}/regions`, { method: "POST", body: { regions: readingOrder(dialog.boxes), ...(manual ? { processing_mode: "manual" } : {}) } });
+        const manual = true;
+        const regions = readingOrder(dialog.boxes);
+        const data = JSON.stringify(regions) === JSON.stringify(q.regions) ? { question: q }
+          : await api(`/api/questions/${q.id}/regions`, { method: "POST", body: { regions, processing_mode: "manual" } });
         applyQuestion(data);
+        savedQuestion = data.question || q;
+        saved = true;
         toast(manual ? `第 ${q.number} 题范围已保存，请核对原图；未调用 AI` : `第 ${q.number} 题范围已更新，请重新核对`);
         refreshPaper();
       } else if (dialog.mode === "figures") {
@@ -5809,10 +6235,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const box = dialog.boxes[dialog.boxes.length - 1];
         if (!box) { toast("请先在原卷上框出要识读的那一块", "error"); return; }
         const target = $("readTargetSelect").value;
-        const data = await api(`/api/questions/${q.id}/region-read`, {
-          method: "POST", body: { page_idx: box.page_idx, bbox: box.bbox, target }
-        });
-        applyQuestion(data);
+        const pending = queueRegionRead(q, box, target);
+        $("pageDialogClose").disabled = false;
+        $("pageDialogClose").textContent = "取消识读";
+        await pending;
+        if (dialog.session !== session) return;
         toast(`AI 正在读框里的字，读完显示在第 ${q.number} 题的题卡上`);
         refreshPaper();
       } else {
@@ -5820,20 +6247,62 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (!Number.isInteger(number) || number < 1) { toast("请填写题号", "error"); return; }
         if (!dialog.boxes.length) { toast("请先在原卷上拖出这道题的范围", "error"); return; }
         const selectedGroup = $("groupSelect").value;
-        const body = { number, regions: readingOrder(dialog.boxes), body_mode: "source_image", processing_mode: "manual" };
+        const body = { number, regions: readingOrder(dialog.boxes), body_mode: "source_image", processing_mode: "manual",
+          question_type: $("cropTypeSelect").value || "unknown" };
         if (selectedGroup) body.group_id = Number(selectedGroup);
         const data = await api(`/api/papers/${state.paperId}/questions`, { method: "POST", body });
         applyQuestion(data);
-        toast(`第 ${number} 题已保存为原图题；请选题型并核对后入库`);
+        savedQuestion = data.question;
+        saved = true;
+        toast(`第 ${number} 题已保存为原图题；${body.question_type === "unknown" ? "请选题型并" : "请"}核对后入库`);
         refreshPaper();
       }
+      if (recognize && savedQuestion) {
+        // Once the image question exists, a failed OCR request must retry on
+        // that question rather than create a duplicate with the same number.
+        dialog.mode = "regions";
+        dialog.question = savedQuestion;
+        $("pageDialogTitle").textContent = `第 ${savedQuestion.number} 题 · 原卷与识读`;
+        configureCropActions();
+        trackCropDraft();
+        editGuard.setSaving(CROP_EDIT_KEY, true);
+        applyQuestion(await QBRegionWait.boundedRequest((signal) => api(`/api/questions/${savedQuestion.id}/reread`,
+          { method: "POST", body: {}, signal }), { timeoutMs: 30000 }));
+        refreshPaper();
+        toast(`第 ${savedQuestion.number} 题已开始识读，原图保留；请在题卡确认采用文字`);
+      }
+      if (next && savedQuestion) {
+        continueManualCut(savedQuestion.number, savedQuestion);
+        return;
+      }
       closeFigureSlotMenu({ cancelPending: true, rerender: false });
+      editGuard.release(CROP_EDIT_KEY);
       $("pageDialog").close();
-    } catch (error) { toast(error.message, "error"); }
-  });
+    } catch (error) {
+      if (dialog.session !== session || !$("pageDialog").open) return;
+      if (saved) trackCropDraft();
+      if (error.name === "AbortError") showCropResult("识读已取消，框选仍保留。");
+      else {
+        showCropResult(saved && recognize ? error.name === "TimeoutError"
+          ? `原图题已保存，识读请求未确认：${error.message}。可以返回题卡查看，框选不会丢失。`
+          : `原图题已保存，识读未开始：${error.message}`
+          : onlyRead || dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动改字。`
+          : `未保存：${error.message}。框选仍保留，请重试。`, true);
+        toast(error.message, "error");
+      }
+    } finally { if (dialog.session === session) setCropSaving(false); }
+  }
+
+  $("pageDialogSave").addEventListener("click", () => savePageCrop());
+  $("pageDialogSaveNext").addEventListener("click", () => savePageCrop({ next: true }));
+  $("pageCropRead").addEventListener("click", () => savePageCrop(dialog.mode === "new" || dialog.question?.body_mode === "source_image"
+    ? { recognize: true } : { onlyRead: true }));
 
   $("addQuestion").addEventListener("click", () => { $("toolsMenu").open = false; openPageDialog("new"); });
-  $("manualProcessing").addEventListener("click", () => { $("toolsMenu").open = false; switchToManual(); });
+  $("manualProcessing").addEventListener("click", () => {
+    $("toolsMenu").open = false;
+    if (state.paper?.status === "ready") openPageDialog("new"); else switchToManual();
+  });
 
   async function switchToManual(page = null) {
     const id = state.paperId;
@@ -5995,37 +6464,28 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // 照片（一张或几张）先弹出确认框，合成一份试卷；PDF、Word 一份一份直接上传。
   const MAX_PHOTOS = 30;
-  const photoUpload = { files: [], urls: [], parseMode: "manual", materialType: "exam" };
+  const photoUpload = { files: [], urls: [], policy: Object.freeze({ parseMode: "auto", allowCloud: false }), materialType: "exam" };
   const pasteUpload = { batch: null, resolve: null };
 
   function selectedMaterialType() {
     return document.querySelector('input[name="materialType"]:checked')?.value === "book" ? "book" : "exam";
   }
 
-  function selectedParseMode() {
-    const value = $("parseMode").value;
-    return ["native", "mineru"].includes(value) ? value : "manual";
-  }
-
   function automaticParseReady() {
-    return Boolean(state.status?.automatic_parse_ready ?? state.status?.upload_enabled);
+    // upload_enabled includes local import and must never grant cloud access.
+    return Boolean(state.status?.automatic_parse_ready);
   }
 
-  function renderIntakeMode() {
-    const mode = selectedParseMode();
-    const ready = mode !== "mineru" || automaticParseReady();
-    $("parseModeHint").textContent = mode === "manual"
-      ? "保留原卷，在页面上框出题目；保存原图题，不会自动调用 AI。"
-      : mode === "native" ? "本机提取 PDF 的文字和坐标；没有文字层的页面可手工切题，公式保留原图供核对。"
-        : "整卷发给 MinerU 自动切题，再按读题设置处理。";
-    $("fileInput").disabled = !ready;
-    $("dropZone").classList.toggle("disabled", !ready);
-    $("dropZone").setAttribute("aria-disabled", String(!ready));
+  function renderUploadAvailability() {
+    $("fileInput").disabled = false;
+    $("dropZone").classList.remove("disabled");
+    $("dropZone").setAttribute("aria-disabled", "false");
     const note = $("uploadNote");
-    note.hidden = ready;
-    if (!ready) note.replaceChildren(document.createTextNode("自动切题尚未配置。可改用本地手工切题或文字版 PDF。"), button("配置自动切题", "small", () => openSettings()));
+    note.hidden = false;
+    note.textContent = automaticParseReady()
+      ? "先在本机切题；经你允许后，也可使用已配置的云服务。"
+      : "自动判断资料，先在本机切题；未切出的题可以从原卷选取，无需密钥。";
   }
-  $("parseMode").addEventListener("change", renderIntakeMode);
 
   function materialTypeLabel() {
     return selectedMaterialType() === "book" ? "一本书 / 讲义" : "一份试卷";
@@ -6045,21 +6505,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("只支持 PDF、DOCX、JPG、PNG 和 WEBP 文件", "error");
       return;
     }
-    const parseMode = selectedParseMode();
     const materialType = selectedMaterialType();
-    if (parseMode === "mineru" && !automaticParseReady()) { toast("自动切题尚未配置，请改用本地手工切题或文字版 PDF", "error"); return; }
     if (routed.unsupported.length) {
       toast(`已跳过 ${routed.unsupported.length} 个不支持的文件`, "error");
     }
     let acknowledged = false;
     try { acknowledged = Boolean(sessionStorage.getItem("qb-cloud-upload-ack")); } catch { /* 无存储时每次都提示 */ }
-    if (parseMode === "mineru" && !acknowledged) {
-      const accepted = await confirmDialog({
-        title: "隐私提示",
-        text: "上传新卷会把整份原卷发送给 MinerU，切出的题目截图还会发送给你填了密钥的看图读题服务（魔搭、MiniMax、硅基流动）；选了“AI 助手读题”时，截图由你让它操作的 AI 助手读取。系统不会先擦除姓名、手写或批改痕迹。\n\n请确认你有权按此方式处理这些卷面，再继续上传。",
-        ok: "我已确认，继续上传"
-      });
-      if (!accepted) return;
+    const policy = await QBUpload.resolveUploadPolicy({ cloudReady: automaticParseReady(), acknowledged }, () => confirmDialog({
+      title: "本机无法切题时，允许云处理吗？",
+      text: "资料会先保存在本机并尝试切题。若本机无法切题，允许后才会把原稿发送给已配置的 MinerU，并按现有读题设置使用看图服务或 AI 助手，可能使用服务额度。系统不会预先擦除姓名、手写或批改痕迹。\n\n不允许也能导入，然后从原卷选取题目。此选择适用于本次上传；允许后本窗口后续上传不再重复提示。",
+      ok: "允许使用已配置服务",
+      cancel: "仅保留在本机",
+      focusCancel: true
+    }));
+    if (policy.allowCloud && !acknowledged) {
       try { sessionStorage.setItem("qb-cloud-upload-ack", "1"); } catch { /* 无存储时每次都提示 */ }
     }
     const pictures = routed.pictures;
@@ -6069,12 +6528,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const form = new FormData();
       form.append("file", file);
       form.append("material_type", materialType);
-      form.append("parse_mode", parseMode);
+      QBUpload.appendUploadPolicy(form, policy);
       try { last = await sendUpload(form, file.name); } catch (error) { toast(`${file.name}：${error.message}`, "error"); }
     }
     if (last) { await loadPapers(); selectPaper(last.id); }
     if (pictures.length > MAX_PHOTOS) toast(`一份试卷最多 ${MAX_PHOTOS} 张照片，这次选了 ${pictures.length} 张`, "error");
-    else if (pictures.length) openPhotoDialog(pictures, { parseMode, materialType });
+    else if (pictures.length) openPhotoDialog(pictures, { policy, materialType });
   }
 
   function fileSizeLabel(bytes) {
@@ -6123,13 +6582,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     resolve?.(false);
   });
 
-  function openPhotoDialog(files, { parseMode = selectedParseMode(), materialType = selectedMaterialType() } = {}) {
+  function openPhotoDialog(files, { policy = Object.freeze({ parseMode: "auto", allowCloud: false }), materialType = selectedMaterialType() } = {}) {
     photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
     photoUpload.files = files;
-    photoUpload.parseMode = parseMode;
+    photoUpload.policy = policy;
     photoUpload.materialType = materialType;
     photoUpload.urls = files.map((file) => URL.createObjectURL(file));
-    $("photoHint").textContent = `这些照片按下列顺序合成${materialType === "book" ? "一本书 / 讲义" : "一份试卷"}。${parseMode === "mineru" ? "使用 MinerU 自动切题。" : "照片保留在本机，之后手工框出题目；不会自动调用 AI。"}`;
+    $("photoHint").textContent = `这些照片按下列顺序合成${materialType === "book" ? "一本书 / 讲义" : "一份试卷"}。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
     $("photoTitle").textContent = files.length > 1 ? `上传 ${files.length} 张照片` : "上传 1 张照片";
     $("photoUpload").textContent = files.length > 1 ? `上传（${files.length} 张合成一份试卷）` : "上传";
     $("photoUpload").disabled = false;
@@ -6151,7 +6610,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     files.forEach((file) => form.append("file", file));
     form.append("enhance", $("photoEnhance").checked ? "1" : "0");
     form.append("material_type", photoUpload.materialType);
-    form.append("parse_mode", photoUpload.parseMode === "native" ? "manual" : photoUpload.parseMode);
+    QBUpload.appendUploadPolicy(form, photoUpload.policy);
     $("photoUpload").disabled = true;
     try {
       const paper = await sendUpload(form, files.length > 1 ? `${files.length} 张照片` : files[0].name);
@@ -6468,9 +6927,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     document.querySelectorAll("details.menu[open], details.more[open]").forEach((menu) => { menu.open = false; });
   });
 
-  document.querySelectorAll("dialog [data-close]").forEach((node) => node.addEventListener("click", () => node.closest("dialog").close()));
+  document.querySelectorAll("dialog [data-close]").forEach((node) => node.addEventListener("click", () => {
+    const modal = node.closest("dialog");
+    if (modal.id === "pageDialog") requestPageDialogClose(); else modal.close();
+  }));
   document.querySelectorAll("dialog").forEach((node) => node.addEventListener("click", (event) => {
-    if (event.target === node) node.close();
+    if (event.target === node) {
+      if (node.id === "pageDialog") requestPageDialogClose(); else node.close();
+    }
   }));
 
   setLens(state.lens);
@@ -6492,8 +6956,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return;
     }
     node.className = `settings-ready ${automaticParseReady() ? "ready" : "missing"}`;
-    node.textContent = automaticParseReady() ? "本地导入和自动切题均可使用。"
-      : "现在就能本地导入、手工切题，不需要密钥。以后要自动切题或主动识读时，再配置读题服务。";
+    node.textContent = automaticParseReady() ? "可以直接导入，程序先在本机切题。云处理已配置，使用前会说明发送范围；实际可用性以处理结果为准。"
+      : "现在就能导入资料、从原卷选题，不需要密钥。以后需要云处理或主动识读时，再配置读题服务。";
     $("welcomeKeys").hidden = automaticParseReady();
   }
 
@@ -6521,13 +6985,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("dropZone"), title: "上传资料",
       text: "把 PDF、Word 或手机拍的照片拖进窗口任意位置，或点这里选文件。上传前先在下面选“一份试卷”还是“一本书 / 讲义”。" },
     { target: () => $("paperList"), title: "试卷列表",
-      text: "上传后 AI 会自动切题、读题。每份资料读到哪一步、还有几张要看，都写在这里；点一份就打开它的题卡。" },
+      text: "上传后先在本机尝试切题，未切出的题可以从原卷选取。每份资料处理到哪一步、还有几张要看，都写在这里；点一份就打开它的题卡。" },
     { target: () => firstTourCard(), title: "题卡",
       text: "一道题一张卡。左边原卷截图点一下放大：Ctrl＋滚轮缩放，左键拖动；右边是题面。黄色标出几次读法不一样的地方，重点核对。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "对了就打勾",
       text: "对照原卷没问题，就在题号左边的方框打勾（或按 Enter），会自动跳到下一张要看的题。点错了再点一下就撤销。" },
     { target: () => firstTourCard()?.querySelector(".card-actions"), title: "不对就改",
-      text: "字错了点“改字”，预览会对应输入光标和选区；图不对点“配图”。“框选识读”可只重读一小块并推荐替换位置，先确认再保存；识读需要服务可用。" },
+      text: "字错了点“改字”，预览会对应输入光标和选区。范围或原图不对，点“原卷与识读”；文字题的配图可以点“配图”调整。框选识读也在“原卷与识读”里：点“识读选中片段”，先确认替换位置再保存；识读需要可用的读题服务。" },
     { target: () => $("paperMenu").querySelector("summary"), title: "看整份原卷",
       text: "点“试卷操作 → 查看整份原卷”。Ctrl＋滚轮缩放，左键拖动，还能适页、适宽和跳页。画框编辑时用空格＋左键或中键拖动。" },
     { target: () => $("filters"), title: "先看有疑点的",
@@ -6922,7 +7386,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "region": {
         focusCard(9);
         if (!$("pageDialog").open && lessonNumber(9)) openPageDialog("read", lessonNumber(9));
-        later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "示例不调用 AI。真实识读会先给替换建议，你确认后才填入改字，最后还要保存。");
+        later(() => $("readTargetSelect"), "保留自动推荐，练一下画框", "真实题目的入口是“原卷与识读”。示例只练框选识读，不调用 AI；识读结果先确认替换位置，再填入改字并保存。");
         break;
       }
       case "library": later(() => document.querySelector('.topnav a[href="/library"]'), "正式题库在这里", "列表先看摘要，点“完整题目”再核对条件、选项和配图；查看出处和版本历史仍在。示例不会入库。"); break;
@@ -6978,7 +7442,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (lesson?.final) {
       if (!(await closeTeachingSurface())) return;
       exitTeaching();
-      toast("教学完成。已有题卡可继续审核；新资料识读需要读题服务可用。", "success");
+      toast("教学完成。导入资料无需密钥，可从原卷框选保存；需要 AI 识读时再配置读题服务。", "success");
       return;
     }
     advanceTeaching();
@@ -7042,6 +7506,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderTeach();
     if (["all", "new"].includes(params.get("learn"))) {
       await startTeaching({ reset: params.get("learn") === "all", review: params.get("learn") === "new" });
+      return;
+    }
+    if (window.location.hash === "#dropZone") {
+      $("dropZone").focus({ preventScroll: true });
+      $("dropZone").scrollIntoView({ block: "nearest" });
       return;
     }
     if (readPref("qb-welcome-seen", "") !== "1") openWelcome();

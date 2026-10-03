@@ -19,7 +19,7 @@
 | `assistant-setup [--skill-dir 绝对skills父目录] [--replace-skill] [--desktop show\|hide]` | **1.10.14 起支持，先检查安装版 `--help`**。默认只读核实安装并列出技能/图标选择；用户明确选择后才安装配套技能或显示/隐藏本软件桌面图标。技能覆盖须获明确同意，`--replace-skill` 保留备份 |
 | `start [--timeout 90]` | 打开题有据，等它就绪 |
 | `papers` | 列出试卷：编号、名字、状态、题数、通过数、入库数 |
-| `upload 文件… [--book] [--parse-mode manual\|native\|mineru] [--wait] [--timeout 秒]` | 导入 PDF、Word，或几张照片（合成一份）。`manual` 无密钥手工切题，`native` 本机提取文字 PDF，`mineru` 要求云服务；无服务默认手工。`--book` 表示书或讲义。上传过的文件不会重复处理 |
+| `upload 文件… [--book] [--parse-mode auto\|manual\|native\|mineru] [--allow-cloud] [--wait] [--timeout 秒]` | 1.11.6 默认 `auto`，先本机处理文字 PDF，不能切出的题保留原页供框题。只有 `--allow-cloud` 才允许自动使用已配置 MinerU；失败仍保留本地结果。`manual`、`native` 可明确限定本地处理，`mineru` 明确选择云解析。`--book` 表示书或讲义。上传过的文件不会重复处理 |
 | `wait <试卷> [--timeout 秒]` | 等试卷读完，打印进度。读完后告诉你有几道需要逐题核对 |
 | `cards <试卷> [--filter F]` | 列出题卡和疑点。F 可以是 `todo`（需逐题核对）、`green`（识读一致、未通过）、`approved`、`ai`（AI 通过）、`human`（人工通过）、`all` |
 | `show <试卷> <题号> [--out 文件夹] [--no-images]` | 一道题的全部信息，原卷截图、候选图编号截图、配图都存成 PNG |
@@ -133,7 +133,7 @@ tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --resul
 
 - `status`、`start_app`、`list_papers`
 - `configure_reading(reader, checker, minimax_plan)`：同 `config`，不传参数只看现状
-- `upload_paper(paths, book, parse_mode="manual"|"native"|"mineru")`、`wait_paper(paper, timeout≤600)`；导入模式可省略，无服务默认手工。
+- `upload_paper(paths, book, parse_mode="auto"|"manual"|"native"|"mineru", allow_cloud=false)`、`wait_paper(paper, timeout≤600)`；默认自动准备，先尝试本机文字 PDF，未切出的内容保留原卷供手工框题。只有显式 `allow_cloud:true` 才允许自动使用已配置的 MinerU；明确选择 `mineru` 表示云解析。
 - `list_cards(paper, filter)`、`show_card(paper, card)`：返回文字，以及原卷截图（有候选图时是编号截图）和配图
 - `fix_card(paper, card, stem, options, type, answer, analysis)`：`options` 里值为空字符串，表示删掉这个选项
 - `set_figures(paper, card, use | keep | none)`

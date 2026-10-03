@@ -184,7 +184,8 @@ class PhotoPaperTests(TestCase):
     def test_parse_orders_pages_by_question_numbers_then_manual_reorder(self):
         # 三张照片按文件名粗排成 A、B、C，但卷面题号说明正确顺序是 B（1–5）、C（6–9）、A（10–12）。
         pictures = {"A.jpg": marked_page(1), "B.jpg": marked_page(2), "C.jpg": marked_page(3)}
-        response = self.upload({name: jpeg_bytes(image) for name, image in pictures.items()}, enhance="0")
+        response = self.upload({name: jpeg_bytes(image) for name, image in pictures.items()},
+            enhance="0", parse_mode="mineru")
         paper = Paper.objects.get(pk=response.json()["paper"]["id"])
         numbers = {"A.jpg": (10, 12), "B.jpg": (1, 5), "C.jpg": (6, 9)}
         blocks, seq = [], 0

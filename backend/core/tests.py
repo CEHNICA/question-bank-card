@@ -2065,9 +2065,10 @@ class ApiTests(TestCase):
         self.assertEqual(detail["paper"]["counts"]["yellow"], 1)
         self.assertEqual(len(detail["questions"]), 2)
 
-    def test_upload_needs_credentials(self):
+    def test_explicit_cloud_upload_needs_credentials(self):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}):
-            response = self.client.post("/api/papers", {"file": io.BytesIO(b"%PDF-1.4")}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post("/api/papers", {"file": io.BytesIO(b"%PDF-1.4"),
+                "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 400)
 
     def test_upload_creates_queued_paper(self):
@@ -2076,7 +2077,7 @@ class ApiTests(TestCase):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}):
             upload = io.BytesIO(source.read_bytes())
             upload.name = "新卷.pdf"
-            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="新卷.pdf")
         self.assertEqual(paper.status, Paper.Status.QUEUED)
@@ -2089,7 +2090,7 @@ class ApiTests(TestCase):
         upload.name = "200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="200页.pdf")
         self.assertEqual(len(paper.pages), 200)
@@ -2103,7 +2104,7 @@ class ApiTests(TestCase):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "book"}, HTTP_X_QB_REQUEST="1",
+                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1",
             )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="100页教材.pdf")
@@ -2120,7 +2121,7 @@ class ApiTests(TestCase):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "book"}, HTTP_X_QB_REQUEST="1",
+                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1",
             )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="270页教材.pdf")
@@ -2180,7 +2181,7 @@ class ApiTests(TestCase):
         upload.name = "201页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="201页.pdf")
         chunks = list(ImportChunk.objects.filter(paper=paper).order_by("sequence"))
@@ -2196,7 +2197,7 @@ class ApiTests(TestCase):
         upload.name = "1200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="1200页.pdf")
         chunks = list(paper.import_chunks.order_by("sequence"))

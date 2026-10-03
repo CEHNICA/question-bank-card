@@ -4,7 +4,7 @@
 
 ## 服务与密钥
 
-1.11.5 支持 `upload --parse-mode manual` 无密钥导入 PDF/照片并手工切题，`--parse-mode native` 本地提取文字 PDF。只有选择自动 MinerU 云解析才需要 Token。看图读题可用魔搭、MiniMax、硅基流动，也可经用户选择由 AI 助手核对。凭据由用户在软件里填写，不索要、不代填。申请入口：MinerU 的 https://mineru.net/apiManage/token ，魔搭的 https://www.modelscope.cn/my/myaccesstoken 。额度、费用、账户验证和 Token 有效期以服务商当前规则为准。
+1.11.6 的 `upload` 默认本机优先自动处理，不能可靠切题则保留原页供框题。只有 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动使用已配置 MinerU；云失败保留本地结果。`--parse-mode manual`、`native` 仍可限定本机，`mineru` 是明确云解析选择，需 Token。看图读题可用魔搭、MiniMax、硅基流动，也可经用户选择由 AI 助手核对。凭据由用户在软件里填写，不索要、不代填。申请入口：MinerU 的 https://mineru.net/apiManage/token ，魔搭的 https://www.modelscope.cn/my/myaccesstoken 。额度、费用、账户验证和 Token 有效期以服务商当前规则为准。
 
 看图服务不可用时，成功解析过的原卷可先用 MinerU 初稿逐题核对，或等服务恢复后重读。MinerU 不可用时，可导入新原卷并手工框题、入库和导出；原图题必须查看全部有序正文裁片，不能用空题干为它猜题。显式识读先存建议，确认采用后重审。软件会尝试其他已配置的看图服务；不要把配置有密钥当成实测可用。
 

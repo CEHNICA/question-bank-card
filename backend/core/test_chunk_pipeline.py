@@ -191,7 +191,7 @@ class LongPdfChunkPipelineTests(TestCase):
         ]
 
     @staticmethod
-    def _successful_extract(_source, archive, _page_count, heartbeat=None):
+    def _successful_extract(_source, archive, _page_count, heartbeat=None, cancel=None):
         archive.write_bytes(b"mock MinerU archive")
         if heartbeat:
             heartbeat()
@@ -231,7 +231,7 @@ class LongPdfChunkPipelineTests(TestCase):
         requests: list[int] = []
         fail_second = True
 
-        def extract(source, archive, _page_count, heartbeat=None):
+        def extract(source, archive, _page_count, heartbeat=None, cancel=None):
             nonlocal fail_second
             sequence = int(source.stem.rsplit("_", 1)[1])
             requests.append(sequence)
@@ -328,7 +328,7 @@ class LongPdfChunkPipelineTests(TestCase):
             workers.append(count)
             return RealThreadPoolExecutor(*args, **kwargs)
 
-        def extract(source, archive, _page_count, heartbeat=None):
+        def extract(source, archive, _page_count, heartbeat=None, cancel=None):
             del heartbeat
             network_threads.append(threading.get_ident())
             sequence = int(source.stem.rsplit("_", 1)[1])
@@ -376,7 +376,7 @@ class LongPdfChunkPipelineTests(TestCase):
         active_by_token: dict[str, int] = {}
         maximum_by_token: dict[str, int] = {}
 
-        def network(token, _source, archive, _page_count, heartbeat=None):
+        def network(token, _source, archive, _page_count, heartbeat=None, cancel=None):
             nonlocal active_total, maximum_total
             del heartbeat
             with lock:
@@ -486,7 +486,9 @@ class LongPdfChunkPipelineTests(TestCase):
             pipeline.parse(paper)
 
         self.assertEqual(request.call_count, 1)
-        self.assertEqual(request.call_args.args, (source, folder / "mineru_result.zip", 1))
+        self.assertEqual((request.call_args.args[0], request.call_args.args[2]), (source, 1))
+        self.assertEqual(request.call_args.args[1].name, "mineru_result.zip")
+        self.assertTrue(request.call_args.args[1].parent.name.startswith(".parse-0-"))
         self.assertTrue(callable(request.call_args.kwargs["heartbeat"]))
         self.assertEqual(states[0]["state"], "running")
         self.assertEqual((states[0]["pages"], states[0]["total_pages"]), (1, 1))

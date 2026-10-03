@@ -35,7 +35,9 @@ assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAISettingsMount"\)\)/);
 assert.match(js, /settingsAI: "ai"/);
 // Local import is available without cloud credentials.
 assert.match(html, /id="settingsReady"/);
-assert.match(js, /本地导入、手工切题可直接使用。自动切题还需 \$\{missing\.join\("、"\)\} 密钥/);
+assert.match(js, /导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 \$\{missing\.join\("、"\)\} 密钥/);
+assert.match(js, /现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU/);
+assert.doesNotMatch(js, /新资料的题卡先用 MinerU 的文字/);
 // 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
 assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
 assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);

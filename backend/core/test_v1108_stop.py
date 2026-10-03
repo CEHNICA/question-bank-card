@@ -54,7 +54,7 @@ class StopTests(v110.TempDataMixin, TestCase):
     def test_a_paper_waiting_on_minerU_is_stopped_by_the_worker(self):
         Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.PARSING)
         response = self.post("stop")
-        self.assertEqual(response.json()["stopped"], False)
+        self.assertEqual(response.json()["stopped"], True)
         cancel_file = paper_dir(self.paper) / mineru.CANCEL_FILE
         self.assertTrue(cancel_file.exists())
 
@@ -67,7 +67,9 @@ class StopTests(v110.TempDataMixin, TestCase):
             pipeline.process_paper(self.paper)
         self.paper.refresh_from_db()
         self.assertEqual((self.paper.status, self.paper.error), (Paper.Status.FAILED, mineru.STOPPED_MESSAGE))
-        self.assertFalse(cancel_file.exists())
+        # No live worker is required; an obsolete worker must leave the stop
+        # marker alone. Retry removes it for the new generation.
+        self.assertTrue(cancel_file.exists())
         # 重试 starts it again; a stop request the worker never saw does not stop the retry.
         cancel_file.write_text("stop", encoding="utf-8")
         self.assertEqual(self.post("retry").status_code, 200)

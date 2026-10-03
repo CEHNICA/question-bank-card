@@ -21,7 +21,7 @@ from .pipeline import paper_dir
 def fake_api(states):
     answers = iter(states)
 
-    def api(_session, _token, path, payload=None):
+    def api(_session, _token, path, payload=None, **kwargs):
         if path == "file-urls/batch":
             return {"batch_id": "b1", "file_urls": ["https://example.invalid/upload"]}, "t"
         return {"extract_result": [next(answers)]}, "t"
@@ -45,6 +45,8 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
+        self.paper.status = Paper.Status.QUEUED
+        self.paper.save(update_fields=["status"])
 
     def test_the_file_is_uploaded_again_and_the_request_is_cleared(self):
         folder = paper_dir(self.paper)

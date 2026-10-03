@@ -863,9 +863,9 @@ def papers(request):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    mode = request.POST.get("parse_mode", "mineru" if readers.configured("mineru") and _reading_ready() else "manual")
+    mode = request.POST.get("parse_mode", "auto")
     if mode not in intake.MODES:
-        return _error("请选择手工框题、本地文字 PDF 或 MinerU 自动解析")
+        return _error("请选择自动准备、手工框题、本地文字 PDF 或 MinerU 自动解析")
     if mode == "mineru" and (not readers.configured("mineru") or not _reading_ready()):
         return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
                       "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
@@ -954,14 +954,18 @@ def papers(request):
         raise
     if mode != "mineru":
         try:
-            intake.prepare(paper, mode)
+            if mode == "auto":
+                paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
+                    cloud_ready=readers.configured("mineru") and _reading_ready())
+            else:
+                intake.prepare(paper, mode)
         except Exception as exc:
             paper.status, paper.error = Paper.Status.FAILED, f"本地准备失败（{type(exc).__name__}），原文件已保留，可转手工重试。"
             paper.save(update_fields=["status", "error", "updated_at"])
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
-def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM, parse_mode: str = "mineru") -> JsonResponse:
+def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM, parse_mode: str = "auto") -> JsonResponse:
     """一张或几张照片合成一份试卷。页序先按拍摄时间/文件名粗排，MinerU 读完后按卷面题号排定。"""
     if len(uploads) > photos.MAX_PHOTOS:
         return _error(f"一份试卷最多 {photos.MAX_PHOTOS} 张照片")
@@ -1008,7 +1012,11 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     paper.save()
     if parse_mode != "mineru":
         try:
-            intake.prepare(paper, parse_mode)
+            if parse_mode == "auto":
+                paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
+                    cloud_ready=readers.configured("mineru") and _reading_ready())
+            else:
+                intake.prepare(paper, parse_mode)
         except Exception as exc:
             paper.status, paper.error = Paper.Status.FAILED, f"照片本地准备失败（{type(exc).__name__}），原照片已保留。"
             paper.save(update_fields=["status", "error", "updated_at"])
@@ -1628,36 +1636,39 @@ def paper_reparse(request, paper_id):
 
 @csrf_exempt
 def paper_stop(request, paper_id):
-    """停止处理 (1.10.8): a paper still waiting to be parsed stops, so it can be deleted.
-
-    Queued: stopped at once.  Waiting on MinerU (one file): the worker stops at
-    its next poll and marks the paper stopped.  Either way it then shows as
-    stopped with 删除 and 重试.
-    """
+    """Stop locally even when the worker is absent or a remote request is stuck."""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     rejected = _guard(request)
     if rejected:
         return rejected
-    paper = get_object_or_404(Paper, pk=paper_id)
-    stopped = Paper.objects.filter(pk=paper.pk, status=Paper.Status.QUEUED).update(
-        status=Paper.Status.FAILED, error=mineru.STOPPED_MESSAGE, updated_at=timezone.now())
-    if stopped:
-        paper.refresh_from_db()
-        return JsonResponse({"paper": paper_json(paper), "stopped": True, "message": "已停止，可以删除了"})
-    paper.refresh_from_db()
-    if paper.status != Paper.Status.PARSING:
-        return _error("只有排队中或正在等 MinerU 的任务能停止；处理失败或已完成的任务可以直接删除", 409)
-    if paper.import_chunks.exists():
-        return _error("分片解析中的资料暂时不能停止；等它解析完或出错后再删除", 409)
-    folder = paper_dir(paper)
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / mineru.CANCEL_FILE).write_text("stop", encoding="utf-8")
-    except OSError:
-        return _error("没能通知后台停止，请稍后再试", 500)
-    return JsonResponse({"paper": paper_json(paper), "stopped": False,
-                         "message": "正在停止，几秒后就能删除"})
+    with transaction.atomic():
+        paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        already_stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
+        if not already_stopped:
+            if paper.status not in _ACTIVE_PAPER_STATUSES:
+                return _error("任务已完成或失败，可以直接查看已有成果", 409)
+            plan = deepcopy(paper.processing_plan or {})
+            plan["revision"] = int(plan.get("revision", 0)) + 1
+            paper.processing_plan = plan
+            paper.status, paper.error = Paper.Status.FAILED, mineru.STOPPED_MESSAGE
+            paper.save(update_fields=["processing_plan", "status", "error", "updated_at"])
+            # Pending reads become obsolete; completed/manual bodies and every
+            # approval/publication remain untouched.
+            paper.questions.filter(models.Q(ocr_pending=True) | models.Q(reread_requested=True) | models.Q(
+                processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]
+            )).update(content_revision=models.F("content_revision") + 1,
+                reread_requested=False, ocr_pending=False)
+            RegionRead.objects.filter(question__paper=paper, status__in=region_reads.ACTIVE).update(
+                status=RegionRead.Status.FAILED, error="已停止本机处理，框选结果不再采用。", updated_at=timezone.now())
+        try:
+            # Also wake callers holding an account lease in this worker. The
+            # revision is authoritative, so failure to write cannot block stop.
+            (paper_dir(paper) / mineru.CANCEL_FILE).write_text("stop", encoding="utf-8")
+        except OSError:
+            pass
+    return JsonResponse({"paper": paper_json(paper), "stopped": True,
+        "message": "已停止本机处理，原文件和已有成果已保留。可以重试或删除未入库任务。"})
 
 
 @csrf_exempt
@@ -1677,9 +1688,23 @@ def paper_retry(request, paper_id):
         paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
         if paper.status != Paper.Status.FAILED:
             return _error("只有处理失败的任务需要重试")
+        local_mode = (paper.processing_plan or {}).get("mode")
+        if local_mode in {"manual", "native"}:
+            try:
+                if paper.questions.exists() or paper.blocks.exists():
+                    paper = intake.select_manual(paper)
+                else:
+                    intake.prepare(paper, local_mode)
+            except Exception as exc:
+                return _error(f"本地准备未完成（{type(exc).__name__}），原文件和已有成果已保留", 409)
+            (paper_dir(paper) / mineru.CANCEL_FILE).unlink(missing_ok=True)
+            return JsonResponse({"paper": paper_json(paper), "message": "已重新准备本地原卷，可继续手工切题"})
         has_blocks = paper.blocks.exists()
         has_questions = paper.questions.exists()
-        fields = ["status", "error", "updated_at"]
+        plan = deepcopy(paper.processing_plan or {})
+        plan["revision"] = int(plan.get("revision", 0)) + 1
+        paper.processing_plan = plan
+        fields = ["status", "error", "processing_plan", "updated_at"]
         if requested_type is not None and requested_type != paper.material_type:
             # 0008 及更旧版本没有“试卷/教材”字段，迁移时只能保守地按试卷处理。
             # 允许人在还没有任何解析成果时明确改成教材，不靠文件名猜测。
@@ -2032,9 +2057,31 @@ def question_region_read(request, question_id):
     if payload is None:
         return _error("请求内容不正确")
     question = get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
+    request_id = payload.get("client_request_id")
+    if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request_id)):
+        return _error("识读请求编号不正确")
     if request.method == "DELETE":
-        question.region_reads.all().delete()
+        read_id = payload.get("read_id")
+        if read_id is not None and (type(read_id) is not int or read_id < 1):
+            return _error("识读记录编号不正确")
+        with transaction.atomic():
+            question = get_object_or_404(Question.objects.select_for_update().select_related("paper"), pk=question_id)
+            jobs = question.region_reads.all()
+            if read_id is not None:
+                jobs = jobs.filter(pk=read_id)
+            if request_id is not None:
+                matched = jobs.filter(recommendation__client_request_id=request_id).first()
+                if matched is None and not question.region_reads.filter(recommendation__client_request_id=request_id).exists():
+                    matched = RegionRead(question=question, page_idx=0, bbox=[], target="auto")
+                if matched is not None:
+                    matched.status, matched.error = RegionRead.Status.FAILED, "已取消本机等待"
+                    matched.recommendation = {"client_request_id": request_id, "cancelled": True}
+                    matched.save()
+            else:
+                jobs.delete()
         return JsonResponse({"question": question_json(question)})
+    if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != question.content_revision):
+        return _error("题目已发生变化，请刷新后重新框选", 409)
     target = payload.get("target", "auto")
     if target not in region_reads.TARGETS:
         return _error("请选择读出来的文字填到题干还是哪个选项")
@@ -2048,9 +2095,17 @@ def question_region_read(request, question_id):
     if not _vision_ready():
         return _error(region_reads.NO_ENGINE)
     with transaction.atomic():
-        question.region_reads.all().delete()
+        question = get_object_or_404(Question.objects.select_for_update().select_related("paper"), pk=question_id)
+        if "revision" in payload and payload["revision"] != question.content_revision:
+            return _error("题目已发生变化，请刷新后重新框选", 409)
+        if request_id is not None and question.region_reads.filter(recommendation__client_request_id=request_id).exists():
+            return JsonResponse({"question": question_json(question)})
+        question.region_reads.exclude(recommendation__cancelled=True, recommendation__has_key="cancelled").delete()
+        recommendation = region_reads.queued_recommendation(question)
+        if request_id is not None:
+            recommendation["client_request_id"] = request_id
         RegionRead.objects.create(question=question, page_idx=page_idx, bbox=bbox, target=target,
-                                  recommendation=region_reads.queued_recommendation(question))
+                                  recommendation=recommendation)
     return JsonResponse({"question": question_json(question)})
 
 

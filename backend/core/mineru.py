@@ -16,7 +16,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from django.utils import timezone
 
-from .account_pool import AccountPoolError, account_pool, secrets_from_environment
+from .account_pool import AccountPoolCancelled, AccountPoolError, account_pool, secrets_from_environment
 from .models import Paper
 
 API_ROOT = "https://mineru.net/api/v4"
@@ -50,7 +50,7 @@ class MineruRestart(Exception):
 
 # 1.10.8: 停止处理 — a person wants this paper to stop waiting (to delete it).
 CANCEL_FILE = "mineru_cancel"
-STOPPED_MESSAGE = "已按你的要求停止解析。可以删除这份任务，或点“重试”重新交给 MinerU"
+STOPPED_MESSAGE = "已停止本机处理，原文件和已有成果已保留。远端任务可能仍在结束，本机不再采用本轮结果。"
 
 
 class MineruCancelled(RuntimeError):
@@ -326,17 +326,38 @@ class _TransientDownloadError(MineruError):
     """A download failure worth retrying (network error or HTTP 5xx)."""
 
 
-def _with_network_retries(action: Callable[[], requests.Response]) -> requests.Response:
+def _check_cancel(cancel: Callable[[], bool] | None) -> None:
+    if cancel is not None and cancel():
+        raise MineruCancelled()
+
+
+def _pause(seconds: float, cancel: Callable[[], bool] | None = None) -> None:
+    if cancel is None:
+        time.sleep(seconds)
+        return
+    # Bounded checks also make an account retry or poll delay cancellable.
+    remaining = seconds
+    while remaining > 0:
+        _check_cancel(cancel)
+        duration = min(0.25, remaining)
+        time.sleep(duration)
+        remaining -= duration
+    _check_cancel(cancel)
+
+
+def _with_network_retries(action: Callable[[], requests.Response], *, cancel=None) -> requests.Response:
     for attempt in range(len(NETWORK_RETRY_DELAYS) + 1):
+        _check_cancel(cancel)
         try:
             response = action()
         except requests.RequestException:
             if attempt == len(NETWORK_RETRY_DELAYS):
                 raise
         else:
+            _check_cancel(cancel)
             if response.status_code not in TRANSIENT_HTTP or attempt == len(NETWORK_RETRY_DELAYS):
                 return response
-        time.sleep(NETWORK_RETRY_DELAYS[attempt])
+        _pause(NETWORK_RETRY_DELAYS[attempt], cancel)
     raise AssertionError("unreachable")
 
 
@@ -345,6 +366,7 @@ def _api_json(
     token: str,
     endpoint: str,
     payload: dict | None = None,
+    *, cancel=None,
 ) -> tuple[dict, str]:
     try:
         response = _with_network_retries(lambda: session.request(
@@ -353,7 +375,7 @@ def _api_json(
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             json=payload,
             timeout=(10, 45),
-        ))
+        ), cancel=cancel)
     except requests.RequestException:
         raise MineruError("MinerU 接口连接失败，请检查网络后重试") from None
     try:
@@ -392,17 +414,19 @@ def _https_url(value: object, stage: str, *, trace_id: str = "") -> str:
     return value
 
 
-def _download_zip(session: requests.Session, url: str, target: Path) -> None:
+def _download_zip(session: requests.Session, url: str, target: Path, *, cancel=None) -> None:
     for attempt in range(len(NETWORK_RETRY_DELAYS) + 1):
+        _check_cancel(cancel)
         try:
-            return _download_zip_once(session, url, target)
+            return _download_zip_once(session, url, target, cancel=cancel)
         except _TransientDownloadError:
             if attempt == len(NETWORK_RETRY_DELAYS):
                 raise
-        time.sleep(NETWORK_RETRY_DELAYS[attempt])
+        _pause(NETWORK_RETRY_DELAYS[attempt], cancel)
 
 
-def _download_zip_once(session: requests.Session, url: str, target: Path) -> None:
+def _download_zip_once(session: requests.Session, url: str, target: Path, *, cancel=None) -> None:
+    _check_cancel(cancel)
     url = _https_url(url, "解析包下载")
     partial = target.with_name(target.name + ".part")
     partial.unlink(missing_ok=True)
@@ -414,6 +438,7 @@ def _download_zip_once(session: requests.Session, url: str, target: Path) -> Non
             with partial.open("wb") as output:
                 size = 0
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    _check_cancel(cancel)
                     if not chunk:
                         continue
                     size += len(chunk)
@@ -422,11 +447,12 @@ def _download_zip_once(session: requests.Session, url: str, target: Path) -> Non
                     output.write(chunk)
         if not zipfile.is_zipfile(partial):
             raise MineruError("MinerU 返回的解析包不是有效 ZIP，请稍后重试")
+        _check_cancel(cancel)
         os.replace(partial, target)
     except requests.RequestException as exc:
         partial.unlink(missing_ok=True)
         raise _TransientDownloadError(f"MinerU 解析包下载失败（{type(exc).__name__}）") from None
-    except (MineruError, OSError):
+    except (MineruError, MineruCancelled, OSError):
         partial.unlink(missing_ok=True)
         raise
 
@@ -452,6 +478,7 @@ def request_extract_file(
     下载地址和授权头均不落盘。
     """
     validate_page_count(page_count, source.name)
+    _check_cancel(cancel)
     try:
         source_size = source.stat().st_size
     except OSError:
@@ -472,7 +499,9 @@ def request_extract_file(
     with requests.Session() as session:
         report("uploading")
         batch, submit_trace_id = _api_json(session, token, "file-urls/batch",
-                                            {"files": [{"name": source.name}], "model_version": "vlm"})
+                                            {"files": [{"name": source.name}], "model_version": "vlm"},
+                                            **({"cancel": cancel} if cancel is not None else {}))
+        _check_cancel(cancel)
         batch_id = batch.get("batch_id")
         if (not isinstance(batch_id, str) or not batch_id.strip()
                 or any(character.isspace() or ord(character) < 32 for character in batch_id)):
@@ -490,7 +519,7 @@ def request_extract_file(
                 return session.put(upload_url, data=stream, timeout=(10, 180))
 
         try:
-            response = _with_network_retries(upload)
+            response = _with_network_retries(upload, cancel=cancel)
             if not response.ok:
                 raise MineruError(f"MinerU 文件上传失败（HTTP {response.status_code}）")
         except requests.RequestException as exc:
@@ -501,7 +530,10 @@ def request_extract_file(
         # 20 minutes, or an hour while MinerU says the file is queued or being
         # read: giving up then and sending again would only start the queue over (1.10.8).
         while time.monotonic() - started < (WAIT_ALIVE if state in ALIVE_STATES else WAIT_SILENT):
-            data, trace_id = _api_json(session, token, f"extract-results/batch/{quote(batch_id, safe='')}")
+            _check_cancel(cancel)
+            data, trace_id = _api_json(session, token, f"extract-results/batch/{quote(batch_id, safe='')}",
+                                       **({"cancel": cancel} if cancel is not None else {}))
+            _check_cancel(cancel)
             if heartbeat is not None:
                 heartbeat()
             rows = data.get("extract_result")
@@ -517,7 +549,8 @@ def request_extract_file(
                 url = task.get("full_zip_url")
                 url = _https_url(url, "解析包下载", trace_id=trace_id)
                 report("downloading")
-                _download_zip(session, url, target)
+                _download_zip(session, url, target, **({"cancel": cancel} if cancel is not None else {}))
+                _check_cancel(cancel)
                 return target
             if isinstance(state, str) and state != "failed":
                 # “running” comes with {extracted_pages, total_pages}.
@@ -537,7 +570,7 @@ def request_extract_file(
                 raise MineruRestart()
             # A short exam is usually done within 10–20 s; poll briskly at first
             # and back off for long books so the API is not hammered.
-            time.sleep(2 if time.monotonic() - started < 60 else 5)
+            _pause(2 if time.monotonic() - started < 60 else 5, cancel)
     if state == "pending":
         raise MineruError("MinerU 排了一个小时还没开始识别，多半是 MinerU 那边太忙；请过一会儿点“重试”")
     raise MineruError("MinerU 解析超时")
@@ -567,6 +600,7 @@ def request_extract_file_from_pool(
     """
 
     try:
+        _check_cancel(cancel)
         pool = account_pool("mineru")
     except AccountPoolError as exc:
         raise MineruError(str(exc)) from None
@@ -574,7 +608,8 @@ def request_extract_file_from_pool(
     last_error: MineruError | None = None
     while len(attempted) < max(1, pool.size):
         try:
-            with pool.lease(exclude=attempted) as lease:
+            _check_cancel(cancel)
+            with pool.lease(exclude=attempted, **({"cancel": cancel} if cancel is not None else {})) as lease:
                 try:
                     return request_extract_file(
                         lease.secret, source, target, page_count, heartbeat=heartbeat,
@@ -593,6 +628,8 @@ def request_extract_file_from_pool(
                         lease.cooldown(12)
                         continue
                     raise
+        except AccountPoolCancelled:
+            raise MineruCancelled() from None
         except AccountPoolError:
             break
     if last_error is not None:

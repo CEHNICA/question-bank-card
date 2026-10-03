@@ -118,7 +118,8 @@ class InterruptedReadRecoveryTests(TestCase):
         interrupted = self.question(Question.State.READING, 5)
         selected: list[int] = []
 
-        def record(_paper, questions):
+        def record(_paper, questions, *, revision):
+            self.assertEqual(revision, int((_paper.processing_plan or {}).get("revision", 0)))
             selected.extend(question.pk for question in questions)
 
         with mock.patch.object(pipeline, "read_questions", side_effect=record):

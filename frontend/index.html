@@ -76,7 +76,7 @@
             </div>
             <details id="settingsFreePlan" class="free-plan">
               <summary>如何配置读题服务</summary>
-              <p>导入新资料需要 MinerU Token；自动对照题面还需一家看图服务，或选择 AI 助手读题。</p>
+              <p>导入资料无需密钥，会先在本机尝试切题；无法自动切出的题，可从原卷框选保存。需要云端自动切题时，再配置 MinerU 与看图服务，或选择 AI 助手读题。</p>
               <p><a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">获取 MinerU Token</a> · <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">获取魔搭令牌</a></p>
               <p>MinerU 单文件最多 200 页、200 MB；超过页数会自动分片。服务额度、费用和有效期以官网为准。</p>
             </details>
@@ -169,7 +169,7 @@
               <dl class="explain-list">
                 <div><dt>看原卷</dt><dd>题卡截图、查看整份原卷、正式题库的查看出处，都支持 Ctrl＋滚轮缩放和左键拖动。画框编辑时，改用空格＋左键或中键拖动画布。</dd></div>
                 <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
-                <div><dt>框选识读</dt><dd>自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
+                <div><dt>框选识读</dt><dd>从题卡的“原卷与识读”进入，框住印刷字，再点“识读选中片段”。自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
                 <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
                 <div><dt>快速找题和选题</dt><dd>正式题库先显示完整段落或公式摘要；点“完整题目”查看所有条件、选项和配图。可勾选当前已显示的题批量加入试题篮；换来源、筛选或翻页后，篮中的题会保留。</dd></div>
                 <div><dt>继续上次组卷</dt><dd>在组卷预览里填写标题、点“保存草稿”。下次从“组卷草稿”继续；已撤回或更新的题会提示处理，不会自动换题或漏印。</dd></div>
@@ -182,7 +182,7 @@
         <div id="settingsAbout" class="settings-page" role="tabpanel" hidden>
           <section class="settings-section" aria-labelledby="settingsAboutTitle">
             <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
-            <p class="settings-description">上传新资料会把整份原稿发送给 MinerU；切出的题目截图会发送给所选视觉模型。框选识读使用“自动推荐”时，还会发送当前题干和选项文字，以定位替换位置。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
+            <p class="settings-description">导入资料先在本机处理。只有允许本次云处理、已配置服务且本机无法切题时，才会把原稿发送给 MinerU；切出的题目截图会按读题设置交给视觉模型或 AI 助手。主动框选识读使用“自动推荐”时，还会发送当前题干和选项文字。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
             <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
             <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
             <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
@@ -194,7 +194,7 @@
 
   <div class="layout">
     <aside class="sidebar" aria-label="试卷">
-      <label id="dropZone" class="drop-zone">
+      <label id="dropZone" class="drop-zone" tabindex="-1">
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
         <strong>上传资料</strong>
@@ -206,17 +206,9 @@
           <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
           <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
         </div>
-        <small id="bookChunkHint" class="material-hint">自动解析书籍 PDF 时，每 100 页稳定分片；本地手工切题保留全部原页，原文件不会改动。</small>
+        <small id="bookChunkHint" class="material-hint">原卷先保存在本机。使用云解析书籍 PDF 时，每 100 页稳定分片；原文件不会改动。</small>
       </fieldset>
-      <label class="intake-mode">处理方式
-        <select id="parseMode">
-          <option value="manual" selected>本地手工切题（无需密钥）</option>
-          <option value="native">文字版 PDF（本地提取）</option>
-          <option value="mineru">MinerU 自动切题</option>
-        </select>
-        <small id="parseModeHint">保留原卷，在页面上框出题目；保存原图题，不会自动调用 AI。</small>
-      </label>
-      <p id="uploadNote" class="side-note" hidden></p>
+      <p id="uploadNote" class="side-note">自动判断资料，先在本机切题；未切出的题可以从原卷选取。</p>
       <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
       <div class="side-footer">
@@ -236,11 +228,11 @@
           <path d="m97.5 82 4.5 4.5 8.5-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <h2>把题目留下，也把出处留下</h2>
-        <p>无需密钥也能导入原卷、手工切题。文字版 PDF 可在本机提取，AI 识读由你主动发起。</p>
+        <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
         <button id="emptyLearn" class="button primary" type="button">先用示例试卷学一遍（不用密钥）</button>
         <ol class="empty-steps">
-          <li><b>1</b>选择处理方式，再上传原卷；手工切题无需密钥</li>
-          <li><b>2</b>框出题目、选项与配图；跨页片段可自由调整顺序</li>
+          <li><b>1</b>上传原卷，程序自动判断怎么切题</li>
+          <li><b>2</b>核对题目范围；未切出的题从原卷补齐</li>
           <li><b>3</b>对照原卷看一眼：对了就通过，错了就改</li>
         </ol>
       </section>
@@ -262,7 +254,7 @@
                   <button id="viewOriginalPaper" class="link-button" type="button">查看整份原卷</button>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
-                  <button id="settingsStop" class="link-button" type="button" hidden title="不再处理这份任务；停下来以后可以删除，或点“重试”重新开始">停止处理</button>
+                  <button id="settingsStop" class="link-button" type="button" hidden title="停止本机处理，保留原卷和已有题卡">停止处理</button>
                   <button id="settingsConfirmStructure" class="link-button" type="button" hidden>确认属于同一份资料并继续</button>
                   <button id="settingsSplit" class="link-button" type="button" hidden>拆分任务</button>
                   <details class="paper-notes">
@@ -317,7 +309,7 @@
               <summary class="toggle-pill"><svg class="icon"><use href="#i-tools"/></svg>工具<svg class="icon" style="width:13px;height:13px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
                 <button id="addQuestion" class="link-button" type="button">漏了一题？手动框出</button>
-                <button id="manualProcessing" class="link-button" type="button">改用本地手工切题</button>
+                <button id="manualProcessing" class="link-button" type="button">从原卷补题</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
                 <button id="selectionStart" class="link-button" type="button">批量处理题卡…</button>
@@ -351,7 +343,7 @@
       </header>
       <div class="credential-body">
         <section class="credential-service" data-service="mineru">
-          <div class="credential-service-head"><strong>MinerU Token <small>必填 · 识别整页文字、切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
+          <div class="credential-service-head"><strong>MinerU Token <small>可选 · 云端识别与切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
           <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">生成 Token</a>（到期日见管理页）</label>
           <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
@@ -396,10 +388,11 @@
     <div class="dialog-head">
       <div>
         <h3 id="pageDialogTitle"></h3>
-        <p id="pageDialogHint" class="hint"></p>
+        <details id="pageCropHelp" class="page-crop-help"><summary>操作说明</summary><p id="pageDialogHint" class="hint"></p></details>
       </div>
       <div class="dialog-tools">
         <label id="numberField" class="number-field" hidden>题号 <input id="numberInput" type="number" min="1" max="999"></label>
+        <label id="cropTypeField" class="number-field" hidden>题型 <select id="cropTypeSelect" aria-label="新题题型"></select></label>
         <label id="groupField" class="number-field" hidden>题组
           <select id="groupSelect"></select>
         </label>
@@ -415,6 +408,8 @@
           </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
+        <button id="pageDialogSaveNext" class="button primary" type="button" hidden>保存并切下一题</button>
+        <button id="pageCropRead" class="button" type="button" hidden>识读文字</button>
         <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
     </div>
@@ -437,7 +432,7 @@
       <span id="pageCanvasHint" class="hint"></span>
       <span id="pageImageState" class="hint" role="status" hidden></span>
       <button id="pageImageRetry" class="button small" type="button" hidden>重新加载原卷</button>
-      <button id="pageManualCut" class="button small" type="button" hidden>在这页手工切题</button>
+      <button id="pageManualCut" class="button small" type="button" hidden>从这页补题</button>
     </div>
     <nav class="page-navigation" aria-label="原卷翻页">
       <button id="pagePrevious" class="button small" type="button" aria-label="上一页">上一页</button>
@@ -457,7 +452,13 @@
       </details>
     </nav>
     <div id="regionPieces" class="region-pieces" role="region" aria-label="题目片段顺序" hidden></div>
-    <div id="pageStage" class="page-stage" tabindex="0" aria-label="整页原卷画布"></div>
+    <p id="pageCropResult" class="page-crop-result" role="status" aria-live="polite" hidden></p>
+    <div class="page-crop-workspace">
+      <div id="pageStage" class="page-stage" tabindex="0" aria-label="整页原卷画布"></div>
+      <aside id="pageCropPreview" class="page-crop-preview" aria-label="保存后的题目预览" hidden>
+        <details id="pageCropPreviewDetails"><summary>保存效果 · 按片段顺序拼接</summary><div id="pageCropPreviewBody"></div></details>
+      </aside>
+    </div>
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
       <div class="figure-slot-head">
         <strong>这张图属于</strong>
@@ -671,7 +672,7 @@
       <h2 id="welcomeTitle">欢迎使用题有据</h2>
       <p class="welcome-lead">保留原卷，核对后入库。每道题都有出处，随时回看原页。</p>
       <ol class="welcome-steps">
-        <li><b>1</b><span><strong>上传</strong>PDF 或照片可在本地手工切题，无需密钥。文字版 PDF 可本地提取；自动切题需先配置服务。</span></li>
+        <li><b>1</b><span><strong>上传</strong>PDF、Word 或照片先保存在本机，程序自动尝试切题；未切出的题可以从原卷选取，无需密钥。</span></li>
         <li><b>2</b><span><strong>核对</strong>完整框出题目、选项与配图，选好题型。可以直接保留原图，也可以主动识读，确认后转成文字。</span></li>
         <li><b>3</b><span><strong>入库</strong>核对完点“入库”，题目就进了“正式题库”，可以搜索、组卷。</span></li>
       </ol>

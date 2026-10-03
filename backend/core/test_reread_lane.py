@@ -112,7 +112,7 @@ class ParseLaneTests(TestCase):
         queued = self.paper(Paper.Status.QUEUED, "queued")
         parsed = []
 
-        def fake_parse(paper):
+        def fake_parse(paper, **kwargs):
             parsed.append(paper.pk)
             self.assertIn(paper.pk, run_worker.PARSING_AHEAD)
             Paper.objects.filter(pk=paper.pk).update(status=Paper.Status.SEGMENTING)

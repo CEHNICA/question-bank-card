@@ -200,6 +200,37 @@ class TiyoujuCliTests(LiveServerTestCase):
         code, missing = run_json("upload", str(self.temp / "nope.pdf"))
         self.assertIn("找不到文件", missing["error"])
 
+    def test_upload_defaults_to_local_auto_and_manual_remains_explicit(self):
+        for mode in (None, "manual"):
+            pdf = self.temp / f"policy-{mode}.pdf"
+            with fitz.open() as document:
+                document.new_page().insert_text((72, 72), f"1. Local question {mode}")
+                document.save(pdf)
+            arguments = ("--parse-mode", mode) if mode else ()
+            code, result = run_json("upload", str(pdf), *arguments)
+            self.assertEqual(code, 0, result)
+            paper = Paper.objects.get(filename=pdf.name)
+            self.assertEqual(paper.processing_plan["mode"], "manual" if mode else "native")
+            self.assertEqual(paper.status, "ready")
+            self.assertFalse(paper.processing_plan.get("cloud_authorized", False))
+
+    def test_mcp_auto_cloud_authorization_is_explicit(self):
+        tool = next(tool for tool in cli.MCP_TOOLS if tool[0] == "upload_paper")
+        self.assertIn("auto", tool[2]["properties"]["parse_mode"]["enum"])
+        self.assertEqual(tool[2]["properties"]["allow_cloud"]["type"], "boolean")
+        pdf = self.temp / "policy-mcp.pdf"
+        with fitz.open() as document:
+            document.new_page()
+            document.save(pdf)
+        fake_client = mock.Mock()
+        fake_client.upload.return_value = {"paper": {"id": "example", "filename": "example.pdf", "status": "ready"}}
+        for allowed in (False, True):
+            # Dispatch is the same path used by tools/call; no cloud request.
+            cli.mcp_call(fake_client, "upload_paper", {"paths": [str(pdf)], "allow_cloud": allowed})
+            parameters = fake_client.upload.call_args.args[1]
+            self.assertEqual(parameters["parse_mode"], "auto")
+            self.assertEqual(parameters["allow_cloud"], "1" if allowed else "0")
+
     def test_mcp_lists_tools_and_returns_the_crop_as_an_image(self):
         lines = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize",
