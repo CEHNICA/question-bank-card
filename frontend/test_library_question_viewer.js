@@ -11,7 +11,7 @@ class Element {
   set disabled(value) { this._disabled = Boolean(value); if (value && document.activeElement === this) document.activeElement = document.body; }
   get disabled() { return this._disabled; }
   showModal() { this.open = true; }
-  close() { this.open = false; this.emit("close"); }
+  close() { this.open = false; root.setTimeout(() => this.emit("close"), 0); }
   focus(options) { document.activeElement = this; this.focusOptions = options; }
   get textContent() { return (this.text || "") + this.children.map(value => typeof value === "string" ? value : value.textContent || "").join(""); }
   set textContent(value) { this.text = String(value); this.children = []; }
@@ -178,6 +178,47 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   await viewer.open(item, { navigation: nav, returnFocus: detached, returnFocusResolver: () => { resolverCalls++; return replacement; } });
   detached.isConnected = false; await byId("questionViewerNext").emit("click"); viewer.close();
   assert.equal(resolverCalls, 1); assert.equal(document.activeElement, replacement); assert.deepEqual(scrolls.at(-1), [15, 980]);
+
+  // Native close is queued, while the application close must release its own
+  // session immediately and only once. An old event cannot cancel a new read.
+  runTasks(0);
+  await viewer.open(item, { navigation: nav, returnFocus: caller });
+  const beforeCloseScrolls = scrolls.length;
+  viewer.close();
+  assert.equal(scrolls.length, beforeCloseScrolls + 1); assert.equal(document.activeElement, caller);
+  assert.equal(document.body.style.overflow, "");
+  runTasks(0); assert.equal(scrolls.length, beforeCloseScrolls + 1, "The queued native event does not repeat return cleanup");
+
+  await viewer.open(item, { navigation: nav, returnFocus: caller }); viewer.close();
+  const freshCaller = node("button"); root.scrollX = 31; root.scrollY = 1217;
+  let releaseFresh; gate = new Promise(resolve => { releaseFresh = resolve; });
+  response = { solution: null, ai_answer: { answer: "新会话参考答案" }, ai_answer_stale: false };
+  const freshRead = viewer.open(item, { navigation: nav, returnFocus: freshCaller });
+  const freshSignal = requests.at(-1).options.signal, beforeOldEventScrolls = scrolls.length;
+  runTasks(0);
+  assert(viewer.isOpen()); assert(!freshSignal.aborted, "A late close must not abort the reopened reference check");
+  assert.equal(scrolls.length, beforeOldEventScrolls); assert.equal(document.body.style.overflow, "hidden");
+  gate = null; releaseFresh(); await freshRead;
+  assert(byClass("question-viewer-answers").textContent.includes("新会话参考答案"));
+  await byId("questionViewerNext").emit("click"); await settle();
+  assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题", "The reopened navigation survives the previous session's close event");
+  viewer.close(); assert.equal(document.activeElement, freshCaller); assert.deepEqual(scrolls.at(-1), [31, 1217]);
+  runTasks(0); assert.equal(document.activeElement, freshCaller);
+
+  // External native close still restores focus. Reopening before that event
+  // arrives first completes its previous return state, then owns a new one.
+  response = { solution: null, ai_answer: null };
+  await viewer.open(item, { navigation: nav, returnFocus: caller });
+  const externalBefore = scrolls.length; byId("libraryQuestionViewer").close();
+  assert.equal(scrolls.length, externalBefore); runTasks(0);
+  assert.equal(scrolls.length, externalBefore + 1); assert.equal(document.activeElement, caller);
+  await viewer.open(item, { navigation: nav, returnFocus: caller }); byId("libraryQuestionViewer").close();
+  await viewer.open(item, { navigation: nav, returnFocus: freshCaller }); runTasks(0);
+  assert(viewer.isOpen()); assert.equal(document.body.style.overflow, "hidden");
+  await byId("questionViewerNext").emit("click"); await settle();
+  assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题");
+  viewer.close(); assert.equal(document.activeElement, freshCaller); assert.equal(document.body.style.overflow, "");
+  runTasks(0);
 
   const host = node("div"), focus = root.LibraryQuestionViewer.mountFocus({ node, host });
   focus.button.emit("click"); assert(document.body.classList.contains("library-focus-mode")); assert.equal(focus.button.textContent, "退出专注浏览");

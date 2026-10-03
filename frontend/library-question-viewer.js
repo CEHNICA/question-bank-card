@@ -136,7 +136,10 @@
       if (!controls.answers.children.length) controls.answers.append(node("p", "helper", "原卷未提供答案与解析。"));
     }
     async function open(item, options = {}) {
-      build(); stopRead(); const session = ++epoch;
+      build();
+      // A native close event can still be queued when another question opens.
+      if (!dialog.open && returnState) finishClose();
+      stopRead(); const session = ++epoch;
       if (!options.navigationStep) stopNavigation();
       navigation = options.navigation || null;
       position = options.position || (navigation ? { index: navigation.index, total: navigation.total } : null);
@@ -175,6 +178,7 @@
       }
     }
     function finishClose() {
+      if (dialog?.open || !returnState) return;
       ++epoch; stopRead(); stopNavigation(); navigation = null; position = null;
       const session = epoch, previous = returnState; returnState = null;
       if (previous) {
@@ -187,7 +191,10 @@
       // reopen must not be cleared by an earlier close's callback.
       afterPaint(() => { if (session === epoch && !dialog.open) { controls.question.replaceChildren(); controls.answers.replaceChildren(); controls.status.textContent = ""; } });
     }
-    function close() { if (dialog?.open) dialog.close(); }
+    function close() {
+      if (!dialog?.open) return;
+      dialog.close(); finishClose();
+    }
     return { open, close, isOpen: () => Boolean(dialog?.open) };
   }
 
