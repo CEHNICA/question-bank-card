@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 from urllib.parse import quote
+from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
 
 from django.conf import settings
@@ -78,6 +79,28 @@ def _wait_debug_port(profile, process, deadline):
             if not 1 <= port <= 65535:
                 raise ValueError("debug port")
             return port
+        time.sleep(min(.05, _remaining(deadline)))
+
+
+def _wait_page_target(opener, port, process, deadline):
+    # The debugging listener may precede the initial blank page's registration.
+    # Wait for that owned target, without restarting or rendering a document twice.
+    while True:
+        _remaining(deadline)
+        if process.poll() is not None:
+            raise word.ExportError("本机浏览器未能启动 PDF 排版，请重试或先导出 Word。", 503)
+        try:
+            with opener.open(f"http://127.0.0.1:{port}/json/list", timeout=_remaining(deadline)) as reply:
+                targets = json.loads(reply.read(100_000))
+        except (ConnectionRefusedError, URLError) as error:
+            if isinstance(error, URLError) and not isinstance(error.reason, ConnectionRefusedError):
+                raise
+            targets = []
+        if not isinstance(targets, list) or any(not isinstance(target, dict) for target in targets):
+            raise ValueError("debug catalog")
+        target = next((item for item in targets if item.get("type") == "page" and item.get("url") == "about:blank"), None)
+        if target is not None:
+            return target
         time.sleep(min(.05, _remaining(deadline)))
 
 
@@ -353,9 +376,7 @@ def _render(document):
             try:
                 port = _wait_debug_port(profile, process, deadline)
                 opener = build_opener(ProxyHandler({}))
-                with opener.open(f"http://127.0.0.1:{port}/json/list", timeout=_remaining(deadline)) as reply:
-                    targets = json.loads(reply.read(100_000))
-                target = next(t for t in targets if t.get("type") == "page" and t.get("url") == "about:blank")
+                target = _wait_page_target(opener, port, process, deadline)
                 url = target["webSocketDebuggerUrl"]
                 match = re.fullmatch(rf"ws://(?:127\.0\.0\.1|localhost):{port}(/devtools/page/[A-Za-z0-9_-]+)", url)
                 if not match:

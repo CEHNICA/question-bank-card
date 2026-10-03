@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const { TEACH_LESSONS, lessonDone, lessonHint, restoreTeaching, teachingProgress } = require("./app.js");
 
 assert.deepEqual(TEACH_LESSONS.filter((lesson) => lesson.section === "basic").map((lesson) => lesson.key),
@@ -80,4 +81,18 @@ assert.match(js, /node\.classList\.add\("teaching-target"\)/);
 assert.match(js, /await leaveFor\("\/#dropZone"\)/);
 assert.match(js, /finally \{[\s\S]*?const resumedUrl = new URL\(window\.location\.href\);\s*resumedUrl\.searchParams\.delete\("learn"\);\s*window\.history\.replaceState\(null, "", resumedUrl\);/,
   "opening/reset requests are consumed even on cancellation while retaining paper and unrelated URL parameters");
-console.log("teaching checks: OK");
+// Delayed/programmatic activation must not start a crop behind an auxiliary
+// modal. Exercise the real function before any DOM/timer action is allowed.
+const showStart = js.indexOf("  async function showLesson()");
+const showEnd = js.indexOf("  // Guide mounts reserve", showStart);
+assert.ok(showStart > 0 && showEnd > showStart);
+Promise.all(["keysDialog", "viewerDialog", "confirmDialog", "pageDialog"].map(async (opened) => {
+  let queried = 0;
+  await vm.runInNewContext(js.slice(showStart, showEnd) + "\nshowLesson();", {
+    QBTeach: { LESSONS: TEACH_LESSONS }, teaching: { index: 0, moving: false },
+    anyDialogOpen() { queried += 1; return true; },
+    $(id) { return { open: id === opened }; },
+    endTour() { throw new Error("modal guide must not start another operation"); }
+  });
+  assert.equal(queried, 1, `${opened} retains ownership of its controls`);
+})).then(() => console.log("teaching checks: OK"), (error) => { console.error(error); process.exitCode = 1; });

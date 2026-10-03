@@ -1,5 +1,6 @@
 """PDF export boundaries; renderer tests use synthesized local documents only."""
 from copy import deepcopy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ import struct
 import threading
 import time
 from unittest import mock
+from urllib.error import URLError
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import path
@@ -209,6 +211,73 @@ class PdfBrowserStartupTests(SimpleTestCase):
                 self.wait_for_port([value + "\n/devtools/browser/local-id"])
         with self.assertRaises(OSError):
             self.wait_for_port([OSError(5, "persistent device error")])
+
+
+class PdfPageStartupTests(SimpleTestCase):
+    target = {"type": "page", "url": "about:blank", "webSocketDebuggerUrl": "ws://127.0.0.1:12345/devtools/page/local-id"}
+
+    def wait_for_target(self, responses, *, polls=None, deadline=.2):
+        clock = [0.0]
+        process = mock.Mock()
+        process.poll = mock.Mock(side_effect=polls) if polls is not None else mock.Mock(return_value=None)
+        opener = mock.Mock()
+        def reply(value):
+            response = mock.MagicMock()
+            response.__enter__.return_value = response
+            response.read.return_value = json.dumps(value).encode()
+            return response
+        opener.open.side_effect = [value if isinstance(value, BaseException) else reply(value) for value in responses]
+        def sleep(seconds):
+            clock[0] += seconds
+        with mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(pdf.time, "sleep", side_effect=sleep):
+            return pdf._wait_page_target(opener, 12345, process, deadline)
+
+    def test_real_local_listener_can_publish_page_after_initial_empty_catalog(self):
+        requests = []
+        target = self.target
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                requests.append(self.path)
+                payload = json.dumps([] if len(requests) == 1 else [target]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            process = mock.Mock(); process.poll.return_value = None
+            selected = pdf._wait_page_target(pdf.build_opener(pdf.ProxyHandler({})), server.server_port, process, time.monotonic() + 3)
+            self.assertEqual(selected, target)
+            self.assertEqual(requests, ["/json/list", "/json/list"])
+        finally:
+            server.shutdown(); server.server_close(); thread.join(2)
+
+    def test_only_initial_connection_refusal_recovers_including_urllib_wrapper(self):
+        for error in (ConnectionRefusedError(10061, "not listening yet"), URLError(ConnectionRefusedError(10061, "not listening yet"))):
+            with self.subTest(error=type(error).__name__):
+                self.assertEqual(self.wait_for_target([error, [self.target]]), self.target)
+        with self.assertRaises(URLError):
+            self.wait_for_target([URLError("different connection failure")])
+
+    def test_catalog_without_initial_blank_page_keeps_original_deadline(self):
+        with self.assertRaisesMessage(pdf.word.ExportError, "超时") as caught:
+            self.wait_for_target([[], [{"type": "page", "url": "edge://newtab"}]], deadline=.1)
+        self.assertEqual(caught.exception.status, 504)
+
+    def test_browser_exit_between_catalog_queries_stops_waiting(self):
+        with self.assertRaisesMessage(pdf.word.ExportError, "未能启动") as caught:
+            self.wait_for_target([[]], polls=[None, 1])
+        self.assertEqual(caught.exception.status, 503)
+
+    def test_invalid_catalog_is_not_retried(self):
+        for catalog in ({"not": "a list"}, ["not a target"]):
+            with self.subTest(catalog=catalog), self.assertRaises(ValueError):
+                self.wait_for_target([catalog])
 
 
 class PdfTransportTests(SimpleTestCase):

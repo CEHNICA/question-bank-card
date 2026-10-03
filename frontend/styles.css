@@ -1290,11 +1290,11 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 #reviewTeachFallback { margin-bottom: 16px; }
 .teaching-target { outline: 3px solid var(--amber-bar); outline-offset: 4px; }
 dialog > .teaching-dock { margin: 8px 16px; }
-dialog > .teaching-dock .teach-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px 16px; padding: 8px 12px; }
+dialog > .teaching-dock .teach-panel { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 16px; padding: 8px 12px; }
 dialog > .teaching-dock .teach-head { grid-column: 1; }
 dialog > .teaching-dock .teach-bar { display: none; }
 dialog > .teaching-dock #teachDetails { grid-column: 2; }
-dialog > .teaching-dock .teach-actions { grid-column: 3; margin-top: 0; }
+dialog > .teaching-dock .teach-actions { display: none; }
 dialog > .teaching-dock .teach-panel:has(#teachDetails[hidden]) { grid-template-columns: minmax(0, 1fr); }
 dialog > .teaching-dock .teach-panel:has(#teachDetails[hidden]) .teach-actions { display: none; }
 dialog > .teaching-dock .teach-panel h4 { font-size: 13px; }

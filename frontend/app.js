@@ -8652,7 +8652,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function showLesson() {
     const lesson = QBTeach.LESSONS[teaching.index];
     if (!lesson) return;
-    if (teaching.moving || $("confirmDialog").open) return;
+    if (teaching.moving || anyDialogOpen()) return;
     const focusCard = (number) => {
       const q = lessonNumber(number);
       if (!q) return;

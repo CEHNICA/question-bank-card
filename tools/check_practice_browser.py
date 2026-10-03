@@ -118,7 +118,18 @@ def allowed_write(path):
     return False
 
 
-def browser_check():
+def verify_private_data():
+    with db() as conn:
+        REPORT['formal_publications']=conn.execute("SELECT COUNT(*) FROM core_publishedquestion").fetchone()[0]
+        REPORT['jobs']=conn.execute("SELECT COUNT(*) FROM core_libraryjob").fetchone()[0]
+        REPORT['reread_requested']=conn.execute("SELECT COUNT(*) FROM core_question WHERE reread_requested=1").fetchone()[0]
+        assert REPORT['formal_publications']==REPORT['jobs']==REPORT['reread_requested']==0
+        assert all(json.loads(row[0]).get('demo') for row in conn.execute("SELECT structure FROM core_paper"))
+    assert not (USER/'credentials.bin').exists() and not (USER/'library-ai-credentials.bin').exists()
+    assert not REPORT['page_errors'] and not REPORT['forbidden_requests'], REPORT
+
+
+def browser_check(modals_only=False):
     from playwright.sync_api import sync_playwright, expect
     with sync_playwright() as pw:
         chrome = next((str(p) for p in (Path(pw.chromium.executable_path),
@@ -155,6 +166,26 @@ def browser_check():
                 and guide['y'] < content['y']+content['height'] and guide['y']+guide['height'] > content['y'])
             assert not intersects, (label, guide, content)
             REPORT.setdefault('guide_geometry', []).append({'scene':label,'mount':mount,'guide':guide,'content':content,'overlap':False})
+        def guide_in_modal(dialog_id, pause=False):
+            expect(page.locator('#teachPanel .teach-actions')).not_to_be_visible()
+            assert page.locator('#teachPanel').evaluate('n=>n.closest("dialog")?.id') == dialog_id
+            page.locator('#teachFold').click(); expect(page.locator('#teachDetails')).not_to_be_visible()
+            page.locator('#teachFold').click(); expect(page.locator('#teachDetails')).to_be_visible()
+            # A delayed/programmatic activation of the hidden action must
+            # still respect modal ownership and never create a second dialog.
+            page.locator('#teachShow').evaluate('n=>n.click()')
+            page.wait_for_timeout(100)
+            assert page.locator('dialog[open]').evaluate_all('nodes=>nodes.map(n=>n.id)') == [dialog_id]
+            page.screenshot(path=str(OUTPUT/f'guide-{dialog_id}-actions-safe.png'),full_page=True)
+            if pause:
+                page.locator('#teachClose').click()
+                expect(page.locator('#teachPanel')).not_to_be_visible()
+                expect(page.locator('#'+dialog_id)).to_be_visible()
+                assert page.evaluate("JSON.parse(localStorage.getItem('qb-teach')).active") is False
+            REPORT['passed'].append(f'{dialog_id}: actions hidden, collapse works, programmatic action cannot stack another modal'+('; pause leaves the real window open' if pause else ''))
+        def resume_from_help(key):
+            page.goto(BASE+'/settings#help'); page.wait_for_load_state('networkidle')
+            page.locator('#settingsLearn').click(); stage(key)
         try:
             page.goto(BASE + "/settings#help"); page.wait_for_load_state("networkidle")
             expect(page.locator("#settingsLearn")).to_have_text("开始手工练习")
@@ -188,7 +219,14 @@ def browser_check():
             close_keys=page.locator('#keysDialog').get_by_role('button',name='关闭',exact=True)
             assert close_keys.evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
             page.screenshot(path=str(OUTPUT/'guide-shortcuts.png'),full_page=True)
+            guide_in_modal('keysDialog',pause=True)
             close_keys.click()
+            resume_from_help('cut')
+            card(9).locator('.source-note').click()
+            expect(page.locator('#viewerDialog')).to_be_visible()
+            guide_in_modal('viewerDialog',pause=True)
+            page.locator('#viewerDialog').get_by_role('button',name='关闭',exact=False).click()
+            resume_from_help('cut')
             page.locator("#teachShow").click()
             expect(page.locator("#pageDialog")).to_be_visible()
             page.wait_for_function("()=>{const i=document.querySelector('#pageStage img');return i?.complete&&i.naturalWidth>0}")
@@ -239,6 +277,7 @@ def browser_check():
             guide_clear_of('#viewerSource','viewerTeachMount','desktop original comparison')
             guide_clear_of('#viewerText','viewerTeachMount','desktop comparison question text')
             page.screenshot(path=str(OUTPUT/'guide-desktop-viewer.png'),full_page=True)
+            expect(page.locator('#teachPanel .teach-actions')).not_to_be_visible()
             page.locator('#viewerDialog').get_by_role('button',name='关闭',exact=False).click()
             REPORT["passed"].append("actual two-click crop; S creates question1; CtrlS ends crop without OCR")
             page.locator("#teachShow").click()
@@ -259,7 +298,23 @@ def browser_check():
             guide_clear_of('#confirmDialog .confirm-actions','','desktop unsaved-confirm controls')
             assert page.locator('#confirmOk').evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
             page.screenshot(path=str(OUTPUT/'guide-unsaved-confirm.png'),full_page=True)
+            guide_in_modal('confirmDialog',pause=modals_only)
             page.locator('#confirmDialog').get_by_role('button', name='继续编辑', exact=True).click()
+            if modals_only:
+                assert dirty.locator('.stem-input').input_value().endswith(' 尚未保存的练习文字')
+                assert question(2)['stem'] == original_two
+                # Leaving remains a real user decision. Pause must never
+                # dismiss the unsaved-change prompt or discard its text.
+                page.locator('#settingsButton').click()
+                expect(page.locator('#confirmDialog')).to_be_visible()
+                page.locator('#confirmDialog').get_by_role('button',name='丢弃改动',exact=True).click()
+                page.wait_for_url('**/settings*')
+                resume_from_help('fix')
+                expect(page.locator('#teachNext')).to_be_visible()
+                page.locator('#teachNext').click(); stage('tick9')
+                REPORT['passed'].append('after auxiliary windows close, review guide starts actual cutting and advances accepted edits; unsaved text requires explicit discard')
+                verify_private_data()
+                return
             stage('fix')
             blocked_progress = page.evaluate("JSON.parse(localStorage.getItem('qb-teach'))")
             assert blocked_progress['completed'] is True
@@ -393,17 +448,10 @@ def browser_check():
         finally:
             page.screenshot(path=str(OUTPUT / "browser-last.png"), full_page=True)
             context.close(); browser.close()
-    with db() as conn:
-        REPORT['formal_publications']=conn.execute("SELECT COUNT(*) FROM core_publishedquestion").fetchone()[0]
-        REPORT['jobs']=conn.execute("SELECT COUNT(*) FROM core_libraryjob").fetchone()[0]
-        REPORT['reread_requested']=conn.execute("SELECT COUNT(*) FROM core_question WHERE reread_requested=1").fetchone()[0]
-        assert REPORT['formal_publications']==REPORT['jobs']==REPORT['reread_requested']==0
-        assert all(json.loads(row[0]).get('demo') for row in conn.execute("SELECT structure FROM core_paper"))
-    assert not (USER/'credentials.bin').exists() and not (USER/'library-ai-credentials.bin').exists()
-    assert not REPORT['page_errors'] and not REPORT['forbidden_requests'], REPORT
+    verify_private_data()
 
 
-def internal_mode(mode: str, output: Path, port: int) -> int:
+def internal_mode(mode: str, output: Path, port: int, modals_only=False) -> int:
     global OUTPUT, USER, RECEIPT, BASE, BACKEND_PYTHON, REPORT
     OUTPUT = confined_output(output); USER = OUTPUT / "user"
     BASE = f"http://127.0.0.1:{port}"
@@ -423,9 +471,10 @@ def internal_mode(mode: str, output: Path, port: int) -> int:
     assert RECEIPT["url"] == BASE
     BACKEND_PYTHON = RECEIPT["backend_python"]
     REPORT = {"passed": [], "page_errors": [], "forbidden_requests": [], "writes": [],
-        "real_user_data_used": False, "isolated_root": str(USER), "worker_started": False}
+        "real_user_data_used": False, "isolated_root": str(USER), "worker_started": False,
+        "mode": "guide-modals" if modals_only else "full-practice"}
     try:
-        browser_check(); REPORT["success"] = True
+        browser_check(modals_only=modals_only); REPORT["success"] = True
     except Exception as error:
         REPORT.update(success=False, error=str(error), traceback=traceback.format_exc())
     (OUTPUT / "report.json").write_text(json.dumps(REPORT, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -447,6 +496,7 @@ def run(args) -> int:
     output.mkdir(parents=True); user = output / "user"; user.mkdir(); (user / "data").mkdir()
     url = f"http://127.0.0.1:{args.port}"; env = private_environment(user, url)
     command = [str(Path(__file__).resolve()), "--output", str(output), "--port", str(args.port)]
+    if args.modals_only: command.append('--modals-only')
     migrated = subprocess.run([backend_python, *command, "--internal-mode", "migrate"],
         cwd=ROOT, env=env, capture_output=True, timeout=90)
     (output / "migration.log").write_bytes(migrated.stdout + migrated.stderr)
@@ -519,6 +569,7 @@ def run(args) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Run the real course against a newly isolated server")
+    parser.add_argument("--modals-only", action="store_true", help="With --run, check guide/modal ownership and actual crop/edit controls without PDF export")
     parser.add_argument("--port", type=int, default=8991, help="Unoccupied loopback test port (default: 8991)")
     parser.add_argument("--output", help="New evidence folder under checkout/tmp; omitted creates a random folder")
     parser.add_argument("--server-python", help="Python with Django and PyMuPDF; automatically detected by default")
@@ -527,7 +578,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.internal_mode:
         if not args.output: parser.error("Internal mode requires --output")
-        return internal_mode(args.internal_mode, Path(args.output), args.port)
+        return internal_mode(args.internal_mode, Path(args.output), args.port, args.modals_only)
     if not args.run:
         parser.print_help(); return 0
     try: return run(args)
