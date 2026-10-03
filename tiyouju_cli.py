@@ -58,7 +58,7 @@ TYPES = {
 TYPE_BLOCKED = "题型还没定：用 fix --type 选题型（single_choice/multiple_choice/fill_blank/true_false/free_response）后才能通过"
 DECIDED_TYPES = [key for key in TYPES if key != "unknown"]
 STATES = {
-    "waiting": "等待识读", "reading": "识读中", "green": "识读一致", "yellow": "需核对", "red": "识读失败",
+    "waiting": "等待识读", "reading": "识读中", "green": "识读完成", "yellow": "需核对", "red": "识读失败",
 }
 FIGURE_BLOCKS = {"blocked_missing": "可能漏图", "conflict": "配图冲突"}
 ACTIVE = {"queued", "parsing", "segmenting", "reading"}
@@ -645,7 +645,7 @@ def show_wait(result: dict) -> str:
     if paper.get("processing_plan", {}).get("mode") == "manual":
         return f"{short(paper['id'])} 原卷准备好了：{result['cards']} 道手工题，需核对 {result['todo']} 道。可以继续手工框题和配图。"
     return (f"{short(paper['id'])} 读完了：{result['cards']} 道题，需逐题核对 {result['todo']} 道，"
-            f"识读一致 {result['green']} 道。下一步：`tiyouju cards {short(paper['id'])} --filter todo`。")
+            f"绿卡 {result['green']} 道，仍须对照原卷。下一步：`tiyouju cards {short(paper['id'])} --filter todo`。")
 
 
 def cmd_cards(client: Client, args) -> dict:
@@ -904,7 +904,7 @@ def cmd_approve(client: Client, args) -> dict:
         result = client.post(f"/api/papers/{paper['id']}/approve-green", tag)
         return {"paper": paper_summary(result["paper"]), "approved": result.get("approved", 0), "results": []}
     if not args.cards:
-        raise CliError("请写要通过的题号（可以写好几个），或用 --green 一起通过识读一致的绿卡。")
+        raise CliError("请写已对照原卷核对的题号（可以写好几个），或用 --green 一起通过已核对的绿卡。")
     detail = paper_detail(client, paper)
     results = []
     for ref in args.cards:
@@ -940,7 +940,8 @@ def cmd_reread(client: Client, args) -> dict:
     paper = find_paper(client, args.paper)
     question = find_card(paper_detail(client, paper), args.card)
     guard_human(question, args.force)
-    saved = client.post(f"/api/questions/{question['id']}/reread", {"by": "ai", "agent": client.agent})["question"]
+    saved = client.post(f"/api/questions/{question['id']}/reread",
+                        {"by": "ai", "agent": client.agent, "force": args.force is True})["question"]
     return {"saved": True, **card_summary(saved)}
 
 
@@ -1245,9 +1246,9 @@ MCP_TOOLS = [
     ("wait_paper", "等一份试卷读完（最多等 timeout 秒，没读完可以再调一次）。", _schema({
         "paper": PAPER, "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
     }, ["paper"])),
-    ("list_cards", "列出一份试卷的题卡和疑点。filter：todo 需逐题核对、green 识读一致未通过、approved、ai、human、all。",
+    ("list_cards", "列出一份试卷的题卡和疑点。filter：todo 需逐题核对、green 识读完成未通过、approved、ai、human、all。",
      _schema({"paper": PAPER, "filter": {"type": "string", "enum": list(FILTERS)}}, ["paper"])),
-    ("show_card", "看一道题：读出的文字、疑点、两次识读，以及原卷截图（有候选图时另给一张标了 图1、图2… 的截图）和配图。",
+    ("show_card", "看一道题：读出的文字、疑点、识读记录，以及原卷截图（有候选图时另给一张标了 图1、图2… 的截图）和配图。",
      _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("fix_card", "改一道题的文字。只传要改的字段；公式用 $...$ 包住的 LaTeX；表格用 Markdown。", _schema({
         "paper": PAPER, "card": CARD, "stem": {"type": "string"},
@@ -1260,7 +1261,7 @@ MCP_TOOLS = [
     ("set_figures", "处理一道题的配图：use 选候选图（编号见 show_card，如 [\"1\", \"2:A\"]）、keep 保留现有配图、none 确认无图。",
      _schema({"paper": PAPER, "card": CARD, "use": {"type": "array", "items": {"type": "string"}},
               "keep": {"type": "boolean"}, "none": {"type": "boolean"}}, ["paper", "card"])),
-    ("approve_cards", "对照原卷无误后打勾（记为 AI 通过）。cards 写题号；green=true 一起通过识读一致的绿卡（先抽查）。",
+    ("approve_cards", "逐题对照原卷无误后打勾（记为 AI 通过）。cards 写题号；green=true 一起通过已核对的绿卡。",
      _schema({"paper": PAPER, "cards": {"type": "array", "items": {"type": "string"}}, "green": {"type": "boolean"}},
              ["paper"])),
     ("unapprove_card", "撤销自己（AI）打的勾。人工通过的不能撤。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
@@ -1501,7 +1502,7 @@ def build_parser() -> argparse.ArgumentParser:
     cards = sub.add_parser("cards", parents=[common], help="列出题卡和疑点")
     cards.add_argument("paper")
     cards.add_argument("--filter", choices=FILTERS, default="all",
-                       help="todo 需逐题核对；green 识读一致未通过；approved；ai；human；all")
+                       help="todo 需逐题核对；green 识读完成未通过；approved；ai；human；all")
 
     show = sub.add_parser("show", parents=[common], help="看一道题：文字、疑点，并把原卷截图和配图存成图片")
     show.add_argument("paper")
@@ -1534,7 +1535,7 @@ def build_parser() -> argparse.ArgumentParser:
     approve = sub.add_parser("approve", parents=[common], help="对照原卷无误后打勾（记为 AI 通过）")
     approve.add_argument("paper")
     approve.add_argument("cards", nargs="*")
-    approve.add_argument("--green", action="store_true", help="一起通过识读一致的绿卡（先抽查）")
+    approve.add_argument("--green", action="store_true", help="一起通过已逐题对照原卷核对的绿卡")
 
     unapprove = sub.add_parser("unapprove", parents=[common], help="撤销 AI 打的勾")
     unapprove.add_argument("paper")

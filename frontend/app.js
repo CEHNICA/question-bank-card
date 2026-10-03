@@ -517,7 +517,7 @@ const QBTeach = (() => {
     { key: "fix", title: "改错字，边改边看",
       text: "第 9 题原卷是“向右移动 5 个单位”。点“改字”，把 3 改成 5：预览的绿线、选区或公式框会指出修改位置。点“保存”；改完还需重新核对、打勾。" },
     { key: "figure", title: "补上配图",
-      text: "第 2 题缺图。点“补选配图”，点蓝色候选图，选“题干”，再保存。需要移动原卷时用空格＋左键或中键；普通左键用于画框。" },
+      text: "第 2 题缺图。点“补选配图”，点蓝色候选图，选“题干”，再保存。也可单击图片的一个角，移动鼠标到另一个角，再单击固定范围；不用按住鼠标。四个选项图大小相同，先框一张，再双击下一张图的中间，复制附近框的尺寸并选择归属。需要移动原卷时用空格＋左键或中键。" },
     { key: "publish", title: "核对过的题，才入库",
       text: "点右上角“入库”看看说明。只入库已通过的题；表格要逐格核对，绿卡也要看原卷。示例只练操作，不会进入正式题库。" },
     { key: "basics", title: "基础练习完成", manual: true, checkpoint: true,
@@ -4311,7 +4311,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   };
   let credentialBusy = false;
   let credentialStateRequest = 0;
+  let credentialSession = 0;
+  let credentialFocusFrame = 0;
   let credentialServices = {};
+
+  function cancelCredentialFocus() {
+    if (credentialFocusFrame) cancelAnimationFrame(credentialFocusFrame);
+    credentialFocusFrame = 0;
+  }
+
+  function focusCredentialControl(id, session, opening) {
+    cancelCredentialFocus();
+    credentialFocusFrame = requestAnimationFrame(() => {
+      credentialFocusFrame = 0;
+      if (session !== credentialSession || $("credentialDialog").open !== opening) return;
+      // A previous close must not pull focus out of a newly opened dialog.
+      if (!opening && anyDialogOpen()) return;
+      $(id)?.focus({ preventScroll: true });
+    });
+  }
+
+  function requestCredentialClose() {
+    if (credentialBusy) return false;
+    if ($("credentialDialog").open) $("credentialDialog").close();
+    return true;
+  }
 
   function credentialAccounts(value) {
     return [...new Set(String(value || "").split(/[;\r\n]+/)
@@ -4360,6 +4384,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function openCredentialSettings() {
     if (credentialBusy || $("credentialDialog").open) return;
+    const session = ++credentialSession;
+    cancelCredentialFocus();
     resetCredentialInputs();
     renderCredentialStates({ services: {} });
     Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
@@ -4367,17 +4393,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("credentialDialog").showModal();
     try {
       await loadCredentialStates();
-      if ($("credentialDialog").open) requestAnimationFrame(() => $("credentialMineruInput").focus());
+      if (session === credentialSession && $("credentialDialog").open) focusCredentialControl("credentialMineruInput", session, true);
     } catch (error) {
+      if (session !== credentialSession || !$("credentialDialog").open) return;
       $("credentialResult").textContent = error.message;
       toast(error.message, "error");
     }
   }
 
-  async function refreshCredentialStatus(message) {
+  async function refreshCredentialStatus(message, session) {
     let refreshed = false;
     try { refreshed = await loadStatus(); } catch { /* The mutation already succeeded. */ }
-    if (!refreshed && $("credentialDialog").open) {
+    if (!refreshed && session === credentialSession && $("credentialDialog").open) {
       $("credentialResult").textContent = `${message} 当前状态暂未刷新，重新打开设置或刷新页面即可查看。`;
     }
   }
@@ -4385,6 +4412,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function deleteCredential(service) {
     const field = CREDENTIAL_FIELDS[service];
     if (!field || credentialBusy || !credentialServices[service]?.configured) return;
+    const session = credentialSession;
+    let refreshMessage = "";
     setCredentialBusy(true);
     try {
       const confirmed = await confirmDialog({
@@ -4400,12 +4429,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const message = `已删除 ${field.label} 密钥，其他服务和未保存的内容已保留。`;
       $("credentialResult").textContent = message;
       toast(message, "success");
-      await refreshCredentialStatus(message);
+      refreshMessage = message;
     } catch (error) {
       const message = `未能删除 ${field.label} 密钥：${error.message}`;
       $("credentialResult").textContent = message;
       toast(message, "error");
     } finally { setCredentialBusy(false); }
+    // The key operation is complete. A slow status refresh must not lock Close.
+    if (refreshMessage) await refreshCredentialStatus(refreshMessage, session);
   }
 
   function renderSettingsTask() {
@@ -4609,9 +4640,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }, true);
 
   $("credentialDialog").addEventListener("close", () => {
+    // Native close events are queued; reopening can happen before this runs.
+    if ($("credentialDialog").open) return;
+    const session = ++credentialSession;
     credentialStateRequest += 1;
+    cancelCredentialFocus();
     resetCredentialInputs();
-    requestAnimationFrame(() => $("settingsCredentialOpen").focus());
+    $("credentialResult").textContent = "";
+    focusCredentialControl("settingsCredentialOpen", session, false);
   });
 
   $("credentialForm").addEventListener("submit", async (event) => {
@@ -4632,6 +4668,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("credentialResult").textContent = "没有填写新的密钥，已保存的密钥保持不变。";
       return;
     }
+    const session = credentialSession;
+    let refreshMessage = "";
     setCredentialBusy(true);
     credentialStateRequest += 1;
     $("credentialResult").textContent = "正在检查填写格式并加密保存…";
@@ -4642,13 +4680,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const message = result.message || "API 配置已加密保存；下一项任务开始时生效。";
       $("credentialResult").textContent = message;
       toast(message, "success");
-      await refreshCredentialStatus(message);
+      refreshMessage = message;
     } catch (error) {
       $("credentialResult").textContent = error.message;
       toast(error.message, "error");
     } finally {
       setCredentialBusy(false);
     }
+    if (refreshMessage) await refreshCredentialStatus(refreshMessage, session);
   });
 
   // Queue the values captured at each change, rather than reading the form
@@ -5374,7 +5413,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // ---------------------------------------------------------------- 原卷页面上拖框（调整范围 / 配图 / 补一题）
 
   const dialog = {
-    mode: null, question: null, boxes: [], page: 0, drag: null,
+    mode: null, question: null, boxes: [], page: 0, drag: null, sketch: null,
     tool: "draw",
     history: [], future: [],
     zoom: 1, zoomMode: "width", zoomFrame: 0, spacePan: false, imageReady: false,
@@ -5399,6 +5438,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function requestPageDialogClose() {
+    cancelFigureSketch();
     if (dialog.saving) {
       if (dialog.question && hasRegionReadSubmission(dialog.question.id)) {
         cancelRegionReadSubmission(dialog.question.id);
@@ -5438,7 +5478,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("groupField").hidden = dialog.mode !== "new" || (state.paper.question_groups || []).length < 2;
   }
 
-  $("pageDialog").addEventListener("cancel", (event) => { event.preventDefault(); requestPageDialogClose(); });
+  $("pageDialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    if (dialog.sketch) { cancelFigureSketch(); return; }
+    requestPageDialogClose();
+  });
 
   function openPageDialog(mode, q = null, { page: requestedPage = null } = {}) {
     if (!state.paper?.pages?.length) { toast("原卷页面尚未生成", "error"); return; }
@@ -5466,6 +5510,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageManualCut").hidden = mode !== "view" || !["ready", "failed"].includes(state.paper.status);
     $("pageToolPan").setAttribute("aria-pressed", String(dialog.tool === "pan"));
     $("pageToolDraw").setAttribute("aria-pressed", String(dialog.tool === "draw"));
+    $("pageToolDraw").textContent = mode === "figures" ? "两点框选" : "框选";
     dialog.question = q;
     closeFigureSlotMenu({ cancelPending: true, rerender: false });
     if (mode === "regions") dialog.boxes = q.regions.map((r) => ({ page_idx: r.page_idx, bbox: [...r.bbox] }));
@@ -5506,7 +5551,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小、拖框内部移动；可跨页添加片段、调整顺序。这里只调整题目范围，保存后关闭窗口。"
       : mode === "figures"
-        ? "点蓝色候选图或画新框，再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）· 点标签改归属，拖标签只挪标签 · 保存后需重新审核"
+        ? "点蓝色候选图，或单击一个角、移动鼠标、再单击另一个角固定新框；无需按住鼠标。双击下一张图的中间可复制附近框的尺寸，适合四个同样大小的选项图。再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）。Esc 取消未完成的新框；已有框仍可拖动和缩放。点标签改归属，拖标签只挪标签；保存后需重新审核。"
         : mode === "read"
           ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
           : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
@@ -5518,9 +5563,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogSave").title = dialog.practiceRead ? "示例只练画框；真实识读需要可用的读题服务" : "";
     if (dialog.practiceRead) $("pageDialogHint").textContent = "离线示例：可练画框和选择自动推荐，不会调用 AI 或生成识读结果。真实题目识读后，先确认替换前后，再填入改字、核对保存。";
     $("pageDialogClose").textContent = mode === "view" ? "关闭" : "取消";
-    $("pageCanvasHint").textContent = mode === "view"
-      ? "Ctrl+滚轮缩放 · 按住鼠标左键拖动画布"
-      : "Ctrl+滚轮缩放 · 空格+左键或中键拖画布 · 左键仍然画框";
+    updatePageCanvasHint();
     $("numberField").hidden = mode !== "new";
     $("readTargetField").hidden = mode !== "read";
     configureCropActions();
@@ -5633,15 +5676,24 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.spacePan = false;
     $("pageStage").classList.toggle("pan-ready", dialog.tool === "pan");
   };
+  function updatePageCanvasHint() {
+    $("pageCanvasHint").textContent = dialog.mode === "view"
+      ? "Ctrl+滚轮缩放 · 按住鼠标左键拖动画布"
+      : dialog.tool === "pan" ? "左键拖动画布 · Ctrl+滚轮缩放"
+        : dialog.mode === "figures"
+          ? "单击两角画框 · 双击下一图中间，复制附近框尺寸 · Esc 取消新框 · Ctrl+滚轮缩放 · 空格+左键或中键拖画布"
+          : "左键画框 · 空格+左键或中键拖画布 · Ctrl+滚轮缩放";
+  }
   function selectPageTool(tool) {
     if (dialog.saving) return;
+    cancelFigureSketch();
     if (dialog.drag) dialog.drag();
     stopPageCanvasPan();
     dialog.tool = tool;
     clearPagePanKey();
     $("pageToolPan").setAttribute("aria-pressed", String(tool === "pan"));
     $("pageToolDraw").setAttribute("aria-pressed", String(tool === "draw"));
-    $("pageCanvasHint").textContent = tool === "pan" ? "左键拖动画布 · Ctrl+滚轮缩放" : "左键画框 · 空格+左键或中键拖画布 · Ctrl+滚轮缩放";
+    updatePageCanvasHint();
     $("pageStage").focus({ preventScroll: true });
   }
   $("pageToolPan").addEventListener("click", () => selectPageTool("pan"));
@@ -5678,6 +5730,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (event.target.closest?.("input, textarea, select, button, summary, [contenteditable='true']")) return;
     if (event.key === " ") {
       event.preventDefault();
+      cancelFigureSketch();
       dialog.spacePan = true;
       $("pageStage").classList.add("pan-ready");
     } else if (["+", "="].includes(event.key)) { event.preventDefault(); zoomPageBy(1.25); }
@@ -6160,6 +6213,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (menuIsOpen() && dialog.slotAnchor?.isConnected) positionFigureSlotMenu(dialog.slotAnchor);
   }, { passive: true });
   $("pageDialog").addEventListener("close", () => {
+    cancelFigureSketch();
     editGuard.release(CROP_EDIT_KEY);
     dialog.lastPage = dialog.page;
     if (dialog.zoomFrame) cancelAnimationFrame(dialog.zoomFrame);
@@ -6170,6 +6224,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
 
   function renderStage() {
+    cancelFigureSketch();
     renderRegionPieces();
     const stage = $("pageStage");
     const scroll = { left: stage.scrollLeft, top: stage.scrollTop };
@@ -6232,6 +6287,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         placeBox(option, candidate.bbox);
         option.addEventListener("click", (event) => {
           event.stopPropagation();
+          if (event.detail === 2) return; // The following dblclick copies a same-size frame.
           if (menuIsOpen()) {
             closeFigureSlotMenu({ cancelPending: true, rerender: true });
             return;
@@ -6336,13 +6392,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (dialog.mode === "figures") requestAnimationFrame(() => {
       if (surface.isConnected) autoPlaceFigureLabels(surface);
     });
+    // While a new figure is being outlined, the second click belongs to it,
+    // even when it lands on a candidate or an existing figure's controls.
+    let suppressSketchClick = false;
+    surface.addEventListener("pointerdown", (event) => {
+      if (!dialog.sketch) return;
+      if (event.button !== 0 || dialog.spacePan || dialog.tool !== "draw") {
+        cancelFigureSketch();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      suppressSketchClick = true;
+      dialog.sketch.complete(event);
+    }, { capture: true });
+    surface.addEventListener("click", (event) => {
+      if (!suppressSketchClick) return;
+      suppressSketchClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, { capture: true });
+    surface.addEventListener("dblclick", (event) => {
+      if (dialog.mode !== "figures" || event.target.closest?.(".grip, .box-label, .box-remove")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      duplicateFigureAt(event, surface);
+    }, { capture: true });
     surface.addEventListener("pointerdown", (event) => {
       if (event.target !== surface && event.target !== image && !event.target.classList.contains("ghost")) return;
       if (menuIsOpen()) {
         closeFigureSlotMenu({ cancelPending: true, rerender: true });
         return;
       }
-      startDrag(event, surface, null, "create");
+      if (dialog.mode === "figures") startFigureSketch(event, surface);
+      else startDrag(event, surface, null, "create");
     });
     stage.append(surface);
     applyPageZoom();
@@ -6361,6 +6444,106 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       Math.min(1000, Math.max(0, ((event.clientX - rect.left) / rect.width) * 1000)),
       Math.min(1000, Math.max(0, ((event.clientY - rect.top) / rect.height) * 1000))
     ];
+  }
+
+  function cancelFigureSketch() {
+    if (dialog.sketch) dialog.sketch.cancel();
+  }
+
+  function duplicateFigureAt(event, surface) {
+    if (dialog.saving || event.button !== 0 || dialog.mode !== "figures" || dialog.tool !== "draw"
+      || dialog.spacePan || !dialog.imageReady) return;
+    const center = pointFrom(event, surface);
+    const local = dialog.boxes.filter((box) => box.page_idx === dialog.page);
+    const nearest = local.reduce((best, box) => {
+      const distance = (box.bbox[0] + box.bbox[2] - 2 * center[0]) ** 2
+        + (box.bbox[1] + box.bbox[3] - 2 * center[1]) ** 2;
+      return !best || distance < best.distance ? { box, distance } : best;
+    }, null)?.box || dialog.boxes[dialog.selected] || dialog.boxes[dialog.boxes.length - 1];
+    cancelFigureSketch();
+    // A double click also emits two ordinary clicks. Discard only their
+    // temporary assignment, never an existing figure or its chosen slot.
+    const pendingPreview = dialog.pendingFigure && dialog.slotAnchor;
+    closeFigureSlotMenu({ cancelPending: true, rerender: false });
+    if (pendingPreview?.classList.contains("pending-assignment")) pendingPreview.remove();
+    if (!nearest) {
+      showCropResult("请先框一张配图并选择归属，再双击下一张图的中间复制同样大小的框。", true);
+      return;
+    }
+    const width = Math.round((nearest.bbox[2] - nearest.bbox[0]) * 10) / 10;
+    const height = Math.round((nearest.bbox[3] - nearest.bbox[1]) * 10) / 10;
+    if (![width, height].every((size) => Number.isFinite(size) && size > 0 && size <= 1000)) {
+      showCropResult("这个框的尺寸不能完整放进当前页，请先调整原框，再复制。", true);
+      return;
+    }
+    const x = Math.round(Math.max(0, Math.min(1000 - width, center[0] - width / 2)) * 10) / 10;
+    const y = Math.round(Math.max(0, Math.min(1000 - height, center[1] - height / 2)) * 10) / 10;
+    const bbox = [x, y, x + width, y + height].map((value) => Math.round(value * 10) / 10);
+    const preview = el("div", "edit-box figure pending-assignment");
+    placeBox(preview, bbox);
+    surface.append(preview);
+    showCropResult("已复制附近框的尺寸，请选择这张图属于题干或哪个选项。");
+    openFigureSlotMenu(preview, { kind: "new", box: { page_idx: dialog.page, bbox } });
+  }
+
+  function startFigureSketch(event, surface) {
+    if (dialog.saving || dialog.sketch || dialog.drag || event.button !== 0 || dialog.mode !== "figures"
+      || dialog.tool !== "draw" || dialog.spacePan || !dialog.imageReady) return;
+    event.preventDefault();
+    $("pageStage").focus({ preventScroll: true });
+    const start = pointFrom(event, surface);
+    const page = dialog.page;
+    const session = dialog.session;
+    const preview = el("div", "edit-box figure drawing");
+    preview.setAttribute("aria-hidden", "true");
+    // Show a small outline immediately; it becomes the actual rectangle as
+    // the released mouse moves. Only a valid second click creates a figure.
+    placeBox(preview, [Math.max(0, start[0] - 6), Math.max(0, start[1] - 6),
+      Math.min(1000, start[0] + 6), Math.min(1000, start[1] + 6)]);
+    surface.append(preview);
+    showCropResult("移动鼠标到另一个角，再点一下固定配图范围；Esc 取消新框。");
+    const bboxAt = (next) => {
+      const [x, y] = pointFrom(next, surface);
+      return [Math.min(x, start[0]), Math.min(y, start[1]), Math.max(x, start[0]), Math.max(y, start[1])]
+        .map((value) => Math.round(value * 10) / 10);
+    };
+    const stillCurrent = () => surface.isConnected && $("pageDialog").open
+      && dialog.mode === "figures" && dialog.page === page && dialog.session === session;
+    const move = (next) => {
+      if (!stillCurrent()) { cancel(); return; }
+      if (next.pointerId !== event.pointerId) return;
+      placeBox(preview, bboxAt(next));
+    };
+    const finish = () => {
+      if (dialog.sketch === sketch) dialog.sketch = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+      showCropResult("");
+    };
+    const cancel = () => {
+      finish();
+      preview.remove();
+    };
+    const complete = (next) => {
+      if (!stillCurrent()) { cancel(); return; }
+      if (next.pointerType && event.pointerType && next.pointerType !== event.pointerType) return;
+      const bbox = bboxAt(next);
+      placeBox(preview, bbox);
+      if (bbox[2] - bbox[0] <= 8 || bbox[3] - bbox[1] <= 8) {
+        showCropResult("范围太小，请移动鼠标后再点一下；Esc 取消新框。", true);
+        return;
+      }
+      finish();
+      preview.classList.remove("drawing");
+      preview.classList.add("pending-assignment");
+      openFigureSlotMenu(preview, { kind: "new", box: { page_idx: page, bbox } });
+    };
+    const sketch = { cancel, complete };
+    dialog.sketch = sketch;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
   }
 
   function startDrag(event, surface, index, handle) {
@@ -6425,6 +6608,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         preview.remove();
       } else if (box && JSON.stringify(box.bbox) !== JSON.stringify(original)) {
         rememberDialogBoxes(before);
+      } else if (dialog.mode === "figures") {
+        // Keep an unmoved frame connected so the browser can deliver the
+        // following click/double-click without starting another gesture.
+        return;
       }
       renderStage();
       $("pageStage").querySelector(`[data-box-index="${dialog.selected}"]`)?.focus({ preventScroll: true });
@@ -6495,6 +6682,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       showCropResult("示例只练习框选，不会调用识读服务。"); return;
     }
     if (state.paperId !== dialog.paperId) { showCropResult("当前试卷已变化，请重新打开原卷", true); return; }
+    if (dialog.sketch) {
+      showCropResult("请先再点一下固定新配图，或按 Esc 取消这个新框，再保存。", true);
+      return;
+    }
     if (dialog.drag) dialog.drag();
     const q = dialog.question;
     const session = dialog.session;
@@ -7244,14 +7435,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     document.querySelectorAll("details.menu[open], details.more[open]").forEach((menu) => { menu.open = false; });
   });
 
+  function requestDialogClose(modal) {
+    if (!modal?.open) return;
+    if (modal.id === "pageDialog") requestPageDialogClose();
+    else if (modal.id === "credentialDialog") requestCredentialClose();
+    else modal.close();
+  }
+
   document.querySelectorAll("dialog [data-close]").forEach((node) => node.addEventListener("click", () => {
-    const modal = node.closest("dialog");
-    if (modal.id === "pageDialog") requestPageDialogClose(); else modal.close();
+    requestDialogClose(node.closest("dialog"));
   }));
   document.querySelectorAll("dialog").forEach((node) => node.addEventListener("click", (event) => {
-    if (event.target === node) {
-      if (node.id === "pageDialog") requestPageDialogClose(); else node.close();
-    }
+    if (event.target === node) requestDialogClose(node);
   }));
 
   setLens(state.lens);

@@ -21,11 +21,11 @@
 | `papers` | 列出试卷：编号、名字、状态、题数、通过数、入库数 |
 | `upload 文件… [--book] [--parse-mode auto\|manual\|native\|mineru] [--allow-cloud] [--wait] [--timeout 秒]` | 1.11.6 默认 `auto`，先本机处理文字 PDF，不能切出的题保留原页供框题。只有 `--allow-cloud` 才允许自动使用已配置 MinerU；失败仍保留本地结果。`manual`、`native` 可明确限定本地处理，`mineru` 明确选择云解析。`--book` 表示书或讲义。上传过的文件不会重复处理 |
 | `wait <试卷> [--timeout 秒]` | 等试卷读完，打印进度。读完后告诉你有几道需要逐题核对 |
-| `cards <试卷> [--filter F]` | 列出题卡和疑点。F 可以是 `todo`（需逐题核对）、`green`（识读一致、未通过）、`approved`、`ai`（AI 通过）、`human`（人工通过）、`all` |
+| `cards <试卷> [--filter F]` | 列出题卡和疑点。F 可以是 `todo`（需逐题核对）、`green`（识读完成、未通过）、`approved`、`ai`（AI 通过）、`human`（人工通过）、`all` |
 | `show <试卷> <题号> [--out 文件夹] [--no-images]` | 一道题的全部信息，原卷截图、候选图编号截图、配图都存成 PNG |
 | `fix <试卷> <题号> [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--clear-option E]… [--type T] [--origin 题源] [--answer 文字] [--analysis 文字] [--force]` | 改字。没写的部分保持原样。`--stem -` 从标准输入读。只写 `--type` 时只改题型（其余疑点不动） |
 | `figures <试卷> <题号> (--use 1[:slot],… \| --keep \| --none) [--force]` | 配图。slot 是 `stem` 或 `A`–`E`，不写就是 `stem` |
-| `approve <试卷> <题号>…` / `approve <试卷> --green` | 打勾，记为 AI 通过。`--green` 一起通过识读一致的绿卡 |
+| `approve <试卷> <题号>…` / `approve <试卷> --green` | 打勾，记为 AI 通过。`--green` 一起通过识读完成的绿卡；仍须逐题对照原卷 |
 | `unapprove <试卷> <题号>` | 撤销 AI 打的勾。人工通过的不能撤 |
 | `reread <试卷> <题号> [--force]` | 让软件的读题模型重读一道题 |
 | `publish <试卷>` | 把通过的题入库，并列出还没通过、没入库的题 |
@@ -54,7 +54,7 @@
 | `type` | `single_choice` 单选、`multiple_choice` 多选、`fill_blank` 填空、`true_false` 判断、`free_response` 解答、`unknown` 题型未定 |
 | `type_blocked` | 题型还没定：这时不能通过、不能入库，先 `fix --type` |
 | `origin` | 题源：题干前印的出处，单独存放，不算题干 |
-| `state` | `waiting` 等待识读、`reading` 识读中、`green` 识读一致、`yellow` 需核对、`red` 识读失败 |
+| `state` | `waiting` 等待识读、`reading` 识读中、`green` 识读完成（不保证多次一致）、`yellow` 需核对、`red` 识读失败 |
 | `approved_by` / `approval_agent` | `human`（人工通过）、`ai`（AI 通过，以及是哪个 AI）、`""`（还没通过） |
 | `needs_check` | 是否需要逐题核对 |
 | `issues` | 疑点，按重要程度排列 |

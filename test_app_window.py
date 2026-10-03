@@ -122,7 +122,76 @@ class WindowTests(unittest.TestCase):
             command = app_window.window_command(edge, "http://127.0.0.1:8768", profile)
             self.assertIn("--app=http://127.0.0.1:8768", command)
             self.assertIn(f"--user-data-dir={profile}", command)
+            self.assertIn("--profile-directory=Default", command)
             self.assertIn("--start-maximized", command)
+            preferences = json.loads((profile / "Default" / "Preferences").read_text(encoding="utf-8"))
+            self.assertIs(preferences["credentials_enable_service"], False)
+            self.assertIs(preferences["credentials_enable_autosignin"], False)
+
+    def test_password_preferences_change_only_the_dedicated_profile_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "app-profile"
+            preferences = profile / "Default" / "Preferences"
+            preferences.parent.mkdir(parents=True)
+            original = {"credentials_enable_service": True, "credentials_enable_autosignin": True,
+                        "appearance": {"theme": "custom"}, "profile": {"name": "题有据", "exit_type": "Normal"}}
+            preferences.write_text(json.dumps(original), encoding="utf-8")
+            ordinary = root / "ordinary-browser" / "Default" / "Preferences"
+            ordinary.parent.mkdir(parents=True)
+            ordinary.write_text(json.dumps(original), encoding="utf-8")
+            ordinary_bytes = ordinary.read_bytes()
+            unrelated = [profile / "Default" / "Login Data", profile / "Default" / "Cookies", root / "credentials.dat"]
+            for target in unrelated:
+                target.write_bytes(b"never-read-or-change-this-test-fixture")
+            actual_read = Path.read_text
+            reads = []
+
+            def read_only_preferences(target, *args, **kwargs):
+                reads.append(target)
+                self.assertEqual(target, preferences)
+                return actual_read(target, *args, **kwargs)
+
+            with patch.object(Path, "read_text", read_only_preferences):
+                self.assertTrue(app_window._disable_profile_password_saving(profile))
+            self.assertEqual(reads, [preferences])
+            expected = dict(original, credentials_enable_service=False, credentials_enable_autosignin=False)
+            self.assertEqual(json.loads(preferences.read_text(encoding="utf-8")), expected)
+            self.assertEqual(ordinary.read_bytes(), ordinary_bytes)
+            for target in unrelated:
+                self.assertEqual(target.read_bytes(), b"never-read-or-change-this-test-fixture")
+            self.assertEqual(list(preferences.parent.glob(".password-preferences-*")), [])
+            with patch.object(app_window.os, "replace") as replace:
+                self.assertTrue(app_window._disable_profile_password_saving(profile))
+                replace.assert_not_called()
+
+    def test_invalid_password_preferences_are_preserved_without_content_in_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            preferences = profile / "Default" / "Preferences"
+            preferences.parent.mkdir()
+            original = b'{"unrelated-private-test-value": invalid JSON'
+            preferences.write_bytes(original)
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                self.assertFalse(app_window._disable_profile_password_saving(profile))
+            self.assertEqual(preferences.read_bytes(), original)
+            self.assertNotIn("private-test-value", output.getvalue())
+            self.assertEqual(list(preferences.parent.glob(".password-preferences-*")), [])
+
+    def test_failed_password_preferences_replace_preserves_original_and_removes_temp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp)
+            preferences = profile / "Default" / "Preferences"
+            preferences.parent.mkdir()
+            original = b'{"credentials_enable_service":true,"appearance":{"theme":"custom"}}'
+            preferences.write_bytes(original)
+            output = io.StringIO()
+            with patch.object(app_window.os, "replace", side_effect=OSError("private failure detail")), patch("sys.stdout", output):
+                self.assertFalse(app_window._disable_profile_password_saving(profile))
+            self.assertEqual(preferences.read_bytes(), original)
+            self.assertNotIn("private failure detail", output.getvalue())
+            self.assertEqual(list(preferences.parent.glob(".password-preferences-*")), [])
 
     def test_no_browser_falls_back_to_default_browser(self):
         with patch.object(app_window, "browser_candidates", return_value=[]), \

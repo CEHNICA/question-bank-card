@@ -96,7 +96,7 @@
                 <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>仅在服务商确认支持时开启；纯文本模型不会跳过配图处理含图题。</small></span></label>
                 <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
-                <label for="libraryAIKey">API Key · 已保存的密钥不会回显</label><input id="libraryAIKey" type="password" autocomplete="new-password" placeholder="留空保留当前服务商的密钥" spellcheck="false">
+                <label for="libraryAIKey">API Key · 已保存的密钥不会回显</label><input id="libraryAIKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore="true" placeholder="留空保留当前服务商的密钥" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIClearKey" type="checkbox"><span>清除已保存的 API Key</span></label>
                 <p>密钥用当前 Windows 用户加密保存。保存不联网；更换服务商后请使用对应的密钥。</p>
                 <strong>先确认能力，再生成</strong><p>保存后，用软件自带的合成题测试服务响应及所选的图像、思考能力，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生 API 费用。</p>

@@ -21,6 +21,7 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -216,13 +217,55 @@ def window_profile() -> Path:
     if not local_state.exists():
         # 关窗即退出：不让浏览器在后台常驻，否则启动器会一直以为窗口还开着。
         local_state.write_text(json.dumps({"background_mode": {"enabled": False}}), encoding="utf-8")
+    _disable_profile_password_saving(profile)
     return profile
+
+
+def _disable_profile_password_saving(profile: Path) -> bool:
+    """Disable password saving only in the application's dedicated profile.
+
+    API keys remain encrypted by credential_store, never by the browser's
+    login database. Existing unrelated preferences are round-tripped without
+    inspection or output; Login Data, Cookies and saved API keys are not read.
+    """
+    preferences = profile / "Default" / "Preferences"
+    pending: Path | None = None
+    try:
+        # Do not follow a redirected Default directory into another profile.
+        if not preferences.resolve().is_relative_to(profile.resolve()):
+            raise ValueError("redirected profile")
+        data = json.loads(preferences.read_text(encoding="utf-8")) if preferences.exists() else {}
+        if not isinstance(data, dict):
+            raise ValueError("invalid preferences")
+        settings = {"credentials_enable_service": False, "credentials_enable_autosignin": False}
+        if all(data.get(key) is value for key, value in settings.items()):
+            return True
+        data.update(settings)
+        preferences.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=preferences.parent,
+                                         prefix=".password-preferences-", suffix=".tmp", delete=False) as stream:
+            pending = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(pending, preferences)
+        pending = None
+        return True
+    except (OSError, ValueError, UnicodeError):
+        # Preserve a malformed/locked file rather than resetting the profile.
+        # Do not print its contents or the exception, which may include paths.
+        print("应用浏览器的密码保存偏好未能更新；原有配置已保留。", flush=True)
+        return False
+    finally:
+        if pending is not None:
+            with contextlib.suppress(OSError):
+                pending.unlink()
 
 
 def window_command(browser: Path, url: str, profile: Path) -> list[str]:
     return [
         str(browser), f"--app={url}", f"--user-data-dir={profile}",
-        "--no-first-run", "--no-default-browser-check", "--start-maximized",
+        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check", "--start-maximized",
     ]
 
 

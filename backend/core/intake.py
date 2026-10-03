@@ -11,6 +11,8 @@ from . import imaging, native_pdf, segment, source_images
 from .models import Block, Paper, Question, QuestionGroup
 
 MODES = {"auto", "manual", "native", "mineru"}
+BOOK_MANUAL_REASON = "教材或讲义中的题号可能按章节重新开始，本机暂不自动切题；已保留完整原页供手工框题，避免把不同章节的题合并。"
+MULTI_PAPER_MANUAL_REASON = "这份文件的题号多次从头开始，可能包含多套试卷。已保留完整原页供手工框题，避免把不同试卷的题合并。"
 
 
 def prepare(paper: Paper, mode: str) -> Paper:
@@ -39,6 +41,24 @@ def prepare(paper: Paper, mode: str) -> Paper:
         plan["pages"] = [{"page_idx": p["page_idx"], "mode": "manual", "warnings": []} for p in paper.pages]
         if mode == "native":
             plan["warnings"] = ["这份资料没有 PDF 文字层，已保留原页供手工框题。"]
+    if mode == "native" and paper.material_type == Paper.MaterialType.BOOK:
+        # The exam segmenter assumes monotonically increasing question numbers.
+        # A book may restart them in each chapter (or example/exercise scope),
+        # so keep its local text as evidence but do not build merged exam cards.
+        plan.update(mode="manual", native_book_fallback=True, fallback_reason=BOOK_MANUAL_REASON)
+        plan.setdefault("warnings", []).append(BOOK_MANUAL_REASON)
+        plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
+    elif mode == "native" and extracted["blocks"]:
+        usable = {page["page_idx"] for page in plan["pages"] if page["mode"] == "native"}
+        scopes = segment.numbering_scopes(paper.pages, [
+            block for block in extracted["blocks"] if block["page_idx"] in usable])
+        if len(scopes) > 1:
+            # Reuse the existing restart detector before the single-exam
+            # segmenter can absorb a later paper into the previous one's tail.
+            plan.update(mode="manual", native_numbering_fallback=True,
+                local_scope_count=len(scopes), fallback_reason=MULTI_PAPER_MANUAL_REASON)
+            plan.setdefault("warnings", []).append(MULTI_PAPER_MANUAL_REASON)
+            plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
     with transaction.atomic():
         locked = Paper.objects.select_for_update().get(pk=paper.pk)
         # The intake path is for a new file. Re-preparing an existing task
@@ -54,6 +74,7 @@ def prepare(paper: Paper, mode: str) -> Paper:
                     metadata={"pages": list(range(len(paper.pages))), "source": "manual"})
         if extracted["blocks"]:
             Block.objects.bulk_create([Block(paper=paper, **block) for block in extracted["blocks"]], batch_size=300)
+        if extracted["blocks"] and plan["mode"] == "native":
             # Pure segmentation: gap location and cloud reading are deliberately
             # not called. A scan page remains available for manual completion.
             usable = {p["page_idx"] for p in plan["pages"] if p["mode"] == "native"}
@@ -114,8 +135,13 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
             paper.status = Paper.Status.QUEUED
         else:
             plan["mode"] = "manual"
-            plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
-                if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
+            if plan.get("native_book_fallback"):
+                plan["fallback_reason"] = BOOK_MANUAL_REASON
+            elif plan.get("native_numbering_fallback"):
+                plan["fallback_reason"] = MULTI_PAPER_MANUAL_REASON
+            else:
+                plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
+                    if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
             plan["pages"] = [{**page, "mode": "manual"} for page in plan.get("pages", [])]
         paper.processing_plan = plan
         paper.save(update_fields=["processing_plan", "status", "updated_at"])

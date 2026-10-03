@@ -2298,7 +2298,7 @@ def question_action(request, question_id, action: str):
             if body_mode not in {"text", "source_image"}:
                 return _error("请选择原图正文或文字正文")
             if body_mode == "text" and not question.stem.strip():
-                return _error("文字正文还为空，请先改字或采用识读建议")
+                return _error("文字正文还为空，请先改字填写题干，或完成 AI 识读")
             if body_mode == "source_image" and not source_images.valid_regions(question.paper, question.regions):
                 return _error("原图正文需要有效的原卷范围")
             question.body_mode = body_mode
@@ -2403,11 +2403,15 @@ def question_action(request, question_id, action: str):
         elif action == "reread":
             if source_images.is_image(question) and (question.paper.archived or question.paper.status != Paper.Status.READY):
                 return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
-            if ((source_images.is_image(question) or question.processing_mode == "manual")
-                    and (question.approved or question.publications.exists()
-                    or (source_images.is_image(question) and question.edited and (question.stem.strip() or question.options)))):
+            if (source_images.is_image(question) and (question.approved or question.publications.exists()
+                    or (question.edited and (question.stem.strip() or question.options)))):
                 return _error("这道原图题已有审核、入库或人工文字，已保留；请对照原卷手动修改。", 409)
-            if source_images.is_image(question) and (not _reading_ready() or readers.assistant_mode()):
+            if (not source_images.is_image(question) and actor[0] == "ai"
+                    and library.approval_source(question) == "human" and library.approval_is_current(question)
+                    and payload.get("force") is not True):
+                return _error("这道题已由使用者人工通过；需要使用者明确要求重新识读，才能撤销当前审核。", 409)
+            if (source_images.is_image(question) or question.processing_mode == "manual") and (
+                    not _vision_ready() or readers.assistant_mode()):
                 return _error("请先配置一家看图读题模型；也可以直接由当前 AI 助手对照原图改字。", 409)
             if not source_images.is_image(question):
                 question.edited = False

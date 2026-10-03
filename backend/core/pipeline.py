@@ -3266,9 +3266,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if not results and quota_errors:
         raise quota_errors[0]
     asked = {name for name, *_rest in jobs}
-    if not results and asked and asked <= unavailable and snapshot.get("fallback_draft") is not None:
+    if not results and asked and asked <= unavailable and str(snapshot.get("fallback_draft") or "").strip():
         # No service could answer at all (free quota used up, outage): start
         # from MinerU's text like AI-assistant reading, and say why.
+        # A hand-cut scan has no OCR text to fall back to. An empty draft
+        # would erase a previously recognized stem/options on a reread.
         card = assistant_draft({**snapshot, "draft": snapshot["fallback_draft"]})
         card["flags"] = [*card["flags"], FLAG_READERS_DOWN]
         card["read_a"] = {**card["read_a"], "error": errors.get("a", "")}

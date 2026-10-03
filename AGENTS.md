@@ -42,6 +42,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/C
 - 不自行修改或撤销人工通过的题；明确获用户授权才使用命令提供的 `--force`。删除题卡、撤回入库交给用户。
 - 退出码 `3`：把具体原因和需用户处理的事项说清楚，暂停受影响的步骤；其余已授权且不依赖该问题的工作继续。
 
+1.11.10 起，教材/讲义和检测到多编号范围的合订试卷保留完整原页与真实文字，默认托底手工，避免重复题号被合并。明确云授权时仍可进入原有云结构流程。已转文字的手工题可显式重新识读，缺少服务时保留原正文；旧入库版本不受重读影响。配图默认两点框选，双击下一张图的中间复制附近框尺寸，再指定归属。
+
 完整核对流程见 [question-workflow.md](skills/tiyouju/references/question-workflow.md)，命令与 MCP 参数见 [commands.md](skills/tiyouju/references/commands.md)。
 
 MinerU 当前限制与错误分类见 [云 API 调查](docs/MINERU_API.md)：按 200 页单文件限制处理，1000 页/日是优先级额度，Token 不固定宣称 14 天有效。公开文档可访问、已有凭据或离线测试通过，都不证明当前用户真实云识读已经恢复。

@@ -186,6 +186,28 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.q1.refresh_from_db()
         self.assertEqual(self.q1.approval_source, "human")
 
+    def test_explicit_force_can_reread_manual_text_without_changing_published_version(self):
+        self.q1.processing_mode = "manual"
+        self.q1.save()
+        result = self.client.post(f"/api/questions/{self.q1.pk}/approve", data=json.dumps({"approved": True}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(result.status_code, 200, result.content)
+        code, published = run_json("publish", "期中")
+        self.assertEqual(code, 0, published)
+        publication = PublishedQuestion.objects.get(question=self.q1)
+        content = json.dumps(publication.content, ensure_ascii=False, sort_keys=True)
+        with mock.patch("core.views._vision_ready", return_value=True), \
+                mock.patch("core.readers.assistant_mode", return_value=False):
+            code, refused = run_json("reread", "期中", "1")
+            self.assertEqual(code, cli.EXIT_NEEDS_USER, refused)
+            code, requested = run_json("reread", "期中", "1", "--force")
+        self.assertEqual(code, 0, requested)
+        self.q1.refresh_from_db()
+        self.assertTrue(self.q1.ocr_pending and self.q1.reread_requested)
+        self.assertFalse(self.q1.approved)
+        publication.refresh_from_db()
+        self.assertEqual(json.dumps(publication.content, ensure_ascii=False, sort_keys=True), content)
+
     def test_upload_sends_the_file_and_spots_a_duplicate(self):
         pdf = self.temp / "新卷.pdf"
         document = fitz.open()

@@ -344,7 +344,7 @@
   </div>
 
   <dialog id="credentialDialog" class="credential-dialog" aria-labelledby="credentialTitle">
-    <form id="credentialForm" class="credential-form" autocomplete="off">
+    <form id="credentialForm" class="credential-form" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
       <header class="dialog-head">
         <div>
           <p class="settings-eyebrow">读题服务</p>
@@ -357,28 +357,28 @@
         <section class="credential-service" data-service="mineru">
           <div class="credential-service-head"><strong>MinerU Token <small>可选 · 云端识别与切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
           <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">生成 Token</a>（到期日见管理页）</label>
-          <input id="credentialMineruInput" type="password" autocomplete="off" spellcheck="false"
+          <input id="credentialMineruInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
           <div class="credential-service-actions"><button id="credentialMineruDelete" class="button small credential-delete" type="button" aria-label="删除 MinerU 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="modelscope">
           <div class="credential-service-head"><strong>魔搭访问令牌 <small>看图读题 · 免费，每天几百次（推荐）</small></strong><span id="credentialModelscopeState" class="api-state">正在读取…</span></div>
           <label for="credentialModelscopeInput">新的令牌（留空就不改）· <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">免费申请</a></label>
-          <input id="credentialModelscopeInput" type="password" autocomplete="off" spellcheck="false"
+          <input id="credentialModelscopeInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴魔搭“访问令牌”页里复制的 Access Token">
           <div class="credential-service-actions"><button id="credentialModelscopeDelete" class="button small credential-delete" type="button" aria-label="删除魔搭密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="minimax">
           <div class="credential-service-head"><strong>MiniMax API Key <small>看图读题 · 付费会员</small></strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
           <label for="credentialMinimaxInput">新的 Key（留空就不改）</label>
-          <input id="credentialMinimaxInput" type="password" autocomplete="off" spellcheck="false"
+          <input id="credentialMinimaxInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MiniMax 开放平台里复制的 API Key">
           <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="siliconflow">
           <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 付费，可做复核和备用</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
           <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
-          <input id="credentialSiliconflowInput" type="password" autocomplete="off" spellcheck="false"
+          <input id="credentialSiliconflowInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴硅基流动里复制的 API Key">
           <div class="credential-service-actions"><button id="credentialSiliconflowDelete" class="button small credential-delete" type="button" aria-label="删除硅基流动密钥" hidden>删除密钥</button></div>
         </section>

@@ -14,9 +14,13 @@ assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 
 for (const provider of ["Mineru", "Modelscope", "Minimax", "Siliconflow"]) {
   assert.match(html, new RegExp(`id="credential${provider}Input"[^>]*type="password"`));
+  assert.match(html, new RegExp(`id="credential${provider}Input"[^>]*autocomplete="off"[^>]*autocapitalize="off"[^>]*autocorrect="off"`));
   assert.match(html, new RegExp(`id="credential${provider}Delete"[^>]*type="button"[^>]*hidden>删除密钥</button>`));
   assert.match(html, new RegExp(`id="credential${provider}State"`));
 }
+const aiSettings = fs.readFileSync(path.join(__dirname, "library-ai-settings.js"), "utf8");
+assert.match(aiSettings, /id="libraryAIKey"[^>]*type="password"[^>]*autocomplete="off"/);
+assert.doesNotMatch(aiSettings, /id="libraryAIKey"[^>]*autocomplete="(?:current|new)-password"/);
 
 assert.match(js, /api\("\/api\/settings\/credentials"\)/);
 assert.match(js, /api\("\/api\/settings\/credentials",\s*\{\s*method:\s*"POST"/);
@@ -25,7 +29,7 @@ assert.match(js, /action:\s*"keep"/);
 assert.match(js, /action:\s*"clear"/);
 assert.match(js, /resetCredentialInputs\(\);[\s\S]*?renderCredentialStates\(result\)/);
 assert.match(js, /async function loadStatus\(\)[\s\S]*?return false;[\s\S]*?return true;/);
-assert.match(js, /await refreshCredentialStatus\(message\)/);
+assert.match(js, /await refreshCredentialStatus\(refreshMessage, session\)/);
 assert.match(js, /function openSettings\(\)[\s\S]*?showSettingsTab\(settingsTabFromHash\(\), \{ updateHash: false \}\);[\s\S]*?void loadStatus\(\);/);
 assert.match(html, /已经保存的密钥不会再显示出来/);
 assert.match(html, /不写入题库、日志或项目文件/);
