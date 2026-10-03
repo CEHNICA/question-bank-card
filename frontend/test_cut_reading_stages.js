@@ -9,7 +9,7 @@ const source = (id, extra = {}) => ({ id, body_mode: "source_image", content_rev
   regions: [{ page_idx: 0, bbox: [10, 20, 800, 300] }], ...extra });
 const suggestion = { revision: 4, stem: "Find x.", error: "" };
 
-assert.deepEqual(Cut.cutReadingSummary(), { saved: 0, pending: 0, suggestions: 0, eligibleIds: [], revisions: {}, suggestionIds: [], stage: 1 });
+assert.deepEqual(Cut.cutReadingSummary(), { saved: 0, pending: 0, eligibleIds: [], revisions: {}, stage: 1 });
 const qs = [source(1), source(2, { ocr_pending: true }), source(3, { ocr_suggestion: suggestion }),
   source(4, { ocr_suggestion: { ...suggestion, revision: 3 } }),
   source(5, { ocr_suggestion: { ...suggestion, error: "Read failed" } }),
@@ -19,21 +19,26 @@ const original = JSON.stringify(qs);
 const summary = Cut.cutReadingSummary(qs);
 assert.deepEqual(summary.eligibleIds, [1, 4, 5], "Retry stale/failed readings, but never duplicate pending or replace a successful suggestion");
 assert.deepEqual(summary.revisions, { 1: 4, 4: 4, 5: 4 });
-assert.deepEqual(summary.suggestionIds, [3]);
+assert.equal(Object.hasOwn(summary, "suggestionIds"), false, "The normal review workflow has no separate adoption phase");
 assert.equal(summary.pending, 1);
 assert.equal(summary.stage, 2);
 assert.equal(JSON.stringify(qs), original, "Entering the reading stage must not modify saved questions");
 assert.equal(Cut.cutReadingSummary([source(1)]).stage, 2, "The second step remains discoverable after a reload");
-assert.equal(Cut.cutReadingSummary([source(1, { ocr_suggestion: suggestion })]).stage, 3, "Successful readings await explicit confirmation before review");
+assert.equal(Cut.cutReadingSummary([source(1, { ocr_suggestion: suggestion })]).stage, 3, "Legacy successful readings reach normal review without another paid request");
 assert.equal(Cut.cutReadingSummary([source(1, { approved: true })]).stage, 3, "Image-only approval may skip AI reading");
 assert.equal(Cut.hasCurrentReading(source(1, { ocr_suggestion: { ...suggestion, stem: " " } })), false);
 assert.deepEqual(Cut.cutReadingRequest(qs, [1, 4], 5), { question_ids: [1, 4], revisions: { 1: 4, 4: 4 }, revision: 5 });
+const manualText = source(10, { body_mode: "text", processing_mode: "manual", stem: "Saved reviewed text", ocr_pending: true });
+assert.deepEqual(Cut.cutReadingSummary([manualText]), { saved: 0, pending: 1, eligibleIds: [], revisions: {}, stage: 2 }, "Manual text rereading remains stoppable without becoming a new batch candidate");
+assert.equal(Cut.cutReadingSummary([{ ...manualText, ocr_pending: false }]).stage, 3, "Successful text returns to ordinary review");
+assert.equal(Cut.cutReadingSummary([{ ...manualText, processing_mode: "auto" }]).pending, 0, "Unrelated automatic text reading keeps its existing workflow");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const entry = js.slice(js.indexOf("  async function enterCutReadingStage("), js.indexOf("  async function readCutQuestions("));
 assert.match(entry, /await refreshPaper\(\)/);
-assert.doesNotMatch(entry, /api\(|reread|read-cut-questions/, "Completing cutting never starts an API reading");
+assert.match(entry, /await readCutQuestions\(questionIds\)/, "Completing cutting automatically starts saved-cut reading");
+assert.doesNotMatch(js, /采用此读法|\/apply-reading|查看待确认读法|读法待确认/, "There is no separate adoption action");
 assert.match(js, /\/api\/papers\/\$\{paperId\}\/read-cut-questions/);
 assert.match(js, /body: \{ revision: q\.content_revision \}, signal/);
 assert.doesNotMatch(js, /if \(q\.body_mode === "source_image"\) openPageDialog\("regions", q\); else rereadQuestion/);
@@ -88,5 +93,5 @@ assert.match(js, /settingsGeneral: "services"/);
   }
   assert.match(js, /请先继续手工整理或重试恢复这份资料，再开始 AI 识读/);
   assert.equal(JSON.stringify(qs), original, "Submitting readings keeps the saved originals intact");
-  console.log("Saved-cut reading eligibility, reload stages, subset contract and explicit API action: OK");
+  console.log("Saved-cut reading eligibility, normal review, subset contract and submission guards: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

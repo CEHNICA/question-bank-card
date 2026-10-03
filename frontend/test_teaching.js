@@ -17,14 +17,14 @@ assert.ok(TEACH_LESSONS.find((lesson) => lesson.key === "basics").checkpoint);
 // even when no reading service has been configured.
 const regionLesson = TEACH_LESSONS.find((lesson) => lesson.key === "region");
 assert.match(regionLesson.text, /更多 → 框选识读（纠错）/);
-assert.match(regionLesson.text, /手工切题后用第二步的 AI 识读，无需再次画框/);
+assert.match(regionLesson.text, /手工切题结束后自动识读，无需再次画框/);
 assert.match(regionLesson.text, /框选识读/);
 assert.doesNotMatch(regionLesson.text, /点“框选识读”/);
 const finishLesson = TEACH_LESSONS.find((lesson) => lesson.key === "finish");
 assert.match(finishLesson.text, /导入资料无需密钥/);
 assert.match(finishLesson.text, /从原卷框选保存/);
-assert.match(finishLesson.text, /完成切题.*第二步.*AI 识读已切题目/);
-assert.match(finishLesson.text, /切题本身不会调用 AI/);
+assert.match(finishLesson.text, /完成切题.*自动 AI 识读.*文字.*配图.*审核入库/);
+assert.match(finishLesson.text, /连续切题时只保存范围/);
 assert.doesNotMatch(finishLesson.text, /上传、重新识读.*需要读题服务/);
 
 // Stable keys and the old course's indexes must refer to learning content,

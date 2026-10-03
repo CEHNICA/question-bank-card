@@ -335,7 +335,7 @@ class LocalIntakeTests(TestCase):
         question.refresh_from_db()
         self.assertEqual(question.state, "yellow")
 
-    def test_requested_image_reading_only_suggests_and_adoption_is_explicit(self):
+    def test_requested_image_reading_cannot_overwrite_a_previously_approved_body(self):
         question = self.question(self.paper(), reread_requested=True)
         library.approve(question, now=timezone.now())
         question.save()
@@ -348,12 +348,8 @@ class LocalIntakeTests(TestCase):
         self.assertEqual(question.stem, "")
         self.assertEqual(question.approved_content_hash, original_hash)
         self.assertTrue(library.approval_is_current(question))
-        self.assertEqual(question.ocr_suggestion["stem"], "Recognized question")
-        self.assertEqual(self.action(question, "apply-reading", {"revision": 0}).status_code, 200)
-        question.refresh_from_db()
-        self.assertEqual(question.body_mode, "text")
-        self.assertEqual(question.stem, "Recognized question")
-        self.assertFalse(question.approved)
+        self.assertFalse(question.ocr_suggestion or question.ocr_pending or question.reread_requested)
+        self.assertEqual(self.action(question, "reread", {"revision": 0}).status_code, 409)
         self.assertEqual(question.source_key, key)
 
     def test_late_reader_cannot_overwrite_manual_revision_even_same_coordinates(self):

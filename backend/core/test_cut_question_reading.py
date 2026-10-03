@@ -1,4 +1,4 @@
-"""Saved crops -> explicit recognition queue -> candidate -> explicit adoption."""
+"""Saved crops -> explicit recognition -> normal drafts, with manual review."""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -41,7 +41,7 @@ class CutQuestionReadingTests(TestCase):
             content_type="application/json", HTTP_X_QB_REQUEST="1")
 
     def test_queue_uses_saved_ordered_crops_and_does_not_read_or_modify_body(self):
-        question = self.cut(edited=True, stem="saved manual evidence",
+        question = self.cut(edited=False, stem="native text-layer evidence",
             figures=[{"page_idx": 0, "bbox": [100, 100, 200, 200], "slot": "stem", "source": "manual"}],
             figure_review={"status": "ok", "source": "human"}, flags=["manual range warning"])
         before = deepcopy(Question.objects.values().get(pk=question.pk))
@@ -73,13 +73,17 @@ class CutQuestionReadingTests(TestCase):
         suggested = self.cut(5, ocr_suggestion={"revision": 0, "stem": "successful saved suggestion"})
         invalid = self.cut(6, regions=[])
         deleted = self.cut(7, deleted_at=timezone.now())
-        protected = [approved, text, pending, suggested, invalid, deleted]
+        protected = [approved, text, pending, invalid, deleted]
         snapshots = {q.pk: deepcopy(Question.all_objects.values().get(pk=q.pk)) for q in protected}
         result = self.post({"question_ids": []})
         self.assertEqual(result.status_code, 200, result.content)
         self.assertEqual(result.json()["queued_ids"], [eligible.pk])
         self.assertEqual({item["id"] for item in result.json()["skipped"]},
-            {q.pk for q in protected if q is not deleted})
+            {q.pk for q in [*protected, suggested] if q is not deleted})
+        self.assertEqual(result.json()["converted_ids"], [suggested.pk])
+        suggested.refresh_from_db()
+        self.assertEqual((suggested.body_mode, suggested.stem), ("text", "successful saved suggestion"))
+        self.assertFalse(suggested.approved or suggested.ocr_suggestion)
         for question in protected:
             self.assertEqual(Question.all_objects.values().get(pk=question.pk), snapshots[question.pk])
 
@@ -132,7 +136,7 @@ class CutQuestionReadingTests(TestCase):
         eligible.refresh_from_db()
         self.assertFalse(eligible.ocr_pending or eligible.reread_requested)
 
-    def test_recognition_stays_candidate_until_adoption_and_uses_saved_regions(self):
+    def test_recognition_becomes_normal_text_for_manual_review_and_uses_saved_regions(self):
         question = self.cut()
         key, regions = question.source_key, deepcopy(question.regions)
         self.assertEqual(self.post().json()["queued"], 1)
@@ -143,14 +147,12 @@ class CutQuestionReadingTests(TestCase):
                 "figures": [], "flags": [], "state": "green"}
         self.run_read(question, answer)
         question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem, question.state), ("source_image", "", "yellow"))
+        self.assertEqual((question.body_mode, question.stem, question.state), ("text", "Recognized draft", "green"))
         self.assertFalse(question.ocr_pending or question.reread_requested or question.approved)
-        self.assertEqual(question.ocr_suggestion["stem"], "Recognized draft")
+        self.assertFalse(question.ocr_suggestion)
+        self.assertEqual(question.regions, regions)
+        self.assertEqual(len(views.question_json(question)["question_images"]), 2)
         self.assertEqual(self.post().json()["queued"], 0)
-        result = self.post({"revision": question.content_revision}, url=f"/api/questions/{question.pk}/apply-reading")
-        self.assertEqual(result.status_code, 200, result.content)
-        question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem), ("text", "Recognized draft"))
         self.assertEqual(question.source_key, key)
         self.assertFalse(question.approved or question.publications.exists())
 
@@ -283,7 +285,8 @@ class CutQuestionReadingTests(TestCase):
         self.assertFalse(question.ocr_suggestion)
         self.run_read(question, lambda *args: {"stem": "new requested text", "state": "yellow", "flags": []})
         question.refresh_from_db()
-        self.assertEqual(question.ocr_suggestion["stem"], "new requested text")
+        self.assertEqual((question.body_mode, question.stem), ("text", "new requested text"))
+        self.assertFalse(question.ocr_suggestion)
         self.assertFalse(question.ocr_pending or question.reread_requested)
 
     def test_stop_selected_version_guard_does_not_cancel_changed_or_unselected_reads(self):

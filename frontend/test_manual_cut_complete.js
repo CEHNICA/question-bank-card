@@ -11,10 +11,10 @@ const start = source.indexOf("  function continueManualCut(");
 const end = source.indexOf('  $("pageDialogSave").addEventListener', start);
 assert.ok(start > 0 && end > start);
 const actions = source.slice(source.indexOf("  function configureCropActions("), source.indexOf('  $("pageDialog").addEventListener("cancel"'));
-assert.match(actions, /\$\("pageDialogSave"\)\.hidden = \["view", "new"\]\.includes\(dialog\.mode\) \|\| dialog\.practiceRead;/);
+assert.match(actions, /\$\("pageDialogSave"\)\.hidden = dialog\.mode === "view" \|\| dialog\.practiceRead;/);
 assert.match(actions, /\$\("pageDialogSaveNext"\)\.hidden = dialog\.mode !== "new";/);
 assert.match(actions, /\$\("pageDialogComplete"\)\.hidden = dialog\.mode !== "new";/);
-assert.doesNotMatch(source, /保存并关闭|\$\("pageDialogSave"\)\.hidden = mode === "view"/);
+assert.match(actions, /dialog\.mode === "new" \? "保存并关闭"/);
 assert.match(source, /\$\(dialog\.mode === "new" \? "pageDialogComplete" : "pageDialogSave"\)\.click\(\)/);
 function harness({ count = 25, number = count + 1, boxes = [], mode = "new", failure = false } = {}) {
   const requests = [], stages = [], messages = [], releases = [];
@@ -27,7 +27,7 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   const question = { id: 7, number: 1, regions: [{ page_idx: 0, bbox: [10, 10, 300, 100] }] };
   const state = { paperId: "qa-paper", paper: { demo: false },
     questions: Array.from({ length: count }, (_, i) => ({ id: i + 1, number: i + 1 })) };
-  const dialog = { mode, boxes, paperId: state.paperId, session: 1, saving: false,
+  const dialog = { mode, boxes, paperId: state.paperId, session: 1, saving: false, cutQuestionIds: [],
     question: mode === "new" ? null : question, page: 2, zoom: 1.2 };
   const context = vm.createContext({
     $, state, dialog, QBManualCrop: { nextCropNumber }, CROP_EDIT_KEY: "crop",
@@ -45,10 +45,10 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
       if (failure) throw Error("storage unavailable");
       return { question: { ...(mode === "new" ? { id: count + 1 } : question), ...options.body } };
     },
-    async enterCutReadingStage(paperId) {
+    async enterCutReadingStage(paperId, questionIds) {
       assert.equal(nodes.pageDialog.open, false, "The crop dialog closes before the reading stage opens");
       assert.equal(dialog.saving, false, "Finishing must release the save busy state");
-      stages.push({ paperId, count: state.questions.length });
+      stages.push({ paperId, count: state.questions.length, questionIds: questionIds === null ? null : Array.from(questionIds) });
       return true;
     }
   });
@@ -64,7 +64,7 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   await empty.save({ complete: true });
   assert.equal(empty.requests.length, 0, "Finishing empty question 26 must not send a create or OCR request");
   assert.equal(empty.state.questions.length, 25);
-  assert.deepEqual(empty.stages, [{ paperId: "qa-paper", count: 25 }]);
+  assert.deepEqual(empty.stages, [{ paperId: "qa-paper", count: 25, questionIds: null }]);
   assert.equal(empty.messages.length, 0, "An empty next draft must not ask for another range");
 
   const last = harness({ count: 24, number: 25, boxes: [
@@ -75,17 +75,18 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   assert.equal(last.nodes.numberInput.value, 26);
   assert.equal(last.dialog.boxes.length, 0);
   assert.equal(last.dialog.page, 2); assert.equal(last.dialog.zoom, 1.2);
+  assert.equal(last.stages.length, 0, "Continuous save never starts AI reading");
   await last.save({ complete: true });
   assert.equal(last.requests.length, 1, "Saving 25 and then finishing 26 creates exactly one real question");
   assert.equal(last.requests[0].body.processing_mode, "manual");
   assert.equal(last.requests[0].body.body_mode, "source_image");
   assert.deepEqual(last.requests[0].body.regions.map((r) => r.page_idx), [1, 2]);
-  assert.deepEqual(last.stages, [{ paperId: "qa-paper", count: 25 }]);
+  assert.deepEqual(last.stages, [{ paperId: "qa-paper", count: 25, questionIds: [25] }], "Completion reads only this batch's saved IDs");
 
   const finishWithBox = harness({ count: 24, number: 25, boxes: [{ page_idx: 0, bbox: [10, 10, 900, 200] }] });
   await finishWithBox.save({ complete: true });
   assert.equal(finishWithBox.requests.length, 1);
-  assert.deepEqual(finishWithBox.stages, [{ paperId: "qa-paper", count: 25 }], "The final unsaved range is saved before entering reading");
+  assert.deepEqual(finishWithBox.stages, [{ paperId: "qa-paper", count: 25, questionIds: [25] }], "The final unsaved range is saved before entering reading");
 
   const failed = harness({ count: 24, number: 25, boxes: [{ page_idx: 0, bbox: [10, 10, 900, 200] }], failure: true });
   await failed.save({ complete: true });
@@ -102,5 +103,5 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   assert.equal(adjusted.requests[0].body.processing_mode, "manual");
   assert.equal(adjusted.stages.length, 0);
   assert.equal(adjusted.nodes.pageDialog.open, false);
-  console.log("Manual cutting completion, empty next draft, final-save failure and separate OCR stage: OK");
+  console.log("Manual cutting completion, saved batch IDs, empty next draft and final-save failure: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -43,6 +43,37 @@ function scenario() {
   await vm.runInNewContext(handler + "\nstopCutReading();", success.context);
   assert.equal(success.requests.length, 1, "No pending task means no repeated stop or automatic reread request");
 
+  const manualText = scenario();
+  Object.assign(manualText.questions[0], { body_mode: "text", processing_mode: "manual", stem: "Retained manual text",
+    options: { A: "1", B: "2" }, figures: [{ page_idx: 1, bbox: [20, 30, 400, 250], slot: "stem" }] });
+  const textEvidence = JSON.stringify({ stem: manualText.questions[0].stem, options: manualText.questions[0].options,
+    figures: manualText.questions[0].figures, regions: manualText.questions[0].regions });
+  await vm.runInNewContext(handler + "\nstopCutReading();", manualText.context);
+  assert.equal(manualText.requests.length, 1, "A manual question remains stoppable after its first reading turned it into text");
+  assert.equal(manualText.questions[0].ocr_pending, false);
+  assert.equal(manualText.questions[0].body_mode, "text");
+  assert.equal(JSON.stringify({ stem: manualText.questions[0].stem, options: manualText.questions[0].options,
+    figures: manualText.questions[0].figures, regions: manualText.questions[0].regions }), textEvidence);
+
+  // A manually cut supplement can belong to an otherwise cloud-parsed paper.
+  // Its normal text rereading still needs a visible stop action.
+  const stage = js.slice(js.indexOf("  function renderCutReadingStage("), js.indexOf("  function openManualCut("));
+  const stageNodes = new Map(), buttons = [];
+  const node = () => ({ hidden: false, dataset: {}, children: [], append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; }, setAttribute() {} });
+  const stageContext = { state: { paper: { id: "manual-text", parse_mode: "mineru", status: "ready" },
+    questions: [{ ...manualText.questions[0], ocr_pending: true }] }, QBCutReading: Cut,
+    cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(),
+    cutReadingRequests: new Set(), cutReadingStops: new Set(), paperReadSubmissionPending: () => false,
+    $: (id) => { if (!stageNodes.has(id)) stageNodes.set(id, node()); return stageNodes.get(id); },
+    document: { createTextNode: (text) => text }, el: () => node(),
+    button: (label) => { buttons.push(label); return node(); }, stopCutReading() {}, openManualCut() {}, focusCutReview() {}, readCutQuestions() {} };
+  vm.runInNewContext(stage + "\nrenderCutReadingStage();", stageContext);
+  assert.equal(stageNodes.get("cutReadingStage").hidden, false);
+  assert.match(stageNodes.get("cutReadingTitle").textContent, /1 道题正在 AI 识读/);
+  assert.ok(buttons.includes("停止识读"));
+  assert.ok(!buttons.some((label) => /识读未完成题目/.test(label)), "Text rereading must not produce a duplicate batch reading action");
+
   const failure = scenario();
   failure.context.api = async () => { throw new Error("Offline"); };
   const before = JSON.stringify(failure.questions);
@@ -65,7 +96,7 @@ function scenario() {
   const refreshContext = { state: { paperId: "cut-test", papers: [], questions: [], selected: new Set(), selectionAnchor: null },
     paperRefreshToken: 0, ACTIVE_STATUS: new Set(), clearTimeout() {}, setTimeout() { throw new Error("Unexpected poll"); },
     $: (id) => ({ open: false }), normalizeRegionRead: (q) => q,
-    renderPaper() {}, renderPaperList() {}, renderViewer() {}, regionReadPending: () => false, toast() {},
+    renderPaper() {}, renderPaperList() {}, renderViewer() {}, readNewlyCutUpload() {}, regionReadPending: () => false, toast() {},
     api: () => new Promise((resolve) => waits.push(resolve)) };
   const oldPoll = vm.runInNewContext(refresh + "\nrefreshPaper();", refreshContext);
   const newPoll = vm.runInNewContext(refresh + "\nrefreshPaper();", refreshContext);

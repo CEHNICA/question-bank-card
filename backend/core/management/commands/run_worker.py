@@ -278,13 +278,17 @@ def clean_saved_example_labels(out=None) -> None:
     A failure here must never stop the worker from reading papers."""
     try:
         from core.library import tidy_saved_cards
+        from core.pipeline import promote_saved_readings
 
         counts = tidy_saved_cards()
+        converted = promote_saved_readings()
     except Exception:
         logging.getLogger("core").exception("example label cleanup failed")
         return
     if (counts["questions"] or counts["publications"]) and out is not None:
         out.write(f"已按新规则整理题面格式：{counts['questions']} 张题卡、{counts['publications']} 条已入库题目")
+    if converted and out is not None:
+        out.write(f"已恢复 {len(converted)} 道已有识读结果，可直接审核；未重新调用读题服务。")
 
 
 class Command(BaseCommand):

@@ -66,7 +66,7 @@ assert.match(js, /\$\("pageDialogComplete"\)\.addEventListener\("click"/);
 assert.match(html, /<label id="readTargetField" class="number-field" hidden>读出来的字填到/);
 assert.match(html, /<option value="A">选项 A<\/option>/);
 assert.match(js, /\$\("readTargetField"\)\.hidden = dialog\.mode !== "read"/);
-assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读这一块" : "保存";/);
+assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "new" \? "保存并关闭" : dialog\.mode === "read" \? "识读这一块" : "保存";/);
 // One box: a new one replaces the old.
 assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
 assert.match(js, /function queueRegionRead\(q, box, target\)/);

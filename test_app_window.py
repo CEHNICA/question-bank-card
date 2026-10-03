@@ -122,6 +122,7 @@ class WindowTests(unittest.TestCase):
             command = app_window.window_command(edge, "http://127.0.0.1:8768", profile)
             self.assertIn("--app=http://127.0.0.1:8768", command)
             self.assertIn(f"--user-data-dir={profile}", command)
+            self.assertIn("--start-maximized", command)
 
     def test_no_browser_falls_back_to_default_browser(self):
         with patch.object(app_window, "browser_candidates", return_value=[]), \

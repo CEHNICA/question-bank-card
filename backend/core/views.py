@@ -44,6 +44,7 @@ from .models import (
 )
 from .pipeline import (
     TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir, preview_resegment, reorder_photo_pages,
+    promote_saved_readings,
 )
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
@@ -513,7 +514,7 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
             shown_figure["table"] = True
         figures.append({**shown_figure, "url": f"/api/questions/{question.id}/figures/{index}?v={digest}"})
     question_images = []
-    if source_images.is_image(question):
+    if source_images.is_image(question) or question.processing_mode == "manual":
         try:
             question_images = source_images.assets(question)
         except (OSError, ValueError, IndexError, RuntimeError):
@@ -1673,7 +1674,7 @@ def paper_stop(request, paper_id):
 
 @csrf_exempt
 def paper_read_cut_questions(request, paper_id):
-    """Queue recognition of saved question crops; never adopt or approve it."""
+    """Recognize saved crops into normal reviewable drafts; never approve."""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     rejected = _guard(request)
@@ -1705,6 +1706,9 @@ def paper_read_cut_questions(request, paper_id):
         selected_ids = {question.pk for question in questions}
         if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
             return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
+        converted_ids = promote_saved_readings(paper.pk)
+        if converted_ids:
+            questions = list(query.order_by("number", "id"))
         published_ids = set(PublishedQuestion.objects.filter(question_id__in=selected_ids).values_list("question_id", flat=True))
         candidates = []
         for question in questions:
@@ -1717,7 +1721,9 @@ def paper_read_cut_questions(request, paper_id):
                 reason = "已在识读队列中"
             elif (suggestion.get("revision") == question.content_revision and not suggestion.get("error")
                     and isinstance(suggestion.get("stem"), str) and suggestion["stem"].strip()):
-                reason = "已有识读建议，请先核对并确认采用"
+                reason = "已有识读结果，但当前原卷或人工内容受保护，请对照原卷检查"
+            elif question.edited and (question.stem.strip() or question.options):
+                reason = "已有人工修改的文字，已保留"
             elif not source_images.valid_regions(paper, question.regions):
                 reason = "尚未保存有效切题范围"
             else:
@@ -1743,15 +1749,18 @@ def paper_read_cut_questions(request, paper_id):
             question.save(update_fields=["content_revision", "reread_requested", "ocr_pending", "updated_at"])
             queued_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
-    message = (f"已提交 {len(queued_ids)} 道已切题目，等待读题后台识读；结果须确认采用后再审核。"
-               if queued_ids else "没有新的题目需要识读；请查看已有建议，或继续切题、直接原图审核。")
+    message = (f"已提交 {len(queued_ids)} 道已切题目，识读完成后可直接审核。"
+               if queued_ids else "没有新的题目需要识读；可直接查看、审核已有结果。")
+    if converted_ids:
+        message = f"已恢复 {len(converted_ids)} 道已有识读结果，无需重新识读。" + message
     return JsonResponse({"paper": paper_json(paper), "queued": len(queued_ids), "queued_ids": queued_ids,
-                         "question_revisions": question_revisions, "skipped": skipped, "message": message})
+                         "converted_ids": converted_ids, "question_revisions": question_revisions,
+                         "skipped": skipped, "message": message})
 
 
 @csrf_exempt
 def paper_stop_cut_reading(request, paper_id):
-    """Stop only pending image-body reads, keeping the paper and its results."""
+    """Stop pending saved-crop reads, including their later manual text rereads."""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     rejected = _guard(request)
@@ -1781,21 +1790,24 @@ def paper_stop_cut_reading(request, paper_id):
         selected_ids = {question.pk for question in questions}
         if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
             return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
-        pending = [question for question in questions if source_images.is_image(question)
-                   and (question.ocr_pending or question.reread_requested)]
+        pending = [question for question in questions if
+                   (source_images.is_image(question) and (question.ocr_pending or question.reread_requested))
+                   or (question.processing_mode == "manual" and question.body_mode == "text" and question.ocr_pending)]
         if any(revisions.get(str(question.pk), question.content_revision) != question.content_revision for question in pending):
             return _error("识读请求已发生变化，请刷新后再停止", 409)
         for question in pending:
             question.content_revision += 1
             question.ocr_pending = False
             question.reread_requested = False
-            question.save(update_fields=["content_revision", "ocr_pending", "reread_requested", "updated_at"])
+            if not source_images.is_image(question):
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+            question.save(update_fields=["content_revision", "ocr_pending", "reread_requested", "state", "updated_at"])
             stopped_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
     return JsonResponse({"paper": paper_json(paper), "stopped": len(stopped_ids), "stopped_ids": stopped_ids,
         "question_revisions": question_revisions,
         "message": "已停止本机识读，原图和已有成果已保留；本机不再采用本轮结果，已发出的远端请求可能仍在结束。"
-                   if stopped_ids else "没有正在等待的原图题识读，已有成果已保留。"})
+                   if stopped_ids else "没有正在等待的已切题目识读，已有成果已保留。"})
 
 
 @csrf_exempt
@@ -2280,24 +2292,7 @@ def question_action(request, question_id, action: str):
             else:
                 _clear_approval(question)
         elif action == "apply-reading":
-            suggestion = question.ocr_suggestion or {}
-            if (type(payload.get("revision")) is not int or suggestion.get("revision") != question.content_revision
-                    or payload["revision"] != question.content_revision or not str(suggestion.get("stem") or "").strip()):
-                return _error("识读建议已过期或没有可采用的正文，请重新识读", 409)
-            question.stem = suggestion["stem"]
-            question.options = suggestion.get("options") or {}
-            if not question.type_locked:
-                question.question_type = suggestion.get("question_type", question.question_type)
-            question.body_mode = "text"
-            question.edited = True
-            question.text_source = "assistant" if actor[0] == "ai" else "human"
-            question.figures = suggestion.get("figures") or []
-            question.figure_review = suggestion.get("figure_review") or {}
-            question.flags = qtypes.with_flag(suggestion.get("flags") or [], question.question_type)
-            question.state = Question.State.YELLOW
-            question.error = ""
-            question.ocr_suggestion = {}
-            _clear_approval(question)
+            return _error("识读结果会直接写入待审核题面，无需再采用；请刷新查看题目。", 409)
         elif action == "body" or action == "manual":
             body_mode = payload.get("body_mode", "source_image" if action == "manual" else None)
             if body_mode not in {"text", "source_image"}:
@@ -2408,6 +2403,10 @@ def question_action(request, question_id, action: str):
         elif action == "reread":
             if source_images.is_image(question) and (question.paper.archived or question.paper.status != Paper.Status.READY):
                 return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
+            if ((source_images.is_image(question) or question.processing_mode == "manual")
+                    and (question.approved or question.publications.exists()
+                    or (source_images.is_image(question) and question.edited and (question.stem.strip() or question.options)))):
+                return _error("这道原图题已有审核、入库或人工文字，已保留；请对照原卷手动修改。", 409)
             if source_images.is_image(question) and (not _reading_ready() or readers.assistant_mode()):
                 return _error("请先配置一家看图读题模型；也可以直接由当前 AI 助手对照原图改字。", 409)
             if not source_images.is_image(question):
@@ -2427,7 +2426,7 @@ def question_action(request, question_id, action: str):
                 _clear_approval(question)
                 question.state = Question.State.WAITING
             question.reread_requested = True
-            question.ocr_pending = source_images.is_image(question)
+            question.ocr_pending = source_images.is_image(question) or question.processing_mode == "manual"
         elif action == "figure-table":
             # A crop MinerU read as a table becomes a text table in the stem.
             index = payload.get("figure")
@@ -2710,7 +2709,7 @@ def question_image(request, question_id, index: int):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     question = _question(question_id)
-    if not source_images.is_image(question):
+    if not source_images.is_image(question) and question.processing_mode != "manual":
         raise Http404()
     try:
         return _file(source_images.asset_file(question, index), "image/png")

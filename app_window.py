@@ -222,7 +222,7 @@ def window_profile() -> Path:
 def window_command(browser: Path, url: str, profile: Path) -> list[str]:
     return [
         str(browser), f"--app={url}", f"--user-data-dir={profile}",
-        "--no-first-run", "--no-default-browser-check", "--window-size=1440,920",
+        "--no-first-run", "--no-default-browser-check", "--start-maximized",
     ]
 
 

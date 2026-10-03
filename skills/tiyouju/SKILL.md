@@ -29,7 +29,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/C
 
 ## 处理题目
 
-1.11.6 起，`upload` 默认 `auto`，先在本机处理文字 PDF，无法可靠切题则保留原页供框题。只有显式 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动分流到已配置 MinerU，不能把已有密钥当成本次许可；云失败保留原页和已成功题。工具仍可指定 `manual`、`native`、`mineru`，明确 `mineru` 才要求云解析。软件返回的原图题通过 `show` 或 MCP 提供按序正文裁片，题干空白不代表空题；实际查看全部片段后才核对入库。1.11.7 的裁剪窗口只保存范围；切题完成后显式进入AI识读，直接使用已保存的裁片，不重新框选。识读结果需确认采用，再重新审核。先检查安装版 `upload --help`，旧版不支持 auto / allow-cloud 时按其实际能力操作。
+1.11.6 起，`upload` 默认 `auto`，先在本机处理文字 PDF，无法可靠切题则保留原页供框题。只有显式 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动分流到已配置 MinerU，不能把已有密钥当成本次许可；云失败保留原页和已成功题。工具仍可指定 `manual`、`native`、`mineru`，明确 `mineru` 才要求云解析。软件返回的原图题通过 `show` 或 MCP 提供按序正文裁片，题干空白不代表空题；实际查看全部片段后才核对入库。1.11.9 桌面完成切题后自动识读保存的裁片，成功直接生成正常文字题，沿用审核、配图、重读与入库，没有“采用此读法”步骤；连续裁剪仍只保存范围。自动写回保护等待期间的人工修改、人工通过和入库版本。CLI 本机导入不会因已有密钥隐式上传原卷。先检查安装版 `upload --help`，旧版按其实际能力操作。
 
 首次核对或改字前读 [references/question-workflow.md](references/question-workflow.md)。命令、JSON 字段与 MCP 参数需要时查 [references/commands.md](references/commands.md)。以下用 `tiyouju` 作简称，实际执行用完整 EXE 路径。
 

@@ -6,7 +6,7 @@
 
 1.11.6 的 `upload` 默认本机优先自动处理，不能可靠切题则保留原页供框题。只有 `--allow-cloud` / MCP `allow_cloud:true` 才允许自动使用已配置 MinerU；云失败保留本地结果。`--parse-mode manual`、`native` 仍可限定本机，`mineru` 是明确云解析选择，需 Token。看图读题可用魔搭、MiniMax、硅基流动，也可经用户选择由 AI 助手核对。凭据由用户在软件里填写，不索要、不代填。申请入口：MinerU 的 https://mineru.net/apiManage/token ，魔搭的 https://www.modelscope.cn/my/myaccesstoken 。额度、费用、账户验证和 Token 有效期以服务商当前规则为准。
 
-看图服务不可用时，成功解析过的原卷可先用 MinerU 初稿逐题核对，或等服务恢复后重读。MinerU 不可用时，可导入新原卷并手工框题、入库和导出；原图题必须查看全部有序正文裁片，不能用空题干为它猜题。1.11.7 按切题、AI识读、审核分步：裁剪只存题目范围，完成后显式提交已保存题目识读，不重新框选。识读先存建议，确认采用后重审，不自动改人工审批或历史入库版本。不要把配置有密钥当成实测可用。
+看图服务不可用时，成功解析过的原卷可先用 MinerU 初稿逐题核对，或等服务恢复后重读。MinerU 不可用时，可导入新原卷并手工框题、入库和导出；原图题必须查看全部有序正文裁片，不能用空题干为它猜题。1.11.9 桌面流程仍是切题、AI识读、审核：连续裁剪只存范围，完成切题自动识读已保存的题，不重新框选。成功直接显示正常文字题，沿用改字、配图、单题重读和审核入库，没有额外的“采用此读法”步骤。原卷裁片和出处保留，自动识读不替用户打审核勾，也不改等待期间的人工修改或历史入库版本。不要把配置有密钥当成实测可用。
 
 用户选择由 AI 助手核对时，用 `tiyouju config --reader assistant`；改回看图读题可用 `--reader modelscope` 等。改动从下一份新上传的卷子生效。`config` 不加参数只显示现状。
 
@@ -33,7 +33,7 @@ tiyouju upload "D:\试卷\期中.pdf" --wait     # 上传并等它读完（几�
 tiyouju cards latest --filter todo           # 需要逐题核对的题
 tiyouju show latest 9                        # 看第 9 题：文字 + 原卷截图
 # ……核对、修改、打勾，见下面……
-tiyouju cards latest --filter green          # 识读一致、还没通过的题：也要看
+tiyouju cards latest --filter green          # 识读完成、还没通过的题：也要看
 tiyouju publish latest                       # 入库
 ```
 
@@ -99,7 +99,7 @@ tiyouju figures latest 3 --none           # 这道题确实没有图
 
 ```powershell
 tiyouju approve latest 9            # 对照无误后打勾，可以一次写好几个题号
-tiyouju approve latest --green      # 识读一致的绿卡一起通过
+tiyouju approve latest --green      # 已对照核对的绿卡一起通过
 tiyouju publish latest              # 把通过的题入库
 ```
 

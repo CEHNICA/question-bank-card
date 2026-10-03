@@ -167,7 +167,7 @@ class ManualIntakeReviewTests(TestCase):
         target.write_bytes(data[:marker + 4 + max(1, length // 2)])
         self.assertFalse(source_images.body_valid(question))
 
-    def test_image_ocr_is_only_a_suggestion_until_explicit_adoption(self):
+    def test_image_ocr_cannot_overwrite_approved_or_published_original(self):
         question = self.image_question()
         library.approve(question, now=timezone.now())
         question.reread_requested = True
@@ -181,13 +181,9 @@ class ManualIntakeReviewTests(TestCase):
         self.assertEqual(question.body_mode, "source_image")
         self.assertEqual(question.stem, "")
         self.assertTrue(library.approval_is_current(question))
-        self.assertEqual(question.ocr_suggestion["stem"], answer["stem"])
-        result = self.post(f"/api/questions/{question.pk}/apply-reading", {"revision": question.content_revision})
-        self.assertEqual(result.status_code, 200, result.content)
-        question.refresh_from_db()
-        self.assertEqual(question.body_mode, "text")
-        self.assertEqual(question.stem, answer["stem"])
-        self.assertFalse(question.approved)
+        self.assertFalse(question.ocr_suggestion or question.reread_requested or question.ocr_pending)
+        result = self.post(f"/api/questions/{question.pk}/reread", {"revision": question.content_revision})
+        self.assertEqual(result.status_code, 409, result.content)
         publication.refresh_from_db()
         self.assertEqual(publication.content, expected_publication)
 

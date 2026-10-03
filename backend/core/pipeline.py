@@ -23,7 +23,7 @@ from PIL import Image
 
 from . import (
     cuts, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
-    textnorm,
+    textnorm, source_images,
 )
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
@@ -3520,6 +3520,7 @@ def _snapshot(question: Question) -> dict:
             "candidates": question.figure_candidates, "question_type": question.question_type,
             "section": question.section, "content_revision": question.content_revision,
             "body_mode": question.body_mode, "processing_mode": question.processing_mode,
+            "ocr_pending": question.ocr_pending,
             "stem": question.stem, "options": question.options, "edited": question.edited,
             "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
             "segmentation_flags": [
@@ -3578,10 +3579,169 @@ def _set_backlog(paper_pk, value: int | None) -> None:
             _READ_BACKLOG[paper_pk] = value
 
 
+def _apply_reading_fields(question: Question, fields: dict) -> None:
+    """Normal OCR writeback, including locked types and manual figure evidence."""
+    # Figures handed over from another question's range survive a reread.
+    # A row figure that lies in this question's own range is re-decided by
+    # the new reading instead.
+    own_keys = {candidate_key(item) for item in question.figure_candidates or []}
+    borrowed = [
+        f for f in question.figures
+        if f.get("source") == "other" or (f.get("source") == "row" and candidate_key(f) not in own_keys)
+    ]
+    if borrowed and "figures" in fields:
+        fields["figures"] = fields["figures"] + [
+            f for f in borrowed if not _same_box(f, fields["figures"])
+        ]
+        review_stem = question.stem if question.edited else fields.get("stem", question.stem)
+        review_options = question.options if question.edited else fields.get("options", question.options)
+        fields["figure_review"] = recheck_automatic_review(
+            stem=review_stem,
+            options=review_options,
+            figures=fields["figures"],
+            previous=fields.get("figure_review"),
+        )
+        fields["flags"] = _flags_after_figure_review(
+            fields.get("flags", []), fields["figure_review"], fields["figures"],
+        )
+        if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
+            fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
+    # 人选定的题型（题号旁的下拉、改字、tiyouju fix --type）重读也不变。
+    kept = {"question_type"} if question.type_locked and qtypes.decided(question.question_type) else set()
+    if question.edited:
+        # 人工改过的文字（连同题源）不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
+        kept |= {"stem", "options", "text_source", "origin"}
+        if qtypes.decided(question.question_type):
+            kept.add("question_type")
+    if kept:
+        fields = {k: v for k, v in fields.items() if k not in kept}
+    if question.edited:
+        fields["flags"] = [f for f in fields.get("flags", []) if "识读" not in f and "[?]" not in f]
+        if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
+            fields["state"] = Question.State.GREEN
+    if question.figures and any(f.get("source") == "manual" for f in question.figures):
+        manual_figures, manual_review = _manual_figures_and_review(question)
+        fields["figures"] = manual_figures
+        fields["flags"] = _flags_after_figure_review(
+            fields.get("flags", []), manual_review, manual_figures,
+        )
+        fields["figure_review"] = manual_review
+    elif "manual_figure_outside_range" in (
+            (question.figure_review or {}).get("signals") or []):
+        fields["figures"] = []
+        fields["figure_review"] = question.figure_review
+        fields["flags"] = _flags_after_figure_review(
+            fields.get("flags", []), question.figure_review, [],
+        )
+    elif stored_or_derived_review(question).get("status") == CONFIRMED_NO_FIGURE:
+        fields["figures"] = []
+        fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
+        fields["figure_review"] = stored_or_derived_review(question)
+    if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
+        kind = fields.get("question_type", question.question_type)
+        fields["flags"] = qtypes.with_flag(fields.get("flags", []), kind)
+        fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
+    for key, value in fields.items():
+        setattr(question, key, value)
+    question.save()
+    Paper.objects.filter(pk=question.paper_id).update(
+        progress=question.paper.questions.exclude(
+            state__in=[Question.State.WAITING, Question.State.READING],
+        ).count(),
+        updated_at=timezone.now(),
+    )
+
+
+def _usable_cut_reading(fields: dict) -> bool:
+    return (isinstance(fields, dict) and not fields.get("error")
+            and isinstance(fields.get("state", Question.State.GREEN), str)
+            and fields.get("state", Question.State.GREEN) in {Question.State.GREEN, Question.State.YELLOW}
+            and isinstance(fields.get("stem"), str) and bool(fields["stem"].strip())
+            and isinstance(fields.get("options", {}), dict)
+            and all(key in readers.OPTION_KEYS and isinstance(value, str)
+                    for key, value in fields.get("options", {}).items()))
+
+
+def _cut_content_protected(question: Question) -> bool:
+    return bool(question.approved or question.publications.exists()
+                or (question.edited and (question.stem.strip() or question.options)))
+
+
+def _cut_source_current(question: Question) -> bool:
+    try:
+        assets = source_images.assets(question)
+        expected = (question.paper.processing_plan or {}).get("render_sha256")
+        if not expected and not question.paper.render_path:
+            expected = question.paper.sha256
+        return bool(assets) and (not expected or all(item["render_sha256"] == expected for item in assets))
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return False
+
+
+def _cut_to_text(question: Question, fields: dict) -> None:
+    """Replace only an unprotected original-image draft, never approve it."""
+    question.body_mode = "text"
+    question.content_revision += 1
+    question.ocr_suggestion = {}
+    question.ocr_pending = False
+    question.reread_requested = False
+    # Type/range/figure gestures may mark an empty original-image draft edited.
+    # Its locked type and manual figures are still retained by normal writeback.
+    question.edited = False
+    _invalidate_approval(question)
+    _apply_reading_fields(question, fields)
+
+
+def promote_saved_readings(paper_id=None) -> list[int]:
+    """Upgrade a current successful pre-1.11.9 candidate locally, with no API."""
+    query = Question.objects.filter(body_mode="source_image", paper__status=Paper.Status.READY,
+        paper__archived=False, ocr_pending=False, reread_requested=False).exclude(ocr_suggestion={})
+    if paper_id is not None:
+        query = query.filter(paper_id=paper_id)
+    promoted = []
+    for question_id, owner in query.values_list("pk", "paper_id"):
+        with transaction.atomic():
+            current = Paper.objects.select_for_update().filter(pk=owner, status=Paper.Status.READY,
+                archived=False).first()
+            if current is None:
+                continue
+            question = Question.objects.select_for_update().select_related("paper").filter(pk=question_id).first()
+            if (question is None or question.body_mode != "source_image" or question.ocr_pending
+                    or question.reread_requested or _cut_content_protected(question)):
+                continue
+            candidate = question.ocr_suggestion
+            if (not isinstance(candidate, dict) or type(candidate.get("revision")) is not int
+                    or candidate["revision"] != question.content_revision or not _usable_cut_reading(candidate)
+                    or not source_images.valid_regions(current, question.regions) or not _cut_source_current(question)):
+                continue
+            # Historical candidates carried the content revision. Newer ones
+            # may also bind the paper/source plan, which must agree when present.
+            if ("paper_revision" in candidate and candidate["paper_revision"] != int(
+                    (current.processing_plan or {}).get("revision", 0))):
+                continue
+            fields = {key: deepcopy(value) for key, value in candidate.items() if key in {
+                "stem", "options", "question_type", "origin", "text_source", "figures", "figure_review",
+                "flags", "error", "state", "answer", "analysis"}}
+            fields.setdefault("state", Question.State.GREEN)
+            fields.setdefault("flags", [])
+            fields.setdefault("error", "")
+            _cut_to_text(question, fields)
+            promoted.append(question.pk)
+    return promoted
+
+
 def read_questions(paper: Paper, questions: list[Question], *, revision: int | None = None) -> None:
     revision = int((paper.processing_plan or {}).get("revision", 0)) if revision is None else revision
     _check_run(paper.pk, revision)
     questions = [question for question in questions if question.processing_mode == "auto" or question.reread_requested]
+    eligible = []
+    for question in questions:
+        if question.body_mode == "source_image" and _cut_content_protected(question):
+            Question.objects.filter(pk=question.pk, content_revision=question.content_revision).update(
+                reread_requested=False, ocr_pending=False)
+        else:
+            eligible.append(question)
+    questions = eligible
     if not questions:
         return
     workers = _reader_parallelism()
@@ -3634,7 +3794,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         ]
     for question in questions:
         update = {"reread_requested": False}
-        if question.body_mode == "source_image":
+        if question.body_mode == "source_image" or question.processing_mode == "manual":
             update["ocr_pending"] = True
         if question.body_mode != "source_image":
             update.update(state=Question.State.READING, approved=False, approved_at=None, approved_content_hash="")
@@ -3643,10 +3803,11 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     def work(snapshot: dict) -> tuple[int, dict]:
         try:
             with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
-                if snapshot["body_mode"] == "source_image":
+                if snapshot["body_mode"] == "source_image" or snapshot["processing_mode"] == "manual":
                     def cut_cancelled() -> bool:
                         return not Question.objects.filter(pk=snapshot["id"],
-                            content_revision=snapshot["content_revision"], body_mode="source_image", ocr_pending=True).exists()
+                            content_revision=snapshot["content_revision"], body_mode=snapshot["body_mode"],
+                            processing_mode=snapshot["processing_mode"], ocr_pending=True).exists()
                     # Keep the existing request timeouts. Cancellation also
                     # covers account/HTTP-slot waiting and unstarted crops;
                     # an already-sent request can only be discarded locally.
@@ -3682,88 +3843,38 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                 or question.body_mode != snapshot["body_mode"] or question.regions != snapshot["regions"]):
             return
         if question.body_mode == "source_image":
-            # Recognition is a candidate next to the original body. Approval
-            # and published snapshots stay valid until someone adopts it.
-            fields.pop("foreign_figures", None)
+            if not question.ocr_pending or _cut_content_protected(question):
+                # A review/publication may happen without changing revision.
+                # It is still authoritative over the late OCR response.
+                question.ocr_pending = question.reread_requested = False
+                question.save(update_fields=["ocr_pending", "reread_requested", "updated_at"])
+                return
+            source_current = _cut_source_current(question)
+            if _usable_cut_reading(fields) and source_current:
+                foreign.extend(fields.pop("foreign_figures", []))
+                _cut_to_text(question, fields)
+                return
+            # Failed OCR does not erase the original-image body. Its last
+            # error remains visible, and another read requires an explicit request.
             question.ocr_suggestion = {"revision": question.content_revision,
-                **{key: value for key, value in fields.items() if key in {
-                    "stem", "options", "question_type", "origin", "text_source", "figures", "figure_review", "flags", "error", "state"}}}
+                "paper_revision": revision, "error": (fields.get("error") or "识读未返回有效正文") if source_current
+                else "原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。",
+                "state": Question.State.RED}
+            question.error = question.ocr_suggestion["error"]
             for key in ("read_a", "read_b", "read_c"):
                 if key in fields:
                     setattr(question, key, fields[key])
-            question.ocr_pending = False
-            question.save(update_fields=["ocr_suggestion", "ocr_pending", "read_a", "read_b", "read_c", "updated_at"])
+            question.ocr_pending = question.reread_requested = False
+            question.save(update_fields=["ocr_suggestion", "ocr_pending", "reread_requested", "error",
+                "read_a", "read_b", "read_c", "updated_at"])
             return
         foreign.extend(fields.pop("foreign_figures", []))
-        # Figures handed over from another question's range survive a reread.
-        # A row figure that lies in this question's own range is re-decided by
-        # the new reading instead.
-        own_keys = {candidate_key(item) for item in question.figure_candidates or []}
-        borrowed = [
-            f for f in question.figures
-            if f.get("source") == "other" or (f.get("source") == "row" and candidate_key(f) not in own_keys)
-        ]
-        if borrowed and "figures" in fields:
-            fields["figures"] = fields["figures"] + [
-                f for f in borrowed if not _same_box(f, fields["figures"])
-            ]
-            review_stem = question.stem if question.edited else fields.get("stem", question.stem)
-            review_options = question.options if question.edited else fields.get("options", question.options)
-            fields["figure_review"] = recheck_automatic_review(
-                stem=review_stem,
-                options=review_options,
-                figures=fields["figures"],
-                previous=fields.get("figure_review"),
-            )
-            fields["flags"] = _flags_after_figure_review(
-                fields.get("flags", []), fields["figure_review"], fields["figures"],
-            )
-            if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
-                fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
-        # 人选定的题型（题号旁的下拉、改字、tiyouju fix --type）重读也不变。
-        kept = {"question_type"} if question.type_locked and qtypes.decided(question.question_type) else set()
-        if question.edited:
-            # 人工改过的文字（连同题源）不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
-            kept |= {"stem", "options", "text_source", "origin"}
-            if qtypes.decided(question.question_type):
-                kept.add("question_type")
-        if kept:
-            fields = {k: v for k, v in fields.items() if k not in kept}
-        if question.edited:
-            fields["flags"] = [f for f in fields.get("flags", []) if "识读" not in f and "[?]" not in f]
-            if fields.get("state") == Question.State.YELLOW and not fields["flags"]:
-                fields["state"] = Question.State.GREEN
-        if question.figures and any(f.get("source") == "manual" for f in question.figures):
-            manual_figures, manual_review = _manual_figures_and_review(question)
-            fields["figures"] = manual_figures
-            fields["flags"] = _flags_after_figure_review(
-                fields.get("flags", []), manual_review, manual_figures,
-            )
-            fields["figure_review"] = manual_review
-        elif "manual_figure_outside_range" in (
-                (question.figure_review or {}).get("signals") or []):
-            fields["figures"] = []
-            fields["figure_review"] = question.figure_review
-            fields["flags"] = _flags_after_figure_review(
-                fields.get("flags", []), question.figure_review, [],
-            )
-        elif stored_or_derived_review(question).get("status") == CONFIRMED_NO_FIGURE:
-            fields["figures"] = []
-            fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
-            fields["figure_review"] = stored_or_derived_review(question)
-        if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
-            kind = fields.get("question_type", question.question_type)
-            fields["flags"] = qtypes.with_flag(fields.get("flags", []), kind)
-            fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
-        for key, value in fields.items():
-            setattr(question, key, value)
-        question.save()
-        Paper.objects.filter(pk=paper.pk).update(
-            progress=paper.questions.exclude(
-                state__in=[Question.State.WAITING, Question.State.READING],
-            ).count(),
-            updated_at=timezone.now(),
-        )
+        if question.processing_mode == "manual":
+            if not question.ocr_pending:
+                return
+            question.ocr_pending = False
+            question.reread_requested = False
+        _apply_reading_fields(question, fields)
 
     def persist(question_id: int, fields: dict) -> None:
         with transaction.atomic():

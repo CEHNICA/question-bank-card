@@ -196,7 +196,7 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
     def post(self, path, payload=None):
         return self.client.post(path, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1")
 
-    def test_first_batch_then_explicit_reread_each_use_one_call_and_require_adoption(self):
+    def test_first_batch_then_explicit_reread_each_use_one_call_and_require_manual_review(self):
         question = self.question(body_mode="source_image", processing_mode="manual", state="yellow")
         regions, key = deepcopy(question.regions), question.source_key
         result = self.post(f"/api/papers/{self.original.pk}/read-cut-questions")
@@ -206,8 +206,9 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
         self.assertEqual(chat.call_count, 1)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem, question.regions, question.source_key),
-            ("source_image", "", regions, key))
-        self.assertEqual(question.ocr_suggestion["text_source"], "single")
+            ("text", STEM, regions, key))
+        self.assertEqual(question.text_source, "single")
+        self.assertFalse(question.ocr_suggestion)
         self.assertFalse(question.approved or question.ocr_pending or question.reread_requested)
         result = self.post(f"/api/questions/{question.pk}/reread", {"revision": question.content_revision})
         self.assertEqual(result.status_code, 200, result.content)
@@ -215,12 +216,7 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
             self.assertEqual(pipeline.process_rereads(), 1)
         self.assertEqual(chat.call_count, 1)
         question.refresh_from_db()
-        result = self.post(f"/api/questions/{question.pk}/apply-reading", {"revision": question.content_revision})
-        self.assertEqual(result.status_code, 200, result.content)
-        question.refresh_from_db()
-        # Explicit adoption remains a human content gesture; the saved reading
-        # evidence still records that the second AI pass was disabled.
-        self.assertEqual((question.body_mode, question.text_source), ("text", "human"))
+        self.assertEqual((question.body_mode, question.text_source), ("text", "single"))
         self.assertEqual(question.read_b, {"skipped": "disabled"})
         self.assertFalse(question.approved)
         with self.assertRaisesRegex(ValueError, "还没有通过终审"):
