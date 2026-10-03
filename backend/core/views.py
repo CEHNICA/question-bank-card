@@ -1628,6 +1628,8 @@ def paper_reparse(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
+    if demo.is_demo(paper):
+        return _error("示例练习不调用云服务，请继续手工核对。", 409)
     if paper.status != Paper.Status.PARSING:
         return _error("只有正在等 MinerU 的试卷能重新解析；处理失败的试卷请点“重试”", 409)
     if paper.import_chunks.exists():
@@ -1712,6 +1714,10 @@ def paper_read_cut_questions(request, paper_id):
         selected_ids = {question.pk for question in questions}
         if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
             return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
+        if demo.is_demo(paper):
+            return JsonResponse({"paper": paper_json(paper), "queued": 0, "queued_ids": [],
+                "converted_ids": [], "question_revisions": {}, "skipped": [],
+                "message": "练习范围已保存，可直接对照原图核对；练习不调用 AI 识读。"})
         converted_ids = promote_saved_readings(paper.pk)
         if converted_ids:
             questions = list(query.order_by("number", "id"))
@@ -1831,6 +1837,8 @@ def paper_retry(request, paper_id):
         return _error("资料类型不正确")
     with transaction.atomic():
         paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
+        if demo.is_demo(paper):
+            return _error("示例练习不调用云服务，请继续手工核对或重新开始练习。", 409)
         if paper.status != Paper.Status.FAILED:
             return _error("只有处理失败的任务需要重试")
         local_mode = (paper.processing_plan or {}).get("mode")
@@ -1924,6 +1932,8 @@ def paper_resegment_preview(request, paper_id):
 
 
 def _resegment_safety_error(paper: Paper) -> str:
+    if demo.is_demo(paper):
+        return "示例练习不重新自动切题，请用手工切题继续练习。"
     if paper.status != Paper.Status.READY:
         return "只有已经完成识读、处于待终审状态的任务可以重新切题"
     if not paper.blocks.exists():
@@ -2076,10 +2086,16 @@ def demo_paper(request):
         return rejected
     payload = _body(request) or {}
     try:
-        paper = demo.create_demo_paper(reset=payload.get("reset") is True)
+        course = payload.get("course", "full")
+        if course not in {"full", "basics"}:
+            return _error("请选择基础练习或完整示例")
+        paper = demo.create_demo_paper(reset=payload.get("reset") is True, course=course)
     except FileNotFoundError as error:
         return _error(str(error), 500)
-    return JsonResponse({"paper": paper_json(paper)}, status=201)
+    return JsonResponse({"paper": paper_json(paper),
+        "restart_required": course == "basics" and (paper.structure or {}).get("course") != "basics",
+        "practice": {
+        "library_url": f"/practice/{paper.pk}", "export_url": f"/api/demo/{paper.pk}/export-pdf"}}, status=201)
 
 
 @csrf_exempt
@@ -2135,6 +2151,8 @@ def add_question(request, paper_id):
     kind = payload.get("question_type", "unknown")
     if processing_mode not in {"manual", "auto", "assistant"} or body_mode not in {"text", "source_image"} or kind not in TYPES:
         return _error("题目正文模式或题型不正确")
+    if demo.is_demo(paper):
+        processing_mode = "manual"
     manual = processing_mode != "auto" or body_mode == "source_image"
     question = Question.objects.create(
         paper=paper, group=group, number=number, regions=regions, regions_auto=regions, start_source="manual",
@@ -2231,6 +2249,8 @@ def question_region_read(request, question_id):
     if payload is None:
         return _error("请求内容不正确")
     question = get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
+    if request.method == "POST" and demo.is_demo(question.paper):
+        return _error("示例练习不调用云服务。可以练习画框，再对照原卷手工改字。", 409)
     request_id = payload.get("client_request_id")
     if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request_id)):
         return _error("识读请求编号不正确")
@@ -2418,7 +2438,7 @@ def question_action(request, question_id, action: str):
             question.regions = regions
             question.figure_candidates = candidates_in(question.paper, regions)
             _clear_approval(question)
-            manual = payload.get("processing_mode", question.processing_mode) in {"manual", "assistant"} or source_images.is_image(question)
+            manual = demo.is_demo(question.paper) or payload.get("processing_mode", question.processing_mode) in {"manual", "assistant"} or source_images.is_image(question)
             if manual:
                 question.processing_mode = "manual"
                 # Range changes do not erase manually corrected text, type or
@@ -2436,6 +2456,8 @@ def question_action(request, question_id, action: str):
                 question.state = Question.State.WAITING
                 question.reread_requested = True
         elif action == "reread":
+            if demo.is_demo(question.paper):
+                return _error("示例练习不调用云服务。请对照原卷手工改字。", 409)
             if source_images.is_image(question) and (question.paper.archived or question.paper.status != Paper.Status.READY):
                 return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
             if (source_images.is_image(question) and (question.approved or question.publications.exists()

@@ -22,7 +22,7 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
+    cuts, demo, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
     textnorm, source_images,
 )
 from .account_pool import AccountPoolError, account_pool
@@ -1156,6 +1156,8 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
 
 def parse(paper: Paper, *, revision: int | None = None) -> None:
     paper.refresh_from_db()
+    if demo.is_demo(paper):
+        return
     plan_revision = int((paper.processing_plan or {}).get("revision", 0))
     if revision is not None and revision != plan_revision:
         raise mineru.MineruCancelled()
@@ -3831,6 +3833,8 @@ def promote_saved_readings(paper_id=None) -> list[int]:
 
 
 def read_questions(paper: Paper, questions: list[Question], *, revision: int | None = None) -> None:
+    if demo.is_demo(paper):
+        return
     revision = int((paper.processing_plan or {}).get("revision", 0)) if revision is None else revision
     _check_run(paper.pk, revision)
     questions = [question for question in questions if question.processing_mode == "auto" or question.reread_requested]
@@ -4219,6 +4223,8 @@ def _set_if_plan_current(paper: Paper, revision: int, **fields) -> bool:
 
 def process_paper(paper: Paper) -> None:
     paper.refresh_from_db()
+    if demo.is_demo(paper):
+        return
     run_revision = int((paper.processing_plan or {}).get("revision", 0))
     try:
         if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
@@ -4274,6 +4280,8 @@ def parse_ahead(paper: Paper) -> bool:
     try:
         paper.refresh_from_db()
         run_revision = int((paper.processing_plan or {}).get("revision", 0))
+        if demo.is_demo(paper):
+            return False
         if paper.status != Paper.Status.QUEUED or (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
             return False
         parse(paper, revision=run_revision)
@@ -4311,6 +4319,8 @@ def process_rereads(*, idle_papers_only: bool = False) -> int:
     if idle_papers_only:
         papers = papers.exclude(status__in=ACTIVE_PAPER_STATUSES)
     for paper in papers.distinct():
+        if demo.is_demo(paper):
+            continue
         run_revision = int((paper.processing_plan or {}).get("revision", 0))
         questions = list(paper.questions.filter(reread_requested=True))
         try:

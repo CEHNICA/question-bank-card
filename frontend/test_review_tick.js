@@ -50,8 +50,11 @@ assert.match(js, /state\.editing\.delete\(id\); \}\);\s*stopSelecting\(\{ render
 assert.match(css, /\.toast\[popover\] \{ inset: auto 24px 78px auto;/);
 assert.doesNotMatch(css, /\.toast \{[^}]*translateX\(-50%\)/);
 
-// The shortcut sheet tells the new meaning.
-assert.match(html, /打勾通过 \/ 再点撤销/);
+// The shared shortcut sheet explains that Enter continues; undo remains explicit.
+const help = require("./shortcut-help.js").reference("review");
+assert.ok(help.primary.some(row => row.label === "通过并继续" && row.keys.includes("Enter")));
+assert.match(help.extra, /Enter 不撤销已通过的题/);
+assert.ok(help.more.some(row => row.label === "撤销当前题通过" && row.keys.includes("U")));
 
 // The tick is the one place to approve: no second 标记通过 / 撤销通过 button on the card.
 assert.doesNotMatch(js, /button\(blocked \? blockedLabel : approvalNeedsReview\(q\) \? "重新标记通过" : "标记通过"/);

@@ -32,7 +32,7 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", fai
   const context = vm.createContext({
     $, state, dialog, QBManualCrop: { nextCropNumber }, CROP_EDIT_KEY: "crop",
     editGuard: { release(key) { releases.push(key); } },
-    showCropResult(text) { messages.push(text); }, toast() {},
+    showCropResult(text) { messages.push(text); }, toast() {}, teach() {},
     setCropSaving(value) { dialog.saving = value; },
     readingOrder(value) { return value.map(({ page_idx, bbox }) => ({ page_idx, bbox: [...bbox] })); },
     closeFigureSlotMenu() {}, trackCropDraft() {}, renderPageTabs() {}, renderStage() {},

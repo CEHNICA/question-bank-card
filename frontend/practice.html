@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light"><title>题有据 · 新手练习</title>
+  <link rel="icon" href="/favicon.png"><link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><img class="brand-mark" src="/favicon.png" alt="" width="34" height="34"><span class="brand-text"><strong>题有据</strong><span>新手练习</span></span></a><a id="practiceReturn" class="button quiet" href="/">返回核对</a></header>
+  <main class="practice-home">
+    <header class="practice-heading"><h1>选题与导出</h1><p>这里只显示已通过的练习题，与正式题库和试题篮分开。</p></header>
+    <ol class="practice-steps" aria-label="练习进度"><li id="stepSelect" aria-current="step">1 选题</li><li id="stepPreview">2 预览</li><li id="stepExport">3 导出</li></ol>
+    <p id="practiceGuidance" class="practice-guidance" role="status">勾选一题，加入这次练习卷。</p>
+    <p id="practiceError" class="practice-error" role="alert" hidden></p>
+    <button id="practiceRetry" class="button" type="button" hidden>重新读取练习题</button>
+    <div id="practiceList" class="practice-list" aria-label="已通过的练习题"></div>
+    <div class="practice-actions"><span id="practiceCount">已选 0 题</span><button id="practicePreview" class="button primary" type="button" disabled>预览练习卷</button><button id="practiceExport" class="button primary" type="button" hidden disabled>导出 PDF</button></div>
+    <section id="practicePreviewPanel" class="practice-preview-panel" aria-label="练习卷预览" hidden><p id="practicePages" role="status"></p><iframe id="practiceFrame" title="练习卷实际排版预览" sandbox="allow-scripts allow-same-origin"></iframe></section>
+    <section id="practiceDone" class="practice-complete" hidden><h2>练习已完成</h2><p>你已经完成框题、核对、通过、选题和导出，可以开始整理自己的试卷了。</p><a class="button" href="/">开始使用</a></section>
+  </main>
+  <script src="/vendor/katex/katex.min.js" defer></script><script src="/qb-render.js" defer></script><script src="/browser-interactions.js" defer></script><script src="/practice.js" defer></script>
+</body>
+</html>

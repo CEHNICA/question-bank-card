@@ -51,6 +51,7 @@
       const title = node("h3", "", "答案解析"); title.id = "answerEditorTitle";
       const subtitle = node("p", "helper"); subtitle.id = "answerEditorScope";
       const heading = node("div"); heading.append(node("p", "eyebrow", "备课"), title, subtitle);
+      const keyHints = node("div", "answer-editor-shortcuts"); root.QBShortcutHelp?.mountHint(keyHints, "answers"); heading.append(keyHints);
       const close = node("button", "button button-quiet button-small", "返回"); close.type = "button"; close.addEventListener("click", closeEditor);
       head.append(heading, close);
       const main = node("div", "answer-editor-layout");
@@ -137,7 +138,11 @@
       });
       dialog.addEventListener("cancel", event => { event.preventDefault(); if (cropStart) { clearCrop(); return; } void closeEditor(); });
       dialog.addEventListener("keydown", event => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrent(); }
+        if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.shiftKey) return;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          if (!event.repeat) void saveCurrent();
+        }
       });
       cropSurface.addEventListener("click", event => {
         if (cropImage.dataset.ready !== "true" || !cropImage.naturalWidth || uploading || event.button !== 0) return;

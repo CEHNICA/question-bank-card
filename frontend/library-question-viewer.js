@@ -40,7 +40,10 @@
       const native = button("图片原尺寸", "questionViewerNative", () => { controls.content.classList.add("native-images"); setZoom(100); });
       const less = button("−", "questionViewerZoomOut", () => setZoom(zoom - 25)); less.setAttribute("aria-label", "缩小题目");
       const more = button("＋", "questionViewerZoomIn", () => setZoom(zoom + 25)); more.setAttribute("aria-label", "放大题目");
-      tools.append(fit, native, less, percent, more, node("span", "question-viewer-tip", "Ctrl + 滚轮缩放"));
+      const keyHints = node("div", "question-viewer-shortcuts");
+      if (root.QBShortcutHelp) root.QBShortcutHelp.mountHint(keyHints, "library", { fullScreen: true });
+      else keyHints.append(node("span", "question-viewer-tip", "← / → 上下题 · Esc 返回 · Ctrl + 滚轮缩放"));
+      tools.append(fit, native, less, percent, more, keyHints);
       const viewport = node("div", "question-viewer-viewport"); viewport.tabIndex = 0; viewport.setAttribute("aria-label", "完整题目与答案");
       const content = node("div", "question-viewer-content");
       const question = node("article", "paper question-viewer-question");
@@ -52,7 +55,7 @@
       dialog.addEventListener("click", event => { if (event.target === dialog) close(); });
       dialog.addEventListener("close", finishClose);
       dialog.addEventListener("keydown", event => {
-        if (!dialog.open || event.defaultPrevented || event.isComposing || event.keyCode === 229
+        if (!dialog.open || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat
             || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
         if (event.target?.closest?.("input, textarea, select, [contenteditable], [role='textbox']")) return;
         const scrolling = event.target?.closest?.(".qb-stem-body, .qb-option-body, .qb-analysis");
@@ -61,7 +64,7 @@
         event.preventDefault(); void navigate(event.key === "ArrowLeft" ? -1 : 1);
       });
       viewport.addEventListener("wheel", event => {
-        if (!event.ctrlKey || !event.deltaY) return;
+        if (event.defaultPrevented || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !event.deltaY) return;
         event.preventDefault(); setZoom(zoom + (event.deltaY < 0 ? 10 : -10));
       }, { passive: false });
     }

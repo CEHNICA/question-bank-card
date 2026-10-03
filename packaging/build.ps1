@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
+    [ValidatePattern('^\d+\.\d+(\.\d+){0,2}$')]
     [string]$Version = '1.3.0',
 
     [switch]$SkipInstaller,

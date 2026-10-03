@@ -2360,11 +2360,19 @@
   window.addEventListener("scroll", syncToolbar, { passive: true });
   window.addEventListener("resize", syncToolbar);
   syncToolbar();
+  $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
+  window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
+  window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
   document.addEventListener("keydown", (event) => {
-    if (event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !document.querySelector("dialog[open]") && !ui.search.disabled
-      && !document.activeElement?.closest?.("input, textarea, select")) {
+    const editable = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+    const ordinary = !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat
+      && !event.target?.closest?.(editable) && !document.activeElement?.closest?.(editable);
+    if (ordinary && !event.shiftKey && event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !document.querySelector("dialog[open]") && !ui.search.disabled) {
       event.preventDefault();
       ui.search.focus();
+    }
+    if (ordinary && event.key === "?" && ui.sheet.hidden && !document.querySelector("dialog[open]")) {
+      event.preventDefault(); window.QBShortcutHelp?.open("library");
     }
     handlePrintEscape(event);
   });

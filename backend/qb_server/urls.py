@@ -1,10 +1,13 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, api_key_reveal, export_preferences
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, api_key_reveal, export_preferences, practice
 
 urlpatterns = [
     path("", views.index_page),
     path("library", views.library_page),
+    path("practice/<uuid:paper_id>", practice.page),
+    path("practice.js", views._frontend("practice.js", "application/javascript; charset=utf-8")),
+    path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
     path("settings", views.index_page),
     path("app.js", views.app_script),
     path("browser-interactions.js", views.browser_interactions_script),
@@ -37,6 +40,9 @@ urlpatterns = [
     path("api/export-preferences/open", export_preferences.open_export_view),
     path("api/papers", views.papers),
     path("api/demo", views.demo_paper),
+    path("api/demo/<uuid:paper_id>/library", practice.library_view),
+    path("api/demo/<uuid:paper_id>/preview", practice.output_view, {"preview": True}),
+    path("api/demo/<uuid:paper_id>/export-pdf", practice.output_view),
     path("api/papers/<uuid:paper_id>", views.paper_detail),
     path("api/papers/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
     path("api/papers/<uuid:paper_id>/processing", views.paper_processing),

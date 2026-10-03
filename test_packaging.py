@@ -437,10 +437,11 @@ class InstallerReceiptTests(unittest.TestCase):
         cls.workspace = tempfile.TemporaryDirectory(prefix="tiyouju-installer-test-")
         cls.root = Path(cls.workspace.name).resolve()
         cls.stubs = {}
-        for version in ("1.10.13", "1.10.14", "1.10.15"):
+        for version in ("1.10.13", "1.10.14", "1.10.15", "1.11.18", "1.12", "1.12.0", "1.12.0.1"):
             target = cls.root / f"stub-{version}.exe"
+            numeric = ".".join((version.split(".") + ["0"] * 4)[:4])
             source = (
-                f'[assembly:System.Reflection.AssemblyFileVersion("{version}.0")]\n'
+                f'[assembly:System.Reflection.AssemblyFileVersion("{numeric}")]\n'
                 f'[assembly:System.Reflection.AssemblyInformationalVersion("{version}")]\n'
                 'public class InstallerStub { public static void Main() { '
                 f'System.Console.WriteLine("tiyouju {version}"); }} }}'
@@ -505,6 +506,49 @@ catch {{ Write-Output $_.Exception.Message; exit 9 }}
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("已保留本机版本：1.10.15", result.stdout)
         self.assertIn("已安装并通过核验，版本：1.10.15", result.stdout)
+
+    def test_two_component_version_is_verified_without_changing_display(self):
+        result = self.run_case("1.12", release="1.12", cli="1.12")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("已安装并通过核验，版本：1.12\n", result.stdout)
+        self.assertNotIn("版本：1.12.0", result.stdout)
+        self.assertIn("assistant-setup --json", result.stdout)
+
+    def test_equivalent_versions_compare_with_missing_components_zero(self):
+        for installed, release, cli in (("1.12.0", "1.12", "1.12"), ("1.12", "1.12.0", "1.12.0")):
+            with self.subTest(installed=installed, release=release, cli=cli):
+                result = self.run_case(installed, release=release, cli=cli)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn("已安装这个版本：", result.stdout)
+                self.assertIn(f"已安装并通过核验，版本：{installed}", result.stdout)
+
+    def test_short_newer_version_is_kept_when_public_release_is_older(self):
+        result = self.run_case("1.12", release="1.11.18", cli="1.12")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("已保留本机版本：1.12", result.stdout)
+
+    def test_upgrade_from_three_components_to_two_is_selected(self):
+        result = self.run_case("1.11.18", release="1.12", cli="1.11.18")
+        self.assertEqual(result.returncode, 9, result.stdout)
+        self.assertIn("TEST: a download was attempted", result.stdout)
+        self.assertNotIn("已安装并通过核验", result.stdout)
+
+    def test_revision_component_is_not_discarded(self):
+        result = self.run_case("1.12.0.1", release="1.12", cli="1.12.0.1")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("已保留本机版本：1.12.0.1", result.stdout)
+        wrong_cli = self.run_case("1.12.0.1", release="1.12", cli="1.12")
+        self.assertEqual(wrong_cli.returncode, 9, wrong_cli.stdout)
+        self.assertIn("安装尚未通过核验", wrong_cli.stdout)
+        self.assertNotIn("已安装并通过核验", wrong_cli.stdout)
+
+    def test_invalid_release_version_is_not_treated_as_installed(self):
+        for release in ("1", "1.12.bad", "1.12.0.0.1", "1.12-beta"):
+            with self.subTest(release=release):
+                result = self.run_case("1.12", release=release, cli="1.12")
+                self.assertEqual(result.returncode, 9, result.stdout)
+                self.assertIn("安装尚未通过核验", result.stdout)
+                self.assertNotIn("TEST: a download was attempted", result.stdout)
 
     def test_missing_or_wrong_cli_never_reports_success(self):
         for cli in (None, "1.10.13"):

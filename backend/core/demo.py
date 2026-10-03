@@ -46,7 +46,7 @@ def existing_demo() -> Paper | None:
                  if is_demo(paper)), None)
 
 
-def create_demo_paper(*, reset: bool = False) -> Paper:
+def create_demo_paper(*, reset: bool = False, course: str = "full") -> Paper:
     """Open the practice paper, making it (again) when needed."""
     current = existing_demo()
     if current is not None and not reset:
@@ -62,7 +62,8 @@ def create_demo_paper(*, reset: bool = False) -> Paper:
         # start a real reading, not open this practice copy.
         sha256=hashlib.sha256(pdf + b"\0qb-practice").hexdigest(),
         material_type=Paper.MaterialType.EXAM, pages=fixture["pages"],
-        status=Paper.Status.READY, structure={DEMO_MARK: True},
+        status=Paper.Status.READY, structure={DEMO_MARK: True, "course": course},
+        processing_plan={"mode": "manual", "revision": 0} if course == "basics" else {},
     )
     folder = settings.DATA_ROOT / str(paper.id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -71,11 +72,12 @@ def create_demo_paper(*, reset: bool = False) -> Paper:
     paper.render_path = paper.source_path
     try:
         with transaction.atomic():
-            paper.total = len(fixture["questions"])
+            questions = [item for item in fixture["questions"] if course != "basics" or item["number"] in {2, 9}]
+            paper.total = len(questions)
             paper.progress = paper.total
             paper.save()
             Block.objects.bulk_create([Block(paper=paper, **block) for block in fixture["blocks"]])
-            for item in fixture["questions"]:
+            for item in questions:
                 question = Question(paper=paper, **item)
                 question.approved = False
                 question.reread_requested = False

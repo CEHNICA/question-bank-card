@@ -71,9 +71,9 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 function M([string]$key) { return [regex]::Unescape($Messages[$key]) }
 function App-Version([string]$text) {
     try {
+        if ($text -notmatch '^\d+\.\d+(\.\d+){0,2}$') { throw 'invalid version' }
         $parsed = [version]$text
-        if ($parsed.Build -lt 0) { throw 'missing patch version' }
-        return [version]$parsed.ToString(3)
+        return [version]::new($parsed.Major, $parsed.Minor, [Math]::Max(0, $parsed.Build), [Math]::Max(0, $parsed.Revision))
     } catch { throw (M 'verify_failed') }
 }
 $Messages = @{
@@ -109,8 +109,8 @@ if ($installed) {
     $keepInstalled = ($installedVersion -eq $releaseVersion -and $env:TIYOUJU_REINSTALL -ne '1') -or (-not $env:TIYOUJU_VERSION -and $installedVersion -gt $releaseVersion)
 }
 if ($keepInstalled) {
-    if ($installedVersion -gt $releaseVersion) { Write-Output ((M 'newer') + $installedVersion) }
-    else { Write-Output ((M 'already') + $installedVersion) }
+    if ($installedVersion -gt $releaseVersion) { Write-Output ((M 'newer') + $installed) }
+    else { Write-Output ((M 'already') + $installed) }
 } else {
     $work = Join-Path $env:TEMP "tiyouju-install-$version"
     New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -157,14 +157,16 @@ if ($keepInstalled) {
 }
 
 if (-not (Test-Path -LiteralPath $App -PathType Leaf) -or -not (Test-Path -LiteralPath $Cli -PathType Leaf)) { throw (M 'verify_failed') }
-$verifiedVersion = App-Version ((Get-Item -LiteralPath $App).VersionInfo.ProductVersion)
+$verifiedText = (Get-Item -LiteralPath $App).VersionInfo.ProductVersion
+$verifiedVersion = App-Version $verifiedText
 $expectedVersion = App-Version $version
 if ($keepInstalled) { $expectedVersion = $installedVersion }
 if ($verifiedVersion -ne $expectedVersion) { throw (M 'verify_failed') }
 try { $cliVersion = ((& $Cli --version 2>&1) -join '').Trim() }
 catch { throw (M 'verify_failed') }
-if ($LASTEXITCODE -ne 0 -or $cliVersion -ne "tiyouju $($verifiedVersion.ToString(3))") { throw (M 'verify_failed') }
-Write-Output ((M 'installed') + $verifiedVersion.ToString(3))
+if ($LASTEXITCODE -ne 0 -or $cliVersion -notmatch '^tiyouju (?<number>\d+\.\d+(\.\d+){0,2})$') { throw (M 'verify_failed') }
+if ((App-Version $Matches['number']) -ne $verifiedVersion) { throw (M 'verify_failed') }
+Write-Output ((M 'installed') + $verifiedText)
 
 if ($env:TIYOUJU_NO_START -ne '1' -and -not (Get-Process -Name 'QuestionBankCard' -ErrorAction SilentlyContinue)) {
     Write-Output (M 'starting')

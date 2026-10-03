@@ -12,7 +12,7 @@ const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 
 assert.match(html, /id="focusToggle"[^>]*aria-pressed="true"[^>]*>.*专注<\/button>/);
-assert.match(html, /专注开 \/ 关（其余题暗下来）<\/span><span><kbd>Z<\/kbd>/);
+assert(require("./shortcut-help.js").reference("review").more.some(item => item.keys.includes("Z") && item.label.includes("专注")));
 // On by default, remembered per viewer.
 assert.match(js, /focus: readPref\("qb-focus", "1"\) === "1"/);
 assert.match(js, /case "z": event\.preventDefault\(\); setFocus\(!state\.focus\)/);
@@ -91,8 +91,9 @@ assert.match(js, /function canCollapse\(q\) \{\s*return Boolean\(q\) && isApprov
 assert.match(js, /autoExpand: readPref\("qb-auto-expand", "1"\) === "1"/);
 assert.match(js, /writePref\("qb-auto-expand", state\.autoExpand \? "1" : "0"\)/);
 assert.match(html, /id="settingsAutoExpand" type="checkbox" role="switch"/);
-assert.match(html, /<span>展开 \/ 收起这张已通过的题<\/span><span><kbd>O<\/kbd><\/span>/);
-assert.match(html, /<span>已通过的题全部展开 \/ 全部收起<\/span><span><kbd>Shift<\/kbd>\+<kbd>O<\/kbd><\/span>/);
+const focusKeys = require("./shortcut-help.js").reference("review");
+assert(focusKeys.more.some(item => item.keys.includes("O") && item.label.includes("展开")));
+assert(focusKeys.more.some(item => item.keys.includes("Shift+O") && item.label.includes("全部")));
 // A click on 展开 / the row, or E, is a manual expand: it stays open when J/K moves on.
 assert.match(js, /setExpanded\(q\.id, collapsed\);/);
 assert.match(js, /state\.autoExpanded\.delete\(q\.id\);    \/\/ 正在改的题，离开时不收回/);

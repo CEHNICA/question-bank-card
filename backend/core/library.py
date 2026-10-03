@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import features, imaging, prose, qtypes, source_images
+from . import demo, features, imaging, prose, qtypes, source_images
 from .figure_policy import (
     DECISION_FLAGS,
     CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
@@ -408,6 +408,8 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
             paper = Paper.objects.select_for_update().get(pk=question.paper_id)
         except Paper.DoesNotExist:
             raise ValueError("这份试卷任务已删除，不能再入库") from None
+        if demo.is_demo(paper):
+            raise ValueError(demo.PUBLISH_REFUSED)
         try:
             question = Question.objects.select_for_update().select_related("paper").get(pk=question.pk)
         except Question.DoesNotExist:

@@ -10,4 +10,4 @@ class AppVersionTests(TestCase):
         response = self.client.get("/api/status")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["app_version"], APP_VERSION)
-        self.assertRegex(APP_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertRegex(APP_VERSION, r"^\d+\.\d+(?:\.\d+){0,2}$")

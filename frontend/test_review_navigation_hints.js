@@ -68,7 +68,7 @@ guide.dismiss(); assert.equal(guide.visible("paper-one", true), false); assert.e
 guide.restore(); assert.equal(guide.visible("paper-new", true), true); assert.equal(makeGuide().visible("paper-two", true), false);
 assert(writes.every(key => key.startsWith("qb-review-guidance-")), "Only the dedicated local guidance preferences change");
 assert.match(html, /id="reviewGuidanceDismiss"[^>]*>以后不再提示/);
-assert.match(html, /id="settingsRestoreHints"[^>]*>恢复操作提示/);
+assert.match(html, /id="settingsRestoreHints"[^>]*>恢复(?:已关闭的)?操作提示/);
 const guideUI = source.slice(source.indexOf("  const reviewGuidance ="), source.indexOf("  function renderPaper()"));
 assert.match(guideUI, /setCropGuidanceEnabled\(true\)/, "Help restores the existing permanent crop guidance opt-out too");
 assert.doesNotMatch(guideUI, /paperError|cutReadingError|pageCropResult|editGuard|\/api\//, "Guidance changes cannot hide failures, unsaved warnings or submit work");
@@ -101,8 +101,11 @@ assert.match(menu, /id="paperContinueAi"/);
 assert.equal((html.match(/id="paperContinueAi"/g) || []).length, 1, "The existing guarded AI continuation has one menu entry");
 assert.doesNotMatch(html, /id="approveGreen"/);
 assert.doesNotMatch(source, /\$\("approveGreen"\)|approve-green/);
-assert.match(source, /firstTourCard\(\)\?\.querySelector\("\.card-tick"\), title: "入库"/);
-assert.match(source, /通过即自动入库/);
+const tourSteps = source.slice(source.indexOf("  const TOUR_STEPS ="), source.indexOf("  const tour ="));
+assert.equal((tourSteps.match(/querySelector\("\.card-tick"\)/g) || []).length, 1, "Automatic banking shares the single approval lesson");
+assert.match(tourSteps, /自动入库/);
+assert.match(tourSteps, /通过即入库/);
+assert.doesNotMatch(tourSteps, /publishButton/, "The tour never points to an obsolete second bank action");
 
 // Render real stage actions and the real empty-state branch together. Neither
 // depends on the previous stage's hidden flag, so an initial/polled render cannot

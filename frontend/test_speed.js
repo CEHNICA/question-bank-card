@@ -9,7 +9,7 @@ const path = require("node:path");
 const QB = require("./qb-render.js");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8").replace(/\r\n/g, "\n");
 
 // Cards off screen wait; the current card and one being edited never do.
 assert.match(css, /content-visibility: auto; contain-intrinsic-size: auto 320px; \}/);

@@ -21,7 +21,7 @@ from django.db import close_old_connections, transaction
 from django.utils import timezone
 from PIL import Image
 
-from . import imaging, readers, textnorm
+from . import demo, imaging, readers, textnorm
 from .models import RegionRead
 
 logger = logging.getLogger("core")
@@ -306,6 +306,8 @@ def crop(page: Image.Image, bbox: list[float]) -> Image.Image:
 def run(job: RegionRead) -> tuple[str, str]:
     from .pipeline import PageStore
 
+    if demo.is_demo(job.question.paper):
+        raise RegionError("示例练习不调用云服务，请对照原卷手工改字。")
     engine = readers.primary_engine()
     if engine is None:
         raise RegionError(NO_ENGINE)
@@ -405,6 +407,8 @@ def process_pending(limit: int = 5) -> int:
         handled += 1
         try:
             job = RegionRead.objects.select_related("question__paper").get(pk=job.pk)
+            if demo.is_demo(job.question.paper):
+                raise RegionError("示例练习不调用云服务，请对照原卷手工改字。")
             text, engine = run(job)
             _finish(job, RegionRead.Status.DONE, text=text, engine=engine)
         except RegionRead.DoesNotExist:

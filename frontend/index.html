@@ -97,7 +97,15 @@
             <h3 id="settingsFeaturesTitle">题面整理</h3>
             <p class="settings-footnote">整理显示方式，不改原卷。</p>
             <div id="featureSwitches"><p class="settings-footnote">正在读取…</p></div>
-            <p id="featureNote" class="settings-footnote" hidden></p>
+            <details id="featureAdvanced" class="settings-advanced">
+              <summary>高级整理设置</summary>
+              <div id="featureAdvancedSwitches"></div>
+            </details>
+            <details id="knowledgeDetails" class="settings-advanced" hidden>
+              <summary>管理知识点</summary>
+              <p class="settings-footnote">可用记事本编辑知识点目录，每行一个知识点，# 开头的是章名。修改后下次生成标签时使用。</p>
+              <details><summary>查看文件位置</summary><p id="featureNote" class="settings-footnote settings-path"></p></details>
+            </details>
           </section>
           <section id="settingsInterface" class="settings-section" aria-labelledby="settingsInterfaceTitle">
             <h3 id="settingsInterfaceTitle">审核界面</h3>
@@ -109,35 +117,63 @@
           </section>
         </div>
         <div id="settingsReview" class="settings-page" role="tabpanel" hidden>
-          <section class="settings-section" aria-labelledby="settingsReviewTitle">
-            <h3 id="settingsReviewTitle">题卡上的标记是什么意思</h3>
-            <dl class="explain-list">
-              <div><dt>两种引擎一致</dt><dd>看图读出的题面和 MinerU 自己识别的文字逐字一致（两套独立的程序），所以没有再请复核模型读。</dd></div>
-              <div><dt>AI 两次一致</dt><dd>和 MinerU 的文字有出入（有手写的卷子常见）时，复核模型又独立读了一遍，两次读出的题面相同。</dd></div>
-              <div><dt>AI 三读多数一致</dt><dd>前两次读的不一样；MinerU 的文字在每处分歧上支持其中一次，或者第三次读和其中一次相同，就采用多数的读法。</dd></div>
-              <div><dt>一致不等于正确</dt><dd>以上都只是机器之间的一致，不代表已经和原卷人工核对过。</dd></div>
-              <div><dt>未人工审核</dt><dd>需要你对照原卷确认；在题号左边的方框里打勾（或按 Enter），才记录为你接受了当前版本。</dd></div>
-              <div><dt>处理记录</dt><dd>程序在切题、页序、配图等环节注意到的情况，不等于出错。在试卷标题旁的“试卷操作”里可以看到。</dd></div>
-            </dl>
+          <section class="settings-section help-start" aria-labelledby="settingsReviewTitle">
+            <h3 id="settingsReviewTitle">从一份小练习开始</h3>
+            <p class="settings-description">切出题目、核对改字、通过后选题，最后实际导出一份 PDF。</p>
             <div class="settings-help-actions">
-              <button id="settingsLearn" class="button primary" type="button">用示例试卷重新学一遍</button>
-              <button id="settingsNewFeatures" class="button" type="button">只看新版功能</button>
-              <button id="settingsWelcome" class="button" type="button">重新看一遍新手引导</button>
-              <button id="settingsRestoreHints" class="button" type="button">恢复操作提示</button>
+              <button id="settingsLearn" class="button primary" type="button">开始新手练习</button>
+              <button id="settingsHelpFaq" class="button" type="button">常见问题</button>
+              <button id="settingsHelpKeys" class="button" type="button">快捷键</button>
             </div>
-            <p class="settings-footnote">基础练习约 3 分钟；新版功能可以单独看。示例不用密钥、不调用读题服务，也不会进入正式题库。教学进度保存在本机浏览器，刷新后可继续。</p>
-            <details class="teaching-help">
-              <summary>忘了怎么操作，或遇到未保存提醒？</summary>
+            <p class="settings-footnote">示例全程离线；练习题库和选题篮独立，不会改动你的正式题库。进度会自动记住，下次可以继续。</p>
+          </section>
+          <section class="settings-section help-tasks" aria-labelledby="helpTasksTitle">
+            <h3 id="helpTasksTitle">遇到问题时再看</h3>
+            <details class="teaching-help"><summary>题目缺了配图</summary>
+              <p>点题卡的“补选配图”，从原卷选图，再选择属于题干还是选项。保存后对照原卷重新通过。</p>
+              <button class="button small" type="button" data-teach-task="figure">用示例练补图</button>
+            </details>
+            <details class="teaching-help"><summary>一道题跨栏或跨页</summary>
+              <p>为同一道题添加多个片段；翻到下一页继续框选，等题干、选项和图都完整后再保存。调整已有题可用“调整范围”。</p>
+            </details>
+            <details class="teaching-help"><summary>补充或修改答案</summary>
+              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
+            </details>
+            <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
+              <p>等待时可改为手工切题，原卷和已保存题目会保留。框好后完成切题；读题服务不可用时，仍可对照原图审核，也可配置服务后重试。</p>
+              <p>重试不会替你通过题目。云处理发送范围和可能产生的费用，会在发起前说明。</p>
+            </details>
+          </section>
+          <section class="settings-section" aria-labelledby="helpFaqTitle">
+            <h3 id="helpFaqTitle">常见问题</h3>
+            <details id="settingsFaq" class="teaching-help"><summary>查看常见问题</summary>
               <dl class="explain-list">
-                <div><dt>看原卷</dt><dd>题卡截图、查看整份原卷、正式题库的查看出处，都支持 Ctrl＋滚轮缩放和左键拖动。画框编辑时，改用空格＋左键或中键拖动画布。</dd></div>
-                <div><dt>改字找位置</dt><dd>点输入框光标或选中文字，预览会标出对应位置；公式内插入位置以输入框光标为准。Ctrl＋Enter 保存。</dd></div>
-                <div><dt>切题后 AI 识读</dt><dd>点两次固定题目范围，按 S 保存下一题，只保存范围。点“完成切题”或按 Ctrl+S 后自动识读已保存的题目；Enter / Ctrl+Enter 也可使用。文字显示在原图旁，再核对文字和配图并审核。没有读题服务时保留原图，可设置服务后重试，也可直接原图审核。</dd></div>
-                <div><dt>框选识读纠错</dt><dd>文字题可从“更多 → 框选识读（纠错）”进入，只读需要纠正的一小块。自动推荐会建议替换题干或选项中的哪段文字。看过前后对比再填入改字；未保存前原题不变。识读和推荐需要配置可用的读题服务。</dd></div>
-                <div><dt>未保存的字</dt><dd>选择“继续编辑”回到输入框；“丢弃改动”保留上次保存的文字。刷新或关闭前先保存，未保存的字不会自动恢复。已经入库的旧版本可以在正式题库的“版本历史”中查看。</dd></div>
-                <div><dt>快速找题和选题</dt><dd>正式题库先显示完整段落或公式摘要；点“完整题目”查看所有条件、选项和配图。可勾选当前已显示的题批量加入试题篮；换来源、筛选或翻页后，篮中的题会保留。</dd></div>
-                <div><dt>继续上次组卷</dt><dd>在组卷预览里填写标题、点“保存草稿”。下次从“组卷草稿”继续；已撤回或更新的题会提示处理，不会自动换题或漏印。</dd></div>
-                <div><dt>标签和参考答案</dt><dd>在“设置 → API 配置 → 标签与答案”配置并测试独立 API。两项全局开关默认关闭、默认手动；开启后可在题库单题、批量或入库时生成。答案解析窗口也可仅勾选本次需要补充的题，不改变全局开关；初稿检查并保存后用于出卷，原卷答案保留。AI 初稿标为“AI 参考 · 未核对”；人工保存后显示保存版本，旧初稿保留在历史中。</dd></div>
+                <div><dt>通过以后还要入库吗？</dt><dd>不用。对照原卷确认后标记通过，题目自动入库；改过题面后需要重新核对。</dd></div>
+                <div><dt>怎样看完整题目？</dt><dd>题库点“全屏看题”，用左右方向键切换题目，Esc 返回。原卷支持 Ctrl＋滚轮缩放和左键拖动。</dd></div>
+                <div><dt>没保存时能直接离开吗？</dt><dd>有实际改动时会提醒。选择“继续编辑”保留当前内容；“丢弃改动”回到上次保存的版本。</dd></div>
+                <div><dt>怎样继续上次组卷？</dt><dd>组卷预览中保存草稿，下次从“组卷草稿”打开。遇到更新或撤回的题，先按提示处理。</dd></div>
+                <div><dt>AI 答案的“未核对”是什么意思？</dt><dd>表示这份初稿还需要人工检查。人工保存后主视图显示保存版本；保存本身不代表数学结论已经正确。</dd></div>
               </dl>
+            </details>
+            <details class="teaching-help"><summary>题卡上的标记说明</summary>
+              <p>“需要核查”表示还没人工确认；黄色提醒指出需要特别核对的位置；“已通过”表示当前版本已被确认。</p>
+              <details class="teaching-help"><summary>查看识读过程的详细标记</summary>
+                <dl class="explain-list">
+                  <div><dt>两种引擎一致</dt><dd>两种独立识读结果相同。</dd></div>
+                  <div><dt>AI 两次一致</dt><dd>两次独立识读的题面相同。</dd></div>
+                  <div><dt>AI 三读多数一致</dt><dd>识读结果有分歧时采用多数相同的读法。</dd></div>
+                  <div><dt>一致不等于正确</dt><dd>这些标记不能代替对照原卷核查。</dd></div>
+                  <div><dt>处理记录</dt><dd>切题、页序或配图时遇到的情况，可在“试卷操作”中查看。</dd></div>
+                </dl>
+              </details>
+            </details>
+            <details class="teaching-help help-preferences"><summary>重新练习与提示设置</summary>
+              <div class="settings-help-actions">
+                <button id="settingsRestartLearn" class="button" type="button">重新开始练习</button>
+                <button id="settingsWelcome" class="button" type="button">浏览界面入口</button>
+                <button id="settingsRestoreHints" class="button" type="button">恢复已关闭的操作提示</button>
+              </div>
+              <p class="settings-footnote">基础提示可以永久关闭；服务故障和未保存提醒仍会显示。</p>
             </details>
           </section>
         </div>
@@ -192,7 +228,7 @@
         </svg>
         <h2>把题目留下，也把出处留下</h2>
         <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
-        <button id="emptyLearn" class="button primary" type="button">先用示例试卷学一遍（不用密钥）</button>
+        <button id="emptyLearn" class="button primary" type="button">先做新手练习（不用密钥）</button>
         <ol class="empty-steps">
           <li><b>1</b>上传原卷，程序先尝试切题；未切出的题手工补齐</li>
           <li><b>2</b>用已保存的题目 AI 识读，也可直接保留原图</li>
@@ -737,15 +773,15 @@
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
         <strong>第一次用？先拿示例试卷练一遍</strong>
-        <span>一份已经读好的示例试卷，不用密钥、不调用读题服务。用约 3 分钟练对照、打勾、改错字、补配图和入库入口；然后可选看新版功能。示例不会进入正式题库。</span>
-        <button id="welcomeLearn" class="button primary" type="button">用示例试卷学一遍</button>
+        <span>用三道示例题实际练切题、改字、核对通过、选题和导出。不用密钥、不调用 AI，也不会改动正式题库。</span>
+        <button id="welcomeLearn" class="button primary" type="button">开始新手练习</button>
       </div>
     </div>
     <footer class="welcome-actions">
       <button id="welcomeKeys" class="button" type="button" hidden>配置自动切题（可稍后）</button>
       <span class="welcome-spacer"></span>
       <button id="welcomeSkip" class="button quiet" type="button">直接开始</button>
-      <button id="welcomeTour" class="button" type="button">只看一遍界面</button>
+      <button id="welcomeTour" class="button" type="button">浏览界面入口</button>
     </footer>
   </dialog>
 
@@ -790,37 +826,16 @@
     <div class="dialog-head">
       <div>
         <h3 id="keysTitle">快捷键</h3>
-        <p class="hint">在输入框里打字时不会触发。</p>
+        <p class="hint">按当前场景查看。输入时不触发导航和画框快捷键；保存组合键仍可使用。</p>
       </div>
-      <button class="button" type="button" data-close>关闭</button>
+      <button class="button" type="button" data-close data-shortcut-help-close>关闭</button>
     </div>
-    <div class="keys-body">
-      <h4>审题</h4>
-      <div class="key-row"><span>下一张 / 上一张题卡</span><span><kbd>J</kbd><kbd>K</kbd></span></div>
-      <div class="key-row"><span>展开 / 收起这张已通过的题</span><span><kbd>O</kbd></span></div>
-      <div class="key-row"><span>已通过的题全部展开 / 全部收起</span><span><kbd>Shift</kbd>+<kbd>O</kbd></span></div>
-      <div class="key-row"><span>标记通过（并跳到下一张）</span><span><kbd>Enter</kbd></span></div>
+    <div id="shortcutHelpBody" class="shortcut-help-body">
+      <h4>录入审核</h4>
+      <div class="key-row"><span>当前列表下一题</span><span><kbd>N</kbd></span></div>
+      <div class="key-row"><span>通过并继续，自动入库</span><span><kbd>Enter</kbd></span></div>
       <div class="key-row"><span>撤销通过</span><span><kbd>U</kbd></span></div>
-      <div class="key-row"><span>放大对照原卷</span><span><kbd>Space</kbd></span></div>
-      <div class="key-row"><span>改字</span><span><kbd>E</kbd></span></div>
-      <div class="key-row"><span>调整范围 / 配图</span><span><kbd>R</kbd><kbd>F</kbd></span></div>
-      <div class="key-row"><span>当前列表下一张题卡</span><span><kbd>N</kbd></span></div>
-      <div class="key-row"><span>题卡放大镜开 / 关</span><span><kbd>L</kbd></span></div>
-      <div class="key-row"><span>专注开 / 关（其余题暗下来）</span><span><kbd>Z</kbd></span></div>
-      <div class="key-row"><span>全屏审核 / 退出全屏</span><span><kbd>Q</kbd><kbd>Esc</kbd></span></div>
-      <div class="key-row"><span>打勾通过 / 再点撤销</span><span>点题号左边的方框</span></div>
-      <div class="key-row"><span>批量删除：选择题卡（工具 → 批量删除题卡）</span><span><kbd>Ctrl</kbd>+点击 / <kbd>Shift</kbd>+点击</span></div>
-      <div class="key-row"><span>把已选题卡移到回收站 / 退出选择</span><span><kbd>Delete</kbd><kbd>Esc</kbd></span></div>
-      <h4>放大对照</h4>
-      <div class="key-row"><span>完整显示整题 / 适合宽度</span><span><kbd>0</kbd><kbd>W</kbd></span></div>
-      <div class="key-row"><span>缩小 / 放大原卷</span><span><kbd>−</kbd><kbd>+</kbd></span></div>
-      <div class="key-row"><span>鼠标所在位置缩放</span><span><kbd>Ctrl</kbd>+滚轮</span></div>
-      <div class="key-row"><span>拖动原卷 / 题面（Alt+拖动可选字）</span><span>鼠标左键</span></div>
-      <h4>筛选与其他</h4>
-      <div class="key-row"><span>全部 / 需要核查 / 已通过</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
-      <div class="key-row"><span>改字时保存</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
-      <div class="key-row"><span>关闭窗口 / 取消改字</span><span><kbd>Esc</kbd></span></div>
-      <div class="key-row"><span>打开这张说明</span><span><kbd>?</kbd></span></div>
+      <p class="hint">完整说明按录入审核、切题配图、题库看题、答案编辑和组卷导出分别展示。</p>
     </div>
   </dialog>
 
@@ -843,6 +858,7 @@
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/static/export-settings.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
+  <script src="/shortcut-help.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
