@@ -547,7 +547,7 @@ const QBTeach = (() => {
     { key: "drafts", title: "给这份练习起个名字", manual: true,
       text: "在组卷预览里填写试卷标题，点“保存草稿”；“另存为”会保留另一份。下次从“组卷草稿”继续选题和调整顺序。题目被撤回、更新或找不到时会明确提示；先处理缺题，不会悄悄换成新版本或漏印。" },
     { key: "ai", title: "标签和答案，统一设置", manual: true,
-      text: "所有页面共用“设置 → 标签与答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，也可在正式题库单题或勾选批量生成。默认由当前 AI 助手通过本机工具写回，无需额外豆包 API；独立模型可选，推荐 DeepSeek。教学只认识入口，不改开关、不生成、不测试。" },
+      text: "所有页面共用“设置 → API 配置 → 标签与答案”。两项默认关闭、默认手动；开启后可选录入并入库时自动生成，也可在正式题库单题或勾选批量生成。答题服务、模型和密钥统一在 API 配置窗口中设置。教学只认识入口，不改开关、不生成、不测试。" },
     { key: "recovery", title: "没保存时，先留住改动", manual: true,
       text: "改字时按 Ctrl＋Enter 保存。取消、换卷或离开有改动的题，会提示“继续编辑”或“丢弃改动”；刷新会有浏览器提醒，未保存的字不会自动恢复。教学进度会记住，刷新后能继续。" },
     { key: "finish", title: "现在可以用自己的试卷了", manual: true, final: true,
@@ -1827,7 +1827,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const ids = QBCutReading.cutReadingSummary(state.questions).eligibleIds;
     if (!ids.length) return;
     if (!state.status?.reader || state.status.assistant_mode) {
-      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → 读题服务配置；也可改字或直接原图审核。");
+      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → API 配置中配置；也可改字或直接原图审核。");
       renderCutReadingStage();
       return;
     }
@@ -4762,7 +4762,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestAnimationFrame(action);
   }
 
-  const SETTINGS_HASHES = { settingsGeneral: "services", settingsAI: "ai", settingsDisplay: "display", settingsReview: "help", settingsAbout: "about" };
+  const SETTINGS_HASHES = { settingsGeneral: "services", settingsDisplay: "display", settingsReview: "help", settingsAbout: "about" };
   function settingsTabFromHash() {
     const hash = window.location.hash.slice(1);
     return Object.keys(SETTINGS_HASHES).find((id) => SETTINGS_HASHES[id] === hash) || "settingsGeneral";
@@ -4782,11 +4782,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${SETTINGS_HASHES[id]}`);
     }
   }
+  function syncSettingsRoute() {
+    showSettingsTab(settingsTabFromHash(), { updateHash: false });
+    // Existing answer-setting links keep opening the answer section of the one
+    // API window, without bringing back a second settings page or entry point.
+    if (["#ai", "#api"].includes(window.location.hash)) void openCredentialSettings("answers");
+  }
   window.addEventListener("hashchange", () => {
-    if (window.location.pathname === "/settings") {
-      showSettingsTab(settingsTabFromHash(), { updateHash: false });
-      if (window.location.hash === "#api") void openCredentialSettings("answers");
-    }
+    if (window.location.pathname === "/settings") syncSettingsRoute();
   });
 
   document.querySelectorAll("[data-settings-tab]").forEach((tab, index, tabs) => {
@@ -4873,7 +4876,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsFocus").checked = state.focus;
     $("settingsAutoExpand").checked = state.autoExpand;
     if (!modelFormDirty) showModelSaveResult("");
-    showSettingsTab(settingsTabFromHash(), { updateHash: false });
+    syncSettingsRoute();
     void loadStatus();
     requestAnimationFrame(() => { if (!anyDialogOpen()) $("settingsTitle").focus({ preventScroll: true }); });
   }
@@ -4883,7 +4886,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
-  $("settingsAPIOpen").addEventListener("click", () => { void openCredentialSettings("answers"); });
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
   $("settingsAutoExpand").addEventListener("change", (event) => {
@@ -8563,7 +8565,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "basket": later(() => document.querySelector('.topnav a[href="/library"]'), "从这里进入题库选题", "勾选当前已显示的题，再加入试题篮。可切到“已选题目”集中检查；收起试题篮不会清空。教学不替你选择真实题目。"); break;
       case "drafts": later(() => document.querySelector('.topnav a[href="/library"]'), "从题库继续组卷", "按 A4 页预览，选省纸排版或尽量保持单题完整；选项可全卷或单题调整，单题也能另起页。直接导出 PDF 或 Word，保存草稿后下次继续。旧版本、缺题先处理。教学只认识入口，不保存真实草稿或实际导出。"); break;
       case "ai": {
-        later(() => $("settingsButton"), "设置 → 标签与答案", "两项默认关闭。开启后可选入库时生成，也可在题库单题或勾选批量生成。助手模式仍需当前助手处理并写回；教学不会改开关。");
+        later(() => $("settingsButton"), "设置 → API 配置 → 标签与答案", "两项默认关闭。开启后可选入库时生成，也可在题库单题或勾选批量生成。教学不会改开关。");
         break;
       }
       case "recovery": {
@@ -8641,7 +8643,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         }
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();
-      if (window.location.hash === "#api") void openCredentialSettings("answers");
       if (window.ExportSettings?.mount) await window.ExportSettings.mount($("exportSettingsMount"));
       return;
     }

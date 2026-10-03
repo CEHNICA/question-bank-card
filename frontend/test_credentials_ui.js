@@ -32,7 +32,7 @@ assert.match(js, /action:\s*"clear"/);
 assert.match(js, /resetCredentialInputs\(\);[\s\S]*?renderCredentialStates\(result\)/);
 assert.match(js, /async function loadStatus\(\)[\s\S]*?return false;[\s\S]*?return true;/);
 assert.match(js, /await refreshCredentialStatus\(refreshMessage, session\)/);
-assert.match(js, /function openSettings\(\)[\s\S]*?showSettingsTab\(settingsTabFromHash\(\), \{ updateHash: false \}\);[\s\S]*?void loadStatus\(\);/);
+assert.match(js, /function openSettings\(\)[\s\S]*?syncSettingsRoute\(\);[\s\S]*?void loadStatus\(\);/);
 assert.match(html, /已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒/);
 assert.match(html, /id="credentialSavedTotal"/);
 assert.match(html, /不写入题库、日志或项目文件/);

@@ -18,11 +18,11 @@ for (const page of [html, libraryHtml]) {
 assert.match(html, /id="aboutVersion"/);
 assert.match(js, /题有据 \$\{s\.app_version\}（本机安装）/);
 
-// 两页进入一个常规设置页：服务、AI、显示、帮助、关于。
+// 两页进入一个常规设置页；API 配置只有一个外层分区和入口。
 assert.match(html, /id="settingsButton" href="\/settings">设置<\/a>/);
 assert.match(libraryHtml, /href="\/settings">设置<\/a>/);
 assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
-for (const id of ["settingsGeneral", "settingsAI", "settingsDisplay", "settingsReview", "settingsAbout"]) {
+for (const id of ["settingsGeneral", "settingsDisplay", "settingsReview", "settingsAbout"]) {
   assert.match(html, new RegExp(`data-settings-tab="${id}"`));
   assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
 }
@@ -33,9 +33,75 @@ assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
 assert.match(html, /id="libraryAIAPISettingsMount"/);
 assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true \}\)/);
 assert.doesNotMatch(html + js, /libraryAISettingsMount/);
-assert.match(html, /id="settingsAPIOpen"[^>]*>API 配置<\/button>/);
+assert.equal((html.match(/>API 配置<\/button>/g) || []).length, 2, "One outer tab and one configuration button");
+assert.match(html, /id="settingsCredentialOpen"[^>]*>API 配置<\/button>/);
+assert.doesNotMatch(html + js, /settingsAI\b|settingsAPIOpen/);
 assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialSettings \}\)/);
-assert.match(js, /settingsAI: "ai"/);
+
+// Run the actual settings route and navigation handlers against the tabs parsed
+// from the page. Old answer bookmarks must work on both entry and hash changes.
+const vm = require("node:vm"), dom = require("./credential-test-dom.js");
+const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  function renderSettingsReady()"));
+const openSource = js.slice(js.indexOf("  function openSettings()"), js.indexOf('  $("settingsButton").addEventListener'));
+function routes(hash = "") {
+  const listeners = new Map(), nodes = new Map(), opened = [], navigated = [];
+  const $ = (id) => { if (!nodes.has(id)) nodes.set(id, dom.node(id)); return nodes.get(id); };
+  const tabs = [...html.matchAll(/<button[^>]*data-settings-tab="([^"]+)"[^>]*>([^<]+)<\/button>/g)].map((match) => {
+    const tab = dom.node(match[1], "button", match[2]); tab.dataset = { settingsTab: match[1] }; tab.focus = () => { tab.focused = true; }; return tab;
+  });
+  const pages = [...html.matchAll(/id="([^"]+)" class="settings-page" role="tabpanel"/g)].map((match) => $(match[1]));
+  const location = { pathname: "/settings", search: "", hash };
+  const context = vm.createContext({ $, window: { location,
+    addEventListener(name, fn) { listeners.set(name, fn); },
+    history: { replaceState(_state, _title, url) { location.hash = url.slice(url.indexOf("#")); } }
+  }, document: {
+    querySelectorAll(selector) { if (selector === "[data-settings-tab]") return tabs; if (selector === "#settingsDialog .settings-page") return pages; throw new Error(selector); },
+    querySelector(selector) { assert.equal(selector, "#settingsDialog .settings-scroll"); return $("scroll"); }
+  }, state: { lens: false, focus: false, autoExpand: true }, modelFormDirty: false,
+  openCredentialSettings(tab) { opened.push(tab); $("credentialDialog").open = true; },
+  loadFeatureSwitches: () => {}, renderSettingsModels: () => {}, renderSettingsReady: () => {},
+  showModelSaveResult: () => {}, loadStatus: () => {},
+  leaveFor: (url) => navigated.push(url), anyDialogOpen: () => $("credentialDialog").open,
+  requestAnimationFrame: (fn) => fn() });
+  vm.runInContext(routeSource + openSource, context);
+  return { $, context, tabs, pages, location, opened, navigated, listeners,
+    selected() { return tabs.filter((tab) => tab.getAttribute("aria-selected") === "true").map((tab) => tab.id); },
+    visible() { return pages.filter((page) => !page.hidden).map((page) => page.id); }
+  };
+}
+for (const hash of ["#ai", "#api", "#services", "", "#display", "#help", "#about", "#unknown"]) {
+  const entry = routes(hash);
+  entry.context.openSettings();
+  const expected = ({ "#display": "settingsDisplay", "#help": "settingsReview", "#about": "settingsAbout" })[hash] || "settingsGeneral";
+  assert.deepEqual(entry.selected(), [expected]); assert.deepEqual(entry.visible(), [expected]);
+  assert.deepEqual(entry.opened, ["#ai", "#api"].includes(hash) ? ["answers"] : [], "Initial bookmarks use only the unified window");
+  assert.equal(entry.location.hash, hash, "Entry does not replace legacy bookmark before routing");
+  for (const nextHash of ["#ai", "#api", "#services", "#display"]) {
+    entry.opened.length = 0; entry.location.hash = nextHash; entry.listeners.get("hashchange")();
+    assert.deepEqual(entry.selected(), [nextHash === "#display" ? "settingsDisplay" : "settingsGeneral"]);
+    assert.deepEqual(entry.visible(), entry.selected());
+    assert.deepEqual(entry.opened, ["#ai", "#api"].includes(nextHash) ? ["answers"] : [], "Changed legacy bookmarks also open the answer section");
+  }
+}
+const navigation = routes(); navigation.context.openSettings();
+assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["API 配置", "显示与导出", "帮助", "关于"]);
+for (let index = 0; index < navigation.tabs.length; index++) {
+  for (const key of ["ArrowLeft", "ArrowRight"]) {
+    let prevented = false;
+    navigation.tabs.forEach((tab) => { tab.focused = false; });
+    navigation.tabs[index].events.keydown[0]({ key, preventDefault() { prevented = true; } });
+    const next = navigation.tabs[(index + (key === "ArrowRight" ? 1 : -1) + navigation.tabs.length) % navigation.tabs.length];
+    assert.equal(prevented, true); assert.equal(next.focused, true);
+    assert.deepEqual(navigation.selected(), [next.id]); assert.deepEqual(navigation.visible(), [next.id]);
+    assert.equal(next.tabIndex, 0); assert.ok(navigation.tabs.filter((tab) => tab !== next).every((tab) => tab.tabIndex === -1));
+  }
+  navigation.tabs[index].events.click[0]();
+  assert.deepEqual(navigation.selected(), [navigation.tabs[index].id]); assert.deepEqual(navigation.visible(), [navigation.tabs[index].id]);
+}
+assert.deepEqual(navigation.opened, [], "Normal outer tab navigation does not open another API entry");
+navigation.location.pathname = "/library"; navigation.location.hash = "#ai";
+navigation.listeners.get("hashchange")(); assert.deepEqual(navigation.opened, []);
+navigation.context.openSettings(); assert.deepEqual(navigation.navigated, ["/settings"]);
 // Local import is available without cloud credentials.
 assert.match(html, /id="settingsReady"/);
 assert.match(js, /导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 \$\{missing\.join\("、"\)\} 密钥/);
