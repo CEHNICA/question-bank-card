@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -207,6 +208,10 @@ class ShortcutTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "real Windows shortcut")
     def test_real_powershell_fallback_keeps_unicode_paths_and_source_arguments(self):
+        # Real Shell validation should receive an actual PE and icon, not the
+        # placeholder bytes used by the unit tests. Neither is executed.
+        shutil.copyfile(sys.executable, self.pythonw)
+        shutil.copyfile(shortcut.ICON, self.root / "app.ico")
         with mock.patch.object(shortcut, "_write_with_com", side_effect=ImportError("pywin32 unavailable")):
             try:
                 self.assertTrue(shortcut.create(self.link, spec=self.spec))
