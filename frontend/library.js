@@ -150,6 +150,22 @@
     window.history.replaceState(null, "", url);
   }
 
+  function libraryQuery(filters = state, { limit = 40, offset = 0 } = {}) {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset), sort: filters.sort || "recent" });
+    for (const key of ["q", "document", "type", "review", "answer", "tag"]) {
+      const value = key === "q" ? String(filters[key] || "").trim() : filters[key];
+      if (value) query.set(key, value);
+    }
+    return query;
+  }
+
+  function markLibraryResult(query = null) {
+    if (query) state.resultQuery = query.toString();
+    const filters = new URLSearchParams(state.resultQuery || ""); filters.delete("limit"); filters.delete("offset");
+    const identity = JSON.stringify([state.view, state.view === "selected" ? state.basket : filters.toString(), visibleItems().map(item => item.id)]);
+    if (identity !== state.resultIdentity) { state.resultGeneration = (state.resultGeneration || 0) + 1; state.resultIdentity = identity; }
+  }
+
   async function load({ append = false, quiet = false } = {}) {
     if (state.view === "selected") {
       window.clearTimeout(state.poll);
@@ -162,6 +178,7 @@
         }
       } catch (_) { /* Keep the last known settings when a local refresh fails. */ }
       await refreshBasket({ force: true });
+      markLibraryResult();
       render();
       scheduleJobRefresh();
       return;
@@ -172,14 +189,7 @@
     window.clearTimeout(state.poll);
     // A quiet refresh (jobs finishing) reloads everything already shown, page by page.
     const wanted = quiet ? Math.max(40, state.items.length) : 40;
-    const query = new URLSearchParams({ limit: String(Math.min(100, wanted)), offset: String(append ? state.items.length : 0) });
-    query.set("sort", state.sort);
-    if (state.q.trim()) query.set("q", state.q.trim());
-    if (state.document) query.set("document", state.document);
-    if (state.type) query.set("type", state.type);
-    if (state.review) query.set("review", state.review);
-    if (state.answer) query.set("answer", state.answer);
-    if (state.tag) query.set("tag", state.tag);
+    const query = libraryQuery(state, { limit: Math.min(100, wanted), offset: append ? state.items.length : 0 });
     if (!append && !quiet) ui.status.textContent = "正在读取题库…";
     try {
       const response = await fetch(`/api/library?${query}`, { cache: "no-store" });
@@ -198,6 +208,7 @@
       state.features = body.features || {};
       state.ai = body.ai || { mode: "assistant" };
       state.items = append ? state.items.concat(body.items) : body.items;
+      markLibraryResult(query);
       state.items.forEach((item) => state.catalog.set(item.id, item));
       render();
       // 助手任务只等待工具写回；API 任务由后台处理。两种结果都刷新显示。
@@ -355,9 +366,50 @@
   }
 
   let questionViewer = null;
+  function questionViewerNavigation(item) {
+    const selected = state.view === "selected", items = visibleItems().slice();
+    const index = items.findIndex(value => value.id === item.id);
+    if (index < 0) return null;
+    const query = new URLSearchParams(state.resultQuery || libraryQuery().toString());
+    query.delete("limit"); query.delete("offset");
+    const view = state.view, generation = state.resultGeneration || 0;
+    const basket = selected ? JSON.stringify(state.basket) : "";
+    const total = selected ? items.length : Math.max(items.length, Number(state.total) || 0);
+    const stillCurrent = () => state.view === view && (state.resultGeneration || 0) === generation
+      && (!selected || JSON.stringify(state.basket) === basket);
+    const assertCurrent = signal => {
+      if (signal?.aborted) throw new Error("读取下一题已停止");
+      if (!stillCurrent()) throw new Error("题库结果已更新，请返回题库重新打开后继续看题。");
+    };
+    return { index, total,
+      note: selected && state.basket.length > items.length ? `已选 ${state.basket.length} 题，其中 ${state.basket.length - items.length} 题暂不可查看；按可用题目浏览。` : "",
+      async load(position, { signal } = {}) {
+        assertCurrent(signal);
+        if (!Number.isInteger(position) || position < 0 || position >= total) throw new Error("已到当前结果的边界");
+        if (position >= items.length) {
+          const next = new URLSearchParams(query); next.set("limit", "40"); next.set("offset", String(items.length));
+          const response = await fetch(`/api/library?${next}`, { cache: "no-store", signal });
+          const body = await response.json();
+          assertCurrent(signal);
+          if (!response.ok) throw new Error(body.error || "下一页题目读取失败，请重试。");
+          if (!Array.isArray(body.items) || !body.items.length || !Number.isInteger(body.total) || body.total !== total
+              || items.length + body.items.length > total
+              || body.items.some(value => !value?.id || items.some(known => known.id === value.id))
+              || new Set(body.items.map(value => value.id)).size !== body.items.length) {
+            throw new Error("题库结果已有变化或返回不完整，请返回题库刷新后继续。");
+          }
+          items.push(...body.items);
+        }
+        assertCurrent(signal);
+        if (!items[position]) throw new Error("下一题暂未返回，请重试。");
+        return { item: items[position], index: position, total };
+      }
+    };
+  }
   function openQuestionViewer(item, returnFocus) {
     if (!questionViewer) questionViewer = window.LibraryQuestionViewer.create({ node, QB, solutions });
-    return questionViewer.open(item, { returnFocus });
+    return questionViewer.open(item, { returnFocus, navigation: questionViewerNavigation(item),
+      returnFocusResolver: () => document.getElementById(`q-${item.id}`)?.querySelector(".library-full-button") });
   }
   window.LibraryQuestionViewer.mountFocus({ node, host: document.querySelector(".library-results-head") });
 
@@ -2181,7 +2233,7 @@
     if (target?.isConnected) target.focus({ preventScroll: true });
     else {
       const card = document.getElementById(`q-${state.questionReturnId}`);
-      const button = Array.from(card?.querySelectorAll("button") || []).find((node) => node.textContent === "完整题目");
+      const button = card?.querySelector(".library-full-button");
       (button || ui.search).focus({ preventScroll: true });
     }
   });

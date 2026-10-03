@@ -7,7 +7,9 @@ class Element {
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(name, value) { this[name] = String(value); }
   addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); }
-  emit(name, event = {}) { for (const callback of this.listeners[name] || []) callback({ preventDefault() {}, stopPropagation() {}, ...event }); }
+  emit(name, event = {}) { return Promise.all((this.listeners[name] || []).map(callback => callback({ preventDefault() {}, stopPropagation() {}, ...event }))); }
+  set disabled(value) { this._disabled = Boolean(value); if (value && document.activeElement === this) document.activeElement = document.body; }
+  get disabled() { return this._disabled; }
   showModal() { this.open = true; }
   close() { this.open = false; this.emit("close"); }
   focus(options) { document.activeElement = this; this.focusOptions = options; }
@@ -42,6 +44,7 @@ const item = { id: "pub-1", number: 7, version: 3, source_filename: "离线数�
 const snapshot = JSON.stringify(item), caller = document.activeElement;
 const runFrames = () => { const pending = frames.splice(0); pending.forEach(callback => callback()); };
 const runTasks = delay => { tasks.filter(task => !task.cancelled && task.delay === delay).forEach(task => { task.cancelled = true; task.callback(); }); };
+const settle = async () => { for (let count = 0; count < 12; count++) await Promise.resolve(); };
 
 (async () => {
   await viewer.open(item, { returnFocus: caller });
@@ -107,6 +110,75 @@ const runTasks = delay => { tasks.filter(task => !task.cancelled && task.delay =
   assert(byId("questionViewerStatus").textContent.includes("保留")); assert(byClass("question-viewer-question").textContent.includes("第二问"));
   viewer.close();
 
+  // Navigation uses the current-result position rather than the original paper
+  // number. Rapid clicks share the in-flight step, not a second page request.
+  const navItems = [item, { ...item, id: "next-pub", number: 20, content: { stem: "完整下一题" } }, { ...item, id: "last-pub", number: 99, content: { stem: "完整末题" } }];
+  const navCalls = []; let navGate = null, navFails = false;
+  const nav = { index: 0, total: 3, load: async (index, { signal }) => {
+    navCalls.push({ index, signal }); const waiting = navGate, failure = navFails;
+    if (waiting) await waiting; if (failure) throw new Error("合成下一页读取失败"); return { item: navItems[index], index, total: 3 };
+  } };
+  response = { solution: null, ai_answer: null };
+  await viewer.open(item, { returnFocus: caller, navigation: nav });
+  assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题"); assert(byId("questionViewerPrevious").disabled); assert(!byId("questionViewerNext").disabled);
+  let releaseNav; navGate = new Promise(resolve => { releaseNav = resolve; });
+  byId("questionViewerNext").focus(); const nextRead = byId("questionViewerNext").emit("click");
+  assert.equal(document.activeElement, document.body, "Disabling a focused navigation button models the browser's focus loss");
+  await byId("questionViewerNext").emit("click"); assert.equal(navCalls.length, 1); assert(byId("questionViewerPrevious").disabled && byId("questionViewerNext").disabled);
+  navGate = null; releaseNav(); await nextRead; await settle();
+  assert.equal(byId("questionViewerTitle").textContent, "第 20 题"); assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题");
+  assert.equal(document.activeElement, byId("questionViewerNext"), "Completion restores keyboard navigation after temporary disabling loses focus");
+
+  let consumed = false;
+  await byId("libraryQuestionViewer").emit("keydown", { key: "ArrowRight", target: byId("questionViewerNext"), preventDefault() { consumed = true; } }); await settle();
+  assert(consumed); assert.equal(byClass("question-viewer-position").textContent, "第 3/3 题"); assert(byId("questionViewerNext").disabled);
+  assert.equal(document.activeElement, byClass("question-viewer-viewport"), "At the last item the disabled Next button gives keyboard focus to the readable viewport");
+  const input = { closest: selector => selector.startsWith("input") ? {} : null };
+  const scrollField = { closest: selector => selector.startsWith(".qb-") ? { scrollWidth: 600, clientWidth: 200 } : null };
+  const beforeIgnored = navCalls.length;
+  for (const event of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { shiftKey: true }, { target: input }, { target: scrollField }]) {
+    consumed = false; await byId("libraryQuestionViewer").emit("keydown", { key: "ArrowLeft", preventDefault() { consumed = true; }, ...event }); assert(!consumed);
+  }
+  assert.equal(navCalls.length, beforeIgnored, "IME, text inputs, selection modifiers and horizontally scrollable formulas keep their arrow keys");
+  await byId("libraryQuestionViewer").emit("keydown", { key: "ArrowLeft" }); await settle(); assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题");
+
+  // Busy completion must not steal focus from a zoom/return interaction.
+  let releaseFocus; navGate = new Promise(resolve => { releaseFocus = resolve; }); byId("questionViewerPrevious").focus();
+  const focusRead = byId("questionViewerPrevious").emit("click"); byId("questionViewerZoomIn").focus();
+  navGate = null; releaseFocus(); await focusRead; await settle(); assert.equal(document.activeElement, byId("questionViewerZoomIn"));
+  assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题");
+
+  // An API answer check can stay in flight without blocking the next question.
+  let releaseAnswer; gate = new Promise(resolve => { releaseAnswer = resolve; });
+  await byId("questionViewerNext").emit("click"); assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题");
+  await byId("questionViewerNext").emit("click"); assert.equal(byClass("question-viewer-position").textContent, "第 3/3 题");
+  gate = null; releaseAnswer(); await settle();
+
+  // Failed and timed-out page reads retain the current question and allow retry.
+  await viewer.open(item, { navigation: nav, returnFocus: caller }); navFails = true;
+  await byId("questionViewerNext").emit("click"); assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题");
+  assert(byClass("question-viewer-navigation-status").textContent.includes("失败")); assert(!byId("questionViewerNext").disabled); navFails = false;
+  let releaseDeadline; navGate = new Promise(resolve => { releaseDeadline = resolve; });
+  const deadlineRead = byId("questionViewerNext").emit("click"); runTasks(15000); await deadlineRead;
+  assert(navCalls.at(-1).signal.aborted); assert(byClass("question-viewer-navigation-status").textContent.includes("超时"));
+  assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题");
+  navGate = null; await byId("questionViewerNext").emit("click"); releaseDeadline(); await settle();
+  assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题", "An ignored-abort old timeout response cannot advance a successful retry");
+
+  let releaseClose; navGate = new Promise(resolve => { releaseClose = resolve; });
+  const closingRead = byId("questionViewerNext").emit("click"); const closedSignal = navCalls.at(-1).signal;
+  viewer.close(); assert(closedSignal.aborted); navGate = null; await viewer.open(item, { navigation: nav });
+  releaseClose(); await closingRead; await settle(); assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题");
+  viewer.close();
+  const closedCount = navCalls.length; await byId("libraryQuestionViewer").emit("keydown", { key: "ArrowRight" }); assert.equal(navCalls.length, closedCount);
+
+  // A quiet list refresh may replace the original entry button. Resolve that
+  // same card at close, not the last navigated question, without moving scroll.
+  const detached = node("button"), replacement = node("button"); let resolverCalls = 0;
+  await viewer.open(item, { navigation: nav, returnFocus: detached, returnFocusResolver: () => { resolverCalls++; return replacement; } });
+  detached.isConnected = false; await byId("questionViewerNext").emit("click"); viewer.close();
+  assert.equal(resolverCalls, 1); assert.equal(document.activeElement, replacement); assert.deepEqual(scrolls.at(-1), [15, 980]);
+
   const host = node("div"), focus = root.LibraryQuestionViewer.mountFocus({ node, host });
   focus.button.emit("click"); assert(document.body.classList.contains("library-focus-mode")); assert.equal(focus.button.textContent, "退出专注浏览");
   assert.equal(focus.button["aria-pressed"], "true");
@@ -119,5 +191,5 @@ const runTasks = delay => { tasks.filter(task => !task.cancelled && task.delay =
   assert(css.includes(".library-focus-mode .library-toolbar, .library-focus-mode .basket-panel"));
   assert(css.includes(".question-viewer-content.native-images .qb-question-image img"));
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
-  console.log("Question viewer: complete content, original image order/zoom, validated references, Esc focus/scroll, read abort and pure focus mode: OK");
+  console.log("Question viewer: complete content, original image order/zoom, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

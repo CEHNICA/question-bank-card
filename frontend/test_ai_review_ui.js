@@ -41,7 +41,12 @@ assert.match(js, /if \(state\.filter === "ai"\) return isAiApproved\(q\);/);
 // The library marks AI-reviewed questions and can show only people-checked ones.
 assert.match(lib, /node\("span", "library-review ai", `\$\{item\.review\.agent \|\| "AI"\} 审核`\)/);
 assert.match(lib, /\[\["", "全部", ai \+ human\], \["human", "人工核对", human\], \["ai", "AI 审核", ai\]\]/);
-assert.match(lib, /if \(state\.review\) query\.set\("review", state\.review\);/);
+const libraryFilters = { state: {}, URLSearchParams };
+vm.runInNewContext(lib.slice(lib.indexOf("  function libraryQuery("), lib.indexOf("  function markLibraryResult(")), libraryFilters);
+for (const value of ["human", "ai"]) {
+  assert.equal(libraryFilters.libraryQuery({ review: value }).get("review"), value);
+}
+assert.equal(libraryFilters.libraryQuery({ review: "" }).has("review"), false);
 assert.match(libHtml, /id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden/);
 
 console.log("AI review UI checks: OK");

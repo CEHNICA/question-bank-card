@@ -14,6 +14,7 @@
   function create({ node, QB, solutions }) {
     const doc = root.document;
     let dialog, controls, epoch = 0, reading = null, readTimer = null, returnState = null, zoom = 100;
+    let navigation = null, position = null, navigating = false, navEpoch = 0, navController = null, navTimer = null;
     function button(label, id, callback) {
       const value = node("button", "button button-small", label); value.id = id; value.type = "button";
       value.addEventListener("click", callback); return value;
@@ -27,7 +28,12 @@
       const source = node("p", "question-viewer-source"), detail = node("p", "question-viewer-detail");
       metadata.append(title, source, detail);
       const exit = button("返回题库 · Esc", "questionViewerClose", close);
-      head.append(metadata, exit);
+      const navigationBar = node("div", "question-viewer-navigation"); navigationBar.setAttribute("role", "group"); navigationBar.setAttribute("aria-label", "按当前结果逐题浏览");
+      const previous = button("← 上一题", "questionViewerPrevious", () => navigate(-1));
+      const next = button("下一题 →", "questionViewerNext", () => navigate(1));
+      const place = node("output", "question-viewer-position"); place.setAttribute("aria-live", "polite");
+      const navStatus = node("p", "question-viewer-navigation-status"); navStatus.setAttribute("role", "status");
+      navigationBar.append(previous, place, next, navStatus); head.append(metadata, navigationBar, exit);
       const tools = node("div", "question-viewer-tools"); tools.setAttribute("aria-label", "看题缩放");
       const percent = node("output", "question-viewer-percent", "100%"); percent.setAttribute("aria-live", "polite");
       const fit = button("适合宽度", "questionViewerFit", () => { controls.content.classList.remove("native-images"); setZoom(100); });
@@ -41,10 +47,19 @@
       const answers = node("section", "question-viewer-answers"); answers.setAttribute("aria-label", "答案与解析");
       const status = node("p", "question-viewer-status"); status.id = "questionViewerStatus"; status.setAttribute("role", "status");
       content.append(question, answers, status); viewport.append(content); dialog.append(head, tools, viewport); doc.body.append(dialog);
-      controls = { title, source, detail, exit, percent, native, less, more, viewport, content, question, answers, status };
+      controls = { title, source, detail, exit, percent, native, less, more, viewport, content, question, answers, status, navigationBar, previous, next, place, navStatus };
       dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
       dialog.addEventListener("click", event => { if (event.target === dialog) close(); });
       dialog.addEventListener("close", finishClose);
+      dialog.addEventListener("keydown", event => {
+        if (!dialog.open || event.defaultPrevented || event.isComposing || event.keyCode === 229
+            || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        if (event.target?.closest?.("input, textarea, select, [contenteditable], [role='textbox']")) return;
+        const scrolling = event.target?.closest?.(".qb-stem-body, .qb-option-body, .qb-analysis");
+        if (scrolling && scrolling.scrollWidth > scrolling.clientWidth + 2) return;
+        if (!navigation) return;
+        event.preventDefault(); void navigate(event.key === "ArrowLeft" ? -1 : 1);
+      });
       viewport.addEventListener("wheel", event => {
         if (!event.ctrlKey || !event.deltaY) return;
         event.preventDefault(); setZoom(zoom + (event.deltaY < 0 ? 10 : -10));
@@ -59,6 +74,46 @@
     function stopRead() {
       root.clearTimeout(readTimer); readTimer = null;
       reading?.abort(); reading = null;
+    }
+    function stopNavigation() {
+      ++navEpoch; navController?.abort(); navController = null;
+      root.clearTimeout(navTimer); navTimer = null; navigating = false;
+    }
+    function renderNavigation() {
+      controls.navigationBar.hidden = !navigation || !position;
+      controls.place.textContent = position ? `第 ${position.index + 1}/${position.total} 题` : "";
+      controls.previous.disabled = navigating || !position || position.index <= 0;
+      controls.next.disabled = navigating || !position || position.index >= position.total - 1;
+    }
+    async function navigate(direction) {
+      if (!dialog?.open || !navigation || !position || navigating) return;
+      const target = position.index + direction;
+      if (target < 0 || target >= position.total) return;
+      const session = epoch, request = ++navEpoch, source = navigation, controller = new root.AbortController(), previousFocus = doc.activeElement;
+      let timedOut = false;
+      navController = controller; navigating = true; renderNavigation(); controls.navStatus.textContent = "正在读取题目…";
+      const deadline = new Promise((_, reject) => {
+        navTimer = root.setTimeout(() => { timedOut = true; controller.abort(); reject(new Error("读取题目超时，当前题目保留，点上一题或下一题重试。")); }, 15000);
+      });
+      try {
+        const value = await Promise.race([source.load(target, { signal: controller.signal }), deadline]);
+        if (session !== epoch || request !== navEpoch || !dialog.open || controller.signal.aborted) return;
+        if (!value?.item?.id || value.index !== target || !Number.isInteger(value.total) || value.total <= target) throw new Error("下一题返回不完整，请重试。");
+        navigating = false;
+        // The question displays synchronously. Do not lock navigation while
+        // its separate read-only answer verification is still in flight.
+        void open(value.item, { navigation: source, position: { index: value.index, total: value.total }, navigationStep: true });
+      } catch (error) {
+        if (session === epoch && request === navEpoch && dialog.open) controls.navStatus.textContent = timedOut ? "读取题目超时，当前题目保留，点上一题或下一题重试。" : error.message || "题目读取失败，请重试。";
+      } finally {
+        if (request === navEpoch) {
+          root.clearTimeout(navTimer); navTimer = null; navController = null; navigating = false; renderNavigation();
+          if (dialog.open && [controls.previous, controls.next].includes(previousFocus)
+              && (!doc.activeElement || doc.activeElement === doc.body || doc.activeElement === dialog)) {
+            (previousFocus.disabled ? controls.viewport : previousFocus).focus({ preventScroll: true });
+          }
+        }
+      }
     }
     function addAnswer(label, value, className = "") {
       if (!solutions.hasContent(value)) return;
@@ -82,8 +137,13 @@
     }
     async function open(item, options = {}) {
       build(); stopRead(); const session = ++epoch;
+      if (!options.navigationStep) stopNavigation();
+      navigation = options.navigation || null;
+      position = options.position || (navigation ? { index: navigation.index, total: navigation.total } : null);
+      renderNavigation(); controls.navStatus.textContent = navigation?.note || "";
       if (!dialog.open) {
-        returnState = { focus: options.returnFocus || doc.activeElement, x: root.scrollX || 0, y: root.scrollY || 0, overflow: doc.body.style.overflow || "" };
+        returnState = { focus: options.returnFocus || doc.activeElement, focusResolver: options.returnFocusResolver,
+          x: root.scrollX || 0, y: root.scrollY || 0, overflow: doc.body.style.overflow || "" };
         dialog.showModal(); doc.body.style.overflow = "hidden";
       }
       controls.title.textContent = `第 ${item.number ?? "?"} 题`;
@@ -94,7 +154,8 @@
       QB.renderQuestion(controls.question, item.content || {}, { showNumber: false, showAnswer: "none", imageLoading: "eager" });
       renderAnswers(item);
       controls.native.hidden = !(item.content?.figures?.length || item.content?.question_images?.length || item.solution?.figures?.length);
-      controls.status.textContent = "正在检查已有参考答案…"; controls.exit.focus({ preventScroll: true });
+      controls.status.textContent = "正在检查已有参考答案…";
+      if (!options.navigationStep) controls.exit.focus({ preventScroll: true });
       const controller = new root.AbortController(); reading = controller; let timedOut = false;
       const timer = root.setTimeout(() => { timedOut = true; controller.abort(); }, 15000); readTimer = timer;
       try {
@@ -114,10 +175,12 @@
       }
     }
     function finishClose() {
-      ++epoch; stopRead(); const session = epoch, previous = returnState; returnState = null;
+      ++epoch; stopRead(); stopNavigation(); navigation = null; position = null;
+      const session = epoch, previous = returnState; returnState = null;
       if (previous) {
         doc.body.style.overflow = previous.overflow;
-        const target = previous.focus?.isConnected === false ? null : previous.focus;
+        let target = previous.focus;
+        if (target?.isConnected === false) { try { target = previous.focusResolver?.(); } catch { target = null; } }
         target?.focus?.({ preventScroll: true }); root.scrollTo?.(previous.x, previous.y);
       }
       // Paint the underlying card before releasing large images/math. A quick
