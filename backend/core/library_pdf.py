@@ -6,9 +6,11 @@ A fresh system-browser profile renders a fixed document with no network assets.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import hashlib
 import html
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -37,6 +39,7 @@ MAX_PDF_BYTES = 64 * 1024 * 1024
 MAX_MESSAGE_BYTES = 192 * 1024 * 1024
 MAX_PAGES = 200
 _render_lock = threading.Lock()
+_logger = logging.getLogger(__name__)
 
 
 def _browser_path():
@@ -104,6 +107,70 @@ def _wait_page_target(opener, port, process, deadline):
         time.sleep(min(.05, _remaining(deadline)))
 
 
+def _cleanup_warning(stage, error):
+    # Do not include documents, profile paths, or exception messages in this log.
+    try:
+        _logger.warning("PDF cleanup step failed: stage=%s error_type=%s", stage, type(error).__name__)
+    except Exception:
+        pass
+
+
+@contextmanager
+def _temporary_directory():
+    directory = tempfile.TemporaryDirectory(prefix="tiyouju-pdf-")
+    try:
+        yield directory.name
+    finally:
+        try:
+            directory.cleanup()
+        except Exception as error:
+            _cleanup_warning("temporary_directory", error)
+
+
+def _cleanup_browser(client, process):
+    if client:
+        try:
+            client.call("Browser.close")
+        except (word.ExportError, ConnectionError):
+            # Shutdown can close CDP before its reply, or follow the main deadline.
+            pass
+        except Exception as error:
+            _cleanup_warning("browser_close", error)
+        try:
+            client.close()
+        except Exception as error:
+            _cleanup_warning("socket_close", error)
+    if process is None:
+        return
+    try:
+        if process.poll() is not None:
+            return
+    except Exception as error:
+        _cleanup_warning("process_poll", error)
+    try:
+        process.wait(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception as error:
+        _cleanup_warning("process_wait", error)
+    try:
+        # Recheck this Popen before force-stopping its PID and child tree.
+        if process.poll() is None:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
+                    timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                process.kill()
+    except Exception as error:
+        _cleanup_warning("process_terminate", error)
+    try:
+        process.wait(timeout=5)
+    except Exception as error:
+        _cleanup_warning("process_final_wait", error)
+
+
 class _CDP:
     """Bounded RFC 6455 transport, only to this fresh browser's loopback port."""
 
@@ -133,7 +200,10 @@ class _CDP:
             if not re.match(r"HTTP/1\.[01] 101(?: |$)", lines[0]) or fields.get("sec-websocket-accept") != expected:
                 raise ValueError("invalid handshake")
         except BaseException:
-            self.socket.close()
+            try:
+                self.socket.close()
+            except Exception as error:
+                _cleanup_warning("handshake_socket_close", error)
             raise
 
     def close(self):
@@ -360,7 +430,7 @@ def _render(document):
     try:
         executable = _browser_path()
         deadline = time.monotonic() + DEADLINE_SECONDS
-        with tempfile.TemporaryDirectory(prefix="tiyouju-pdf-") as directory:
+        with _temporary_directory() as directory:
             root = Path(directory).resolve()
             if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith("tiyouju-pdf-"):
                 raise word.ExportError("PDF 临时目录未能建立，请重试。", 503)
@@ -408,28 +478,9 @@ def _render(document):
                     raise word.ExportError("PDF 排版发生错误，未下载不完整的试卷。", 422)
                 return data, status["page_count"]
             finally:
-                if client:
-                    # Close the browser gracefully before the profile is removed.
-                    try:
-                        client.call("Browser.close")
-                    except (word.ExportError, OSError, ValueError, ConnectionError):
-                        pass
-                    client.close()
-                    client = None
-                if process and process.poll() is None:
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        if os.name == "nt":
-                            # The PID belongs to this Popen and is still alive.
-                            # Stop its child tree, never other browser instances.
-                            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
-                                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
-                        else:
-                            process.kill()
-                        process.wait(timeout=5)
-                process = None
+                # Cleanup failures must not replace validated bytes or the main error.
+                _cleanup_browser(client, process)
+                client = process = None
     except word.ExportError:
         raise
     except (OSError, ValueError, ConnectionError, TimeoutError, KeyError, StopIteration, IndexError, subprocess.SubprocessError):

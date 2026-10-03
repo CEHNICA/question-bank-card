@@ -1,5 +1,6 @@
 """PDF export boundaries; renderer tests use synthesized local documents only."""
 from copy import deepcopy
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
@@ -9,6 +10,7 @@ import socket
 import struct
 import threading
 import time
+from types import SimpleNamespace
 from unittest import mock
 from urllib.error import URLError
 
@@ -278,6 +280,162 @@ class PdfPageStartupTests(SimpleTestCase):
         for catalog in ({"not": "a list"}, ["not a target"]):
             with self.subTest(catalog=catalog), self.assertRaises(ValueError):
                 self.wait_for_target([catalog])
+
+
+class PdfCleanupTests(SimpleTestCase):
+    secret_message = "SYNTHETIC_PRIVATE_DOCUMENT_MUST_NOT_APPEAR_IN_LOGS"
+    faults = ("socket_close", "temporary_directory", "process_wait", "process_terminate", "process_final_wait")
+
+    def render_with_cleanup_failure(self, fault, primary_status=None, *, log_fails=False):
+        directory = mock.Mock()
+        directory.name = str(Path(pdf.tempfile.gettempdir()) / "tiyouju-pdf-synthetic-cleanup")
+        if fault == "temporary_directory":
+            directory.cleanup.side_effect = PermissionError(13, self.secret_message)
+        process = mock.Mock(pid=987654)
+        exited = [False]
+        process.poll.side_effect = lambda: 0 if exited[0] else None
+        def wait(timeout):
+            if timeout == 2 and fault in {"process_terminate", "process_final_wait"}:
+                raise pdf.subprocess.TimeoutExpired("synthetic owned process", timeout)
+            if timeout == 2 and fault == "process_wait":
+                raise OSError(5, self.secret_message)
+            if timeout == 5 and fault == "process_final_wait":
+                raise pdf.subprocess.TimeoutExpired("synthetic owned process", timeout)
+            exited[0] = True
+            return 0
+        process.wait.side_effect = wait
+        client = mock.Mock(events=[])
+        if fault == "socket_close":
+            client.close.side_effect = OSError(10038, self.secret_message)
+        def call(method, params=None):
+            if method == "Page.getFrameTree":
+                return {"frameTree": {"frame": {"id": "owned-frame"}}}
+            if method == "Runtime.evaluate":
+                if primary_status == 504:
+                    raise pdf.word.ExportError("synthetic primary deadline", 504)
+                status = {"error": "synthetic primary layout"} if primary_status == 422 else {"ready": True, "page_count": 1}
+                return {"result": {"value": status}}
+            if method == "Page.printToPDF":
+                return {"data": pdf.base64.b64encode(COMPLETE).decode()}
+            return {}
+        client.call.side_effect = call
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(pdf.tempfile, "TemporaryDirectory", return_value=directory))
+            stack.enter_context(mock.patch.object(pdf, "os", SimpleNamespace(name="nt")))
+            stack.enter_context(mock.patch.object(pdf.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True))
+            stack.enter_context(mock.patch.object(pdf, "_browser_path", return_value=Path("synthetic-fixed-browser")))
+            stack.enter_context(mock.patch.object(pdf, "_wait_debug_port", return_value=12345))
+            stack.enter_context(mock.patch.object(pdf, "_wait_page_target", return_value=PdfPageStartupTests.target))
+            stack.enter_context(mock.patch.object(pdf, "_CDP", return_value=client))
+            stack.enter_context(mock.patch.object(pdf.subprocess, "Popen", return_value=process))
+            terminator = stack.enter_context(mock.patch.object(pdf.subprocess, "run"))
+            if fault == "process_terminate":
+                terminator.side_effect = pdf.subprocess.TimeoutExpired("synthetic owned termination", 5)
+            validate = stack.enter_context(mock.patch.object(pdf, "_validate_pdf"))
+            if log_fails:
+                logs = SimpleNamespace(output=[], records=[])
+                logger_warning = stack.enter_context(mock.patch.object(pdf._logger, "warning", side_effect=OSError(5, self.secret_message)))
+            else:
+                logs = stack.enter_context(self.assertLogs(pdf._logger, level="WARNING"))
+                logger_warning = None
+            error = None
+            try:
+                result = pdf._render("synthetic document with no real questions")
+            except pdf.word.ExportError as caught:
+                error, result = caught, None
+        return SimpleNamespace(result=result, error=error, client=client, process=process, directory=directory,
+                               terminator=terminator, validate=validate, logs=logs, logger_warning=logger_warning)
+
+    def test_cleanup_failures_preserve_already_validated_pdf_without_rerendering(self):
+        for fault in self.faults:
+            with self.subTest(fault=fault):
+                outcome = self.render_with_cleanup_failure(fault)
+                self.assertIsNone(outcome.error)
+                self.assertEqual(outcome.result, (COMPLETE, 1))
+                outcome.validate.assert_called_once_with(COMPLETE, 1)
+                self.assertEqual(sum(call.args[0] == "Page.setDocumentContent" for call in outcome.client.call.call_args_list), 1)
+                self.assertEqual(sum(call.args[0] == "Page.printToPDF" for call in outcome.client.call.call_args_list), 1)
+
+    def test_cleanup_failures_preserve_primary_layout_and_deadline_errors(self):
+        for status in (422, 504):
+            for fault in self.faults:
+                with self.subTest(status=status, fault=fault):
+                    outcome = self.render_with_cleanup_failure(fault, status)
+                    self.assertIsNone(outcome.result)
+                    self.assertEqual(outcome.error.status, status)
+                    self.assertIn("synthetic primary", str(outcome.error))
+                    outcome.validate.assert_not_called()
+
+    def test_failed_socket_close_still_waits_for_owned_process_and_cleans_directory(self):
+        outcome = self.render_with_cleanup_failure("socket_close")
+        outcome.client.close.assert_called_once()
+        outcome.process.wait.assert_called_once_with(timeout=2)
+        outcome.directory.cleanup.assert_called_once()
+
+    def test_failed_termination_still_waits_and_only_targets_own_popen(self):
+        outcome = self.render_with_cleanup_failure("process_terminate", 504)
+        self.assertEqual(outcome.error.status, 504)
+        outcome.terminator.assert_called_once_with(
+            ["taskkill", "/PID", "987654", "/T", "/F"], stdout=pdf.subprocess.DEVNULL,
+            stderr=pdf.subprocess.DEVNULL, shell=False, timeout=5, creationflags=0x08000000)
+        self.assertEqual(outcome.process.wait.call_args_list, [mock.call(timeout=2), mock.call(timeout=5)])
+        outcome.directory.cleanup.assert_called_once()
+        process = mock.Mock(); process.poll.return_value = 0
+        with mock.patch.object(pdf.subprocess, "run") as terminate:
+            pdf._cleanup_browser(None, process)
+        process.wait.assert_not_called()
+        terminate.assert_not_called()
+
+    def test_unfinished_cleanup_records_only_phase_and_exception_type(self):
+        for fault in self.faults:
+            with self.subTest(fault=fault):
+                outcome = self.render_with_cleanup_failure(fault)
+                self.assertTrue(any(f"stage={fault} " in line for line in outcome.logs.output))
+                self.assertNotIn(self.secret_message, "\n".join(outcome.logs.output))
+                for record in outcome.logs.records:
+                    self.assertIsNone(record.exc_info)
+                    self.assertEqual(len(record.args), 2)
+
+    def test_logging_failure_keeps_pdf_and_primary_error_and_continues_cleanup(self):
+        for primary in (None, 422):
+            with self.subTest(primary=primary):
+                outcome = self.render_with_cleanup_failure("socket_close", primary, log_fails=True)
+                if primary is None:
+                    self.assertIsNone(outcome.error)
+                    self.assertEqual(outcome.result, (COMPLETE, 1))
+                    outcome.validate.assert_called_once_with(COMPLETE, 1)
+                else:
+                    self.assertEqual(outcome.error.status, primary)
+                    outcome.validate.assert_not_called()
+                outcome.logger_warning.assert_called_once_with(
+                    "PDF cleanup step failed: stage=%s error_type=%s", "socket_close", "OSError")
+                outcome.process.wait.assert_called_once_with(timeout=2)
+                outcome.directory.cleanup.assert_called_once()
+
+    def test_expected_browser_shutdown_has_no_warning_and_still_closes_socket(self):
+        for error in (ConnectionError("expected shutdown"), pdf.word.ExportError("expected deadline", 504)):
+            with self.subTest(error=type(error).__name__):
+                client, process = mock.Mock(), mock.Mock()
+                client.call.side_effect = error
+                process.poll.return_value = None
+                with self.assertNoLogs(pdf._logger, level="WARNING"):
+                    pdf._cleanup_browser(client, process)
+                client.close.assert_called_once()
+                process.wait.assert_called_once_with(timeout=2)
+
+    def test_handshake_socket_close_cannot_replace_primary_deadline(self):
+        sock = mock.Mock()
+        sock.close.side_effect = OSError(10038, self.secret_message)
+        error = pdf.word.ExportError("synthetic primary deadline", 504)
+        with mock.patch.object(pdf.socket, "create_connection", return_value=sock), \
+                mock.patch.object(pdf, "_remaining", side_effect=[1, error]), \
+                self.assertLogs(pdf._logger, level="WARNING") as logs, \
+                self.assertRaises(pdf.word.ExportError) as caught:
+            pdf._CDP(12345, "/devtools/page/local-id", time.monotonic() + 1)
+        self.assertIs(caught.exception, error)
+        sock.close.assert_called_once()
+        self.assertIn("stage=handshake_socket_close error_type=OSError", logs.output[0])
+        self.assertNotIn(self.secret_message, "\n".join(logs.output))
 
 
 class PdfTransportTests(SimpleTestCase):
