@@ -53,7 +53,10 @@ assert.equal(teachingProgress(9).total, 1, "advanced practice is a separate shor
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-assert.match(html, /id="settingsLearn"[^>]*>开始新手练习/);
+assert.match(html, /id="settingsLearn"[^>]*>开始手工练习/);
+assert.match(html, /id="settingsAutomaticGuide"[^>]*>自动切题入门/);
+assert.match(html, /手工示例没有经过 MinerU 或 AI 处理/);
+assert.match(html, /明确允许本次云处理/);
 assert.match(html, /id="settingsHelpFaq"/);
 assert.match(html, /id="settingsHelpKeys"/);
 assert.doesNotMatch(html, /只看新版功能|用示例试卷重新学一遍|重新看一遍新手引导/);
@@ -71,6 +74,10 @@ assert.match(js, /\$\("teachSkip"\)\.hidden = true/,
   "a skipped action cannot masquerade as a completed exercise");
 assert.match(js, /if \(dialog\.mode === "view" \|\| dialog\.practiceRead\) return;/);
 assert.match(js, /const host = openDialogs\[openDialogs\.length - 1\] \|\| document\.body;/);
+assert.match(js, /mount = \$\("pageTeachMount"\)/);
+assert.match(js, /mount = \$\("viewerTeachMount"\)/);
+assert.match(js, /node\.classList\.add\("teaching-target"\)/);
+assert.match(js, /await leaveFor\("\/#dropZone"\)/);
 assert.match(js, /finally \{[\s\S]*?const resumedUrl = new URL\(window\.location\.href\);\s*resumedUrl\.searchParams\.delete\("learn"\);\s*window\.history\.replaceState\(null, "", resumedUrl\);/,
   "opening/reset requests are consumed even on cancellation while retaining paper and unrelated URL parameters");
 console.log("teaching checks: OK");

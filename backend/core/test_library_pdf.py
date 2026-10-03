@@ -172,6 +172,45 @@ class PdfExportTests(TestCase):
         self.assertIn("浏览器缺失", response.json()["error"])
 
 
+class PdfBrowserStartupTests(SimpleTestCase):
+    def wait_for_port(self, reads, *, polls=None, deadline=.2):
+        clock = [0.0]
+        process = mock.Mock()
+        process.poll = mock.Mock(side_effect=polls) if polls is not None else mock.Mock(return_value=None)
+        def sleep(seconds):
+            clock[0] += seconds
+        with mock.patch.object(Path, "read_text", side_effect=reads), \
+                mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(pdf.time, "sleep", side_effect=sleep):
+            return pdf._wait_debug_port(Path("synthetic-profile"), process, deadline)
+
+    def test_brief_windows_writer_lock_can_recover(self):
+        self.assertEqual(self.wait_for_port([PermissionError(13, "writer lock"), "12345\n/devtools/browser/local-id"]), 12345)
+
+    def test_missing_file_can_recover_without_an_exists_read_race(self):
+        self.assertEqual(self.wait_for_port([FileNotFoundError(), "12345\n/devtools/browser/local-id"]), 12345)
+
+    def test_empty_and_half_written_file_wait_for_completion(self):
+        self.assertEqual(self.wait_for_port(["", "123", "12345\n", "12345\n/devtools/browser/local-id"]), 12345)
+
+    def test_persistent_writer_lock_keeps_original_deadline(self):
+        with self.assertRaisesMessage(pdf.word.ExportError, "超时") as caught:
+            self.wait_for_port(PermissionError(13, "writer lock"), deadline=.1)
+        self.assertEqual(caught.exception.status, 504)
+
+    def test_browser_exit_while_waiting_reports_startup_failure(self):
+        with self.assertRaisesMessage(pdf.word.ExportError, "未能启动") as caught:
+            self.wait_for_port([FileNotFoundError()], polls=[None, 1])
+        self.assertEqual(caught.exception.status, 503)
+
+    def test_complete_invalid_port_and_other_io_errors_are_not_retried(self):
+        for value in ("0", "65536", "not-a-port"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.wait_for_port([value + "\n/devtools/browser/local-id"])
+        with self.assertRaises(OSError):
+            self.wait_for_port([OSError(5, "persistent device error")])
+
+
 class PdfTransportTests(SimpleTestCase):
     def test_actual_pdf_pages_and_a4_are_checked(self):
         import pymupdf

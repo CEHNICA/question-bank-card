@@ -118,14 +118,12 @@
         </div>
         <div id="settingsReview" class="settings-page" role="tabpanel" hidden>
           <section class="settings-section help-start" aria-labelledby="settingsReviewTitle">
-            <h3 id="settingsReviewTitle">从一份小练习开始</h3>
-            <p class="settings-description">切出题目、核对改字、通过后选题，最后实际导出一份 PDF。</p>
-            <div class="settings-help-actions">
-              <button id="settingsLearn" class="button primary" type="button">开始新手练习</button>
-              <button id="settingsHelpFaq" class="button" type="button">常见问题</button>
-              <button id="settingsHelpKeys" class="button" type="button">快捷键</button>
+            <h3 id="settingsReviewTitle">选择一种切题方式</h3>
+            <div class="help-paths">
+              <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后核对，通过即入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
+              <article class="help-path"><h4>手工切题</h4><p>从原卷框出题目。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
             </div>
-            <p class="settings-footnote">示例全程离线；练习题库和选题篮独立，不会改动你的正式题库。进度会自动记住，下次可以继续。</p>
+            <p class="help-secondary"><button id="settingsHelpFaq" class="link-button" type="button">常见问题</button><span aria-hidden="true">·</span><button id="settingsHelpKeys" class="link-button" type="button">快捷键</button></p>
           </section>
           <section class="settings-section help-tasks" aria-labelledby="helpTasksTitle">
             <h3 id="helpTasksTitle">遇到问题时再看</h3>
@@ -193,6 +191,7 @@
 
   <div class="layout">
     <aside class="sidebar" aria-label="试卷">
+      <div id="reviewTeachMount" class="teaching-dock"></div>
       <label id="dropZone" class="drop-zone" tabindex="-1">
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
@@ -217,6 +216,7 @@
     </aside>
 
     <main id="main" class="main">
+      <div id="reviewTeachFallback" class="teaching-dock"></div>
       <section id="emptyState" class="empty-state">
         <svg class="empty-art" viewBox="0 0 132 104" fill="none" aria-hidden="true">
           <rect x="18" y="10" width="62" height="84" rx="8" fill="#fff" stroke="#cdd5cd"/>
@@ -228,7 +228,7 @@
         </svg>
         <h2>把题目留下，也把出处留下</h2>
         <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
-        <button id="emptyLearn" class="button primary" type="button">先做新手练习（不用密钥）</button>
+        <div class="empty-learning"><button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button><button id="emptyLearn" class="button" type="button">手工切题练习（不用密钥）</button></div>
         <ol class="empty-steps">
           <li><b>1</b>上传原卷，程序先尝试切题；未切出的题手工补齐</li>
           <li><b>2</b>用已保存的题目 AI 识读，也可直接保留原图</li>
@@ -487,6 +487,7 @@
         <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
     </div>
+    <div id="pageTeachMount" class="teaching-dock"></div>
     <div class="page-zoom-toolbar">
       <div id="pageToolControls" class="zoom-controls" role="group" aria-label="原卷操作工具">
         <button id="pageToolPan" class="button" type="button" aria-pressed="false">手形 · 浏览</button>
@@ -588,6 +589,7 @@
       <button class="button quiet" type="button" data-close>关闭 <span class="kbd-hint">Esc</span></button>
       <span id="viewerImageState" class="hint viewer-image-state" role="status" hidden></span>
     </div>
+    <div id="viewerTeachMount" class="teaching-dock"></div>
     <div class="viewer-body">
       <div id="viewerSource" class="viewer-source" tabindex="-1"><div id="viewerCrop" class="viewer-crop"></div></div>
       <div id="viewerText" class="viewer-text"></div>
@@ -772,17 +774,28 @@
       </ol>
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
-        <strong>第一次用？先拿示例试卷练一遍</strong>
-        <span>用三道示例题实际练切题、改字、核对通过、选题和导出。不用密钥、不调用 AI，也不会改动正式题库。</span>
-        <button id="welcomeLearn" class="button primary" type="button">开始新手练习</button>
+        <strong>想自己框题？用示例练手工切题</strong>
+        <span>用三道离线示例实际练框题、改字、通过、选题和导出。不调用 AI，也不会改动正式题库。</span>
+        <button id="welcomeLearn" class="button" type="button">开始手工练习</button>
       </div>
     </div>
     <footer class="welcome-actions">
       <button id="welcomeKeys" class="button" type="button" hidden>配置自动切题（可稍后）</button>
       <span class="welcome-spacer"></span>
       <button id="welcomeSkip" class="button quiet" type="button">直接开始</button>
-      <button id="welcomeTour" class="button" type="button">浏览界面入口</button>
+      <button id="welcomeTour" class="button primary" type="button">自动切题入门</button>
     </footer>
+  </dialog>
+
+  <dialog id="automaticGuideDialog" class="automatic-guide-dialog" aria-labelledby="automaticGuideTitle">
+    <div class="dialog-head"><div><h3 id="automaticGuideTitle">自动切题入门</h3><p class="hint">这是操作流程说明。手工示例没有经过 MinerU 或 AI 处理。</p></div><button class="button quiet" type="button" data-close>关闭</button></div>
+    <ol class="automatic-guide-steps">
+      <li><b>1</b><div><strong>导入资料</strong><p>上传 PDF、Word 或照片。原卷先保存在本机，程序先尝试在本机自动切题。</p></div></li>
+      <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → API 配置”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
+      <li><b>3</b><div><strong>核对后通过</strong><p>对照原卷检查题干、选项和配图，改好错漏后勾选通过，题目自动进入正式题库。</p></div></li>
+      <li><b>4</b><div><strong>选题、预览、导出</strong><p>在正式题库把题目加入试题篮，打开组卷预览，再导出 PDF 或 Word。</p></div></li>
+    </ol>
+    <footer class="automatic-guide-actions"><span>实际结果以本次资料与服务状态为准。</span><button id="automaticGuideImport" class="button primary" type="button">开始导入</button></footer>
   </dialog>
 
   <div id="tour" class="tour" hidden>

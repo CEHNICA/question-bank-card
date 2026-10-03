@@ -139,29 +139,61 @@ def browser_check():
                 route.continue_()
         context.route("**/*", route_guard)
         page = context.new_page(); page.on("pageerror", lambda e: REPORT["page_errors"].append(str(e)))
+        page.on('download', lambda d: REPORT.setdefault('downloads', []).append(d.suggested_filename))
         page.on("dialog", lambda d: d.dismiss())
         def stage(key):
             page.wait_for_function("key=>JSON.parse(localStorage.getItem('qb-teach')||'null')?.lesson===key", arg=key)
             expect(page.locator("#teachPanel")).to_be_visible()
         def card(number):
             return page.locator(f'.card[data-id="{question(number)["id"]}"]')
+        def guide_clear_of(selector, mount, label):
+            guide = page.locator('#teachPanel').bounding_box()
+            content = page.locator(selector).bounding_box()
+            assert guide and content, (label, guide, content)
+            assert page.locator('#teachPanel').evaluate('n=>n.parentElement.id') == mount
+            intersects = (guide['x'] < content['x']+content['width'] and guide['x']+guide['width'] > content['x']
+                and guide['y'] < content['y']+content['height'] and guide['y']+guide['height'] > content['y'])
+            assert not intersects, (label, guide, content)
+            REPORT.setdefault('guide_geometry', []).append({'scene':label,'mount':mount,'guide':guide,'content':content,'overlap':False})
         try:
             page.goto(BASE + "/settings#help"); page.wait_for_load_state("networkidle")
-            expect(page.locator("#settingsLearn")).to_have_text("开始新手练习")
+            expect(page.locator("#settingsLearn")).to_have_text("开始手工练习")
             assert page.locator("#settingsReview .explain-list:visible").count() == 0
+            page.locator('#settingsAutomaticGuide').click()
+            expect(page.locator('#automaticGuideDialog')).to_be_visible()
+            expect(page.locator('#automaticGuideDialog')).to_contain_text('明确允许本次云处理')
+            expect(page.locator('#automaticGuideDialog')).to_contain_text('手工示例没有经过 MinerU 或 AI 处理')
+            expect(page.locator('#automaticGuideDialog .automatic-guide-steps li')).to_have_count(4)
+            page.screenshot(path=str(OUTPUT/'automatic-introduction.png'),full_page=True)
+            assert not REPORT['writes'], 'automatic introduction must not manufacture a demo or initiate cloud processing'
+            page.locator('#automaticGuideImport').click(); page.wait_for_url('**/#dropZone')
+            expect(page.locator('#dropZone')).to_be_visible()
+            with db() as conn: assert conn.execute('SELECT COUNT(*) FROM core_paper').fetchone()[0] == 0
+            page.goto(BASE+'/settings#help'); page.wait_for_load_state('networkidle')
+            REPORT['passed'].append('automatic path explains local cut, explicit MinerU cloud permission, review and composition; import points to actual upload without fake AI results')
             page.locator("#settingsHelpKeys").click()
             expect(page.locator("#keysDialog")).to_be_visible()
             page.locator("#keysDialog select").select_option("crop")
             assert "Ctrl+S" in page.locator("#keysDialog").inner_text()
             page.locator("#keysDialog").get_by_role("button", name="关闭", exact=True).click()
             page.screenshot(path=str(OUTPUT / "help-clean.png"), full_page=True)
-            REPORT["passed"].append("help starts with practice, FAQ and actual shortcut content; details collapsed")
+            REPORT["passed"].append("help starts with automatic/manual paths, FAQ and actual shortcut content; details collapsed")
             page.locator("#settingsLearn").click(); page.wait_for_load_state("networkidle"); stage("cut")
             page.wait_for_function("!new URL(location.href).searchParams.has('learn')")
             assert question(1) is None and question(2) and question(9)
+            guide_clear_of('#cards','reviewTeachMount','desktop review sidebar')
+            page.keyboard.press('?')
+            expect(page.locator('#keysDialog')).to_be_visible()
+            guide_clear_of('#shortcutHelpBody','','desktop guide in shortcut dialog')
+            close_keys=page.locator('#keysDialog').get_by_role('button',name='关闭',exact=True)
+            assert close_keys.evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
+            page.screenshot(path=str(OUTPUT/'guide-shortcuts.png'),full_page=True)
+            close_keys.click()
             page.locator("#teachShow").click()
             expect(page.locator("#pageDialog")).to_be_visible()
             page.wait_for_function("()=>{const i=document.querySelector('#pageStage img');return i?.complete&&i.naturalWidth>0}")
+            guide_clear_of('#pageStage','pageTeachMount','desktop source canvas')
+            page.screenshot(path=str(OUTPUT/'guide-desktop-cut.png'),full_page=True)
             image = page.locator("#pageStage img").bounding_box(); assert image
             # Demo q1 bounds in the shipped source. A real two-click gesture,
             # with a margin around its stem and all four options.
@@ -169,6 +201,10 @@ def browser_check():
             x2=image['x']+image['width']*.88; y2=image['y']+image['height']*.255
             page.mouse.click(x1,y1); page.mouse.click(x2,y2)
             page.locator("#pageStage").focus(); page.keyboard.press("s"); stage("cutComplete")
+            guide_clear_of('#pageStage','pageTeachMount','desktop 2 of8 source guide')
+            expect(page.locator('#pageCropResult')).not_to_be_visible()
+            expect(page.locator('#toast')).not_to_be_visible()
+            page.screenshot(path=str(OUTPUT/'guide-desktop-cut-complete.png'),full_page=True)
             assert question(1)["body_mode"] == "source_image"
             # Closing the guide pauses it without losing the saved crop.
             page.locator("#teachClose").click()
@@ -180,17 +216,36 @@ def browser_check():
             expect(page.locator("#teachPanel")).not_to_be_visible()
             assert question(1)['body_mode'] == 'source_image'
             page.goto(BASE + "/settings#help"); page.wait_for_load_state("networkidle")
-            expect(page.locator("#settingsLearn")).to_have_text("继续新手练习")
+            expect(page.locator("#settingsLearn")).to_have_text("继续手工练习")
             page.locator("#settingsLearn").click(); stage("cutComplete")
             page.locator("#teachShow").click()
             expect(page.locator("#pageDialog")).to_be_visible()
-            page.locator("#pageStage").focus(); page.keyboard.press("Control+s"); stage("fix")
+            # Save must still belong to the crop dialog when a guide control
+            # owns focus. It must not open browser save-as or download a page.
+            page.locator("#teachFold").focus(); page.keyboard.press("Control+s"); stage("fix")
+            assert not REPORT.get('downloads'), 'Ctrl+S from guide focus must not invoke browser page-save'
+            REPORT['passed'].append('CtrlS from a focused guide control completes cutting without browser save-as/download')
             REPORT['passed'].append('closing the guide pauses the saved crop; refresh stays quiet and help resumes without duplicating question1')
             expect(page.locator("#pageDialog")).not_to_be_visible()
+            page.locator('#fullscreenToggle').click()
+            page.wait_for_function("document.documentElement.classList.contains('review-fullscreen')")
+            guide_clear_of('#cards','reviewTeachFallback','desktop fullscreen review flow')
+            page.screenshot(path=str(OUTPUT/'guide-desktop-fullscreen.png'),full_page=True)
+            page.keyboard.press('Escape')
+            page.wait_for_function("!document.documentElement.classList.contains('review-fullscreen')")
             page.screenshot(path=str(OUTPUT / "practice-cut-complete.png"), full_page=True)
+            card(9).locator('.source-note').click()
+            expect(page.locator('#viewerDialog')).to_be_visible()
+            guide_clear_of('#viewerSource','viewerTeachMount','desktop original comparison')
+            guide_clear_of('#viewerText','viewerTeachMount','desktop comparison question text')
+            page.screenshot(path=str(OUTPUT/'guide-desktop-viewer.png'),full_page=True)
+            page.locator('#viewerDialog').get_by_role('button',name='关闭',exact=False).click()
             REPORT["passed"].append("actual two-click crop; S creates question1; CtrlS ends crop without OCR")
             page.locator("#teachShow").click()
             editor = card(9).locator(".editor"); expect(editor).to_be_visible()
+            page.wait_for_function("document.querySelector('.stem-input.teaching-target')")
+            expect(page.locator('#tour')).not_to_be_visible()
+            guide_clear_of('#cards','reviewTeachMount','desktop highlighted editor')
             field = editor.locator(".stem-input"); original=field.input_value(); assert "3 个单位" in original
             # Another dirty editor must block the delayed automatic move.
             original_two = question(2)['stem']
@@ -201,6 +256,9 @@ def browser_check():
             editor.get_by_role("button", name="保存", exact=True).click()
             expect(page.locator('#teachDone')).to_be_visible()
             expect(page.locator('#confirmDialog')).to_be_visible(timeout=6000)
+            guide_clear_of('#confirmDialog .confirm-actions','','desktop unsaved-confirm controls')
+            assert page.locator('#confirmOk').evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
+            page.screenshot(path=str(OUTPUT/'guide-unsaved-confirm.png'),full_page=True)
             page.locator('#confirmDialog').get_by_role('button', name='继续编辑', exact=True).click()
             stage('fix')
             blocked_progress = page.evaluate("JSON.parse(localStorage.getItem('qb-teach'))")
@@ -249,7 +307,7 @@ def browser_check():
             REPORT["passed"].append("actual isolated practice selection, shared-layout preview and downloaded PDF pages match")
             page.screenshot(path=str(OUTPUT / "practice-complete.png"), full_page=True)
             page.goto(BASE+"/settings#help"); page.wait_for_load_state("networkidle")
-            expect(page.locator("#settingsLearn")).to_have_text("回看已完成的练习")
+            expect(page.locator("#settingsLearn")).to_have_text("回看已完成的手工练习")
             REPORT["passed"].append("help recognises completed practical course after navigation")
             # Legacy course preparation is confined to a demo, never a formal
             # question. It intentionally models old saved progress, not a claim
@@ -287,14 +345,16 @@ def browser_check():
             page.locator('#teachShow').click()
             expect(page.locator('#pageDialog')).to_be_visible()
             page.wait_for_function("()=>{const i=document.querySelector('#pageStage img');return i?.complete&&i.naturalWidth>0}")
-            assert page.locator('#teachPanel').evaluate('n=>n.parentElement.id') == 'pageDialog'
+            guide_clear_of('#pageStage','pageTeachMount','390px source canvas')
             guide=page.locator('#teachPanel').bounding_box(); assert guide
             assert guide['x'] >= -1 and guide['x']+guide['width'] <= 391
             assert page.locator('#teachClose').evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
             page.locator('#teachFold').click(); expect(page.locator('#teachDetails')).not_to_be_visible()
+            guide_clear_of('#pageStage','pageTeachMount','390px collapsed source guide')
             page.locator('#teachFold').click(); expect(page.locator('#teachDetails')).to_be_visible()
             page.screenshot(path=str(OUTPUT/'guide-390.png'),full_page=True)
             page.locator('#pageDialogClose').click()
+            guide_clear_of('#cards','reviewTeachFallback','390px review flow')
             page.set_viewport_size({'width':1440,'height':1050})
             page.locator('#teachShow').click()
             page.wait_for_function("()=>{const i=document.querySelector('#pageStage img');return i?.complete&&i.naturalWidth>0}")
@@ -302,7 +362,16 @@ def browser_check():
             page.mouse.click(image['x']+image['width']*.035,image['y']+image['height']*.145)
             page.mouse.click(image['x']+image['width']*.88,image['y']+image['height']*.255)
             page.locator('#pageStage').focus();page.keyboard.press('s');stage('cutComplete')
-            page.locator('#pageStage').focus();page.keyboard.press('Control+s');stage('fix')
+            page.set_viewport_size({'width':390,'height':844})
+            guide_clear_of('#pageStage','pageTeachMount','390px 2 of8 source guide')
+            expect(page.locator('#pageCropResult')).not_to_be_visible()
+            expect(page.locator('#toast')).not_to_be_visible()
+            page.screenshot(path=str(OUTPUT/'guide-390-cut-complete.png'),full_page=True)
+            before_downloads=len(REPORT.get('downloads',[]))
+            page.locator('#teachFold').focus();page.keyboard.press('Control+s');stage('fix')
+            expect(page.locator('#pageDialog')).not_to_be_visible()
+            assert len(REPORT.get('downloads',[])) == before_downloads
+            page.set_viewport_size({'width':1440,'height':1050})
             page.locator('#teachShow').click()
             editor=card(9).locator('.editor');field=editor.locator('.stem-input')
             field.fill(field.input_value().replace('3 个单位','5 个单位'))

@@ -57,7 +57,9 @@ const canvas = { open: true, mode: "new", canvasFocused: true };
 assert.equal(cropShortcutAction(event("s"), canvas), "next"); assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), canvas), "complete");
 for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { altKey: true }, { shiftKey: true }]) assert.equal(cropShortcutAction(event("s", extra), canvas), null);
 assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), { ...canvas, editing: true }), null);
-assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), { ...canvas, canvasFocused: false }), null);
+assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), { ...canvas, canvasFocused: false }), "complete");
+assert.match(help.reference("crop").extra, /S 保存下一题需先点原卷画布/);
+assert.match(help.reference("crop").extra, /Ctrl\+S 完成切题可在窗口工具栏和教学提示中使用/);
 
 const app = read("app.js"), viewerApprove = app.slice(app.indexOf("  async function viewerApprove()"), app.indexOf("  function viewerKey("));
 const viewerKeys = app.slice(app.indexOf("  function viewerKey("), app.indexOf("  function editFromViewer("));

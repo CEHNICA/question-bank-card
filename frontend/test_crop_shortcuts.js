@@ -10,7 +10,8 @@ const end = source.indexOf('  $("manualProcessing").addEventListener', start);
 assert.ok(start > 0 && end > start);
 const listeners = new Map(), calls = [];
 const stage = { classList: { add: (value) => calls.push(["class", value]) } };
-const modal = { open: true, addEventListener: (name, listener) => listeners.set(name, listener) };
+const registrations = [];
+const modal = { open: true, addEventListener: (name, listener, options) => { listeners.set(name, listener); registrations.push({ name, options }); } };
 const context = {
   $: (id) => id === "pageDialog" ? modal : stage,
   QBManualCrop: App, QBUpload: App,
@@ -28,11 +29,13 @@ const context = {
   removeBox: (index) => calls.push(["remove", index])
 };
 vm.runInNewContext(source.slice(start, end), context);
-const target = (kind = "canvas") => ({ tagName: ["input", "textarea", "select", "button", "summary", "a"].includes(kind) ? kind.toUpperCase() : "DIV",
+const target = (kind = "canvas") => ({ tagName: ["input", "textarea", "select", "button", "summary", "a"].includes(kind) ? kind.toUpperCase() : ["teachButton", "toolbarButton"].includes(kind) ? "BUTTON" : "DIV",
   closest(selector) {
     if (kind === "canvas" && selector === "#pageStage") return this;
     if (["input", "textarea", "select", "button", "summary", "a"].includes(kind) && selector.split(/[, ]+/).includes(kind)) return this;
+    if (["teachButton", "toolbarButton"].includes(kind) && selector.split(/[, ]+/).includes("button")) return this;
     if (kind === "contenteditable" && selector.includes("contenteditable")) return this;
+    if (kind === "textbox" && selector.includes('[role="textbox"]')) return this;
     return null;
   }
 });
@@ -52,17 +55,36 @@ for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, 
   press("Enter", extra); press("Enter", { ctrlKey: true, ...extra });
   press("s", extra); press("s", { ctrlKey: true, ...extra });
 }
-for (const kind of ["input", "textarea", "select", "contenteditable", "button", "summary", "a"]) {
+for (const kind of ["input", "textarea", "select", "contenteditable", "textbox"]) {
   for (const [key, extra] of [["Enter", {}], ["Enter", { ctrlKey: true }], ["s", {}], ["s", { ctrlKey: true }], ["z", { ctrlKey: true }], ["PageDown", {}], ["Delete", {}]]) press(key, extra, kind);
 }
-assert.deepEqual(calls, [], "Typing, composition, native controls, held save keys and already handled events never save, delete or navigate");
+for (const kind of ["button", "summary", "a", "teachButton", "toolbarButton"]) {
+  for (const [key, extra] of [["Enter", {}], ["s", {}], ["z", { ctrlKey: true }], ["PageDown", {}], ["Delete", {}]]) press(key, extra, kind);
+}
+assert.deepEqual(calls, [], "Typing, composition, native single-key controls, held save keys and already handled events never save, delete or navigate");
 assert.equal(press("s", { ctrlKey: true }, "input").defaultPrevented, true, "Blocked Ctrl+S never opens the browser Save Page prompt instead of saving a question");
 assert.equal(press("s", { ctrlKey: true, isComposing: true }, "input").defaultPrevented, undefined, "IME events remain untouched");
-press("s", {}, "outside"); press("s", { ctrlKey: true }, "outside");
+press("s", {}, "dialog");
+for (const kind of ["dialog", "teachButton", "toolbarButton", "summary", "a"]) {
+  assert.equal(press("s", { ctrlKey: true }, kind).defaultPrevented, true);
+  assert.equal(press("Enter", { ctrlKey: true }, kind).defaultPrevented, true);
+}
+assert.deepEqual(clone(calls.splice(0)), Array.from({ length: 10 }, () => ["save", { complete: true }]), "Completion combinations work in the cutting dialog, tutorial and toolbar without requiring canvas focus");
+assert.equal(registrations.find(item => item.name === "keydown").options, true, "The page dialog owns save combinations during capture before child toolbar bubbling is stopped");
 for (const extra of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }, { ctrlKey: true, altKey: true }]) press("s", extra);
-assert.equal(calls.length, 0, "S requires canvas focus; Shift/Alt combinations cannot complete a paper accidentally");
+assert.equal(calls.length, 0, "Unmodified S requires canvas focus; Shift/Alt combinations cannot complete a paper accidentally");
 for (const field of ["saving", "closing"]) {
   context.dialog[field] = true; press("Enter"); press("s"); press("s", { ctrlKey: true }); press("PageDown"); press("z", { ctrlKey: true }); context.dialog[field] = false;
+}
+for (const kind of ["teachButton", "toolbarButton"]) {
+  for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }, { shiftKey: true }, { altKey: true }, { metaKey: true }]) {
+    press("s", { ctrlKey: true, ...extra }, kind); press("Enter", { ctrlKey: true, ...extra }, kind);
+  }
+  for (const field of ["saving", "closing"]) {
+    context.dialog[field] = true;
+    assert.equal(press("s", { ctrlKey: true }, kind).defaultPrevented, true, "A busy completion does not open browser Save Page");
+    press("Enter", { ctrlKey: true }, kind); context.dialog[field] = false;
+  }
 }
 context.otherModal = true; press("Enter"); press("s"); assert.equal(press("s", { ctrlKey: true }).defaultPrevented, undefined); press("z", { ctrlKey: true }); context.otherModal = false;
 context.menuOpen = true; press("Enter"); press("s"); press("s", { ctrlKey: true }); press("Delete"); context.menuOpen = false;

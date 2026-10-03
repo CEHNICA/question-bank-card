@@ -61,6 +61,26 @@ def _remaining(deadline):
     return seconds
 
 
+def _wait_debug_port(profile, process, deadline):
+    # Chromium creates this file before it has finished writing it. On Windows
+    # its writer can also briefly deny reads, so creation alone is not readiness.
+    port_file = profile / "DevToolsActivePort"
+    while True:
+        _remaining(deadline)
+        if process.poll() is not None:
+            raise word.ExportError("本机浏览器未能启动 PDF 排版，请重试或先导出 Word。", 503)
+        try:
+            lines = port_file.read_text(encoding="utf-8").splitlines()
+        except (FileNotFoundError, PermissionError):
+            lines = []
+        if len(lines) >= 2 and lines[0] and lines[1]:
+            port = int(lines[0])
+            if not 1 <= port <= 65535:
+                raise ValueError("debug port")
+            return port
+        time.sleep(min(.05, _remaining(deadline)))
+
+
 class _CDP:
     """Bounded RFC 6455 transport, only to this fresh browser's loopback port."""
 
@@ -331,16 +351,7 @@ def _render(document):
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             process = subprocess.Popen(flags, **kwargs)
             try:
-                port_file = profile / "DevToolsActivePort"
-                while not port_file.is_file():
-                    _remaining(deadline)
-                    if process.poll() is not None:
-                        raise word.ExportError("本机浏览器未能启动 PDF 排版，请重试或先导出 Word。", 503)
-                    time.sleep(.05)
-                lines = port_file.read_text(encoding="utf-8").splitlines()
-                port = int(lines[0])
-                if not 1 <= port <= 65535:
-                    raise ValueError("debug port")
+                port = _wait_debug_port(profile, process, deadline)
                 opener = build_opener(ProxyHandler({}))
                 with opener.open(f"http://127.0.0.1:{port}/json/list", timeout=_remaining(deadline)) as reply:
                     targets = json.loads(reply.read(100_000))

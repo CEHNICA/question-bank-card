@@ -560,7 +560,7 @@ const QBTeach = (() => {
   function progress(index) {
     const lesson = LESSONS[Number.isInteger(index) && index >= 0 && index < LESSONS.length ? index : 0];
     const section = LESSONS.filter((item) => item.section === lesson.section && !item.final);
-    return { lesson, label: lesson.section === "basic" ? "新手练习" : "补图练习",
+    return { lesson, label: lesson.section === "basic" ? "手工练习" : "补图练习",
       current: lesson.final ? section.length : section.findIndex((item) => item.key === lesson.key) + 1,
       total: section.length };
   }
@@ -840,19 +840,20 @@ const QBManualCrop = (() => {
   }
   function cropShortcutAction(event, context = {}) {
     if (!context.open || context.saving || context.closing || context.otherDialog || context.menuOpen
-      || context.editing || context.onControl || event.defaultPrevented || event.isComposing || event.keyCode === 229) return null;
+      || context.editing || event.defaultPrevented || event.isComposing || event.keyCode === 229) return null;
     const modified = event.ctrlKey || event.metaKey;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-    if (event.altKey) return null;
+    if (event.altKey || (event.ctrlKey && event.metaKey)) return null;
     if (modified) {
       if (key === "s" && !event.shiftKey && !event.repeat && context.mode === "new"
-        && context.canvasFocused && !context.practiceRead) return "complete";
+        && !context.practiceRead) return "complete";
       if (key === "Enter" && !event.shiftKey && !event.repeat && !context.practiceRead && context.mode !== "view") {
         return context.mode === "new" ? "complete" : "save";
       }
-      if (key === "z" && ["new", "regions"].includes(context.mode)) return event.shiftKey ? "redo" : "undo";
+      if (!context.onControl && key === "z" && ["new", "regions"].includes(context.mode)) return event.shiftKey ? "redo" : "undo";
       return null;
     }
+    if (context.onControl) return null;
     if (!event.shiftKey && (key === "Enter" || key === "s") && context.mode === "new"
       && context.canvasFocused && !event.repeat && !context.practiceRead) return "next";
     if (key === "PageUp") return "previous-page";
@@ -7263,7 +7264,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderPageTabs();
     renderStage();
     $("pageStage").focus({ preventScroll: true });
-    showCropResult(state.paper?.demo ? `第 ${number} 题已保存。点“完成切题”回到题卡；示例只保留原图，不调用 AI。`
+    if (teaching.active && teaching.paper === state.paperId) showCropResult("");
+    else showCropResult(state.paper?.demo ? `第 ${number} 题已保存。点“完成切题”回到题卡；示例只保留原图，不调用 AI。`
       : `第 ${number} 题已保存，尚未识读。可以继续框下一题；全部切完点“完成切题”，自动识读已保存的题目。`);
   }
 
@@ -7366,7 +7368,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           dialog.cutQuestionIds = [...(dialog.cutQuestionIds || []), savedQuestion.id];
         }
         saved = true;
-        toast(state.paper?.demo ? `第 ${number} 题已保存；练习只保留原图，不调用 AI` : `第 ${number} 题已保存；结束切题后自动 AI 识读`);
+        if (!(teaching.active && teaching.paper === state.paperId)) {
+          toast(state.paper?.demo ? `第 ${number} 题已保存；练习只保留原图，不调用 AI` : `第 ${number} 题已保存；结束切题后自动 AI 识读`);
+        }
         teach({ type: "cut", number });
         refreshPaper();
       }
@@ -7407,7 +7411,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const action = QBManualCrop.cropShortcutAction(event, shortcutContext);
     if (!action) {
       // Ctrl+S is an app operation in the cutting window. A blocked save
-      // (typing, unfinished operation, control focus) must not open the
+      // (typing or an unfinished operation) must not open the
       // browser's Save Page dialog instead. Composition remains untouched.
       if (shortcutContext.open && shortcutContext.mode === "new" && !shortcutContext.otherDialog
         && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229
@@ -7433,7 +7437,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else if (action === "zoom-out") zoomPageBy(0.8);
     else if (action === "fit" || action === "width") requestPageZoom(action);
     else if (action === "delete" && !dialog.sketch && dialog.selected !== null && dialog.selected !== undefined) removeBox(dialog.selected);
-  });
+  }, true);
 
   $("manualProcessing").addEventListener("click", () => {
     $("toolsMenu").open = false;
@@ -8251,7 +8255,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("welcomeSkip").addEventListener("click", finishWelcome);
   $("welcomeDialog").addEventListener("cancel", () => writePref("qb-welcome-seen", "1"));
   $("welcomeKeys").addEventListener("click", () => { finishWelcome(); openCredentialSettings(); });
-  $("welcomeTour").addEventListener("click", () => { finishWelcome(); requestAnimationFrame(startTour); });
+  $("welcomeTour").addEventListener("click", () => { finishWelcome(); openAutomaticGuide(); });
   $("settingsWelcome").addEventListener("click", async () => {
     if (window.location.pathname === "/settings") { await leaveFor("/?tour=1"); return; }
     closeSettingsThen(startTour);
@@ -8291,9 +8295,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("tourSkip").hidden = pointing;
   }
 
-  // 教学里的“指给我看”：圈亮一个地方，旁边写一句；不挡操作，点哪里都行。
+  let teachingTarget = null;
+
+  // 练习说明留在指导栏，只给目标加轮廓，避免另一个说明浮层遮住原卷。
   function pointAt(node, title, text) {
     if (!tourVisible(node)) return false;
+    if (teaching.active) {
+      endTour();
+      teachingTarget = node;
+      node.classList.add("teaching-target");
+      renderTeach(text);
+      const rect = node.getBoundingClientRect();
+      if (rect.top < 90 || rect.bottom > window.innerHeight - 20) node.scrollIntoView({ block: "center" });
+      return true;
+    }
     tourMode(true);
     tour.steps = [];
     tour.target = node;
@@ -8325,6 +8340,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function endTour() {
     clearTimeout(tour.pending);
+    teachingTarget?.classList.remove("teaching-target");
+    teachingTarget = null;
     $("tour").hidden = true;
     document.documentElement.classList.remove("touring");
     tour.target = null;
@@ -8395,6 +8412,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // While the tour is open its keys come first and the review shortcuts wait.
   document.addEventListener("keydown", (event) => {
     if ($("tour").hidden) return;
+    // Modal controls own their shortcuts, including save combinations. The
+    // optional screen tour must not consume keys before the cutting dialog.
+    if (anyDialogOpen()) return;
     if (tour.pointing) {
       // Pointing never blocks the page; Esc drops the highlight unless a window is open.
       if (event.key === "Escape" && !anyDialogOpen()) { endTour(); event.preventDefault(); event.stopPropagation(); }
@@ -8450,7 +8470,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderLearningEntry() {
     const saved = readTeachingProgress();
     const entry = $("settingsLearn");
-    entry.textContent = saved && !saved.migrated && saved.course === "basic" ? saved.completed === "finish" ? "回看已完成的练习" : "继续新手练习" : "开始新手练习";
+    entry.textContent = saved && !saved.migrated && saved.course === "basic" ? saved.completed === "finish" ? "回看已完成的手工练习" : "继续手工练习" : "开始手工练习";
   }
 
   async function startTeaching({ reset = false, review = false, task = "basic" } = {}) {
@@ -8516,6 +8536,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderTeach(hint = "") {
     const panel = $("teachPanel");
     panel.hidden = !teaching.active;
+    liftGuides();
     if (!teaching.active) return;
     const progress = QBTeach.progress(teaching.index);
     const lesson = progress.lesson;
@@ -8690,9 +8711,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
-  // 教学卡片和“指给我看”的圈一直浮在最上面。对话框（放大对照、配图、确认框）
-  // 打开后在浏览器的最顶层，外面的东西会被它盖住、也点不到，所以把这两样挪进
-  // 最后打开的那个对话框里，关掉后再挪回来。
+  // Guide mounts reserve actual layout space. Dialogs need their own mount
+  // because the browser top layer makes the review sidebar inert.
   const openDialogs = [];
   function liftGuides() {
     for (let index = openDialogs.length - 1; index >= 0; index -= 1) {
@@ -8700,10 +8720,41 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     document.querySelectorAll("dialog[open]").forEach((node) => { if (!openDialogs.includes(node)) openDialogs.push(node); });
     const host = openDialogs[openDialogs.length - 1] || document.body;
-    [$("tour"), $("teachPanel")].forEach((node) => { if (node.parentNode !== host) host.append(node); });
+    if ($("tour").parentNode !== host) host.append($("tour"));
+    let mount;
+    if (host === $("pageDialog")) mount = $("pageTeachMount");
+    else if (host === $("viewerDialog")) mount = $("viewerTeachMount");
+    else if (host !== document.body) {
+      mount = host.querySelector(":scope > .teaching-dock");
+      if (!mount) {
+        mount = document.createElement("div");
+        mount.className = "teaching-dock";
+        const head = host.querySelector(":scope > .dialog-head, :scope > header");
+        if (head) head.after(mount); else host.prepend(mount);
+      }
+    } else {
+      const fallback = document.documentElement.classList.contains("review-fullscreen") || window.matchMedia("(max-width: 760px)").matches;
+      mount = $(fallback ? "reviewTeachFallback" : "reviewTeachMount");
+    }
+    if ($("teachPanel").parentNode !== mount) mount.append($("teachPanel"));
     if (!$("tour").hidden) requestAnimationFrame(placeTour);
   }
   new MutationObserver(liftGuides).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
+  new MutationObserver(liftGuides).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  window.addEventListener("resize", liftGuides);
+
+  function openAutomaticGuide() {
+    $("automaticGuideDialog").showModal();
+  }
+  $("settingsAutomaticGuide").addEventListener("click", openAutomaticGuide);
+  $("emptyAutomaticGuide").addEventListener("click", openAutomaticGuide);
+  $("automaticGuideImport").addEventListener("click", async () => {
+    $("automaticGuideDialog").close();
+    if (window.location.pathname === "/settings") { await leaveFor("/#dropZone"); return; }
+    if (!(await discardEdits())) return;
+    $("dropZone").scrollIntoView({ block: "center", behavior: "smooth" });
+    $("dropZone").focus({ preventScroll: true });
+  });
 
   $("teachShow").addEventListener("click", showLesson);
   $("teachSkip").addEventListener("click", () => {

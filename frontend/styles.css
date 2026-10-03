@@ -1257,10 +1257,11 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .tour-actions { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
 @media (prefers-reduced-motion: reduce) { .tour-spot, .tour-card { transition: none; } }
 
-/* 新手教学：右下角的小卡片，说这一步做什么；做对了自动进入下一步。 */
-/* Over the lower part of the paper list, so it never covers a card; in full screen it moves to the right. */
-.teach-panel { position: fixed; left: 12px; bottom: 12px; z-index: 60; width: 248px; padding: 12px 13px 12px;
-  border: 1px solid #9cc2b5; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-pop); }
+/* 指导占用自己的布局区域，不悬浮在原卷或题面上。 */
+.teaching-dock { flex: none; min-width: 0; }
+.teaching-dock:not(:has(> .teach-panel:not([hidden]))) { display: none; }
+.teach-panel { position: static; width: auto; min-width: 0; padding: 12px 13px;
+  border: 1px solid #9cc2b5; border-radius: 12px; background: var(--surface); }
 .teach-head { display: flex; align-items: center; gap: 8px; }
 .teach-head strong { color: var(--accent); font-size: 13px; }
 .teach-progress { color: var(--muted); font-size: 12px; }
@@ -1285,17 +1286,27 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 .settings-help-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .teaching-help { margin-top: 12px; }
 .teaching-help > summary { color: var(--accent); cursor: pointer; }
-#emptyLearn { margin: 4px 0 14px; }
-:root.review-fullscreen .teach-panel { left: auto; right: 20px; bottom: 132px; width: min(320px, calc(100vw - 32px)); }
-/* 放大对照窗口里，左下角是“改字 / 上一题”等按钮：卡片挪到右下，按钮上方。 */
-.viewer-dialog > .teach-panel { left: auto; right: 20px; bottom: 78px; }
+.empty-learning { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 4px 0 14px; }
+#reviewTeachFallback { margin-bottom: 16px; }
+.teaching-target { outline: 3px solid var(--amber-bar); outline-offset: 4px; }
+dialog > .teaching-dock { margin: 8px 16px; }
+dialog > .teaching-dock .teach-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px 16px; padding: 8px 12px; }
+dialog > .teaching-dock .teach-head { grid-column: 1; }
+dialog > .teaching-dock .teach-bar { display: none; }
+dialog > .teaching-dock #teachDetails { grid-column: 2; }
+dialog > .teaching-dock .teach-actions { grid-column: 3; margin-top: 0; }
+dialog > .teaching-dock .teach-panel:has(#teachDetails[hidden]) { grid-template-columns: minmax(0, 1fr); }
+dialog > .teaching-dock .teach-panel:has(#teachDetails[hidden]) .teach-actions { display: none; }
+dialog > .teaching-dock .teach-panel h4 { font-size: 13px; }
+dialog > .teaching-dock .teach-panel p { font-size: 12px; line-height: 1.55; }
+#pageTeachMount .teach-actions { display: none; }
+#pageTeachMount .teach-panel { grid-template-columns: auto minmax(0, 1fr); }
+.viewer-dialog[open]:has(#viewerTeachMount > .teach-panel:not([hidden])) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 @media (max-width: 760px) {
-  .teach-panel { left: 12px; right: 12px; width: auto; max-height: min(300px, 45dvh); overflow: auto; }
-  /* In the top layer, reserve a row for the lesson instead of covering
-     the canvas, its save controls, or the confirmation buttons. */
-  dialog[open] > .teach-panel { position: relative; left: auto; right: auto; bottom: auto; width: auto;
-    flex: none; margin: 8px 12px; max-height: min(260px, 34dvh); }
-  .viewer-dialog[open]:has(> .teach-panel:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+  dialog > .teaching-dock { margin: 6px 12px; }
+  dialog > .teaching-dock .teach-panel, #pageTeachMount .teach-panel { grid-template-columns: minmax(0, 1fr); gap: 5px; max-height: 25dvh; overflow: auto; }
+  dialog > .teaching-dock #teachDetails, dialog > .teaching-dock .teach-actions { grid-column: 1; }
+  .teach-head { flex-wrap: wrap; }
   .tour-card { max-height: calc(100dvh - 20px); overflow: auto; }
 }
 
@@ -1324,6 +1335,21 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
 
 /* Task help stays short until the reader asks for a specific explanation. */
 .help-start { border-left: 3px solid var(--accent); }
+.help-paths { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.help-path { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--bg-sunken); }
+.help-path h4 { margin: 0 0 8px; font-size: 16px; }
+.help-path p { margin: 0 0 14px; color: var(--ink-2); line-height: 1.75; }
+.help-path small { display: block; margin-top: 10px; color: var(--muted); }
+.help-secondary { display: flex; align-items: center; gap: 12px; margin-bottom: 0; }
+.automatic-guide-dialog { width: min(740px, 94vw); max-height: 90dvh; }
+.automatic-guide-steps { display: grid; gap: 18px; list-style: none; padding: 20px 24px; margin: 0; }
+.automatic-guide-steps li { display: flex; align-items: start; gap: 14px; }
+.automatic-guide-steps b { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.automatic-guide-steps strong { font-size: 16px; }
+.automatic-guide-steps p { margin: 5px 0 0; color: var(--ink-2); line-height: 1.7; }
+.automatic-guide-actions { padding: 16px 24px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.automatic-guide-actions span { margin-right: auto; font-size: 12px; color: var(--muted); }
+@media (max-width: 760px) { .help-paths { grid-template-columns: minmax(0, 1fr); } .automatic-guide-steps { padding: 16px; gap: 14px; } }
 .help-tasks > .teaching-help, .help-preferences { border-top: 1px solid var(--line); padding-top: 12px; }
 .help-tasks .teaching-help > summary { color: var(--ink); font-weight: 600; }
 .help-tasks .teaching-help p, .teaching-help > p { color: var(--ink-2); line-height: 1.75; margin: 10px 0; }

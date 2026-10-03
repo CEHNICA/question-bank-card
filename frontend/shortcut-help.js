@@ -32,14 +32,14 @@
       const primary = mode === "new" ? [row("保存下一题", "S"), row("完成切题", "Ctrl+S"), row("取消新框 / 返回", "Esc")]
         : editing ? [...(!options.practiceRead ? [row(mode === "read" ? "识读这一块" : "保存当前修改", "Ctrl+Enter")] : []), row("移动选中框", "方向键"), row("取消新框 / 返回", "Esc")]
           : [row("上一页 / 下一页", "PageUp", "PageDown"), row("适页 / 适宽", "0", "W"), row("返回", "Esc")];
-      return { scene, title: mode === "figures" ? "配图" : mode === "regions" ? "调整题目范围" : mode === "read" ? "框选识读" : mode === "view" ? "查看原卷" : "手工切题", note: "输入题号、页码或文字时，画布快捷键暂不生效；先点原卷画布再按键。",
+      return { scene, title: mode === "figures" ? "配图" : mode === "regions" ? "调整题目范围" : mode === "read" ? "框选识读" : mode === "view" ? "查看原卷" : "手工切题", note: "输入题号、页码或文字时，切题快捷键暂不生效；完成切题组合键在工具栏和教学提示中也可使用。",
         primary, more: [...(mode === "new" ? [row("保存下一题（兼容）", "Enter"), row("完成切题（兼容）", "Ctrl+Enter")] : []),
           ...(editing ? [row("删除选中框", "Delete", "Backspace"), row("先选中框，再移动 / 大步移动", "方向键", "Shift+方向键")] : []),
           ...(["new", "regions"].includes(mode) ? [row("撤销范围改动 / 重做", "Ctrl+Z", "Ctrl+Shift+Z")] : []),
           row("上一页 / 下一页", "PageUp", "PageDown"), row("适页 / 适宽", "0", "W"), row("缩小 / 放大", "−", "+"), row("画布缩放", "Ctrl+滚轮"),
           ...(editing ? [row("平移画布", "Space+拖动", "中键拖动")] : [row("平移画布", "左键拖动")]),
           ...(mode === "figures" ? [row("归属菜单：题干 / 选项 / 无关 / 接上一图", "S", "A–E", "X", "J")] : [])],
-        extra: mode === "new" ? "S 和 Ctrl+S 在原卷画布中生效：先点击画布再按键。保存下一题只保存范围，完成切题后识读已保存题目。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
+        extra: mode === "new" ? "S 保存下一题需先点原卷画布；Ctrl+S 完成切题可在窗口工具栏和教学提示中使用。保存下一题只保存范围，完成切题后识读已保存题目。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
     }
     if (scene === "library") return { scene, title: TITLES[scene], note,
       primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]
