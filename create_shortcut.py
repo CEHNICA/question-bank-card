@@ -75,15 +75,68 @@ def _ps_quote(value: str) -> str:
 
 
 def powershell_script(link: Path, spec: dict[str, str]) -> str:
+    # The WScript.Shell TargetPath setter rejects some Unicode paths on an
+    # English Windows host. Use the native Unicode interface even when pywin32
+    # is unavailable, preserving the source launcher's complete arguments.
+    native = r"""
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+namespace TiYouJu {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    public class NativeShellLink { }
+
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, IntPtr data, uint flags);
+        void GetIDList(out IntPtr idList);
+        void SetIDList(IntPtr idList);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder description, int size);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string description);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int size);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int size);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        void GetHotkey(out short hotkey);
+        void SetHotkey(short hotkey);
+        void GetShowCmd(out int command);
+        void SetShowCmd(int command);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder icon, int size, out int index);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string icon, int index);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+        void Resolve(IntPtr window, uint flags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    }
+
+    public static class SourceShortcut {
+        public static void Create(string path, string target, string arguments,
+                                  string directory, string icon, int iconIndex,
+                                  string description) {
+            var link = (IShellLinkW)new NativeShellLink();
+            try {
+                link.SetPath(target);
+                link.SetArguments(arguments);
+                link.SetWorkingDirectory(directory);
+                link.SetIconLocation(icon, iconIndex);
+                link.SetDescription(description);
+                ((IPersistFile)link).Save(path, true);
+            } finally {
+                Marshal.FinalReleaseComObject(link);
+            }
+        }
+    }
+}
+"""
+    icon_path, _, icon_index = spec["icon"].rpartition(",")
+    values = [str(link), spec["target"], spec["arguments"], spec["workdir"], icon_path]
+    arguments = [_ps_quote(value) for value in values]
+    arguments.extend([str(int(icon_index or "0")), _ps_quote(spec["description"])])
     return "\n".join([
         "$ErrorActionPreference = 'Stop'",
-        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + _ps_quote(str(link)) + ")",
-        "$s.TargetPath = " + _ps_quote(spec["target"]),
-        "$s.Arguments = " + _ps_quote(spec["arguments"]),
-        "$s.WorkingDirectory = " + _ps_quote(spec["workdir"]),
-        "$s.IconLocation = " + _ps_quote(spec["icon"]),
-        "$s.Description = " + _ps_quote(spec["description"]),
-        "$s.Save()",
+        "Add-Type -TypeDefinition @'\n" + native + "\n'@",
+        "[TiYouJu.SourceShortcut]::Create(" + ", ".join(arguments) + ")",
     ])
 
 
