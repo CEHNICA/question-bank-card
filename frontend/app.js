@@ -3254,7 +3254,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       figureAction: (figure) => tableAction(q, figure) });
     else rendered.append(el("p", "hint", "还没有题面"));
     body.append(rendered);
-    if (q.body_mode === "source_image" && q.ocr_suggestion) body.append(readingSuggestionPanel(q));
+    if (q.body_mode === "source_image" && q.ocr_suggestion && Object.keys(q.ocr_suggestion).length) body.append(readingSuggestionPanel(q));
 
     // 通过和撤销通过都在题号左边的方框里（也可以按 Enter / U），这里不再放
     // 一个同样作用的按钮。配图没处理好时，这里放一个去处理的按钮。
