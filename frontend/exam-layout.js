@@ -168,7 +168,16 @@
     doc.body.append(measure);
     const work = clean(source.cloneNode(true)); work.removeAttribute("id"); work.classList.remove("exam-source"); work.classList.add("print-flow"); measure.append(work);
     try {
+      // Newly inserted maths can start its font requests only when the browser
+      // lays it out. Reading fonts.ready before that first layout can resolve
+      // the previous, already-ready promise and measure fallback glyphs. The
+      // URL fonts in the preview and embedded PDF fonts must both finish first.
+      work.getBoundingClientRect();
       await (doc.fonts?.ready || Promise.resolve());
+      if (work.querySelector(".katex") && doc.fonts && typeof doc.fonts[Symbol.iterator] === "function"
+        && Array.from(doc.fonts).some(face => face.status === "error" && /KaTeX_/.test(face.family))) {
+        throw new Error("公式字体未能载入，请刷新组卷页面后重试。");
+      }
       await Promise.all(Array.from(work.querySelectorAll("img"), async image => {
         image.loading = "eager";
         if (typeof image.decode === "function") {
@@ -210,7 +219,42 @@
       }
       newPage();
       let pending = [], hasQuestion = false;
+      function writingSpace(blank, question) {
+        // Writing space is divisible; moving an entire 60 mm blank block left
+        // otherwise usable page bottoms empty and created blank continuation
+        // sheets. Keep the requested total, using the current page first.
+        let remaining = height(blank.cloneNode(true));
+        while (remaining > .01) {
+          let owner = body.lastElementChild;
+          const existing = owner?.matches(".print-question") && owner.dataset.questionId === question.dataset.questionId;
+          if (!existing) {
+            owner = question.cloneNode(false);
+            owner.classList.add("exam-fragment"); owner.dataset.continuation = "1";
+            const number = parseInt(question.querySelector(".qb-number")?.textContent, 10) || "?";
+            owner.append(element(doc, "div", "exam-continuation-label", `第 ${number} 题答题区（续）`));
+          }
+          const previousHeight = height(owner.cloneNode(true));
+          const available = BODY_HEIGHT - used - (existing ? 0 : previousHeight);
+          if (available <= .5) { newPage(); continue; }
+          const allocated = Math.min(remaining, available);
+          const piece = blank.cloneNode(false);
+          piece.style.height = `${allocated}px`;
+          owner.append(piece);
+          const nextHeight = height(owner.cloneNode(true));
+          if (existing) used += nextHeight - previousHeight;
+          else add(owner, nextHeight);
+          remaining -= allocated;
+          if (remaining > .01) newPage();
+        }
+      }
       function compose(node, forceBreak = false) {
+        const blank = node.matches(".print-question") && Array.from(node.children).find(child => child.matches(".print-answer-space"));
+        if (blank && (options.pagination === "compact" || height(node.cloneNode(true)) > BODY_HEIGHT + .5)) {
+          blank.remove();
+          compose(node, forceBreak);
+          writingSpace(blank, node);
+          return;
+        }
         const h = height(node.cloneNode(true));
         const pendingHeight = pending.reduce((sum, heading) => sum + height(heading.cloneNode(true)), 0);
         const full = !node.matches(".print-answer-row") && keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination);

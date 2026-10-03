@@ -1746,6 +1746,11 @@
   }
 
   function renderPrint(items) {
+    // Any new source, including an empty basket, invalidates pending pages.
+    ++printState.layoutToken;
+    printState.layoutPending = false;
+    printState.layoutError = "";
+    printState.layoutPromise = Promise.resolve();
     printState.items = items;
     $("printImageHint").hidden = !items.some(item => item.content?.body_mode === "source_image");
     renderPrintMissing();
@@ -1760,6 +1765,9 @@
     ui.paper.append(title);
     if (options.student_info && options.document !== "answers") ui.paper.append(info);
     if (!items.length) {
+      delete ui.paper.dataset.pageCount;
+      $("printPageStatus").textContent = "";
+      $("printLayoutWarnings").hidden = true;
       ui.paper.append(node("p", "helper", printState.missing.length ? "选题尚未全部载入，请先重试或移出未载入题目。" : "试题篮是空的。"));
       $("printLayoutNotice").hidden = true;
       syncExportButtons();
@@ -1866,7 +1874,7 @@
       preparePrintLayout();
       const layoutHost = node("div", "print-paper");
       const result = await window.ExamLayout.paginate(flow, { host: layoutHost, ...currentPrintOptions() });
-      if (token !== printState.layoutToken) return;
+      if (token !== printState.layoutToken || !ui.sheet.open) return;
       ui.paper.replaceChildren(...result.pages);
       ui.paper.dataset.pageCount = String(result.page_count);
       window.ExamLayout.scale(ui.paper);
@@ -2144,6 +2152,8 @@
   function closePrint() {
     if (printState.exporting || state.draftSaving) { toast("请等待当前保存或导出完成", "error"); return; }
     ++printState.token;
+    ++printState.layoutToken;
+    printState.layoutPending = false;
     if (ui.sheet.open) ui.sheet.close();
     ui.sheet.hidden = true;
     document.body.classList.remove("printing");

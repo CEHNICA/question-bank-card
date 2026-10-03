@@ -1,0 +1,162 @@
+"use strict";
+
+const assert = require("node:assert/strict"), fs = require("node:fs"), vm = require("node:vm");
+const App = require("./app.js");
+const source = fs.readFileSync(require.resolve("./app.js"), "utf8").replace(/\r\n/g, "\n");
+const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
+
+// Run the real N handler and its stepping function against rendered cards.
+// The old priority algorithm skipped 2, 3 and 4 to reach the first yellow card.
+const step = source.slice(source.indexOf("  function moveNextCard()"), source.indexOf("  // ---------------------------------------------------------------- 展开 / 收起"));
+const keyboard = source.slice(source.indexOf('  document.addEventListener("keydown", (event) => {\n    if (event.defaultPrevented || event.ctrlKey'), source.indexOf("  // ---------------------------------------------------------------- 原卷截图"));
+function navigation(ids = [11, 12, 13, 14, 15]) {
+  const nodes = new Map(), selected = [], expanded = [], messages = [], handlers = [];
+  const cards = ids.map((id, index) => ({ dataset: { id: String(id) }, inView: true,
+    rect: { top: 140 + index * 320, bottom: 460 + index * 320 }, getBoundingClientRect() { return this.rect; } }));
+  const state = { current: ids[0], followHold: false, questions: ids.map((id, index) => ({ id, number: index + 1, state: index === 4 ? "yellow" : "green" })) };
+  const $ = id => {
+    if (!nodes.has(id)) nodes.set(id, { open: false, hidden: false });
+    return nodes.get(id);
+  };
+  const context = { state, $, QBUpload: App, document: { addEventListener: (name, fn) => handlers.push(fn) },
+    cardNodes: () => cards, viewTop: () => 100, onScreen: card => card.inView,
+    questionById: id => state.questions.find(q => q.id === id), anyDialogOpen: () => Boolean(context.dialogOpen),
+    autoExpandOnMove: id => expanded.push(id), toast: text => messages.push(text),
+    setCurrent: (id, options) => { assert.equal(options.scroll, true); state.current = id; state.followHold = true; selected.push(id); },
+    viewerKey: event => context.viewerEvents.push(event.key), viewerEvents: [] };
+  vm.runInNewContext(step + keyboard, context);
+  function press(extra = {}) {
+    let prevented = false;
+    const event = { key: "n", target: { closest: () => null }, preventDefault() { prevented = true; }, ...extra };
+    handlers[0](event);
+    return prevented;
+  }
+  return { context, state, cards, selected, expanded, messages, press, $ };
+}
+const next = navigation();
+for (const id of [12, 13, 14, 15]) { assert(next.press()); assert.equal(next.state.current, id); }
+assert.deepEqual(next.selected, [12, 13, 14, 15], "Each press visits exactly the next rendered card, regardless of yellow priority");
+next.press(); assert.equal(next.state.current, 15); assert.match(next.messages.at(-1), /最后一题/);
+assert.equal(next.selected.length, 4, "The end does not silently wrap to the first question");
+const filtered = navigation([11, 13, 15]); filtered.press(); assert.equal(filtered.state.current, 13); filtered.press(); assert.equal(filtered.state.current, 15);
+const initial = navigation(); initial.state.current = null; initial.press(); assert.equal(initial.state.current, 12, "The first visible question is the initial origin");
+const scrolled = navigation(); scrolled.cards[0].inView = false; scrolled.cards[0].rect.bottom = 80;
+scrolled.press(); assert.equal(scrolled.state.current, 12, "A selected card stays the origin even when focus or scrolling has put it outside the viewport");
+const unselectedScroll = navigation(); unselectedScroll.state.current = null; unselectedScroll.cards[0].inView = false; unselectedScroll.cards[0].rect.bottom = 80;
+unselectedScroll.press(); assert.equal(unselectedScroll.state.current, 13, "Only an unselected list uses the top visible question as origin");
+const rapid = navigation(); rapid.press(); rapid.cards[1].inView = false; rapid.press(); assert.equal(rapid.state.current, 13, "A queued smooth scroll cannot reset the next press to the old viewport");
+const guarded = navigation();
+for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { defaultPrevented: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
+  { target: { closest: selector => selector.includes("input") ? {} : null } },
+  { target: { closest: selector => selector.includes("contenteditable") ? {} : null } }]) {
+  guarded.press(extra); assert.equal(guarded.selected.length, 0, "Held keys, text input, IME and modified shortcuts do not step");
+}
+guarded.context.dialogOpen = true; guarded.press(); assert.equal(guarded.selected.length, 0, "An open settings, crop or confirmation dialog blocks N");
+guarded.context.dialogOpen = false; guarded.$("paperView").hidden = true; guarded.press(); assert.equal(guarded.selected.length, 0);
+guarded.$("paperView").hidden = false; guarded.press({ key: "N" }); assert.equal(guarded.state.current, 12);
+
+// First-use guidance is one session on one paper, then suppressed across reloads.
+// Explicit opt-out is persistent, reversible, and does not touch data/configuration.
+const preferences = new Map(), writes = [];
+const makeGuide = () => App.createReviewGuidance((key, fallback) => preferences.get(key) ?? fallback,
+  (key, value) => { preferences.set(key, value); writes.push(key); });
+const guide = makeGuide();
+assert.equal(guide.visible("paper-one", false), false); assert.equal(writes.length, 0);
+assert.equal(guide.visible("paper-one", true), true); assert.equal(guide.visible("paper-one", true), true);
+assert.equal(guide.visible("paper-two", true), false); assert.equal(guide.visible("paper-one", true), false); assert.equal(makeGuide().visible("paper-one", true), false);
+guide.dismiss(); assert.equal(guide.visible("paper-one", true), false); assert.equal(makeGuide().visible("paper-new", true), false);
+guide.restore(); assert.equal(guide.visible("paper-new", true), true); assert.equal(makeGuide().visible("paper-two", true), false);
+assert(writes.every(key => key.startsWith("qb-review-guidance-")), "Only the dedicated local guidance preferences change");
+assert.match(html, /id="reviewGuidanceDismiss"[^>]*>以后不再提示/);
+assert.match(html, /id="settingsRestoreHints"[^>]*>恢复操作提示/);
+const guideUI = source.slice(source.indexOf("  const reviewGuidance ="), source.indexOf("  function renderPaper()"));
+assert.match(guideUI, /setCropGuidanceEnabled\(true\)/, "Help restores the existing permanent crop guidance opt-out too");
+assert.doesNotMatch(guideUI, /paperError|cutReadingError|pageCropResult|editGuard|\/api\//, "Guidance changes cannot hide failures, unsaved warnings or submit work");
+const historical = "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。";
+assert.equal(App.historicalParseReason({ status: "ready", processing_plan: { fallback_reason: historical } }), true);
+for (const status of ["queued", "parsing", "failed", "needs_grouping"]) {
+  assert.equal(App.historicalParseReason({ status, processing_plan: { fallback_reason: historical } }), false);
+}
+for (const reason of ["MinerU 服务暂时不可用，原页保留。", "有一页文字乱码。", "未切出 3 页题目，请补齐。", "题号重叠，请确认。", "未知的新警告"]) {
+  assert.equal(App.historicalParseReason({ status: "ready", processing_plan: { fallback_reason: reason } }), false, "Only known completed route history leaves the main status");
+}
+
+// The same single-entry rule covers empty and populated manual/native stages.
+const blank = App.cutReadingSummary([]), image = App.cutReadingSummary([{ id: 1, body_mode: "source_image", regions: [{ bbox: [0, 0, 10, 10] }] }]);
+for (const parse_mode of ["manual", "native"]) {
+  assert.equal(App.showCutReadingStage({ parse_mode, status: "ready" }, blank), true);
+  assert.equal(App.showCutReadingStage({ parse_mode, status: "ready" }, image), true);
+  assert.equal(App.showCutReadingStage({ parse_mode, status: "failed" }, blank), true);
+}
+for (const status of ["queued", "parsing", "segmenting", "needs_grouping"]) {
+  assert.equal(App.showCutReadingStage({ parse_mode: "mineru", status }, image), false, "An active cloud cut has its direct stop-and-manual action rather than another crop stage");
+}
+assert.equal(App.showCutReadingStage({ parse_mode: "mineru", status: "ready" }, blank), false);
+assert.equal(App.showCutReadingStage({ parse_mode: "mineru", status: "ready" }, image), true);
+assert.equal(App.showCutReadingStage({ parse_mode: "manual", status: "ready", demo: true }, blank), false);
+const mainStrip = html.slice(html.indexOf('id="paperManualEntry"'), html.indexOf('id="cutReadingStage"'));
+assert.doesNotMatch(mainStrip, /paperContinueAi/);
+const menu = html.slice(html.indexOf('id="paperMenu"'), html.indexOf('id="paperStatus"'));
+assert.match(menu, /id="paperContinueAi"/);
+assert.equal((html.match(/id="paperContinueAi"/g) || []).length, 1, "The existing guarded AI continuation has one menu entry");
+assert.doesNotMatch(html, /id="approveGreen"/);
+assert.doesNotMatch(source, /\$\("approveGreen"\)|approve-green/);
+assert.match(source, /firstTourCard\(\)\?\.querySelector\("\.card-tick"\), title: "入库"/);
+assert.match(source, /通过即自动入库/);
+
+// Render real stage actions and the real empty-state branch together. Neither
+// depends on the previous stage's hidden flag, so an initial/polled render cannot
+// accidentally produce two primary crop buttons.
+const { node, el } = require("./credential-test-dom.js");
+const stageCode = source.slice(source.indexOf("  function renderCutReadingStage()"), source.indexOf("  function openManualCut()"));
+const emptyStart = source.indexOf("    if (!shown.length) {");
+const emptyCode = source.slice(emptyStart, source.indexOf("    R.fitOptions(container);", emptyStart));
+function cutting(paper, questions = []) {
+  const nodes = new Map(), container = node("cards");
+  const $ = id => { if (!nodes.has(id)) nodes.set(id, { ...node(id), dataset: {} }); return nodes.get(id); };
+  // Deliberately stale DOM visibility: the new shared decision must win.
+  $("cutReadingStage").hidden = false;
+  const context = { $, state: { paper, paperId: "p", questions, filter: "all" }, QBCutReading: App, QBProgress: App,
+    ACTIVE_STATUS: new Set(["queued", "parsing", "segmenting", "reading"]), container, shown: [], el,
+    directImageReview: new Set(), cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), cutReadingRequests: new Set(), cutReadingStops: new Set(),
+    manualSwitches: new Set(), aiCutContinuations: new Set(), paperReadSubmissionPending: () => false,
+    openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {}, document: { createTextNode: text => text },
+    button(label, className, callback) { const result = node("", "button", label); result.className = className; result.callback = callback; return result; } };
+  vm.runInNewContext(stageCode, context);
+  context.renderCutReadingStage();
+  vm.runInNewContext(emptyCode, context);
+  const stageButtons = $("cutReadingStage").hidden ? [] : $("cutReadingActions").children.filter(item => /手工切题/.test(item.textContent));
+  const emptyButtons = container.children.flatMap(item => item.children).filter(item => item.id === "emptyManualCut");
+  return { $, context, stageButtons, emptyButtons };
+}
+for (const parse_mode of ["manual", "native"]) {
+  const ready = cutting({ parse_mode, status: "ready", pages: [{ page_idx: 0 }] });
+  assert.equal(ready.stageButtons.length, 1); assert.equal(ready.emptyButtons.length, 0);
+  const populated = cutting({ parse_mode, status: "ready", pages: [{ page_idx: 0 }] }, [{ id: 1, approved: true, body_mode: "source_image", regions: [{ bbox: [0, 0, 10, 10] }] }]);
+  assert.equal(populated.stageButtons.length, 1); assert.equal(populated.emptyButtons.length, 0);
+}
+const ordinaryCloud = cutting({ parse_mode: "mineru", status: "ready", pages: [{ page_idx: 0 }] });
+assert.equal(ordinaryCloud.stageButtons.length, 0); assert.equal(ordinaryCloud.emptyButtons.length, 1, "Cloud-ready empty papers keep one usable manual fallback");
+for (const status of ["queued", "parsing", "segmenting"]) {
+  const pending = cutting({ parse_mode: "mineru", status, pages: [{ page_idx: 0 }] });
+  assert.equal(pending.stageButtons.length + pending.emptyButtons.length, 0, "The existing direct stop-and-manual recovery owns cloud wait states");
+}
+
+// Exercise actual dismiss/restore listeners with fake preferences, not just the
+// controller. Required error nodes remain untouched, and Help restores crop hints.
+const helpNodes = new Map(), storageHandlers = [], helpPreferences = new Map(), cropRestores = [];
+const helpUI = { QBReviewGuidance: App, state: { paperId: "paper", paper: { status: "ready" }, questions: [{ id: 1, approved: false }] },
+  isHumanApproved: q => q.approved === true,
+  $: id => { if (!helpNodes.has(id)) helpNodes.set(id, node(id)); return helpNodes.get(id); },
+  readPref: (key, fallback) => helpPreferences.get(key) ?? fallback,
+  writePref: (key, value) => helpPreferences.set(key, value), setCropGuidanceEnabled: value => cropRestores.push(value), toast() {},
+  window: { addEventListener: (event, callback) => storageHandlers.push(callback) } };
+vm.runInNewContext(guideUI, helpUI);
+helpUI.$("paperError").hidden = false; helpUI.$("paperError").textContent = "Service unavailable";
+helpUI.renderReviewGuidance(); assert.equal(helpUI.$("reviewGuidanceHint").hidden, false);
+helpUI.$("reviewGuidanceDismiss").events.click[0](); assert.equal(helpUI.$("reviewGuidanceHint").hidden, true);
+helpUI.$("settingsRestoreHints").events.click[0](); assert.equal(helpUI.$("reviewGuidanceHint").hidden, false);
+assert.deepEqual(cropRestores, [true]); assert.equal(helpUI.$("paperError").hidden, false); assert.equal(helpUI.$("paperError").textContent, "Service unavailable");
+helpPreferences.set("qb-review-guidance-disabled", "1"); storageHandlers[0]({ key: "qb-review-guidance-disabled" });
+assert.equal(helpUI.$("reviewGuidanceHint").hidden, true, "Another window's permanent dismissal updates this current review");
+console.log("Review N: sequential visible cards, first-card origin, scroll fencing, held-key and IME guards; one-time reversible guidance, fault visibility, single cutting entry and automatic-approval tutorial: OK");

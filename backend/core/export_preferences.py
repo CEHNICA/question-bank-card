@@ -24,6 +24,7 @@ from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 _lock = threading.RLock()
+_picker_lock = threading.Lock()
 _receipts: dict[str, tuple[float, Path, tuple[int, int, int, int]]] = {}
 _RECEIPT_SECONDS = 3600
 _RESERVED = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.I)
@@ -147,6 +148,48 @@ def preferences_view(request):
             response = JsonResponse(save(_body(request, limit=10_000)))
         except ExportPreferenceError as error:
             return JsonResponse({"error": str(error)}, status=400)
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def select_export_directory_view(request):
+    """Open the desktop folder picker only on an explicit local page request.
+
+    Selecting returns a candidate for the input field; the existing Save button
+    remains the only operation that writes the preference. Cancel changes none.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request, mutation=True)
+    if rejected:
+        return rejected
+    if not desktop_capable():
+        return JsonResponse({"error": "请选择 Windows 桌面版中的导出文件夹；网页版仍可使用浏览器下载。"}, status=409)
+    from .views import _body
+    if _body(request, limit=1_000) != {}:
+        return JsonResponse({"error": "选择文件夹的请求格式不正确。"}, status=400)
+    from .native_folder_picker import choose_directory, FolderPickerError
+    if not _picker_lock.acquire(blocking=False):
+        return JsonResponse({"error": "文件夹选择窗口已经打开，请先选择或取消。"}, status=409)
+    try:
+        initial = _read()["directory"]
+        try:
+            directory = _directory(initial)
+        except ExportPreferenceError:
+            directory = None  # A deleted saved folder should not prevent a new choice.
+        chosen = choose_directory(str(directory) if directory else "")
+        if chosen is None:
+            response = JsonResponse({"selected": False, "cancelled": True})
+        else:
+            candidate = _directory(chosen)
+            if candidate is None:
+                raise ExportPreferenceError("未选择有效文件夹，请重新选择。")
+            response = JsonResponse({"selected": True, "directory": str(candidate)})
+    except (ExportPreferenceError, FolderPickerError) as error:
+        response = JsonResponse({"error": str(error)}, status=409)
+    finally:
+        _picker_lock.release()
     response["Cache-Control"] = "no-store"
     return response
 

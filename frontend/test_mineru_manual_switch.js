@@ -71,7 +71,7 @@ function harness(options = {}) {
     cloudPaper({ status: "ready" }), cloudPaper({ archived: true }), cloudPaper({ demo: true })]) {
     const hidden = harness({ paper }); hidden.context.renderSettingsTask();
     assert.equal(hidden.$("settingsManualFallback").hidden, true, "Other routes/stages must not be mislabeled MinerU");
-    assert.equal(hidden.$("paperManualEntry").hidden, !App.canContinueAiCut(paper));
+    assert.equal(hidden.$("paperManualEntry").hidden, true, "AI continuation is a menu entry, not a duplicate main-screen manual card");
     assert.equal(await hidden.context.switchToManual(null, { stopMinerU: true }), false);
     assert.equal(hidden.calls.length, 0);
   }
@@ -86,7 +86,7 @@ function harness(options = {}) {
   assert.equal(success.context.newUploadReadContinuations.has("paper"), false, "Switching never starts automatic reading");
   assert.equal(success.context.busy.size, 0);
   assert.equal(success.$("settingsManualFallback").hidden, true, "The cloud-only action disappears after conversion");
-  assert.equal(success.$("paperManualEntry").hidden, false, "The saved manual pages keep a visible continuation back to automatic cutting");
+  assert.equal(success.$("paperManualEntry").hidden, true, "The saved manual pages keep AI continuation in the menu, while the stage owns manual cutting");
   assert.equal(success.$("paperContinueAi").hidden, false);
   const alreadyManual = harness({ response: { paper: manualPaper(), manual_ready: true, changed: false } });
   assert.equal(await alreadyManual.context.switchToManual(null, { stopMinerU: true }), true);
@@ -105,7 +105,7 @@ function harness(options = {}) {
   assert.equal(pending.openings.length, 1);
   assert.equal(pending.$("settingsStop").disabled, false);
   assert.equal(pending.$("paperManualFallback").disabled, false);
-  assert.equal(pending.$("paperManualEntry").hidden, false);
+  assert.equal(pending.$("paperManualEntry").hidden, true);
   assert.equal(pending.$("paperManualFallback").hidden, true, "The manual action stays in the cutting stage instead of being duplicated in the continuation card");
 
   for (const options of [{ failure: true }, { timeout: true }, { refreshed: false },

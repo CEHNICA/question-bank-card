@@ -879,6 +879,40 @@ const QBManualCrop = (() => {
   return { nextCropNumber, cropDraftSnapshot, moveCropBox, cropShortcutAction };
 })();
 
+const QBReviewGuidance = (() => {
+  "use strict";
+  const SEEN_PREF = "qb-review-guidance-seen";
+  const DISABLED_PREF = "qb-review-guidance-disabled";
+
+  function createReviewGuidance(read, write) {
+    let shownFor = null;
+    function visible(paperId, eligible) {
+      if (shownFor !== null && shownFor !== paperId) shownFor = null;
+      if (read(DISABLED_PREF, "0") === "1" || !eligible) return false;
+      if (shownFor === paperId) return true;
+      if (read(SEEN_PREF, "0") === "1") return false;
+      shownFor = paperId;
+      write(SEEN_PREF, "1");
+      return true;
+    }
+    function dismiss() { shownFor = null; write(DISABLED_PREF, "1"); }
+    function restore() {
+      shownFor = null;
+      write(SEEN_PREF, "0");
+      write(DISABLED_PREF, "0");
+    }
+    return { visible, dismiss, restore };
+  }
+  function historicalParseReason(paper) {
+    if (paper?.status !== "ready") return false;
+    return [
+      "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。",
+      "已从本地文字层准备题卡，请对照原卷核对；未切出的页面可手工补充。"
+    ].includes(paper.processing_plan?.fallback_reason);
+  }
+  return { createReviewGuidance, historicalParseReason };
+})();
+
 const QBCutReading = (() => {
   "use strict";
 
@@ -906,7 +940,11 @@ const QBCutReading = (() => {
       ...(Number.isInteger(revision) ? { revision } : {}) };
   }
 
-  return { hasCurrentReading, cutReadingSummary, cutReadingRequest };
+  function showCutReadingStage(paper, summary) {
+    return Boolean(paper && !paper.demo && ["ready", "failed", "reading"].includes(paper.status)
+      && (summary.saved || summary.pending || ["manual", "native"].includes(paper.parse_mode)));
+  }
+  return { hasCurrentReading, cutReadingSummary, cutReadingRequest, showCutReadingStage };
 })();
 
 if (typeof module !== "undefined" && module.exports) {
@@ -916,6 +954,7 @@ if (typeof module !== "undefined" && module.exports) {
     ...QBRegionWait,
     ...QBManualCrop,
     ...QBCutReading,
+    ...QBReviewGuidance,
     insertTableText: QBTableText.insert, growTableText: QBTableText.grow,
     TEACH_LESSONS: QBTeach.LESSONS, lessonDone: QBTeach.lessonDone, lessonHint: QBTeach.lessonHint,
     restoreTeaching: QBTeach.restore, teachingProgress: QBTeach.progress };
@@ -1585,6 +1624,28 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     banner.append(actions);
   }
 
+  const reviewGuidance = QBReviewGuidance.createReviewGuidance(readPref, writePref);
+
+  function renderReviewGuidance() {
+    const eligible = !$("paperView").hidden && state.paper?.status === "ready"
+      && state.questions.some((q) => !isHumanApproved(q));
+    $("reviewGuidanceHint").hidden = !reviewGuidance.visible(state.paperId, eligible);
+  }
+
+  $("reviewGuidanceDismiss").addEventListener("click", () => {
+    reviewGuidance.dismiss();
+    renderReviewGuidance();
+  });
+  $("settingsRestoreHints").addEventListener("click", () => {
+    reviewGuidance.restore();
+    setCropGuidanceEnabled(true);
+    renderReviewGuidance();
+    toast("审核与画框操作提示已恢复");
+  });
+  window.addEventListener("storage", (event) => {
+    if (["qb-review-guidance-seen", "qb-review-guidance-disabled"].includes(event.key)) renderReviewGuidance();
+  });
+
   function renderPaper() {
     const paper = state.paper;
     $("emptyState").hidden = true;
@@ -1615,14 +1676,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       statusText.textContent = paper.pages?.length
         ? "原卷已保存，可以从原卷选取题目。" : "没有题卡";
     } else if (c.todo) {
-      // What to do next, not a second copy of the counts shown in the bar and tabs.
-      statusText.replaceChildren(
-        document.createTextNode(`${c.all} 道题，${c.todo} 题需要核查（按 `),
-        el("kbd", "", "N"),
-        document.createTextNode(" 逐张跳过去）。确认后通过即入库。"),
-      );
+      statusText.textContent = `${c.all} 道题，${c.todo} 题需要核查。`;
     } else if (c.green) {
-      statusText.textContent = `${c.all} 道题：${c.green} 张题卡需要核查，确认后标记通过并入库。`;
+      statusText.textContent = `${c.all} 道题，${c.green} 题需要核查。`;
     } else {
       statusText.textContent = `全部 ${c.all} 题已通过。` + aiNote(c);
     }
@@ -1632,9 +1688,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const warnings = paper.processing_plan?.warnings;
       if (Array.isArray(warnings) && warnings.length) statusText.append(el("span", "processing-detail", warnings.map(String).join("；")));
     }
-    if (!isProcessing && paper.processing_plan?.fallback_reason) {
+    // Only known completed local/cloud route explanations move to history.
+    // Failures, missing pages, structure issues and unknown warnings stay visible.
+    if (paper.processing_plan?.fallback_reason && !QBReviewGuidance.historicalParseReason(paper)) {
       statusText.append(el("span", "processing-detail", String(paper.processing_plan.fallback_reason)));
     }
+    renderReviewGuidance();
     const processingPanel = $("processingPanel");
     processingPanel.hidden = !isProcessing;
     const progress = $("progress");
@@ -1675,9 +1734,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderMeter(c);
     renderDoneBanner(c);
     const structureBlocked = paper.status === "needs_grouping";
-    $("approveGreen").disabled = !c.green || structureBlocked;
-    $("approveGreen").textContent = c.green ? `批量通过（${c.green}）` : "批量通过";
-    $("approveGreen").title = "对照原卷确认“需要核查”中的题目后，批量标记通过并入库。";
     renderPublishButton(c, structureBlocked);
     const notes = paper.notes || [];
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
@@ -1732,7 +1788,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     const host = $("cutReadingStage");
     const summary = QBCutReading.cutReadingSummary(state.questions);
-    host.hidden = !paper || paper.demo || paper.status === "needs_grouping" || (!summary.saved && !summary.pending && !["manual", "native"].includes(paper.parse_mode));
+    host.hidden = !QBCutReading.showCutReadingStage(paper, summary);
     if (host.hidden) return;
     if (summary.pending) cutReadingErrors.delete(paper.id);
     if (!summary.pending) cutReadingStopErrors.delete(paper.id);
@@ -2145,9 +2201,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
         empty.append(el("strong", "", "原卷已保存"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。完成切题后自动识读已保存的题目。"));
-        // The cutting panel already supplies the primary entry. Only show
-        // this fallback when that panel is absent, and use the same guard.
-        if ($("cutReadingStage").hidden) {
+        // The cutting panel owns the main entry. The empty state is a fallback
+        // only when the panel is absent, independent of the previous render.
+        if (!QBCutReading.showCutReadingStage(state.paper, QBCutReading.cutReadingSummary(state.questions))) {
           const cut = button("手工切题", "primary", openManualCut);
           cut.id = "emptyManualCut";
           cut.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
@@ -2317,6 +2373,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     setCurrent(nextId, { scroll: true, focus: true });
   }
 
+  function moveNextCard() {
+    const cards = cardNodes();
+    if (!cards.length) return;
+    const currentIndex = cards.findIndex((card) => Number(card.dataset.id) === state.current);
+    // N always advances from the selected card, even if a focus action or
+    // scrolling temporarily moved it outside the viewport. Only an unselected
+    // list needs the first visible card as its starting point.
+    let from = currentIndex >= 0 ? currentIndex
+      : cards.findIndex((card) => card.getBoundingClientRect().bottom > viewTop() + 24);
+    if (from < 0) from = cards.length - 1;
+    const next = cards[from + 1];
+    if (!next) { toast("已经是当前列表的最后一题"); return; }
+    const nextId = Number(next.dataset.id);
+    autoExpandOnMove(nextId);
+    // Update immediately: a second separate press must advance from this card,
+    // even if the scroll animation or an expansion has not painted yet.
+    setCurrent(nextId, { scroll: true, focus: true });
+  }
+
   // ---------------------------------------------------------------- 展开 / 收起
 
   // 只有人工通过的题会收起；AI 通过的题等你核对，一直展开。
@@ -2384,9 +2459,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   document.addEventListener("keydown", (event) => {
-    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey
+      || event.isComposing || event.keyCode === 229) return;
     const target = event.target;
-    if (target.closest?.("input, textarea, select, [contenteditable='true'], .editor")) return;
+    if (QBUpload.isEditingTarget(target) || target.closest?.(".editor")) return;
     if ($("viewerDialog").open) { viewerKey(event); return; }
     if (anyDialogOpen()) return;
     if ($("paperView").hidden) {
@@ -2431,12 +2507,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         break;
       case "r": if (q) { event.preventDefault(); openPageDialog("regions", q); } break;
       case "f": if (q) { event.preventDefault(); openPageDialog(q.body_mode === "source_image" ? "regions" : "figures", q); } break;
-      case "n": {
+      case "n":
         event.preventDefault();
-        const next = nextToReview(q, { onlyCheck: true }) || nextToReview(q);
-        if (next) goTo(next); else toast("没有待审的题卡了");
+        if (!event.repeat) moveNextCard();
         break;
-      }
       case "l": event.preventDefault(); setLens(!state.lens); toast(state.lens ? "放大镜已打开" : "放大镜已关闭"); break;
       case "z": event.preventDefault(); setFocus(!state.focus); toast(state.focus ? "专注已打开：其余题暗下来" : "专注已关闭"); break;
       case "1": case "2": case "3": case "4":
@@ -2959,7 +3033,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function viewerKey(event) {
     const key = event.key;
     if (["ArrowLeft", "k", "K"].includes(key)) { event.preventDefault(); viewerStep(-1); }
-    else if (["ArrowRight", "j", "J"].includes(key)) { event.preventDefault(); viewerStep(1); }
+    else if (["ArrowRight", "j", "J", "n", "N"].includes(key)) {
+      event.preventDefault();
+      if (!event.repeat || key.toLowerCase() !== "n") viewerStep(1);
+    }
     else if (key === "Enter") { event.preventDefault(); viewerApprove(); }
     else if (key === " ") { event.preventDefault(); $("viewerDialog").close(); }
     else if (key === "+" || key === "=") { event.preventDefault(); zoomBy(1.25); }
@@ -4712,7 +4789,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // Keep the recovery action beside the processing status. The local
     // fallback already has a primary cutting action in its three-step panel.
     const cloudCutting = QBProgress.canSwitchMinerUToManual(paper), canContinue = QBProgress.canContinueAiCut(paper);
-    $("paperManualEntry").hidden = !changingCutMode && !cloudCutting && !canContinue;
+    $("paperManualEntry").hidden = !switchingManual && !cloudCutting;
     $("paperManualFallback").hidden = !switchingManual && !cloudCutting;
     $("paperManualFallback").disabled = changingCutMode;
     $("paperManualFallback").textContent = switchingManual ? "正在准备手工切题…" : "改为手工切题";
@@ -4732,6 +4809,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsSplit").textContent = groups.length > 1 ? `按建议拆成 ${groups.length} 份` : "拆分任务";
 
     const notes = [...(paper.notes || [])];
+    const parseReason = paper.processing_plan?.fallback_reason;
+    if (parseReason && !notes.includes(parseReason)) notes.push(parseReason);
     const structureMessage = paper.structure_message
       || (typeof paper.structure_conflict === "object" && paper.structure_conflict.message);
     if (structureMessage && !notes.includes(structureMessage)) notes.unshift(structureMessage);
@@ -4905,7 +4984,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("paperManualFallback").addEventListener("click", () => {
     void switchToManual(null, { stopMinerU: true });
   });
-  $("paperContinueAi").addEventListener("click", () => { void continueAiCut(); });
+  $("paperContinueAi").addEventListener("click", () => {
+    $("paperMenu").open = false;
+    void continueAiCut();
+  });
   $("renameNudge").addEventListener("click", openRenameDialog);
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
@@ -5127,24 +5209,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
-  $("approveGreen").addEventListener("click", async () => {
-    const count = counts().green;
-    if (!count) return;
-    const ok = await confirmDialog({
-      title: `把 ${count} 道题批量标记为通过？`,
-      text: "请先对照原卷确认这些无未处理提醒的题目；通过后自动入库。",
-      ok: `标记 ${count} 张通过`
-    });
-    if (!ok) return;
-    try {
-      const data = await api(`/api/papers/${state.paperId}/approve-green`, { method: "POST", body: {} });
-      toast(`已将 ${data.approved} 道题通过并入库`, "success");
-      if (data.problems?.length) toast(data.problems.join(" "), "error");
-      teach({ type: "approveGreen" });
-      refreshPaper();
-    } catch (error) { toast(error.message, "error"); }
-  });
-
   function renderPublishButton(c = counts(), structureBlocked = state.paper?.status === "needs_grouping") {
     const button = $("publishButton");
     button.hidden = true;
@@ -5168,7 +5232,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (state.paper?.demo) {
       await confirmDialog({
         title: "示例试卷不会入库",
-        text: "示例试卷只用来练习，不会进入正式题库。你自己的试卷核对完，点“入库”，题目就进了正式题库，可以搜索、组卷。",
+        text: "示例试卷只用来练习，不会进入正式题库。你自己的试卷逐题核对后打勾，通过即自动入库，可以搜索、组卷。",
         ok: "知道了"
       });
       teach({ type: "publish" });
@@ -8167,11 +8231,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("paperMenu").querySelector("summary"), title: "看整份原卷",
       text: "点“试卷操作 → 查看整份原卷”。Ctrl＋滚轮缩放，左键拖动，还能适页、适宽和跳页。画框编辑时用空格＋左键或中键拖动。" },
     { target: () => $("filters"), title: "先看有疑点的",
-      text: "“重点核查”列出有待处理问题或配图尚未完成的题卡；其余识读成功的题放在“需要核查”。确认后打勾，进入“已通过”。" },
+      text: "“需要核查”列出尚未人工确认的题卡，有疑点的题会保留黄色提醒。逐题核对后打勾，进入“已通过”；按 N 按当前列表顺序看下一题。" },
     { target: () => document.querySelector("#toolbar .tool-group"), title: "专注和全屏",
       text: "“专注”让正在看的题亮着、其余题暗下来；“全屏”收起顶栏和试卷列表，只留题卡。" },
-    { target: () => $("publishButton"), title: "入库",
-      text: "核对完的题点“入库”，就进了正式题库。已经入库的题再改，会提示你重新入库，旧版本也会留着。" },
+    { target: () => firstTourCard()?.querySelector(".card-tick"), title: "入库",
+      text: "逐题对照原卷确认后打勾，通过即自动入库。已经入库的题再改，需要重新核对并通过，旧版本也会留着；示例只练习，不会入库。" },
     { target: () => document.querySelector('.topnav a[href="/library"]'), title: "正式题库",
       text: "按试卷、题型、关键词找题，选好就能组卷。每道题可“查看出处”，对照原卷；“版本历史”看修改前后，“相关资料”查其他来源。" },
     { target: () => $("settingsButton"), title: "设置",
@@ -8547,8 +8611,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         "点“补选配图”", "在原卷上点蓝色的候选图，选“题干”，再点“保存”。"); break;
       case "table": focusCard(3); later(() => cardFor(3)?.querySelector(".qb-table") || cardFor(3),
         "对照这张表", "逐格看一遍，没问题就给第 3 题打勾。"); break;
-      case "green": later(() => $("approveGreen"), "点这里", "核对“需要核查”中的题目后，可以一起标记通过。"); break;
-      case "publish": later(() => $("approveGreen"), "点“入库”", "示例试卷不会真的入库。"); break;
+      case "publish": focusCard(1); later(() => cardFor(1)?.querySelector(".card-tick"), "核对后打勾", "逐题确认后通过即入库，不需要另点入库；示例试卷不会真的入库。"); break;
       case "basics": later(() => $("settingsButton"), "以后从这里继续", "设置 → 帮助：可以重做基础练习，也可以只看新版功能。"); break;
       case "original": {
         if (!$("pageDialog").open) openPageDialog("view");

@@ -123,6 +123,7 @@
               <button id="settingsLearn" class="button primary" type="button">用示例试卷重新学一遍</button>
               <button id="settingsNewFeatures" class="button" type="button">只看新版功能</button>
               <button id="settingsWelcome" class="button" type="button">重新看一遍新手引导</button>
+              <button id="settingsRestoreHints" class="button" type="button">恢复操作提示</button>
             </div>
             <p class="settings-footnote">基础练习约 3 分钟；新版功能可以单独看。示例不用密钥、不调用读题服务，也不会进入正式题库。教学进度保存在本机浏览器，刷新后可继续。</p>
             <details class="teaching-help">
@@ -216,6 +217,7 @@
                   <button id="viewOriginalPaper" class="link-button" type="button">查看整份原卷</button>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
+                  <button id="paperContinueAi" class="link-button" type="button" hidden>继续 AI 切题</button>
                   <button id="settingsManualFallback" class="link-button" type="button" hidden title="停止等待 MinerU，保留原卷和已有题卡，直接从原卷手工框题；这一步不调用 AI 识读">停止 MinerU，改为手工切题</button>
                   <button id="settingsStop" class="link-button" type="button" hidden title="停止本机处理，保留原卷和已有题卡">停止处理</button>
                   <button id="settingsConfirmStructure" class="link-button" type="button" hidden>确认属于同一份资料并继续</button>
@@ -232,15 +234,17 @@
               </details>
             </div>
             <p id="paperStatus" class="paper-status"></p>
+            <div id="reviewGuidanceHint" class="review-guidance-hint" hidden>
+              <span>按 <kbd>N</kbd> 依次看下一题。核对后打勾，通过即入库。</span>
+              <button id="reviewGuidanceDismiss" class="link-button" type="button">以后不再提示</button>
+            </div>
           </div>
           <div class="paper-actions">
-            <button id="approveGreen" class="button" type="button">批量通过</button>
             <button id="publishButton" class="button primary" type="button" hidden>入库</button>
           </div>
         </div>
         <div id="paperManualEntry" class="manual-cut-entry" hidden>
           <button id="paperManualFallback" class="button primary" type="button">改为手工切题</button>
-          <button id="paperContinueAi" class="button" type="button">继续 AI 切题</button>
           <span id="paperManualHint" role="status">可以停止等待，直接框题；原卷和已有题目保留。</span>
         </div>
         <section id="cutReadingStage" class="cut-reading-stage" aria-labelledby="cutReadingTitle" hidden>
@@ -800,7 +804,7 @@
       <div class="key-row"><span>放大对照原卷</span><span><kbd>Space</kbd></span></div>
       <div class="key-row"><span>改字</span><span><kbd>E</kbd></span></div>
       <div class="key-row"><span>调整范围 / 配图</span><span><kbd>R</kbd><kbd>F</kbd></span></div>
-      <div class="key-row"><span>下一张需核对的卡</span><span><kbd>N</kbd></span></div>
+      <div class="key-row"><span>当前列表下一张题卡</span><span><kbd>N</kbd></span></div>
       <div class="key-row"><span>题卡放大镜开 / 关</span><span><kbd>L</kbd></span></div>
       <div class="key-row"><span>专注开 / 关（其余题暗下来）</span><span><kbd>Z</kbd></span></div>
       <div class="key-row"><span>全屏审核 / 退出全屏</span><span><kbd>Q</kbd><kbd>Esc</kbd></span></div>

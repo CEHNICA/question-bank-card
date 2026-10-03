@@ -211,7 +211,7 @@ window.__qbPdfStatus = {ready:false};
     row.dataset.questionId=item.id;row.append(node('strong','',isInline?'':n+'.'));
     LibrarySolutions.render(body,{...(item.selected||{}),figures:(item.solution_images||[]).map(f=>({...f,url:f.file}))},
       {node,QB:QBRender,empty:'（原卷未提供答案解析）'});
-    if(item.ai)body.append(node('span','print-ai-note','（AI参考，未核对）'));
+    if(item.ai)body.prepend(node('span','print-ai-note','（AI 参考，未核对）'));
     row.append(body);return row;
   };
   const types=[['single_choice','选择题'],['multiple_choice','多选题'],['fill_blank','填空题'],['true_false','判断题'],['free_response','解答题']];

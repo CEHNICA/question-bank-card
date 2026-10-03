@@ -89,10 +89,14 @@ assert.match(html, /id="emptyLearn"[^>]*>先用示例试卷学一遍（不用密
 assert.match(html, /id="settingsLearn"[^>]*>用示例试卷重新学一遍<\/button>/);
 assert.match(js, /api\("\/api\/demo", \{ method: "POST", body: \{ reset \} \}\)/);
 // The review actions report to the lesson.
-for (const event of ['type: "viewer"', 'type: "approve"', 'type: "filter"', 'type: "text"', 'type: "figures"', 'type: "approveGreen"', 'type: "publish"']) {
+for (const event of ['type: "viewer"', 'type: "approve"', 'type: "filter"', 'type: "text"', 'type: "figures"', 'type: "publish"']) {
   assert.ok(js.includes(`teach({ ${event}`), event);
 }
-// The practice paper never publishes: 入库 explains instead.
+// Manual approval is the only teaching approval control; the practice paper never publishes.
+assert.doesNotMatch(html, /id="approveGreen"/);
+assert.doesNotMatch(js, /\$\("approveGreen"\)|approve-green/);
+assert.match(js, /case "publish": focusCard\(1\); later\(\(\) => cardFor\(1\)\?\.querySelector\("\.card-tick"\)/);
+// The legacy publish helper is compatible with a demo and explains instead.
 assert.match(js, /if \(state\.paper\?\.demo\) \{\s*await confirmDialog\(\{\s*title: "示例试卷不会入库"[\s\S]*?\}\);\s*teach\(\{ type: "publish" \}\);\s*return;/);
 assert.match(js, /if \(dialog\.mode === "view" \|\| dialog\.practiceRead\) return;/);
 // The practice pointer uses a real control, rather than a removed card button.

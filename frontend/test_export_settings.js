@@ -44,6 +44,7 @@ function setup({ desktop = true, directory = "" } = {}) {
   assert.equal(normal.calls[0].url, "/api/export-preferences"); assert.equal(normal.calls[0].cache, "no-store");
   assert.equal(normal.calls[0].headers["X-QB-Request"], "1"); assert.equal(normal.calls[0].body, undefined);
   assert.equal(normal.get("exportDirectory").disabled, false); assert.equal(normal.get("exportDirectoryOpen").disabled, true);
+  assert.equal(normal.get("exportDirectorySelect").disabled, false);
   assert.equal(normal.get("exportDirectoryRetry").hidden, false, "Reloading saved directory remains available after a successful load"); assert.equal(normal.timers.size, 0);
   await normal.window.ExportSettings.mount(new (normal.host.constructor)()); assert.equal(normal.calls.length, 1, "Repeated mount must not duplicate requests or controls");
 
@@ -61,9 +62,39 @@ function setup({ desktop = true, directory = "" } = {}) {
   normal.response(request => { assert.deepEqual(request.payload, { directory: "" }); normal.current.directory = ""; return { body: { ...normal.current } }; });
   await normal.click("exportDirectoryReset"); assert.equal(normal.get("exportDirectory").value, ""); assert.equal(normal.get("exportDirectoryOpen").disabled, true);
 
+  const chooser = setup({ directory: target }); await chooser.mount();
+  const picked = "C:\\offline-fixture\\已选择的新位置";
+  chooser.response(request => { assert.equal(request.url, "/api/export-preferences/select"); assert.equal(request.method, "POST");
+    assert.deepEqual(request.payload, {}); return { body: { selected: true, directory: picked } }; });
+  await chooser.click("exportDirectorySelect");
+  assert.equal(chooser.get("exportDirectory").value, picked); assert.equal(chooser.current.directory, target);
+  assert.equal(chooser.calls.length, 2, "A native choice only fills the candidate, without a preference POST");
+  assert.match(chooser.get("exportDirectoryStatus").textContent, /保存位置.*生效/);
+  chooser.response(() => ({ body: { selected: false, cancelled: true } })); await chooser.click("exportDirectorySelect");
+  assert.equal(chooser.get("exportDirectory").value, picked, "Cancel retains both saved location and the prior unsaved candidate");
+  assert.equal(chooser.current.directory, target); assert.match(chooser.get("exportDirectoryStatus").textContent, /取消/);
+  for (const result of [{ ok: false, body: { error: "offline chooser failed" } }, { badJSON: true },
+                        { body: { selected: true, directory: 42 } }, { body: { selected: false } }]) {
+    chooser.response(() => result); await chooser.click("exportDirectorySelect");
+    assert.equal(chooser.get("exportDirectory").value, picked); assert.equal(chooser.current.directory, target);
+    assert.equal(chooser.get("exportDirectorySelect").disabled, false); assert.equal(chooser.timers.size, 0);
+  }
+  let chooseDone;
+  chooser.response(() => new Promise(resolve => { chooseDone = resolve; })); await chooser.click("exportDirectorySelect");
+  assert.equal(chooser.get("exportDirectorySelect").disabled, true); assert.equal(chooser.get("exportDirectorySave").disabled, true);
+  assert.equal(chooser.timers.size, 0, "A native file choice may remain open longer than 15 seconds without an HTTP deadline");
+  const activeChoiceCalls = chooser.calls.length;
+  for (const id of ["exportDirectorySelect", "exportDirectorySave", "exportDirectoryReset", "exportDirectoryOpen", "exportDirectoryRetry"]) await chooser.click(id);
+  assert.equal(chooser.calls.length, activeChoiceCalls, "A pending picker prevents repeated dialogs or competing saves/resets/reloads");
+  chooseDone({ body: { selected: false, cancelled: true } }); await flush();
+  assert.equal(chooser.get("exportDirectorySelect").disabled, false); assert.equal(chooser.get("exportDirectory").value, picked);
+  chooser.response(request => { assert.equal(request.url, "/api/export-preferences"); assert.deepEqual(request.payload, { directory: picked });
+    chooser.current.directory = picked; return { body: { ...chooser.current } }; });
+  await chooser.click("exportDirectorySave"); assert.equal(chooser.current.directory, picked);
+
   const web = setup({ desktop: false, directory: target }); await web.mount();
-  for (const id of ["exportDirectory", "exportDirectorySave", "exportDirectoryReset", "exportDirectoryOpen"]) assert.equal(web.get(id).disabled, true);
-  for (const id of ["exportDirectorySave", "exportDirectoryReset", "exportDirectoryOpen"]) await web.click(id);
+  for (const id of ["exportDirectory", "exportDirectorySelect", "exportDirectorySave", "exportDirectoryReset", "exportDirectoryOpen"]) assert.equal(web.get(id).disabled, true);
+  for (const id of ["exportDirectorySelect", "exportDirectorySave", "exportDirectoryReset", "exportDirectoryOpen"]) await web.click(id);
   assert.equal(web.calls.length, 1, "Forged events cannot save or open a directory in web mode");
   assert.match(web.get("exportDirectoryStatus").textContent, /网页版/);
 
@@ -115,5 +146,5 @@ function setup({ desktop = true, directory = "" } = {}) {
   complete({ body: { directory: "C:\\offline-fixture\\obsolete-response", desktop_capable: true } }); await flush();
   assert.equal(waiting.get("exportDirectory").value, typed, "A timed-out save's late response cannot replace the retained input");
   assert.equal(waiting.timers.size, 0);
-  console.log("Export directory settings: explicit save/reset/open, web guard, load/retry, failures, deadlines, duplicate requests and retained input: OK");
+  console.log("Export directory settings: native pick/cancel without implicit save or timeout, explicit save/reset/open, web guard, load/retry, failures, duplicate requests and retained input: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

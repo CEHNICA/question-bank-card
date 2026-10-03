@@ -33,6 +33,7 @@ urlpatterns = [
     path("api/settings/library-ai/test", views.library_ai_test_view),
     path("api/settings/library-ai/key/reveal", api_key_reveal.reveal_view),
     path("api/export-preferences", export_preferences.preferences_view),
+    path("api/export-preferences/select", export_preferences.select_export_directory_view),
     path("api/export-preferences/open", export_preferences.open_export_view),
     path("api/papers", views.papers),
     path("api/demo", views.demo_paper),

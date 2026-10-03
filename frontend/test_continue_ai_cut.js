@@ -38,9 +38,10 @@ function harness(options = {}) {
   vm.runInNewContext(helper + render + "\nglobalThis.aiBusy = aiCutContinuations;globalThis.manualBusy = manualSwitches;", context);
   return { context, $, requests, confirmations, notices, updates, refreshes, stageEntryStates, sidebar: () => sidebarRefreshes };
 }
-test("the visible cutting card exposes both choices while MinerU waits; continuing submits nothing", async () => {
+test("direct manual recovery and menu AI continuation stay available while MinerU waits; continuing submits nothing", async () => {
   assert.match(html, /id="paperContinueAi"[^>]*>继续 AI 切题<\/button>/);
-  assert(html.indexOf('id="paperContinueAi"') > html.indexOf('id="paperManualFallback"'));
+  assert(html.indexOf('id="paperContinueAi"') > html.indexOf('id="paperMenu"'));
+  assert(html.indexOf('id="paperContinueAi"') < html.indexOf('id="paperManualEntry"'));
   for (const status of ["queued", "parsing", "segmenting"]) {
     const h = harness({ paper: paper({ parse_mode: "mineru", status, processing: { stage: status, mineru: { state: "pending", for_seconds: 90 } } }) });
     const original = clone(h.context.state); h.context.renderSettingsTask();
@@ -53,7 +54,7 @@ test("the visible cutting card exposes both choices while MinerU waits; continui
 test("manual, native and stopped pages visibly offer AI continuation without duplicating manual buttons", async () => {
   for (const value of [paper(), paper({ parse_mode: "native" }), paper({ status: "failed" }), paper({ parse_mode: "mineru", status: "failed", stopped: true })]) {
     const h = harness({ paper: value }); h.context.renderSettingsTask();
-    assert.equal(h.$("paperManualEntry").hidden, false); assert.equal(h.$("paperContinueAi").hidden, false); assert.equal(h.$("paperManualFallback").hidden, true);
+    assert.equal(h.$("paperManualEntry").hidden, true, "Manual-ready papers have one stage action, with AI continuation in the menu"); assert.equal(h.$("paperContinueAi").hidden, false); assert.equal(h.$("paperManualFallback").hidden, true);
   }
   for (const value of [null, paper({ archived: true }), paper({ demo: true }), paper({ status: "needs_grouping" }), paper({ parse_mode: "mineru", status: "reading" }), paper({ parse_mode: "mineru", status: "ready" })]) {
     assert.equal(App.canContinueAiCut(value), false);
@@ -120,7 +121,7 @@ test("both first-step and later quiet manual stage buttons obey continuation bus
   const stage = source.slice(source.indexOf("  function renderCutReadingStage()"), source.indexOf("  function openManualCut()"));
   for (const stageNumber of [1, 3]) {
     const nodes = new Map(), node = () => ({ dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; }, setAttribute() {} });
-    const context = { state: { paper: paper(), questions: [] }, QBCutReading: { cutReadingSummary: () => ({ stage: stageNumber, saved: 1, pending: 0, eligibleIds: [] }) },
+    const context = { state: { paper: paper(), questions: [] }, QBCutReading: { showCutReadingStage: App.showCutReadingStage, cutReadingSummary: () => ({ stage: stageNumber, saved: 1, pending: 0, eligibleIds: [] }) },
       cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(), cutReadingRequests: new Set(), cutReadingStops: new Set(),
       manualSwitches: new Set(), aiCutContinuations: new Set(["paper"]), paperReadSubmissionPending: () => false,
       $: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, document: { createTextNode: text => text }, el: node,

@@ -1318,3 +1318,6 @@ mark.qb-mark.spot:not(.qb-mark-math) { color: #c2410c; font-weight: 700; }
 mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px solid var(--accent); border-radius: 3px; }
 @media (max-width: 760px) { .region-location-comparison { grid-template-columns: minmax(0, 1fr); } }
 .editor input.prefilled { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }
+
+.review-guidance-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.review-guidance-hint .link-button { padding: 0; font-size: 12px; }

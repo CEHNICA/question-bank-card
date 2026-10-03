@@ -1850,6 +1850,8 @@ def paper_retry(request, paper_id):
         has_questions = paper.questions.exists()
         plan = deepcopy(paper.processing_plan or {})
         plan["revision"] = int(plan.get("revision", 0)) + 1
+        if plan.get("continue_preserve_existing") is True:
+            plan["continue_revision"] = plan["revision"]
         paper.processing_plan = plan
         fields = ["status", "error", "processing_plan", "updated_at"]
         if requested_type is not None and requested_type != paper.material_type:
@@ -1878,13 +1880,21 @@ def paper_retry(request, paper_id):
                 ImportChunk(paper=paper, **chunk.as_record())
                 for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
             ])
-        paper.status = Paper.Status.SEGMENTING if has_blocks and not paper.questions.exists() else \
+        # Continuing missing cuts keeps old manual cards alongside a fresh
+        # MinerU parse.  Their presence is not evidence that parsing succeeded:
+        # a failed submit/poll/download must retry parsing before reading cards.
+        retry_continued_parse = not has_blocks and plan.get("continue_preserve_existing") is True
+        paper.status = Paper.Status.QUEUED if retry_continued_parse else \
+            Paper.Status.SEGMENTING if has_blocks and not has_questions else \
             Paper.Status.READING if has_questions else Paper.Status.QUEUED
         paper.error = ""
         paper.save(update_fields=fields)
         # A stop request the worker never saw must not stop the retry (1.10.8).
         (paper_dir(paper) / mineru.CANCEL_FILE).unlink(missing_ok=True)
-        paper.questions.filter(state=Question.State.RED).update(state=Question.State.WAITING)
+        retry_cards = paper.questions.filter(state=Question.State.RED)
+        if plan.get("continue_preserve_existing") is True:
+            retry_cards = retry_cards.exclude(pk__in=plan.get("continue_existing_question_ids") or [])
+        retry_cards.update(state=Question.State.WAITING)
     return JsonResponse({
         "paper": paper_json(paper),
         "message": "已按教材模式分片重试" if requested_type == Paper.MaterialType.BOOK

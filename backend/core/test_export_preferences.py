@@ -10,8 +10,10 @@ from django.test import SimpleTestCase, override_settings
 from django.urls import path
 
 from . import export_preferences as preferences, library_pdf, library_export
+from . import native_folder_picker
 
 urlpatterns = [path("api/export-preferences", preferences.preferences_view),
+               path("api/export-preferences/select", preferences.select_export_directory_view),
                path("api/export-preferences/open", preferences.open_export_view),
                path("api/library/export-pdf", library_pdf.export_pdf_view),
                path("api/library/export-docx", library_export.export_docx_view)]
@@ -161,6 +163,113 @@ class ExportPreferenceTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "no-store")
         self.assertTrue(response.json()["desktop_capable"])
+
+    def test_native_selection_returns_candidate_without_saving_or_creating_files(self):
+        preferences.save({"directory": str(self.folder)})
+        saved = preferences.preference_path().read_bytes()
+        other = self.root / "另一导出文件夹"
+        other.mkdir()
+        with mock.patch.object(native_folder_picker, "choose_directory", return_value=str(other)) as choose:
+            response = self.post({}, "/api/export-preferences/select")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {"selected": True, "directory": str(other)})
+        self.assertEqual(response["Cache-Control"], "no-store")
+        choose.assert_called_once_with(str(self.folder))
+        self.assertEqual(preferences.preference_path().read_bytes(), saved)
+        self.assertEqual(list(other.iterdir()), [])
+        self.assertEqual(self.secret.read_bytes(), b"opaque-secret-file-do-not-read")
+
+    def test_native_selection_cancel_and_failure_keep_saved_preference_and_release_lock(self):
+        preferences.save({"directory": str(self.folder)})
+        saved = preferences.preference_path().read_bytes()
+        for result in (None, str(self.root / "missing"), "\\\\server\\share", "",
+                       native_folder_picker.FolderPickerError("offline native chooser unavailable")):
+            with self.subTest(result=result), mock.patch.object(native_folder_picker, "choose_directory") as choose:
+                if isinstance(result, Exception):
+                    choose.side_effect = result
+                else:
+                    choose.return_value = result
+                response = self.post({}, "/api/export-preferences/select")
+                self.assertEqual(response.status_code, 200 if result is None else 409)
+                if result is None:
+                    self.assertEqual(response.json(), {"selected": False, "cancelled": True})
+                self.assertEqual(preferences.preference_path().read_bytes(), saved)
+                self.assertTrue(preferences._picker_lock.acquire(blocking=False))
+                preferences._picker_lock.release()
+
+    def test_native_selection_can_recover_deleted_saved_directory_but_not_corrupt_preferences(self):
+        preferences.save({"directory": str(self.folder)})
+        self.folder.rmdir()
+        with mock.patch.object(native_folder_picker, "choose_directory", return_value=None) as choose:
+            self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 200)
+            choose.assert_called_once_with("")
+        preferences.preference_path().write_bytes(b"private-corrupt-state")
+        with mock.patch.object(native_folder_picker, "choose_directory") as choose:
+            self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 409)
+            choose.assert_not_called()
+        self.assertEqual(preferences.preference_path().read_bytes(), b"private-corrupt-state")
+
+    def test_native_selection_guards_fail_before_showing_any_window(self):
+        with mock.patch.object(native_folder_picker, "choose_directory") as choose:
+            self.assertEqual(self.client.get("/api/export-preferences/select", **self.headers).status_code, 405)
+            for headers in ({"HTTP_ORIGIN": "http://evil.invalid"}, {"HTTP_ORIGIN": ""},
+                            {"HTTP_X_QB_REQUEST": ""}, {"REMOTE_ADDR": "192.0.2.2"}):
+                self.assertEqual(self.post({}, "/api/export-preferences/select", **headers).status_code, 403)
+            for value in ({"directory": str(self.folder)}, {"target": "directory"}, {"initial": "arbitrary"}, []):
+                self.assertEqual(self.post(value, "/api/export-preferences/select").status_code, 400)
+            with mock.patch.object(preferences, "desktop_capable", return_value=False):
+                self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 409)
+            choose.assert_not_called()
+        self.assertFalse(preferences.preference_path().exists())
+
+    def test_duplicate_native_selection_never_opens_a_second_window(self):
+        def while_open(initial):
+            with mock.patch.object(native_folder_picker, "choose_directory") as another:
+                response = self.post({}, "/api/export-preferences/select")
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("已经打开", response.json()["error"])
+                another.assert_not_called()
+            return None
+        with mock.patch.object(native_folder_picker, "choose_directory", side_effect=while_open) as choose:
+            self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 200)
+            choose.assert_called_once_with("")
+        self.assertFalse(preferences.preference_path().exists())
+
+    def test_native_dialog_always_releases_com_on_cancel_selection_or_exception(self):
+        for result in (None, str(self.folder), native_folder_picker.FolderPickerError("offline COM failed"),
+                       OSError("offline Windows dialog unavailable")):
+            with self.subTest(result=result), mock.patch.object(native_folder_picker.os, "name", "nt"), \
+                    mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory:
+                dialog = factory.return_value
+                if isinstance(result, Exception):
+                    dialog.choose.side_effect = result
+                    with self.assertRaises(native_folder_picker.FolderPickerError):
+                        native_folder_picker.choose_directory("synthetic initial folder")
+                else:
+                    dialog.choose.return_value = result
+                    self.assertEqual(native_folder_picker.choose_directory("synthetic initial folder"), result)
+                dialog.choose.assert_called_once_with("synthetic initial folder")
+                dialog.release.assert_called_once_with()
+        with mock.patch.object(native_folder_picker.os, "name", "posix"), \
+                mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory:
+            with self.assertRaises(native_folder_picker.FolderPickerError):
+                native_folder_picker.choose_directory()
+            factory.assert_not_called()
+
+    @mock.patch.object(native_folder_picker, "_method", wraps=native_folder_picker._method)
+    def test_windows_com_adapter_without_opening_a_dialog(self, method):
+        if os.name != "nt":
+            self.skipTest("Windows COM capability probe only; no UI is shown")
+        dialog = native_folder_picker._WindowsFolderDialog()
+        try:
+            dialog._check(dialog._call(9, [native_folder_picker.ctypes.c_uint32], 0x20 | 0x40 | 0x800 | 0x8 | 0x2000000))
+            dialog._check(dialog._call(17, [native_folder_picker.ctypes.c_wchar_p], "隔离测试：不打开选择窗口"))
+            dialog._check(dialog._call(18, [native_folder_picker.ctypes.c_wchar_p], "选择文件夹"))
+        finally:
+            dialog.release()
+        self.assertFalse(dialog.initialized)
+        self.assertFalse(dialog.interface)
+        self.assertNotIn(3, [call.args[1] for call in method.call_args_list], "No IModalWindow.Show call in offline tests")
 
     def test_real_export_handlers_return_native_receipts_for_pdf_word_and_zip(self):
         preferences.save({"directory": str(self.folder)})
