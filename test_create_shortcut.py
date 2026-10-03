@@ -71,6 +71,7 @@ class ShortcutTests(unittest.TestCase):
                 mock.patch.object(shortcut, "_run_cli", side_effect=run_cli), \
                 mock.patch.object(setup, "windows_desktop", return_value=self.desktop), \
                 mock.patch.object(setup, "WindowsShortcuts", return_value=self.reader), \
+                mock.patch.object(shortcut, "SourceWindowsShortcuts", return_value=self.reader), \
                 contextlib.redirect_stdout(output):
             code = shortcut.main()
         return code, output.getvalue()
@@ -225,9 +226,10 @@ class ShortcutTests(unittest.TestCase):
                         diagnostic = diagnostic.decode("utf-8", errors="replace")
                     self.fail(f"{error}\nWindows shortcut diagnostic:\n{diagnostic[:8000]}")
                 raise
-        info = setup.WindowsShortcuts().read(self.link)
+        info = shortcut.SourceWindowsShortcuts().read(self.link)
         self.assertTrue(shortcut._same_path(info["target"], self.pythonw))
         self.assertEqual(info["arguments"], self.spec["arguments"])
+        self.assertTrue(shortcut._same_path(info["working_dir"], self.root))
 
 
 @unittest.skipUnless(os.name == "nt", "Windows cmd and temporary native CLI fixture")

@@ -74,11 +74,11 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def powershell_script(link: Path, spec: dict[str, str]) -> str:
+def _native_shell_link_definition() -> str:
     # The WScript.Shell TargetPath setter rejects some Unicode paths on an
     # English Windows host. Use the native Unicode interface even when pywin32
     # is unavailable, preserving the source launcher's complete arguments.
-    native = r"""
+    return r"""
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
@@ -111,6 +111,21 @@ namespace TiYouJu {
     }
 
     public static class SourceShortcut {
+        public static string[] Read(string path) {
+            var link = (IShellLinkW)new NativeShellLink();
+            try {
+                ((IPersistFile)link).Load(path, 0);
+                var target = new StringBuilder(32768);
+                var arguments = new StringBuilder(32768);
+                var directory = new StringBuilder(32768);
+                link.GetPath(target, target.Capacity, IntPtr.Zero, 0);
+                link.GetArguments(arguments, arguments.Capacity);
+                link.GetWorkingDirectory(directory, directory.Capacity);
+                return new string[] {target.ToString(), arguments.ToString(), directory.ToString()};
+            } finally {
+                Marshal.FinalReleaseComObject(link);
+            }
+        }
         public static void Create(string path, string target, string arguments,
                                   string directory, string icon, int iconIndex,
                                   string description) {
@@ -129,15 +144,45 @@ namespace TiYouJu {
     }
 }
 """
+
+
+def powershell_script(link: Path, spec: dict[str, str]) -> str:
     icon_path, _, icon_index = spec["icon"].rpartition(",")
     values = [str(link), spec["target"], spec["arguments"], spec["workdir"], icon_path]
     arguments = [_ps_quote(value) for value in values]
     arguments.extend([str(int(icon_index or "0")), _ps_quote(spec["description"])])
     return "\n".join([
         "$ErrorActionPreference = 'Stop'",
-        "Add-Type -TypeDefinition @'\n" + native + "\n'@",
+        "Add-Type -TypeDefinition @'\n" + _native_shell_link_definition() + "\n'@",
         "[TiYouJu.SourceShortcut]::Create(" + ", ".join(arguments) + ")",
     ])
+
+
+class SourceWindowsShortcuts:
+    """Read source links through the Unicode interface, independent of WSH locale."""
+
+    def read(self, path: Path) -> dict:
+        script = "\n".join([
+            "$ErrorActionPreference = 'Stop'",
+            "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)",
+            "Add-Type -TypeDefinition @'\n" + _native_shell_link_definition() + "\n'@",
+            "$values = [TiYouJu.SourceShortcut]::Read(" + _ps_quote(str(path)) + ")",
+            "[ordered]@{target=$values[0];arguments=$values[1];working_dir=$values[2]} | ConvertTo-Json -Compress",
+        ])
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        try:
+            process = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                capture_output=True, encoding="utf-8", check=True, timeout=20,
+            )
+            result = json.loads(process.stdout.strip().lstrip("\ufeff"))
+            if not isinstance(result, dict) or not all(
+                isinstance(result.get(key), str) for key in ("target", "arguments", "working_dir")
+            ):
+                raise ValueError("invalid source shortcut response")
+            return result
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            raise setup.SetupError("Windows 无法读取源码快捷方式，未确认目标正确。") from error
 
 
 def _write_with_powershell(link: Path, spec: dict[str, str]) -> None:
@@ -165,7 +210,7 @@ def _matches(link: Path, spec: dict[str, str], *, shortcuts=None) -> bool:
     setup._safe_path(link)
     if not link.is_file():
         return False
-    info = (shortcuts or setup.WindowsShortcuts()).read(link)
+    info = (shortcuts or SourceWindowsShortcuts()).read(link)
     return (_same_path(info.get("target") or "", spec["target"])
             and info.get("arguments", "") == spec["arguments"]
             and _same_path(info.get("working_dir") or "", spec["workdir"]))
