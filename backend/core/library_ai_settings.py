@@ -36,6 +36,13 @@ DEFAULTS = {
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
 KEY_PROVIDER_ORDER = ("deepseek", "minimax", "doubao", "custom")
+# MiniMax is the only provider both halves use, so it is the only one whose key
+# can be filled once.  DeepSeek/豆包 answer questions only, 魔搭/硅基流动 read
+# questions only; merging those would invent a capability the app does not have.
+SHAREABLE_FROM_READING = {"minimax"}
+SHAREABLE_FROM_READING_ERROR = "只有 MiniMax 同时用于读题和答案，只能共用 MiniMax 的密钥。"
+SHARE_TARGET_ERROR = "先把这里的服务商改成 MiniMax 并保存，再共用读题的 MiniMax 密钥。"
+SHARE_SOURCE_MISSING = "读题这边还没有保存 MiniMax 密钥，请先在“读题与切题”里填一次。"
 ASSISTANT_MESSAGE = "由当前操作软件的豆包工作版或 AI 助手领取任务、看图解题，再通过本地工具写回。无需 API；软件不会自动连接桌面助手。生成结果仍需核对。"
 UNAVAILABLE = "独立 API 尚未配置并通过显式测试，已暂停 API 生成；请打开“标签与参考答案设置”。可推荐 DeepSeek Pro，也可配置 MiniMax M3.1 或其他模型；不会自动回退到 OCR 或其他服务。"
 _lock = threading.RLock()
@@ -164,8 +171,52 @@ def saved_key_status(config: dict | None = None) -> dict:
     for provider in KEY_PROVIDER_ORDER:
         selected = saved_key_configuration(provider, current)
         configured = selected["key_configured"] is True and key_path(provider).is_file()
-        result[provider] = {"configured": configured, "count": int(configured)}
+        state = current.get("key_states", {}).get(provider, {})
+        state = state if isinstance(state, dict) else {}
+        result[provider] = {"configured": configured, "count": int(configured),
+                            # “这里用的是读题那份密钥” is a fact the teacher needs
+                            # before deleting or replacing one of the two.
+                            "shared_with_reading": state.get("shared") == "reading"}
     return result
+
+
+def share_reading_key(provider: str = "minimax") -> dict:
+    """Copy the reading side's key for one service into this API's own store.
+
+    The two halves of the app keep separate encrypted files, so the same key
+    used to have to be typed twice.  This is the one operation that bridges
+    them, and it is never automatic: the teacher presses the button.  The
+    reading store may hold up to eight accounts; the API side holds one, so
+    the first saved account is taken and the answer says which one.
+    """
+    if provider not in SHAREABLE_FROM_READING:
+        raise SettingsError(SHAREABLE_FROM_READING_ERROR)
+    with _lock:
+        current = _load()
+        if current["mode"] != "api" or current["provider"] != provider:
+            raise SettingsError(SHARE_TARGET_ERROR)
+        try:
+            key = credential_settings.reveal_saved_key(provider, 0)
+        except (credential_settings.CredentialStoreError, credential_settings.CredentialValidationError):
+            raise SettingsError(SHARE_SOURCE_MISSING) from None
+        if not isinstance(key, str) or not key or any(c.isspace() for c in key):
+            raise SettingsError(SHARE_SOURCE_MISSING)
+        config = dict(current)
+        config["key_revision"] = uuid.uuid4().hex
+        try:
+            protected = credential_settings.store._transform(json.dumps(
+                {"version": 1, "revision": config["key_revision"], "key": key}).encode(), protect=True)
+            _write(key_path(provider), protected)
+        except (OSError, credential_settings.CredentialStoreError):
+            raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None
+        # A copied key is a brand new credential: the previous “已测通” verdict
+        # was about the key that was just replaced.
+        config.update(key_configured=True, verified=False, verified_at="", resolved_model="",
+                      revision=uuid.uuid4().hex)
+        config["key_states"][provider] = {"revision": config["key_revision"], "configured": True,
+                                          "shared": "reading"}
+        _write_settings(config)
+    return public_status()
 
 
 def public_status() -> dict:
@@ -179,6 +230,11 @@ def public_status() -> dict:
     return {key: config[key] for key in ("mode", *API_FIELDS)} | {
         "endpoint_id": config["model"] if config["provider"] == "doubao" else "",
         "key_configured": key_configured, "key_count": int(key_configured), "keys": keys,
+        # Which providers the answers API could borrow a key for.  Whether the
+        # reading side actually holds one is *not* answered here: this function
+        # must never open the OCR credential store, so the page is told by the
+        # reading side's own status instead.
+        "shareable_from_reading": sorted(SHAREABLE_FROM_READING & {config["provider"]}),
         "configured": configured, "verified": verified,
         "api_ready": verified, "ready": assistant or verified,
         "status": "assistant" if assistant else "verified" if verified else "unverified" if configured else "missing",

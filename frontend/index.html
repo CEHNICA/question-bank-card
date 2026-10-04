@@ -270,6 +270,11 @@
               </details>
             </div>
             <p id="paperStatus" class="paper-status"></p>
+            <div id="cutResultBanner" class="cut-result-banner" hidden role="status">
+              <span id="cutResultMessage"></span>
+              <button id="cutResultManual" class="button primary" type="button"
+                title="打开整份原卷，直接框出没切出来的题目；已有的题卡和成果都保留">在原卷上补切</button>
+            </div>
             <div id="reviewGuidanceHint" class="review-guidance-hint" hidden>
               <span>按 <kbd>N</kbd> 依次看下一题。核对后打勾，通过即入库。</span>
               <button id="reviewGuidanceDismiss" class="link-button" type="button">以后不再提示</button>
@@ -351,7 +356,7 @@
         <div>
           <p class="settings-eyebrow">共用设置</p>
           <h3 id="credentialTitle">API 配置</h3>
-          <p class="hint">读题与标签、答案的服务和模型在这里配置。两个分区分别保存。</p>
+          <p class="hint">读题和标签、答案的服务与密钥都在这里配置；同一家 MiniMax 的密钥只填一次。模型和角色仍按各自需要单独选。</p>
           <p id="credentialSavedTotal" class="credential-saved-total" aria-label="读题服务的已保存密钥总数" role="status">正在读取已保存的密钥…</p>
         </div>
         <button class="button quiet" type="button" data-close>关闭</button>

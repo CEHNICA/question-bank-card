@@ -122,7 +122,9 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
         self.primary_engine.return_value = None
         result, chat, *_ = self.run_card()
         self.assertEqual(result["state"], "red")
-        self.assertIn("主读模型", result["error"])
+        # No engine at all means the machine has no reading service, not that
+        # the one chosen is being held back on purpose.
+        self.assertIn("没有配置任何看图读题服务", result["error"])
         chat.assert_not_called()
 
     def test_old_default_still_reads_twice_and_reports_real_agreement(self):

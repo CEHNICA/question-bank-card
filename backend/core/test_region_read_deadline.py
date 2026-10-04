@@ -182,6 +182,9 @@ class RegionDeadlineTests(TempDataMixin, TestCase):
 
 class BoundedInteractiveReaderTests(SimpleTestCase):
     def test_auto_scope_never_falls_back_to_another_configured_service(self):
+        # The other half of the credential rule: the request already went out
+        # to a service that was answering, so a failure is *that* service's
+        # failure to report — not a reason to spend a second fee elsewhere.
         engine = readers.Engine("minimax", "test-model")
         with mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "1"}), \
                 mock.patch.object(readers, "_chat_hedged", side_effect=readers.ReaderUnavailable("busy")) as chosen, \
@@ -194,13 +197,20 @@ class BoundedInteractiveReaderTests(SimpleTestCase):
         chosen.assert_called_once_with(engine, "copy original", ["test-image"], 3000)
         fallback.assert_not_called()
 
-    def test_auto_scope_missing_chosen_primary_does_not_select_another_service(self):
+    def test_auto_scope_missing_chosen_primary_uses_the_service_that_has_a_key(self):
+        # The chosen service was never usable, so it never cost anything to
+        # change: refusing to read because *that* service has no key would only
+        # leave the teacher with a card nobody can read.  A service that is
+        # already answering is the case that must not be swapped — see
+        # test_auto_scope_never_falls_back_to_another_configured_service.
         with readers.selected_services_only(), \
                 mock.patch.object(readers, "_primary_selection", return_value="minimax_m3"), \
                 mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured") as alternative:
-            self.assertIsNone(readers.primary_engine())
-        alternative.assert_not_called()
+                mock.patch.object(readers, "_first_configured",
+                                  return_value=readers.Engine("modelscope", "m")) as alternative:
+            engine = readers.primary_engine()
+        self.assertIs(engine, alternative.return_value)
+        alternative.assert_called_once()
 
     def test_auto_checker_without_independent_provider_does_not_duplicate_primary(self):
         engine = readers.Engine("minimax", "test-model")
