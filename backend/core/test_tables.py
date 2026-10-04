@@ -82,7 +82,7 @@ class ReadingTableTests(SimpleTestCase):
         self.assertIn("编号=表格", FIGURE_RULES)
 
     def test_table_role_is_parsed_and_resolves_the_candidate(self):
-        raw = f"【题号】17\n【题型】解答题\n【题干】\n填写如下列联表：\n{CONTINGENCY}\n【配图】1=表格, 2=题干\n【其他题号】无"
+        raw = f"【题号】17\n【题型】解答题\n【题干】\n填写如下列联表：\n{CONTINGENCY}\n【配图】1=表格, 2=题干"
         reading = parse_reading(raw, 17)
         self.assertEqual(reading["figures"], {"1": "table", "2": "stem"})
         self.assertIn("| 甲车间 | | |", reading["stem"])

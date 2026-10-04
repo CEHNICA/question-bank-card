@@ -172,7 +172,7 @@ class Question(models.Model):
     class State(models.TextChoices):
         WAITING = "waiting", "等待识读"
         READING = "reading", "识读中"
-        GREEN = "green", "两次识读一致"
+        GREEN = "green", "自动检查无明显异常"
         YELLOW = "yellow", "请看一眼"
         RED = "red", "识读失败"
 

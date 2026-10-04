@@ -1797,75 +1797,40 @@ def locate_missing(
     return notes
 
 
-CUT_COMPLETE = "complete"
-CUT_DEGRADED = "degraded"
-CUT_FAILED = "failed"
-CUT_UNVERIFIED = "unverified"
+# The one cut failure that is still reported, and the sentence every place that
+# has to recognise it starts with.  “The automatic cut produced no questions”
+# counts the cards that exist; it never compares them against a number the paper
+# claims to have.
+CUT_PRODUCED_NOTHING = "自动切题没有切出"
 
 
-def reconcile_cut(paper: Paper, *, reason: str = "") -> dict:
-    """原卷声明了多少题 vs 真的切出多少题——一次自动切题的诚实对账。
+def _fail_when_nothing_was_cut(paper: Paper, revision: int, *, reason: str = "") -> bool:
+    """A paper that produced no card at all has failed, and says why.
 
-    自动切题的失败方式不是抛异常，而是安静地少切：缺号检测只看两个已定位
-    题号之间的洞（``segment.missing_numbers``），只切出 1、2 时后面没有任何
-    可比的东西，3–24 就永远不被提起，卷子带着两张卡显示成“待你终审”。
-    纯扫描件更彻底：一句文字都读不出来，机器没有任何依据说自己切全了。
-
-    所以结论分四种，UI 不得把它们都画成同一个样子：
-    ``failed`` 一题没切出（硬失败）、``degraded`` 卷面印着却没切出、
-    ``unverified`` 读不出文字因而无法判断（不等于没题）、
-    ``complete`` 切出的题号覆盖了卷面印着的每一个。
-    """
-    blocks = _block_dicts(paper)
-    printed = segment.printed_numbers(blocks)
-    found = sorted({number for number in paper.questions.values_list("number", flat=True)
-                    if isinstance(number, int)})
-    missing = [number for number in printed if number not in found]
-    if not found:
-        verdict = CUT_FAILED
-    elif not printed:
-        # 读不出文字不是“没有题”，是“没有依据说切全了”：这两句话对老师的
-        # 下一步完全不同，所以它有自己的结论，不并进 complete。
-        verdict = CUT_UNVERIFIED
-    elif missing:
-        verdict = CUT_DEGRADED
-    else:
-        verdict = CUT_COMPLETE
-    if verdict == CUT_FAILED:
-        message = reason or "自动切题没有切出任何题目。"
-    elif verdict == CUT_UNVERIFIED:
-        message = reason or ("这份资料没有可读取的文字，自动切题没有依据判断是否切全；"
-                             "请对照原卷核对题数。")
-    elif verdict == CUT_DEGRADED:
-        message = (f"原卷上印着第 {'、'.join(str(number) for number in missing)} 题的题号，"
-                   "但这次没有切出对应的题卡。")
-    else:
-        message = ""
-    return {"verdict": verdict, "expected": len(printed), "found": len(found),
-            "missing": missing, "message": message,
-            "source": "printed_numbers" if printed else "no_text"}
-
-
-def _record_cut_result(paper: Paper, revision: int, *, reason: str = "") -> dict | None:
-    """Write the reconciliation onto the plan, and fail the paper when nothing was cut.
+    This is a count of the cards that exist, not a comparison against anything
+    the paper claims: “0 张题卡” is a fact the teacher can act on.  The earlier
+    reconciliation also compared against the question numbers printed on the
+    sheet, and a 答案/解析 section at the back prints “33.” “51.” too — nothing
+    in the text layer says which lines are questions, so that comparison named
+    missing questions that were never missing.  A false alarm costs the teacher
+    their trust in every other honest label on the page, so it is gone.
 
     Only while the run is still the current one: a teacher who has already
     switched to manual must not have a later worker overwrite the paper.
     """
-    result = reconcile_cut(paper, reason=reason)
+    if paper.questions.exists():
+        return False
+    message = reason or f"{CUT_PRODUCED_NOTHING}任何题目。"
     with transaction.atomic():
         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
         if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
-            return None
-        plan = {**(current.processing_plan or {}), "cut_result": result}
-        current.processing_plan = plan
-        if result["verdict"] == CUT_FAILED:
-            _set(current, status=Paper.Status.FAILED, error=result["message"][:500])
-        current.save(update_fields=["processing_plan", "updated_at"])
-    paper.processing_plan = plan
-    if result["verdict"] == CUT_FAILED:
-        paper.status, paper.error = Paper.Status.FAILED, result["message"][:500]
-    return result
+            return False
+        if current.questions.exists():
+            return False
+        _set(current, status=Paper.Status.FAILED, error=message[:500])
+        current.save(update_fields=["status", "error", "updated_at"])
+    paper.status, paper.error = Paper.Status.FAILED, message[:500]
+    return True
 
 
 def _normalise_source_kind(item: dict) -> str:
@@ -3230,10 +3195,11 @@ def assistant_draft(snapshot: dict) -> dict:
         "figures": figures, "figure_review": review, "foreign_figures": [],
         "flags": flags, "error": "", "state": Question.State.YELLOW,
     }
-OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："
+WITNESS_FLAG_PREFIX = "AI 识读与 MinerU 原始文字有差异，请对照原卷："
+OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："  # legacy cards
 
 
-ARBITER_OBJECTION_FLAG_PREFIX = "第三次识读裁决后，MinerU 在这里读法仍不同，再看一次也不能确定："
+ARBITER_OBJECTION_FLAG_PREFIX = "第三次识读裁决后，MinerU 在这里读法仍不同，再看一次也不能确定："  # legacy cards
 
 
 def _objection_flag(spots: list[dict], prefix: str = OBJECTION_FLAG_PREFIX) -> str:
@@ -3279,7 +3245,7 @@ def _mark_spot_text(update: dict, stem: str, options: dict) -> None:
     record["doubtful"] = marked
 
 
-OBJECTION_PREFIXES = (OBJECTION_FLAG_PREFIX, ARBITER_OBJECTION_FLAG_PREFIX)
+OBJECTION_PREFIXES = (WITNESS_FLAG_PREFIX, OBJECTION_FLAG_PREFIX, ARBITER_OBJECTION_FLAG_PREFIX)
 SPOT_KEYS = ("n", "reading", "mineru", "page_idx", "bbox", "field", "start", "end", "text")
 
 
@@ -3400,6 +3366,22 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     return final, source
 
 
+def _record_unverified_witness_differences(final: dict, update: dict, flags: list[str], *, witness: str,
+                                           blocks: list[dict] | None = None) -> None:
+    """Expose clear MinerU/vision substitutions for human review without another AI call."""
+    spots = textnorm.witness_objections(final, witness)
+    if not spots:
+        return
+    update["read_c"] = {
+        "engine": "MinerU",
+        "witness": witness[:4000],
+        "objections": spots,
+        "doubtful": _located_spots(spots, blocks),
+        "unverified": True,
+    }
+    flags.append(_objection_flag(spots, WITNESS_FLAG_PREFIX))
+
+
 _OPTION_LETTERS = "ABCDEFGH"
 
 
@@ -3502,7 +3484,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         return assistant_draft(snapshot)
     number = snapshot["number"]
     source_kind = snapshot.get("source_kind") or Question.SourceKind.UNKNOWN
-    double_read = snapshot["double_read"] if "double_read" in snapshot else features.enabled("double_read")
+    # 新题卡只发起一次看图识读。旧数据里的第二读结果仍保存在 read_b/read_c，
+    # 但不再创建新的复读、分歧裁决或额外配图分类请求。
+    double_read = False
     primary = readers.primary_engine()
     checker = readers.checker_engine() if double_read else None
     if primary is None:
@@ -3715,6 +3699,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             final = {**final, "type": agreed}
     # 题源、中文引号（设置里可关）：在这里整理，配图检查和疑点都按整理后的题面来。
     final, origin = _tidy_final(final)
+    if not double_read and a_text and witness:
+        _record_unverified_witness_differences(
+            final, update, flags, witness=witness, blocks=snapshot.get("witness_blocks"),
+        )
     for letter, supported in restored_options.items():
         if not supported:
             flags.append(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对")
@@ -3819,7 +3807,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     )
     if review["status"] == BLOCKED_MISSING:
         if choice_missing:
-            flags.append("选择题没有读出选项；如果选项是图，请点“配图”把 A–D 各框一下")
+            flags.append("选择题没有读出完整选项，请对照原卷补全；如果选项是图，再为对应选项添加配图")
             flags.append(FLAG_UNFOUND_FIGURE)
         elif review.get("cue_matches") and not figures:
             flags.append(FLAG_NO_FIGURE)
@@ -3830,12 +3818,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                      else FLAG_UNCUED_FIGURE)
     if final.get("unclear"):
         flags.append("有看不清的字（[?]），请对照原卷补上")
-    # 两位读者都说看到了别的题号才提示；能用"第N题图"解释的不算。
-    seen_a, seen_b = set((a or {}).get("others", [])), set((b or {}).get("others", []))
-    others = (seen_a & seen_b) if a and b else (seen_a | seen_b)
-    others -= {item["number"] for item in foreign}
-    if others:
-        flags.append(f"截图里还露出了第 {'、'.join(map(str, sorted(others)))} 题，范围可能需要调整")
+    # 1.12.5：删掉"截图里还露出了第 N 题"。这条实际上从没成立过——双读被
+    # 硬编码关掉（features 里 double_read 恒为 False），所以它一直是单模型
+    # 自说自话，真实题库 153 张卡里出现 6 次，人工核对基本都是错的。
+    # "范围可能需要调整"的说法反而会误导人重切那些本来切对了的题。
     if number_flag := _number_seen_flag(
             number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
@@ -3899,7 +3885,9 @@ def _reader_parallelism() -> int:
         return base
     capacity = 0
     seen: set[str] = set()
-    for engine in (readers.primary_engine(), readers.checker_engine()):
+    # New question reads use only the selected primary reader. A legacy checker
+    # preference must not reserve an extra provider's capacity.
+    for engine in (readers.primary_engine(),):
         if engine is None or engine.provider in seen:
             continue
         seen.add(engine.provider)
@@ -4100,8 +4088,9 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     workers = _reader_parallelism()
     store = PageStore(paper)
     snapshots = [_snapshot(q) for q in questions]
-    # Freeze the setting for this task; changes apply to the next read/reread.
-    double_read = features.enabled("double_read")
+    # Kept in the private snapshot shape for compatibility with older workers;
+    # current production reads are always single-pass.
+    double_read = False
     for snapshot in snapshots:
         snapshot["double_read"] = double_read
     snapshots_by_id = {snapshot["id"]: snapshot for snapshot in snapshots}
@@ -4502,10 +4491,9 @@ def process_paper(paper: Paper) -> None:
         if paper.status == Paper.Status.SEGMENTING:
             segment_paper(paper)
             paper.refresh_from_db()
-            # 对账在识读之前：切不出题的卷子没有东西可识读，早点停下才不会
-            # 在“待你终审”里交出两张卡却什么都不说。
-            cut = _record_cut_result(paper, run_revision)
-            if cut is not None and cut["verdict"] == CUT_FAILED:
+            # 一张题卡都没有的卷子没有东西可识读，早点停下才不会在“待你终审”
+            # 里交出空白的任务。
+            if _fail_when_nothing_was_cut(paper, run_revision):
                 return
         if paper.status == Paper.Status.READING:
             pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING])

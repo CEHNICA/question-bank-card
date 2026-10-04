@@ -1,9 +1,4 @@
-"""Fewer false yellow cards without letting real reading errors through.
-
-- The arbiter may take each reader's word at different spots (two votes each).
-- A choice question whose options skip a letter, or repeat one, is never green.
-- Follow-up figure judgements survive a later edit of the card.
-"""
+"""Local review safeguards that remain after the optional second read is removed."""
 
 from __future__ import annotations
 
@@ -155,54 +150,30 @@ class ReadingPipelineTests(TestCase):
         question.refresh_from_db()
         return chat
 
-    def test_arbiter_siding_with_each_reader_somewhere_is_green(self):
+    def test_single_read_does_not_start_a_second_read_or_arbiter(self):
         question = self.card()
-        self.run_card(question, {
+        chat = self.run_card(question, {
             ("a", 1): tagged("交x轴于点E，y≥0时，是否为定值？如果是，请求出"),
             ("b", 1): tagged("交x轴于点E，当y≥0时，是否为定值？若是，请求出"),
             ("arbiter", 1): tagged("交x轴于点E，当y≥0时，是否为定值？如果是，请求出"),
         })
-        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "majority"), question.flags)
-        self.assertTrue(question.read_c["spotwise"])
+        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "single"), question.flags)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
 
-    def test_the_arbiter_sees_the_checkers_reading_first(self):
-        question = self.card()
-        chat = self.run_card(question, {
-            ("a", 1): tagged("通过前几天的销售发现，当销售单价为15元时"),
-            ("b", 1): tagged("通过前几天的销售发现，当销售定价为15元时"),
-            ("arbiter", 1): tagged("通过前几天的销售发现，当销售定价为15元时"),
-        })
-        self.assertEqual(question.text_source, "majority")
-        self.assertIn("定价", question.stem)
-        self.assertTrue(any(call[0] == "arbiter" for call in chat.calls))
-
-    def test_arbiter_inventing_a_spot_stays_yellow(self):
-        question = self.card()
-        self.run_card(question, {
-            ("a", 1): tagged("在△ABC中，AF=2\\sqrt{3}，求BF"),
-            ("b", 1): tagged("在VABC中，AF=2\\sqrt{3}，求BF"),
-            ("arbiter", 1): tagged("1如图，在VABC中，AF=2\\sqrt{5}，求BF"),
-        })
-        self.assertEqual(question.text_source, "arbiter")
-        self.assertIn("两次识读不一致，已由第三次识读裁决", question.flags)
-        self.assertTrue(question.stem.startswith("如图"))
-
-    def test_mineru_still_gets_its_say_after_the_arbiter(self):
-        # shengli7 #16：两位读者和裁决都写“器补”，MinerU 读的是印刷的“添补”。
+    def test_mineru_difference_is_visible_for_manual_review_without_an_ai_spot_check(self):
+        # MinerU and the single vision reading differ at a clean one-character spot.
         question = self.card()
         self.paper.blocks.create(seq=1, type="text", page_idx=0, bbox=[60, 110, 470, 170],
                                  text="1. 小毅设计了包装盒，共有____种添补的方法")
-        self.run_card(question, {
-            ("a", 1): tagged("三、解答题 小毅设计了包装盒，共有____种器补的方法"),
-            ("b", 1): tagged("小毅设计了包装盒，共有____种器补的方法和步骤"),
-            ("arbiter", 1): tagged("小毅设计了包装盒，共有____种器补的方法"),
-            ("spotcheck", 1): lambda prompt: "1=不确定\n2=不确定\n3=不确定",
+        chat = self.run_card(question, {
+            ("a", 1): tagged("小毅设计了包装盒，共有____种器补的方法"),
+            ("spotcheck", 1): lambda prompt: "1=不确定",
         })
         self.assertEqual(question.state, Question.State.YELLOW)
-        flag = next(f for f in question.flags if f.startswith(pipeline.ARBITER_OBJECTION_FLAG_PREFIX))
+        flag = next(f for f in question.flags if f.startswith(pipeline.WITNESS_FLAG_PREFIX))
         self.assertIn("【器】", flag)
-        self.assertEqual(question.read_c["stem"], "小毅设计了包装盒，共有____种器补的方法")   # arbiter kept
-        self.assertIn("objection_check", question.read_c)
+        self.assertTrue(question.read_c["unverified"])
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
 
     def test_a_choice_question_missing_a_letter_is_not_green(self):
         question = self.card()
@@ -212,13 +183,14 @@ class ReadingPipelineTests(TestCase):
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertIn("选项 A 没有读出来，请对照原卷补上", question.flags)
 
-    def test_followup_judgements_survive_a_later_edit(self):
+    def test_unjudged_candidate_stays_flagged_after_a_later_edit(self):
         question = self.card(candidates=[1, 2])
         stem = "如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。"
-        self.run_card(question, {("a", 1): tagged(stem, figures="1=题干"), ("b", 1): tagged(stem),
-                                 ("classify", 1): "2=无关"})
-        self.assertEqual(question.state, Question.State.GREEN, question.flags)
+        chat = self.run_card(question, {("a", 1): tagged(stem, figures="1=题干"),
+                                        ("classify", 1): "2=无关"})
+        self.assertEqual(question.state, Question.State.YELLOW, question.flags)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
         question.stem = stem + "（改一个字）"
         question.figure_review = {}
         review = figure_policy.stored_or_derived_review(question)
-        self.assertNotIn("candidate_unclassified", review["signals"])
+        self.assertIn("candidate_unclassified", review["signals"])

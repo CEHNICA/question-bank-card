@@ -241,7 +241,7 @@ class StopAndAutoIntakeTests(TestCase):
         paper = self.upload(scan=True, allow_cloud="true")
         # 转手工而不是假装切完了：扫描件一题也切不出，状态必须说失败。
         self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
-        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
+        self.assertIn("自动切题没有切出", paper.error)
         self.assertFalse(paper.processing_plan["cloud_authorized"])
         self.assertEqual(len(paper.pages), 1)
 

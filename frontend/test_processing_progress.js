@@ -149,3 +149,55 @@ assert.equal(Progress.canStopPaper(null), false);
 assert.match(reparseSource, /const stoppable = QBProgress\.canStopPaper\(paper\);/);
 assert.match(reparseSource, /先点上面的“停止处理”，停下来以后就能删除。/);
 assert.match(reparseSource, /paper\.stopped \? "已停止" : "处理失败"/);
+
+// 试卷列表的进度条只有两种状态：不用再看和还要看。两个数由后端按审核页那套
+// 判据算好后下发，列表和「N 张要看」都直接用它，不在这里另数一遍。
+assert.deepEqual(Progress.paperProgress({ total: 25, done: 0, todo: 25, green: 21, yellow: 4, red: 0, approved: 0, settled: 0 }),
+  { total: 25, todo: 25, done: 0 }, "审核页说 25 张要看，列表就不能说 4 张");
+assert.deepEqual(Progress.paperProgress({ total: 25, done: 25, todo: 0, green: 0, yellow: 0, red: 0, approved: 25, settled: 25 }),
+  { total: 25, todo: 0, done: 25 });
+// 识读中的题两边都不算：谁都没看过。
+assert.deepEqual(Progress.paperProgress({ total: 6, done: 0, todo: 2, waiting: 4, green: 0, yellow: 2, red: 0 }),
+  { total: 6, todo: 2, done: 0 });
+// 后端给了数就不许再用绿/黄/红推算，哪怕推出来的结果不一样。
+assert.deepEqual(Progress.paperProgress({ total: 10, done: 10, todo: 0, green: 7, yellow: 3, red: 0 }),
+  { total: 10, todo: 0, done: 10 });
+
+// 老服务没有 done/todo 时才退回本地推算；下面几条走的是这条兜底路径。
+assert.deepEqual(Progress.paperProgress({ total: 25, green: 18, yellow: 3, red: 1, approved: 3, settled: 0 }),
+  { total: 25, todo: 4, done: 21 });
+assert.deepEqual(Progress.paperProgress({ total: 9, green: 7, yellow: 2 }),
+  { total: 9, todo: 2, done: 7 });
+assert.deepEqual(Progress.paperProgress({ total: 25, green: 0, yellow: 0, red: 0, approved: 0, settled: 25, published: 25 }),
+  { total: 25, todo: 0, done: 25 }, "全部已入库的卷子不该还画着一段“还要看”");
+assert.deepEqual(Progress.paperProgress({ total: 10, green: 0, yellow: 0, approved: 0, settled: 10, published: 10 }),
+  { total: 10, todo: 0, done: 10 }, "已入库 10 就不能同时说 3 张要看");
+assert.deepEqual(Progress.paperProgress({ total: 4, waiting: 4 }), { total: 4, todo: 0, done: 0 });
+assert.deepEqual(Progress.paperProgress(), { total: 0, todo: 0, done: 0 });
+assert.deepEqual(Progress.paperProgress({ total: 6, green: 4, red: 2, yellow: 0 }),
+  { total: 6, todo: 2, done: 4 }, "识读失败的题同样算还要看，不能因为没有黄题就少算");
+
+// 界面上真的只画两段。
+const vm = require("node:vm");
+const meterSource = appSource.slice(
+  appSource.indexOf("  function miniMeter(paper) {"),
+  appSource.indexOf("  function renderPaperList() {"));
+const meterNode = () => ({ dataset: {}, style: {}, children: [], append(...items) { this.children.push(...items); } });
+const meterContext = {
+  QBProgress: Progress,
+  el: (tag, className) => Object.assign(meterNode(), { className })
+};
+vm.runInNewContext(`${meterSource}\nthis.meter = miniMeter;`, meterContext);
+const drawn = (counts) => {
+  const bar = meterContext.meter({ counts });
+  return { title: bar.title, parts: bar.children.map((part) => [part.dataset.state, part.style.width, part.style.background]) };
+};
+assert.deepEqual(drawn({ total: 25, done: 0, todo: 25, green: 21, yellow: 4, red: 0, approved: 0, settled: 0 }),
+  { title: "不用再看 0 · 还要看 25", parts: [["todo", "100%", "var(--amber-bar)"]] });
+assert.deepEqual(drawn({ total: 10, done: 10, todo: 0, green: 0, yellow: 0, approved: 0, settled: 10 }),
+  { title: "不用再看 10 · 还要看 0", parts: [["done", "100%", "var(--green-bar)"]] });
+assert.deepEqual(drawn({ total: 4, done: 0, todo: 0, waiting: 4 }), { title: undefined, parts: [] });
+assert.equal(meterContext.meter({ counts: { total: 0 } }).children.length, 0);
+assert.equal(meterContext.meter({}).children.length, 0, "没有题数的试卷画一条空条，不报错");
+assert.doesNotMatch(meterSource, /--red\)/, "识读失败不再单独占一段颜色");
+assert.doesNotMatch(meterSource, /已通过 \$\{/, "绿色那段不是“已通过”：已入库但没打勾的题一道都没有");

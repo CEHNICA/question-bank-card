@@ -1,7 +1,8 @@
 "use strict";
 
-// 1.7.0: the square left of the question number is the reviewer's tick,
-// not a delete selection; batch delete is an explicit mode.
+// 1.7.0: the square left of the question number is the reviewer's tick.
+// 1.12.5: 批量处理题卡（选择模式 + 批量识读/批量删除）整套删除，题号左边
+// 只剩这一个打勾方框，不再有会跟它混淆的圆形选择框。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -12,10 +13,10 @@ const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 
 // Every card, full or collapsed, starts with the approval tick.
 assert.match(js, /function approvalTick\(q\)/);
-assert.match(js, /row\.append\(approvalTick\(q\), cardSelectionControl\(q\)/);
-assert.match(js, /head\.append\(approvalTick\(q\), cardSelectionControl\(q\)\)/);
+assert.match(js, /row\.append\(approvalTick\(q\), el\("span", "qnum"/);
+assert.match(js, /head\.append\(approvalTick\(q\)\)/);
 // Ticking approves, ticking an approved card revokes, a figure block routes to the figure panel.
-const tick = js.slice(js.indexOf("function approvalTick(q)"), js.indexOf("function handleCardSelectionClick"));
+const tick = js.slice(js.indexOf("function approvalTick(q)"), js.indexOf("function renderCards()"));
 assert.match(tick, /tick\.setAttribute\("aria-pressed", byAi \? "mixed" : String\(approved\)\)/);
 // 1.10: an undecided type routes to the type picker beside the number.
 assert.match(tick, /if \(approved\) approveQuestion\(q, false\);\s*else if \(blocked\) focusFigureReview\(q\);\s*else if \(typeBlocked\) focusTypePicker\(q\);\s*else approveQuestion\(q, true\);/);
@@ -24,27 +25,21 @@ assert.match(tick, /tick\.disabled = !\(approved \|\| byAi \|\| blocked \|\| typ
 // A revoke by mistake is one click to undo.
 assert.match(js, /\{ label: "恢复通过", onClick: \(\) => approveQuestion\(fresh, true, \{ advance: false \}\) \}/);
 
-// Delete selection only shows in selection mode.
-assert.match(css, /\.cards:not\(\.selecting\) \.card-select, \.cards\.selecting \.card-tick \{ display: none; \}/);
-assert.match(css, /\.card-select \{ border-radius: 50%; \}/);
+// The tick is the only square left of the number: the batch-select round one
+// is gone from markup, styles and script alike.
 assert.match(css, /\.card-tick\[aria-pressed="true"\]/);
-assert.match(html, /id="selectionStart"[^>]*>批量处理题卡…<\/button>/);
-assert.match(html, /id="selectionCancel"[^>]*>完成<\/button>/);
-assert.match(js, /function startSelecting\(\)/);
-assert.match(js, /function stopSelecting\(\{ render = true \} = \{\}\)/);
-assert.match(js, /bar\.hidden = !state\.selecting;/);
-assert.match(js, /\$\("cards"\)\.classList\.toggle\("selecting", state\.selecting\)/);
-assert.match(js, /\$\("selectionStart"\)\.addEventListener\("click", \(\) => \{ \$\("toolsMenu"\)\.open = false; startSelecting\(\); \}\)/);
-// Ctrl/Shift-click still works and switches the mode on.
-const select = js.slice(js.indexOf("function selectQuestion(q, event = {})"), js.indexOf("function cardSelectionControl"));
-assert.match(select, /state\.selecting = true;/);
-// Esc, 完成, switching paper and a finished delete all leave the mode.
-assert.match(js, /case "Escape":\s*if \(state\.selecting && !state\.selectionBusy\) \{ event\.preventDefault\(\); stopSelecting\(\); \}/);
-assert.match(js, /\$\("selectionCancel"\)\.addEventListener\("click", \(\) => stopSelecting\(\)\)/);
+assert.doesNotMatch(html, /id="selectionStart"/);
+assert.doesNotMatch(html, /id="selectionBar"/);
+assert.doesNotMatch(html, /id="selectionCancel"/);
+assert.doesNotMatch(html, /id="selectionReread"/);
+assert.doesNotMatch(html, /id="selectionDelete"/);
+assert.doesNotMatch(css, /card-select|selection-bar|is-selected/);
+assert.doesNotMatch(js, /startSelecting|stopSelecting|renderSelectionState|cardSelectionControl|updateSelection/);
+assert.doesNotMatch(js, /state\.selected|state\.selecting|state\.selectionAnchor/);
+// Esc still leaves full-screen review.
+assert.match(js, /case "Escape":\s*if \(document\.documentElement\.classList\.contains\("review-fullscreen"\)\) \{ event\.preventDefault\(\); setReviewFullscreen\(false\); \}/);
 const paperChange = js.slice(js.indexOf("  async function selectPaper(id)"), js.indexOf("  async function clearPaperSelection()"));
-assert.match(paperChange, /if \(state\.paperId !== id\) \{[\s\S]*?stopSelecting\(\{ render: false \}\);[\s\S]*?state\.paperId = id;/);
 assert.ok(paperChange.indexOf("cancelPendingPageOpening();") < paperChange.indexOf("state.paperId = id;"), "Paper navigation invalidates an old manual opening before selecting another paper");
-assert.match(js, /state\.editing\.delete\(id\); \}\);\s*stopSelecting\(\{ render: false \}\);/);
 
 // The toast sits at the right, clear of the left-aligned card buttons.
 assert.match(css, /\.toast\[popover\] \{ inset: auto 24px 78px auto;/);
@@ -55,8 +50,9 @@ const help = require("./shortcut-help.js").reference("review");
 assert.ok(help.primary.some(row => row.label === "通过并继续" && row.keys.includes("Enter")));
 assert.match(help.extra, /Enter 不撤销已通过的题/);
 assert.ok(help.more.some(row => row.label === "撤销当前题通过" && row.keys.includes("U")));
+assert.ok(!help.more.some(row => /批量选择|移到回收站/.test(row.label)), "批量选择的快捷键说明已随功能一起删除");
 
 // The tick is the one place to approve: no second 标记通过 / 撤销通过 button on the card.
 assert.doesNotMatch(js, /button\(blocked \? blockedLabel : approvalNeedsReview\(q\) \? "重新标记通过" : "标记通过"/);
 assert.doesNotMatch(js, /actions\.append\(button\("撤销通过"/);
-console.log("review tick and selection mode checks: OK");
+console.log("review tick checks: OK");

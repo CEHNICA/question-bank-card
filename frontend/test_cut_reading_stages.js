@@ -71,7 +71,7 @@ assert.match(js, /settingsGeneral: "services"/);
   assert.equal(requests.length, 1, "Batch reading waits while a single submission is in flight");
   context.questionReadingRequests.clear();
 
-  const single = js.slice(js.indexOf("  async function rereadQuestion("), js.indexOf("  async function rereadSelectedQuestions("));
+  const single = js.slice(js.indexOf("  async function rereadQuestion("), js.indexOf("  function updatePaperFromResponse("));
   context.questionById = (id) => qs.find((q) => q.id === id);
   context.applyQuestion = () => {};
   context.q = qs[0];

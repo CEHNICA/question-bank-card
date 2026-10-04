@@ -10,7 +10,7 @@ class ContentKindReadingTests(SimpleTestCase):
     def test_parser_keeps_example_kind_in_existing_reading_payload(self):
         result = readers.parse_reading(
             "【内容类型】例题\n【题号】6\n【题型】解答题\n"
-            "【题干】求函数的定义域。\n【其他题号】无",
+            "【题干】求函数的定义域。",
             6,
         )
 
@@ -19,7 +19,7 @@ class ContentKindReadingTests(SimpleTestCase):
 
     def test_legacy_reader_output_without_kind_remains_compatible(self):
         result = readers.parse_reading(
-            "【题号】3\n【题型】解答题\n【题干】求 $x$。\n【其他题号】无",
+            "【题号】3\n【题型】解答题\n【题干】求 $x$。",
             3,
         )
 
@@ -62,8 +62,7 @@ class ContentKindReadingTests(SimpleTestCase):
     def test_explicit_example_anchor_is_kept_but_model_conflict_turns_yellow(self):
         reading = {
             "stem": "单调性", "options": {}, "type": "free_response",
-            "content_kind": "prose", "figures": {}, "missing_figure": False,
-            "others": [], "number_seen": 1, "figure_descriptions": [], "unclear": False,
+            "content_kind": "prose", "figures": {}, "missing_figure": False, "number_seen": 1, "figure_descriptions": [], "unclear": False,
         }
         snapshot = {
             "id": 1, "number": 1, "group_id": None, "regions": [{"page_idx": 0, "bbox": [0, 0, 10, 10]}],
@@ -89,8 +88,7 @@ class ContentKindReadingTests(SimpleTestCase):
                 "(2) 请列举两个例子并说明理由。"
             ),
             "options": {}, "type": "free_response",
-            "content_kind": "prose", "figures": {}, "missing_figure": False,
-            "others": [], "number_seen": 6, "figure_descriptions": [], "unclear": False,
+            "content_kind": "prose", "figures": {}, "missing_figure": False, "number_seen": 6, "figure_descriptions": [], "unclear": False,
         }
         snapshot = {
             "id": 6, "number": 6, "group_id": None,
@@ -176,15 +174,15 @@ class ContentKindReadingTests(SimpleTestCase):
             "AI 看到的题号是 2，请确认",
         )
 
-    def test_invalid_arbiter_output_keeps_primary_reading_for_review(self):
+    def test_second_read_and_arbiter_are_not_requested(self):
         primary_engine = readers.Engine("minimax", "primary-model")
         checker_engine = readers.Engine("siliconflow", "checker-model")
         primary = readers.parse_reading(
-            "【题号】1\n【题型】解答题\n【题干】求 $x$ 的值。\n【其他题号】无",
+            "【题号】1\n【题型】解答题\n【题干】求 $x$ 的值。",
             1,
         )
         checker = readers.parse_reading(
-            "【题号】1\n【题型】解答题\n【题干】求 $y$ 的值。\n【其他题号】无",
+            "【题号】1\n【题型】解答题\n【题干】求 $y$ 的值。",
             1,
         )
         snapshot = {
@@ -197,7 +195,7 @@ class ContentKindReadingTests(SimpleTestCase):
         fake_store = type("Store", (), {"load": lambda self, page: object()})()
 
         with patch.object(pipeline.readers, "primary_engine", return_value=primary_engine), \
-                patch.object(pipeline.readers, "checker_engine", return_value=checker_engine), \
+                patch.object(pipeline.readers, "checker_engine", return_value=checker_engine) as checker_mock, \
                 patch.object(pipeline.readers, "arbiter_engine", return_value=primary_engine), \
                 patch.object(
                     pipeline.readers, "read_question",
@@ -210,11 +208,12 @@ class ContentKindReadingTests(SimpleTestCase):
                 patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"):
             result = pipeline.read_card(snapshot, fake_store)
 
-        self.assertEqual(result["state"], Question.State.YELLOW)
+        checker_mock.assert_not_called()
+        self.assertEqual(result["state"], Question.State.GREEN)
         self.assertEqual(result["stem"], primary["stem"])
         self.assertEqual(result["text_source"], "single")
-        self.assertIn("裁决输出不合格式", result["read_c"]["error"])
-        self.assertTrue(any("裁决失败" in flag for flag in result["flags"]))
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
+        self.assertEqual(result["read_c"], {})
 
 
 class LocalTextReviewUpgradeTests(TestCase):

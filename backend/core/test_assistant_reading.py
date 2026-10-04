@@ -107,7 +107,7 @@ class AssistantModeReadTests(TestCase):
 
 
 class DraftEditTests(TestCase):
-    def test_saving_the_text_clears_the_draft_reminder_but_not_the_range_one(self):
+    def test_saving_the_text_clears_the_draft_reminder_but_not_other_flags(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder, \
                 override_settings(DATA_ROOT=Path(folder)):
             paper = Paper.objects.create(
@@ -115,11 +115,12 @@ class DraftEditTests(TestCase):
                 render_path=str(Path(folder) / "d.pdf"), pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
                 status=Paper.Status.READY,
             )
-            range_flag = "截图里还露出了第 2 题，范围可能需要调整"
+            # 1.12.5 起另一条提醒是切题范围的，保存文字只清草稿提醒、不动它。
+            other_flag = pipeline.FLAG_LOCATED_WITHOUT_NUMBER
             question = Question.objects.create(
                 paper=paper, number=1, question_type="free_response", state=Question.State.YELLOW,
                 stem="计算 1+1 的值", text_source="mineru", regions=REGION,
-                flags=[pipeline.FLAG_MINERU_DRAFT, range_flag],
+                flags=[pipeline.FLAG_MINERU_DRAFT, other_flag],
             )
             card = self.client.post(
                 f"/api/questions/{question.pk}/text",
@@ -127,7 +128,7 @@ class DraftEditTests(TestCase):
                                  "by": "ai", "agent": "豆包"}),
                 content_type="application/json", HTTP_X_QB_REQUEST="1",
             ).json()["question"]
-        self.assertEqual(card["flags"], [range_flag])
+        self.assertEqual(card["flags"], [other_flag])
         self.assertEqual(card["text_source"], "assistant")
 
 

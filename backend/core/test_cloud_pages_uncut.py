@@ -89,15 +89,11 @@ class CloudContentBecomesAutomaticAgainTests(TestCase):
         # 导入 → 切题 → 一张题卡都不能少。这是本机真实撞到的那条主线。
         paper = self.cloud_parsed_paper()
         self.run_parse(paper, CLOUD_BLOCKS)
-        with mock.patch.object(pipeline, "_record_cut_result",
-                               wraps=pipeline._record_cut_result):
-            pipeline.segment_paper(paper)
+        pipeline.segment_paper(paper)
         paper.refresh_from_db()
         self.assertGreaterEqual(paper.questions.count(), 1,
                                 "the run had printed question numbers; dropping them all is the bug")
         self.assertEqual(paper.status, Paper.Status.READING)
-        verdict = (paper.processing_plan.get("cut_result") or {}).get("verdict")
-        self.assertNotEqual(verdict, "failed")
 
     def test_a_run_that_drops_everything_says_which_pages_why(self):
         # 云端什么也没读回来时，题号可以被算出来，但题卡必须留在原卷上给人框。
@@ -131,14 +127,11 @@ class TheFailedCutOffersTheWayBackTests(TestCase):
         Block.objects.create(paper=paper, page_idx=0, seq=0, type="text",
                              bbox=[40.0, 60.0, 540.0, 200.0], text="1. 设 x = 1，求 y 的值。")
         paper.status = Paper.Status.FAILED
-        paper.processing_plan = {"revision": 3, "mode": "mineru",
-                                 "cut_result": {"verdict": "failed", "found": 0, "expected": 1,
-                                                "missing": [1], "message": "自动切题没有切出任何题目。",
-                                                "source": "printed_numbers"}}
+        paper.error = "自动切题没有切出任何题目：本地文字层没有可靠题卡。"
+        paper.processing_plan = {"revision": 3, "mode": "mineru"}
         paper.save()
         data = views.paper_json(paper)
         # The parse is still on disk, so 继续 AI 切题 reuses it and no cloud
         # fee is involved; the entry point must say that the paper is retryable.
         self.assertTrue(paper.blocks.exists())
-        self.assertEqual(data["cut_result"]["verdict"], "failed")
         self.assertEqual(data["parse_mode"], "mineru")

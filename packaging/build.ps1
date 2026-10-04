@@ -32,9 +32,23 @@ function Invoke-Native {
         [Parameter(Mandatory)] [string]$FilePath,
         [string[]]$ArgumentList = @()
     )
-    & $FilePath @ArgumentList
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed (exit $LASTEXITCODE): $FilePath $($ArgumentList -join ' ')"
+    # Windows PowerShell 5.1 wraps each line a native command writes to stderr
+    # in a NativeCommandError record, and $ErrorActionPreference = 'Stop' turns
+    # the first one into a terminating error. Build tools such as PyInstaller
+    # log ordinary progress to stderr, so a successful call would abort the
+    # build. Judge the call by its exit code only, and keep the captured lines
+    # on the output stream.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $FilePath @ArgumentList 2>&1 | ForEach-Object { Write-Host $_ }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
+        throw "Command failed (exit $exitCode): $FilePath $($ArgumentList -join ' ')"
     }
 }
 

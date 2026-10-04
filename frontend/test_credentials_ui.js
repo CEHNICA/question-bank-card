@@ -64,7 +64,7 @@ assert.ok(html.indexOf('id="credentialModelscopeInput"') < html.indexOf('id="cre
 assert.doesNotMatch(html + js, /zhipu|智谱|bigmodel/i);
 
 const functions = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf("  function renderSettingsTask("));
-const listenersStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("selectionReread").addEventListener'));
+const listenersStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = js.slice(listenersStart, js.indexOf("  // Queue the values captured", listenersStart));
 assert.ok(functions && listenersStart > 0);
 const services = ["mineru", "modelscope", "minimax", "siliconflow"];

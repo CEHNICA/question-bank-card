@@ -485,7 +485,6 @@ class ParseTests(TestCase):
 【C】$y=\\frac{1}{x}$
 【D】无
 【配图】1=A, 2=B, 3=无关，4＝C 缺图
-【其他题号】10
 ```"""
         reading = readers.parse_reading(raw, 9)
         self.assertEqual(reading["stem"], "下列图象中，是函数图象的是（ ）")
@@ -493,7 +492,6 @@ class ParseTests(TestCase):
         self.assertEqual(reading["type"], "single_choice")
         self.assertEqual(reading["figures"], {"1": "A", "2": "B", "3": "none", "4": "C"})
         self.assertTrue(reading["missing_figure"])
-        self.assertEqual(reading["others"], [10])
         self.assertEqual(reading["number_seen"], 9)
 
     def test_handwritten_choice_in_brackets_is_dropped(self):
@@ -690,11 +688,11 @@ class ScriptedChat:
         return value(prompt) if callable(value) else value
 
 
-def tagged(stem, options=None, figures="无", others="无", number=None):
+def tagged(stem, options=None, figures="无", number=None):
     lines = ([f"【题号】{number}"] if number else []) + ["【题型】单选题" if options else "【题型】解答题", "【题干】", stem]
     for key, value in (options or {}).items():
         lines.append(f"【{key}】{value}")
-    lines += [f"【配图】{figures}", f"【其他题号】{others}"]
+    lines += [f"【配图】{figures}"]
     return "\n".join(lines)
 
 
@@ -747,15 +745,13 @@ class PipelineTests(TestCase):
             result = pipeline.read_card(snapshot, store)
         return result, read_mock, arbitrate_mock
 
-    def test_primary_and_checker_can_read_one_card_in_parallel(self):
+    def test_primary_reads_once_without_starting_a_checker(self):
         primary = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
         checker = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
-        barrier = threading.Barrier(2)
         threads: list[int] = []
 
         def read(_engine, _url, _number, with_figures):
             threads.append(threading.get_ident())
-            barrier.wait(timeout=1)
             return primary if with_figures else checker
 
         snapshot = {
@@ -768,7 +764,9 @@ class PipelineTests(TestCase):
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
         self.assertEqual(result["state"], Question.State.GREEN)
-        self.assertEqual(len(set(threads)), 2)
+        self.assertEqual(len(threads), 1)
+        self.assertEqual(len(set(threads)), 1)
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
         arbitrate_mock.assert_not_called()
 
     def test_figure_policy_uses_existing_reads_without_extra_api_call_and_excludes_irrelevant_candidate(self):
@@ -776,8 +774,8 @@ class PipelineTests(TestCase):
             "计算 $1+1$ 的值。", figure_role="1=无关",
         )
 
-        # 新规则只消费两位读者已有的结构化结果，不增加模型/API 调用。
-        self.assertEqual(read_mock.call_count, 2)
+        # One selected vision read supplies the automatic figure review.
+        self.assertEqual(read_mock.call_count, 1)
         arbitrate_mock.assert_not_called()
         self.assertEqual(result["figures"], [])
         self.assertEqual(result["figure_review"]["status"], "auto_excluded")
@@ -786,7 +784,7 @@ class PipelineTests(TestCase):
 
     def test_unclassified_candidate_is_not_silently_deleted(self):
         result, read_mock, _ = self.read_policy_card("计算 $1+1$ 的值。", figure_role="无")
-        self.assertEqual(read_mock.call_count, 2)
+        self.assertEqual(read_mock.call_count, 1)
         self.assertEqual(result["figure_review"]["status"], "conflict")
         self.assertEqual(result["figure_review"]["unclassified_count"], 1)
         self.assertEqual(result["state"], Question.State.YELLOW)
@@ -821,11 +819,11 @@ class PipelineTests(TestCase):
             "At what time did the temperature first reach 18℃?"
         )
         primary = readers.parse_reading(
-            f"【题号】6\n【题型】单选题\n【题干】\n{stem}\n【配图】1=题干\n【其他题号】无",
+            f"【题号】6\n【题型】单选题\n【题干】\n{stem}\n【配图】1=题干",
             6,
         )
         checker = readers.parse_reading(
-            f"【题号】6\n【题型】解答题\n【题干】\n{stem}\n【其他题号】无",
+            f"【题号】6\n【题型】解答题\n【题干】\n{stem}",
             6,
         )
         snapshot = {
@@ -843,13 +841,13 @@ class PipelineTests(TestCase):
         ) as read_mock, mock.patch.object(readers, "arbitrate") as arbitrate_mock:
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
-        self.assertEqual(read_mock.call_count, 2)
+        self.assertEqual(read_mock.call_count, 1)
         arbitrate_mock.assert_not_called()
         self.assertEqual([figure["slot"] for figure in result["figures"]], ["stem"])
-        self.assertEqual(result["figure_review"]["status"], "ok")
+        self.assertEqual(result["figure_review"]["status"], "blocked_missing")
         self.assertEqual(result["figure_review"]["cue_matches"], ["graph below"])
-        self.assertNotIn(figure_policy.FLAG_UNFOUND_FIGURE, result["flags"])
-        self.assertEqual(result["state"], Question.State.GREEN)
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, result["flags"])
+        self.assertEqual(result["state"], Question.State.YELLOW)
 
         self.assertEqual(
             figure_policy.missing_choice_figure_slots(
@@ -867,7 +865,7 @@ class PipelineTests(TestCase):
         )
         common = {
             "stem": stem, "options": {}, "content_kind": "exercise",
-            "figures": {}, "missing_figure": False, "others": [],
+            "figures": {}, "missing_figure": False,
             "number_seen": 2, "figure_descriptions": [], "unclear": False,
         }
         primary = {**common, "type": "single_choice", "raw": "primary raw audit"}
@@ -886,15 +884,13 @@ class PipelineTests(TestCase):
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
         arbitrate_mock.assert_not_called()
-        self.assertEqual(result["question_type"], "free_response")
-        self.assertEqual(result["state"], Question.State.GREEN)
-        self.assertFalse(any("选择题没有读出选项" in flag for flag in result["flags"]))
-        # The local display/type correction must not rewrite either model's
-        # original audit record.
+        self.assertEqual(result["question_type"], "single_choice")
+        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assertTrue(any("选择题没有读出完整选项" in flag for flag in result["flags"]))
+        # The one saved read retains the model's original result for a human to check.
         self.assertEqual(result["read_a"]["type"], "single_choice")
         self.assertEqual(result["read_a"]["raw"], "primary raw audit")
-        self.assertEqual(result["read_b"]["type"], "free_response")
-        self.assertEqual(result["read_b"]["raw"], "checker raw audit")
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
 
     def test_numeric_type_normalisation_does_not_touch_image_choice_questions(self):
         final = {"stem": "(1) 甲图；(2) 乙图。", "options": {}}
@@ -915,7 +911,7 @@ class PipelineTests(TestCase):
         self.assertEqual(result["figure_review"]["status"], "conflict")
         self.assertEqual(result["figure_review"]["source"], "automatic")
 
-    def test_missing_checker_key_keeps_primary_reading_for_review(self):
+    def test_missing_checker_key_does_not_affect_primary_reading(self):
         primary = readers.Engine("minimax", readers.MINIMAX_MODEL)
         primary_reading = readers.parse_reading(tagged("计算 $1+1$ 的值。"), 9)
         snapshot = {
@@ -928,18 +924,19 @@ class PipelineTests(TestCase):
         store = pipeline.PageStore(self.paper)
 
         with mock.patch.object(readers, "primary_engine", return_value=primary), \
-                mock.patch.object(readers, "checker_engine", return_value=None), \
+                mock.patch.object(readers, "checker_engine", return_value=None) as checker_mock, \
                 mock.patch.object(readers, "read_question", return_value=primary_reading) as read_mock, \
                 mock.patch.object(readers, "arbitrate") as arbitrate_mock:
             result = pipeline.read_card(snapshot, store)
 
         read_mock.assert_called_once_with(primary, mock.ANY, 9, with_figures=True)
         arbitrate_mock.assert_not_called()
+        checker_mock.assert_not_called()
         self.assertEqual(result["stem"], "计算 $1+1$ 的值。")
         self.assertEqual(result["text_source"], "single")
-        self.assertEqual(result["state"], Question.State.YELLOW)
-        self.assertIn("所选复核模型没有可用的 API Key", result["read_b"]["error"])
-        self.assertTrue(any("只有一次识读成功" in flag for flag in result["flags"]))
+        self.assertEqual(result["state"], Question.State.GREEN)
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
+        self.assertEqual(result["flags"], [])
 
     def test_reread_never_removes_a_manually_selected_figure(self):
         first_key = "0:300,410,460,500"
@@ -1033,7 +1030,7 @@ class PipelineTests(TestCase):
             ("a", 3): tagged("已知函数 $f(x)=x^2$，\n(1) 求 $f(2)$；\n(2) 求最小值。", figures="1=题干", number=4),
             ("b", 3): tagged("已知函数 $f(x)=x^3$，\n(1) 求 $f(2)$；\n(2) 求最小值。"),
             ("arbiter", 3): tagged("已知函数 $f(x)=x^4$，\n(1) 求 $f(2)$；\n(2) 求最小值。"),
-            ("a", 5): tagged("已知数列 $\\{a_n\\}$", others="6"),
+            ("a", 5): tagged("已知数列 $\\{a_n\\}$", number=5),
             ("b", 5): readers.ReaderError("硅基流动接口返回 HTTP 500"),
             ("a", 6): readers.ReaderError("MiniMax 接口返回 HTTP 500"),
             ("b", 6): readers.ReaderError("硅基流动接口返回 HTTP 500"),
@@ -1042,15 +1039,14 @@ class PipelineTests(TestCase):
         self.assertEqual(self.paper.status, Paper.Status.READY, self.paper.error)
         cards = {q.number: q for q in self.paper.questions.all()}
         self.assertEqual(sorted(cards), [1, 2, 3, 5, 6])
-        # MinerU's own text of card 1 matches the first vision reading, so the
-        # independent engine is the second witness and no checker call is made.
-        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "witness"))
-        self.assertEqual(cards[1].read_b.get("skipped"), "witness")
-        self.assertEqual((cards[2].state, cards[2].text_source), ("green", "majority"), cards[2].flags)
+        # MinerU remains a local source of text evidence; it no longer triggers
+        # a second vision reader or changes the primary read's source label.
+        self.assertEqual((cards[1].state, cards[1].text_source), ("green", "single"))
+        self.assertEqual(cards[1].read_b, {"skipped": "disabled"})
+        self.assertEqual((cards[2].state, cards[2].text_source), ("green", "single"), cards[2].flags)
         self.assertEqual([f["slot"] for f in cards[2].figures], ["stem"])
-        # MinerU's text (“f(x)=x^2”) settles the x^2/x^3 disagreement for the
-        # primary reading, so the arbiter's third opinion (x^4) is not needed.
-        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "majority"))
+        # A single read remains the saved text and keeps local number warnings.
+        self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "single"))
         self.assertIn("x^2", cards[3].stem)
         self.assertNotIn(("arbiter", 3, "minimax"), chat.calls)
         self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
@@ -1058,16 +1054,14 @@ class PipelineTests(TestCase):
         # locator got a second look before giving up.
         self.assertIn(pipeline.merged_question_flag(4), cards[3].flags)
         self.assertEqual([call for call in chat.calls if call[0] == "locate"], [("locate", 4, "minimax")] * 2)
-        # Card 5's text is backed by MinerU, so the failing checker is never
-        # needed; the primary reader's sighting of question 6 is still shown.
-        self.assertEqual((cards[5].state, cards[5].text_source), ("yellow", "witness"))
-        self.assertFalse(any("只有一次" in f for f in cards[5].flags))
-        self.assertTrue(any("第 6 题" in f for f in cards[5].flags))
+        # 1.12.5：截图里露出的邻题号不再提示。题号对得上、没别的信号的卡是绿的，
+        # 也不会再冒出"还露出了第 N 题"这种把切对了的题说成切错的提醒。
+        self.assertEqual((cards[5].state, cards[5].text_source), ("green", "single"))
+        self.assertEqual(cards[5].flags, [])
         self.assertEqual(cards[6].state, "red")
         self.assertTrue(any("没有找到第 4 题" in note or "AI 没有找到第 4 题" in note for note in self.paper.notes))
-        # 第二位读者用的是另一家；旁证一致的第 1 题没有再调用复核模型
-        self.assertNotIn(("b", 1, "siliconflow"), chat.calls)
-        self.assertIn(("b", 2, "siliconflow"), chat.calls)
+        # No checker or arbiter call is made for any newly read card.
+        self.assertFalse(any(kind in {"b", "arbiter"} for kind, _number, _provider in chat.calls))
         self.assertIn(("a", 1, "minimax"), chat.calls)
 
     def test_figure_printed_for_another_question_is_handed_over(self):
@@ -1076,16 +1070,16 @@ class PipelineTests(TestCase):
             ("a", 1): tagged("已知集合", {"A": "1", "B": "2"}),
             ("b", 1): tagged("已知集合", {"A": "1", "B": "2"}),
             # 第 2 题范围里的图其实印着"第 3 题图"
-            ("a", 2): tagged("下列图形中是柱体的是（ ）", figures="1=第3题", others="3"),
-            ("b", 2): tagged("下列图形中是柱体的是（ ）", others="3"),
+            ("a", 2): tagged("下列图形中是柱体的是（ ）", figures="1=第3题"),
+            ("b", 2): tagged("下列图形中是柱体的是（ ）"),
             ("*", 3): tagged("如图，已知函数 $f(x)=x^2$"),
             ("a", 5): tagged("已知数列"), ("b", 5): tagged("已知数列"),
             ("a", 6): tagged("如图，四棱锥", figures="无"), ("b", 6): tagged("如图，四棱锥"),
         }
         self.run_paper(answers)
         cards = {q.number: q for q in self.paper.questions.all()}
-        # 第 2 题：选择题，但选项全是图？这里没有选项文字也没有选项图 → 提示；"第 3 题"已由图解释，不提示范围
-        self.assertFalse(any("露出了" in f for f in cards[2].flags), cards[2].flags)
+        # 第 2 题：选择题，但选项全是图？这里没有选项文字也没有选项图 → 提示。
+        # 印着"第 3 题图"的候选图按配图规则处理（"还露出了第 N 题"已于 1.12.5 删除）。
         self.assertEqual(cards[2].figures, [])
         # 第 3 题明确写有“如图”，且自己范围内恰好只有一张普通候选图：
         # 本地规则可确定性认领该图，随后再接收第 2 题交来的另一张图。
@@ -1103,8 +1097,8 @@ class PipelineTests(TestCase):
     def test_partial_option_figures_keep_the_question_blocked(self):
         answers = {("locate", 4): "【刻度】无", ("*", 1): tagged("x"), ("*", 3): tagged("x"), ("*", 5): tagged("x"),
                    ("*", 6): tagged("x"),
-                   ("a", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【A】\n【B】\n【配图】1=A\n【其他题号】无",
-                   ("b", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【其他题号】无"}
+                   ("a", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【A】\n【B】\n【配图】1=A",
+                   ("b", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）"}
         self.run_paper(answers)
         q2 = self.paper.questions.get(number=2)
         self.assertEqual([f["slot"] for f in q2.figures], ["A"])
@@ -1160,7 +1154,7 @@ class PipelineTests(TestCase):
             ("*", 5): tagged("x"), ("*", 6): tagged("x"),
             ("a", 2): (
                 "【题型】单选题\n【题干】四位同学画数轴如图所示（ ）\n"
-                "【A】\n【B】\n【C】\n【D】\n【配图】1=A\n【其他题号】无"
+                "【A】\n【B】\n【C】\n【D】\n【配图】1=A"
             ),
             ("b", 2): tagged(
                 "四位同学画数轴如图所示（ ）",
@@ -1181,30 +1175,30 @@ class PipelineTests(TestCase):
         self.assertEqual(q2.figure_review["status"], "blocked_missing")
         self.assertEqual(q2.figure_review["missing_slots"], ["B", "C", "D"])
         self.assertFalse(any("看不清的字" in flag for flag in q2.flags))
-        self.assertEqual(set(q2.read_b["options"]), {"A", "B", "C", "D"})
+        self.assertEqual(q2.read_b, {"skipped": "disabled"})
         self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
-    def test_real_printed_option_text_next_to_a_figure_is_preserved(self):
+    def test_missing_option_text_from_primary_read_stays_flagged_for_human_review(self):
         answers = {
             ("locate", 4): "【刻度】无",
             ("*", 1): tagged("x"), ("*", 3): tagged("x"),
             ("*", 5): tagged("x"), ("*", 6): tagged("x"),
             ("a", 2): (
                 "【题型】单选题\n【题干】选择箭头方向（ ）\n"
-                "【A】\n【配图】1=A\n【其他题号】无"
+                "【A】\n【配图】1=A"
             ),
             ("b", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
             ("arbiter", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
         }
         chat = self.run_paper(answers)
         q2 = self.paper.questions.get(number=2)
-        self.assertEqual(q2.options, {"A": "向右"})
+        self.assertEqual(q2.options, {})
         self.assertEqual([figure["slot"] for figure in q2.figures], ["A"])
-        self.assertEqual(q2.text_source, "majority")
+        self.assertEqual(q2.text_source, "single")
         self.assertEqual(q2.state, "yellow", q2.flags)
-        self.assertIn(figure_policy.FLAG_UNCUED_FIGURE, q2.flags)
-        self.assertEqual(q2.figure_review["status"], "conflict")
-        self.assertTrue(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
+        self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, q2.flags)
+        self.assertEqual(q2.figure_review["status"], "blocked_missing")
+        self.assertFalse(any(kind in {"b", "arbiter"} and number == 2 for kind, number, _ in chat.calls))
 
     def test_plain_image_description_from_primary_reader_is_not_saved(self):
         answers = {
@@ -1228,7 +1222,7 @@ class PipelineTests(TestCase):
         self.assertEqual(q2.figure_review["missing_slots"], ["B", "C", "D"])
         self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
-    def test_arbiter_figure_description_without_a_bound_figure_gets_warning(self):
+    def test_primary_text_is_kept_without_a_second_reader(self):
         answers = {
             ("locate", 4): "【刻度】无",
             ("*", 1): tagged("x"), ("*", 3): tagged("x"),
@@ -1239,7 +1233,8 @@ class PipelineTests(TestCase):
         }
         self.run_paper(answers)
         q2 = self.paper.questions.get(number=2)
-        self.assertEqual(q2.options, {})
+        self.assertEqual(q2.options, {"A": "甲"})
+        self.assertEqual(q2.text_source, "single")
         self.assertIn(pipeline.FLAG_UNFOUND_FIGURE, q2.flags)
         self.assertEqual(q2.state, "yellow")
 
@@ -1802,6 +1797,55 @@ class ApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.q2.refresh_from_db()
         self.assertFalse(self.q2.approved)
+        # 1.12.5：过不去的题逐条说明原因，不再静默跳过。这张卡带着它自己的
+        # 提醒（识读不一致 + 配图没框出来），原因就照这些提醒报。
+        skipped = {item["number"]: item["reason"] for item in response.json()["skipped"]}
+        self.assertIn(self.q2.number, skipped, response.content)
+        self.assertIn(figure_policy.FLAG_UNFOUND_FIGURE, skipped[self.q2.number], response.content)
+
+    def test_approve_green_reports_a_card_the_figure_review_demoted(self):
+        """绿卡只要还带着待核查提醒，就必须说出来。
+
+        配图检查在内存里把"绿"改回"黄"时，老代码直接 continue，界面上看起来
+        就是"一键通过什么都没做"。这里钉住它必须出现在 skipped 里，并带上原因。
+        """
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN,
+            figure_review={
+                "status": "blocked_missing", "reason": "题干提示有图但未绑定配图",
+                "signals": ["text_reference"], "source": "automatic",
+            },
+        )
+        data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
+        reasons = {item["number"]: item["reason"] for item in data["skipped"]}
+        self.assertIn(self.q2.number, reasons, data["skipped"])
+        self.assertIn("还有待核查的提醒", reasons[self.q2.number])
+        self.q2.refresh_from_db()
+        self.assertFalse(self.q2.approved)
+
+    def test_approve_green_reports_why_each_card_cannot_pass(self):
+        """一键通过的结果面板要能说清每道过不去的题卡卡在哪一步。"""
+        # 空题干：没读出文字
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN, stem="   ", question_type="free_response",
+            figure_review={"status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human"},
+        )
+        # 题型未定
+        q3 = Question.objects.create(
+            paper=self.paper, number=3, state=Question.State.GREEN, stem="求证：如图。",
+            question_type="",
+            figure_review={"status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human"},
+        )
+        data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
+        reasons = {item["number"]: item["reason"] for item in data["skipped"]}
+        self.assertIn("还没读出题干", reasons[self.q2.number], data["skipped"])
+        self.assertIn("题型还没定", reasons[q3.number], data["skipped"])
+        # 能过的照过，已入库的那道不算"过不去"。
+        self.assertEqual(data["approved"], 1, data["skipped"])
+        self.q.refresh_from_db()
+        self.assertTrue(self.q.approved_content_hash)
+        # 已经入库的题不该被列为待处理项。
+        self.assertNotIn(self.q.number, reasons)
 
     def test_human_no_figure_confirmation_is_traceable_and_allows_approval(self):
         Question.objects.filter(pk=self.q2.pk).update(

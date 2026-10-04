@@ -16,8 +16,8 @@ assert(require("./shortcut-help.js").reference("review").more.some(item => item.
 // On by default, remembered per viewer.
 assert.match(js, /focus: readPref\("qb-focus", "1"\) === "1"/);
 assert.match(js, /case "z": event\.preventDefault\(\); setFocus\(!state\.focus\)/);
-// Only the current card is lit; selection mode (looking across cards) is not dimmed.
-assert.match(css, /\.cards\.focus-mode\.reading:not\(\.selecting\) \.card:not\(\.is-current\) \{ opacity: \.34;/);
+// Only the current card is lit; every other card dims.
+assert.match(css, /\.cards\.focus-mode\.reading \.card:not\(\.is-current\) \{ opacity: \.34;/);
 assert.match(css, /\.cards\.focus-mode \{ gap: 26px; \}/);
 assert.match(css, /\.cards\.focus-mode \.card\.compact \+ \.card\.compact \{ margin-top: -14px; \}/);
 // Dimming needs a full card being read: a collapsed (approved) row, a card

@@ -72,7 +72,7 @@
               <div><span><strong>MinerU</strong><small>新资料的文字识别与切题</small></span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
               <div><span><strong>魔搭</strong><small>可选的看图读题服务</small></span><strong id="settingsModelscopeState" class="api-state">正在读取…</strong></div>
               <div><span><strong>MiniMax</strong><small>可选的看图读题服务</small></span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
-              <div><span><strong>硅基流动</strong><small>可选的复核和备用服务</small></span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
+              <div><span><strong>硅基流动</strong><small>可选的看图读题服务</small></span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
             </div>
             <details id="settingsFreePlan" class="free-plan">
               <summary>如何配置读题服务</summary>
@@ -85,11 +85,6 @@
               <button id="settingsCredentialOpen" class="button" type="button">API 配置</button>
             </div>
           </section>
-          <section class="settings-section" aria-labelledby="settingsReadingTitle">
-            <h3 id="settingsReadingTitle">识读方式</h3>
-            <div id="readingSwitches"><p class="settings-footnote">正在读取…</p></div>
-          </section>
-
         </div>
         <div id="settingsDisplay" class="settings-page" role="tabpanel" hidden>
           <div id="exportSettingsMount"></div>
@@ -157,10 +152,7 @@
               <p>“需要核查”表示还没人工确认；黄色提醒指出需要特别核对的位置；“已通过”表示当前版本已被确认。</p>
               <details class="teaching-help"><summary>查看识读过程的详细标记</summary>
                 <dl class="explain-list">
-                  <div><dt>两种引擎一致</dt><dd>两种独立识读结果相同。</dd></div>
-                  <div><dt>AI 两次一致</dt><dd>两次独立识读的题面相同。</dd></div>
-                  <div><dt>AI 三读多数一致</dt><dd>识读结果有分歧时采用多数相同的读法。</dd></div>
-                  <div><dt>一致不等于正确</dt><dd>这些标记不能代替对照原卷核查。</dd></div>
+                  <div><dt>待核对</dt><dd>还没有人工确认；请对照原卷检查题面和配图。</dd></div>
                   <div><dt>处理记录</dt><dd>切题、页序或配图时遇到的情况，可在“试卷操作”中查看。</dd></div>
                 </dl>
               </details>
@@ -270,15 +262,6 @@
               </details>
             </div>
             <p id="paperStatus" class="paper-status"></p>
-            <div id="cutResultBanner" class="cut-result-banner" hidden role="status">
-              <span id="cutResultMessage"></span>
-              <button id="cutResultManual" class="button primary" type="button"
-                title="打开整份原卷，直接框出没切出来的题目；已有的题卡和成果都保留">在原卷上补切</button>
-            </div>
-            <div id="reviewGuidanceHint" class="review-guidance-hint" hidden>
-              <span>按 <kbd>N</kbd> 直接跳到下一道需要核查的题。核对后打勾，通过即入库。</span>
-              <button id="reviewGuidanceDismiss" class="link-button" type="button">以后不再提示</button>
-            </div>
           </div>
           <div class="paper-actions">
             <button id="publishButton" class="button primary" type="button" hidden>入库</button>
@@ -317,7 +300,6 @@
           <span id="toolbarPaper" class="toolbar-paper" aria-hidden="true"></span>
           <div id="filters" class="filters" role="tablist" aria-label="筛选题卡"></div>
           <span class="toolbar-spacer"></span>
-          <span class="key-hints" aria-hidden="true"><kbd>J</kbd><kbd>K</kbd> 上下题<span class="sep"></span><kbd>Enter</kbd> 通过<span class="sep"></span><kbd>Space</kbd> 放大对照<span class="sep"></span><kbd>?</kbd></span>
           <div class="tool-group">
             <button id="fullscreenToggle" class="toggle-pill" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）"><svg class="icon"><use href="#i-expand"/></svg><span id="fullscreenLabel">全屏</span></button>
             <button id="focusToggle" class="toggle-pill" type="button" aria-pressed="true" title="专注：正在看的这道题正常显示，其余题暗下来；滚动时跟着换（Z）"><svg class="icon"><use href="#i-focus"/></svg>专注</button>
@@ -332,19 +314,11 @@
                 <button id="manualProcessing" class="link-button" type="button">手工切题</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
-                <button id="selectionStart" class="link-button" type="button">批量处理题卡…</button>
+                <button id="approveAllGreen" class="link-button" type="button" hidden>一键通过所有题目</button>
                 <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
               </div>
             </details>
           </div>
-        </div>
-        <div id="selectionBar" class="selection-bar" role="region" aria-label="批量选择题卡" hidden>
-          <span class="selection-summary"><strong id="selectionCount">已选择 0 道题</strong><small id="selectionHint">删除后可以撤销。</small></span>
-          <span class="selection-actions">
-            <button id="selectionCancel" class="button quiet" type="button">完成</button>
-            <button id="selectionReread" class="button" type="button">识读所选题</button>
-            <button id="selectionDelete" class="button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>移到回收站</button>
-          </span>
         </div>
         <div id="cards" class="cards" role="tabpanel"></div>
       </section>
@@ -395,7 +369,7 @@
           <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-service" data-service="siliconflow">
-          <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 付费，可做复核和备用</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
+          <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 付费，可作为读题备用</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
           <ul id="credentialSiliconflowSaved" class="credential-saved-list" aria-label="已保存的硅基流动密钥"></ul>
           <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
           <input id="credentialSiliconflowInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
@@ -423,8 +397,6 @@
             <form id="modelSettingsForm" class="model-settings-form">
               <p class="model-role-heading">谁来读题</p>
               <label class="field" for="settingsPrimaryModel"><span>主读</span><select id="settingsPrimaryModel" name="primary"></select></label>
-              <label class="field" for="settingsCheckerModel"><span>有出入时复核</span><select id="settingsCheckerModel" name="checker"></select></label>
-              <label class="field" for="settingsArbiterModel"><span>两次不一致时裁决</span><select id="settingsArbiterModel" name="arbiter"></select></label>
               <p id="settingsModelSummary" class="settings-footnote"></p>
               <details class="model-id-details">
                 <summary>各家使用的具体模型（高级）</summary>
@@ -600,7 +572,6 @@
       <div id="viewerText" class="viewer-text"></div>
     </div>
     <div class="viewer-foot">
-      <span class="key-hints"><kbd>←</kbd><kbd>→</kbd> 上下题<span class="sep"></span><kbd>Enter</kbd> 通过并下一题<span class="sep"></span><kbd>0</kbd> 全题<span class="sep"></span><kbd>W</kbd> 适宽<span class="sep"></span><kbd>E</kbd> 改字<span class="sep"></span><kbd>R</kbd><kbd>F</kbd> 范围 / 配图<span class="sep"></span><kbd>Ctrl</kbd>+滚轮 放大</span>
       <button id="viewerEdit" class="button" type="button" title="关闭放大窗口并改这道题（E）">改字</button>
       <button id="viewerPrev" class="button" type="button"><svg class="icon"><use href="#i-left"/></svg>上一题</button>
       <button id="viewerNext" class="button" type="button">下一题<svg class="icon"><use href="#i-right"/></svg></button>
@@ -745,6 +716,17 @@
     <div id="trashList" class="trash-list" aria-live="polite"></div>
   </dialog>
 
+  <dialog id="approveResultDialog" class="trash-dialog approve-result-dialog" aria-labelledby="approveResultTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="approveResultTitle">一键通过的结果</h3>
+        <p class="hint">能通过的题已经入库；下面逐条列出过不去的题和原因。</p>
+      </div>
+      <button class="button" type="button" data-close>关闭</button>
+    </div>
+    <div id="approveResultList" class="trash-list" aria-live="polite"></div>
+  </dialog>
+
   <dialog id="renameDialog" class="rename-dialog" aria-labelledby="renameTitle">
     <form id="renameForm">
       <div class="dialog-head">
@@ -785,7 +767,6 @@
       </div>
     </div>
     <footer class="welcome-actions">
-      <button id="welcomeKeys" class="button" type="button" hidden>配置自动切题（可稍后）</button>
       <span class="welcome-spacer"></span>
       <button id="welcomeSkip" class="button quiet" type="button">直接开始</button>
       <button id="welcomeTour" class="button primary" type="button">自动切题入门</button>

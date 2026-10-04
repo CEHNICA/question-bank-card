@@ -20,8 +20,7 @@ RAW = """【内容类型】练习题
 【B】1个
 【C】2个
 【D】3个
-【E】4个
-【其他题号】无"""
+【E】4个"""
 
 
 class ParseTests(SimpleTestCase):

@@ -49,29 +49,25 @@ class IsolatedData:
         self.addCleanup(network.stop)
 
 
-class DoubleReadSettingsTests(IsolatedData, TestCase):
+class RemovedDoubleReadSettingsTests(IsolatedData, TestCase):
     def setUp(self):
         self.isolate()
 
-    def test_old_or_missing_settings_keep_second_read_on(self):
-        self.assertTrue(features.enabled("double_read"))
-        features.path().write_text('{"origin_split": false}', encoding="utf-8")
-        self.assertTrue(features.enabled("double_read"))
+    def test_old_saved_switch_is_ignored_and_hidden_from_settings(self):
+        features.path().write_text('{"double_read": true, "origin_split": false}', encoding="utf-8")
+        self.assertFalse(features.enabled("double_read"))
         self.assertFalse(features.enabled("origin_split"))
         response = self.client.get("/api/settings/features")
-        setting = next(item for item in response.json()["features"] if item["key"] == "double_read")
-        self.assertTrue(setting["default"] and setting["enabled"])
+        self.assertNotIn("double_read", {item["key"] for item in response.json()["features"]})
 
-    def test_api_can_disable_and_restore_without_changing_other_switches(self):
-        for enabled in (False, True):
-            response = self.client.post("/api/settings/features",
-                json.dumps({"features": {"double_read": enabled}}),
-                content_type="application/json", HTTP_X_QB_REQUEST="1")
-            self.assertEqual(response.status_code, 200, response.content)
-            setting = next(item for item in response.json()["features"] if item["key"] == "double_read")
-            self.assertEqual(setting["enabled"], enabled)
-            self.assertTrue(features.enabled("origin_split"))
-            self.assertFalse(features.enabled("knowledge_tags"))
+    def test_api_no_longer_accepts_a_second_read_switch(self):
+        response = self.client.post("/api/settings/features",
+            json.dumps({"features": {"double_read": True}}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(features.enabled("double_read"))
+        self.assertTrue(features.enabled("origin_split"))
+        self.assertFalse(features.enabled("knowledge_tags"))
 
 
 class SingleCardTests(IsolatedData, SimpleTestCase):
@@ -98,23 +94,31 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
             result = pipeline.read_card(self.snapshot, store=mock.Mock())
         return result, chat, arbiter, spot, classify
 
-    def test_disabled_reads_once_and_never_compares_or_claims_witness_agreement(self):
-        features.save({"double_read": False})
-        for witness in (STEM, "已知函数 $f(x)=x^3$，求 $f(2)$ 的值。"):
-            self.snapshot["witness"] = witness
-            result, chat, arbiter, spot, classify = self.run_card()
-            self.assertEqual(chat.call_count, 1)
-            self.assertEqual((result["text_source"], result["state"]), ("single", "green"))
-            self.assertEqual(result["read_b"], {"skipped": "disabled"})
-            self.assertEqual(result["read_c"], {})
-            self.assertEqual(result["flags"], [])
-            arbiter.assert_not_called()
-            spot.assert_not_called()
-            classify.assert_not_called()
+    def test_disabled_reads_once_without_extra_ai_comparisons(self):
+        self.snapshot["witness"] = STEM
+        result, chat, arbiter, spot, classify = self.run_card()
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual((result["text_source"], result["state"]), ("single", "green"))
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
+        self.assertEqual(result["read_c"], {})
+        self.assertEqual(result["flags"], [])
+        arbiter.assert_not_called()
+        spot.assert_not_called()
+        classify.assert_not_called()
         self.checker_engine.assert_not_called()
 
+    def test_clear_mineru_difference_is_flagged_without_a_followup_ai_call(self):
+        self.snapshot["witness"] = "已知函数 $f(x)=x^3$，求 $f(2)$ 的值。"
+        result, chat, arbiter, spot, classify = self.run_card()
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual((result["text_source"], result["state"]), ("single", "yellow"))
+        self.assertTrue(result["read_c"]["unverified"])
+        self.assertTrue(any(flag.startswith(pipeline.WITNESS_FLAG_PREFIX) for flag in result["flags"]))
+        arbiter.assert_not_called()
+        spot.assert_not_called()
+        classify.assert_not_called()
+
     def test_disabled_failure_does_not_try_checker_or_add_a_missing_checker_error(self):
-        features.save({"double_read": False})
         result, chat, arbiter, spot, _ = self.run_card(error=readers.ReaderError("mock primary failure"))
         self.assertEqual(chat.call_count, 1)
         self.assertEqual((result["state"], result["error"]), ("red", "mock primary failure"))
@@ -126,7 +130,6 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
         spot.assert_not_called()
 
     def test_missing_primary_does_not_fake_a_successful_single_read(self):
-        features.save({"double_read": False})
         self.primary_engine.return_value = None
         result, chat, *_ = self.run_card()
         self.assertEqual(result["state"], "red")
@@ -135,23 +138,23 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
         self.assertIn("没有配置任何看图读题服务", result["error"])
         chat.assert_not_called()
 
-    def test_old_default_still_reads_twice_and_reports_real_agreement(self):
+    def test_saved_old_switch_cannot_trigger_a_second_read(self):
+        features.path().write_text('{"double_read": true}', encoding="utf-8")
         result, chat, arbiter, spot, _ = self.run_card()
-        self.assertEqual(chat.call_count, 2)
-        self.assertEqual((result["text_source"], result["state"]), ("agree", "green"))
-        self.assertEqual(result["read_b"]["engine"], CHECKER.label)
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual((result["text_source"], result["state"]), ("single", "green"))
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
+        self.checker_engine.assert_not_called()
         arbiter.assert_not_called()
         spot.assert_not_called()
 
     def test_single_read_retains_first_read_figure_assignment(self):
-        features.save({"double_read": False})
         self.snapshot["candidates"] = [{"label": "1", "seq": 1, "page_idx": 0, "bbox": [50, 80, 100, 120]}]
         result, chat, *_ = self.run_card(raw=tagged("如图，求三角形面积。", figures="1=题干"))
         self.assertEqual(chat.call_count, 1)
         self.assertEqual(result["figures"][0]["slot"], "stem")
 
     def test_unjudged_figure_stays_flagged_without_an_extra_ai_call(self):
-        features.save({"double_read": False})
         self.snapshot["candidates"] = [{"label": "1", "seq": 1, "page_idx": 0, "bbox": [50, 80, 100, 120]}]
         candidates = deepcopy(self.snapshot["candidates"])
         result, chat, _, _, classify = self.run_card()
@@ -162,7 +165,6 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
         self.assertEqual(self.snapshot["candidates"], candidates)
 
     def test_single_read_keeps_local_missing_option_and_unclear_checks(self):
-        features.save({"double_read": False})
         result, chat, *_ = self.run_card(raw=tagged("计算 $[?]+1$ 的值。", options={"A": "1", "C": "3", "D": "4"}))
         self.assertEqual(chat.call_count, 1)
         self.assertEqual(result["state"], "yellow")
@@ -170,15 +172,12 @@ class SingleCardTests(IsolatedData, SimpleTestCase):
         self.assertTrue(any("看不清" in flag for flag in result["flags"]))
         self.assertFalse(any("另一次" in flag or "两次" in flag for flag in result["flags"]))
 
-    def test_task_snapshot_wins_over_a_later_setting_change(self):
-        features.save({"double_read": True})
-        self.snapshot["double_read"] = False
-        result, chat, *_ = self.run_card()
-        self.assertEqual((chat.call_count, result["text_source"]), (1, "single"))
-        features.save({"double_read": False})
+    def test_even_a_stale_task_snapshot_cannot_trigger_a_second_read(self):
         self.snapshot["double_read"] = True
         result, chat, *_ = self.run_card()
-        self.assertEqual((chat.call_count, result["text_source"]), (2, "agree"))
+        self.assertEqual((chat.call_count, result["text_source"]), (1, "single"))
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
+        self.checker_engine.assert_not_called()
 
 
 class SingleReadingWorkflowTests(IsolatedData, TestCase):
@@ -187,7 +186,6 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
     def setUp(self):
         self.isolate()
         self.original = self.paper()
-        features.save({"double_read": False})
         for target, name, value in ((readers, "primary_engine", PRIMARY), (readers, "checker_engine", CHECKER),
                 (readers, "assistant_mode", False), (pipeline, "_reader_parallelism", 1),
                 (views, "_vision_ready", True), (views, "_reading_ready", True)):
@@ -261,7 +259,7 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
         question.refresh_from_db()
         self.assertFalse(question.approved)
 
-    def test_feature_change_cannot_rewrite_existing_approval_or_publication(self):
+    def test_legacy_second_read_setting_cannot_rewrite_existing_approval_or_publication(self):
         question = self.question(body_mode="source_image", processing_mode="manual", state="yellow")
         library.approve(question, now=timezone.now())
         question.save()
@@ -269,16 +267,16 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
             publication, _ = library.publish(question)
         before = deepcopy(Question.objects.values().get(pk=question.pk))
         published = deepcopy(publication.content)
-        for enabled in (True, False):
-            features.save({"double_read": enabled})
+        features.path().write_text('{"double_read": true}', encoding="utf-8")
+        self.assertFalse(features.enabled("double_read"))
         self.assertEqual(Question.objects.values().get(pk=question.pk), before)
         publication.refresh_from_db()
         self.assertEqual(publication.content, published)
 
-    def test_feature_change_during_batch_is_applied_only_to_the_next_batch(self):
+    def test_legacy_second_read_setting_during_batch_is_ignored(self):
         first, second = self.question(), self.question(2)
         def answer(*args, **kwargs):
-            features.save({"double_read": True})
+            features.path().write_text('{"double_read": true}', encoding="utf-8")
             return tagged(STEM)
         with mock.patch.object(readers, "chat", side_effect=answer) as chat:
             pipeline.read_questions(self.original, [first, second])
@@ -288,7 +286,7 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
             self.assertEqual(question.text_source, "single")
         with mock.patch.object(readers, "chat", return_value=tagged(STEM)) as chat:
             pipeline.read_questions(self.original, [first])
-        self.assertEqual(chat.call_count, 2)
+        self.assertEqual(chat.call_count, 1)
 
 
 class SingleReadRequestPolicyTests(SimpleTestCase):

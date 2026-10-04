@@ -15,7 +15,8 @@
   const providerOrder = ["deepseek", "minimax", "doubao", "custom"];
   const KEY_MASK = "****************";
   const KEY_NOTE = "已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下面只填写新密钥；留空就保留原来的配置。";
-  const eyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  // 和“读题与切题”那几栏用同一个图标精灵里的眼睛，两边画出来才一样。
+  const eyeIcon = '<svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>';
   const fields = ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
     "libraryAIModel", "libraryAIImages", "libraryAIThinking"];
   let dialog;
@@ -105,6 +106,7 @@
       .library-ai-key-row>.button{flex:none;padding:9px 12px;min-height:38px}
       .library-ai-key-row>.button svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
       .library-ai-saved-row .credential-saved-value{font-family:var(--mono);font-size:12.5px;letter-spacing:.5px}
+      .library-ai-key-block .credential-eye svg{width:19px;height:19px}
       .library-ai-share{display:grid;gap:8px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--accent-soft)}
       .library-ai-share[hidden]{display:none}
       .library-ai-share p{margin:0}

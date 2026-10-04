@@ -52,4 +52,14 @@ assert.ok(narrow.classes.has("cols-1") || narrow.classes.has("cols-2"));
 assert.deepEqual([...hidden.classes], ["cols-4"]);
 assert.equal(writes.length, 2, "only the list that changes is touched");
 
+// 1.12.5: switching papers must not empty the list first. A blank screen
+// between two papers reads as a hang, so the old cards stay, dimmed and
+// inert, until the new ones have arrived.
+const select = js.slice(js.indexOf("  async function selectPaper(id)"), js.indexOf("  async function clearPaperSelection()"));
+assert.doesNotMatch(select, /\$\("cards"\)\.replaceChildren\(\)/, "the card list is never wiped before the fetch");
+assert.match(select, /cards\.classList\.add\("is-loading"\)/);
+assert.match(select, /cards\.setAttribute\("aria-busy", "true"\)/);
+assert.match(select, /await refreshPaper\(\);[\s\S]*?cards\.classList\.remove\("is-loading"\)/);
+assert.match(css, /\.cards\.is-loading \{[^}]*opacity: \.45;[^}]*pointer-events: none;/);
+
 console.log("speed checks: OK");

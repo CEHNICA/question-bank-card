@@ -117,17 +117,17 @@ assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\
 assert.doesNotMatch(html, /id="settingsTask"/);
 assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
 
-// 三个模型角色和保存契约必须保持一致。
-for (const id of ["settingsPrimaryModel", "settingsCheckerModel", "settingsArbiterModel"]) {
+// 读题设置只保留一个实际读题模型；第二读和裁决入口已移除。
+for (const id of ["settingsPrimaryModel"]) {
   assert.match(html, new RegExp(`id="${id}"`));
 }
+assert.doesNotMatch(html, /settingsCheckerModel|settingsArbiterModel|有出入时复核|两次不一致时裁决/);
 for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel", "settingsModelscopeModel"]) {
   assert.match(html, new RegExp(`id="${id}"[^>]*list="${id}s"`));
 }
 assert.match(js, /api\("\/api\/settings\/models"/);
 assert.match(js, /primary:\s*\$\("settingsPrimaryModel"\)\.value/);
-assert.match(js, /checker:\s*\$\("settingsCheckerModel"\)\.value/);
-assert.match(js, /arbiter:\s*\$\("settingsArbiterModel"\)\.value/);
+assert.doesNotMatch(js, /settingsCheckerModel|settingsArbiterModel/);
 assert.match(js, /models:\s*\{[\s\S]*?minimax:\s*\$\("settingsMinimaxModel"\)\.value\.trim\(\)[\s\S]*?siliconflow:\s*\$\("settingsSiliconflowModel"\)\.value\.trim\(\)/);
 
 // 角色选项与 model_id 建议必须来自后端；建议列表不限制用户填写其他合法 model_id。
@@ -156,8 +156,7 @@ assert.match(js, /\/api\/papers\/\$\{splitPlan\.paperId\}\/split/);
 assert.match(html, /id="settingsConfirmStructure"/);
 assert.match(js, /\/api\/papers\/\$\{paper\.id\}\/confirm-structure/);
 assert.match(js, /engines\.saved\?\.\[role\]\s*\|\|\s*engines\.selected/);
-assert.match(js, /AI 两次一致 · 未人工审核/);
-assert.match(js, /AI 三读多数一致 · 未人工审核/);
+assert.doesNotMatch(js, /AI 两次一致|AI 三读多数一致/);
 
 // 同一页存在多个题号作用域时，补录必须显式选择题组并把 group_id 交给后端。
 assert.match(html, /id="groupField"[\s\S]*?id="groupSelect"/);
@@ -173,12 +172,12 @@ assert.doesNotMatch(html, /settingsMinimaxPlan|同时读题数量|MiniMax 会员
 assert.doesNotMatch(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
 assert.match(js, /if \(!select \|\| !\$\("settingsMinimaxPlanNote"\)\) return;/);
 const readModelSource = js.slice(js.indexOf("  function readModelSettings()"), js.indexOf("  function showModelSaveResult"));
-const values = { settingsPrimaryModel: "assistant", settingsCheckerModel: "auto", settingsArbiterModel: "primary", settingsMinimaxModel: "ModelA", settingsSiliconflowModel: "ModelB", settingsModelscopeModel: "ModelC" };
+const values = { settingsPrimaryModel: "assistant", settingsMinimaxModel: "ModelA", settingsSiliconflowModel: "ModelB", settingsModelscopeModel: "ModelC" };
 const payload = require("node:vm").runInNewContext(readModelSource + "\nreadModelSettings();", { $: id => {
   assert.notEqual(id, "settingsMinimaxPlan", "removed controls must never be read");
   return { value: values[id] };
 } });
-assert.deepEqual(JSON.parse(JSON.stringify(payload)), { primary: "assistant", checker: "auto", arbiter: "primary", models: { minimax: "ModelA", siliconflow: "ModelB", modelscope: "ModelC" } });
+assert.deepEqual(JSON.parse(JSON.stringify(payload)), { primary: "assistant", models: { minimax: "ModelA", siliconflow: "ModelB", modelscope: "ModelC" } });
 assert.equal(Object.hasOwn(payload, "plans"), false);
 
 // 配置说明由用户主动展开；不承诺费用、额度或识读准确率。
@@ -188,7 +187,7 @@ assert.match(html, /id="settingsModels" class="settings-section settings-models"
 assert.match(js, /origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数"/);
 assert.match(css, /\.free-plan \{/);
 assert.match(js, /\{ value: "assistant", label: "AI 助手读题/);
-assert.match(js, /const assistant = \$\("settingsPrimaryModel"\)\.value === "assistant";\s*\$\("settingsCheckerModel"\)\.disabled = assistant;\s*\$\("settingsArbiterModel"\)\.disabled = assistant;/);
+assert.match(js, /settingsPrimaryModel"\)\.value/);
 assert.match(js, /models:\s*\{[\s\S]*?modelscope:\s*\$\("settingsModelscopeModel"\)\.value\.trim\(\)/);
 for (const id of ["settingsModelscopeState"]) {
   assert.match(html, new RegExp(`id="${id}"`));

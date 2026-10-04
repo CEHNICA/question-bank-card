@@ -44,7 +44,7 @@ RATE_LIMIT_ROUNDS = 3
 PATIENT_RATE_LIMIT_ROUNDS = 8
 MAX_RESPONSE_BYTES = 200_000
 OPTION_KEYS = ("A", "B", "C", "D", "E")
-TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|配图|其他题号|刻度)\s*】")
+TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|配图|刻度)\s*】")
 
 
 MAX_PARALLEL_CARDS = 16
@@ -422,7 +422,7 @@ TRANSCRIBE_RULES = """你是数学资料誊录员。图片是从数学试卷或�
 - 选择题把选项分别写在【A】【B】【C】【D】后面，原卷印了 E 选项就再写【E】；不是选择题就不要写这些标记。
 - 题干开头印的“（多项选择题）”“（多选）”“（单选题）”这类题型标注不要写进题干，写在【题型】里。
 - 看不清、无法确定的字写成 [?]，不要猜。
-- 若图里还露出了别的题目的印刷内容（例如上一题的末尾或下一题的开头），不要誊录它；若看到了别的题号，写在【其他题号】里。
+- 若图里还露出了别的题目的印刷内容（例如上一题的末尾或下一题的开头），不要誊录它。
 - 独立判断候选内容的性质，不要因为程序提供了候选编号就把教材小标题或讲解正文硬说成题目：
   “例1/例题2”开头的是例题；练习、习题中的作答任务是练习题；概念说明、性质讲解等是教材正文；只有章节或小节名称的是标题；确实无法确定才写不确定。"""
 
@@ -446,8 +446,7 @@ OUTPUT_FORMAT = """只按下面的格式输出，不要输出别的内容：
 【C】…
 【D】…
 【E】…（原卷没有 E 选项就不写这一行）
-【配图】…
-【其他题号】没有就写"无\""""
+【配图】…"""
 
 
 def transcribe_prompt(number: int, with_figures: bool, source_kind: str = "unknown") -> str:
@@ -657,7 +656,6 @@ def parse_reading(text: str, number: int) -> dict:
             figures[label] = "stem" if other == number else f"q{other}"
         else:
             figures[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
-    others = [int(v) for v in re.findall(r"\d{1,2}", tags.get("其他题号", "")) if int(v) != number]
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
     stem, labelled_kind = strip_type_label(stem)
@@ -685,7 +683,6 @@ def parse_reading(text: str, number: int) -> dict:
         "content_kind": content_kind,
         "figures": figures,
         "missing_figure": "缺图" in figure_text,
-        "others": sorted(set(others)),
         "number_seen": int(seen[0]) if seen else None,
         "figure_descriptions": figure_descriptions,
         "unclear": "[?]" in stem or any("[?]" in v for v in options.values()),

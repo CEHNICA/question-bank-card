@@ -48,7 +48,7 @@ class InterruptedReadRecoveryTests(TestCase):
             "segmentation_flags": [],
         }
 
-    def test_one_reader_can_succeed_when_the_other_provider_has_no_quota(self):
+    def test_quota_exhaustion_is_not_hidden_by_a_second_reader(self):
         primary = pipeline.readers.Engine("minimax", "MiniMax-M3")
         checker = pipeline.readers.Engine("siliconflow", "Qwen/Test")
         successful = pipeline.readers.parse_reading(
@@ -64,17 +64,13 @@ class InterruptedReadRecoveryTests(TestCase):
             return successful
 
         with mock.patch.object(pipeline.readers, "primary_engine", return_value=primary), \
-                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker), \
+                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock, \
                 mock.patch.object(pipeline.readers, "read_question", side_effect=read), \
                 mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"):
-            result = pipeline.read_card(self.read_snapshot(), mock.Mock())
-
-        self.assertEqual(result["state"], Question.State.YELLOW)
-        self.assertEqual(result["text_source"], "single")
-        self.assertEqual(result["error"], "")
-        self.assertIn("Token Plan", result["read_a"]["error"])
-        self.assertTrue(any("只有一次识读成功" in flag for flag in result["flags"]))
+                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"), \
+                self.assertRaises(pipeline.readers.ReaderQuotaExhausted):
+            pipeline.read_card(self.read_snapshot(), mock.Mock())
+        checker_mock.assert_not_called()
 
     def test_no_reader_result_with_any_quota_error_pauses_the_card(self):
         primary = pipeline.readers.Engine("minimax", "MiniMax-M3")
@@ -88,12 +84,13 @@ class InterruptedReadRecoveryTests(TestCase):
             raise pipeline.readers.ReaderError("复核服务暂时不可用")
 
         with mock.patch.object(pipeline.readers, "primary_engine", return_value=primary), \
-                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker), \
+                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock, \
                 mock.patch.object(pipeline.readers, "read_question", side_effect=read), \
                 mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
                 mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"), \
                 self.assertRaises(pipeline.readers.ReaderQuotaExhausted):
             pipeline.read_card(self.read_snapshot(), mock.Mock())
+        checker_mock.assert_not_called()
 
     def test_restart_only_resumes_waiting_and_reading_cards(self):
         approved = self.question(

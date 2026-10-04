@@ -16,6 +16,7 @@ backend/backups/
 packaging/.build/
 packaging/dist/
 tmp/
+.planning/
 
 credentials.dat
 *.pem

@@ -21,9 +21,13 @@ assert.match(js, /brandNotice\("连不上本机服务：请关掉题有据再重
 
 // Automatic flow is explained separately from an actual offline manual course.
 assert.match(html, /<dialog id="welcomeDialog"[\s\S]*?<strong>上传<\/strong>[\s\S]*?<strong>核对<\/strong>[\s\S]*?<strong>入库<\/strong>/);
-assert.match(html, /id="welcomeKeys"[^>]*hidden>配置自动切题（可稍后）<\/button>/);
+assert.doesNotMatch(html, /id="welcomeKeys"|配置自动切题（可稍后）/,
+  "first launch keeps API setup in settings instead of adding a fourth competing action");
 assert.match(html, /id="welcomeLearn"[^>]*>开始手工练习<\/button>/);
 assert.match(html, /id="welcomeTour"[^>]*>自动切题入门<\/button>/);
+assert.match(js, /requestAnimationFrame\(\(\) => \$\("welcomeTour"\)\.focus\(\)\)/,
+  "keyboard focus starts on the primary automatic-cutting guide");
+assert.match(js, /以后需要云处理或主动识读时，再到设置中的 API 配置填写密钥/);
 assert.match(js, /if \(readPref\("qb-welcome-seen", ""\) !== "1"\) openWelcome\(\);/);
 assert.match(js, /writePref\("qb-welcome-seen", "1"\)/);
 const steps = js.match(/const TOUR_STEPS = \[([\s\S]*?)\n  \];/)[1];

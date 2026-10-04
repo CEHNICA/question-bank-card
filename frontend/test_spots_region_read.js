@@ -54,7 +54,7 @@ assert.match(js, /marks: reviewMarks\(q\)/);
 assert.doesNotMatch(js, /marks: diffMarks\(q\), showAnswer/);
 assert.match(js, /kind: "spot", exact: true/);
 // The flag numbers its spots like the boxes.
-assert.match(js, /const SPOT_FLAG = \/\^\(\(\?:两次识读一致\|第三次识读裁决后\)/);
+assert.match(js, /const SPOT_FLAG = \/\^\(\(\?:AI 识读与 MinerU 原始文字有差异\|两次识读一致\|第三次识读裁决后\)/);
 assert.match(js, /el\("span", "flag-spot-number", spotNumber\(index \+ 1\)\)/);
 assert.match(css, /\.crop-spot \{ position: absolute; border: 2px dashed #c2410c;/);
 assert.match(css, /mark\.qb-mark\.spot \{/);
@@ -74,7 +74,14 @@ assert.match(js, /revision: submission\.revision, client_request_id: submission\
 // The page keeps polling while a region is read, and the result fills an option through 改字.
 assert.match(js, /q\.state === "reading" \|\| q\.ocr_pending \|\| regionReadPending\(q\)/);
 assert.match(js, /openEditor\(card, q, \{ prefill: \{ field: target, value: read\.text \} \}\)/);
-assert.match(js, /function openEditor\(card, q, \{ prefill = null, regionInsert = null \} = \{\}\)/);
+// 1.12.5：openEditor 包了一层兜底，真正的面板构造在 openEditorPanel 里。
+assert.match(js, /function openEditor\(card, q, options\)/);
+assert.match(js, /function openEditorPanel\(card, q, \{ prefill = null, regionInsert = null \} = \{\}\)/);
+// 兜底不是静默吞掉：崩了要说出来，并把那张卡从"正在改字"里摘出来。
+const guard = js.slice(js.indexOf("function openEditor(card, q, options)"), js.indexOf("function openEditorPanel("));
+assert.match(guard, /state\.editing\.delete\(q\.id\)/);
+assert.match(guard, /editGuard\.release\(q\.id\)/);
+assert.match(guard, /toast\(`改字面板没能打开：/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
 assert.match(js, /method: "DELETE", body, signal/);
 // Without a clipboard (an older browser) it says so instead of failing silently.

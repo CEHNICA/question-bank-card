@@ -53,7 +53,7 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
             paper = intake.prepare_auto(paper, cloud_ready=True)
         # 自动切题一题没切出就是硬失败，不能以“待你终审”的样子交到审核页。
         self.assertEqual((paper.material_type, paper.status, paper.processing_plan["mode"]), ("exam", "failed", "manual"))
-        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
+        self.assertIn("自动切题没有切出", paper.error)
         self.assertTrue(paper.processing_plan["native_numbering_fallback"])
         self.assertEqual(paper.processing_plan["local_scope_count"], 2)
         self.assertFalse(paper.questions.exists() or paper.processing_plan["cloud_authorized"])
@@ -73,8 +73,7 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
                 # 只有真的会去解析的路线才是 queued；转手工的路线一题没切出，
                 # 状态必须说失败，否则这份卷会以完成的样子躺在列表里。
                 self.assertEqual(paper.status, "queued" if mode == "mineru" else "failed")
-                self.assertEqual(paper.processing_plan.get("cut_result", {}).get("verdict"),
-                                 None if mode == "mineru" else "failed")
+                self.assertEqual(paper.error.startswith("自动切题没有切出"), mode != "mineru")
                 self.assertEqual(paper.processing_plan["cloud_authorized"], allowed)
                 self.assertFalse(paper.questions.exists())
                 self.assertTrue(paper.processing_plan["native_numbering_fallback"])
@@ -103,7 +102,7 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
                 mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected exam segmentation")):
             paper = intake.prepare_auto(paper, cloud_ready=True)
         self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
-        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
+        self.assertIn("自动切题没有切出", paper.error)
         self.assertFalse(paper.questions.exists())
         self.assertEqual(len(paper.pages), 2)
         self.assertEqual(source_images.source_identity(paper), original)

@@ -5,7 +5,7 @@ const dom = require("./credential-test-dom.js");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const source = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf("  function renderSettingsTask("));
-const listenerStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("selectionReread").addEventListener'));
+const listenerStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = js.slice(listenerStart, js.indexOf("  // Queue the values captured", listenerStart));
 const leaveSource = js.slice(js.indexOf("  async function prepareSettingsLeave()"), js.indexOf("  async function saveModelSettingsNow("));
 const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  function renderSettingsReady()"));

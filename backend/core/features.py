@@ -15,10 +15,6 @@ from pathlib import Path
 from django.conf import settings
 
 FEATURES = {
-    "double_read": {
-        "default": True, "label": "第二次 AI 比对",
-        "help": "开启后使用第二次识读比对，分歧时再裁决。关闭后只识读一次，仍需人工采用、审核和入库。更改从下一次识读开始生效。",
-    },
     # 默认开：只挪格式、不改字。
     "origin_split": {
         "default": True, "label": "拆出题源",
@@ -42,7 +38,10 @@ FEATURES = {
         "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
 }
-DEFAULTS = {key: spec["default"] for key, spec in FEATURES.items()}
+# Keep the removed switch readable as false so an old features.json cannot
+# silently re-enable a second model call after updating the app.
+DEFAULTS = {**{key: spec["default"] for key, spec in FEATURES.items()}, "double_read": False}
+PUBLIC_KEYS = frozenset(FEATURES)
 
 _lock = threading.Lock()
 _cache: dict = {"path": None, "mtime": None, "values": None}
@@ -80,6 +79,7 @@ def load() -> dict[str, bool]:
     stored = _read(target) if mtime is not None else {}
     values = {key: stored[key] if isinstance(stored.get(key), bool) else default
               for key, default in DEFAULTS.items()}
+    values["double_read"] = False
     with _lock:
         _cache.update(path=target, mtime=mtime, values=dict(values))
     return values
@@ -93,12 +93,12 @@ def save(changes) -> dict[str, bool]:
     """Change some switches (others keep their value) and return all of them."""
     if not isinstance(changes, dict) or not changes:
         raise FeatureError("请提供要修改的开关")
-    unknown = set(changes) - set(DEFAULTS)
+    unknown = set(changes) - PUBLIC_KEYS
     if unknown:
         raise FeatureError("没有这个开关：" + "、".join(sorted(unknown)))
     if not all(isinstance(value, bool) for value in changes.values()):
         raise FeatureError("开关只能是 true 或 false")
-    values = {**load(), **changes}
+    values = {**load(), **changes, "double_read": False}
     target = path()
     target.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(prefix=".features-", suffix=".json", dir=str(target.parent))

@@ -115,11 +115,11 @@ def prepare(paper: Paper, mode: str) -> Paper:
 def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool = False) -> Paper:
     """Use real local text first; cloud use requires this import's explicit consent.
 
-    Whatever this returns, the paper carries a ``cut_result``: the teacher asked
-    for automatic cutting, so the honest answer to “how many questions did we
-    get” is part of the import, not something discovered later on the review
-    page.  A paper whose local attempt produced no card must not arrive at the
-    review page looking like a finished one.
+    A paper whose local attempt produced no card must not arrive at the review
+    page looking like a finished one, so it is failed here with the reason the
+    teacher needs.  How many questions the sheet *should* have had is not
+    guessed: a 答案/解析 section prints the same numbers as the questions, so
+    that comparison named missing questions that were never missing.
     """
     from . import pipeline
     try:
@@ -156,9 +156,9 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
         paper.save(update_fields=["processing_plan", "status", "updated_at"])
     if plan.get("mode") != "mineru":
         # Nothing will be queued for this run, so the worker never comes back to
-        # reconcile it.  The reason the local attempt gave up is the sentence the
+        # check it.  The reason the local attempt gave up is the sentence the
         # teacher actually needs, so it is not overwritten by the generic one.
-        pipeline._record_cut_result(
+        pipeline._fail_when_nothing_was_cut(
             paper, int(plan.get("revision", 0)),
             reason=f"自动切题没有切出任何题目：{plan.get('fallback_reason', '')}".strip(),
         )

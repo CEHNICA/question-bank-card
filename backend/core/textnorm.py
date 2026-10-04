@@ -508,12 +508,12 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
     return _keys_agree(witness_key(reading_witness_text(reading)), expected)
 
 
-# A spot where both vision readings agree but MinerU printed something else
-# one-for-one (“x^3” / “x^2”, “销售单价” / “销售定价”).  The same model reading
-# twice tends to repeat its own slip, so such a spot is worth a third, focused
-# look.  Only clean substitutions count: short, made of letters, digits,
-# Chinese or maths symbols, anchored by identical text on both sides —
-# handwriting mixed into MinerU's text shows up as insertions, not these.
+# A spot where the vision reading and MinerU printed text differ one-for-one
+# (“x^3” / “x^2”, “销售单价” / “销售定价”). Only clean substitutions count:
+# short, made of letters, digits, Chinese or maths symbols, anchored by
+# identical text on both sides — handwriting mixed into MinerU's text shows up
+# as insertions, not these. The comparison is local and deterministic; it does
+# not trigger another model request.
 _OBJECTION_CHARS = re.compile(r"^[0-9A-Za-z\u4e00-\u9fffα-ωΑ-Ω△∠⊥∥≤≥≠±×÷°π∞]+$")
 # MinerU's usual confusions: a disagreement between these proves nothing
 # (in testing MinerU was wrong at every α/a and △/V spot).

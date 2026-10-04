@@ -43,8 +43,8 @@ from .models import (
     RegionRead,
 )
 from .pipeline import (
-    TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir, preview_resegment, reorder_photo_pages,
-    promote_saved_readings,
+    CUT_PRODUCED_NOTHING, TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir,
+    preview_resegment, reorder_photo_pages, promote_saved_readings,
 )
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
@@ -341,24 +341,41 @@ def _processing_json(paper: Paper) -> dict | None:
 # readings and took a second or more each time.  Any change to the row, the
 # paper's name or the card's group gives a new fingerprint, so a stale answer
 # is never reused.
-_VERDICTS: "OrderedDict[int, tuple[str, str, bool, bool]]" = OrderedDict()
+_VERDICTS: "OrderedDict[int, tuple[str, str, bool, bool, bool]]" = OrderedDict()
 _VERDICTS_LIMIT = 50_000
 _VERDICTS_LOCK = threading.Lock()
 
 
-def _verdict(row: Question) -> tuple[str, bool, bool]:
-    """(state, approval current, figures block approval).  The state is read after
-    the figure review: a review saved under an older rule can turn a yellow card
-    green on screen (“已自动排除疑似多余图”), and the counts must say the same."""
+def _live_publications(paper: Paper) -> dict[int, PublishedQuestion]:
+    """The version the library is currently serving for each card, newest first."""
+    latest: dict[int, PublishedQuestion] = {}
+    for publication in PublishedQuestion.objects.filter(
+            paper=paper, status=PublishedQuestion.Status.PUBLISHED).order_by("question_id", "-version"):
+        latest.setdefault(publication.question_id, publication)
+    return latest
+
+
+def _verdict(row: Question, live: PublishedQuestion | None = None) -> tuple[str, bool, bool, bool]:
+    """(state, approval current, figures block approval, in the library as shown).
+
+    The state is read after the figure review: a review saved under an older
+    rule can turn a yellow card green on screen (“已自动排除疑似多余图”), and the
+    counts must say the same.  The last flag is what settles a card: it is in the
+    library *and* the library holds exactly what is on screen, so there is
+    nothing left for the teacher to look at.  A card edited after it was
+    published hashes differently and stays unsettled on purpose.
+    """
     approved, blocked = library.approval_is_current(row), blocks_approval(source_images.review(row))
-    return row.state, approved, blocked
+    settled = live is not None and live.content_hash == library.content_hash(library.final_content(row))
+    return row.state, approved, blocked, settled
 
 
-def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tuple[int, str, bool, bool]]:
-    """(id, state, approval current, figures block approval) for each card of the paper."""
+def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tuple[int, str, bool, bool, bool]]:
+    """(id, state, approval current, figures block approval, settled) for each card."""
+    live = _live_publications(paper)
     if rows is not None:
         with reusing_reviews():
-            return [(row.pk, *_verdict(row)) for row in rows]
+            return [(row.pk, *_verdict(row, live.get(row.pk))) for row in rows]
     json_fields = [field.attname for field in Question._meta.concrete_fields if isinstance(field, models.JSONField)]
     plain_fields = [field.attname for field in Question._meta.concrete_fields
                     if not isinstance(field, models.JSONField)]
@@ -368,11 +385,17 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
     )
     groups = {group.pk: (group.title, group.sequence) for group in paper.question_groups.all()}
     pk_at, group_at = (plain_fields.index(name) for name in ("id", "group_id"))
+    # The library copy is part of the answer, so a card that was published (or
+    # withdrawn) must not be answered from a cache entry taken before it was.
+    def served(pk: int) -> tuple:
+        publication = live.get(pk)
+        return () if publication is None else (publication.pk, publication.version, publication.content_hash)
+
     fingerprints = {
-        row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name)).encode()).hexdigest()
+        row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name, served(row[pk_at]))).encode()).hexdigest()
         for row in raw
     }
-    known: dict[int, tuple[str, bool, bool]] = {}
+    known: dict[int, tuple[str, bool, bool, bool]] = {}
     with _VERDICTS_LOCK:
         for pk, fingerprint in fingerprints.items():
             held = _VERDICTS.get(pk)
@@ -384,7 +407,7 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
         with reusing_reviews():
             for start in range(0, len(missing), 500):
                 for row in paper.questions.select_related("paper", "group").filter(pk__in=missing[start:start + 500]):
-                    known[row.pk] = _verdict(row)
+                    known[row.pk] = _verdict(row, live.get(row.pk))
         with _VERDICTS_LOCK:
             for pk in missing:
                 if pk in known:
@@ -395,35 +418,6 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
     return [(row[pk_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
 
 
-def _live_cut_result(paper: Paper, recorded: dict) -> dict:
-    """What is still missing *now*, not what was missing when the run finished.
-
-    The verdict belongs to the automatic run, but the list of numbers a teacher
-    has to go and cut belongs to this second: someone who cuts 第 3 题 by hand
-    must not keep being told 第 3 题 is missing.  Subtracting the cards that now
-    exist costs no model call and no block scan.
-    """
-    if not recorded:
-        return {}
-    present = set(paper.questions.values_list("number", flat=True))
-    missing = [number for number in (recorded.get("missing") or []) if number not in present]
-    verdict = str(recorded.get("verdict") or "")
-    if verdict == "degraded" and not missing:
-        return {**recorded, "verdict": "complete", "missing": [], "message": "",
-                "found": len(present)}
-    if verdict == "degraded":
-        return {**recorded, "missing": missing, "found": len(present),
-                "message": f"原卷上印着第 {'、'.join(str(number) for number in missing)} 题的题号，"
-                           "但现在还没有对应的题卡。"}
-    if verdict == "failed" and present:
-        # The teacher took over and started cutting by hand.  “自动切题没有切出
-        # 任何题目” is still the truth about the automatic run; saying how many
-        # cards exist now keeps it from reading as if the paper were empty.
-        return {**recorded, "found": len(present),
-                "message": f"自动切题没有切出题目；现在这 {len(present)} 张是手工切的，原卷还在。"}
-    return dict(recorded)
-
-
 def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] | None = None) -> dict:
     info = paper.photos or {}
     quota_paused = (
@@ -431,18 +425,11 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
     )
     stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
-    cut_result = _live_cut_result(paper, (paper.processing_plan or {}).get("cut_result") or {})
-    # “待你终审” says the cut worked.  When the paper's own reconciliation says
-    # it did not, that sentence is the one thing that must not be shown: a
-    # two-card paper from a 24-question exam must not read as finished.
-    cut_label = {"failed": "自动切题失败", "degraded": "切题不全",
-                 "unverified": "切题待核对"}.get(str(cut_result.get("verdict") or ""))
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "material_type": paper.material_type, "archived": paper.archived,
         "status_label": "额度不足，已暂停" if quota_paused else "已停止" if stopped
-        else cut_label if paper.status == Paper.Status.READY and cut_label
         else Paper.Status(paper.status).label,
         "recoverable_pause": quota_paused,
         "stopped": stopped,
@@ -451,7 +438,6 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
         "processing_plan": paper.processing_plan or {},
-        "cut_result": cut_result,
         "parse_mode": (paper.processing_plan or {}).get("mode", "mineru"),
         "demo": demo.is_demo(paper),
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
@@ -480,21 +466,38 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
     if with_counts:
         # ``rows``: the cards the caller already loaded (the review page), so they are not read twice.
         verdicts = card_verdicts(paper, rows)
-        rows = [SimpleNamespace(pk=pk, state=state) for pk, state, _approved, _blocked in verdicts]
-        approved_ids = {pk for pk, _state, approved, _blocked in verdicts if approved}
-        figure_blocked_ids = {pk for pk, _state, _approved, blocked in verdicts if blocked}
+        rows = [SimpleNamespace(pk=pk, state=state) for pk, state, _approved, _blocked, _settled in verdicts]
+        approved_ids = {pk for pk, _state, approved, _blocked, _settled in verdicts if approved}
+        figure_blocked_ids = {pk for pk, _state, _approved, blocked, _settled in verdicts if blocked}
+        # A card the library already serves exactly as it appears is finished:
+        # it must not keep being counted as “N 张要看”, or the same paper says
+        # “已入库 10” and “3 张要看” on the same line.
+        settled_ids = {pk for pk, _state, _approved, _blocked, settled in verdicts if settled}
+        # ``published`` stays “the library holds a record of it”: deleting a task
+        # that has one is refused so the source stays traceable.  ``settled`` is
+        # the stronger claim the card prints — the library holds *exactly* what
+        # is on screen, so there is nothing left to look at.
         published = PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)\
             .values("question_id").distinct().count()
+        pending = approved_ids | settled_ids
+        waiting = sum(1 for r in rows if r.state in (Question.State.WAITING, Question.State.READING))
         data["counts"] = {
             "total": len(rows),
             "green": sum(1 for r in rows if r.state == Question.State.GREEN and r.pk not in approved_ids
-                         and r.pk not in figure_blocked_ids),
+                         and r.pk not in figure_blocked_ids and r.pk not in settled_ids),
             "yellow": sum(1 for r in rows if (r.state == Question.State.YELLOW or r.pk in figure_blocked_ids)
-                          and r.pk not in approved_ids),
-            "red": sum(1 for r in rows if r.state == Question.State.RED and r.pk not in approved_ids),
-            "waiting": sum(1 for r in rows if r.state in (Question.State.WAITING, Question.State.READING)),
+                          and r.pk not in pending),
+            "red": sum(1 for r in rows if r.state == Question.State.RED and r.pk not in pending),
+            "waiting": waiting,
             "approved": len(approved_ids),
+            "settled": len(settled_ids),
             "published": published,
+            # 「不用再看」/「还要看」是试卷列表和审核页共用的唯一口径：
+            # 打了勾的、或者题库里已经原样放着的，算不用再看；还在识读的谁都没看过，
+            # 两边都不算；剩下的——识读干净的、识读有疑问的、识读失败的——都要人看一眼。
+            # 列表和审核页各自数一遍就会出现「列表说 4 张要看、进去却是 25 张要看」。
+            "done": len(pending),
+            "todo": max(0, len(rows) - len(pending) - waiting),
         }
     return data
 
@@ -849,8 +852,10 @@ def model_settings(request):
         return _error("模型设置格式不正确")
     roles = {
         "primary_engine": payload.get("primary"),
-        "checker_engine": payload.get("checker"),
-        "arbiter_engine": payload.get("arbiter"),
+        # Older clients may still send these roles. Newer UI exposes one reader;
+        # omitted legacy roles return to their neutral defaults.
+        "checker_engine": payload.get("checker", preferences.DEFAULTS["checker_engine"]),
+        "arbiter_engine": payload.get("arbiter", preferences.DEFAULTS["arbiter_engine"]),
     }
     normalized = preferences.normalize(roles)
     if normalized is None:
@@ -946,7 +951,7 @@ def papers(request):
     for chunk in upload.chunks():
         digest.update(chunk)
     existing = Paper.objects.filter(sha256=digest.hexdigest(), material_type=material_type, archived=False)\
-        .exclude(Q(status=Paper.Status.FAILED) & Q(processing_plan__cut_result__isnull=True)).first()
+        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING)).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     paper = Paper(
@@ -1034,7 +1039,7 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
         f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()
     ).hexdigest()
     existing = Paper.objects.filter(sha256=combined, material_type=material_type, archived=False)\
-        .exclude(Q(status=Paper.Status.FAILED) & Q(processing_plan__cut_result__isnull=True)).first()
+        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING)).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     first = Path(uploads[0].name).name
@@ -2037,6 +2042,8 @@ def approve_green(request, paper_id):
     now = timezone.now()
     changed = []
     publication_problems = []
+    # 1.12.5：通过不了的题逐条说明原因，不再静默跳过。
+    skipped = []
     with transaction.atomic():
         # Yellow too: a figure review saved under an older rule can make a card
         # green on screen (“已自动排除疑似多余图”) while the database still says
@@ -2048,15 +2055,33 @@ def approve_green(request, paper_id):
         with reusing_reviews():
             for question in questions:
                 review = stored_or_derived_review(question)
+                # ``stored_or_derived_review`` may rewrite question.state in
+                # memory (an upgraded figure review drops the card back to
+                # yellow).  Such a card used to be dropped without a word, which
+                # is why bulk approval looked like it did nothing.
                 if question.state != Question.State.GREEN:
+                    pending = [str(flag) for flag in (question.flags or [])][:3]
+                    skipped.append({
+                        "number": question.number,
+                        "reason": ("还有待核查的提醒：" + "；".join(pending)) if pending
+                                  else "这道题还有待核查的提醒，请先处理",
+                    })
                     continue
-                if not question.stem.strip() or blocks_approval(review) or library.type_blocks_approval(question):
+                if not question.stem.strip():
+                    skipped.append({"number": question.number, "reason": "还没读出题干，请先改字或重新识读"})
+                    continue
+                if blocks_approval(review):
+                    skipped.append({"number": question.number, "reason": blocking_message(review)})
+                    continue
+                if library.type_blocks_approval(question):
+                    skipped.append({"number": question.number, "reason": "题型还没定，请先在题号旁边选一下题型"})
                     continue
                 # Already passed by the same kind of reviewer (or by a person): nothing to do.
                 if library.approval_is_current(question) \
                         and library.approval_source(question) in {approver[0], "human"}:
                     continue
                 if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
+                    skipped.append({"number": question.number, "reason": "这道题的通过状态没能更新，请重试"})
                     continue
                 question.updated_at = now
                 changed.append(question)
@@ -2077,7 +2102,8 @@ def approve_green(request, paper_id):
                     question.save()
                     publication_problems.append(f"第 {question.number} 题保存未完成，请重试或修复来源图片。")
     count = sum(question.approved for question in changed)
-    return JsonResponse({"approved": count, "problems": publication_problems, "paper": paper_json(paper)})
+    return JsonResponse({"approved": count, "problems": publication_problems,
+                         "skipped": skipped, "paper": paper_json(paper)})
 
 
 @csrf_exempt
@@ -3139,8 +3165,6 @@ def feature_settings(request):
         except OSError:
             pass
     message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
-    if "double_read" in (payload or {}).get("features", {}):
-        message = "已保存。第二次 AI 比对的设置从下一次识读开始生效，仍需人工采用和审核。"
     return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path()),
                          "message": message})
 

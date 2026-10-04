@@ -1,8 +1,7 @@
 "use strict";
 
-// 自动切题没切出题、但云端结果还留着的时候，最醒出的那个按钮必须是真的
-// 能救回来的那一个，而不是把人推向手工框题；同时同一句话不能在横幅和错误
-// 行各写一遍——1.12.1 专门修过"同一个错误只显示一次"。
+// 自动切题没切出题、但云端结果还留着的时候，最醒目的那个按钮必须是真的
+// 能救回来的那一个，而不是把人推向手工框题；同一句话也不能在两个地方各写一遍。
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -39,16 +38,12 @@ const failedWithAParse = {
   id: "paper", kind: "pdf", status: "failed", parse_mode: "mineru", material_type: "exam",
   recoverable_pause: false, error: "自动切题没有切出任何题目。",
   processing_plan: { fallback_reason: "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。" },
-  cut_result: { verdict: "failed", found: 0, expected: 10, missing: [1, 2, 3],
-    message: "自动切题没有切出任何题目。", source: "printed_numbers" },
 };
 
-// A service outage has no cut verdict at all: nothing was cut, so nothing to reconcile.
-const failedWithoutAParse = { ...failedWithAParse,
-  cut_result: {}, error: "云端服务不可用。" };
+// A service outage failed before cutting, so it says what actually happened.
+const failedWithoutAParse = { ...failedWithAParse, error: "云端服务不可用。" };
 
-const quotaPause = { ...failedWithAParse, recoverable_pause: true,
-  error: "识读额度已用完。", cut_result: {} };
+const quotaPause = { ...failedWithAParse, recoverable_pause: true, error: "识读额度已用完。" };
 
 (async () => {
   // 1. 云端结果还在：最显眼的按钮是“继续 AI 切题”，它复用已存的解析结果。
@@ -60,17 +55,17 @@ const quotaPause = { ...failedWithAParse, recoverable_pause: true,
     "re-uploading the original would spend cloud quota a second time for nothing");
   assert.ok(recoverable.buttons.some((b) => b.label === "改为手工切题"), "manual cutting stays available");
 
-  // 2. 同一句话不在错误行里再写一遍：横幅已经写了。
-  assert.notEqual(recoverable.text, "自动切题没有切出任何题目。",
-    "the banner already says this; the error row must add the reason, not repeat it");
+  // 2. 错误行说的是“本地为什么没切出来”，不是把“处理失败”再抄一遍。
+  assert.notEqual(recoverable.text, "自动切题没有切出任何题目。");
   assert.match(recoverable.text, /MinerU/);
 
-  // 3. 没有可复用的解析结果时，行为不变：先给手工，最老的路径仍然是主按钮。
+  // 3. 别的失败原样说自己的原因，不套用切题那套按钮，也不换文案。
   const plain = renderErrorRow(failedWithoutAParse);
+  assert.equal(plain.text, "云端服务不可用。");
   assert.equal(plain.buttons[0].label, "继续整理");
   assert.equal(plain.buttons[0].kind, "small primary");
 
-  // 4. 与切题无关的失败（额度用完）不套用这套按钮，也不换文案。
+  // 4. 与切题无关的失败（额度用完）同样不套用这套按钮。
   const quota = renderErrorRow(quotaPause);
   assert.equal(quota.text, "识读额度已用完。");
   assert.equal(quota.buttons[0].label, "继续整理");

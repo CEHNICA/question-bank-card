@@ -63,9 +63,10 @@ class ReadCardSpotTests(v110.TempDataMixin, TestCase):
         snapshot = {**self.snapshot, "witness": f"{LINE['text']}\n{OTHER['text']}",
                     "witness_blocks": [LINE, OTHER]}
         with mock.patch.object(readers, "read_question", return_value=reading), \
-                mock.patch.object(readers, "spot_check", return_value=["mineru"]):
+                mock.patch.object(readers, "spot_check") as spot_check:
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
-        self.assertTrue(any(flag.startswith(pipeline.OBJECTION_FLAG_PREFIX) for flag in result["flags"]))
+        spot_check.assert_not_called()
+        self.assertTrue(any(flag.startswith(pipeline.WITNESS_FLAG_PREFIX) for flag in result["flags"]))
         spot = pipeline.spot_record(result["read_c"])["doubtful"][0]
         self.assertEqual((spot["n"], spot["reading"], spot["mineru"]), (1, "3", "2"))
         self.assertEqual((spot["page_idx"], spot["bbox"]), (0, LINE["bbox"]))

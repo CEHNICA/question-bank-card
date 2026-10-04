@@ -75,23 +75,14 @@ guarded.context.dialogOpen = true; guarded.press(); assert.equal(guarded.selecte
 guarded.context.dialogOpen = false; guarded.$("paperView").hidden = true; guarded.press(); assert.equal(guarded.selected.length, 0);
 guarded.$("paperView").hidden = false; guarded.press({ key: "N" }); assert.equal(guarded.state.current, 12);
 
-// First-use guidance is one session on one paper, then suppressed across reloads.
-// Explicit opt-out is persistent, reversible, and does not touch data/configuration.
-const preferences = new Map(), writes = [];
-const makeGuide = () => App.createReviewGuidance((key, fallback) => preferences.get(key) ?? fallback,
-  (key, value) => { preferences.set(key, value); writes.push(key); });
-const guide = makeGuide();
-assert.equal(guide.visible("paper-one", false), false); assert.equal(writes.length, 0);
-assert.equal(guide.visible("paper-one", true), true); assert.equal(guide.visible("paper-one", true), true);
-assert.equal(guide.visible("paper-two", true), false); assert.equal(guide.visible("paper-one", true), false); assert.equal(makeGuide().visible("paper-one", true), false);
-guide.dismiss(); assert.equal(guide.visible("paper-one", true), false); assert.equal(makeGuide().visible("paper-new", true), false);
-guide.restore(); assert.equal(guide.visible("paper-new", true), true); assert.equal(makeGuide().visible("paper-two", true), false);
-assert(writes.every(key => key.startsWith("qb-review-guidance-")), "Only the dedicated local guidance preferences change");
-assert.match(html, /id="reviewGuidanceDismiss"[^>]*>以后不再提示/);
+// The review bubble and persistent in-page shortcut strip are removed. Full
+// shortcut help remains reachable from Settings and the keyboard shortcut.
+assert.doesNotMatch(html, /reviewGuidanceHint|reviewGuidanceDismiss|class="key-hints"/);
+assert.doesNotMatch(source, /createReviewGuidance|renderReviewGuidance|qb-review-guidance-/);
 assert.match(html, /id="settingsRestoreHints"[^>]*>恢复(?:已关闭的)?操作提示/);
-const guideUI = source.slice(source.indexOf("  const reviewGuidance ="), source.indexOf("  function renderPaper()"));
-assert.match(guideUI, /setCropGuidanceEnabled\(true\)/, "Help restores the existing permanent crop guidance opt-out too");
-assert.doesNotMatch(guideUI, /paperError|cutReadingError|pageCropResult|editGuard|\/api\//, "Guidance changes cannot hide failures, unsaved warnings or submit work");
+const hintRestore = source.slice(source.indexOf('$("settingsRestoreHints").addEventListener'), source.indexOf('window.addEventListener("qb:hints-restored"'));
+assert.match(hintRestore, /setCropGuidanceEnabled\(true\)/, "Help restores the existing permanent crop guidance opt-out too");
+assert.doesNotMatch(hintRestore, /paperError|cutReadingError|pageCropResult|editGuard|\/api\//, "Guidance changes cannot hide failures, unsaved warnings or submit work");
 const historical = "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。";
 assert.equal(App.historicalParseReason({ status: "ready", processing_plan: { fallback_reason: historical } }), true);
 for (const status of ["queued", "parsing", "failed", "needs_grouping"]) {
@@ -119,8 +110,13 @@ assert.doesNotMatch(mainStrip, /paperContinueAi/);
 const menu = html.slice(html.indexOf('id="paperMenu"'), html.indexOf('id="paperStatus"'));
 assert.match(menu, /id="paperContinueAi"/);
 assert.equal((html.match(/id="paperContinueAi"/g) || []).length, 1, "The existing guarded AI continuation has one menu entry");
+// 1.12.5：approve-green 有了入口，但只有工具菜单里一个「一键通过所有题目」，
+// 而且它必须把过不去的题逐条说出来——不许出现第二个"全部通过"的按钮。
+const approveEntries = (html.match(/approve-green/g) || []).length;
+assert.equal(approveEntries, 0, "approve-green 只经脚本调用，不出现在静态标记里");
+assert.equal((html.match(/id="approveAllGreen"/g) || []).length, 1, "一键通过只有一个入口");
 assert.doesNotMatch(html, /id="approveGreen"/);
-assert.doesNotMatch(source, /\$\("approveGreen"\)|approve-green/);
+assert.match(source, /\$\("approveAllGreen"\)\.addEventListener\("click", approveAllGreen\)/);
 const tourSteps = source.slice(source.indexOf("  const TOUR_STEPS ="), source.indexOf("  const tour ="));
 assert.equal((tourSteps.match(/querySelector\("\.card-tick"\)/g) || []).length, 1, "Automatic banking shares the single approval lesson");
 assert.match(tourSteps, /自动入库/);
@@ -165,21 +161,4 @@ for (const status of ["queued", "parsing", "segmenting"]) {
   assert.equal(pending.stageButtons.length + pending.emptyButtons.length, 0, "The existing direct stop-and-manual recovery owns cloud wait states");
 }
 
-// Exercise actual dismiss/restore listeners with fake preferences, not just the
-// controller. Required error nodes remain untouched, and Help restores crop hints.
-const helpNodes = new Map(), storageHandlers = [], helpPreferences = new Map(), cropRestores = [];
-const helpUI = { QBReviewGuidance: App, state: { paperId: "paper", paper: { status: "ready" }, questions: [{ id: 1, approved: false }] },
-  isHumanApproved: q => q.approved === true,
-  $: id => { if (!helpNodes.has(id)) helpNodes.set(id, node(id)); return helpNodes.get(id); },
-  readPref: (key, fallback) => helpPreferences.get(key) ?? fallback,
-  writePref: (key, value) => helpPreferences.set(key, value), setCropGuidanceEnabled: value => cropRestores.push(value), toast() {},
-  window: { addEventListener: (event, callback) => storageHandlers.push(callback) } };
-vm.runInNewContext(guideUI, helpUI);
-helpUI.$("paperError").hidden = false; helpUI.$("paperError").textContent = "Service unavailable";
-helpUI.renderReviewGuidance(); assert.equal(helpUI.$("reviewGuidanceHint").hidden, false);
-helpUI.$("reviewGuidanceDismiss").events.click[0](); assert.equal(helpUI.$("reviewGuidanceHint").hidden, true);
-helpUI.$("settingsRestoreHints").events.click[0](); assert.equal(helpUI.$("reviewGuidanceHint").hidden, false);
-assert.deepEqual(cropRestores, [true]); assert.equal(helpUI.$("paperError").hidden, false); assert.equal(helpUI.$("paperError").textContent, "Service unavailable");
-helpPreferences.set("qb-review-guidance-disabled", "1"); storageHandlers[0]({ key: "qb-review-guidance-disabled" });
-assert.equal(helpUI.$("reviewGuidanceHint").hidden, true, "Another window's permanent dismissal updates this current review");
-console.log("Review N: the next question that still needs checking, skipping approved ones, wrapping at the end, naming a filter that hides the rest, first-card origin, scroll fencing, held-key and IME guards; one-time reversible guidance, fault visibility, single cutting entry and automatic-approval tutorial: OK");
+console.log("Review N: the next question that still needs checking, skipping approved ones, wrapping at the end, naming a filter that hides the rest, first-card origin, scroll fencing, held-key and IME guards; review prompts removed, fault visibility, single cutting entry and automatic-approval tutorial: OK");

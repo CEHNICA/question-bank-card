@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import threading
 import uuid
+from collections import OrderedDict
+from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
@@ -32,13 +35,67 @@ def valid_regions(paper, regions) -> bool:
     return True
 
 
-def source_identity(paper) -> tuple[Path, str, str]:
-    source = Path(paper.render_path or paper.source_path)
+# The source file's own sha256, remembered against its path, size and mtime.
+# Hashing it once per card made every paper detail load re-read the whole PDF
+# or photo: a 25-card paper read the same 20 MB twenty-five times.  The stamp
+# changes the moment the file does, so a replaced original is re-hashed.
+_SOURCE_HASHES: dict[tuple[str, int, int, int], str] = {}
+_SOURCE_HASHES_LOCK = threading.Lock()
+_SOURCE_HASHES_LIMIT = 512
+
+
+def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with source.open("rb") as handle:
+    with path.open("rb") as handle:
         for data in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(data)
-    return source, "pdf" if source.suffix.lower() == ".pdf" else paper.kind, digest.hexdigest()
+    return digest.hexdigest()
+
+
+def source_identity(paper) -> tuple[Path, str, str]:
+    source = Path(paper.render_path or paper.source_path)
+    stamp = None
+    try:
+        stat = source.stat()
+        # The inode matters: two test runs can reuse one path for different
+        # content of the same size written inside one clock tick.
+        stamp = (str(source), stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    except OSError:
+        pass
+    if stamp is not None:
+        with _SOURCE_HASHES_LOCK:
+            held = _SOURCE_HASHES.get(stamp)
+        if held is not None:
+            return source, "pdf" if source.suffix.lower() == ".pdf" else paper.kind, held
+    digest = _file_sha256(source)
+    if stamp is not None:
+        with _SOURCE_HASHES_LOCK:
+            _SOURCE_HASHES[stamp] = digest
+            while len(_SOURCE_HASHES) > _SOURCE_HASHES_LIMIT:
+                _SOURCE_HASHES.pop(next(iter(_SOURCE_HASHES)))
+    return source, "pdf" if source.suffix.lower() == ".pdf" else paper.kind, digest
+
+
+# A card's crops do not change until its ranges or its original change, but
+# building them decodes every PNG and re-hashes every file.  Remembering the
+# finished descriptor turns a second visit to the same paper into a lookup.
+# The cache is only a shortcut: each crop's size and mtime are re-checked, so a
+# deleted or damaged crop is rebuilt (and fails again) exactly as before.
+_ASSETS: "OrderedDict[tuple, tuple[tuple[tuple[str, int, int], ...], list[dict]]]" = OrderedDict()
+_ASSETS_LIMIT = 4_000
+_ASSETS_LOCK = threading.Lock()
+
+
+def _stamp(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (path.name, stat.st_size, stat.st_mtime_ns)
+
+
+def _crops_unchanged(stamps, folder: Path) -> bool:
+    return all(_stamp(folder / stamp[0]) == stamp for stamp in stamps)
 
 
 def assets(question) -> list[dict]:
@@ -46,8 +103,17 @@ def assets(question) -> list[dict]:
         raise ValueError("原图题需要有效的原卷范围")
     source, kind, source_hash = source_identity(question.paper)
     folder = Path(settings.DATA_ROOT) / str(question.paper_id) / "question-images"
+    cache_key = (question.pk, question.content_revision, source_hash,
+                 json.dumps(question.regions, sort_keys=True))
+    with _ASSETS_LOCK:
+        held = _ASSETS.get(cache_key)
+    if held is not None and _crops_unchanged(held[0], folder):
+        with _ASSETS_LOCK:
+            _ASSETS.move_to_end(cache_key)
+        return deepcopy(held[1])
     folder.mkdir(parents=True, exist_ok=True)
     result = []
+    stamps = []
     for index, region in enumerate(question.regions):
         key = hashlib.sha256(json.dumps([source_hash, region], sort_keys=True).encode()).hexdigest()[:32]
         target = folder / f"q{question.pk}-{key}.png"
@@ -65,10 +131,19 @@ def assets(question) -> list[dict]:
             image.load()  # A readable PNG header does not prove intact pixels.
             width, height = image.size
         image_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        stamp = _stamp(target)
+        if stamp is not None:
+            stamps.append(stamp)
         result.append({"page_idx": region["page_idx"], "bbox": list(region["bbox"]), "order": index,
                        "source": "manual", "render_sha256": source_hash, "image_sha256": image_hash,
                        "width": width, "height": height, "file": target.name,
                        "url": f"/api/questions/{question.pk}/question-images/{index}?v={image_hash[:16]}"})
+    if len(stamps) == len(result):
+        with _ASSETS_LOCK:
+            _ASSETS[cache_key] = (tuple(stamps), deepcopy(result))
+            _ASSETS.move_to_end(cache_key)
+            while len(_ASSETS) > _ASSETS_LIMIT:
+                _ASSETS.popitem(last=False)
     return result
 
 

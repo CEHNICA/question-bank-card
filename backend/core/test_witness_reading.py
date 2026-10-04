@@ -268,18 +268,17 @@ class WitnessPipelineTests(TestCase):
             regions_auto=[{"page_idx": 0, "bbox": [50, 100, 480, 200]}],
         )
 
-    def test_agreeing_witness_skips_the_checker(self):
+    def test_agreeing_witness_does_not_start_a_second_ai_read(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。")})
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "witness"))
+        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "single"))
         self.assertEqual([call[0] for call in chat.calls], ["a"])
-        self.assertEqual(question.read_b["skipped"], "witness")
-        self.assertNotIn("stem", question.read_b)
+        self.assertEqual(question.read_b, {"skipped": "disabled"})
 
-    def test_disagreeing_witness_falls_back_to_an_independent_reader(self):
+    def test_disagreeing_witness_keeps_the_primary_text_without_a_second_read(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ 与 $g ( x )$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
@@ -288,8 +287,9 @@ class WitnessPipelineTests(TestCase):
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
-        self.assertEqual(sorted(call[0] for call in chat.calls), ["a", "b"])
+        self.assertEqual(question.text_source, "single")
+        self.assertEqual(question.stem, "已知函数 $f(x)=x^2$，求 $f(2)$ 的值。")
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
 
     @staticmethod
     def pick(side: str):
@@ -306,48 +306,48 @@ class WitnessPipelineTests(TestCase):
             return "\n".join(lines)
         return answer
 
-    def test_two_agreeing_reads_against_mineru_get_a_neutral_spot_check(self):
-        # 凤城高一第 19 题：两次都把 1/x³ 读成 1/x²，MinerU 读对了。
+    def test_clear_mineru_disagreement_is_saved_for_human_review(self):
+        # 凤城高一第 19 题：the reader may confuse 1/x³ with 1/x².
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
             ("spotcheck", 1): self.pick("mineru"),
         })
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual([call[0] for call in chat.calls].count("spotcheck"), 1)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
         self.assertIn("x^2", question.stem)          # the text is not rewritten by the check
         self.assertEqual(question.state, Question.State.YELLOW)
-        flag = next(flag for flag in question.flags if flag.startswith(pipeline.OBJECTION_FLAG_PREFIX))
+        flag = next(flag for flag in question.flags if flag.startswith(pipeline.WITNESS_FLAG_PREFIX))
         self.assertIn("MinerU：3", flag)
-        self.assertEqual(question.read_c["answers"], ["mineru"])
+        self.assertTrue(question.read_c["unverified"])
 
-    def test_a_confirmed_reading_stays_green(self):
-        # MinerU misread the printed 垂美四边形; the spot check sides with the reading.
+    def test_mineru_difference_is_not_silently_marked_confirmed(self):
+        # MinerU may have misread 垂美四边形, but no extra model is asked to decide.
         question = self.card("1. 对角线互相垂直的四边形叫做垂夹四边形，求证其面积。")
         reading = tagged("对角线互相垂直的四边形叫做垂美四边形，求证其面积。")
-        chat = ScriptedChat({("a", 1): reading, ("b", 1): reading, ("spotcheck", 1): self.pick("reading")})
+        chat = ScriptedChat({("a", 1): reading, ("spotcheck", 1): self.pick("reading")})
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "agree"))
+        self.assertEqual((question.state, question.text_source), (Question.State.YELLOW, "single"))
         self.assertIn("垂美", question.stem)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
         self.assertEqual(question.read_c["objections"][0]["reading"], "美")
 
-    def test_an_unclear_spot_check_leaves_the_card_for_a_person(self):
+    def test_no_spot_check_request_is_made_and_the_difference_stays_for_a_person(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
             ("spotcheck", 1): "1=不确定",
         })
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
         self.assertEqual(question.state, Question.State.YELLOW)
-        self.assertEqual(question.read_c["answers"], [None])
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
+        self.assertTrue(question.read_c["unverified"])
 
 
     def figure_card(self):
@@ -359,7 +359,7 @@ class WitnessPipelineTests(TestCase):
         question.save()
         return question
 
-    def test_boxes_a_reader_did_not_judge_are_asked_about_once(self):
+    def test_unjudged_candidate_stays_visible_without_an_extra_ai_call(self):
         question = self.figure_card()
         chat = ScriptedChat({
             ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
@@ -368,9 +368,9 @@ class WitnessPipelineTests(TestCase):
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual([call[0] for call in chat.calls].count("classify"), 1)
-        self.assertEqual((question.state, len(question.figures)), (Question.State.GREEN, 1), question.flags)
-        self.assertEqual(question.read_a["figures_followup"], {"2": "none"})
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
+        self.assertEqual((question.state, len(question.figures)), (Question.State.YELLOW, 1), question.flags)
+        self.assertNotIn("figures_followup", question.read_a)
 
     def test_a_box_still_unjudged_keeps_the_card_for_a_person(self):
         question = self.figure_card()
@@ -383,7 +383,7 @@ class WitnessPipelineTests(TestCase):
         question.refresh_from_db()
         self.assertEqual(question.state, Question.State.YELLOW)
 
-    def test_failed_primary_still_uses_the_checker(self):
+    def test_failed_primary_is_reported_without_calling_a_second_reader(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")
         chat = ScriptedChat({
             ("a", 1): readers.ReaderError("MiniMax 接口返回 HTTP 500"),
@@ -392,10 +392,11 @@ class WitnessPipelineTests(TestCase):
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual(question.text_source, "single")
-        self.assertEqual(question.state, Question.State.YELLOW)
+        self.assertEqual(question.text_source, "")
+        self.assertEqual(question.state, Question.State.RED)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
 
-    def test_witness_breaks_a_disagreement_without_an_arbiter(self):
+    def test_witness_does_not_replace_the_single_primary_reading(self):
         question = self.card("3. 在 $0 . 1 2 1 2 2 1 2 2 2 1 \\ldots$ 这些数中，无理数的个数是（ ）个")
         chat = ScriptedChat({
             ("a", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
@@ -405,10 +406,9 @@ class WitnessPipelineTests(TestCase):
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual(question.text_source, "majority")
-        self.assertIn("0.1212212221", question.stem)
-        self.assertNotIn("arbiter", [call[0] for call in chat.calls])
-        self.assertEqual(question.read_c["skipped"], "witness")
+        self.assertEqual(question.text_source, "single")
+        self.assertIn("12122122221", question.stem)
+        self.assertEqual([call[0] for call in chat.calls], ["a"])
 
 
 class WitnessObjectionTests(SimpleTestCase):

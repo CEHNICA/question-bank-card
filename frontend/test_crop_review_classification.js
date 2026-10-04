@@ -140,7 +140,11 @@ function harness(origin = "todo", seed = {}) {
 
   assert.match(source, /key: "todo", label: "需要核查"/);
   assert.doesNotMatch(source, /key: "green", label:/);
-  assert.match(source, /key: "approved", label: "已通过"/);
+  // 1.12.5：这一栏叫「已入库」，和试卷列表窄条、和审核页的说法一致。
+  assert.match(source, /key: "approved", label: "已入库"/);
+  assert.match(source, /title: "题库里已经有这道题的记录（打了勾的，或原来就放着的）"/);
+  // 这一栏数的是“不用再看”，所以筛选也必须用同一个判据：打了勾的 + 已入库的。
+  assert.match(source, /state\.filter === "approved"\) return isDone\(q\)/);
   assert.doesNotMatch(source, /filterSelect|filterSelectionState/);
   console.log("Crop review: entering classification/counts frozen through sketch/assignment/dirty/undo/poll replacement; real classes released after save/discard; approval/publication immutable: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

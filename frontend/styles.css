@@ -253,11 +253,6 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .rename-paper { min-height: 28px; padding-inline: 8px; color: var(--muted); flex: none; }
 .paper-status { color: var(--muted); font-size: 13.5px; margin-top: 4px; line-height: 1.55; }
 .paper-status kbd { display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); font: 600 11px/17px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--ink-2); text-align: center; }
-/* 自动切题没切全时压在卷名下面：不是提醒，是这份卷现在的状态，所以它有自己的底色，
-   不用“待你终审”那行小字一笔带过。 */
-.cut-result-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 10px; background: var(--amber-soft); color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
-.cut-result-banner[hidden] { display: none; }
-.cut-result-banner span { flex: 1 1 260px; min-width: 0; }
 .processing-headline, .processing-detail, .processing-stale { display: block; }
 .processing-headline { color: var(--ink-2); font-weight: 650; }
 .processing-detail { margin-top: 2px; }
@@ -340,7 +335,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .toolbar-paper strong { color: var(--ink); font-weight: 700; }
 :root.review-fullscreen { --topbar-h: 0px; }
 :root.review-fullscreen .topbar, :root.review-fullscreen .sidebar, :root.review-fullscreen .paper-head,
-:root.review-fullscreen #reviewMeter, :root.review-fullscreen #cutReadingStage, :root.review-fullscreen .key-hints { display: none !important; }
+:root.review-fullscreen #reviewMeter, :root.review-fullscreen #cutReadingStage { display: none !important; }
 :root.review-fullscreen .layout { grid-template-columns: minmax(0, 1fr); min-height: 100vh; }
 :root.review-fullscreen .main { width: 100%; max-width: 1600px; margin: 0 auto; padding-top: 0; }
 :root.review-fullscreen .toolbar { margin-top: 0; }
@@ -375,23 +370,19 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .key-hints .sep { width: 1px; height: 12px; background: var(--line-strong); margin: 0 4px; }
 .order-check { margin-top: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--amber-soft); color: #7a5314;
   border: 1px solid var(--amber-line); display: flex; gap: 12px; align-items: center; justify-content: space-between; font-size: 13.5px; }
-.selection-bar { position: sticky; top: calc(var(--topbar-h) + 56px); z-index: 18; display: flex; align-items: center; justify-content: space-between; gap: 14px;
-  margin: 10px 0 14px; padding: 11px 12px 11px 16px; border: 1px solid var(--red-line); border-radius: 12px; background: #fdf4f1;
-  color: var(--ink); box-shadow: 0 8px 24px -14px rgba(120, 50, 30, .45); }
-.selection-summary { display: grid; gap: 1px; min-width: 0; }
-.selection-summary strong { color: var(--red); font-size: 14px; }
-.selection-summary small { color: var(--ink-2); font-size: 11.5px; line-height: 1.5; }
-.selection-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 
 /* ---------------------------------------------------------------- 题卡 */
 .cards { display: grid; gap: 14px; min-width: 0; }
+/* 换卷时旧卡还留在屏幕上，压暗并挡住点击，直到新题到达。宁可看着旧内容，
+   也不要一屏空白——空白看着就是卡死了。 */
+.cards.is-loading { opacity: .45; pointer-events: none; transition: opacity .12s ease; }
 /* 专注：正在看的这道题正常显示，其余题暗下来，题与题之间也拉开一点。 */
 /* 只有正在看一张展开的整卡时才变暗；收起的已通过题是看完的，挨在一起时也不必拉开。 */
 .cards.focus-mode { gap: 26px; }
 .cards.focus-mode .card.compact + .card.compact { margin-top: -14px; }
 .cards.focus-mode .card { transition: opacity .22s ease, filter .22s ease, box-shadow .18s, border-color .18s; }
-.cards.focus-mode.reading:not(.selecting) .card:not(.is-current) { opacity: .34; filter: saturate(.4); box-shadow: none; }
-.cards.focus-mode.reading:not(.selecting) .card:not(.is-current):hover { opacity: .62; }
+.cards.focus-mode.reading .card:not(.is-current) { opacity: .34; filter: saturate(.4); box-shadow: none; }
+.cards.focus-mode.reading .card:not(.is-current):hover { opacity: .62; }
 @media (prefers-reduced-motion: reduce) { .cards.focus-mode .card { transition: none; } }
 .cards-empty { display: grid; justify-items: center; gap: 6px; color: var(--muted); padding: 48px 0; text-align: center; }
 .cards-empty strong { color: var(--ink); font-size: 15px; }
@@ -413,8 +404,6 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .card.state-red { border-color: var(--red-line); }
 .card:hover { box-shadow: var(--shadow); }
 .card.is-current { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow); }
-.card.is-selected { border-color: var(--red); box-shadow: 0 0 0 4px rgba(179, 65, 46, .26), var(--shadow); }
-.card.is-selected.is-current { box-shadow: 0 0 0 4px rgba(179, 65, 46, .34), 0 9px 24px -14px rgba(120, 50, 30, .6); }
 .card.is-current:focus { outline: none; }
 .card.flash { animation: flash .9s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 6px rgba(31,107,95,.35); } 100% { box-shadow: 0 0 0 3px var(--accent-ring); } }
@@ -452,21 +441,17 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 /* The head spans both columns, padded like the collapsed row, so the tick is always in the same place. */
 .card-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
-/* 题号左边的方框：平时是“打勾通过”；批量删除时换成圆形选择框。 */
-.card-tick, .card-select { flex: none; display: inline-grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1.5px solid var(--line-strong);
+/* 题号左边的方框：打勾就是标记通过。 */
+.card-tick { flex: none; display: inline-grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1.5px solid var(--line-strong);
   background: var(--surface); color: transparent; box-shadow: var(--shadow-sm); cursor: pointer; }
 .card-tick { border-radius: 7px; }
-.card-select { border-radius: 50%; }
-.card-tick .icon, .card-select .icon { width: 16px; height: 16px; stroke-width: 2.4; }
+.card-tick .icon { width: 16px; height: 16px; stroke-width: 2.4; }
 .card-tick:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .card-tick[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
 .card-tick[aria-pressed="true"]:hover { border-color: var(--accent-dark); background: var(--accent-dark); color: #fff; }
 .card-tick.ai { border: 1.5px dashed var(--accent); background: var(--accent-soft); color: var(--accent); }
 .card-tick.ai:hover { border-style: solid; background: var(--accent); color: #fff; }
-.card-select:hover:not(:disabled) { border-color: var(--red); background: var(--red-soft); color: var(--red); }
-.card-select[aria-pressed="true"] { border-color: var(--red); background: var(--red); color: #fff; }
-.card-tick:disabled, .card-select:disabled { background: var(--bg-sunken); cursor: not-allowed; box-shadow: none; }
-.cards:not(.selecting) .card-select, .cards.selecting .card-tick { display: none; }
+.card-tick:disabled { background: var(--bg-sunken); cursor: not-allowed; box-shadow: none; }
 .group-label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: none; color: var(--ink-2); font-size: 12px; font-weight: 500; }
 .qnum { font-weight: 700; font-size: 15px; letter-spacing: .02em; color: var(--ink); }
 .qtype { font-size: 12.5px; color: var(--muted); padding-right: 2px; }
@@ -615,6 +600,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .trash-loading.error { color: var(--red); }
 .trash-empty { display: grid; justify-items: center; align-content: center; gap: 7px; min-height: 190px; color: var(--muted); text-align: center; }
 .trash-empty .icon { width: 28px; height: 28px; color: var(--faint); }
+/* 一键通过的结果：先说入库了几道，再逐条列出过不去的题。 */
+.approve-result-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--ink-2); font-size: 13.5px; }
+.approve-result-head strong { color: var(--accent); font-size: 16px; }
+.approve-result-sub { color: var(--red); }
+.approve-result-ok { color: var(--muted); font-size: 13.5px; }
+.approve-result-skip { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--bg-sunken); color: var(--ink-2); font-size: 13px; line-height: 1.55; }
 .trash-empty strong { color: var(--ink); font-size: 15px; }
 .trash-batch { padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
 .trash-batch.restored { opacity: .65; }
@@ -820,7 +812,6 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .viewer-text .qb-question { font-size: 17.5px; }
 .viewer-text .flags, .viewer-text .figure-review, .viewer-text .reading-difference { margin-bottom: 14px; }
 .viewer-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 12px 20px; border-top: 1px solid var(--line); background: var(--surface-2); flex-wrap: wrap; }
-.viewer-foot .key-hints { margin-right: auto; }
 /* 确认框、快捷键 */
 .confirm-dialog { width: min(460px, 92vw); }
 .confirm-body { padding: 22px 24px 8px; display: grid; grid-template-columns: auto 1fr; gap: 14px; }
@@ -1103,7 +1094,6 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .paper-link { border-color: var(--line); scroll-snap-align: start; }
   .side-footer { border-top: 0; padding-top: 0; }
   .toolbar { position: static; margin-top: 12px; }
-  .selection-bar { top: calc(var(--topbar-h) + 8px); }
   .paper-actions { width: 100%; }
   .paper-actions .button { flex: 1 1 150px; }
   .paper-error { align-items: flex-start; flex-direction: column; }
@@ -1140,9 +1130,6 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .meter-legend { grid-column: 1 / -1; }
   .main { padding-inline: 12px; }
   .toolbar { margin-inline: -12px; padding-inline: 12px; }
-  .selection-bar { align-items: stretch; flex-direction: column; }
-  .selection-actions { width: 100%; }
-  .selection-actions .button { flex: 1; }
   .card-body { padding-inline: 14px; }
   .card-source { padding-inline: 12px; }
   .compact-row { padding-left: 14px; }
@@ -1344,8 +1331,6 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
 @media (max-width: 760px) { .region-location-comparison { grid-template-columns: minmax(0, 1fr); } }
 .editor input.prefilled { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }
 
-.review-guidance-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 4px; color: var(--muted); font-size: 12px; }
-.review-guidance-hint .link-button { padding: 0; font-size: 12px; }
 
 /* Task help stays short until the reader asks for a specific explanation. */
 .help-start { border-left: 3px solid var(--accent); }

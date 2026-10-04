@@ -133,20 +133,22 @@ class ReadCardTypeTests(TempDataMixin, TestCase):
                          "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
                          "candidates": [], "question_type": "unknown"}
 
-    def read(self, primary_text, checker_text, arbiter_text=None):
+    def read(self, primary_text, checker_text=None, arbiter_text=None):
         primary = readers.parse_reading(primary_text, 2)
-        checker = readers.parse_reading(checker_text, 2)
-        arbiter = readers.parse_reading(arbiter_text, 2) if arbiter_text else None
-        with mock.patch.object(readers, "read_question",
-                               side_effect=lambda _e, _u, _n, with_figures: primary if with_figures else checker), \
-                mock.patch.object(readers, "arbitrate", return_value=arbiter):
-            return pipeline.read_card(self.snapshot, pipeline.PageStore(self.paper))
+        with mock.patch.object(readers, "read_question", return_value=primary) as read_mock, \
+                mock.patch.object(readers, "arbitrate") as arbiter:
+            result = pipeline.read_card(self.snapshot, pipeline.PageStore(self.paper))
+        read_mock.assert_called_once()
+        arbiter.assert_not_called()
+        return result
 
-    def test_arbiter_text_keeps_the_type_both_readers_named(self):
+    def test_second_read_and_arbiter_no_longer_replace_primary_text(self):
         result = self.read(tagged("求实数 $m$ 的取值范围甲"), tagged("求实数 $m$ 的取值范围乙"),
                            "【题干】\n求实数 $m$ 的取值范围丙")
-        self.assertEqual(result["text_source"], "arbiter")
+        self.assertEqual(result["text_source"], "single")
+        self.assertIn("甲", result["stem"])
         self.assertEqual(result["question_type"], "free_response")
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
 
     def test_the_chosen_text_and_the_reading_records_are_tidied_alike(self):
         stem = USER_STEM.split("]", 1)[1]
@@ -155,7 +157,7 @@ class ReadCardTypeTests(TempDataMixin, TestCase):
         self.assertEqual(result["stem"], TIDY_STEM)
         # The review page compares readings with the stem: they must not differ only by the tidying.
         self.assertEqual(result["read_a"]["stem"], TIDY_STEM)
-        self.assertEqual(result["read_b"]["stem"], TIDY_STEM)
+        self.assertEqual(result["read_b"], {"skipped": "disabled"})
         self.assertIn("“", result["read_a"]["stem"])
         self.assertTrue(stem)
 
@@ -444,7 +446,7 @@ class FeatureSwitchTests(TempDataMixin, TestCase):
         with self.assertRaises(features.FeatureError):
             features.save({"ai_answer": "yes"})
         response = self.client.get("/api/settings/features")
-        self.assertEqual({item["key"] for item in response.json()["features"]}, set(features.DEFAULTS))
+        self.assertEqual({item["key"] for item in response.json()["features"]}, set(features.FEATURES))
         response = self.client.post("/api/settings/features", data=json.dumps({"features": {"knowledge_tags": True}}),
                                     content_type="application/json", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200, response.content)
