@@ -7,7 +7,7 @@ import threading
 import time
 from unittest import mock
 
-from django.test import TestCase, SimpleTestCase
+from django.test import TestCase, SimpleTestCase, TransactionTestCase
 from django.utils import timezone
 
 from . import account_pool, readers, region_reads
@@ -15,7 +15,7 @@ from .models import RegionRead
 from .test_v110_types_origin import TempDataMixin
 
 
-class RegionDeadlineTests(TempDataMixin, TestCase):
+class RegionDeadlineTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()

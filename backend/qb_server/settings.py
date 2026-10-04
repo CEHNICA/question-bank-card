@@ -16,14 +16,10 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": Path(os.environ.get("QB_DATABASE", BASE_DIR / "db.sqlite3")),
-        # IMMEDIATE, not the default DEFERRED: a deferred transaction opens as a
-        # reader and only asks for the write lock when it first writes.  If
-        # another connection has written in between, SQLite reports "database is
-        # locked" straight away and the busy handler never runs, so ``timeout``
-        # cannot help.  Taking the write lock at BEGIN makes every writer queue
-        # behind ``timeout`` instead of failing — which is what killed a MinerU
-        # run whose heartbeat happened to land on a locked database.
-        "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
+        # Keep the normal application-wide transaction mode.  MinerU heartbeats
+        # have a shorter, local busy timeout because dropping a progress tick is
+        # preferable to blocking the worker's wait/cancel loop for 30 seconds.
+        "OPTIONS": {"timeout": 30},
     }
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

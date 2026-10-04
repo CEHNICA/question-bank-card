@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
 from . import library, library_jobs, pipeline, source_images, views
@@ -13,7 +13,7 @@ from . import test_manual_intake_review as manual_review
 from .models import Question
 
 
-class DirectCutReadingTests(TestCase):
+class DirectCutReadingTests(TransactionTestCase):
     paper = manual_review.ManualIntakeReviewTests.paper
     run_read = manual_review.ManualIntakeReviewTests.run_read
 

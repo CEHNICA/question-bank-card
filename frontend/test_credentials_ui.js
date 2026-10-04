@@ -21,8 +21,18 @@ for (const provider of ["Mineru", "Modelscope", "Minimax", "Siliconflow"]) {
   assert.match(html, new RegExp(`id="credential${provider}Saved"[^>]*class="credential-saved-list"`));
 }
 const aiSettings = fs.readFileSync(path.join(__dirname, "library-ai-settings.js"), "utf8");
-assert.match(aiSettings, /id="libraryAIKey"[^>]*type="password"[^>]*autocomplete="off"/);
-assert.doesNotMatch(aiSettings, /id="libraryAIKey"[^>]*autocomplete="(?:current|new)-password"/);
+// 答案侧按“读题与切题”的形状一家一块：名字、用途、已保存几条、新密钥、删除按钮。
+assert.match(aiSettings, /id="libraryAIKey-\$\{provider\}" type="password" autocomplete="off" autocapitalize="off"/);
+assert.doesNotMatch(aiSettings, /autocomplete="(?:current|new)-password"/);
+for (const provider of ["deepseek", "minimax", "doubao", "custom"]) {
+  assert.match(aiSettings, new RegExp(`id="libraryAISaved-\\$\\{provider\\}" class="credential-saved-list"`));
+  assert.match(aiSettings, new RegExp(`id="libraryAIDelete-\\$\\{provider\\}" class="button small credential-delete" type="button" aria-label="删除 \\$\\{providerNames\\[provider\\]\\} 密钥" hidden>删除密钥</button>`));
+  assert.match(aiSettings, new RegExp(`id="libraryAIKeyState-\\$\\{provider\\}" class="api-state missing">未保存</span>`));
+}
+assert.match(aiSettings, /class="credential-service library-ai-key-block" data-library-service="\$\{provider\}"/);
+assert.match(aiSettings, /const KEY_NOTE = "已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下面只填写新密钥；留空就保留原来的配置。"/);
+assert.match(aiSettings, /<p id="libraryAIKeyNote" class="credential-storage-note" role="status" aria-live="polite">\$\{KEY_NOTE\}<\/p>/);
+assert.doesNotMatch(aiSettings, /id="libraryAIClearKey"/, "删除改成每家自己的按钮，不再用一个勾来清除正在用的那一家");
 
 assert.match(js, /api\("\/api\/settings\/credentials"\)/);
 assert.match(js, /api\("\/api\/settings\/credentials",\s*\{\s*method:\s*"POST"/);

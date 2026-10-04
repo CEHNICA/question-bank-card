@@ -11,7 +11,7 @@ import zipfile
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
@@ -21,7 +21,7 @@ from .test_library_export import document_xml, field, math_field, NS
 
 
 @override_settings(ROOT_URLCONF="qb_server.urls")
-class LibrarySolutionTests(TestCase):
+class LibrarySolutionTests(TransactionTestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

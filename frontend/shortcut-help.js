@@ -17,7 +17,7 @@
         row("返回题卡", "Space"), row("全题 / 适宽", "0", "W"), row("缩小 / 放大原卷", "−", "+"), row("鼠标所在位置缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
       extra: "Enter 不撤销已通过的题；继续看下一题。撤销使用 U 或返回题卡取消勾选。" };
     if (scene === "review") return { scene, title: TITLES[scene], note,
-      primary: [row("下一题", "N"), row("通过并继续", "Enter"), row("上一题", "K")],
+      primary: [row("下一道需要核查的题", "N"), row("通过并继续", "Enter"), row("上一题", "K")],
       more: [row("下一张 / 上一张题卡", "J", "K"), row("放大对照原卷 / 返回", "Space"),
         row("撤销当前题通过", "U"), row("改字", "E"), row("审核改字中保存", "Ctrl+Enter"), row("取消改字", "Esc"),
         row("调整范围 / 配图", "R", "F"), row("展开 / 收起已通过题", "O"), row("已通过题全部展开 / 收起", "Shift+O"),
@@ -26,7 +26,7 @@
         row("批量选择：增减单题 / 连续范围", "Ctrl+点击", "Shift+点击"), row("已选题移到回收站", "Delete"),
         row("对照原卷：全题 / 适宽", "0", "W"), row("对照原卷：缩小 / 放大", "−", "+"),
         row("鼠标所在位置缩放", "Ctrl+滚轮"), row("对照窗口上一题 / 下一题", "←", "→"), row("打开快捷键说明", "?")],
-      extra: "N 按当前筛选顺序逐题前进。Enter 不撤销已通过的题；撤销使用 U 或取消勾选。通过后自动入库。" };
+      extra: "N 跳过已经通过的题，直接到下一道需要核查的题；到末尾会绕回前面。Enter 不撤销已通过的题；撤销使用 U 或取消勾选。通过后自动入库。" };
     if (scene === "crop") {
       const mode = options.mode || "new", editing = mode !== "view";
       const primary = mode === "new" ? [row("保存下一题", "S"), row("完成切题", "Ctrl+S"), row("取消新框 / 返回", "Esc")]

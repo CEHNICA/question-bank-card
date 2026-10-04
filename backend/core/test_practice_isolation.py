@@ -4,13 +4,13 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 
 from . import demo, library, pipeline, region_reads
 from .models import LibraryJob, Paper, PublishedQuestion, Question, RegionRead
 
 
-class PracticeIsolationTests(TestCase):
+class PracticeIsolationTests(TransactionTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)

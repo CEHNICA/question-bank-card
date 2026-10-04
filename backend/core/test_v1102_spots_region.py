@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from unittest import mock
 
-from django.test import Client, SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
 
 from . import pipeline, readers, region_reads, textnorm
 from . import test_v110_types_origin as v110
@@ -180,7 +180,7 @@ class RegionReadApiTests(v110.TempDataMixin, TestCase):
         self.assertIn("框选识读要用看图读题的服务", response.json()["error"])
 
 
-class RegionReadWorkerTests(v110.TempDataMixin, TestCase):
+class RegionReadWorkerTests(v110.TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
@@ -385,7 +385,7 @@ class FigureDecisionFlagTests(v110.TempDataMixin, TestCase):
         self.assertEqual(card.state, Question.State.GREEN)
 
 
-class RegionReadRaceTests(v110.TempDataMixin, TestCase):
+class RegionReadRaceTests(v110.TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()

@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from . import features, knowledge, library, library_ai_settings, library_jobs, pipeline, prose, qtypes, readers, segment, textnorm
@@ -474,7 +474,7 @@ class KnowledgeCatalogueTests(SimpleTestCase):
         self.assertEqual(knowledge.match_tags("【知识点】指数函数", points), ["指数函数"])
 
 
-class LibraryExtrasTests(TempDataMixin, TestCase):
+class LibraryExtrasTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.client = Client()

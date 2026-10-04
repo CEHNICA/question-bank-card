@@ -9,7 +9,7 @@ import json
 import os
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from . import features, library, library_ai_settings as service, library_job_control, library_jobs, library_solutions
@@ -18,7 +18,7 @@ from .test_library_ai_settings import answer_response, protected_test_bytes
 from .test_v110_types_origin import TempDataMixin
 
 
-class ExplicitAnswerAPITests(TempDataMixin, TestCase):
+class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         environment = mock.patch.dict(os.environ, {

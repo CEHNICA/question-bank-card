@@ -4,7 +4,7 @@ import os
 from copy import deepcopy
 from unittest import mock
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 from PIL import Image
 
@@ -122,7 +122,7 @@ class AssistantSettingsTests(SimpleTestCase):
         self.network.assert_not_called()
 
 
-class AssistantTaskTests(TempDataMixin, TestCase):
+class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         environment = mock.patch.dict(os.environ, {

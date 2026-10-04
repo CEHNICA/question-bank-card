@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock, skipUnless
 
 import requests
-from django.test import Client, SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 from PIL import Image
 
@@ -443,7 +443,7 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.assertEqual(self.network.call_count, 1)
 
 
-class GenerationBindingTests(TempDataMixin, TestCase):
+class GenerationBindingTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
@@ -690,3 +690,96 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
                             REMOTE_ADDR="127.0.0.1")
         self.assertEqual(local.status_code, 200, local.content)
         self.assertTrue(local.json()["keys"]["minimax"]["shared_with_reading"])
+
+
+class PerServiceKeyTests(IndependentAISettingsTests):
+    """每家服务各存一个 Key：多填一家不必先切服务商，也不必存两次。
+
+    界面上是一家一块，各自带输入框和删除按钮；切服务商只决定“正在用哪一家”，
+    顺手填的另外几家要跟着这一次保存一起落盘。这里守的是两件事：另外几家的密钥
+    真的写进了它们自己的文件，以及正在用的那一家完全没被这些保存动过。
+    """
+
+    def stored(self, provider):
+        return service.credential_settings.store._transform(
+            service.key_path(provider).read_bytes(), protect=False).decode("utf-8")
+
+    def test_a_second_service_is_stored_without_switching_the_one_in_use(self):
+        self.configure_minimax()
+        verified = self.verify()
+        self.assertTrue(verified["verified"])
+        result = service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-second-service-key"}}})
+        self.assertEqual(result["provider"], "minimax", "saving another service never changes which one is in use")
+        self.assertTrue(result["keys"]["deepseek"]["configured"])
+        self.assertIn("offline-second-service-key", self.stored("deepseek"))
+        # 换的是另一家正在用的凭据，本来就与当前这一家无关：已测通不该被推翻。
+        self.assertTrue(result["verified"])
+        self.assertEqual(service._key(service._load()), "offline-minimax-subscription-key")
+
+    def test_several_services_can_be_filled_in_one_save(self):
+        self.configure()
+        result = service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-key"},
+                                        "minimax": {"action": "replace", "value": "offline-minimax-key"},
+                                        "custom": {"action": "replace", "value": "offline-custom-key"}}})
+        self.assertEqual([result["keys"][name]["configured"] for name in ("deepseek", "minimax", "custom")], [True, True, True])
+        for provider, expected in (("deepseek", "offline-deepseek-key"), ("minimax", "offline-minimax-key"), ("custom", "offline-custom-key")):
+            self.assertIn(expected, self.stored(provider))
+
+    def test_replacing_and_clearing_another_service_touches_only_its_own_file(self):
+        self.configure()
+        service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-one"},
+                               "custom": {"action": "replace", "value": "offline-custom-one"}}})
+        service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-two"}}})
+        self.assertIn("offline-deepseek-two", self.stored("deepseek"))
+        self.assertIn("offline-custom-one", self.stored("custom"), "an untouched service keeps its key")
+        self.assertEqual(service._key(service._load()), "offline-key-never-print")
+        result = service.save({"keys": {"custom": {"action": "clear"}}})
+        self.assertFalse(result["keys"]["custom"]["configured"])
+        self.assertFalse(service.key_path("custom").exists())
+        self.assertTrue(result["keys"]["deepseek"]["configured"], "clearing one service never clears another")
+        self.assertEqual(service._key(service._load()), "offline-key-never-print")
+
+    def test_keeping_a_service_that_was_not_typed_into_changes_nothing(self):
+        self.configure()
+        before = service.path().read_bytes()
+        result = service.save({"keys": {"deepseek": {"action": "keep"}}})
+        self.assertEqual(service.path().read_bytes(), before)
+        self.assertFalse(result["keys"]["deepseek"]["configured"])
+
+    def test_the_service_in_use_cannot_be_saved_through_the_other_list(self):
+        self.configure_minimax()
+        with self.assertRaisesMessage(service.SettingsError, "它自己那一栏"):
+            service.save({"keys": {"minimax": {"action": "clear"}}})
+        self.assertEqual(service._key(service._load()), "offline-minimax-subscription-key")
+
+    def test_unknown_services_and_broken_instructions_are_refused_before_anything_is_written(self):
+        self.configure()
+        before = service.path().read_bytes()
+        for payload in ({"keys": {"openai": {"action": "clear"}}},
+                        {"keys": {"deepseek": {"action": "delete"}}},
+                        {"keys": {"deepseek": {"action": "keep", "value": "offline-x"}}},
+                        {"keys": {"deepseek": {"action": "replace", "value": "offline with spaces"}}},
+                        {"keys": {"deepseek": {"action": "replace", "value": ""}}},
+                        {"keys": "deepseek"},
+                        {"keys": {"deepseek": "offline-key"}}):
+            with self.subTest(payload=payload), self.assertRaises(service.SettingsError):
+                service.save(payload)
+        self.assertEqual(service.path().read_bytes(), before)
+        self.assertFalse(service.key_path("deepseek").exists())
+
+    def test_the_http_route_accepts_the_same_multi_service_save(self):
+        self.configure_minimax()
+        client = Client()
+        remote = client.post("/api/settings/library-ai", data=json.dumps(
+            {"keys": {"deepseek": {"action": "replace", "value": "offline-remote-key"}}}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="203.0.113.9")
+        self.assertEqual(remote.status_code, 403)
+        self.assertFalse(service.key_path("deepseek").exists(), "a remote caller stores nothing")
+        local = client.post("/api/settings/library-ai", data=json.dumps(
+            {"keys": {"deepseek": {"action": "replace", "value": "offline-local-key"}}}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(local.status_code, 200, local.content)
+        body = local.json()
+        self.assertTrue(body["keys"]["deepseek"]["configured"])
+        self.assertEqual(body["provider"], "minimax")
+        self.assertNotIn("offline-local-key", json.dumps(body, ensure_ascii=False))

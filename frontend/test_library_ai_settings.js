@@ -16,7 +16,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
       this.value = ""; this.checked = false; this.disabled = false; this.open = false;
       this.tagName = tag.toUpperCase(); this.children = []; this.modalOpens = 0;
       this.attributes = {};
-      this.listeners = new Map(); this.classList = { toggle() {} };
+      this.listeners = new Map(); this.classList = { toggle() {}, add() {}, remove() {} };
     }
     set id(value) { this._id = value; elements.set(value, this); }
     get id() { return this._id; }
@@ -34,7 +34,8 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     addEventListener(name, fn) { this.listeners.set(name, [...(this.listeners.get(name) || []), fn]); }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     getAttribute(name) { return this.attributes[name]; }
-    append(child) { this.children.push(child); child.parentElement = this; }
+    append(...children) { for (const child of children) { this.children.push(child); child.parentElement = this; } }
+    replaceChildren(...children) { this.children = [...children]; }
     showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
     trigger(name, detail = {}) { for (const fn of this.listeners.get(name) || []) fn({ preventDefault() {}, ...detail }); }
@@ -80,7 +81,13 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
       return { ok: okay, json: async () => body };
     } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "library-ai-settings.js"), "utf8"), sandbox);
-  return { window, document, current, calls, timers, apiWindowCalls, get: (id) => elements.get(id),
+  // 每家服务商一栏，已保存的密钥是运行时按“已保存几条”生成的行，不在 id 表里。
+  const rowOf = (handle, provider) => {
+    const list = handle.get(`libraryAISaved-${provider}`);
+    const item = list.children[0];
+    return { list, item, number: item.children[0], value: item.children[1], eye: item.children[2] };
+  };
+  return { window, document, current, calls, timers, apiWindowCalls, rowOf, get: (id) => elements.get(id),
     response: (fn, ok = true) => { respond = fn; okay = ok; }, consentClose: (value) => { confirm = value; } };
 }
 
@@ -98,10 +105,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   await embedded.window.LibraryAISettings.open();
   assert.equal(embedded.get("libraryAIClose").hidden, true, "Only the outer API window owns its close control");
   embedded.get("libraryAITags").checked = true; embedded.get("libraryAITags").trigger("input");
-  embedded.get("libraryAIKey").value = "offline-embedded-unsaved-key"; embedded.get("libraryAIKey").trigger("input");
-  embedded.get("libraryAIKeyReveal").trigger("click"); await flush();
+  embedded.get("libraryAIKey-deepseek").value = "offline-embedded-unsaved-key"; embedded.get("libraryAIKey-deepseek").trigger("input");
+  embedded.get("libraryAIKeyReveal-deepseek").trigger("click"); await flush();
   embedded.window.LibraryAISettings.hideSecrets();
-  assert.equal(embedded.get("libraryAIKey").value, "offline-embedded-unsaved-key"); assert.equal(embedded.get("libraryAIKey").type, "password");
+  assert.equal(embedded.get("libraryAIKey-deepseek").value, "offline-embedded-unsaved-key"); assert.equal(embedded.get("libraryAIKey-deepseek").type, "password");
   assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), true, "Switching API tabs only hides secrets and preserves all real edits");
   const mountedReadCount = embedded.calls.length; await embedded.window.LibraryAISettings.open(); await embedded.window.LibraryAISettings.activate();
   assert.equal(embedded.calls.length, mountedReadCount); assert.equal(embedded.get("libraryAITags").checked, true);
@@ -109,7 +116,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(embedded.window.LibraryAISettings.deactivate(), false, "The parent cannot deactivate an unconfirmed dirty answer panel");
   embedded.get("libraryAICancel").trigger("click");
   assert.equal(embedded.get("apiSettingsDialog").open, true, "The child undo button only restores its own group; it cannot close the shared API window");
-  assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), false); assert.equal(embedded.get("libraryAIKey").value, "");
+  assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), false); assert.equal(embedded.get("libraryAIKey-deepseek").value, "");
   assert.equal(embedded.window.APISettings.close(), true); assert.equal(embedded.window.LibraryAISettings.isBusy(), false);
   const closedRequestCount = embedded.calls.length; embedded.get("libraryAISettingsForm").trigger("submit");
   await flush(); assert.equal(embedded.calls.length, closedRequestCount, "A deactivated panel cannot submit an old form");
@@ -154,27 +161,31 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAIAdvanced").open, true, "answer API setup is directly visible");
   assert.equal(s.get("libraryAIAPIFields").hidden, false);
   assert.equal(s.get("libraryAIAssistantHelp").hidden, true);
-  assert.equal(s.get("libraryAIKey").value, "");
+  assert.equal(s.get("libraryAIKey-deepseek").value, "");
+  assert.equal(s.get("libraryAIKeyState-deepseek").textContent, "当前使用 · 未保存", "每一栏都写清自己有没有密钥，以及现在用的是哪一家");
+  assert.equal(s.get("libraryAIKeyState-doubao").textContent, "未保存");
+  assert.equal(s.get("libraryAIDelete-deepseek").hidden, true, "没有密钥时不给出删除动作");
+  assert.equal(s.rowOf(s, "doubao").item.className, "credential-saved-empty");
   assert.equal(s.get("libraryAITest").disabled, true);
   assert.equal(s.calls.length, 1, "opening only reads non-secret settings");
   assert.equal(s.window.LibraryAISettings.hasUnsavedChanges(), false, "Showing the legacy assistant config as API-only does not manufacture a change");
 
   const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey", "libraryAIProvider", "libraryAIMode"]) {
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
     unchanged.get(id).trigger("focus"); unchanged.get(id).trigger("input"); unchanged.get(id).trigger("change");
     assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} without an effective change stays clean`);
   }
   unchanged.get("libraryAITestConsent").checked = true; unchanged.get("libraryAITestConsent").trigger("input"); unchanged.get("libraryAITestConsent").trigger("change");
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "Test consent is transient permission, not a saved preference");
-  unchanged.get("libraryAIKey").value = " \n "; unchanged.get("libraryAIKey").trigger("input");
+  unchanged.get("libraryAIKey-deepseek").value = " \n "; unchanged.get("libraryAIKey-deepseek").trigger("input");
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "An empty replacement after trimming keeps the stored key");
-  unchanged.get("libraryAIKey").value = ""; unchanged.get("libraryAIKey").trigger("input");
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIClearKey"]) {
+  unchanged.get("libraryAIKey-deepseek").value = ""; unchanged.get("libraryAIKey-deepseek").trigger("input");
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking"]) {
     const field = unchanged.get(id), saved = field.checked;
     field.checked = !saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true, `${id} real changes remain protected`);
     field.checked = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} reverted to the snapshot is clean`);
   }
-  for (const [id, edit] of [["libraryAIBaseURL", "https://offline.example/v1"], ["libraryAIModel", "offline-edited-model"], ["libraryAIKey", "offline-new-key"]]) {
+  for (const [id, edit] of [["libraryAIBaseURL", "https://offline.example/v1"], ["libraryAIModel", "offline-edited-model"], ["libraryAIKey-deepseek", "offline-new-key"], ["libraryAIKey-doubao", "offline-second-service-key"]]) {
     const field = unchanged.get(id), saved = field.value;
     field.value = edit; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true);
     field.value = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false);
@@ -183,11 +194,12 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "Comparison uses the same trimmed model value as save");
   const noChangeUnload = { prevented: false, preventDefault() { this.prevented = true; } };
   unchanged.window.listeners.get("beforeunload")(noChangeUnload); assert.equal(noChangeUnload.prevented, false);
-  unchanged.get("libraryAIKey").value = "offline-unsaved-new-key"; unchanged.get("libraryAIKey").trigger("input");
+  unchanged.get("libraryAIKey-deepseek").value = "offline-unsaved-new-key"; unchanged.get("libraryAIKey-deepseek").trigger("input");
   unchanged.get("libraryAIProvider").trigger("change");
-  assert.equal(unchanged.get("libraryAIKey").value, "offline-unsaved-new-key", "A duplicate provider event must not discard an intentional replacement");
+  assert.equal(unchanged.get("libraryAIKey-deepseek").value, "offline-unsaved-new-key", "A duplicate provider event must not discard an intentional replacement");
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true);
   unchanged.window.LibraryAISettings.discard();
+  assert.equal(unchanged.get("libraryAIKey-doubao").value, "", "discard clears every service's pending replacement, not just the one in use");
 
   const restoredProvider = setup(); Object.assign(restoredProvider.current, { provider: "custom", base_url: "https://offline-custom.example/v1", model: "offline-saved-model", supports_images: true, thinking: false });
   await restoredProvider.window.LibraryAISettings.open();
@@ -227,7 +239,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: true, answer: false });
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "keep" });
   assert.equal(s.calls.at(-1).headers["X-QB-Request"], "1");
-  assert.equal(s.get("libraryAIKey").value, "", "assistant saves clear local password input without changing the stored key");
+  assert.equal(s.get("libraryAIKey-deepseek").value, "", "assistant saves clear local password input without changing the stored key");
   assert.doesNotMatch(s.get("libraryAIResult").textContent, /当前助手/);
   assert.equal(s.document.events.at(-1).type, "library-ai-settings-saved");
   s.get("libraryAITestConsent").checked = true;
@@ -241,8 +253,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAIAssistantHelp").hidden, true);
   assert.equal(s.get("libraryAIImages").checked, false, "DeepSeek image support must not be assumed");
   assert.equal(s.get("libraryAIModel").value, "deepseek-v4-pro", "use a real model ID rather than the label Pro");
-  s.get("libraryAIKey").value = "offline-api-key";
-  s.get("libraryAIKey").trigger("input");
+  s.get("libraryAIKey-deepseek").value = "offline-api-key";
+  s.get("libraryAIKey-deepseek").trigger("input");
+  s.get("libraryAIKey-doubao").value = "offline-doubao-key";
+  s.get("libraryAIKey-doubao").trigger("input");
   s.response((_url, payload) => ({ ...s.current, ...payload, configured: true, ready: false, api_ready: false }));
   s.get("libraryAISettingsForm").trigger("submit");
   await flush();
@@ -258,7 +272,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.deepEqual(saved.payload.features, { knowledge_tags: true, ai_answer: false });
   assert.deepEqual(saved.payload.on_intake, { tags: true, answer: false });
   assert.deepEqual(saved.payload.key, { action: "replace", value: "offline-api-key" });
-  assert.equal(s.get("libraryAIKey").value, "", "replacement key is cleared after save");
+  assert.deepEqual(saved.payload.keys, { doubao: { action: "replace", value: "offline-doubao-key" } },
+    "A second service's key is saved in the same submit, without switching which service is in use");
+  assert.equal(s.get("libraryAIKey-deepseek").value, "", "replacement key is cleared after save");
+  assert.equal(s.get("libraryAIKey-doubao").value, "");
   assert.equal(s.get("libraryAITest").disabled, true, "saving does not consent to or start a paid probe");
   s.get("libraryAITest").trigger("click");
   await flush();
@@ -274,33 +291,39 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAITestConsent").checked, false, "each probe requires fresh consent");
 
   s.get("libraryAIProvider").value = "custom";
-  s.get("libraryAIKey").value = "previous-provider-unsaved-key";
+  s.get("libraryAIKey-deepseek").value = "previous-provider-unsaved-key";
+  s.get("libraryAIKey-deepseek").trigger("input");
   s.get("libraryAIProvider").trigger("change");
-  assert.equal(s.get("libraryAIKey").value, "", "a provider switch cannot reuse a newly typed key for a different service");
-  assert.equal(s.get("libraryAIBaseURL").value, "");
-  assert.equal(s.get("libraryAIModel").value, "");
-  assert.equal(s.get("libraryAIImages").checked, false);
+  assert.equal(s.get("libraryAIKey-custom").value, "", "a newly typed key stays in the service it was typed for");
+  assert.equal(s.get("libraryAIKey-deepseek").value, "previous-provider-unsaved-key", "switching service does not throw away another service's pending key");
+  assert.equal(s.get("libraryAIKeyState-custom").textContent, "当前使用 · 未保存");
+  assert.equal(s.get("libraryAIKeyState-deepseek").textContent, "未保存", "the service that is no longer in use is still reported on its own");
   s.get("libraryAIBaseURL").value = "https://offline.example/v1";
   s.get("libraryAIModel").value = "offline-math-model";
   s.get("libraryAIImages").checked = true;
-  s.get("libraryAIKey").value = "failed-offline-key";
-  s.get("libraryAIKey").trigger("input");
+  s.get("libraryAIKey-custom").value = "failed-offline-key";
+  s.get("libraryAIKey-custom").trigger("input");
   s.response(() => ({ error: "格式无效" }), false);
   s.get("libraryAISettingsForm").trigger("submit");
   await flush();
   assert.equal(s.calls.at(-1).payload.provider, "custom");
   assert.equal(s.calls.at(-1).payload.supports_images, true);
-  assert.equal(s.get("libraryAIKey").value, "", "failed saves do not retain a password input");
+  assert.deepEqual(s.calls.at(-1).payload.keys, { deepseek: { action: "replace", value: "previous-provider-unsaved-key" } });
+  assert.equal(s.get("libraryAIKey-custom").value, "", "failed saves do not retain a password input");
+  assert.equal(s.get("libraryAIKey-deepseek").value, "", "a failed save also drops the other service's pending replacement");
   assert.match(s.get("libraryAIResult").textContent, /格式无效.*新密钥未保存.*重新填写/);
   assert.equal(s.get("libraryAISave").disabled, true, "a failed replacement cannot become a silent keep on retry");
   const failedSaveCount = s.calls.length;
   s.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.equal(s.calls.length, failedSaveCount, "retry without re-entering a failed replacement never posts keep");
-  s.get("libraryAIKey").value = "retry-offline-key"; s.get("libraryAIKey").trigger("input");
-  assert.equal(s.get("libraryAISave").disabled, false, "re-entering the key enables an explicit replacement retry");
+  s.get("libraryAIKey-custom").value = "retry-offline-key"; s.get("libraryAIKey-custom").trigger("input");
+  assert.equal(s.get("libraryAISave").disabled, true, "re-entering one service's key is not enough while another is still unconfirmed");
+  s.get("libraryAIKey-deepseek").value = "retry-deepseek-key"; s.get("libraryAIKey-deepseek").trigger("input");
+  assert.equal(s.get("libraryAISave").disabled, false, "re-entering the keys enables an explicit replacement retry");
   s.response((_url, payload) => ({ ...s.current, ...payload, configured: true, ready: false }));
   s.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "replace", value: "retry-offline-key" });
+  assert.deepEqual(s.calls.at(-1).payload.keys, { deepseek: { action: "replace", value: "retry-deepseek-key" } });
   s.get("libraryAIBaseURL").value = "https://offline-new.example/v1"; s.get("libraryAIBaseURL").trigger("input");
   s.consentClose(false);
   s.window.APISettings.close();
@@ -310,7 +333,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("apiSettingsDialog").open, false);
 
   const legacy = setup();
-  legacy.response((_url, payload) => ({ ...legacy.current, configured: true, provider: "doubao",
+  legacy.response((_url, payload) => ({ ...legacy.current, configured: true, key_configured: true, key_count: 1, provider: "doubao",
     base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "ep-existing-offline", features: payload?.features || legacy.current.features }));
   await legacy.window.LibraryAISettings.open();
   assert.equal(legacy.get("libraryAIAdvanced").open, true, "existing API settings are directly visible without rewriting storage");
@@ -320,22 +343,27 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(legacy.calls.at(-1).payload.model, "ep-existing-offline");
   assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "keep" }, "explicit API save preserves the selected provider key");
   legacy.get("libraryAIMode").value = "api";legacy.get("libraryAIMode").trigger("input");
-  legacy.get("libraryAIKey").value = "discard-local-value";
-  legacy.get("libraryAIClearKey").checked = true;legacy.get("libraryAIClearKey").trigger("input");
-  assert.equal(legacy.get("libraryAIKey").value, "");
-  assert.equal(legacy.get("libraryAIKey").disabled, true);
-  legacy.response((_url, payload) => ({ ...legacy.current, mode: "api", provider: "doubao", configured: false, ready: false, features: payload.features }));
-  legacy.get("libraryAISettingsForm").trigger("submit");await flush();
-  assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "clear" });
+  assert.equal(legacy.get("libraryAIDelete-doubao").hidden, false, "a service with a saved key offers its own delete action");
+  assert.equal(legacy.get("libraryAIDelete-deepseek").hidden, true, "a service without a saved key has no delete action");
+  legacy.get("libraryAIKey-doubao").value = "discard-local-value";
+  legacy.response((_url, payload) => ({ ...legacy.current, mode: "api", provider: "doubao", configured: false, ready: false, key_configured: false, features: payload?.features || legacy.current.features }));
+  legacy.get("libraryAIDelete-doubao").trigger("click"); await flush();
+  assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "clear" }, "deleting the service in use clears exactly that one");
+  assert.match(legacy.get("libraryAIResult").textContent, /已删除 豆包 密钥/);
+  assert.equal(legacy.get("libraryAIKey-doubao").value, "");
+  assert.equal(legacy.get("libraryAIDelete-doubao").hidden, true, "the delete action disappears once there is nothing left to delete");
 
-  legacy.get("libraryAIClearKey").checked = true; legacy.get("libraryAIClearKey").trigger("input");
+  legacy.get("libraryAIKey-doubao").value = "restore-me";
+  legacy.get("libraryAIKey-doubao").trigger("input");
   legacy.response(() => ({ error: "暂时未保存" }), false);
   legacy.get("libraryAISettingsForm").trigger("submit"); await flush();
-  assert.equal(legacy.get("libraryAIClearKey").checked, true, "failed deletion keeps the user's explicit delete intent");
-  assert.equal(legacy.get("libraryAIKey").disabled, true);
-  legacy.response((_url, payload) => ({ ...legacy.current, mode: "api", configured: false, ready: false, features: payload.features }));
+  assert.match(legacy.get("libraryAIResult").textContent, /暂时未保存.*新密钥未保存.*重新填写/);
+  assert.equal(legacy.get("libraryAIKey-doubao").value, "");
+  assert.equal(legacy.get("libraryAISave").disabled, true, "an unconfirmed replacement blocks the next save instead of silently keeping the old key");
+  legacy.get("libraryAIKey-doubao").value = "restore-me-again"; legacy.get("libraryAIKey-doubao").trigger("input");
+  legacy.response((_url, payload) => ({ ...legacy.current, mode: "api", configured: true, ready: false, features: payload.features }));
   legacy.get("libraryAISettingsForm").trigger("submit"); await flush();
-  assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "clear" }, "retry still deletes instead of retaining an old key");
+  assert.deepEqual(legacy.calls.at(-1).payload.key, { action: "replace", value: "restore-me-again" }, "retry replaces instead of quietly keeping the old key");
 
   const pending = setup();
   let resolve;
@@ -345,7 +373,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   resolve({ ...pending.current, mode: "api", configured: true, ready: true });
   await opened;
   assert.equal(pending.get("apiSettingsDialog").open, false, "old requests cannot reopen a closed window");
-  assert.equal(pending.get("libraryAIKey").value, "");
+  assert.equal(pending.get("libraryAIKey-deepseek").value, "");
 
   const broken = setup();
   broken.response(() => ({ ready: false }));
@@ -380,9 +408,9 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   inline.window.listeners.get("beforeunload")(unload);
   assert.equal(prevented, true);
   assert.equal(unload.returnValue, "", "refresh/close protects unsaved inline settings");
-  inline.get("libraryAIKey").value = "discard-unsaved-secret";
+  inline.get("libraryAIKey-deepseek").value = "discard-unsaved-secret";
   assert.equal(inline.window.LibraryAISettings.discard(), true);
-  assert.equal(inline.get("libraryAIKey").value, "");
+  assert.equal(inline.get("libraryAIKey-deepseek").value, "");
   assert.equal(inline.get("libraryAITags").checked, false);
   assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), false);
   assert.equal(inline.calls.length, 1, "discard restores the read snapshot without changing stored keys or flags");
@@ -412,10 +440,12 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
 
   const minimax = setup();
   await minimax.window.LibraryAISettings.open();
-  minimax.get("libraryAIKey").value = "unsaved-other-provider-key";
+  minimax.get("libraryAIKey-deepseek").value = "unsaved-other-provider-key";
+  minimax.get("libraryAIKey-deepseek").trigger("input");
   minimax.get("libraryAIProvider").value = "minimax";
   minimax.get("libraryAIProvider").trigger("change");
-  assert.equal(minimax.get("libraryAIKey").value, "", "MiniMax never adopts a typed key from another provider");
+  assert.equal(minimax.get("libraryAIKey-minimax").value, "", "MiniMax never adopts a typed key from another provider");
+  assert.equal(minimax.get("libraryAIKey-deepseek").value, "unsaved-other-provider-key", "and the other provider keeps its own pending key");
   assert.equal(minimax.current.mode, "assistant", "selecting a preset never modifies the stored execution mode");
   assert.equal(minimax.get("libraryAIBaseURL").value, "https://api.minimax.cn/v1");
   assert.equal(minimax.get("libraryAIModel").value, "MiniMax-M3.1-Flash-Preview");
@@ -440,7 +470,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   minimax.get("libraryAIModel").value = "MiniMax-M3.1-Flash-Preview"; minimax.get("libraryAIModel").trigger("input");
   assert.equal(minimax.get("libraryAIThinking").checked, true, "returning to M3.1 restores required adaptive thinking");
   minimax.get("libraryAIImages").checked = true; minimax.get("libraryAIImages").trigger("input");
-  minimax.get("libraryAIKey").value = "offline-explicit-minimax-key"; minimax.get("libraryAIKey").trigger("input");
+  minimax.get("libraryAIKey-minimax").value = "offline-explicit-minimax-key"; minimax.get("libraryAIKey-minimax").trigger("input");
   minimax.response((_url, payload) => ({ ...minimax.current, ...payload, configured: true, ready: false, api_ready: false }));
   minimax.get("libraryAISettingsForm").trigger("submit"); await flush();
   const selectedMinimax = minimax.calls.at(-1).payload;
@@ -452,7 +482,9 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(selectedMinimax.reasoning_effort, "high");
   assert.deepEqual(selectedMinimax.features, { knowledge_tags: false, ai_answer: false });
   assert.deepEqual(selectedMinimax.key, { action: "replace", value: "offline-explicit-minimax-key" });
-  assert.equal(minimax.get("libraryAIKey").value, "");
+  assert.deepEqual(selectedMinimax.keys, { deepseek: { action: "replace", value: "unsaved-other-provider-key" } },
+    "the other service's pending key is saved too instead of being silently dropped");
+  assert.equal(minimax.get("libraryAIKey-minimax").value, "");
   assert.equal(minimax.get("libraryAITest").disabled, true, "saving a subscription key does not start a test or generation");
   minimax.get("libraryAITest").trigger("click"); await flush();
   assert.equal(minimax.calls.length, 2);
@@ -465,52 +497,51 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   eye.current.key_configured = true; eye.current.configured = true;
   await eye.window.LibraryAISettings.open();
   assert.equal(eye.calls.length, 1, "opening reads metadata, never decrypts the saved key");
-  assert.equal(eye.get("libraryAIKey").type, "password");
+  assert.equal(eye.get("libraryAIKey-deepseek").type, "password");
+  assert.equal(eye.get("libraryAIKeyState-deepseek").textContent, "当前使用 · 已保存 1 个");
+  assert.equal(eye.rowOf(eye, "deepseek").value.textContent, "****************", "a saved key is listed masked, next to the service it belongs to");
   eye.response(() => ({ provider: "deepseek", key: "offline-reveal-test-only" }));
-  eye.get("libraryAIKeyReveal").trigger("click"); await flush();
+  eye.rowOf(eye, "deepseek").eye.trigger("click"); await flush();
   assert.equal(eye.calls.at(-1).url, "/api/settings/library-ai/key/reveal");
   assert.deepEqual(eye.calls.at(-1).payload, { provider: "deepseek", index: 0 });
-  assert.equal(eye.get("libraryAIStoredValue-deepseek").type, "text");
-  assert.equal(eye.get("libraryAIStoredValue-deepseek").readOnly, true);
-  assert.equal(eye.get("libraryAIStoredValue-deepseek").value, "offline-reveal-test-only");
-  assert.equal(eye.get("libraryAIKey").type, "password");
-  assert.equal(eye.get("libraryAIKey").value, "", "Stored viewing uses a separate readonly field, never the pending replacement input");
+  assert.equal(eye.rowOf(eye, "deepseek").value.textContent, "offline-reveal-test-only");
+  assert.match(eye.get("libraryAIKeyNote").textContent, /正在查看 DeepSeek 已保存的密钥/);
+  assert.equal(eye.get("libraryAIKey-deepseek").value, "", "Stored viewing never lands in the pending replacement input");
   assert.equal(eye.window.LibraryAISettings.hasUnsavedChanges(), false, "viewing is not a settings change");
   eye.response((_url, payload) => ({ ...eye.current, ...payload }));
   eye.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.deepEqual(eye.calls.at(-1).payload.key, { action: "keep" }, "visible saved key is never resubmitted as a replacement");
-  assert.equal(eye.get("libraryAIKey").value, "");
-  assert.equal(eye.get("libraryAIKey").type, "password");
-  assert.equal(eye.get("libraryAIStoredValue-deepseek").value, "");
-  eye.get("libraryAIKey").value = "typed-offline-replacement"; eye.get("libraryAIKey").trigger("input");
+  assert.equal(eye.get("libraryAIKey-deepseek").value, "");
+  assert.equal(eye.get("libraryAIKey-deepseek").type, "password");
+  assert.equal(eye.rowOf(eye, "deepseek").value.textContent, "****************", "saving hides the revealed key again");
+  eye.get("libraryAIKey-deepseek").value = "typed-offline-replacement"; eye.get("libraryAIKey-deepseek").trigger("input");
   const count = eye.calls.length;
-  eye.get("libraryAIKeyReveal").trigger("click"); await flush();
+  eye.get("libraryAIKeyReveal-deepseek").trigger("click"); await flush();
   assert.equal(eye.calls.length, count, "a typed key is shown locally without retrieving the saved key");
-  assert.equal(eye.get("libraryAIKey").type, "text");
-  eye.get("libraryAIKeyReveal").trigger("click");
-  assert.equal(eye.get("libraryAIKey").value, "typed-offline-replacement", "hiding a typed replacement preserves it for explicit save");
-  assert.equal(eye.get("libraryAIKey").type, "password");
+  assert.equal(eye.get("libraryAIKey-deepseek").type, "text");
+  eye.get("libraryAIKeyReveal-deepseek").trigger("click");
+  assert.equal(eye.get("libraryAIKey-deepseek").value, "typed-offline-replacement", "hiding a typed replacement preserves it for explicit save");
+  assert.equal(eye.get("libraryAIKey-deepseek").type, "password");
   eye.get("libraryAICancel").trigger("click");
-  assert.equal(eye.get("libraryAIKey").value, "");
+  assert.equal(eye.get("libraryAIKey-deepseek").value, "");
+
   const late = setup(); late.current.key_configured = true;
   await late.window.LibraryAISettings.open();
   let resolveKey; late.response(() => new Promise(done => { resolveKey = done; }));
-  late.get("libraryAIKeyReveal").trigger("click"); await flush();
+  late.rowOf(late, "deepseek").eye.trigger("click"); await flush();
   late.get("libraryAIProvider").value = "minimax"; late.get("libraryAIProvider").trigger("change");
   resolveKey({ provider: "deepseek", key: "offline-late-secret" }); await flush();
-  assert.equal(late.get("libraryAIKey").value, "", "late reveals cannot expose a previous provider's key");
-  assert.equal(late.get("libraryAIKey").type, "password");
-  assert.equal(late.get("libraryAIStoredValue-deepseek").value, "");
-  assert.equal(late.get("libraryAIKeyReveal").disabled, true);
+  assert.equal(late.rowOf(late, "deepseek").value.textContent, "****************", "late reveals cannot expose a key after the teacher moved to another service");
+  assert.equal(late.get("libraryAIKeyState-minimax").textContent, "当前使用 · 未保存");
 
   for (const action of ["cancel", "close", "typing", "visibility", "hash", "save"]) {
     const h = setup(); h.current.key_configured = true; h.current.configured = true;
     if (action === "hash") await h.window.LibraryAISettings.mount(h.document.createElement("section")); else await h.window.LibraryAISettings.open();
-    let finish; h.response(() => new Promise(resolve => { finish = resolve; })); h.get("libraryAIKeyReveal").trigger("click"); await flush();
+    let finish; h.response(() => new Promise(resolve => { finish = resolve; })); h.rowOf(h, "deepseek").eye.trigger("click"); await flush();
     const pendingKey = h.calls.at(-1); assert.equal(h.window.LibraryAISettings.isBusy(), false, "Key viewing does not lock settings busy");
-    if (action === "cancel") h.get("libraryAIKeyReveal").trigger("click");
+    if (action === "cancel") h.rowOf(h, "deepseek").eye.trigger("click");
     if (action === "close") h.window.APISettings.close();
-    if (action === "typing") { h.get("libraryAIKey").value = "offline-new-input"; h.get("libraryAIKey").trigger("input"); }
+    if (action === "typing") { h.get("libraryAIKey-deepseek").value = "offline-new-input"; h.get("libraryAIKey-deepseek").trigger("input"); }
     if (action === "visibility") { h.document.hidden = true; h.document.listeners.get("visibilitychange")(); }
     if (action === "hash") { h.window.location.hash = "#general"; h.window.listeners.get("hashchange")(); }
     if (action === "save") {
@@ -520,59 +551,81 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     }
     assert.equal(pendingKey.signal.aborted, true, `${action} cancels its pending reveal`);
     finish({ provider: "deepseek", key: "offline-obsolete-key" }); await flush();
-    assert.equal(h.get("libraryAIKey").value, action === "typing" ? "offline-new-input" : "", `${action} rejects a late revealed key`);
-    assert.equal(h.get("libraryAIKey").type, "password"); assert.equal(h.window.LibraryAISettings.isBusy(), false);
-    assert.equal(h.get("libraryAIStoredValue-deepseek").value, "", `${action} rejects a late readonly stored value`);
+    assert.equal(h.get("libraryAIKey-deepseek").value, action === "typing" ? "offline-new-input" : "", `${action} rejects a late revealed key`);
+    assert.equal(h.get("libraryAIKey-deepseek").type, "password"); assert.equal(h.window.LibraryAISettings.isBusy(), false);
+    assert.equal(h.rowOf(h, "deepseek").value.textContent, "****************", `${action} rejects a late stored value`);
   }
   const expires = setup(); expires.current.key_configured = true; await expires.window.LibraryAISettings.open();
-  expires.response(() => ({ provider: "deepseek", key: "offline-expiring-key" })); expires.get("libraryAIKeyReveal").trigger("click"); await flush();
+  expires.response(() => ({ provider: "deepseek", key: "offline-expiring-key" })); expires.rowOf(expires, "deepseek").eye.trigger("click"); await flush();
   assert.equal(expires.timers.size, 1); assert.equal([...expires.timers.values()][0].delay, 60000); [...expires.timers.values()][0]();
-  assert.equal(expires.get("libraryAIKey").value, ""); assert.equal(expires.get("libraryAIKey").type, "password"); assert.equal(expires.get("libraryAIKey").readOnly, false);
-  assert.equal(expires.get("libraryAIStoredValue-deepseek").value, ""); assert.equal(expires.get("libraryAIStoredValue-deepseek").hidden, true);
-  expires.get("libraryAIKey").value = "offline-typed-expiring-key"; expires.get("libraryAIKey").trigger("input"); expires.get("libraryAIKeyReveal").trigger("click"); await flush();
-  [...expires.timers.values()][0](); assert.equal(expires.get("libraryAIKey").value, "offline-typed-expiring-key", "Expiry hides a typed key without deleting the intended replacement");
+  assert.equal(expires.get("libraryAIKey-deepseek").value, ""); assert.equal(expires.get("libraryAIKey-deepseek").type, "password");
+  assert.equal(expires.rowOf(expires, "deepseek").value.textContent, "****************");
+  assert.match(expires.get("libraryAIKeyNote").textContent, /点眼睛可查看 60 秒/, "the line explains itself again once nothing is being shown");
+  expires.get("libraryAIKey-deepseek").value = "offline-typed-expiring-key"; expires.get("libraryAIKey-deepseek").trigger("input");
+  expires.get("libraryAIKeyReveal-deepseek").trigger("click"); await flush();
+  [...expires.timers.values()][0](); assert.equal(expires.get("libraryAIKey-deepseek").value, "offline-typed-expiring-key", "Expiry hides a typed key without deleting the intended replacement");
+  assert.equal(expires.get("libraryAIKey-deepseek").type, "password");
 
   const profiles = setup(); Object.assign(profiles.current, { mode: "api", key_configured: true, key_count: 1, configured: true, ready: true,
     keys: { deepseek: { configured: true, count: 1 }, minimax: { configured: true, count: 1 }, doubao: { configured: false, count: 0 }, custom: { configured: true, count: 1 } } });
   await profiles.window.LibraryAISettings.open();
   assert.equal(profiles.calls.length, 1, "Listing all saved providers reads metadata without decrypting any key");
+  const names = { deepseek: "DeepSeek", minimax: "MiniMax", custom: "其他兼容服务" };
   for (const provider of ["deepseek", "minimax", "custom"]) {
-    assert.equal(profiles.get(`libraryAIStoredMask-${provider}`).textContent, "•••••••• · 已保存 1 条");
-    assert.equal(profiles.get(`libraryAIStoredReveal-${provider}`).hidden, false);
-    assert.equal(profiles.get(`libraryAIStoredValue-${provider}`).value, "");
+    assert.equal(profiles.get(`libraryAIKeyState-${provider}`).textContent, `${provider === "deepseek" ? "当前使用 · " : ""}已保存 1 个`);
+    const row = profiles.rowOf(profiles, provider);
+    assert.equal(row.value.textContent, "****************");
+    assert.equal(row.value.className, "credential-saved-value", "a revealed key is marked so it cannot pass for a masked one");
+    assert.equal(row.eye.getAttribute("aria-label"), `查看${names[provider]}第 1 条已保存的密钥`);
+    assert.equal(profiles.get(`libraryAIDelete-${provider}`).hidden, false);
   }
-  assert.equal(profiles.get("libraryAIStoredMask-doubao").textContent, "未保存"); assert(profiles.get("libraryAIStoredReveal-doubao").hidden);
-  assert.equal(profiles.get("libraryAIStoredReveal-minimax").getAttribute("aria-label"), "查看MiniMax第 1 条已保存的密钥");
-  assert.match(profiles.get("libraryAISettingsDialog").html, /id="libraryAIStoredReveal-minimax"[^>]*>[\s\S]*?<svg viewBox="0 0 24 24" aria-hidden="true">/, "Stored-provider controls use the same eye icon with a provider-specific accessible label");
+  assert.equal(profiles.get("libraryAIKeyState-doubao").textContent, "未保存");
+  assert.equal(profiles.rowOf(profiles, "doubao").item.className, "credential-saved-empty");
+  assert.equal(profiles.rowOf(profiles, "doubao").eye, undefined, "an unconfigured service has no eye and no stored value to show");
+  assert.equal(profiles.get("libraryAIDelete-doubao").hidden, true);
+  assert.match(profiles.get("libraryAISettingsDialog").html, /id="libraryAISaved-minimax"[^>]*>/, "each service keeps its own saved-key list instead of one shared table");
   profiles.response((_url, payload) => ({ provider: payload.provider, index: payload.index, key: "offline-other-provider-stored-key" }));
-  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
+  profiles.rowOf(profiles, "minimax").eye.trigger("click"); await flush();
   assert.deepEqual(profiles.calls.at(-1).payload, { provider: "minimax", index: 0 });
-  assert.equal(profiles.get("libraryAIProvider").value, "deepseek", "Viewing a different provider does not switch the active API");
-  assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "offline-other-provider-stored-key"); assert.equal(profiles.get("libraryAIStoredValue-minimax").readOnly, true);
-  assert.equal(profiles.get("libraryAIStoredReveal-minimax").getAttribute("aria-label"), "隐藏MiniMax第 1 条已保存的密钥");
-  assert.equal(profiles.get("libraryAIKey").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
-  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "");
-  profiles.get("libraryAIKey").value = "offline-pending-active-replacement"; profiles.get("libraryAIKey").trigger("input");
-  profiles.get("libraryAIStoredReveal-custom").trigger("click"); await flush();
-  assert.equal(profiles.get("libraryAIKey").value, "offline-pending-active-replacement", "Read-only viewing does not consume or overwrite a pending replacement");
+  assert.equal(profiles.get("libraryAIProvider").value, "deepseek", "Viewing a different service does not switch the API in use");
+  assert.equal(profiles.rowOf(profiles, "minimax").value.textContent, "offline-other-provider-stored-key");
+  assert.equal(profiles.rowOf(profiles, "minimax").eye.getAttribute("aria-label"), "隐藏MiniMax第 1 条已保存的密钥");
+  assert.equal(profiles.get("libraryAIKey-minimax").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
+  profiles.rowOf(profiles, "minimax").eye.trigger("click"); assert.equal(profiles.rowOf(profiles, "minimax").value.textContent, "****************");
+  profiles.get("libraryAIKey-deepseek").value = "offline-pending-active-replacement"; profiles.get("libraryAIKey-deepseek").trigger("input");
+  profiles.response((_url, payload) => ({ provider: payload.provider, index: payload.index, key: "offline-other-provider-stored-key" }));
+  profiles.rowOf(profiles, "custom").eye.trigger("click"); await flush();
+  assert.equal(profiles.get("libraryAIKey-deepseek").value, "offline-pending-active-replacement", "Viewing another service does not overwrite a pending replacement");
   assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), true);
   profiles.response((_url, payload) => ({ ...profiles.current, ...payload })); profiles.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.deepEqual(profiles.calls.at(-1).payload.key, { action: "replace", value: "offline-pending-active-replacement" });
   assert.equal(profiles.calls.at(-1).payload.provider, "deepseek");
-  for (const provider of ["deepseek", "minimax", "doubao", "custom"]) assert.equal(profiles.get(`libraryAIStoredValue-${provider}`).value, "", "Saving clears every readonly decrypted display");
+  for (const provider of ["deepseek", "minimax", "custom"]) assert.equal(profiles.rowOf(profiles, provider).value.textContent, "****************", "Saving clears every revealed key");
   assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
   profiles.response((_url, payload) => ({ provider: payload.provider, index: payload.index, key: "offline-other-provider-stored-key" }));
-  profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
+  profiles.rowOf(profiles, "minimax").eye.trigger("click"); await flush();
   assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false); [...profiles.timers.values()][0]();
-  assert.equal(profiles.get("libraryAIStoredValue-minimax").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false, "Automatic hiding never manufactures pending edits");
+  assert.equal(profiles.rowOf(profiles, "minimax").value.textContent, "****************"); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false, "Automatic hiding never manufactures pending edits");
   for (const mismatched of [{ provider: "custom", index: 0 }, { provider: "minimax", index: 1 }]) {
     profiles.response(() => ({ ...mismatched, key: "offline-mismatched-response" }));
-    profiles.get("libraryAIStoredReveal-minimax").trigger("click"); await flush();
-    assert.equal(profiles.get("libraryAIStoredValue-minimax").value, "", "Foreign-provider and wrong-index reveal responses are never displayed");
-    assert.equal(profiles.get("libraryAIKey").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
+    profiles.rowOf(profiles, "minimax").eye.trigger("click"); await flush();
+    assert.equal(profiles.rowOf(profiles, "minimax").value.textContent, "****************", "Foreign-service and wrong-index reveal responses are never displayed");
+    assert.equal(profiles.get("libraryAIKey-minimax").value, ""); assert.equal(profiles.window.LibraryAISettings.hasUnsavedChanges(), false);
   }
-  const noStoredCalls = profiles.calls.length; profiles.get("libraryAIStoredReveal-doubao").trigger("click"); await flush();
-  assert.equal(profiles.calls.length, noStoredCalls, "An unconfigured metadata row cannot request a secret even with a forged click");
+  const noStoredCalls = profiles.calls.length; profiles.rowOf(profiles, "doubao").item.trigger("click"); await flush();
+  assert.equal(profiles.calls.length, noStoredCalls, "An unconfigured service cannot request a secret even with a forged click");
+
+  // One service's delete never touches another, and never switches which one is in use.
+  const deleters = setup(); Object.assign(deleters.current, { mode: "api", provider: "deepseek", configured: true, ready: true, key_configured: true,
+    keys: { deepseek: { configured: true, count: 1 }, minimax: { configured: true, count: 1 }, doubao: { configured: false, count: 0 }, custom: { configured: false, count: 0 } } });
+  await deleters.window.LibraryAISettings.open();
+  deleters.response(() => ({ ...deleters.current }));
+  deleters.get("libraryAIDelete-minimax").trigger("click"); await flush();
+  assert.deepEqual(deleters.calls.at(-1).payload, { keys: { minimax: { action: "clear" } } },
+    "Deleting a service that is not in use does not switch the API and does not clear the one in use");
+  assert.match(deleters.get("libraryAIResult").textContent, /已删除 MiniMax 密钥，其他服务保持原样/);
+  deleters.get("libraryAIDelete-deepseek").trigger("click"); await flush();
+  assert.deepEqual(deleters.calls.at(-1).payload, { key: { action: "clear" } });
 
   const normalized = setup(); Object.assign(normalized.current, { provider: "minimax", base_url: "https://api.minimax.cn/v1", model: "MiniMax-M2.7", supports_images: true, thinking: false });
   await normalized.window.LibraryAISettings.open();
@@ -587,11 +640,11 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(readTimeout.get("libraryAISave").disabled, true, "A late cancelled read cannot install settings");
 
   const saveTimeout = setup(); await saveTimeout.window.LibraryAISettings.open();
-  saveTimeout.get("libraryAIKey").value = "offline-pending-save"; saveTimeout.get("libraryAIKey").trigger("input");
+  saveTimeout.get("libraryAIKey-deepseek").value = "offline-pending-save"; saveTimeout.get("libraryAIKey-deepseek").trigger("input");
   let finishTimedSave; saveTimeout.response(() => new Promise(resolve => { finishTimedSave = resolve; })); saveTimeout.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.equal([...saveTimeout.timers.values()][0].delay, 15000); [...saveTimeout.timers.values()][0](); await flush();
   assert.equal(saveTimeout.window.LibraryAISettings.isBusy(), false); assert.equal(saveTimeout.calls.length, 2, "Uncertain saves are not resubmitted");
-  assert.match(saveTimeout.get("libraryAIResult").textContent, /结果.*未确认/); assert.equal(saveTimeout.get("libraryAIKey").value, "");
+  assert.match(saveTimeout.get("libraryAIResult").textContent, /结果.*未确认/); assert.equal(saveTimeout.get("libraryAIKey-deepseek").value, "");
   assert.equal(saveTimeout.get("libraryAISave").disabled, true, "A timeout requires replacing or rereading the unconfirmed key before another save");
   finishTimedSave({ ...saveTimeout.current }); await flush(); assert.equal(saveTimeout.window.LibraryAISettings.hasUnsavedChanges(), true);
 

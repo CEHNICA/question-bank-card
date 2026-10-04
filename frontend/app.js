@@ -1724,14 +1724,35 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     error.hidden = paper.status !== "failed";
     error.classList.toggle("paused", Boolean(paper.recoverable_pause));
     if (!error.hidden) {
+      // The banner under the paper name already carries the cut verdict, so the
+      // error row repeats only the *other* failures.  Showing the same sentence
+      // twice is what 1.12.1 fixed and what this banner must not undo.
+      const cutVerdict = paper.cut_result?.verdict;
+      const cutIsTheReason = Boolean(paper.cut_result?.message)
+        && (paper.error || "") === paper.cut_result.message;
       const actions = el("span", "error-actions");
-      actions.append(button("继续整理", "small primary", () => switchToManual()));
-      actions.append(button(paper.parse_mode === "mineru" ? "重试自动处理" : "重试准备原卷", "small", () => retryPaper()));
+      // 切题没切出题、但云端结果还留着时,真正能救回来的是“继续 AI 切题”：
+      // 它复用已存的解析结果,不重新上传、不再花一次额度。把它放在最显眼
+      // 的位置,别让最醒目的按钮把人推向手工框题。
+      const recoverable = cutIsTheReason && QBProgress.canContinueAiCut(paper);
+      if (recoverable) {
+        actions.append(button("继续 AI 切题", "small primary", () => continueAiCut()));
+        actions.append(button("改为手工切题", "small", () => switchToManual()));
+      } else {
+        actions.append(button("继续整理", "small primary", () => switchToManual()));
+        if (cutVerdict && QBProgress.canContinueAiCut(paper)) {
+          actions.append(button("继续 AI 切题", "small", () => continueAiCut()));
+        }
+        actions.append(button(paper.parse_mode === "mineru" ? "重试自动处理" : "重试准备原卷", "small", () => retryPaper()));
+      }
       if (paper.kind === "pdf" && paper.material_type !== "book") {
         actions.append(button("按教材重试", "small", () => retryPaper("book")));
       }
       actions.append(button("删除任务", "small danger", deletePaper));
-      error.replaceChildren(el("span", "", paper.error || "处理失败"), actions);
+      error.replaceChildren(
+        el("span", "", cutIsTheReason ? (paper.processing_plan?.fallback_reason || paper.error || "处理失败")
+          : (paper.error || "处理失败")),
+        actions);
     }
     renderMeter(c);
     renderDoneBanner(c);
@@ -2400,6 +2421,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     setCurrent(nextId, { scroll: true, focus: true });
   }
 
+  // N 找的是"需要核查"的题，不是"下一张卡"。已经通过、不用你再看第二眼的题
+  // 一律跳过。从当前题往后找，末尾再绕回前面，回头补核查也不用换键。
+  function focusNextReview() {
+    const cards = cardNodes();
+    if (!cards.length) return;
+    const currentIndex = cards.findIndex((card) => Number(card.dataset.id) === state.current);
+    let from = currentIndex >= 0 ? currentIndex
+      : cards.findIndex((card) => card.getBoundingClientRect().bottom > viewTop() + 24);
+    if (from < 0) from = cards.length - 1;
+    for (let step = 1; step <= cards.length; step += 1) {
+      const card = cards[(from + step) % cards.length];
+      const question = questionById(Number(card.dataset.id));
+      if (!question || !needsReview(question)) continue;
+      const nextId = Number(card.dataset.id);
+      autoExpandOnMove(nextId);
+      setCurrent(nextId, { scroll: true, focus: true });
+      return;
+    }
+    // 这一屏没有，不等于整卷没有：当前筛选可能把需要核查的题藏起来了。
+    const hidden = state.questions.filter(needsReview).length;
+    const label = FILTERS.find((filter) => filter.key === state.filter)?.label || "当前";
+    toast(hidden ? `「${label}」这一栏里没有需要核查的题，另外 ${hidden} 道在别的栏目里。`
+      : "这一卷没有需要核查的题了。");
+  }
+
   // ---------------------------------------------------------------- 展开 / 收起
 
   // 只有人工通过的题会收起；AI 通过的题等你核对，一直展开。
@@ -2525,7 +2571,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       case "f": if (q) { event.preventDefault(); openPageDialog(q.body_mode === "source_image" ? "regions" : "figures", q); } break;
       case "n":
         event.preventDefault();
-        if (!event.repeat) moveNextCard();
+        if (!event.repeat) focusNextReview();
         break;
       case "l": event.preventDefault(); setLens(!state.lens); toast(state.lens ? "放大镜已打开" : "放大镜已关闭"); break;
       case "z": event.preventDefault(); setFocus(!state.focus); toast(state.focus ? "专注已打开：其余题暗下来" : "专注已关闭"); break;
@@ -4710,7 +4756,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     window.LibraryAISettings.setReadingKeys?.(credentialServices);
     if (!credentialAnswersMounted) {
       credentialAnswersMounted = true;
-      await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true });
+      await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true, confirm: confirmDialog });
     } else await window.LibraryAISettings.activate();
   }
 

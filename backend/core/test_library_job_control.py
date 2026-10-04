@@ -6,7 +6,7 @@ import os
 from unittest import mock
 import uuid
 
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from . import features, library, library_ai_settings as service, library_assistant as assistant, library_job_control as control, library_jobs
@@ -14,7 +14,7 @@ from .models import LibraryJob, LibrarySolution, PublishedQuestion
 from .test_v110_types_origin import TempDataMixin
 
 
-class LibraryJobControlTests(TempDataMixin, TestCase):
+class LibraryJobControlTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         environment = mock.patch.dict(os.environ, {

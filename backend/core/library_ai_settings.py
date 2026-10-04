@@ -36,6 +36,7 @@ DEFAULTS = {
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
 KEY_PROVIDER_ORDER = ("deepseek", "minimax", "doubao", "custom")
+PROVIDER_NAMES = {"deepseek": "DeepSeek", "minimax": "MiniMax", "doubao": "豆包", "custom": "其他兼容服务"}
 # MiniMax is the only provider both halves use, so it is the only one whose key
 # can be filled once.  DeepSeek/豆包 answer questions only, 魔搭/硅基流动 read
 # questions only; merging those would invent a capability the app does not have.
@@ -246,8 +247,39 @@ def public_status() -> dict:
     }
 
 
+def _key_operation(operation, label: str = "API Key") -> tuple[str, str]:
+    """Validate one keep/replace/clear instruction and return (action, key)."""
+
+    if not isinstance(operation, dict) or set(operation) - {"action", "value"}:
+        raise SettingsError(f"请按保持、替换或清除保存{label}。")
+    action = operation.get("action")
+    if not isinstance(action, str) or action not in {"keep", "clear", "replace"} or (action != "replace" and "value" in operation):
+        raise SettingsError(f"请按保持、替换或清除保存{label}。")
+    if action != "replace":
+        return action, ""
+    raw = operation.get("value")
+    if not isinstance(raw, str) or not raw.strip() or len(raw.strip()) > 4096:
+        raise SettingsError("请填写完整的 API Key。")
+    key = raw.strip()
+    if any(c.isspace() or ord(c) < 33 or ord(c) > 126 for c in key):
+        raise SettingsError("API Key 不能包含空格、换行或非英文字符。")
+    return action, key
+
+
+def _write_provider_key(provider: str, action: str, key: str) -> dict:
+    """Store or drop one provider's key file and return its stored metadata."""
+
+    if action == "replace":
+        revision = uuid.uuid4().hex
+        protected = credential_settings.store._transform(json.dumps({"version": 1, "revision": revision, "key": key}).encode(), protect=True)
+        _write(key_path(provider), protected)
+        return {"revision": revision, "configured": True}
+    key_path(provider).unlink(missing_ok=True)
+    return {"revision": "", "configured": False}
+
+
 def save(payload: dict) -> dict:
-    allowed = {"features", "mode", *API_FIELDS, "endpoint_id", "key", "on_intake"}
+    allowed = {"features", "mode", *API_FIELDS, "endpoint_id", "key", "keys", "on_intake"}
     if not isinstance(payload, dict) or set(payload) - allowed:
         raise SettingsError("标签与参考答案设置格式不正确。")
     changes = payload.get("features", {})
@@ -256,20 +288,15 @@ def save(payload: dict) -> dict:
     timing = payload.get("on_intake", {})
     if not isinstance(timing, dict) or set(timing) - {"tags", "answer"} or not all(type(v) is bool for v in timing.values()):
         raise SettingsError("录入时生成的开关只能分别设为 true 或 false。")
-    operation = payload.get("key", {"action": "keep"})
-    if not isinstance(operation, dict) or set(operation) - {"action", "value"}:
-        raise SettingsError("请按保持、替换或清除保存 API Key。")
-    action = operation.get("action")
-    if not isinstance(action, str) or action not in {"keep", "clear", "replace"} or (action != "replace" and "value" in operation):
-        raise SettingsError("请按保持、替换或清除保存 API Key。")
-    key = ""
-    if action == "replace":
-        raw = operation.get("value")
-        if not isinstance(raw, str) or not raw.strip() or len(raw.strip()) > 4096:
-            raise SettingsError("请填写完整的 API Key。")
-        key = raw.strip()
-        if any(c.isspace() or ord(c) < 33 or ord(c) > 126 for c in key):
-            raise SettingsError("API Key 不能包含空格、换行或非英文字符。")
+    action, key = _key_operation(payload.get("key", {"action": "keep"}))
+    # Keys for the providers that are not in use right now.  Each service keeps
+    # its own encrypted file, so switching provider in the UI must not throw the
+    # other one away, and filling in a second service must not require saving
+    # twice.  These never touch the active provider's revision or test result.
+    extra = payload.get("keys", {})
+    if not isinstance(extra, dict) or set(extra) - set(DEFAULTS):
+        raise SettingsError("标签与参考答案设置格式不正确。")
+    extra_keys = {name: _key_operation(operation, f"{PROVIDER_NAMES[name]}密钥") for name, operation in extra.items()}
     with _lock:
         previous = _load()
         mode = payload.get("mode", previous["mode"])
@@ -300,6 +327,8 @@ def save(payload: dict) -> dict:
                 raise SettingsError("MiniMax M2 系列仅支持文字；含图题请明确选择 M3.1、M3 或其他图文模型。")
         if action == "replace" and not (config["model"] and config["base_url"]):
             raise SettingsError("保存 API Key 前，请填写服务地址和模型 ID。")
+        if provider in extra_keys:
+            raise SettingsError(f"当前服务商是{PROVIDER_NAMES[provider]}，它的密钥请在它自己那一栏保存。")
         state = config["key_states"].get(provider, {}) if switching else {"revision": previous["key_revision"], "configured": previous["key_configured"]}
         config.update(key_revision=state.get("revision", ""), key_configured=state.get("configured") is True)
         changed = action != "keep" or any(previous.get(k) != config.get(k) for k in API_FIELDS)
@@ -318,6 +347,12 @@ def save(payload: dict) -> dict:
                 key_path(provider).unlink(missing_ok=True)
                 config.update(key_revision="", key_configured=False)
             config["key_states"][provider] = {"revision": config["key_revision"], "configured": config["key_configured"]}
+            # 备用服务商的密钥各自落在自己的文件里：不动当前服务商的版本号和
+            # 已测通状态，所以在这里多填一家不会让正在用的连接重新变成未测试。
+            for name, (extra_action, extra_key) in extra_keys.items():
+                if extra_action == "keep":
+                    continue
+                config["key_states"][name] = _write_provider_key(name, extra_action, extra_key)
             _write_settings(config)
         except (OSError, credential_settings.CredentialStoreError):
             raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None

@@ -29,7 +29,15 @@ class IsolatedData:
         setting = override_settings(DATA_ROOT=self.root)
         setting.enable()
         self.addCleanup(setting.disable)
+        # Keep the Windows runtime/temp variables while isolating app settings.
+        # SQLite needs TEMP/TMP to create transaction journal files when this
+        # suite runs against a file-backed test database (as in local CI runs).
+        system_environment = {
+            key: value for key, value in os.environ.items()
+            if key.casefold() in {"path", "systemroot", "windir", "temp", "tmp", "tmpdir"}
+        }
         environment = mock.patch.dict(os.environ, {
+            **system_environment,
             "QB_FEATURES_FILE": str(self.root / "features.json"),
             "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
         }, clear=True)

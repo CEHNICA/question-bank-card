@@ -31,7 +31,7 @@ assert.match(js, /function showSettingsTab\(id, \{ updateHash = true \} = \{\}\)
 assert.match(html, /<section id="settingsDialog" class="settings-panel"/);
 assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
 assert.match(html, /id="libraryAIAPISettingsMount"/);
-assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true \}\)/);
+assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true, confirm: confirmDialog \}\)/);
 assert.doesNotMatch(html + js, /libraryAISettingsMount/);
 assert.equal((html.match(/>API 配置<\/button>/g) || []).length, 2, "One outer tab and one configuration button");
 assert.match(html, /id="settingsCredentialOpen"[^>]*>API 配置<\/button>/);

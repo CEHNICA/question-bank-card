@@ -7,14 +7,14 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 
 from . import demo
 from .figure_policy import blocks_approval, stored_or_derived_review
 from .models import Paper, PublishedQuestion, Question
 
 
-class DemoPaperTests(TestCase):
+class DemoPaperTests(TransactionTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)

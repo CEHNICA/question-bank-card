@@ -8,7 +8,9 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import threading
+import time
 import uuid
 from collections import OrderedDict, defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -17,7 +19,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import close_old_connections, connection, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.db.utils import OperationalError
 from django.utils import timezone
 from PIL import Image
@@ -44,6 +46,10 @@ from .word import convert_docx_to_pdf
 logger = logging.getLogger(__name__)
 PARALLEL = readers._parallel_limit()
 MINERU_HEARTBEAT_SECONDS = 5.0
+HEARTBEAT_BUSY_TIMEOUT_MS = 100
+HEARTBEAT_LOG_INTERVAL_SECONDS = 30.0
+_HEARTBEAT_WARNING_LOCK = threading.Lock()
+_HEARTBEAT_WARNING_AT: OrderedDict[tuple[str, int | None], float] = OrderedDict()
 FLAG_RESEGMENT_PRESERVED = "重新切题未再找到这张人工题卡，已保留；请核对题号与原卷范围"
 FLAG_RESEGMENT_EXCLUDED = "重新切题未再找到这张自动题卡，已移入回收站；恢复后请对照原书核对"
 FLAG_RESEGMENT_RANGE_PROTECTED = "新规则建议了不同原卷范围；这张题卡含人工修改、通过或入库记录，已保留原范围并标黄"
@@ -594,6 +600,47 @@ class ReadOnlyPageStore:
         return image
 
 
+def _cloud_page_modes(plan: dict, blocks: list[dict], page_count: int) -> list[dict]:
+    """记下哪些页云端真的读出了内容，哪些页它什么也没给。
+
+    照片和扫描件没有 PDF 文字层，导入时每一页都被标成“手工”——因为本地
+    读不出东西。MinerU 真的把内容读回来之后，没人把这面标记翻过来；切题
+    保存题卡时会跳过所有落在“手工页”上的题，于是十道题被整批丢掉、零张
+    题卡、零条记录。这一步就是把那面标记按云端的真实结果翻过来：读到内容
+    的页交回自动切题，什么也没读到的页仍然是手工，并且说清楚是哪几页。
+    """
+    characters: dict[int, int] = {}
+    for block in blocks:
+        page = int(block.get("page_idx", -1))
+        characters[page] = characters.get(page, 0) + len(str(block.get("text") or ""))
+    recorded = {int(item["page_idx"]): dict(item)
+                for item in (plan.get("pages") or []) if isinstance(item, dict)
+                and type(item.get("page_idx")) is int}
+    pages = []
+    unreadable = []
+    for page in range(page_count):
+        entry = recorded.get(page, {"page_idx": page, "warnings": []})
+        entry["page_idx"] = page
+        if characters.get(page):
+            entry.update(mode="mineru", text_characters=characters[page])
+            entry["warnings"] = [w for w in (entry.get("warnings") or [])
+                                 if "云端" not in str(w)]
+        else:
+            entry.update(mode="manual", text_characters=0)
+            entry.setdefault("warnings", [])
+            if "云端没有读出这一页的内容" not in entry["warnings"]:
+                entry["warnings"] = [*entry["warnings"], "云端没有读出这一页的内容，请手工框题。"]
+            unreadable.append(page + 1)
+        pages.append(entry)
+    if unreadable:
+        # One line on the plan, so the paper says which pages need a human
+        # instead of quietly producing a short paper.
+        note = "云端没有读出第 " + "、".join(str(number) for number in unreadable) + " 页的内容，这些页需要手工框题。"
+        plan["warnings"] = [w for w in (plan.get("warnings") or [])
+                            if not str(w).startswith("云端没有读出第")] + [note]
+    return pages
+
+
 def _set(paper: Paper, **fields) -> None:
     for key, value in fields.items():
         setattr(paper, key, value)
@@ -610,16 +657,72 @@ def _check_run(paper_id, revision: int) -> None:
         raise mineru.MineruCancelled()
 
 
+def _sqlite_error_code(error: BaseException) -> int | None:
+    """Find the driver's SQLite result code inside Django's wrapped error."""
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        code = getattr(current, "sqlite_errorcode", None)
+        if isinstance(code, int):
+            return code & 0xFF
+        cause = current.__cause__
+        context = current.__context__
+        if cause is not None:
+            pending.append(cause)
+        if context is not None:
+            pending.append(context)
+    return None
+
+
+def _is_sqlite_lock_conflict(error: BaseException) -> bool:
+    """Only SQLite BUSY/LOCKED errors are safe to drop as optional progress."""
+    if connection.vendor != "sqlite":
+        return False
+    return _sqlite_error_code(error) in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+
+
+def _heartbeat_warn_once_in_a_while(paper_id, revision: int | None) -> None:
+    key = (str(paper_id), revision)
+    now = time.monotonic()
+    with _HEARTBEAT_WARNING_LOCK:
+        last = _HEARTBEAT_WARNING_AT.get(key)
+        if last is not None and now - last < HEARTBEAT_LOG_INTERVAL_SECONDS:
+            return
+        _HEARTBEAT_WARNING_AT[key] = now
+        _HEARTBEAT_WARNING_AT.move_to_end(key)
+        while len(_HEARTBEAT_WARNING_AT) > 512:
+            _HEARTBEAT_WARNING_AT.popitem(last=False)
+    logger.warning(
+        "paper %s heartbeat skipped after SQLite lock conflict (revision=%s)",
+        paper_id,
+        revision,
+    )
+
+
+def _heartbeat_busy_timeout(timeout_ms: int) -> int:
+    """Set a short per-connection timeout for this best-effort SQLite write."""
+    with connection.cursor() as cursor:
+        cursor.execute("PRAGMA busy_timeout")
+        row = cursor.fetchone()
+        previous = int(row[0]) if row else 0
+        cursor.execute(f"PRAGMA busy_timeout = {max(0, int(timeout_ms))}")
+    return previous
+
+
 def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None,
                      revision: int | None = None) -> None:
     """Touch one paper from the orchestration thread, optionally saving progress.
 
     This runs *inside* the MinerU wait loop, so it is the one write in the whole
-    run that nobody is waiting for.  Losing a heartbeat costs a stale “正在解析”
-    timestamp for a few seconds; letting its failure escape costs the entire run
-    — a locked database used to abort a MinerU job that was working perfectly.
-    A miss is logged and dropped; the next tick, and the run's own checks, are
-    the things that decide whether the paper is still wanted.
+    run that nobody is waiting for.  It is one conditional UPDATE, so it never
+    reads the row and then tries to upgrade a stale SQLite read transaction.
+    A lock may still be held by another writer; cap only this optional write's
+    wait and skip that tick.  Authoritative task state, cancellation and result
+    writes continue to use their normal error handling.
     """
 
     fields = {"updated_at": timezone.now()}
@@ -627,16 +730,35 @@ def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None
         fields["progress"] = progress
     if total is not None:
         fields["total"] = total
+    updates = Paper.objects.filter(pk=paper_id)
+    if revision is not None:
+        current_revision = (
+            Q(processing_plan__revision=revision)
+            | Q(processing_plan__revision=str(revision))
+        )
+        if revision == 0:
+            # Older/manual plans may predate the revision key; _run_current
+            # treats that shape as revision zero.
+            current_revision |= Q(processing_plan__revision__isnull=True)
+        updates = updates.filter(current_revision)
+
+    previous_timeout = None
     try:
-        with transaction.atomic():
-            paper = Paper.objects.select_for_update().filter(pk=paper_id).first()
-            if paper is not None and (revision is None or int((paper.processing_plan or {}).get("revision", 0)) == revision):
-                Paper.objects.filter(pk=paper_id).update(**fields)
+        if connection.vendor == "sqlite":
+            previous_timeout = _heartbeat_busy_timeout(HEARTBEAT_BUSY_TIMEOUT_MS)
+        updates.update(**fields)
     except OperationalError as error:
-        # A rollback-only atomic block leaves this connection unusable for the
-        # rest of the wait, so the connection is dropped rather than reused.
-        logger.warning("paper %s heartbeat skipped: %s", paper_id, error)
-        connection.close()
+        if not _is_sqlite_lock_conflict(error):
+            raise
+        _heartbeat_warn_once_in_a_while(paper_id, revision)
+        return
+    finally:
+        if previous_timeout is not None and connection.connection is not None:
+            with connection.cursor() as cursor:
+                cursor.execute(f"PRAGMA busy_timeout = {previous_timeout}")
+
+    with _HEARTBEAT_WARNING_LOCK:
+        _HEARTBEAT_WARNING_AT.pop((str(paper_id), revision), None)
 
 
 # ---------------------------------------------------------------- 1. 解析
@@ -1313,8 +1435,13 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
             return  # A person transferred this task while cloud parsing ran.
         paper.blocks.all().delete()
         Block.objects.bulk_create([Block(paper=paper, **block) for block in blocks], batch_size=300)
+        # 云端读出内容之后，页面的“手工/云端”标记要按真实结果翻过来，否则
+        # 下一步切题会把这一轮刚读出来的题整批当成手工页跳过。
+        plan = deepcopy(current.processing_plan or {})
+        plan["pages"] = _cloud_page_modes(plan, blocks, len(paper.pages))
         _set(
             paper,
+            processing_plan=plan,
             zip_path=str(archive) if archive is not None else "",
             structure=structure,
             status=Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING,
@@ -2532,6 +2659,11 @@ def segment_paper(paper: Paper) -> None:
                 if sequence not in real_by_sequence:
                     raise RuntimeError("教材题组重建不完整，已停止重新切题")
                 item["group"] = real_by_sequence[sequence]
+        # A slice on a page the teacher kept as manual is skipped on purpose,
+        # because a card that silently drops half its pages is worse than no
+        # card.  The count is kept so a run that skips *everything* can say so:
+        # a cut that produces nothing used to leave no trace at all.
+        dropped_on_manual_pages: list[int] = []
         for item, question in pairs:
             if preserve_existing and (question is not None or _continuation_already_cut(item, existing_questions)):
                 continue
@@ -2539,6 +2671,7 @@ def segment_paper(paper: Paper) -> None:
             regions = item["regions"]
             candidates = _label_candidates(item["figure_candidates"])
             if any(r["page_idx"] in manual_pages for r in regions):
+                dropped_on_manual_pages.append(int(item["number"]))
                 continue
             if question is None:
                 Question.objects.create(
@@ -2760,6 +2893,22 @@ def segment_paper(paper: Paper) -> None:
             notes.append(
                 f"重新切题时有 {excluded} 张自动题卡未被新规则命中；"
                 "已移入回收站而非永久删除，需要时可以恢复。"
+            )
+        if dropped_on_manual_pages:
+            pages = sorted({index + 1 for page in manual_pages for index in [page]})
+            listed = "、".join(str(number) for number in pages)
+            notes.append(
+                f"第 {'、'.join(str(number) for number in dropped_on_manual_pages)} 题横跨"
+                f"云端没有读出内容的第 {listed} 页，为避免题卡缺页，这 {len(dropped_on_manual_pages)} "
+                "道题没有自动切出，请在原卷上手工框题。"
+            )
+        if dropped_on_manual_pages and not paper.questions.exists():
+            # Everything was dropped.  Say which pages and stop, instead of
+            # handing the review page a paper with no cards and a green status.
+            raise RuntimeError(
+                f"这轮解析没有读出第 {'、'.join(str(number) for number in pages)} 页的内容，"
+                f"第 {'、'.join(str(number) for number in dropped_on_manual_pages)} 题因此没有切出。"
+                "原卷和已保存的题卡都保留；可以在“试卷操作 → 继续 AI 切题”重试，或直接在原卷上手工框题。"
             )
         _set(paper, status=Paper.Status.READING, notes=notes, progress=0, total=paper.questions.count())
 

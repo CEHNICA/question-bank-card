@@ -6,14 +6,16 @@ const source = fs.readFileSync(require.resolve("./app.js"), "utf8").replace(/\r\
 const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
 
 // Run the real N handler and its stepping function against rendered cards.
-// The old priority algorithm skipped 2, 3 and 4 to reach the first yellow card.
+// N locates the next question that still needs checking, so the old "visit every
+// card in order" expectation no longer holds: approved cards are stepped over.
 const step = source.slice(source.indexOf("  function moveNextCard()"), source.indexOf("  // ---------------------------------------------------------------- 展开 / 收起"));
 const keyboard = source.slice(source.indexOf('  document.addEventListener("keydown", (event) => {\n    if (event.defaultPrevented || event.ctrlKey'), source.indexOf("  // ---------------------------------------------------------------- 原卷截图"));
-function navigation(ids = [11, 12, 13, 14, 15]) {
+function navigation(ids = [11, 12, 13, 14, 15], passed = [], offscreen = []) {
   const nodes = new Map(), selected = [], expanded = [], messages = [], handlers = [];
   const cards = ids.map((id, index) => ({ dataset: { id: String(id) }, inView: true,
     rect: { top: 140 + index * 320, bottom: 460 + index * 320 }, getBoundingClientRect() { return this.rect; } }));
-  const state = { current: ids[0], followHold: false, questions: ids.map((id, index) => ({ id, number: index + 1, state: index === 4 ? "yellow" : "green" })) };
+  const state = { current: ids[0], followHold: false, filter: "all", questions: [...ids, ...offscreen].map((id, index) => ({ id, number: index + 1,
+    state: index === 4 ? "yellow" : "green", approved: passed.includes(id) })) };
   const $ = id => {
     if (!nodes.has(id)) nodes.set(id, { open: false, hidden: false });
     return nodes.get(id);
@@ -21,6 +23,9 @@ function navigation(ids = [11, 12, 13, 14, 15]) {
   const context = { state, $, QBUpload: App, document: { addEventListener: (name, fn) => handlers.push(fn) },
     cardNodes: () => cards, viewTop: () => 100, onScreen: card => card.inView,
     questionById: id => state.questions.find(q => q.id === id), anyDialogOpen: () => Boolean(context.dialogOpen),
+    // The app's own rule, reduced to what this fixture knows about a question.
+    needsReview: q => Boolean(q) && !q.approved && ["green", "yellow", "red"].includes(q.state),
+    FILTERS: [{ key: "all", label: "全部" }, { key: "todo", label: "需要核查" }, { key: "approved", label: "已通过" }],
     autoExpandOnMove: id => expanded.push(id), toast: text => messages.push(text),
     setCurrent: (id, options) => { assert.equal(options.scroll, true); state.current = id; state.followHold = true; selected.push(id); },
     viewerKey: event => context.viewerEvents.push(event.key), viewerEvents: [] };
@@ -35,9 +40,24 @@ function navigation(ids = [11, 12, 13, 14, 15]) {
 }
 const next = navigation();
 for (const id of [12, 13, 14, 15]) { assert(next.press()); assert.equal(next.state.current, id); }
-assert.deepEqual(next.selected, [12, 13, 14, 15], "Each press visits exactly the next rendered card, regardless of yellow priority");
-next.press(); assert.equal(next.state.current, 15); assert.match(next.messages.at(-1), /最后一题/);
-assert.equal(next.selected.length, 4, "The end does not silently wrap to the first question");
+assert.deepEqual(next.selected, [12, 13, 14, 15], "Each press visits the next question that still needs checking");
+next.press(); assert.equal(next.state.current, 11, "Past the last question N comes back around to an earlier one still needing a check");
+const done = navigation([11, 12, 13], [11, 12, 13]);
+done.press(); assert.equal(done.state.current, 11, "A paper with nothing left to check stays put");
+assert.match(done.messages.at(-1), /没有需要核查的题/);
+assert.equal(done.selected.length, 0);
+const skipping = navigation([11, 12, 13, 14, 15], [12, 13]);
+skipping.press(); assert.equal(skipping.state.current, 14, "Approved questions in the middle are stepped over");
+assert.deepEqual(skipping.selected, [14]);
+skipping.press(); assert.equal(skipping.state.current, 15);
+const wrapped = navigation([11, 12, 13], [12, 13]);
+wrapped.state.current = 13; wrapped.press();
+assert.equal(wrapped.state.current, 11, "Past the last question N comes back to one still needing a check");
+const hidden = navigation([11, 12, 13], [11, 12, 13], [14]);
+hidden.state.filter = "approved"; hidden.press();
+assert.equal(hidden.selected.length, 0);
+assert.match(hidden.messages.at(-1), /「已通过」这一栏里没有需要核查的题，另外 1 道在别的栏目里/,
+  "Hiding the remaining questions behind a filter is named, not reported as a finished paper");
 const filtered = navigation([11, 13, 15]); filtered.press(); assert.equal(filtered.state.current, 13); filtered.press(); assert.equal(filtered.state.current, 15);
 const initial = navigation(); initial.state.current = null; initial.press(); assert.equal(initial.state.current, 12, "The first visible question is the initial origin");
 const scrolled = navigation(); scrolled.cards[0].inView = false; scrolled.cards[0].rect.bottom = 80;
@@ -162,4 +182,4 @@ helpUI.$("settingsRestoreHints").events.click[0](); assert.equal(helpUI.$("revie
 assert.deepEqual(cropRestores, [true]); assert.equal(helpUI.$("paperError").hidden, false); assert.equal(helpUI.$("paperError").textContent, "Service unavailable");
 helpPreferences.set("qb-review-guidance-disabled", "1"); storageHandlers[0]({ key: "qb-review-guidance-disabled" });
 assert.equal(helpUI.$("reviewGuidanceHint").hidden, true, "Another window's permanent dismissal updates this current review");
-console.log("Review N: sequential visible cards, first-card origin, scroll fencing, held-key and IME guards; one-time reversible guidance, fault visibility, single cutting entry and automatic-approval tutorial: OK");
+console.log("Review N: the next question that still needs checking, skipping approved ones, wrapping at the end, naming a filter that hides the rest, first-card origin, scroll fencing, held-key and IME guards; one-time reversible guidance, fault visibility, single cutting entry and automatic-approval tutorial: OK");

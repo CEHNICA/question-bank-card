@@ -2,7 +2,7 @@
 from copy import deepcopy
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 from PIL import Image
 import pymupdf as fitz
@@ -13,7 +13,7 @@ from . import test_direct_cut_reading as direct_cut
 from . import test_tiyouju_cli as cli_tests
 
 
-class RecentIntakeRegressionsTests(TestCase):
+class RecentIntakeRegressionsTests(TransactionTestCase):
     # Reuse only the isolated original-document setup and meaningful pipeline
     # harness; do not inherit and rerun the unrelated direct-reading tests.
     setUp = direct_cut.DirectCutReadingTests.setUp

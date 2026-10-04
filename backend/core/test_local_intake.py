@@ -84,6 +84,7 @@ class LocalIntakeTests(TestCase):
     def run_read(self, question, result):
         with mock.patch("core.pipeline.ThreadPoolExecutor", InlineExecutor), \
                 mock.patch("core.pipeline._reader_parallelism", return_value=1), \
+                mock.patch("core.pipeline.close_old_connections"), \
                 mock.patch("core.pipeline.readers.assistant_mode", return_value=False), \
                 mock.patch("core.pipeline.read_card", side_effect=result if callable(result) else None,
                            return_value=result if not callable(result) else None):

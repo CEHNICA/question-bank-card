@@ -1,45 +1,54 @@
-"""一次心跳失败不该杀死一次正在正常进行的 MinerU 解析。
+"""MinerU heartbeats are optional writes and must survive real SQLite contention."""
 
-worker.log 里出现过两次 `OperationalError: database is locked`，栈是
-`mineru.request_extract_file → pipeline.heartbeat → _paper_heartbeat`：等
-MinerU 的时候另一个连接正写库，心跳一撞上就抛出，等于把一个本来正常的
-云端任务判成失败。心跳是整轮运行里唯一没有人等待的写入，丢掉它只会让
-“正在解析”多停几秒；让它冒出去则赔上整轮。
-"""
-
+import sqlite3
+import time
 from unittest import mock
 
 from django.db import connection
+from django.db.models.query import QuerySet
 from django.db.utils import OperationalError
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TransactionTestCase
 
 from . import pipeline
-from .models import Paper
 from . import test_manual_intake_review as manual_review
+from .models import Paper
 
 
-class HeartbeatSurvivesALockedDatabaseTests(TestCase):
+class HeartbeatSurvivesALockedDatabaseTests(TransactionTestCase):
+    databases = {"default"}
     paper = manual_review.ManualIntakeReviewTests.paper
     setUp = manual_review.ManualIntakeReviewTests.setUp
 
-    def test_a_locked_database_costs_one_heartbeat_not_the_run(self):
+    def test_a_real_second_connection_lock_drops_one_tick_and_the_next_succeeds(self):
+        database = str(connection.settings_dict["NAME"])
         paper = self.paper()
-        with mock.patch.object(pipeline.Paper.objects, "select_for_update",
-                               side_effect=OperationalError("database is locked")):
-            # The wait loop calls this on a timer; returning normally is the
-            # whole point.  Raising here is what killed a working MinerU job.
-            pipeline._paper_heartbeat(paper.pk, revision=0)
-            pipeline._paper_heartbeat(paper.pk, progress=1, total=2, revision=0)
+        blocker = sqlite3.connect(database, timeout=0.1, isolation_level=None, uri=database.startswith("file:"))
+        self.addCleanup(blocker.close)
+        blocker.execute("BEGIN IMMEDIATE")
+        try:
+            started = time.monotonic()
+            with self.assertLogs("core.pipeline", level="WARNING") as captured:
+                pipeline._paper_heartbeat(paper.pk, progress=1, total=2, revision=0)
+                pipeline._paper_heartbeat(paper.pk, progress=1, total=2, revision=0)
+            self.assertLess(time.monotonic() - started, 2.0)
+            self.assertEqual(len(captured.records), 1, "repeated lock misses should not flood the log")
+            paper.refresh_from_db()
+            self.assertEqual((paper.progress, paper.total), (0, 0), "a skipped tick cannot claim to be saved")
+        finally:
+            blocker.rollback()
 
-    def test_a_dropped_connection_is_not_handed_to_the_next_query(self):
-        # A rolled-back atomic block leaves this connection mid-transaction;
-        # the next statement on it would fail for an unrelated reason.
+        pipeline._paper_heartbeat(paper.pk, progress=2, total=2, revision=0)
+        paper.refresh_from_db()
+        self.assertEqual((paper.progress, paper.total), (2, 2))
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA busy_timeout")
+            self.assertEqual(cursor.fetchone()[0], 30000, "the heartbeat timeout must be restored")
+
+    def test_non_lock_operational_errors_still_surface(self):
         paper = self.paper()
-        with mock.patch.object(pipeline.Paper.objects, "select_for_update",
-                               side_effect=OperationalError("database is locked")), \
-                mock.patch.object(pipeline.connection, "close") as closed:
-            pipeline._paper_heartbeat(paper.pk, revision=0)
-        closed.assert_called_once()
+        with mock.patch.object(QuerySet, "update", side_effect=OperationalError("database schema is corrupt")):
+            with self.assertRaisesRegex(OperationalError, "schema is corrupt"):
+                pipeline._paper_heartbeat(paper.pk, progress=3, total=7, revision=0)
 
     def test_a_healthy_heartbeat_still_saves_progress(self):
         paper = self.paper()
@@ -55,20 +64,15 @@ class HeartbeatSurvivesALockedDatabaseTests(TestCase):
         paper.refresh_from_db()
         self.assertEqual(paper.progress, 0)
 
+    def test_a_legacy_plan_without_revision_is_revision_zero(self):
+        paper = self.paper()
+        paper.processing_plan = {key: value for key, value in paper.processing_plan.items() if key != "revision"}
+        paper.save()
+        pipeline._paper_heartbeat(paper.pk, progress=1, revision=0)
+        paper.refresh_from_db()
+        self.assertEqual(paper.progress, 1)
 
-class SqliteWritesQueueInsteadOfFailingTests(TransactionTestCase):
-    """A deferred transaction cannot honour the busy timeout; IMMEDIATE can.
-
-    ``BEGIN DEFERRED`` opens as a reader and only asks for the write lock when
-    it first writes.  If another connection has written in between, SQLite
-    reports "database is locked" immediately and never enters the busy handler,
-    so ``timeout: 30`` buys nothing.  ``transaction_mode: IMMEDIATE`` takes the
-    write lock at BEGIN, which is what turns a lost race into a wait.
-    """
-
-    databases = {"default"}
-
-    def test_write_transactions_begin_immediate(self):
+    def test_sqlite_transaction_mode_remains_application_default(self):
         options = connection.settings_dict["OPTIONS"]
-        self.assertEqual(options.get("transaction_mode"), "IMMEDIATE")
         self.assertEqual(options.get("timeout"), 30)
+        self.assertNotIn("transaction_mode", options)

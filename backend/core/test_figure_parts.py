@@ -7,7 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
@@ -50,7 +50,7 @@ class StackPiecesTests(SimpleTestCase):
         self.assertEqual(joined.height, 190 + 50)
 
 
-class FigurePartsApiTests(TestCase):
+class FigurePartsApiTests(TransactionTestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)

@@ -19,7 +19,7 @@ function setup({ reading = {} } = {}) {
     constructor(tag = "div") {
       this.value = ""; this.checked = false; this.disabled = false; this.open = false;
       this.tagName = tag.toUpperCase(); this.children = []; this.modalOpens = 0;
-      this.attributes = {}; this.listeners = new Map(); this.classList = { toggle() {} };
+      this.attributes = {}; this.listeners = new Map(); this.classList = { toggle() {}, add() {}, remove() {} };
     }
     set id(value) { this._id = value; elements.set(value, this); }
     get id() { return this._id; }
@@ -37,7 +37,8 @@ function setup({ reading = {} } = {}) {
     addEventListener(name, fn) { this.listeners.set(name, [...(this.listeners.get(name) || []), fn]); }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     getAttribute(name) { return this.attributes[name]; }
-    append(child) { this.children.push(child); child.parentElement = this; }
+    append(...children) { for (const child of children) { this.children.push(child); child.parentElement = this; } }
+    replaceChildren(...children) { this.children = [...children]; }
     showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
     trigger(name, detail = {}) { for (const fn of this.listeners.get(name) || []) fn({ preventDefault() {}, ...detail }); }

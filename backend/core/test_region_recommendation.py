@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 from unittest import mock
 
-from django.test import Client, SimpleTestCase, TestCase
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
 
 from . import readers, region_reads
 from .models import RegionRead
@@ -115,7 +115,7 @@ class RegionRecommendationTests(SimpleTestCase):
         self.assertLess(len(region_reads.prompt("auto", large)), 1500)
 
 
-class RegionRecommendationWorkerTests(TempDataMixin, TestCase):
+class RegionRecommendationWorkerTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
