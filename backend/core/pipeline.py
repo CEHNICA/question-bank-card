@@ -16,8 +16,9 @@ from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
-from django.db import close_old_connections, transaction
+from django.db import close_old_connections, connection, transaction
 from django.db.models import F
+from django.db.utils import OperationalError
 from django.utils import timezone
 from PIL import Image
 
@@ -611,17 +612,31 @@ def _check_run(paper_id, revision: int) -> None:
 
 def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None,
                      revision: int | None = None) -> None:
-    """Touch one paper from the orchestration thread, optionally saving progress."""
+    """Touch one paper from the orchestration thread, optionally saving progress.
+
+    This runs *inside* the MinerU wait loop, so it is the one write in the whole
+    run that nobody is waiting for.  Losing a heartbeat costs a stale “正在解析”
+    timestamp for a few seconds; letting its failure escape costs the entire run
+    — a locked database used to abort a MinerU job that was working perfectly.
+    A miss is logged and dropped; the next tick, and the run's own checks, are
+    the things that decide whether the paper is still wanted.
+    """
 
     fields = {"updated_at": timezone.now()}
     if progress is not None:
         fields["progress"] = progress
     if total is not None:
         fields["total"] = total
-    with transaction.atomic():
-        paper = Paper.objects.select_for_update().filter(pk=paper_id).first()
-        if paper is not None and (revision is None or int((paper.processing_plan or {}).get("revision", 0)) == revision):
-            Paper.objects.filter(pk=paper_id).update(**fields)
+    try:
+        with transaction.atomic():
+            paper = Paper.objects.select_for_update().filter(pk=paper_id).first()
+            if paper is not None and (revision is None or int((paper.processing_plan or {}).get("revision", 0)) == revision):
+                Paper.objects.filter(pk=paper_id).update(**fields)
+    except OperationalError as error:
+        # A rollback-only atomic block leaves this connection unusable for the
+        # rest of the wait, so the connection is dropped rather than reused.
+        logger.warning("paper %s heartbeat skipped: %s", paper_id, error)
+        connection.close()
 
 
 # ---------------------------------------------------------------- 1. 解析
@@ -1653,6 +1668,77 @@ def locate_missing(
                                     seq=None, source="located", col=col))
         notes.append(f"第 {number} 题的题号 MinerU 没读出来，已由 AI 在原卷上定位。")
     return notes
+
+
+CUT_COMPLETE = "complete"
+CUT_DEGRADED = "degraded"
+CUT_FAILED = "failed"
+CUT_UNVERIFIED = "unverified"
+
+
+def reconcile_cut(paper: Paper, *, reason: str = "") -> dict:
+    """原卷声明了多少题 vs 真的切出多少题——一次自动切题的诚实对账。
+
+    自动切题的失败方式不是抛异常，而是安静地少切：缺号检测只看两个已定位
+    题号之间的洞（``segment.missing_numbers``），只切出 1、2 时后面没有任何
+    可比的东西，3–24 就永远不被提起，卷子带着两张卡显示成“待你终审”。
+    纯扫描件更彻底：一句文字都读不出来，机器没有任何依据说自己切全了。
+
+    所以结论分四种，UI 不得把它们都画成同一个样子：
+    ``failed`` 一题没切出（硬失败）、``degraded`` 卷面印着却没切出、
+    ``unverified`` 读不出文字因而无法判断（不等于没题）、
+    ``complete`` 切出的题号覆盖了卷面印着的每一个。
+    """
+    blocks = _block_dicts(paper)
+    printed = segment.printed_numbers(blocks)
+    found = sorted({number for number in paper.questions.values_list("number", flat=True)
+                    if isinstance(number, int)})
+    missing = [number for number in printed if number not in found]
+    if not found:
+        verdict = CUT_FAILED
+    elif not printed:
+        # 读不出文字不是“没有题”，是“没有依据说切全了”：这两句话对老师的
+        # 下一步完全不同，所以它有自己的结论，不并进 complete。
+        verdict = CUT_UNVERIFIED
+    elif missing:
+        verdict = CUT_DEGRADED
+    else:
+        verdict = CUT_COMPLETE
+    if verdict == CUT_FAILED:
+        message = reason or "自动切题没有切出任何题目。"
+    elif verdict == CUT_UNVERIFIED:
+        message = reason or ("这份资料没有可读取的文字，自动切题没有依据判断是否切全；"
+                             "请对照原卷核对题数。")
+    elif verdict == CUT_DEGRADED:
+        message = (f"原卷上印着第 {'、'.join(str(number) for number in missing)} 题的题号，"
+                   "但这次没有切出对应的题卡。")
+    else:
+        message = ""
+    return {"verdict": verdict, "expected": len(printed), "found": len(found),
+            "missing": missing, "message": message,
+            "source": "printed_numbers" if printed else "no_text"}
+
+
+def _record_cut_result(paper: Paper, revision: int, *, reason: str = "") -> dict | None:
+    """Write the reconciliation onto the plan, and fail the paper when nothing was cut.
+
+    Only while the run is still the current one: a teacher who has already
+    switched to manual must not have a later worker overwrite the paper.
+    """
+    result = reconcile_cut(paper, reason=reason)
+    with transaction.atomic():
+        current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
+        if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+            return None
+        plan = {**(current.processing_plan or {}), "cut_result": result}
+        current.processing_plan = plan
+        if result["verdict"] == CUT_FAILED:
+            _set(current, status=Paper.Status.FAILED, error=result["message"][:500])
+        current.save(update_fields=["processing_plan", "updated_at"])
+    paper.processing_plan = plan
+    if result["verdict"] == CUT_FAILED:
+        paper.status, paper.error = Paper.Status.FAILED, result["message"][:500]
+    return result
 
 
 def _normalise_source_kind(item: dict) -> str:
@@ -3272,14 +3358,16 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     checker = readers.checker_engine() if double_read else None
     if primary is None:
         # No request was ever sent, so this is a configuration state, not a
-        # service failure. It carries a category and the service that is
+        # service failure.  It carries a category and the service that is
         # missing, so the card can show it once and point at the right setting
-        # instead of guessing from the sentence.
+        # instead of guessing from the sentence.  A configured service is never
+        # missing from this branch: primary_engine() falls back to one, so
+        # reaching here means the machine has no reading service at all.
         readiness = readers.primary_readiness()
         service = str(readiness.get("label") or readiness.get("selected") or "")
         return {"state": Question.State.RED, "flags": [],
-            "error": f"所选主读模型“{service}”还没有 API Key，无法读题。" if service
-                else "所选主读模型还没有 API Key，无法读题。",
+            "error": f"本机还没有配置任何看图读题服务：所选的“{service}”没有 API Key，也没有其他已配置的服务。" if service
+                else "本机还没有配置任何看图读题服务。",
             "error_kind": "reader_not_configured",
             "error_service": str(readiness.get("selected") or ""),
             "error_service_label": service,
@@ -4265,6 +4353,11 @@ def process_paper(paper: Paper) -> None:
         if paper.status == Paper.Status.SEGMENTING:
             segment_paper(paper)
             paper.refresh_from_db()
+            # 对账在识读之前：切不出题的卷子没有东西可识读，早点停下才不会
+            # 在“待你终审”里交出两张卡却什么都不说。
+            cut = _record_cut_result(paper, run_revision)
+            if cut is not None and cut["verdict"] == CUT_FAILED:
+                return
         if paper.status == Paper.Status.READING:
             pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING])
                 .exclude(pk__in=_continued_existing_ids(paper)))

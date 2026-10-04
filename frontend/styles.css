@@ -253,6 +253,11 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .rename-paper { min-height: 28px; padding-inline: 8px; color: var(--muted); flex: none; }
 .paper-status { color: var(--muted); font-size: 13.5px; margin-top: 4px; line-height: 1.55; }
 .paper-status kbd { display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); font: 600 11px/17px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--ink-2); text-align: center; }
+/* 自动切题没切全时压在卷名下面：不是提醒，是这份卷现在的状态，所以它有自己的底色，
+   不用“待你终审”那行小字一笔带过。 */
+.cut-result-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 10px; background: var(--amber-soft); color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+.cut-result-banner[hidden] { display: none; }
+.cut-result-banner span { flex: 1 1 260px; min-width: 0; }
 .processing-headline, .processing-detail, .processing-stale { display: block; }
 .processing-headline { color: var(--ink-2); font-weight: 650; }
 .processing-detail { margin-top: 2px; }

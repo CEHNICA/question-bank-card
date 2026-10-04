@@ -1,11 +1,13 @@
 """One readiness answer for the reading entry points and the reading worker.
 
 An automatic import that fell back to manual keeps ``auto_fallback``, and the
-worker then refuses to switch service.  The page used to ask the question
-without that context, answer “可以读”, and the same failure came back from the
-worker as “没有配置所选主读模型的 API Key” — written to two fields and therefore
-shown twice.  These tests pin the one answer, the single place the sentence is
-stored, and the entry that takes the teacher to the setting.
+worker then keeps that scope: a service that already answered may not be swapped
+for another when its call fails.  The page used to ask the question without that
+context, answer “可以读”, and the same failure came back from the worker as
+“没有配置所选主读模型的 API Key” — written to two fields and therefore shown
+twice.  These tests pin the one answer, the single place the sentence is stored,
+the entry that takes the teacher to the setting, and the one thing the scope is
+still allowed to stop: moving a request that was already under way.
 """
 
 from copy import deepcopy
@@ -29,7 +31,7 @@ MISSING_PROVIDER = readers.ENGINE_CHOICES[MISSING]
 MISSING_LABEL = provider_catalog.VISION[MISSING_PROVIDER]["label"]
 NOT_CONFIGURED = {
     "ready": False, "reason": "none_configured", "selected": MISSING,
-    "label": MISSING_LABEL, "engine": None, "fallback_available": False,
+    "label": MISSING_LABEL, "engine": None, "used": "", "fallback_available": False,
 }
 
 
@@ -77,18 +79,56 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         self.assertEqual((readiness["selected"], readiness["label"]), (MISSING, MISSING_LABEL))
         fallback.assert_called_once()
 
-    def test_selected_only_round_never_silently_becomes_another_service(self):
+    def test_selected_only_round_uses_a_configured_service_but_says_which(self):
+        # The scope stops a *failing request* from moving to another service.
+        # A service that never had a key is not a failing request, so a
+        # selected-only round still reads — and the answer names the service
+        # that will read, so the switch is never the silent kind.
         with readers.selected_services_only(), \
                 mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
                 mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured") as fallback:
+                mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback:
             readiness = readers.primary_readiness()
-        self.assertEqual((readiness["ready"], readiness["reason"]),
-            (False, "selected_not_configured"))
+            engine = readers.primary_engine()
+        self.assertTrue(readiness["ready"])
+        self.assertEqual((readiness["selected"], readiness["label"]), (MISSING, MISSING_LABEL))
+        self.assertEqual(readiness["used"], CONFIGURED.provider)
+        self.assertTrue(readiness["fallback_available"])
+        self.assertIs(engine, CONFIGURED)
+        fallback.assert_called()
+
+    def test_selected_only_round_with_nothing_configured_still_refuses(self):
+        with readers.selected_services_only(), \
+                mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
+                mock.patch.object(readers, "engine_by_key", return_value=None), \
+                mock.patch.object(readers, "_first_configured", return_value=None):
+            readiness = readers.primary_readiness()
+        self.assertEqual((readiness["ready"], readiness["reason"]), (False, "none_configured"))
         self.assertEqual(readiness["label"], MISSING_LABEL)
+        self.assertEqual(readiness["used"], "")
         self.assertFalse(readiness["fallback_available"])
-        self.assertIsNone(readers.primary_engine())
-        fallback.assert_not_called()
+
+    def test_auto_scope_still_does_not_switch_a_service_that_is_answering(self):
+        # The other half of the rule, so narrowing the credential case did not
+        # also allow swapping a running reader: _fallback_enabled() is what the
+        # request path consults, and the scope still turns it off.
+        with mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "1"}), \
+                readers.selected_services_only():
+            self.assertFalse(readers._fallback_enabled())
+
+    def test_the_service_the_teacher_chose_is_not_reported_as_a_fallback(self):
+        # “auto” resolves to a real provider before it reaches here, so the
+        # only way to be ready without a fallback is: the chosen service is the
+        # one that reads.  Saying otherwise would tell the teacher their
+        # reading changed hands when it did not.
+        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
+                mock.patch.object(readers, "engine_by_key", return_value=CONFIGURED), \
+                mock.patch.object(readers, "_first_configured") as alternative:
+            readiness = readers.primary_readiness()
+        self.assertTrue(readiness["ready"])
+        self.assertEqual(readiness["used"], CONFIGURED.provider)
+        self.assertFalse(readiness["fallback_available"])
+        alternative.assert_not_called()
 
     def test_nothing_configured_and_assistant_mode_are_told_apart(self):
         with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
@@ -124,8 +164,10 @@ class ReadCardConfigurationTests(IsolatedData, SimpleTestCase):
         self.assertEqual(result["error_service"], MISSING)
         self.assertEqual(result["error_service_label"], MISSING_LABEL)
         self.assertTrue(result["error_recoverable"])
-        # “所选主读模型” still names the role; the service name tells them what to fill in.
-        self.assertIn("主读模型", result["error"])
+        # Reaching here means nothing at all is configured, so the sentence says
+        # that instead of blaming the one service they picked and promising not
+        # to use any other.
+        self.assertIn("没有配置任何看图读题服务", result["error"])
         self.assertIn(MISSING_LABEL, result["error"])
         model.assert_not_called()
 
@@ -150,11 +192,24 @@ class StatusReportsReadinessTests(IsolatedData, TestCase):
             body = self.client.get("/api/status").json()
         readiness.assert_called()
         reported = body["reader_readiness"]
-        self.assertEqual(set(reported), {"ready", "reason", "selected", "label", "fallback_available"})
+        self.assertEqual(set(reported), {"ready", "reason", "selected", "label", "used", "fallback_available"})
         self.assertEqual((reported["ready"], reported["reason"]), (False, "none_configured"))
         self.assertEqual(reported["label"], MISSING_LABEL)
+        # Which service will really read travels with the reason, so the button
+        # can say “这次用 魔搭 读” instead of implying the chosen one is used.
+        self.assertEqual(reported["used"], "")
+        self.assertFalse(reported["fallback_available"])
         # Only the reason travels; the engine object and any credential stay put.
         self.assertNotIn("engine", json.dumps(reported, ensure_ascii=False))
+
+    def test_status_names_the_service_that_will_read_when_it_is_not_the_one_chosen(self):
+        with mock.patch.object(views.readers, "primary_readiness", return_value={
+            "ready": True, "reason": "", "selected": MISSING, "label": MISSING_LABEL,
+            "engine": None, "used": "modelscope", "fallback_available": True}):
+            reported = self.client.get("/api/status").json()["reader_readiness"]
+        self.assertTrue(reported["ready"])
+        self.assertEqual(reported["used"], "modelscope")
+        self.assertTrue(reported["fallback_available"])
 
 
 class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
@@ -173,19 +228,35 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
         return self.client.post(f"/api/questions/{self.question.pk}/reread", json.dumps({"revision": self.question.content_revision}),
             content_type="application/json", HTTP_X_QB_REQUEST="1")
 
-    def test_auto_fallback_paper_refuses_before_queueing_and_names_the_service(self):
+    def test_auto_fallback_paper_reads_with_the_configured_service_instead_of_refusing(self):
+        # The teacher asked for this paper to be read and another service does
+        # have a key.  409 here is what produced “可以读” on one screen and
+        # “没有配置所选主读模型的 API Key” on the next; the read is queued and the
+        # entry point says which service will really do it.
         before = deepcopy(Question.objects.values().get(pk=self.question.pk))
         with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
                 mock.patch.object(readers, "engine_by_key", return_value=None), \
                 mock.patch.object(readers, "configured", return_value=False), \
                 mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback:
             result = self.post()
+        self.assertEqual(result.status_code, 200, result.content)
+        self.assertNotIn("API 配置", result.json().get("error", ""))
+        fallback.assert_called_once()
+        after = Question.objects.values().get(pk=self.question.pk)
+        self.assertNotEqual(after["reread_requested"], before["reread_requested"])
+        self.assertTrue(after["ocr_pending"])
+
+    def test_auto_fallback_paper_with_no_service_at_all_refuses_and_names_what_is_missing(self):
+        before = deepcopy(Question.objects.values().get(pk=self.question.pk))
+        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
+                mock.patch.object(readers, "engine_by_key", return_value=None), \
+                mock.patch.object(readers, "configured", return_value=False), \
+                mock.patch.object(readers, "_first_configured", return_value=None):
+            result = self.post()
         self.assertEqual(result.status_code, 409, result.content)
         error = result.json()["error"]
         self.assertIn(MISSING_LABEL, error)
         self.assertIn("API 配置", error)
-        # Another service does have a key, but this round must not silently use it.
-        fallback.assert_not_called()
         after = Question.objects.values().get(pk=self.question.pk)
         self.assertEqual(after["reread_requested"], before["reread_requested"])
         self.assertEqual(after["ocr_pending"], before["ocr_pending"])

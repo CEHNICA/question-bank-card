@@ -4655,6 +4655,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     credentialClosing = true;
     hideAPISecrets();
     credentialCloseTask = (async () => {
+      // 关闭时若模型设置还没保存，这一步会等一次真实的网络往返。原先这一段
+      // 什么都不显示：点“关闭”后窗口像是卡住了，直到保存完才弹出一句提示。
+      // 先把要说的话说出来，再去等。
+      const savingFirst = credentialModelGuard?.hasUnsavedChanges();
+      if (savingFirst) {
+        $("credentialResult").textContent = "模型设置还没保存，正在保存后关闭…";
+        $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = true; });
+      }
       try {
         if (credentialModelGuard?.hasUnsavedChanges() && !(await credentialModelGuard.prepareClose())) return;
         if (session !== credentialSession || !$("credentialDialog").open || credentialMutationPending()) return;
@@ -4666,7 +4674,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           resetCredentialInputs();
         }
         if (session === credentialSession && $("credentialDialog").open) finishCredentialClose();
-      } finally { if (session === credentialSession) { credentialClosing = false; credentialCloseTask = null; } }
+      } finally {
+        if (session === credentialSession) {
+          credentialClosing = false; credentialCloseTask = null;
+          // The close can still be refused (a save failed, or the teacher chose
+          // 继续设置).  Put the buttons back and clear the pending line, or the
+          // dialog is left looking like the one that hangs.
+          if ($("credentialDialog").open) {
+            $("credentialResult").textContent = "";
+            $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = credentialBusy; });
+          }
+        }
+      }
     })();
     return false;
   }
@@ -4685,6 +4704,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       button.tabIndex = tab === name ? 0 : -1;
     }
     if (tab !== "answers" || !window.LibraryAISettings?.mount) return;
+    // The answers panel offers “共用读题的 MiniMax 密钥”, which needs to know
+    // whether the reading side holds one.  It must not read that store itself,
+    // so the status this dialog already loaded is handed over instead.
+    window.LibraryAISettings.setReadingKeys?.(credentialServices);
     if (!credentialAnswersMounted) {
       credentialAnswersMounted = true;
       await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true });
@@ -4856,6 +4879,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
     $("settingsSplit").textContent = groups.length > 1 ? `按建议拆成 ${groups.length} 份` : "拆分任务";
+
+    // 自动切题的实话：卷面印着的题号和真的切出来的对不上时，这行字比
+    // “待你终审”重要得多，所以它自己占一行并带着下一步，而不是混进处理记录。
+    const cut = paper.cut_result || {};
+    const cutIncomplete = ["failed", "degraded", "unverified"].includes(cut.verdict);
+    $("cutResultBanner").hidden = !cutIncomplete;
+    if (cutIncomplete) {
+      const missing = (cut.missing || []).length ? `（第 ${cut.missing.join("、")} 题）` : "";
+      $("cutResultMessage").textContent = cut.message || "自动切题没有切全这份卷子。";
+      $("cutResultManual").textContent = cut.verdict === "unverified" ? "对照原卷核对题数"
+        : cut.verdict === "failed" ? "在原卷上切题" : `在原卷上补切${missing}`;
+      $("cutResultManual").hidden = !paper.pages?.length;
+    }
 
     const notes = [...(paper.notes || [])];
     const parseReason = paper.processing_plan?.fallback_reason;
@@ -5160,7 +5196,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (modelRetryButton) modelRetryButton.hidden = !retry;
   }
 
-  function saveModelSettings() {
+  function saveModelSettings({ refresh = true } = {}) {
     const body = readModelSettings();
     const signature = JSON.stringify(body);
     // Native blur/change and dialog cancel/close can describe the same edit.
@@ -5176,7 +5212,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     lastModelSave = change;
     modelFormDirty = true;
     showModelSaveResult("正在保存…");
-    modelSaving = modelSaving.then(() => saveModelSettingsNow(change), () => saveModelSettingsNow(change));
+    modelSaving = modelSaving.then(
+      () => saveModelSettingsNow(change, { refresh }), () => saveModelSettingsNow(change, { refresh }));
     return modelSaving;
   }
 
@@ -5202,7 +5239,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         showModelSaveResult("模型设置尚未保存，请重试保存后再关闭。", { retry: true });
         return false;
       }
-      await saveModelSettings();
+      // The close waits for the save and nothing else: the status refresh it
+      // used to await as well has no bearing on whether this dialog may close.
+      await saveModelSettings({ refresh: false });
       return !modelFormDirty;
     }
   };
@@ -5233,7 +5272,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return true;
   }
 
-  async function saveModelSettingsNow(change) {
+  async function saveModelSettingsNow(change, { refresh = true } = {}) {
     try {
       await api("/api/settings/models", { method: "POST", body: change.body });
       change.succeeded = true;
@@ -5248,6 +5287,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const message = MODEL_SAVED_MESSAGE;
       showModelSaveResult(message);
       toast(message, "success");
+      if (!refresh) {
+        // Closing the dialog is gated on the save, not on the status refresh
+        // behind it: two round trips in series is what made 关闭 feel like a
+        // hang, and the refreshed status is only worth having once the window
+        // is already gone.
+        void loadStatus();
+        return;
+      }
       const refreshed = await loadStatus();
       if (!refreshed && change === lastModelSave && !modelFormDirty) {
         showModelSaveResult(`${message} 当前状态暂未刷新，重新打开设置即可查看。`);
@@ -6280,6 +6327,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   $("viewOriginalPaper").addEventListener("click", () => closeSettingsThen(() => openPageDialog("view")));
+  // 自动切题没切全时的那一个按钮：把老师直接放到原卷上框题。已经是手工卷就直接开框，
+  // 还是失败状态就先转手工再开框——原卷和已有题卡在两条路上都保留。
+  $("cutResultManual").addEventListener("click", () => {
+    if (state.paper?.status === "ready") { openPageDialog("new"); return; }
+    switchToManual().then((switched) => { if (switched) openPageDialog("new"); });
+  });;
   $("pageZoomFit").addEventListener("click", () => { if (requestPageZoom("fit")) $("pageStage").focus({ preventScroll: true }); });
   $("pageZoomWidth").addEventListener("click", () => { if (requestPageZoom("width")) $("pageStage").focus({ preventScroll: true }); });
   $("pageZoomIn").addEventListener("click", () => { zoomPageBy(1.25); $("pageStage").focus({ preventScroll: true }); });

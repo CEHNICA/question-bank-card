@@ -281,26 +281,33 @@ def primary_readiness(configuration: dict | None = None) -> dict:
     as readable and then fail with “没有配置所选主读模型的 API Key”. Both now ask
     here, and the answer says which service was actually chosen and whether a
     usable fallback exists.
+
+    ``selected_services_only`` guards *the request*, not the *choice*. A
+    configured service that is already answering must not be swapped out when
+    its call fails — that is the case that costs a second fee and can leave a
+    card half-read.  A service that was never usable at all is a different
+    problem: the teacher filled 魔搭 and asked for a photo to be read, and
+    refusing to read it because the *selected* service has no key helps nobody.
+    So a missing credential falls back to a configured service even in a
+    selected-only round, and ``used`` names who will actually read.
     """
     selected = _primary_selection(configuration)
     label = _service_label(selected)
     if selected == ASSISTANT:
         return {"ready": False, "reason": "assistant_mode", "selected": selected, "label": label,
-                "engine": None, "fallback_available": False}
+                "engine": None, "used": "", "fallback_available": False}
     chosen = engine_by_key(selected, configuration)
     if chosen is not None:
         return {"ready": True, "reason": "", "selected": selected, "label": chosen.label,
-                "engine": chosen, "fallback_available": False}
-    if _SELECTED_SERVICES_ONLY.get():
-        # This round is allowed to use the selected service only. Saying so is
-        # what lets the UI point at the one service that is not ready instead
-        # of sending the reader somewhere the user did not authorise.
-        return {"ready": False, "reason": "selected_not_configured", "selected": selected,
-                "label": label, "engine": None, "fallback_available": False}
+                "engine": chosen, "used": chosen.provider, "fallback_available": False}
     fallback = _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
-    return {"ready": fallback is not None, "reason": "" if fallback else "none_configured",
+    return {"ready": fallback is not None,
+            "reason": "" if fallback is not None else "none_configured",
             "selected": selected, "label": label, "engine": fallback,
-            "fallback_available": fallback is not None}
+            "used": fallback.provider if fallback is not None else "",
+            # The page shows the service that will really read, so a switch the
+            # user did not type is visible rather than silent.
+            "fallback_available": fallback is not None and fallback.provider != selected}
 
 
 def _service_label(key: str) -> str:

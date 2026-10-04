@@ -1475,6 +1475,18 @@ def missing_numbers(starts: list[Start]) -> list[tuple[int, Start]]:
     return result
 
 
+def printed_numbers(blocks: list[dict]) -> list[int]:
+    """每一个卷面上真的印着题号的题号，升序。
+
+    ``missing_numbers`` 只能看见两个已定位题号之间的洞：只切出 1、2 时，
+    3–24 后面没有任何东西可比，于是永远不会被提到，卷子就带着两张卡
+    显示成“待你终审”。这里给的是另一半证据——原卷自己声明了什么。
+    纯扫描件读不出文字，返回空列表；空列表表示“没有依据可说全了”，
+    不是“没有题”，所以它绝不能被当成切全了。
+    """
+    return sorted({start.number for start in _candidates(blocks) if start.number > 0})
+
+
 def _slot_index(layout: Layout, page: int, col: int) -> int | None:
     for index, slot in enumerate(layout.slots):
         if slot["page"] == page and slot["col"] == col:

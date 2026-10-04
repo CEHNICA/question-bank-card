@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const API = "/api/settings/library-ai";
-  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, needsKeyReplacement: false };
+  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, needsKeyReplacement: false, reading: {} };
   const defaults = {
     deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-v4-pro", supports_images: false },
     doubao: { base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "", supports_images: false },
@@ -65,8 +65,11 @@
       .library-ai-help p{margin-top:8px}
       .library-ai-key{display:flex;gap:8px;align-items:center}.library-ai-key input{min-width:0;flex:1}
       .library-ai-key .button{flex:none;padding:9px 12px;min-height:38px}.library-ai-key svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
-      .library-ai-stored-keys{display:grid;gap:8px}.library-ai-stored-key{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px 10px;align-items:center}
-      .library-ai-stored-key>span{font-size:12px;color:var(--ink-2)}.library-ai-stored-key>input{grid-column:1/-1}
+      .library-ai-share{display:grid;gap:8px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--accent-soft)}
+      .library-ai-share[hidden]{display:none}
+      .library-ai-share p{margin:0}
+      .library-ai-share-actions{display:flex;flex-wrap:wrap;gap:8px}
+      .library-ai-stored-keys{display:grid;gap:8px}.library-ai-stored-key{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px 10px;align-items:center}      .library-ai-stored-key>span{font-size:12px;color:var(--ink-2)}.library-ai-stored-key>input{grid-column:1/-1}
       .library-ai-stored-key>.button{min-height:34px;padding:5px 9px;justify-self:end;font-size:12px}
       .library-ai-stored-key>.button svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
       .library-ai-stored-key>.button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
@@ -102,6 +105,13 @@
                 <p>推荐 DeepSeek Pro，也可选择 MiniMax M3.1、豆包或其他兼容服务。模型名以服务商实际提供的 ID 为准，与读题服务分开保存。</p>
                 <label for="libraryAIProvider">服务商</label><select id="libraryAIProvider"><option value="deepseek">DeepSeek（推荐）</option><option value="minimax">MiniMax M3.1（M Plan）</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></select>
                 <p id="libraryAIMinimaxHelp" hidden></p>
+                <div id="libraryAIShareKey" class="library-ai-share" hidden>
+                  <p id="libraryAIShareHelp"></p>
+                  <div class="library-ai-share-actions">
+                    <button id="libraryAIShareReadingKey" class="button" type="button">共用读题的 MiniMax 密钥</button>
+                    <button id="libraryAIKeepOwnKey" class="button quiet" type="button" hidden>改用独立密钥</button>
+                  </div>
+                </div>
                 <label for="libraryAIBaseURL">API 地址</label><input id="libraryAIBaseURL" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
                 <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>仅在服务商确认支持时开启；纯文本模型不会跳过配图处理含图题。</small></span></label>
@@ -160,6 +170,8 @@
     }
     $("libraryAITestConsent").addEventListener("change", updateButtons);
     $("libraryAIKeyReveal").addEventListener("click", () => { void toggleKey(); });
+    $("libraryAIShareReadingKey").addEventListener("click", () => { void shareReadingKey(); });
+    $("libraryAIKeepOwnKey").addEventListener("click", () => { void keepOwnKey(); });
     for (const provider of Object.keys(providerNames)) $(`libraryAIStoredReveal-${provider}`).addEventListener("click", () => { void toggleStoredKey(provider); });
     $("libraryAITest").addEventListener("click", () => { void test(); });
     $("libraryAICancel").addEventListener("click", close);
@@ -231,6 +243,67 @@
       const count = storedKeyCount(provider);
       $(`libraryAIStoredMask-${provider}`).textContent = count ? "•••••••• · 已保存 1 条" : "未保存";
       $(`libraryAIStoredReveal-${provider}`).hidden = !count;
+    }
+    renderSharing();
+  }
+
+  // 同一家 MiniMax 在读题和答案里各存一份密钥，就要粘贴两次。这里把
+  // “填一次”的那条路摆出来，并且只在这条路真的可用时才出现：读题侧还没存
+  // 密钥时按钮是灰的并说清去哪填，而不是给一个点了没反应的动作。
+  function renderSharing() {
+    const block = $("libraryAIShareKey");
+    if (!block) return;
+    const provider = $("libraryAIProvider").value;
+    const shareable = (state.current?.shareable_from_reading || []).includes(provider);
+    block.hidden = !isAPI() || !shareable;
+    if (block.hidden) return;
+    const own = (state.current?.keys || {})[provider] || {};
+    const shared = own.shared_with_reading === true;
+    // Whether the reading side holds a key comes from the reading side's own
+    // status, handed in by the page: this module must never read that store.
+    const readingReady = Boolean(state.reading?.[provider]?.configured);
+    const share = $("libraryAIShareReadingKey"), keep = $("libraryAIKeepOwnKey");
+    share.hidden = shared || !readingReady;
+    share.disabled = state.busy || !state.current;
+    share.textContent = own.configured ? "改用读题的 MiniMax 密钥" : "共用读题的 MiniMax 密钥";
+    keep.hidden = !shared;
+    keep.disabled = state.busy || !state.current;
+    $("libraryAIShareHelp").textContent = shared
+      ? "这里用的是读题那份 MiniMax 密钥（读题侧第 1 个账号）。以后改了读题的密钥，这里不会自动跟着变，要跟着改请再点一次共用。"
+      : readingReady
+        ? (own.configured ? "这里已经有一份独立的 MiniMax 密钥。共用会用读题的那份替换它，随时可以改回来。"
+          : "读题这边已经保存了 MiniMax 密钥，可以直接共用，不用再粘贴一次。")
+        : "读题那边还没有保存 MiniMax 密钥。先到“读题与切题”里填一次并保存，回来这里就能共用。";
+  }
+
+  async function shareReadingKey() {
+    if (state.busy || !state.current) return;
+    const session = ++state.session;
+    state.busy = true; state.operation = "share";
+    $("libraryAIResult").textContent = "正在从读题那边取密钥…";
+    updateButtons();
+    try {
+      const body = await request(`${API}/share-reading-key`, { provider: "minimax" });
+      if (session !== state.session || !isActive()) return;
+      $("libraryAIKey").value = ""; $("libraryAIClearKey").checked = false;
+      render(body);
+      $("libraryAIResult").textContent = "已共用读题的 MiniMax 密钥。点“测试连接”验证一次即可。";
+    } catch (error) {
+      if (session === state.session && isActive()) $("libraryAIResult").textContent = error.message;
+    } finally {
+      if (session === state.session) { state.busy = false; state.operation = null; updateButtons(); }
+    }
+  }
+
+  async function keepOwnKey() {
+    if (state.busy || !state.current) return;
+    try {
+      const body = await request(API, { key: { action: "clear" } });
+      $("libraryAIKey").value = ""; $("libraryAIClearKey").checked = false;
+      render(body);
+      $("libraryAIResult").textContent = "已清除共用的密钥，可以在下面粘贴自己的 Key 并保存。";
+    } catch (error) {
+      $("libraryAIResult").textContent = error.message;
     }
   }
 
@@ -310,7 +383,7 @@
     $("libraryAIKeyReveal").disabled = state.busy || !state.current || $("libraryAIClearKey").checked ||
       (!revealing && !revealedProvider && !$("libraryAIKey").value && !storedKeyCount($("libraryAIProvider").value));
     for (const provider of Object.keys(providerNames)) $(`libraryAIStoredReveal-${provider}`).disabled = state.busy || !state.current || !storedKeyCount(provider) || (provider === $("libraryAIProvider").value && $("libraryAIClearKey").checked);
-    renderCapabilities();
+    renderCapabilities(); renderSharing();
     if (state.inline) {
       $("libraryAICancel").disabled = state.busy;
       $("libraryAICancel").textContent = state.current ? "撤销更改" : "重新读取";
@@ -391,7 +464,7 @@
     return true;
   }
 
-  function isMutating() { return state.busy && ["save", "test"].includes(state.operation); }
+  function isMutating() { return state.busy && ["save", "test", "share"].includes(state.operation); }
 
   async function load() {
     const session = ++state.session;
@@ -498,7 +571,15 @@
     }
   }
 
-  window.LibraryAISettings = Object.freeze({ open, mount, activate, deactivate, hideSecrets: hideKey, discard,
+  function setReadingKeys(services) {
+    // Read-side status, handed in by the page that already loaded it. The
+    // answers panel asks "is there a MiniMax key on the reading side?" without
+    // ever opening that store from here.
+    state.reading = (services && typeof services === "object") ? { ...services } : {};
+    if (dialog) updateButtons();
+  }
+
+  window.LibraryAISettings = Object.freeze({ open, mount, activate, deactivate, hideSecrets: hideKey, discard, setReadingKeys,
     hasUnsavedChanges: syncDirty, isBusy: () => state.busy, isMutating });
   window.addEventListener("beforeunload", (event) => {
     hideKey();

@@ -101,9 +101,10 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.transform.reset_mock()
         result = self.client.get("/api/settings/library-ai").json()
         self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom"])
-        self.assertEqual(result["keys"], {"deepseek": {"configured": True, "count": 1},
-            "minimax": {"configured": True, "count": 1}, "doubao": {"configured": False, "count": 0},
-            "custom": {"configured": False, "count": 0}})
+        self.assertEqual(result["keys"], {"deepseek": {"configured": True, "count": 1, "shared_with_reading": False},
+            "minimax": {"configured": True, "count": 1, "shared_with_reading": False},
+            "doubao": {"configured": False, "count": 0, "shared_with_reading": False},
+            "custom": {"configured": False, "count": 0, "shared_with_reading": False}})
         self.assertEqual(result["provider"], "minimax")
         self.assertEqual(result["key_count"], 1)
         self.assertNotIn("synthetic-deepseek", json.dumps(result))
@@ -119,7 +120,8 @@ class IndependentAISettingsTests(SimpleTestCase):
         self.transform.reset_mock()
         result = service.public_status()
         self.assertEqual(result["key_count"], 0)
-        self.assertTrue(all(item == {"configured": False, "count": 0} for item in result["keys"].values()))
+        self.assertTrue(all(item == {"configured": False, "count": 0, "shared_with_reading": False}
+                            for item in result["keys"].values()))
         self.transform.assert_not_called()
         self.network.assert_not_called()
 
@@ -131,9 +133,9 @@ class IndependentAISettingsTests(SimpleTestCase):
         service._write_settings(config)
         self.transform.reset_mock()
         result = service.public_status()
-        self.assertEqual(result["keys"]["deepseek"], {"configured": False, "count": 0})
-        self.assertEqual(result["keys"]["custom"], {"configured": False, "count": 0})
-        self.assertEqual(result["keys"]["minimax"], {"configured": True, "count": 1})
+        self.assertEqual(result["keys"]["deepseek"], {"configured": False, "count": 0, "shared_with_reading": False})
+        self.assertEqual(result["keys"]["custom"], {"configured": False, "count": 0, "shared_with_reading": False})
+        self.assertEqual(result["keys"]["minimax"], {"configured": True, "count": 1, "shared_with_reading": False})
         self.transform.assert_not_called()
 
     def test_legacy_v1_provider_metadata_remains_visible_without_migration(self):
@@ -146,7 +148,7 @@ class IndependentAISettingsTests(SimpleTestCase):
         result = service.public_status()
         self.assertEqual(result["provider"], "doubao")
         self.assertEqual(result["key_count"], 1)
-        self.assertEqual(result["keys"]["doubao"], {"configured": True, "count": 1})
+        self.assertEqual(result["keys"]["doubao"], {"configured": True, "count": 1, "shared_with_reading": False})
         self.assertEqual(service.path().read_bytes(), before)
         self.transform.assert_not_called()
         self.network.assert_not_called()
@@ -607,3 +609,84 @@ class GenerationBindingTests(TempDataMixin, TestCase):
         self.publication.refresh_from_db()
         self.assertEqual(job.status, "failed")
         self.assertEqual(self.publication.extras["ai_answer"]["answer"], "已有结果")
+
+
+class SharedMiniMaxKeyTests(IndependentAISettingsTests):
+    """同一家 MiniMax 的密钥只填一次——但绝不自动填。
+
+    读题和答案各存一份加密文件，所以同一个 Key 过去要粘贴两次。这里是那条
+    显式的路：老师点一下，才把读题那份复制到答案这边；已经有一份独立密钥时
+    按钮会明说“改用”，不会悄悄换掉。
+    """
+
+    def save_reading_key(self, *accounts):
+        return service.credential_settings.save_actions(
+            {"minimax": {"action": "replace", "accounts": list(accounts)}})
+
+    def test_the_reading_key_can_be_copied_over_once_instead_of_typed_twice(self):
+        self.save_reading_key("reading-minimax-key-one", "reading-minimax-key-two")
+        self.configure_minimax()
+        self.assertFalse(service.public_status()["keys"]["minimax"]["shared_with_reading"])
+        result = service.share_reading_key("minimax")
+        self.assertTrue(result["key_configured"])
+        self.assertTrue(result["keys"]["minimax"]["shared_with_reading"])
+        # 一个读题账号池里有多条时，答案侧只取第 1 条，并且这件事要说出来。
+        self.assertEqual(service._key(service._load()), "reading-minimax-key-one")
+        # 共用后原来的“已测通”不再成立：换的是凭据，不是配置。
+        self.assertFalse(result["verified"])
+
+    def test_an_existing_independent_key_is_never_replaced_without_the_press(self):
+        self.save_reading_key("reading-minimax-key-one")
+        self.configure_minimax()
+        self.assertEqual(service._key(service._load()), "offline-minimax-subscription-key")
+        # 保存本身不动它；只有 share_reading_key 才是那个显式动作。
+        self.assertFalse(service.public_status()["keys"]["minimax"]["shared_with_reading"])
+        self.assertEqual(service._key(service._load()), "offline-minimax-subscription-key")
+        service.share_reading_key("minimax")
+        self.assertEqual(service._key(service._load()), "reading-minimax-key-one")
+
+    def test_going_back_to_an_independent_key_clears_the_shared_mark(self):
+        self.save_reading_key("reading-minimax-key-one")
+        self.configure_minimax()
+        service.share_reading_key("minimax")
+        result = service.save({"key": {"action": "clear"}})
+        self.assertFalse(result["key_configured"])
+        self.assertFalse(result["keys"]["minimax"]["shared_with_reading"])
+        # 读题那一份始终没被动过。
+        self.assertEqual(service.credential_settings.reveal_saved_key("minimax", 0), "reading-minimax-key-one")
+
+    def test_nothing_is_offered_when_the_reading_side_has_no_minimax_key(self):
+        self.configure_minimax()
+        self.assertNotIn("reading_key_available", service.public_status(),
+                         "the answers status must never open the reading credential store")
+        with self.assertRaises(service.SettingsError):
+            service.share_reading_key("minimax")
+
+    def test_only_minimax_can_be_shared(self):
+        self.configure()  # doubao: answers only
+        self.assertEqual(service.public_status()["shareable_from_reading"], [])
+        with self.assertRaises(service.SettingsError):
+            service.share_reading_key("deepseek")
+
+    def test_the_endpoint_is_local_only_and_never_returns_a_secret(self):
+        self.save_reading_key("reading-minimax-key-one")
+        self.configure_minimax()
+        result = service.share_reading_key("minimax")
+        rendered = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("reading-minimax-key-one", rendered)
+        self.assertNotIn("offline-minimax-subscription-key", rendered)
+
+    def test_the_http_route_shares_the_key_and_stays_on_this_machine(self):
+        self.save_reading_key("reading-minimax-key-one")
+        self.configure_minimax()
+        client = Client()
+        remote = client.post("/api/settings/library-ai/share-reading-key", data="{}",
+                             content_type="application/json", HTTP_X_QB_REQUEST="1",
+                             REMOTE_ADDR="203.0.113.9")
+        self.assertEqual(remote.status_code, 403)
+        local = client.post("/api/settings/library-ai/share-reading-key",
+                            data=json.dumps({"provider": "minimax"}),
+                            content_type="application/json", HTTP_X_QB_REQUEST="1",
+                            REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(local.status_code, 200, local.content)
+        self.assertTrue(local.json()["keys"]["minimax"]["shared_with_reading"])

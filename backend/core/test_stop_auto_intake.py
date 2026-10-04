@@ -239,13 +239,15 @@ class StopAndAutoIntakeTests(TestCase):
 
     def test_scan_pdf_without_explicit_consent_never_queues_configured_cloud(self):
         paper = self.upload(scan=True, allow_cloud="true")
-        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
+        # 转手工而不是假装切完了：扫描件一题也切不出，状态必须说失败。
+        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
+        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
         self.assertFalse(paper.processing_plan["cloud_authorized"])
         self.assertEqual(len(paper.pages), 1)
 
     def test_authorized_scan_pdf_with_missing_services_is_manual(self):
         paper = self.upload(scan=True, allow_cloud="1", services=False)
-        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
+        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
 
     def test_only_authorized_scan_pdf_with_existing_services_queues_mineru(self):
         paper = self.upload(scan=True, allow_cloud="1")
@@ -272,7 +274,8 @@ class StopAndAutoIntakeTests(TestCase):
     def test_local_native_failure_retains_a_viewable_original(self):
         with mock.patch.object(intake.native_pdf, "extract", side_effect=RuntimeError("bad text layer")):
             paper = self.upload()
-        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
+        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
+        self.assertIn("自动切题没有切出任何题目", paper.error)
         self.assertEqual(len(paper.pages), 1)
 
     def test_local_retry_cannot_queue_cloud(self):

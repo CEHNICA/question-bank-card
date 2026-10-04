@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import models, transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.db.models.functions import Cast
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -395,6 +395,35 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
     return [(row[pk_at], *known[row[pk_at]]) for row in raw if row[pk_at] in known]
 
 
+def _live_cut_result(paper: Paper, recorded: dict) -> dict:
+    """What is still missing *now*, not what was missing when the run finished.
+
+    The verdict belongs to the automatic run, but the list of numbers a teacher
+    has to go and cut belongs to this second: someone who cuts 第 3 题 by hand
+    must not keep being told 第 3 题 is missing.  Subtracting the cards that now
+    exist costs no model call and no block scan.
+    """
+    if not recorded:
+        return {}
+    present = set(paper.questions.values_list("number", flat=True))
+    missing = [number for number in (recorded.get("missing") or []) if number not in present]
+    verdict = str(recorded.get("verdict") or "")
+    if verdict == "degraded" and not missing:
+        return {**recorded, "verdict": "complete", "missing": [], "message": "",
+                "found": len(present)}
+    if verdict == "degraded":
+        return {**recorded, "missing": missing, "found": len(present),
+                "message": f"原卷上印着第 {'、'.join(str(number) for number in missing)} 题的题号，"
+                           "但现在还没有对应的题卡。"}
+    if verdict == "failed" and present:
+        # The teacher took over and started cutting by hand.  “自动切题没有切出
+        # 任何题目” is still the truth about the automatic run; saying how many
+        # cards exist now keeps it from reading as if the paper were empty.
+        return {**recorded, "found": len(present),
+                "message": f"自动切题没有切出题目；现在这 {len(present)} 张是手工切的，原卷还在。"}
+    return dict(recorded)
+
+
 def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] | None = None) -> dict:
     info = paper.photos or {}
     quota_paused = (
@@ -402,11 +431,18 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
     )
     stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
+    cut_result = _live_cut_result(paper, (paper.processing_plan or {}).get("cut_result") or {})
+    # “待你终审” says the cut worked.  When the paper's own reconciliation says
+    # it did not, that sentence is the one thing that must not be shown: a
+    # two-card paper from a 24-question exam must not read as finished.
+    cut_label = {"failed": "自动切题失败", "degraded": "切题不全",
+                 "unverified": "切题待核对"}.get(str(cut_result.get("verdict") or ""))
     data = {
         "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
         "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
         "material_type": paper.material_type, "archived": paper.archived,
         "status_label": "额度不足，已暂停" if quota_paused else "已停止" if stopped
+        else cut_label if paper.status == Paper.Status.READY and cut_label
         else Paper.Status(paper.status).label,
         "recoverable_pause": quota_paused,
         "stopped": stopped,
@@ -415,6 +451,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
         "structure": paper.structure or {},
         "processing_plan": paper.processing_plan or {},
+        "cut_result": cut_result,
         "parse_mode": (paper.processing_plan or {}).get("mode", "mineru"),
         "demo": demo.is_demo(paper),
         "structure_conflict": paper.status == Paper.Status.NEEDS_GROUPING,
@@ -739,10 +776,10 @@ def status(request):
         "arbiter": arbiter.label if arbiter else None,
         "independent_checker": bool(checker and primary and checker.provider != primary.provider),
         "engines": engines,
-        # Why the reader can or cannot run, so the page can say it once and point
-        # at the one service that is missing instead of waiting for a failed read.
+        # Why the reader can or cannot run, and which service will really read:
+        # a switch the user did not type has to be visible, not silent.
         "reader_readiness": {key: readiness[key] for key in
-                             ("ready", "reason", "selected", "label", "fallback_available")},
+                             ("ready", "reason", "selected", "label", "used", "fallback_available")},
         "m3_available": m3import.m3_backend() is not None,
         "app_version": APP_VERSION,
     })
@@ -909,7 +946,7 @@ def papers(request):
     for chunk in upload.chunks():
         digest.update(chunk)
     existing = Paper.objects.filter(sha256=digest.hexdigest(), material_type=material_type, archived=False)\
-        .exclude(status=Paper.Status.FAILED).first()
+        .exclude(Q(status=Paper.Status.FAILED) & Q(processing_plan__cut_result__isnull=True)).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     paper = Paper(
@@ -991,11 +1028,13 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     if len(set(digests)) != len(digests):
         return _error("选中的照片里有重复的文件，请去掉重复的再上传")
     # 同一组照片（不论选择顺序）、同样的处理方式算同一份卷；不做扫描件效果再传一次会得到另一份卷。
+    # “自动切题没切出题”不算失败到可以重传的形状：这份卷已经在库里了，再传一次
+    # 应该打开它，而不是多出一份一模一样的任务。
     combined = hashlib.sha256(
         f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()
     ).hexdigest()
     existing = Paper.objects.filter(sha256=combined, material_type=material_type, archived=False)\
-        .exclude(status=Paper.Status.FAILED).first()
+        .exclude(Q(status=Paper.Status.FAILED) & Q(processing_plan__cut_result__isnull=True)).first()
     if existing:
         return JsonResponse({"paper": paper_json(existing), "duplicate": True})
     first = Path(uploads[0].name).name
@@ -2194,9 +2233,10 @@ def _reader_readiness(paper: Paper | None = None) -> dict:
     """The same readiness answer the worker will give, for this paper.
 
     An automatic import that fell back to manual keeps ``auto_fallback``, and
-    the worker then refuses to switch to another service.  Asking without that
-    context is how “请先配置一家看图读题模型” could be answered “可以读” and the
-    read still failed with “没有配置所选主读模型的 API Key”.
+    the worker then keeps that scope: a service that already answered may not be
+    swapped for another when its call fails.  A service that was never usable is
+    not in that scope, so asking here and asking in the worker now give the same
+    answer instead of “可以读” followed by “没有配置所选主读模型的 API Key”.
     """
     with _reader_scope(paper):
         return readers.primary_readiness(_saved_configuration())
@@ -2216,15 +2256,18 @@ def _reading_ready() -> bool:
 
 
 def _reader_unavailable_sentence(paper: Paper | None) -> str:
-    """Name the service that is missing instead of “配置一家模型”.
+    """Say which service is missing instead of “配置一家模型”.
 
-    A teacher can act on “MiniMax 还没有 API Key”; “请先配置一家看图读题模型”
-    makes them open the settings and compare lists themselves.  The original
-    image and every saved question stay either way.
+    A teacher can act on “还没有配置任何看图读题服务”; “请先配置一家看图读题模型”
+    makes them open the settings and compare lists themselves.  Reaching this
+    sentence means nothing at all is configured — a configured service is
+    always used, even when the chosen one has no key.  The original image and
+    every saved question stay either way.
     """
-    service = str(_reader_readiness(paper).get("label") or "")
-    return (f"还没有可用的看图读题模型：所选的“{service}”还没有 API Key，这轮不会换用别的服务。" if service
-        else "还没有可用的看图读题模型，这轮不会换用别的服务。")
+    readiness = _reader_readiness(paper)
+    service = str(readiness.get("label") or "")
+    return (f"还没有可用的看图读题模型：所选的“{service}”还没有 API Key，本机也没有其他已配置的服务。" if service
+        else "还没有可用的看图读题模型，本机没有已配置的服务。")
 
 
 def _clear_approval(question: Question) -> None:
@@ -3026,6 +3069,30 @@ def library_ai_settings_view(request):
         return rejected
     try:
         return JsonResponse(library_ai_settings.save(_body(request)))
+    except library_ai_settings.ServiceError as error:
+        return _error(str(error), 409)
+    except library_ai_settings.SettingsError as error:
+        return _error(str(error), 400)
+
+
+@csrf_exempt
+def library_ai_share_reading_key_view(request):
+    """Copy the reading side's MiniMax key into the answers API store.
+
+    One key, typed once.  Separate POST because it overwrites whatever the
+    answers side had: the teacher has to mean it.
+    """
+    from . import library_ai_settings
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("共用密钥只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    try:
+        return JsonResponse(library_ai_settings.share_reading_key(payload.get("provider", "minimax")))
     except library_ai_settings.ServiceError as error:
         return _error(str(error), 409)
     except library_ai_settings.SettingsError as error:

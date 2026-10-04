@@ -51,7 +51,9 @@ class RecentIntakeRegressionsTests(TestCase):
         with mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected single-exam segmentation")), \
                 mock.patch.object(pipeline, "parse", side_effect=AssertionError("unexpected cloud parsing")):
             paper = intake.prepare_auto(paper, cloud_ready=True)
-        self.assertEqual((paper.material_type, paper.status, paper.processing_plan["mode"]), ("exam", "ready", "manual"))
+        # 自动切题一题没切出就是硬失败，不能以“待你终审”的样子交到审核页。
+        self.assertEqual((paper.material_type, paper.status, paper.processing_plan["mode"]), ("exam", "failed", "manual"))
+        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
         self.assertTrue(paper.processing_plan["native_numbering_fallback"])
         self.assertEqual(paper.processing_plan["local_scope_count"], 2)
         self.assertFalse(paper.questions.exists() or paper.processing_plan["cloud_authorized"])
@@ -68,7 +70,11 @@ class RecentIntakeRegressionsTests(TestCase):
             with self.subTest(allowed=allowed, ready=ready):
                 paper = intake.prepare_auto(self.exam(), allow_cloud=allowed, cloud_ready=ready)
                 self.assertEqual(paper.processing_plan["mode"], mode)
-                self.assertEqual(paper.status, "queued" if mode == "mineru" else "ready")
+                # 只有真的会去解析的路线才是 queued；转手工的路线一题没切出，
+                # 状态必须说失败，否则这份卷会以完成的样子躺在列表里。
+                self.assertEqual(paper.status, "queued" if mode == "mineru" else "failed")
+                self.assertEqual(paper.processing_plan.get("cut_result", {}).get("verdict"),
+                                 None if mode == "mineru" else "failed")
                 self.assertEqual(paper.processing_plan["cloud_authorized"], allowed)
                 self.assertFalse(paper.questions.exists())
                 self.assertTrue(paper.processing_plan["native_numbering_fallback"])
@@ -96,7 +102,8 @@ class RecentIntakeRegressionsTests(TestCase):
                 mock.patch.object(pipeline, "read_card", side_effect=AssertionError("unexpected reading")), \
                 mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected exam segmentation")):
             paper = intake.prepare_auto(paper, cloud_ready=True)
-        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
+        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
+        self.assertEqual(paper.processing_plan["cut_result"]["verdict"], "failed")
         self.assertFalse(paper.questions.exists())
         self.assertEqual(len(paper.pages), 2)
         self.assertEqual(source_images.source_identity(paper), original)
@@ -117,7 +124,7 @@ class RecentIntakeRegressionsTests(TestCase):
             with self.subTest(allow_cloud=allow_cloud, cloud_ready=cloud_ready):
                 paper = intake.prepare_auto(self.book(), allow_cloud=allow_cloud, cloud_ready=cloud_ready)
                 self.assertEqual(paper.processing_plan["mode"], expected)
-                self.assertEqual(paper.status, "queued" if expected == "mineru" else "ready")
+                self.assertEqual(paper.status, "queued" if expected == "mineru" else "failed")
                 self.assertEqual(paper.processing_plan["cloud_authorized"], allow_cloud)
                 self.assertFalse(paper.questions.exists())
                 self.assertEqual(len(paper.pages), 2)

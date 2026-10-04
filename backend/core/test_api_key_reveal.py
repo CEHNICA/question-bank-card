@@ -110,7 +110,8 @@ class APIKeyRevealTests(SimpleTestCase):
     def test_missing_file_metadata_and_view_do_not_import_ocr_key(self):
         service.key_path("minimax").unlink()
         (self.root / "ocr-credentials.dat").write_bytes(b"synthetic-opaque-ocr-file-must-not-be-read")
-        self.assertEqual(service.public_status()["keys"]["minimax"], {"configured": False, "count": 0})
+        self.assertEqual(service.public_status()["keys"]["minimax"],
+            {"configured": False, "count": 0, "shared_with_reading": False})
         self.assertEqual(self.post({"provider": "minimax", "index": 0}).status_code, 409)
         self.assertEqual((self.root / "ocr-credentials.dat").read_bytes(), b"synthetic-opaque-ocr-file-must-not-be-read")
         self.network.assert_not_called()
