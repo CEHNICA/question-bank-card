@@ -3271,7 +3271,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     primary = readers.primary_engine()
     checker = readers.checker_engine() if double_read else None
     if primary is None:
-        return {"state": Question.State.RED, "error": "没有配置所选主读模型的 API Key，无法读题", "flags": []}
+        # No request was ever sent, so this is a configuration state, not a
+        # service failure. It carries a category and the service that is
+        # missing, so the card can show it once and point at the right setting
+        # instead of guessing from the sentence.
+        readiness = readers.primary_readiness()
+        service = str(readiness.get("label") or readiness.get("selected") or "")
+        return {"state": Question.State.RED, "flags": [],
+            "error": f"所选主读模型“{service}”还没有 API Key，无法读题。" if service
+                else "所选主读模型还没有 API Key，无法读题。",
+            "error_kind": "reader_not_configured",
+            "error_service": str(readiness.get("selected") or ""),
+            "error_service_label": service,
+            "error_recoverable": True}
     if not snapshot["regions"]:
         return {"state": Question.State.RED, "flags": [],
                 "error": "没有切出这道题的原卷范围，请点“调整范围”在原卷上框出来"}
@@ -3960,11 +3972,25 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                 return
             # Failed OCR does not erase the original-image body. Its last
             # error remains visible, and another read requires an explicit request.
-            question.ocr_suggestion = {"revision": question.content_revision,
+            suggestion = {"revision": question.content_revision,
                 "paper_revision": revision, "error": (fields.get("error") or "识读未返回有效正文") if source_current
                 else "原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。",
                 "state": Question.State.RED}
-            question.error = question.ocr_suggestion["error"]
+            if fields.get("error_kind"):
+                suggestion["error_kind"] = fields["error_kind"]
+            if fields.get("error_service"):
+                suggestion["error_service"] = fields["error_service"]
+            if fields.get("error_service_label"):
+                suggestion["error_service_label"] = fields["error_service_label"]
+            question.ocr_suggestion = suggestion
+            # The card strip and the AI panel read two different fields, so the
+            # same sentence used to be rendered twice. A configuration problem
+            # is owned by ocr_suggestion alone; question.error stays empty so
+            # one failure is shown in one place.
+            if fields.get("error_kind") == "reader_not_configured":
+                question.error = ""
+            else:
+                question.error = suggestion["error"]
             for key in ("read_a", "read_b", "read_c"):
                 if key in fields:
                     setattr(question, key, fields[key])

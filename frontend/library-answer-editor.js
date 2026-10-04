@@ -1,4 +1,4 @@
-/* One answer editor for the library and the current paper. Nothing exports until saved. */
+﻿/* One answer editor for the library and the current paper. Nothing exports until saved. */
 ((root) => {
   "use strict";
   function create({ node, QB, notify, confirm, onSaved }) {
@@ -6,6 +6,7 @@
     let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map();
     let token = 0, epoch = 0, loading = false, saving = false, uploading = false, queueing = false, cancelling = false, polling = false, closing = false;
     let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
+let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPreview = false, positionArmed = false;
     let apiSettings = null, checkingApi = false, apiSettingsError = "";
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
@@ -34,6 +35,8 @@
     const post = (url, value, options = {}) => api(url, { method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify(value), ...options });
     function stopWaiting() {
       root.clearTimeout(pollTimer); root.clearTimeout(previewTimer);
+      if (positionFrame) { root.cancelAnimationFrame?.(positionFrame); positionFrame = 0; }
+      userScrolledPreview = false;
       for (const [controller, request] of requests) if (!request.keepAfterClose) controller.abort();
     }
     function schedulePreview() { root.clearTimeout(previewTimer); previewTimer = root.setTimeout(() => { if (dialog?.open && current) renderPreview(); }, 120); }
@@ -130,8 +133,26 @@
       workspace.append(inputColumn, previewColumn);
       panel.append(status, question, workspace, origin, footer);
       main.append(nav, panel); dialog.append(head, main); document.body.append(dialog);
-      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, footer, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
+      // Display caret and selection, the same idea as the review 改字 editor.
+      // Moving the caret or selecting text is not an edit: it must not set
+      // dirty, must not create a history entry and must never reach a payload.
+      const FIELDS = [[answer, "answer"], [analysis, "analysis"]];
+      for (const [input, field] of FIELDS) {
+        for (const type of ["focus", "click", "select", "keyup", "pointerup"]) {
+          input.addEventListener(type, () => {
+            lastField = field; positionArmed = true; userScrolledPreview = false; updatePosition();
+          });
+        }
+        input.addEventListener("compositionstart", () => { composing = true; });
+        input.addEventListener("compositionend", () => { composing = false; updatePosition(); });
+      }
+      // The user browsing the preview by hand must not be fought: following
+      // resumes the moment the caret moves again.
+      controls.previewColumn.addEventListener("pointerdown", () => { userScrolledPreview = false; updatePosition(); });
+      controls.previewColumn.addEventListener("wheel", () => { userScrolledPreview = true; }, { passive: true });
+      controls.previewColumn.addEventListener("scroll", () => { userScrolledPreview = true; });
       dialog.addEventListener("paste", event => {
         const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
         if (files.length) { event.preventDefault(); void uploadFiles(files); }
@@ -242,14 +263,56 @@
       controls.history.replaceChildren(node("option", "", "查看已保存的解析版本"));
       (current.history || []).forEach((record, index) => { const option = node("option", "", `${index + 1}. ${record.created_at ? new Date(record.created_at).toLocaleString("zh-CN", { hour12: false }) : "已保存版本"}`); option.value = record.id; controls.history.append(option); });
       controls.history.hidden = !current.history?.length;
+      positionArmed = false; lastField = "analysis";
       controls.aiDraft.hidden = !current.suggestion;
       if (current.suggestion) S.render(controls.aiPreview, current.suggestion, { node, QB });
       renderFigures(); renderPreview();
     }
+    // The display caret and selection block live only in this preview. The
+    // markers are aria-hidden and pointer-transparent, and nothing here writes
+    // back into the textarea, so the real input position is always the box.
+    function showPosition() {
+      if (!current || !dialog?.open || !controls?.preview || !positionArmed) return;
+      const field = controls[lastField];
+      if (!field) return;
+      const result = QB.previewSelection?.(controls.preview, {
+        field: lastField, start: field.selectionStart ?? 0, end: field.selectionEnd ?? 0
+      });
+      controls.preview.dataset.activeField = lastField;
+      if (!result || userScrolledPreview) return;
+      // Contain the scroll inside the preview column. A target too tall to fit
+      // is left alone rather than yanked: the fragment is the useful part.
+      const column = controls.previewColumn;
+      const target = controls.preview.querySelector(".qb-preview-active-symbol")
+        || controls.preview.querySelector(".qb-preview-caret,.qb-preview-selection,.qb-preview-active-formula,.qb-preview-active-region");
+      if (!target || !column) return;
+      const box = target.getBoundingClientRect(), area = column.getBoundingClientRect(), margin = 10;
+      if (box.height < column.clientHeight - 20) {
+        if (box.top < area.top + margin) column.scrollTop -= area.top + margin - box.top;
+        else if (box.bottom > area.bottom - margin) column.scrollTop += box.bottom - (area.bottom - margin);
+      }
+      if (box.left < area.left + margin) column.scrollLeft -= area.left + margin - box.left;
+      else if (box.right > area.right - margin) column.scrollLeft += box.right - (area.right - margin);
+    }
+    function updatePosition() {
+      if (positionFrame) root.cancelAnimationFrame?.(positionFrame);
+      if (root.requestAnimationFrame) positionFrame = root.requestAnimationFrame(() => { positionFrame = 0; showPosition(); });
+      else showPosition();
+    }
     function renderPreview() {
       if (!current) return;
-      S.render(controls.preview, current.value, { node, QB });
+      const column = controls.previewColumn;
+      // Keep the reader where they were: a re-render must not jump the preview
+      // while they are reading a specific line.
+      const keepTop = column ? column.scrollTop : 0, keepLeft = column ? column.scrollLeft : 0;
+      S.render(controls.preview, current.value, { node, QB, subQuestions: true, trackSource: true });
+      if (column) { column.scrollTop = keepTop; column.scrollLeft = keepLeft; }
       updateEditStatus();
+      if (positionArmed) showPosition();
+      // Until the reader touches a field again there is no position to show,
+      // and a marker left over from the previous question must not survive the
+      // switch. previewSelection cleans its own markers when given no offset.
+      else QB.previewSelection?.(controls.preview, { field: lastField, start: null, end: null });
     }
     function updateEditStatus() {
       if (!current) return;

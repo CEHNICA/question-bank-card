@@ -60,13 +60,62 @@
     if (job.executor === "assistant") return "保留旧生成任务，未自动重新提交";
     return job.status === "running" ? "AI 正在解题" : "AI 任务排队中";
   }
-  function render(container, value, { node, QB, label = true, empty = "尚未补充答案解析" } = {}) {
+  // Split the analysis on blank lines while keeping each paragraph's offset in
+  // the whole field. A preview that tracks a selection needs those offsets to
+  // be global: paragraph 2 and 3 must not restart at zero.
+  function analysisParagraphs(value) {
+    const source = text(value);
+    const parts = [];
+    const pattern = /\n\s*\n/g;
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      const chunk = source.slice(cursor, match.index);
+      if (chunk.trim()) parts.push({ text: chunk, offset: cursor });
+      cursor = match.index + match[0].length;
+    }
+    const tail = source.slice(cursor);
+    if (tail.trim()) parts.push({ text: tail, offset: cursor });
+    return parts;
+  }
+
+  // `subQuestions` is a screen-only display layer. It is opt-in so the print
+  // and PDF path, which shares this function, keeps its current pagination:
+  // the stored string, the paragraph numbering and the image anchors are all
+  // identical either way. `trackSource` is only for the editing preview; it
+  // adds data attributes for the display caret and never reaches a payload.
+  function render(container, value, { node, QB, label = true, empty = "尚未补充答案解析",
+    subQuestions = false, trackSource = false } = {}) {
     container.replaceChildren();
     if (!hasContent(value)) { container.append(node("p", "helper", empty)); return; }
     if (text(value.answer).trim()) {
       const answer = node("div", "solution-result");
       if (label) answer.append(node("strong", "solution-label", "答案："));
-      const body = node("span"); QB.renderTypeset(body, value.answer); answer.append(body); container.append(answer);
+      const parts = subQuestions ? QB.subQuestionParts?.(value.answer) : null;
+      if (parts && parts.length) {
+        const list = node("div", "qb-subquestions");
+        parts.forEach((part) => {
+          const item = node("div", "qb-subquestion");
+          if (part.lead) { const lead = node("span", "qb-subquestion-lead"); QB.renderTypeset(lead, part.lead); item.append(lead); }
+          item.append(node("span", "qb-subquestion-label", part.label));
+          const body = node("span", "qb-subquestion-body");
+          QB.renderTypeset(body, part.body);
+          item.append(body);
+          list.append(item);
+        });
+        answer.append(list);
+      } else if (trackSource) {
+        // One owner element for the whole field: previewSelection resolves the
+        // scope with the first match, so per-paragraph ownership would break
+        // everything after the first paragraph.
+        const body = node("span");
+        body.dataset.qbField = "answer";
+        QB.renderTypeset(body, value.answer, { trackSource: true, sourceOffset: 0 });
+        answer.append(body);
+      } else {
+        const body = node("span"); QB.renderTypeset(body, value.answer); answer.append(body);
+      }
+      container.append(answer);
     }
     const figures = figuresOf(value);
     const addFigure = figure => {
@@ -77,13 +126,20 @@
       box.append(image); container.append(box);
     };
     figures.filter(figure => figure.position === "before").forEach(addFigure);
-    const paragraphs = text(value.analysis).split(/\n\s*\n/).filter(part => part.trim());
-    if (paragraphs.length && label) container.append(node("strong", "solution-label", "解析："));
-    paragraphs.forEach((part, index) => {
-      const body = node("div", "qb-analysis solution-paragraph"); QB.renderTypeset(body, part); container.append(body);
+    const parts = analysisParagraphs(value.analysis);
+    if (parts.length && label) container.append(node("strong", "solution-label", "解析："));
+    const analysisHost = trackSource ? node("div", "qb-analysis-field") : container;
+    if (trackSource) {
+      analysisHost.dataset.qbField = "analysis";
+      if (parts.length) container.append(analysisHost);
+    }
+    parts.forEach((part, index) => {
+      const body = node("div", "qb-analysis solution-paragraph");
+      QB.renderTypeset(body, part.text, trackSource ? { trackSource: true, sourceOffset: part.offset } : undefined);
+      analysisHost.append(body);
       figures.filter(figure => figure.position === "paragraph" && figure.paragraph === index).forEach(addFigure);
     });
-    figures.filter(figure => figure.position === "after" || (figure.position === "paragraph" && figure.paragraph >= paragraphs.length)).forEach(addFigure);
+    figures.filter(figure => figure.position === "after" || (figure.position === "paragraph" && figure.paragraph >= parts.length)).forEach(addFigure);
   }
   return Object.freeze({ hasContent, selected, completeness, fixedSelections, draftSelections, figuresOf, editable, payload, signature, editorInitial, jobLabel, render });
 });

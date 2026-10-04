@@ -22,7 +22,11 @@ assert.match(reveal, /if \(!original && !ai && !saved\) return null;/);
 assert.match(reveal, /node\("span", "when-closed", "看答案"\), node\("span", "when-open", "收起答案"\)/);
 assert.match(reveal, /QB\.answerRows\(document, content\)/);
 assert.match(reveal, /"AI 参考答案 · 未核对"/);
-assert.match(reveal, /solutions\.render\(body, saved, \{ node, QB \}\)/);
+// The saved solution renders through the shared renderer, with the screen-only
+// sub-question display layer switched on. The print path must stay off it.
+assert.match(reveal, /solutions\.render\(body, saved, \{ node, QB, subQuestions: true \}\)/);
+const printRow = js.slice(js.indexOf("function printAnswerRow"), js.indexOf("function printAnswerRow") + 900);
+assert.doesNotMatch(printRow, /subQuestions/, "the print/PDF path keeps its current pagination");
 // What is open stays open when the list redraws.
 assert.match(reveal, /box\.open = state\.opened\.has\(item\.id\);/);
 assert.match(js, /state\.opened\.has\(item\.id\), state\.tag\]\);/);

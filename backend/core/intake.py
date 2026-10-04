@@ -184,6 +184,7 @@ def _select_manual_locked(paper: Paper, pages: list[int], *, whole: bool) -> Pap
     paper.save(update_fields=["processing_plan", "status", "error", "updated_at"])
     for question in paper.questions.select_for_update():
         if whole or any(r["page_idx"] in pages for r in question.regions):
+            was_queued = question.ocr_pending or question.reread_requested
             question.processing_mode = "manual"
             question.content_revision += 1
             question.reread_requested = False
@@ -192,7 +193,13 @@ def _select_manual_locked(paper: Paper, pages: list[int], *, whole: bool) -> Pap
                 question.state = Question.State.YELLOW
                 if not question.stem.strip():
                     question.body_mode = "source_image"
-            question.save(update_fields=["processing_mode", "content_revision", "reread_requested", "ocr_pending", "state", "body_mode", "updated_at"])
+            # The card is no longer waiting for a read, so a last reading failure
+            # would keep a “无法读题” sentence on a card that now only needs a
+            # human to check the original image.  The record itself stays in
+            # ocr_suggestion and in 识读记录.
+            if was_queued:
+                question.error = ""
+            question.save(update_fields=["processing_mode", "content_revision", "reread_requested", "ocr_pending", "state", "body_mode", "error", "updated_at"])
     _ensure_manual_group(paper)
     return paper
 

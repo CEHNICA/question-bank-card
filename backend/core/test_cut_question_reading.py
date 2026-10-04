@@ -112,7 +112,7 @@ class CutQuestionReadingTests(TestCase):
             result = self.post()
             self.assertEqual(pipeline.process_rereads(), 0)
         self.assertEqual(result.status_code, 409)
-        self.assertIn("设置 → 读题服务", result.json()["error"])
+        self.assertIn("设置 → API 配置", result.json()["error"])
         self.assertEqual(Question.objects.values().get(pk=question.pk), before)
         model.assert_not_called()
 

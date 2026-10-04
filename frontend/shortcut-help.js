@@ -64,6 +64,68 @@
   function element(doc, tag, cls, text) {
     const value = doc.createElement(tag); if (cls) value.className = cls; if (text !== undefined) value.textContent = text; return value;
   }
+
+  // Optional operating guidance is a preference of its own. It deliberately
+  // does not share a key with the crop banner or the review onboarding, so
+  // turning one of those off can never silently switch off another, and
+  // restoring the guidance can never look like a settings change.
+  const DISMISSED_PREF = "qb-hint-dismissed";
+  const CATEGORY_LABELS = {
+    review: "录入审核快捷键", "review-compare": "放大对照快捷键", crop: "切题与配图快捷键",
+    library: "题库与全屏看题提示", answers: "答案编辑快捷键", print: "组卷导出快捷键",
+    "reading-overflow": "公式横向查看提示", "preview-note": "题卡全屏看题提示",
+    "editor-position": "改字预览位置说明", "editor-shortcut": "改字保存快捷键说明"
+  };
+  function store() { try { return root.localStorage || null; } catch { return null; } }
+  // Not every host that loads this file has a full event target (the test
+  // harnesses do not), so announcing a change is always best effort.
+  function fire(name, detail) {
+    try {
+      if (typeof root.dispatchEvent === "function" && typeof root.CustomEvent === "function") {
+        root.dispatchEvent(new root.CustomEvent(name, { detail }));
+      }
+    } catch { /* no event target here */ }
+  }
+  function readDismissed() {
+    const box = store(); if (!box) return [];
+    try {
+      const parsed = JSON.parse(box.getItem(DISMISSED_PREF) || "[]");
+      return Array.isArray(parsed) ? parsed.filter(name => typeof name === "string") : [];
+    } catch { return []; }
+  }
+  function writeDismissed(names) {
+    const box = store(); if (!box) return false;
+    try {
+      const unique = [...new Set(names)].filter(name => Object.hasOwn(CATEGORY_LABELS, name));
+      if (unique.length) box.setItem(DISMISSED_PREF, JSON.stringify(unique));
+      else box.removeItem(DISMISSED_PREF);
+      return true;
+    } catch { return false; }
+  }
+  // Storage can be unavailable or full. A dismissal that cannot be persisted
+  // still has to work for this session, so keep an in-memory copy as well.
+  let sessionOnly = [];
+  function dismissedNames() { return [...new Set([...readDismissed(), ...sessionOnly])]; }
+  function hintDismissed(category) { return dismissedNames().includes(category); }
+  function dismissHint(category) {
+    if (!writeDismissed([...dismissedNames(), category]) && !sessionOnly.includes(category)) sessionOnly.push(category);
+  }
+  function restoreHints(category) {
+    if (category) {
+      const kept = dismissedNames().filter(name => name !== category);
+      sessionOnly = sessionOnly.filter(name => name !== category);
+      writeDismissed(kept);
+    } else {
+      sessionOnly = []; writeDismissed([]);
+    }
+  }
+  function dismissedCategories() { return dismissedNames().filter(name => Object.hasOwn(CATEGORY_LABELS, name)); }
+  function categoryFor(scene, options = {}) {
+    if (!Object.hasOwn(TITLES, scene)) scene = "review";
+    if (scene === "review") return options.comparison ? "review-compare" : "review";
+    return scene;
+  }
+
   function keyRow(doc, item) {
     const value = element(doc, "div", "key-row"), keys = element(doc, "span");
     value.append(element(doc, "span", "", item.label), keys);
@@ -76,17 +138,61 @@
     list.append(element(doc, "p", "shortcut-note", info.extra), element(doc, "p", "shortcut-note", info.note));
     return list;
   }
+  function referenceButton(doc, scene, options, label) {
+    const view = element(doc, "button", "button quiet small", label || "查看完整说明");
+    view.type = "button";
+    view.addEventListener("click", () => open(scene, options));
+    return view;
+  }
+  // Dismissed guidance must not come back on the next render, and it must not
+  // leave a blank strip behind either. Reading the preference here -- inside
+  // the mount that every surface re-runs -- is what makes a question switch, a
+  // page change or a new window honour it.
   function mountHint(host, scene, options = {}) {
     if (!host?.ownerDocument) return null;
     host.removeAttribute("aria-hidden");
-    const doc = host.ownerDocument, info = reference(scene, options), details = element(doc, "details", "shortcut-hint");
+    host.hidden = false;
+    const doc = host.ownerDocument, info = reference(scene, options);
+    const category = categoryFor(scene, options);
+    const details = element(doc, "details", "shortcut-hint");
+    if (hintDismissed(category)) {
+      details.classList.add("shortcut-hint-off");
+      const summary = element(doc, "summary", "shortcut-hint-summary");
+      summary.setAttribute("aria-label", `${info.title}操作说明；快捷键提示已永久关闭`);
+      summary.append(element(doc, "span", "shortcut-expand-label", "操作说明"));
+      const panel = element(doc, "div", "shortcut-hint-panel");
+      panel.append(element(doc, "p", "shortcut-note", "这一处的操作提示已永久关闭，快捷键仍然可用。"),
+        referenceButton(doc, scene, options, "查看完整说明"));
+      details.append(summary, panel);
+      host.replaceChildren(details);
+      return details;
+    }
     const summary = element(doc, "summary", "shortcut-hint-summary");
     summary.setAttribute("aria-label", `${info.title}快捷键，展开完整说明`);
     info.primary.forEach(item => { const part = element(doc, "span", "shortcut-quick-key"); item.keys.forEach(key => part.append(element(doc, "kbd", "", key))); part.append(doc.createTextNode(` ${item.label}`)); summary.append(part); });
     summary.append(element(doc, "span", "shortcut-expand-label", "完整说明"));
     const panel = element(doc, "div", "shortcut-hint-panel"); panel.append(detailed(doc, info));
     const all = element(doc, "button", "button quiet small", "查看其他场景"); all.type = "button"; all.addEventListener("click", () => open(scene, options)); panel.append(all);
+    panel.append(dismissButton(doc, category, host));
     details.append(summary, panel); host.replaceChildren(details); return details;
+  }
+  function dismissButton(doc, category, host) {
+    const off = element(doc, "button", "button quiet small", "以后不再提示");
+    off.type = "button";
+    off.title = `不再显示${CATEGORY_LABELS[category] || "这一处提示"}；快捷键仍然有效，可在帮助中恢复`;
+    off.addEventListener("click", () => {
+      dismissHint(category);
+      // Collapse the host so the strip leaves no gap, and let every other
+      // surface re-read the preference now rather than on its next render.
+      if (host) { host.replaceChildren(); host.hidden = true; }
+      const view = root.document?.getElementById("keysDialog");
+      if (view?.open) view.close();
+      // A dismissal is a preference, not a settings edit: it must never make
+      // the API configuration look like it is waiting to be saved.
+      root.document?.querySelectorAll("[data-model-save-result]").forEach(node => { node.textContent = ""; });
+      fire("qb:hint-dismissed", { category });
+    });
+    return off;
   }
   function open(scene = "review", options = {}) {
     const doc = root.document; if (!doc) return false;
@@ -114,8 +220,29 @@
       const more = element(doc, "details", "shortcut-details"); more.append(element(doc, "summary", "", "展开完整说明"), detailed(doc, info));
       content.replaceChildren(heading, quick, more);
     };
-    picker.value = Object.hasOwn(TITLES, scene) ? scene : "review"; picker.addEventListener("change", render); choose.append(picker); body.replaceChildren(choose, content); render();
+    picker.value = Object.hasOwn(TITLES, scene) ? scene : "review"; picker.addEventListener("change", render); choose.append(picker);
+    // Restoring belongs here: this dialog is the one place every surface can
+    // still reach, so a permanently hidden hint is never a one-way door.
+    const restoreRow = element(doc, "div", "shortcut-restore-row");
+    const renderRestore = () => {
+      const off = dismissedCategories();
+      const note = element(doc, "p", "shortcut-note",
+        off.length ? `已关闭：${off.map(name => CATEGORY_LABELS[name]).join("、")}`
+          : "当前没有被永久关闭的操作提示。");
+      const back = element(doc, "button", "button quiet small", "恢复全部操作提示");
+      back.type = "button"; back.disabled = !off.length;
+      back.addEventListener("click", () => {
+        restoreHints();
+        fire("qb:hints-restored");
+        renderRestore();
+      });
+      restoreRow.replaceChildren(note, back);
+    };
+    renderRestore();
+    body.replaceChildren(choose, content, restoreRow); render();
     if (!dialog.open) dialog.showModal(); return true;
   }
-  return { reference, mountHint, open, isEditingTarget, ordinaryKeyBlocked };
+  return { reference, mountHint, open, isEditingTarget, ordinaryKeyBlocked,
+    DISMISSED_PREF, CATEGORY_LABELS, categoryFor, hintDismissed, dismissHint,
+    restoreHints, dismissedCategories };
 });

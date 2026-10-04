@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 题库公共排版与比对模块（审核页和正式题库页共用）。
  *
  * 三条原则：
@@ -733,6 +733,68 @@
   // Mapping exists only in the edit preview. It never changes the source text.
   const previewSourceRanges = new WeakMap();
 
+  const SUB_QUESTION_PATTERN = /[（(]\s*(\d{1,2})\s*[）)]/g;
+  const SUB_QUESTION_SEPARATOR = /[\s　；;，,、。.：:]/;
+  const trimForward = (source, from, to) => {
+    let index = from;
+    while (index < to && SUB_QUESTION_SEPARATOR.test(source[index])) index += 1;
+    return index;
+  };
+  const trimBack = (source, from, to) => {
+    let index = to;
+    while (index > from && SUB_QUESTION_SEPARATOR.test(source[index - 1])) index -= 1;
+    return index;
+  };
+
+  /**
+   * Split a run of text that already carries explicit "(1) ... (2) ..." markers
+   * into display blocks. This is a display concern only: the original string,
+   * its paragraph numbering and every image anchor stay exactly as they were.
+   *
+   * A marker is only accepted when it lies wholly inside ordinary text. A "(1)"
+   * inside `$...$`, a coordinate such as "(1,2)", a matrix row or a bracket
+   * segment is therefore never treated as a sub-question, and the numbering
+   * must run 1, 2, 3 ... so a stray "(2)" can never start a block either.
+   * Returns [] when the text should stay a single block.
+   */
+  function subQuestionParts(value) {
+    const source = String(value ?? "");
+    if (!source.trim() || source.length > 20000) return [];
+    const segments = typesetSegments(source);
+    const plain = new Array(source.length).fill(false);
+    for (const segment of segments) {
+      if (segment.type !== "text") continue;
+      for (let index = segment.start; index < segment.end; index += 1) plain[index] = true;
+    }
+    const candidates = [];
+    SUB_QUESTION_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = SUB_QUESTION_PATTERN.exec(source)) !== null) {
+      const start = match.index, end = start + match[0].length;
+      if (!plain.slice(start, end).every(Boolean)) continue;
+      candidates.push({ start, end, label: match[0].trim(), number: Number(match[1]) });
+    }
+    const kept = [];
+    for (const candidate of candidates) {
+      if (!kept.length) {
+        if (candidate.number === 1) kept.push(candidate);
+        continue;
+      }
+      if (candidate.number === kept[kept.length - 1].number + 1) { kept.push(candidate); continue; }
+      if (candidate.number === 1) { kept.length = 0; kept.push(candidate); continue; }
+      break;
+    }
+    if (kept.length < 2) return [];
+    // Only `offset` is a position: it is where `body` starts in the source, so
+    // a caller tracking selection offsets can add the paragraph's own base.
+    return kept.map((marker, index) => {
+      const lead = index === 0 ? source.slice(0, marker.start) : "";
+      const to = index === kept.length - 1 ? source.length : trimBack(source, marker.end, kept[index + 1].start);
+      const bodyStart = trimForward(source, marker.end, Math.max(marker.end, to));
+      return { label: marker.label, lead, offset: bodyStart, body: source.slice(bodyStart, Math.max(bodyStart, to)) };
+    });
+  }
+
   function previewTextOffsets(raw, shown) {
     const offsets = [];
     let cursor = 0;
@@ -756,10 +818,10 @@
     return node;
   }
 
-  function renderTable(doc, table, marks, { trackSource = false } = {}) {
+  function renderTable(doc, table, marks, { trackSource = false } = {}, baseOffset = 0) {
     const wrap = doc.createElement("span");
     wrap.className = "qb-table-wrap";
-    if (trackSource) previewSource(wrap, table.start, table.end, "table");
+    if (trackSource) previewSource(wrap, baseOffset + table.start, baseOffset + table.end, "table");
     const element = doc.createElement("table");
     element.className = "qb-table";
     const width = Math.max(...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colspan || 1), 0)));
@@ -774,13 +836,13 @@
         const hits = marks.filter((mark) => mark.end > cell.start && mark.start < cell.end);
         if (cell.decoded) {
           renderTypesetText(td, cell.text, { empty: "" });
-          if (trackSource) previewSource(td, cell.start, cell.end, "table-cell");
+          if (trackSource) previewSource(td, baseOffset + cell.start, baseOffset + cell.end, "table-cell");
           if (hits.length) td.classList.add("qb-cell-marked");
         } else {
           const text = cell.text.replace(/\\\|/g, "|");
           const shifted = text === cell.text ? hits.map((mark) => ({ ...mark, start: mark.start - cell.start, end: mark.end - cell.start })) : [];
-          renderTypesetText(td, text, { marks: shifted, empty: "", trackSource: trackSource && text === cell.text, sourceOffset: cell.start });
-          if (trackSource && text !== cell.text) previewSource(td, cell.start, cell.end, "table-cell");
+          renderTypesetText(td, text, { marks: shifted, empty: "", trackSource: trackSource && text === cell.text, sourceOffset: baseOffset + cell.start });
+          if (trackSource && text !== cell.text) previewSource(td, baseOffset + cell.start, baseOffset + cell.end, "table-cell");
           if (hits.length && !shifted.length) td.classList.add("qb-cell-marked");
         }
         td.classList.remove("qb-typeset", "is-empty");
@@ -816,10 +878,13 @@
       if (!source.slice(start, end).trim()) return;
       const run = doc.createElement("span");
       run.className = "qb-text-run";
+      // `start` is relative to this value; the caller's base offset has to be
+      // added or a paragraph rendered apart from the whole field would stamp
+      // its tracked positions at the wrong place in the source.
       renderTypesetText(run, source.slice(start, end), {
         empty: "",
         trackSource: options.trackSource,
-        sourceOffset: start,
+        sourceOffset: (options.sourceOffset || 0) + start,
         marks: marks.filter((mark) => mark.end > start && mark.start < end)
           .map((mark) => ({ ...mark, start: mark.start - start, end: mark.end - start }))
       });
@@ -828,7 +893,7 @@
     let cursor = 0;
     tables.forEach((table) => {
       text(cursor, table.start);
-      node.append(renderTable(doc, table, marks, options));
+      node.append(renderTable(doc, table, marks, options, options.sourceOffset || 0));
       cursor = table.end;
     });
     text(cursor, source.length);
@@ -1353,6 +1418,6 @@
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
     renderTypeset, renderLiteral, renderQuestion, answerRows, previewSelection, previewTextOffsets, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
-    tidiedMarks
+    tidiedMarks, subQuestionParts
   };
 });

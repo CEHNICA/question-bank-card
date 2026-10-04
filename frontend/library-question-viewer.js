@@ -1,4 +1,4 @@
-(function (root, factory) {
+﻿(function (root, factory) {
   "use strict";
   const value = factory(root);
   if (typeof module === "object" && module.exports) module.exports = value;
@@ -122,7 +122,7 @@
       if (!solutions.hasContent(value)) return;
       const part = node("section", `question-viewer-answer ${className}`.trim());
       part.append(node("h3", "", label));
-      const body = node("div"); solutions.render(body, value, { node, QB, empty: "原卷未提供" });
+      const body = node("div"); solutions.render(body, value, { node, QB, empty: "原卷未提供", subQuestions: true });
       part.append(body); target.append(part);
     }
     function renderAnswers(item, verified = null) {

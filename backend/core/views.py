@@ -708,6 +708,7 @@ def status(request):
         applied_preferences = None
     checker = readers.checker_engine(applied_preferences)
     primary = readers.primary_engine(applied_preferences)
+    readiness = readers.primary_readiness(applied_preferences)
     arbiter = readers.arbiter_engine(primary, checker, applied_preferences)
     engines = readers.engine_settings(applied_preferences)
     try:
@@ -738,6 +739,10 @@ def status(request):
         "arbiter": arbiter.label if arbiter else None,
         "independent_checker": bool(checker and primary and checker.provider != primary.provider),
         "engines": engines,
+        # Why the reader can or cannot run, so the page can say it once and point
+        # at the one service that is missing instead of waiting for a failed read.
+        "reader_readiness": {key: readiness[key] for key in
+                             ("ready", "reason", "selected", "label", "fallback_available")},
         "m3_available": m3import.m3_backend() is not None,
         "app_version": APP_VERSION,
     })
@@ -1747,9 +1752,10 @@ def paper_read_cut_questions(request, paper_id):
                 if expected_revision != question.content_revision:
                     return _error("所选题目的范围或内容已发生变化，请刷新后再识读", 409)
                 candidates.append(question)
-        if candidates and not _vision_ready():
-            return _error("AI 识读已切题目需要看图读题服务：请先在“设置 → 读题服务”中配置；"
-                          "也可以直接原图审核，或由当前 AI 助手对照原图改字。", 409)
+        if candidates and not _vision_ready(paper):
+            return _error(_reader_unavailable_sentence(paper)
+                + "请在“设置 → API 配置”里补上密钥；也可以直接原图审核，"
+                "或由当前 AI 助手对照原图改字。", 409)
         now = timezone.now()
         for question in candidates:
             # Same invalidation as a single reread, once per newly queued card.
@@ -2172,14 +2178,53 @@ def _question(question_id) -> Question:
     return get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
 
 
+def _saved_configuration() -> dict | None:
+    try:
+        return preferences.load_configuration() if preferences.preference_path().is_file() else None
+    except preferences.PreferenceError:
+        return None
+
+
+def _reader_scope(paper: Paper | None = None):
+    """The service scope this paper's reading worker will run in."""
+    return readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback")) if paper else False)
+
+
+def _reader_readiness(paper: Paper | None = None) -> dict:
+    """The same readiness answer the worker will give, for this paper.
+
+    An automatic import that fell back to manual keeps ``auto_fallback``, and
+    the worker then refuses to switch to another service.  Asking without that
+    context is how “请先配置一家看图读题模型” could be answered “可以读” and the
+    read still failed with “没有配置所选主读模型的 API Key”.
+    """
+    with _reader_scope(paper):
+        return readers.primary_readiness(_saved_configuration())
+
+
+def _vision_ready(paper: Paper | None = None) -> bool:
+    """A vision service can read this paper (框选识读 and 识读这题 both need one;
+    AI-assistant reading has none and is handled by its own branch)."""
+    with _reader_scope(paper):
+        return readers.primary_engine(_saved_configuration()) is not None
+
+
 def _reading_ready() -> bool:
     """A new paper can be read: some vision service has a key (the worker
     falls back to it), or the saved choice is AI-assistant reading."""
-    try:
-        configuration = preferences.load_configuration() if preferences.preference_path().is_file() else None
-    except preferences.PreferenceError:
-        configuration = None
-    return readers.primary_engine(configuration) is not None or readers.assistant_mode(configuration)
+    return _vision_ready() or readers.assistant_mode(_saved_configuration())
+
+
+def _reader_unavailable_sentence(paper: Paper | None) -> str:
+    """Name the service that is missing instead of “配置一家模型”.
+
+    A teacher can act on “MiniMax 还没有 API Key”; “请先配置一家看图读题模型”
+    makes them open the settings and compare lists themselves.  The original
+    image and every saved question stay either way.
+    """
+    service = str(_reader_readiness(paper).get("label") or "")
+    return (f"还没有可用的看图读题模型：所选的“{service}”还没有 API Key，这轮不会换用别的服务。" if service
+        else "还没有可用的看图读题模型，这轮不会换用别的服务。")
 
 
 def _clear_approval(question: Question) -> None:
@@ -2226,15 +2271,6 @@ def _apply_figure_review(question: Question, review: dict) -> None:
         )
     if question.state in library.REVIEWABLE_STATES:
         question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
-
-
-def _vision_ready() -> bool:
-    """Some vision service has a key (框选识读 needs one; AI-assistant reading has none)."""
-    try:
-        configuration = preferences.load_configuration() if preferences.preference_path().is_file() else None
-    except preferences.PreferenceError:
-        configuration = None
-    return readers.primary_engine(configuration) is not None
 
 
 @csrf_exempt
@@ -2286,7 +2322,7 @@ def question_region_read(request, question_id):
     bbox = _valid_bbox(payload.get("bbox"))
     if bbox is None or bbox[2] - bbox[0] < 4 or bbox[3] - bbox[1] < 2:
         return _error("框太小了，请框住要识读的整行字")
-    if not _vision_ready():
+    if not _vision_ready(question.paper):
         return _error(region_reads.NO_ENGINE)
     with transaction.atomic():
         question = get_object_or_404(Question.objects.select_for_update().select_related("paper"), pk=question_id)
@@ -2468,8 +2504,9 @@ def question_action(request, question_id, action: str):
                     and payload.get("force") is not True):
                 return _error("这道题已由使用者人工通过；需要使用者明确要求重新识读，才能撤销当前审核。", 409)
             if (source_images.is_image(question) or question.processing_mode == "manual") and (
-                    not _vision_ready() or readers.assistant_mode()):
-                return _error("请先配置一家看图读题模型；也可以直接由当前 AI 助手对照原图改字。", 409)
+                    not _vision_ready(question.paper) or readers.assistant_mode()):
+                return _error(_reader_unavailable_sentence(question.paper)
+                    + "请在“设置 → API 配置”里补上密钥后重新识读；也可以直接由当前 AI 助手对照原图改字，原图始终保留。", 409)
             if not source_images.is_image(question):
                 question.edited = False
             current_review = question.figure_review if isinstance(question.figure_review, dict) else {}

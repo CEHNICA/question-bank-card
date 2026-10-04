@@ -272,17 +272,55 @@ def _first_configured(order, configuration: dict | None = None, *, skip: str = "
     return None
 
 
+def primary_readiness(configuration: dict | None = None) -> dict:
+    """Why the primary reader can or cannot be used, in one place.
+
+    The entry points and the worker used to answer this question separately:
+    the entry point fell back to any configured service while the worker, under
+    ``selected_services_only``, refused. That is how a photo could be reported
+    as readable and then fail with “没有配置所选主读模型的 API Key”. Both now ask
+    here, and the answer says which service was actually chosen and whether a
+    usable fallback exists.
+    """
+    selected = _primary_selection(configuration)
+    label = _service_label(selected)
+    if selected == ASSISTANT:
+        return {"ready": False, "reason": "assistant_mode", "selected": selected, "label": label,
+                "engine": None, "fallback_available": False}
+    chosen = engine_by_key(selected, configuration)
+    if chosen is not None:
+        return {"ready": True, "reason": "", "selected": selected, "label": chosen.label,
+                "engine": chosen, "fallback_available": False}
+    if _SELECTED_SERVICES_ONLY.get():
+        # This round is allowed to use the selected service only. Saying so is
+        # what lets the UI point at the one service that is not ready instead
+        # of sending the reader somewhere the user did not authorise.
+        return {"ready": False, "reason": "selected_not_configured", "selected": selected,
+                "label": label, "engine": None, "fallback_available": False}
+    fallback = _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
+    return {"ready": fallback is not None, "reason": "" if fallback else "none_configured",
+            "selected": selected, "label": label, "engine": fallback,
+            "fallback_available": fallback is not None}
+
+
+def _service_label(key: str) -> str:
+    """The provider name a teacher would recognise, for the message they read.
+
+    “所选主读模型” told them something was wrong but not which key to paste, so
+    they had to open the settings and compare lists themselves.
+    """
+    if key == ASSISTANT:
+        return "AI 助手读题"
+    provider = ENGINE_CHOICES.get(key)
+    spec = provider_catalog.VISION.get(provider) if provider else None
+    return str(spec["label"]) if spec else (provider or key)
+
+
 def primary_engine(configuration: dict | None = None) -> Engine | None:
     """The first reader.  When the chosen service has no key, the first one in
     provider_catalog.PRIMARY_ORDER that has a key reads instead, so a teacher
     who only filled the free 魔搭 key never meets “没有配置主读模型”."""
-    selected = _primary_selection(configuration)
-    if selected == ASSISTANT:
-        return None
-    chosen = engine_by_key(selected, configuration)
-    if chosen is not None or _SELECTED_SERVICES_ONLY.get():
-        return chosen
-    return _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
+    return primary_readiness(configuration)["engine"]
 
 
 def checker_engine(configuration: dict | None = None) -> Engine | None:

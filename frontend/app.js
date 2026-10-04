@@ -1629,11 +1629,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsRestoreHints").addEventListener("click", () => {
     reviewGuidance.restore();
     setCropGuidanceEnabled(true);
+    window.QBShortcutHelp?.restoreHints?.();
     renderReviewGuidance();
-    toast("审核与画框操作提示已恢复");
+    toast("审核、画框和各处操作提示已恢复");
   });
   window.addEventListener("storage", (event) => {
     if (["qb-review-guidance-seen", "qb-review-guidance-disabled"].includes(event.key)) renderReviewGuidance();
+    if (event.key === window.QBShortcutHelp?.DISMISSED_PREF) {
+      window.QBShortcutHelp?.mountHint?.($("toolbar").querySelector(".key-hints"), "review");
+      window.QBShortcutHelp?.mountHint?.($("viewerDialog").querySelector(".key-hints"), "review", { comparison: true });
+    }
+  });
+  // A hint dismissed in one window has to disappear in the others too, and a
+  // restore has to take effect everywhere, not only where it was clicked.
+  window.addEventListener("qb:hints-restored", () => {
+    window.QBShortcutHelp?.mountHint?.($("toolbar").querySelector(".key-hints"), "review");
+    window.QBShortcutHelp?.mountHint?.($("viewerDialog").querySelector(".key-hints"), "review", { comparison: true });
+    if (typeof dialog !== "undefined" && dialog.active) configureCropActions();
   });
 
   function renderPaper() {
@@ -3440,11 +3452,29 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (difference.observedOnly.length) return "两次识读不一致；当前稿没有可标黄的文字，另一读法多出的内容见下方";
       return "识读记录中曾有出入；可在“更多 → 查看识读记录”中查看。";
     });
-    if (!flags.length && !q.error) return null;
+    // 同一句失败原本出现在两处：题卡上的这串提示，和原图下面“AI 识读结果”
+    // 面板里的那句。识读失败只由那个面板负责，这里不再重复。
+    const suggested = q.body_mode === "source_image" && q.ocr_suggestion
+      && Object.keys(q.ocr_suggestion).length ? q.ocr_suggestion.error : "";
+    const owned = suggested && suggested === q.error ? q.error : "";
+    if (!flags.length && (!q.error || owned)) return null;
     const list = el("ul", "flags");
-    if (q.error) list.append(el("li", "", q.error));
+    if (q.error && !owned) list.append(el("li", "", q.error));
     flags.forEach((flag) => list.append(flagItem(flag)));
     return list;
+  }
+
+  // 识读没跑起来的原因是密钥没配，不是这张题有问题。所以这里说清是哪一家
+  // 服务、原图还在，并给一个直接打开本机 API 配置窗口的入口；原图审核流程不变。
+  function readerConfigEntry(suggestion) {
+    const service = String(suggestion.error_service_label || "").trim();
+    const box = el("div", "reading-suggestion-actions");
+    box.append(el("p", "hint", `${service ? `“${service}”` : "看图读题服务"}还没有 API Key，所以这次识读没有发出请求。`
+      + "原卷、已切好的题目和人工改过的内容都保留着：配好密钥后可以直接重新识读，"
+      + "也可以先对照原图审核或改字，不影响这一份资料。"));
+    box.append(button("打开 API 配置", "small primary", () => openCredentialSettings("reading"),
+      "在本机填写这家的 API Key；填好后回到题卡点“重新 AI 识读”即可"));
+    return box;
   }
 
   // “…当销售【单】价为1…（MinerU：定）”: the disputed characters stand out.
@@ -3697,9 +3727,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     );
     if (q.body_mode === "source_image") {
       const read = button(q.ocr_pending ? "AI 识读中……" : QBCutReading.hasCurrentReading(q) ? "重新 AI 识读" : "AI 识读这题", "primary", () => rereadQuestion(q), "直接读取这道题已保存的全部片段，无需重新框选；识读文字会显示在原图旁供你审核");
+      // A missing key is certain before the click, so the button says so instead
+      // of accepting the request and reporting the same sentence twice.
+      const notReady = readerUnavailable();
       read.disabled = Boolean(q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
-        || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready");
-      if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
+        || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready") || Boolean(notReady);
+      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
+      else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
       actions.append(read);
     }
     const more = el("details", "more");
@@ -3731,6 +3765,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (suggestion.error || !String(suggestion.stem || "").trim()) {
       panel.append(el("p", "hint", suggestion.error || "没有读到完整题干，请保留原图并核对范围。"));
+      if (suggestion.error_kind === "reader_not_configured") panel.append(readerConfigEntry(suggestion));
       return panel;
     }
     const preview = el("div", "reading-suggestion-body");
@@ -5400,13 +5435,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 下面，和原卷上下对照；截图太高、上下堆叠或窄屏时放在题干输入框下面。
     const previewBox = el("div", "editor-preview-box");
     const preview = el("div", "editor-preview");
-    const positionHint = el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
+    // These two lines only explain what is already happening. They can be
+    // switched off permanently; the position markers they describe and the
+    // save shortcut they mention keep working either way.
+    const positionHint = window.QBShortcutHelp?.hintDismissed?.("editor-position")
+      ? el("p", "editor-position-hint", "") : el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
+    positionHint.hidden = !positionHint.textContent;
     previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), positionHint, preview);
     const saveButton = el("button", "button primary", "保存");
     saveButton.type = "submit";
     const cancel = button("取消", "", () => discardEdits([q.id]));
     const bar = el("div", "editor-actions");
-    bar.append(saveButton, cancel, el("p", "hint", "Ctrl+Enter 保存 · Esc 取消"));
+    const shortcutNote = window.QBShortcutHelp?.hintDismissed?.("editor-shortcut")
+      ? null : el("p", "hint", "Ctrl+Enter 保存 · Esc 取消");
+    bar.append(saveButton, cancel);
+    if (shortcutNote) bar.append(shortcutNote);
     editor.append(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
 
     const collect = () => ({
@@ -5499,8 +5542,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     const relayout = () => { fitStem(); placePreview(); updatePosition(); };
     editor.addEventListener("input", update);
-    stem.addEventListener("input", fitStem);
+    // A taller stem changes the room the preview may use, and the original crop
+    // only knows its height once the image has loaded. Both used to leave the
+    // layout measured against a stale height until the window was resized.
+    stem.addEventListener("input", relayout);
     window.addEventListener("resize", relayout);
+    const shot = card.querySelector(".source-sticky .crop img, .source-sticky .crop");
+    if (shot && !shot.complete) shot.addEventListener("load", relayout, { once: true });
+    if (root.ResizeObserver) {
+      const observer = new ResizeObserver(() => { fitStem(); placePreview(); });
+      observer.observe(stem);
+      editor.addEventListener("qb:editor-teardown", () => observer.disconnect(), { once: true });
+    }
     editor.addEventListener("keydown", (event) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey) return;
       if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); discardEdits([q.id]); }
@@ -5533,6 +5586,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       editGuard.release(q.id);
       state.editing.delete(q.id);
       card.classList.remove("editing");
+      editor.dispatchEvent(new Event("qb:editor-teardown"));
       cancelAnimationFrame(frame);
       cancelAnimationFrame(positionFrame);
       document.removeEventListener("selectionchange", selectionChanged);
@@ -6505,10 +6559,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return !menu.hidden;
   }
 
-  function closeFigureSlotMenu({ cancelPending = true, rerender = false } = {}) {
+  function closeFigureSlotMenu({ cancelPending = true, rerender = false, restoreFocus = true } = {}) {
     showCropGuide("");
     const menu = $("figureSlotMenu");
     const hadPending = Boolean(dialog.pendingFigure);
+    const menuHadFocus = menu.contains(document.activeElement);
     if (cancelPending) dialog.pendingFigure = null;
     dialog.slotTarget = null;
     dialog.slotAnchor = null;
@@ -6518,6 +6573,24 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     menu.style.left = "";
     menu.style.top = "";
     if (rerender && hadPending && $("pageDialog").open) renderStage();
+    // Hiding the popover takes the focus away with it, and the browser then
+    // leaves it on <body> -- outside the modal dialog. The cutting shortcuts
+    // only listen inside #pageDialog, so a stranded focus makes Ctrl+Enter
+    // look broken until the user clicks some blank space first.
+    if (restoreFocus && menuHadFocus && $("pageDialog").open) focusCropDialog();
+  }
+
+  // Keep the focus on a stable node inside the cutting dialog. The selected box
+  // is preferred because it is what the user just acted on and it already owns
+  // the arrow-key nudging; the canvas is the fallback when nothing is selected.
+  function focusCropDialog({ preferSelection = false } = {}) {
+    const stage = $("pageStage");
+    if (!stage || !$("pageDialog").open) return;
+    if (preferSelection && dialog.selected !== null && dialog.selected !== undefined) {
+      const box = stage.querySelector(`[data-box-index="${dialog.selected}"]`);
+      if (box) { box.focus({ preventScroll: true }); return; }
+    }
+    stage.focus({ preventScroll: true });
   }
 
   function positionFigureSlotMenu(anchor) {
@@ -6572,7 +6645,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (target.kind === "existing") {
       const box = dialog.boxes[target.index];
-      closeFigureSlotMenu({ cancelPending: false, rerender: false });
+      closeFigureSlotMenu({ cancelPending: false, rerender: false, restoreFocus: false });
       if (!box) return;
       if (slot === "join") {
         box.join = true;
@@ -6594,7 +6667,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     } else {
       const pending = target.box;
-      closeFigureSlotMenu({ cancelPending: false, rerender: false });
+      closeFigureSlotMenu({ cancelPending: false, rerender: false, restoreFocus: false });
       dialog.pendingFigure = null;
       if (slot === "irrelevant") {
         if (target.candidateKey) dialog.ignoredCandidates.add(target.candidateKey);
@@ -6617,6 +6690,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     }
     renderStage();
+    // renderStage rebuilds every box, so the focus has to be re-anchored after
+    // it; otherwise the shortcut that should save this very change is lost.
+    focusCropDialog({ preferSelection: true });
   }
 
   function selectFigureBox(surface, index) {
@@ -7724,6 +7800,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function automaticParseReady() {
     // upload_enabled includes local import and must never grant cloud access.
     return Boolean(state.status?.automatic_parse_ready);
+  }
+
+  // The backend answers this the same way the reading worker will, so a card can
+  // say “no key for the service you chose” before the request instead of after.
+  function readerUnavailable() {
+    const readiness = state.status?.reader_readiness;
+    return readiness && readiness.ready === false ? readiness : null;
   }
 
   function renderUploadAvailability() {

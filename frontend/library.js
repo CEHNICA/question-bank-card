@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   "use strict";
 
   const QB = window.QBRender;
@@ -465,7 +465,14 @@
       if (summary.folded) notes.push("还有题干与小问");
       if (Object.keys(item.content?.options || {}).length) notes.push("含选项");
       if ((item.content?.figures || []).length > 2) notes.push(`含 ${(item.content.figures || []).length} 张配图`);
-      if (notes.length) paper.append(node("p", "library-preview-note", notes.join(" · ") + " · 点全屏看题查看"));
+      // The repeated "点全屏看题查看" nudge can be permanently switched off.
+      // The facts about what was folded stay, and the button below the card is
+      // always there, so the complete question is never harder to find.
+      if (notes.length) {
+        const hintOff = hintHidden("preview-note");
+        paper.append(node("p", "library-preview-note",
+          notes.join(" · ") + (hintOff ? "" : " · 点全屏看题查看")));
+      }
     }
     const reveal = answerReveal(item);
     if (reveal) paper.append(reveal);
@@ -559,7 +566,7 @@
     if (saved) {
       const part = node("div", "qb-answer");
       part.append(node("p", "library-answer-label", item.solution_needs_review ? "保存的答案解析 · 题面有改动，待核对" : "保存的答案解析"));
-      const body = node("div"); solutions.render(body, saved, { node, QB }); part.append(body); box.append(part);
+      const body = node("div"); solutions.render(body, saved, { node, QB, subQuestions: true }); part.append(body); box.append(part);
     }
     if (ai) {
       const part = node("div", "qb-answer ai-answer");
@@ -679,12 +686,22 @@
     }
   }
 
+  // Optional guidance is checked where it is produced, so a re-render, a
+  // question switch or a new window cannot bring a dismissed hint back.
+  function hintHidden(category) {
+    return Boolean(window.QBShortcutHelp?.hintDismissed?.(category));
+  }
+
   function readingOverflowHints(container) {
     container.querySelectorAll(".reading-overflow-hint").forEach((hint) => hint.remove());
+    // A genuinely wide formula always stays focusable and horizontally
+    // scrollable; only the sentence explaining it is dismissible.
+    const hintOff = hintHidden("reading-overflow");
     container.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
       if (!field.clientWidth || field.scrollWidth <= field.clientWidth + 2) return;
       field.tabIndex = 0;
       field.setAttribute("aria-label", "题目内容，可左右滚动查看完整公式");
+      if (hintOff) return;
       const hint = node("span", "reading-overflow-hint", "左右滑动查看完整公式；键盘可用左右方向键。");
       (field.closest(".qb-stem, .qb-option") || field).after(hint);
     });
@@ -1915,11 +1932,25 @@
 
   function updateOverflowHints() {
     ui.paper.querySelectorAll(".print-overflow-hint").forEach((hint) => hint.remove());
+    // The field stays focusable and scrollable whatever the preference says;
+    // only the sentence and the description pointing at it are dropped, so no
+    // invisible aria-describedby target is left behind.
     ui.paper.querySelectorAll('[data-print-overflow="1"]').forEach((field) => {
       field.removeAttribute("tabindex");
       field.removeAttribute("aria-describedby");
       delete field.dataset.printOverflow;
     });
+    if (hintHidden("reading-overflow")) {
+      // Still make a genuinely wide formula reachable by keyboard; only the
+      // sentence and its description target go away.
+      ui.paper.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
+        if (field.scrollWidth <= field.clientWidth + 2) return;
+        field.tabIndex = 0;
+        field.dataset.printOverflow = "1";
+        field.setAttribute("aria-label", "题目内容，可左右滚动查看完整公式");
+      });
+      return;
+    }
     ui.paper.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
       if (field.scrollWidth <= field.clientWidth + 2) return;
       const hint = node("span", "print-overflow-hint no-print", "左右滑动查看完整公式；键盘可用左右方向键。");
@@ -2363,6 +2394,32 @@
   $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
   window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
   window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
+  // The library surface needs its own way back: without it a hint dismissed
+  // here could only be restored from the intake page.
+  function syncRestoreHints() {
+    const button = $("libraryRestoreHints");
+    if (!button) return;
+    const off = window.QBShortcutHelp?.dismissedCategories?.() || [];
+    button.hidden = !off.length;
+    button.textContent = `恢复操作提示（${off.length}）`;
+  }
+  $("libraryRestoreHints")?.addEventListener("click", () => {
+    window.QBShortcutHelp?.restoreHints?.();
+    window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
+    window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
+    syncRestoreHints();
+    void load();
+  });
+  window.addEventListener("qb:hint-dismissed", syncRestoreHints);
+  window.addEventListener("qb:hints-restored", syncRestoreHints);
+  window.addEventListener("storage", (event) => {
+    if (event.key === window.QBShortcutHelp?.DISMISSED_PREF) {
+      window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
+      window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
+      syncRestoreHints();
+    }
+  });
+  syncRestoreHints();
   document.addEventListener("keydown", (event) => {
     const editable = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
     const ordinary = !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat

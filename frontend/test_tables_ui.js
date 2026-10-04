@@ -42,7 +42,10 @@ const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const render = fs.readFileSync(path.join(__dirname, "qb-render.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 // The typeset view lays tables out and keeps the rest of the text as before.
-assert.match(render, /function renderTypeset\(node, value, options = \{\}\) \{[\s\S]*?findTables\(source\)[\s\S]*?renderTable\(doc, table, marks, options\)/);
+// The table branch must pass the caller's base offset through, so a paragraph
+// rendered on its own still stamps its tracked positions in the whole field.
+assert.match(render, /function renderTypeset\(node, value, options = \{\}\) \{[\s\S]*?findTables\(source\)[\s\S]*?renderTable\(doc, table, marks, options, options\.sourceOffset \|\| 0\)/);
+assert.match(render, /sourceOffset: \(options\.sourceOffset \|\| 0\) \+ start/);
 assert.match(render, /figureElement\(figure, opts\.resolveUrl, opts\.figureAction\)/);
 assert.match(css, /\.qb-table td, \.qb-table th \{[^}]*border: 1px solid var\(--paper-ink\)/);
 // A crop MinerU read as a table offers the conversion on the card.

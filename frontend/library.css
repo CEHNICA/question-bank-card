@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 正式题库页。共用的令牌、顶栏、按钮、对话框和题面排版在 styles.css 里，
  * 这里只放题库列表、查看出处和组卷打印。
  */
@@ -445,7 +445,14 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .answer-image-fields select { max-width: 155px; }
 .answer-image-fields .answer-image-tools { flex-basis: 100%; margin: 0; }
 .answer-editor-preview, .answer-origin > .paper, .answer-ai-draft > .paper { padding: 16px; margin: 8px 0 16px; border: 1px solid #b0c2b3; border-radius: 10px; background: #fff; }
+/* The display caret and selection are absolutely positioned inside the preview,
+   so the preview itself has to be their containing block. Without this they
+   resolve against the sticky column and land in the wrong place. */
+.answer-editor-preview { position: relative; }
 .answer-editor-preview-column > .answer-editor-preview { margin: 0; min-height: 180px; }
+/* The footer is sticky, so the panel needs room reserved for it; otherwise it
+   covers the line the caret is on. */
+.answer-editor-panel { padding-bottom: 76px; }
 .answer-editor-panel > h4 { margin-bottom: 8px; }
 .answer-origin { margin: 18px 0; }
 .answer-origin select { max-width: 100%; }
@@ -606,6 +613,12 @@ body.printing { overflow: hidden; }
 .question-viewer-content { width: 100%; max-width: 1180px; margin: 0 auto; padding: clamp(18px, 3vw, 38px); background: white; border: 1px solid #d9e1d8; border-radius: 8px; color: #182720; font-size: 18px; line-height: 1.85; }
 .question-viewer-question { font-size: inherit; line-height: inherit; }
 .question-viewer-question .qb-stem-body, .question-viewer-question .qb-option-body, .question-viewer-content .qb-analysis { min-width: 0; max-width: 100%; overflow-x: auto; }
+/* `overflow-x: auto` alone makes the other axis compute to `auto`, so each of
+   these blocks became a second vertical scroll area inside the reader. `clip`
+   keeps the horizontal scrolling a genuinely wide formula needs while leaving
+   the viewport as the only vertical scroller; the padding below is what keeps
+   a tall fraction from being clipped in the first place. */
+.question-viewer-question .qb-stem-body, .question-viewer-question .qb-option-body, .question-viewer-content .qb-analysis { overflow-y: clip; padding-block: 7px; }
 .question-viewer-question .qb-question-image img { max-height: none; width: auto; height: auto; max-width: 100%; }
 .question-viewer-question .qb-figure { max-width: 100%; }
 .question-viewer-question .qb-figure img { max-width: 100%; max-height: none; height: auto; }
@@ -655,4 +668,36 @@ body.printing { overflow: hidden; }
   .question-viewer-viewport { padding: 8px 8px 18px; }
   .question-viewer-content { padding: 14px; font-size: 16px; }
   .question-viewer-content .qb-options { grid-template-columns: 1fr; }
+}
+
+/* ---------------------------------------------------------------------------
+   Answer and solution legibility on screen.
+
+   Scoped to screen media and to the views that show an answer. The print and
+   PDF path shares the same renderer and the same line-height, so none of this
+   may move a page boundary in the exported document.
+   --------------------------------------------------------------------------- */
+@media screen {
+  /* A fixed line-height cannot hold a tall fraction, a deep radical or a big
+     script: the ink then runs into the line above or below. Vertical padding
+     on the inline formula grows the line box instead of scaling the text. */
+  .qb-subquestion-body .qb-math, .qb-subquestion-lead .qb-math,
+  .solution-paragraph .qb-math, .library-answer .qb-analysis .qb-math,
+  .qb-subquestion-body .qb-math, .qb-subquestion-lead .qb-math, .solution-paragraph .qb-math, .library-answer .qb-analysis .qb-math, .question-viewer-content .qb-math:not(.is-display) { padding-block: .42em; }
+  .question-viewer-content .solution-result, .question-viewer-content .solution-paragraph, .library-answer .qb-analysis, .library-answer .solution-result { line-height: 2.15; }
+  .solution-result .qb-subquestions, .library-answer .qb-subquestions { display: grid; gap: 8px; margin-top: 2px; }
+  .solution-result .qb-subquestion, .library-answer .qb-subquestion {
+    display: grid; grid-template-columns: 2.6em minmax(0, 1fr); column-gap: .4em; row-gap: 2px;
+    align-items: baseline; padding: 7px 10px; border-radius: 8px; background: #f4f6f3;
+    border-left: 3px solid #b9cdc2;
+  }
+  .solution-result .qb-subquestion-lead { grid-column: 1 / -1; color: var(--ink-2); }
+  .solution-result .qb-subquestion-lead + .qb-subquestion-label { grid-row: 2; }
+  .solution-result .qb-subquestion-label, .library-answer .qb-subquestion-label {
+    grid-row: 1; font: 650 15px/1.5 var(--ui-font); color: var(--accent-dark); font-variant-numeric: tabular-nums;
+  }
+  .solution-result .qb-subquestion:has(.qb-subquestion-lead) .qb-subquestion-label { grid-row: 2; }
+  .solution-result .qb-subquestion:has(.qb-subquestion-lead) .qb-subquestion-body { grid-row: 2; }
+  .solution-result .qb-subquestion-body, .library-answer .qb-subquestion-body { min-width: 0; }
+  .solution-result .solution-label, .library-answer .solution-label { display: block; margin: 4px 0 2px; }
 }
