@@ -69,6 +69,11 @@ async function approvalChecks() {
     isHumanApproved: q => q.approved, figureBlocksApproval: () => false, typeBlocksApproval: () => false, canApprove: () => true,
     viewerList: () => [q1, q2], visible: () => true, viewerStep: value => { steps.push(value); },
     approveQuestion: async (q, value) => { changes.push([q.id, value]); q.approved = value; return true; }, setCurrent() {}, hideLens() {}, renderPaper() {}, renderViewer() {}, toast() {},
+    // 1.12.6: U now goes through revokeQuestion, which also withdraws the library
+    // copy.  The harness records the same [id, false] shape so the assertion below
+    // still describes "U is the explicit revocation key".
+    revokeQuestion: async (q) => { changes.push([q.id, false]); q.approved = false; return true; },
+    isSettled: q => Boolean(q.publication && q.publication.up_to_date),
     QBUpload: { isEditingTarget: help.isEditingTarget }, isApproved: q => q.approved, $: () => ({ scrollTo() {} }) };
   vm.createContext(context); vm.runInContext(viewerApprove + viewerKeys, context);
   await context.viewerApprove(); assert.deepEqual(steps, [1]); assert.equal(changes.length, 0, "Enter on an approved question advances without any approval mutation");

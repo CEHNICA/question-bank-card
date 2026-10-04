@@ -84,9 +84,6 @@ def check(base):
         assert before != after, "Original did not pan"
         page.locator("#sourceDialog").get_by_role("button", name="关闭", exact=True).click()
         expect(page.locator("#questionDialog")).to_be_visible()
-        page.locator("#questionActions").get_by_role("button", name="版本历史", exact=True).click()
-        expect(page.locator("#historyVersions button")).to_have_count(1)
-        page.locator("#historyDialog").get_by_role("button", name="关闭", exact=True).click()
         page.locator("#questionActions").get_by_role("button", name="移出试题篮", exact=True).click()
         page.locator("#questionActions").get_by_role("button", name="加入试题篮", exact=True).click()
         page.locator("#closeQuestion").click()

@@ -258,10 +258,6 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .processing-detail { margin-top: 2px; }
 .processing-stale { width: fit-content; margin-top: 6px; padding: 5px 9px; border-radius: 8px; background: var(--amber-soft); color: #7b5616; }
 .processing-reparse { margin-top: 8px; }
-.manual-cut-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0 4px; padding: 12px 16px; border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface); }
-.manual-cut-entry[hidden] { display: none; }
-.manual-cut-entry > button { flex-shrink: 0; }
-.manual-cut-entry > span { color: var(--muted); font-size: 14px; }
 .paper-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .paper-actions .button { min-height: 38px; padding-inline: 16px; }
 
@@ -417,7 +413,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .compact-text .qb-math { font-size: .95em; }
 
 .card-source { position: relative; background: #f8f7f3; border-right: 1px solid var(--line); padding: 14px 14px 12px 17px; min-width: 0; }
-.source-sticky { position: sticky; top: calc(var(--topbar-h) + 70px); }
+/* 1.12.6：保存条钉在改字面板顶部，卡片底部那块 62px 预留删掉了。
+   左栏要接预览，吸顶时给原卷自己留出的高度也收窄一点。 */
+.source-sticky { position: sticky; top: calc(var(--topbar-h) + 6px); }
 .crop { display: grid; gap: 0; }
 .crop.zoomable { cursor: zoom-in; }
 .crop.zoomable:focus-visible { border-radius: 6px; }
@@ -451,6 +449,10 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .card-tick[aria-pressed="true"]:hover { border-color: var(--accent-dark); background: var(--accent-dark); color: #fff; }
 .card-tick.ai { border: 1.5px dashed var(--accent); background: var(--accent-soft); color: var(--accent); }
 .card-tick.ai:hover { border-style: solid; background: var(--accent); color: #fff; }
+/* 1.12.6：题库里已经放着这道题、但这张卡从没被人亲自打过勾。
+   它和 .ai 一样用虚线描边（"我还没亲自确认"），不是实心通过态。 */
+.card-tick.published { border: 1.5px dashed var(--accent); background: var(--accent-soft); color: var(--accent); }
+.card-tick.published:hover { border-style: solid; background: var(--accent); color: #fff; }
 .card-tick:disabled { background: var(--bg-sunken); cursor: not-allowed; box-shadow: none; }
 .group-label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: none; color: var(--ink-2); font-size: 12px; font-weight: 500; }
 .qnum { font-weight: 700; font-size: 15px; letter-spacing: .02em; color: var(--ink); }
@@ -539,7 +541,12 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 
 /* ---------------------------------------------------------------- 改字 */
 .editor { display: grid; gap: 12px; max-width: 1100px; }
-.editor-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+/* 1.12.6：标题和保存条并成一行，省掉一整行；保存条钉在面板顶部而不是底部，
+   底部那块 62px 预留也一并去掉。 */
+.editor-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap;
+  position: sticky; top: calc(var(--topbar-h) + 6px); z-index: 5; margin: -4px -6px 0; padding: 6px 6px 8px;
+  background: var(--surface); border-bottom: 1px solid #efede6; box-shadow: 0 10px 12px -12px rgba(22, 44, 39, .35); }
+.editor-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .field { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
 .field.inline { grid-template-columns: 3.2em minmax(0, 1fr); align-items: center; }
 .field input, .field textarea, .field select { width: 100%; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink);
@@ -552,7 +559,11 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .extra summary { cursor: pointer; font-size: 13px; color: var(--ink-2); padding: 4px 0; }
 .extra { display: grid; gap: 8px; }
 .editor-preview-box { display: grid; gap: 5px; }
-.editor-preview-box.beside { margin-top: 14px; }
+/* 预览留在题干下面（窄屏）时给一段上限高度，长题也不会把下面的选项顶出屏幕。 */
+.editor-preview { max-height: var(--preview-room, none); overflow: auto; overscroll-behavior: contain; }
+/* 1.12.6：搬去左栏时上方留出的空档由 JS 按「和题干顶对齐」算出来填，
+   这里只管左右撑满、顶端有一条分隔线，左栏读起来是「原卷 → 预览」两段。 */
+.editor-preview-box.beside { max-width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
 .preview-label { margin: 0; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
 .editor-preview { position: relative; min-width: 0; max-width: 100%; border: 1px dashed rgba(31, 107, 95, .45); border-radius: var(--radius); padding: 10px 14px; background: #fff; overflow-x: auto; overflow-anchor: none; }
 .editor-position-hint { margin: 0; color: #165b4e; font-size: 12px; font-weight: 600; line-height: 1.55; }
@@ -571,14 +582,8 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .qb-preview-active-symbol .katex-html [style*="#1f6b5f"] { background: #fff2a8; outline: 2px solid #006b50; outline-offset: 1px; box-shadow: 0 0 0 3px #fff2a8; border-radius: 2px; }
 .qb-preview-active-region { outline: 3px solid #006b50; outline-offset: 2px; background: rgba(31, 107, 95, .14); }
 .qb-preview-empty-field { margin: 8px 0 0; color: var(--muted); }
-.editor-preview-box.beside .editor-preview { max-height: var(--preview-room); overflow: auto; overscroll-behavior: contain; }
 .editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.card.editing .editor-actions { position: sticky; bottom: 0; z-index: 4; margin-bottom: -16px; padding: 10px 0 14px; background: var(--surface);
-  border-top: 1px solid #efede6; box-shadow: 0 -10px 12px -12px rgba(22, 44, 39, .35); }
-/* The save bar is sticky and deliberately bleeds to the card edge, so the
-   editor body has to reserve its height. Without this the bar sits on top of
-   the line the caret is on and the reader loses their place. */
-.card.editing .card-body { padding-bottom: 62px; }
+/* 1.12.6：保存条不再钉在卡片底部，卡片底部那 62px 预留一起删掉。 */
 .editor-actions .hint { margin: 0 0 0 auto; }
 
 /* ---------------------------------------------------------------- 对话框 */

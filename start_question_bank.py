@@ -775,7 +775,7 @@ def main() -> int:
     logs: list[object] = []
     try:
         _prepare()
-        print("\n读题服务的密钥可在题有据的“设置 → 常用 → 填写或更换密钥”中填写。")
+        print("\n读题服务的密钥可在题有据的“设置 → 服务与密钥”中填写。")
         credential_pools = _saved_credential_pools()
         preferences = _model_preferences()
         model_env = model_preference_environment(preferences)

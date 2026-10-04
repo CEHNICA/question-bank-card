@@ -136,7 +136,7 @@ def continue_ai_cut(request, paper_id):
                 if payload.get("allow_cloud") is not True:
                     raise ContinueCutConflict("没有可直接切题的解析结果；继续可能重新提交原卷，请明确允许本次自动解析。", "cloud_authorization")
                 if not readers.configured("mineru"):
-                    raise ContinueCutConflict("请先在“设置 → API 配置 → 读题与切题”配置 MinerU Token，再继续自动切题。", "missing_mineru")
+                    raise ContinueCutConflict("请先在“设置 → 服务与密钥 → 读题与切题”配置 MinerU Token，再继续自动切题。", "missing_mineru")
             existing_ids = list(Question.all_objects.filter(paper=paper).values_list("pk", flat=True))
             cancel = _cancellation_file(paper)
             previous_cancel = cancel.read_bytes() if cancel.exists() else None

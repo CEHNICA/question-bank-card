@@ -389,7 +389,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
         payload = json.loads(_transform(path.read_bytes(), protect=False).decode("utf-8"))
         if not isinstance(payload, dict) or payload.get("version") != 1:
             raise CredentialStoreError(
-                "已保存的凭据格式不受支持，请在题有据的“设置 → 常用 → 填写或更换密钥”中重新填写。"
+                "已保存的凭据格式不受支持，请在题有据的“设置 → 服务与密钥”中重新填写。"
             )
         result: dict[str, object] = {}
         for service, (legacy_key, pool_key) in ACCOUNT_POOL_FIELDS.items():
@@ -399,7 +399,7 @@ def load_credentials(path: Path | None = None) -> dict[str, object]:
                 result[pool_key] = pool
         return result
     except (OSError, UnicodeError, ValueError, TypeError, CredentialStoreError) as exc:
-        raise CredentialStoreError("已保存的凭据无法读取，请先在题有据的“设置 → 常用 → 填写或更换密钥”中重试；若仍无法打开，再运行独立配置工具恢复。") from exc
+        raise CredentialStoreError("已保存的凭据无法读取，请先在题有据的“设置 → 服务与密钥”中重试；若仍无法打开，再运行独立配置工具恢复。") from exc
 
 
 def save_credentials(values: Mapping[str, object], path: Path | None = None) -> None:

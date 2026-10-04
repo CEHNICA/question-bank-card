@@ -105,10 +105,12 @@ for (const status of ["queued", "parsing", "segmenting", "needs_grouping"]) {
 assert.equal(App.showCutReadingStage({ parse_mode: "mineru", status: "ready" }, blank), false);
 assert.equal(App.showCutReadingStage({ parse_mode: "mineru", status: "ready" }, image), true);
 assert.equal(App.showCutReadingStage({ parse_mode: "manual", status: "ready", demo: true }, blank), false);
-const mainStrip = html.slice(html.indexOf('id="paperManualEntry"'), html.indexOf('id="cutReadingStage"'));
-assert.doesNotMatch(mainStrip, /paperContinueAi/);
+const mainStrip = html.slice(html.indexOf('</div>', html.indexOf('id="paperMenu"')), html.indexOf('id="cutReadingStage"'));
+assert.doesNotMatch(mainStrip, /paperContinueAi|settingsManualFallback/,
+  "1.12.6: no cut-mode switch is duplicated outside 试卷操作");
 const menu = html.slice(html.indexOf('id="paperMenu"'), html.indexOf('id="paperStatus"'));
 assert.match(menu, /id="paperContinueAi"/);
+assert.match(menu, /id="settingsManualFallback"/);
 assert.equal((html.match(/id="paperContinueAi"/g) || []).length, 1, "The existing guarded AI continuation has one menu entry");
 // 1.12.5：approve-green 有了入口，但只有工具菜单里一个「一键通过所有题目」，
 // 而且它必须把过不去的题逐条说出来——不许出现第二个"全部通过"的按钮。

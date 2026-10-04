@@ -261,7 +261,7 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
         self.assertEqual(result.status_code, 409, result.content)
         error = result.json()["error"]
         self.assertIn(MISSING_LABEL, error)
-        self.assertIn("API 配置", error)
+        self.assertIn("服务与密钥", error)
         after = Question.objects.values().get(pk=self.question.pk)
         self.assertEqual(after["reread_requested"], before["reread_requested"])
         self.assertEqual(after["ocr_pending"], before["ocr_pending"])

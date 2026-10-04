@@ -22,8 +22,10 @@ assert.equal(review.isHumanApproved({ ...aiQuestion, approved_by: "human" }), tr
 assert.equal(review.isAiApproved({ ...aiQuestion, approval_valid: false }), false);
 // Its own chip, a dashed tick, a dashed bar; it does not fold away.
 assert.match(js, /el\("span", "chip ai-approved", `\$\{agentLabel\(q\)\} 已通过 · 待你核对`\)/);
-assert.match(js, /const tick = el\("button", `card-tick\$\{byAi \? " ai" : ""\}`\);/);
-assert.match(js, /tick\.setAttribute\("aria-pressed", byAi \? "mixed" : String\(approved\)\);/);
+// 1.12.6: the tick gained a second dashed state for "题库里已经放着、但我还没亲自
+// 打过勾"，so the class list is no longer a plain ai-or-nothing ternary.
+assert.match(js, /el\("button", `card-tick\$\{byAi \? " ai" : ""\}\$\{published && !approved \? " published" : ""\}`\);/);
+assert.match(js, /tick\.setAttribute\("aria-pressed", byAi \? "mixed" : String\(ticked\)\);/);
 assert.match(js, /const approvedCompact = approved && !isAiApproved\(q\) && !state\.expanded\.has\(q\.id\);/);
 assert.match(css, /\.card-tick\.ai \{ border: 1\.5px dashed var\(--accent\);/);
 assert.match(css, /\.card\.state-ai::before \{ background: repeating-linear-gradient/);

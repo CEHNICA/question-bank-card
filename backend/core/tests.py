@@ -7,6 +7,7 @@ import json
 import shutil
 import tempfile
 import threading
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -1597,9 +1598,15 @@ class ApiTests(TestCase):
         listing = self.client.get("/api/library?q=秋季月考任务").json()
         self.assertEqual(listing["total"], 1)
         self.assertEqual(listing["items"][0]["source_filename"], "秋季月考任务")
-        self.assertEqual(listing["facets"]["sources"], [{
-            "document_id": str(self.paper.id), "filename": "秋季月考任务", "count": 1,
-        }])
+        source = listing["facets"]["sources"][0]
+        # 1.12.6：来源带上入库时间，题库里同名来源（同一份卷录过两次）才分得开。
+        self.assertEqual((source["document_id"], source["filename"], source["count"]),
+                         (str(self.paper.id), "秋季月考任务", 1))
+        published = datetime.fromisoformat(listing["items"][0]["published_at"].replace("Z", "+00:00"))
+        # JsonResponse 会把 UTC 写成 Z，publication_json 里是 +00:00；数据库只存到
+        # 微秒而发布记录的序列化保留全精度，所以比到秒。
+        self.assertEqual(source["first_published_at"][:19], published.strftime("%Y-%m-%dT%H:%M:%S"))
+        self.assertEqual(source["last_published_at"][:19], published.strftime("%Y-%m-%dT%H:%M:%S"))
         self.assertEqual(self.client.get("/api/library?q=卷.pdf").json()["total"], 0)
 
     def test_rename_keeps_an_already_stale_approval_stale(self):

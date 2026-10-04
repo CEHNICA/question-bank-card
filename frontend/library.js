@@ -14,11 +14,7 @@
     sourceZoomIn: $("sourceZoomIn"), sourceZoom: $("sourceZoom"), sourceFit: $("sourceFit"), sourceRelated: $("sourceRelated"),
     sheet: $("printSheet"), paper: $("printPaper"), printTitle: $("printTitle"), printAnswers: $("printAnswers"),
     printOrigin: $("printOrigin"), printAi: $("printAiAnswers"), printAiBox: $("printAiBox"),
-    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools"),
-    historyDialog: $("historyDialog"), historyTitle: $("historyTitle"), historyStatus: $("historyStatus"),
-    historyVersions: $("historyVersions"), historyControls: $("historyControls"), historyCompare: $("historyCompare"),
-    historySummary: $("historySummary"), historyPreview: $("historyPreview"), historyDiff: $("historyDiff"), historyChanges: $("historyChanges"),
-    historyRelated: $("historyRelated")
+    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools")
   };
   const params = new URL(window.location.href).searchParams;
   const state = {
@@ -241,8 +237,13 @@
     const facets = state.facets || { sources: [], types: {} };
     const current = state.document;
     ui.source.replaceChildren(new Option("全部试卷", ""));
+    // 1.12.6：同一份卷录过两次时，两条来源在题库里同名，光看文件名和题数分不出
+    // 哪份是哪份 —— 照着下拉随手一选就可能撤错那一份。补上录入时间。
+    const nameTotals = new Map();
+    facets.sources.forEach((source) => nameTotals.set(source.filename, (nameTotals.get(source.filename) || 0) + 1));
     facets.sources.forEach((source) => {
-      ui.source.append(new Option(`${source.filename}（${source.count}）`, source.document_id || ""));
+      const suffix = nameTotals.get(source.filename) > 1 ? `，录于 ${shortDate(source.first_published_at)}` : "";
+      ui.source.append(new Option(`${source.filename}（${source.count} 题${suffix}）`, source.document_id || ""));
     });
     ui.source.value = current;
     if (ui.source.value !== current) ui.source.value = "";
@@ -316,7 +317,7 @@
     box.hidden = !tools.length;
     if (tools.length) {
       if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，会用到服务额度："), ...tools);
-      else box.append(node("span", "helper", "请到“设置 → API 配置”配置并测试答题 API。"));
+      else box.append(node("span", "helper", "请到“设置 → 服务与密钥”配置并测试答题 API。"));
     }
   }
 
@@ -324,7 +325,7 @@
     try {
       const configurationResponse = await fetch("/api/settings/library-ai", { cache: "no-store" });
       const configuration = await configurationResponse.json();
-      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请到“设置 → API 配置”配置并测试答题 API 后再生成。");
+      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请到“设置 → 服务与密钥”配置并测试答题 API 后再生成。");
       const response = await fetch("/api/library/jobs", {
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
         body: JSON.stringify({ kind, ...target, api_only: true })
@@ -337,7 +338,7 @@
         : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
       load({ quiet: true });
     } catch (error) {
-      toast(`${error.message || "没能排上队"} 请到“设置 → API 配置”检查服务商、密钥和模型。`, "error");
+      toast(`${error.message || "没能排上队"} 请到“设置 → 服务与密钥”检查服务商、密钥和模型。`, "error");
     }
   }
 
@@ -413,6 +414,34 @@
   }
   window.LibraryQuestionViewer.mountFocus({ node, host: document.querySelector(".library-results-head") });
 
+  // 录过两次的卷在题库里同名。日期只到天仍会撞（同一天录两次照样分不出），
+  // 所以带上时分 —— 用户要判断的正是「哪份是后录的」。
+  function shortDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "时间未知"
+      : date.toLocaleString("zh-CN", { hour12: false, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit" });
+  }
+
+  // 来源下拉、题卡和撤回确认框必须显示同一个时间，否则用户对着看会以为
+  // 是两条不同记录。统一从 facets 里取该来源的首次入库时间。
+  function sourceFirstSeen(documentId, fallback) {
+    const row = (state.facets?.sources || []).find((source) => source.document_id === documentId);
+    return row?.first_published_at || fallback;
+  }
+
+  function fullDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "时间未知" : date.toLocaleString("zh-CN", { hour12: false });
+  }
+
+  // 录过两次的卷在题库里同名，撤回一批前必须能分清哪份是哪份。
+  function duplicateSourceNames() {
+    const names = new Map();
+    for (const item of state.catalog.values()) names.set(item.source_filename, (names.get(item.source_filename) || 0) + 1);
+    return new Set([...names].filter(([, count]) => count > 1).map(([name]) => name));
+  }
+
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}`);
     article.id = `q-${item.id}`;
@@ -432,6 +461,13 @@
       node("span", "", `原卷第 ${item.number} 题`),
       typeChip(item)
     );
+    // 1.12.6：同一份卷被录过两次时，两份来源在题库里同名，只看文件名分不出
+    // 哪份是哪份。补上录入时间，撤回一批时才不会撤错那一份。
+    if (duplicateSourceNames().has(item.source_filename)) {
+      const when = node("span", "library-note quiet", `录于 ${shortDate(sourceFirstSeen(item.document_id, item.published_at))}`);
+      when.title = `这份来源的入库时间：${fullDate(sourceFirstSeen(item.document_id, item.published_at))}`;
+      meta.append(when);
+    }
     if (item.content?.body_mode === "source_image") meta.append(node("span", "library-note", "原图题"));
     if (item.origin) {
       const origin = node("span", "library-origin", `题源：${item.origin}`);
@@ -496,12 +532,10 @@
     const more = node("details", "library-card-more");
     more.append(node("summary", "", "更多"));
     const menu = node("div", "library-card-menu");
-    const history = iconButton("button", "button button-quiet button-small", "版本历史", "history");
-    history.addEventListener("click", () => openHistory(item));
     const review = iconButton("a", "button button-quiet button-small", "回到题卡", "back");
     review.href = draftLink(item);
     const withdraw = iconButton("button", "button button-quiet button-small library-withdraw", "撤回", "undo");
-    withdraw.title = "从正式题库撤下；题卡和历史版本都保留，可重新入库";
+    withdraw.title = "从正式题库撤下；题卡和原卷都保留，可以重新入库";
     withdraw.addEventListener("click", () => withdrawItem(item));
     const inBasket = state.basket.includes(item.id);
     const basket = iconButton("button", `button ${inBasket ? "button-outline" : ""} button-small`, inBasket ? "已在试题篮" : "加入试题篮", inBasket ? "check" : "plus");
@@ -516,7 +550,7 @@
     editAnswer.addEventListener("click", () => openAnswerEditor([item], { scope: "library" }));
     const editQuestion = node("button", "button button-quiet button-small", "修改题目");
     editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
-    menu.append(editQuestion, editAnswer, history, review, withdraw, ...jobButtons(item));
+    menu.append(editQuestion, editAnswer, review, withdraw, ...jobButtons(item));
     more.append(menu);
     actions.append(origin, full, expand, more, node("span", "actions-spacer"), basket);
     article.append(meta, paper, actions);
@@ -599,7 +633,7 @@
     Object.entries(item.job_errors || {})
       .filter(([kind]) => (kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer))
       .forEach(([kind, message]) => box.append(node("p", "library-job-error",
-        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → API 配置”检查服务商、密钥和模型。`)));
+        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → 服务与密钥”检查服务商、密钥和模型。`)));
     return box.childNodes.length ? box : null;
   }
 
@@ -760,6 +794,7 @@
       button.disabled = !state.selected.size;
     }
     $("addSelected").disabled = !state.selected.size;
+    $("withdrawSelected").disabled = !state.selected.size;
     $("clearSelection").disabled = !state.selected.size;
   }
 
@@ -885,8 +920,6 @@
     actions.replaceChildren();
     const source = iconButton("button", "button button-small", "查看出处", "source");
     source.addEventListener("click", () => openSource(item));
-    const history = iconButton("button", "button button-small", "版本历史", "history");
-    history.addEventListener("click", () => openHistory(item));
     const add = iconButton("button", "button button-primary button-small", state.basket.includes(item.id) ? "移出试题篮" : "加入试题篮", state.basket.includes(item.id) ? "check" : "plus");
     add.addEventListener("click", () => {
       if (!state.basket.includes(item.id) && state.basket.length >= 500) { toast("试题篮最多放 500 题，请先保存一份组卷", "error"); return; }
@@ -899,7 +932,7 @@
     editAnswer.addEventListener("click", () => openAnswerEditor([item], { scope: "library" }));
     const editQuestion = node("button", "button button-small", "修改题目");
     editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
-    actions.append(source, editQuestion, editAnswer, history, ...jobButtons(item), node("span", "actions-spacer"), add);
+    actions.append(source, editQuestion, editAnswer, ...jobButtons(item), node("span", "actions-spacer"), add);
     if (!dialog.open) { state.questionReturnFocus = document.activeElement; dialog.showModal(); }
     state.questionReturnId = item.id;
     state.questionSignature = questionSignature(item);
@@ -931,6 +964,53 @@
     } catch (error) {
       ui.status.textContent = error.message || "撤回失败。";
       toast(error.message || "撤回失败", "error");
+    }
+  }
+
+  // 1.12.6：一份卷一次要撤 25 道，逐题点「撤回」要点 25 下。
+  // 确认框按来源任务分组列出卷名、题数和录入时间 —— 录过两次的卷同名，
+  // 不分组就分不清这次撤的是哪一份，撤错了没法补救。
+  async function withdrawSelected() {
+    const picked = [...state.selected].map((id) => state.catalog.get(id)).filter(Boolean);
+    if (!picked.length) return;
+    const groups = new Map();
+    picked.forEach((item) => {
+      const key = item.document_id || item.source_filename;
+      if (!groups.has(key)) groups.set(key, { name: item.source_filename, items: [], at: sourceFirstSeen(item.document_id, item.published_at) });
+      groups.get(key).items.push(item);
+    });
+    const lines = [...groups.values()].map((group) => `《${group.name}》：${group.items.length} 道题，录于 ${shortDate(group.at)}`);
+    const ok = await confirmDialog({
+      title: groups.size > 1 ? `从正式题库撤回这 ${picked.length} 道题？` : "从正式题库撤回这些题？",
+      text: `将撤下 ${picked.length} 道题，来自 ${groups.size} 份资料：\n${lines.join("\n")}\n\n`
+        + "题卡和原卷都保留，撤回之后重新打勾就能再入库。",
+      ok: "撤回所选", danger: true
+    });
+    if (!ok) return;
+    const button = $("withdrawSelected");
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/library/withdraw-batch", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ ids: picked.map((item) => item.id) })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "撤回失败");
+      const done = body.withdrawn_count ?? (body.withdrawn || []).length;
+      const skipped = body.skipped || [];
+      const withdrawn = new Set(body.withdrawn || []);
+      state.basket = state.basket.filter((id) => !withdrawn.has(id));
+      picked.forEach((item) => { if (withdrawn.has(item.id)) { state.selected.delete(item.id); state.catalog.delete(item.id); } });
+      saveBasket();
+      await load();
+      const skippedText = skipped.length
+        ? `；${skipped.length} 道没撤成（${[...new Set(skipped.map((row) => row.reason))].join("、")}）` : "";
+      toast(`已撤回 ${done} 道题${skippedText}`, skipped.length ? "error" : "success");
+    } catch (error) {
+      ui.status.textContent = error.message || "撤回失败。";
+      toast(error.message || "撤回失败", "error");
+    } finally {
+      button.disabled = !state.selected.size;
     }
   }
 
@@ -1028,7 +1108,22 @@
       && region.bbox[2] > region.bbox[0] && region.bbox[3] > region.bbox[1]);
   }
 
-  function renderRelated(container, body, openHistoryLink) {
+  function reviewLabel(item) {
+    return item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对` : "人工核对";
+  }
+
+  async function fetchPublication(id, compare = "") {
+    const query = compare ? `?compare=${encodeURIComponent(compare)}` : "";
+    const response = await fetch(`/api/library/${encodeURIComponent(id)}${query}`, { cache: "no-store" });
+    if (!response.ok) {
+      let message = `读取失败（${response.status}）`;
+      try { message = (await response.json()).error || message; } catch { /* 不是 JSON 就用状态码 */ }
+      throw new Error(message);
+    }
+    return response.json();
+  }
+
+  function renderRelated(container, body) {
     container.replaceChildren();
     container.open = false;
     const groups = [
@@ -1052,15 +1147,6 @@
         source.type = "button";
         source.addEventListener("click", () => openSource(item));
         row.append(name, source);
-        if (openHistoryLink) {
-          const history = node("button", "button button-small", "查看这份资料的历史");
-          history.type = "button";
-          history.addEventListener("click", () => {
-            ui.historyTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
-            loadHistoryVersion(item.id);
-          });
-          row.append(history);
-        }
         group.append(row);
       });
       container.append(group);
@@ -1151,155 +1237,9 @@
     ui.sourceRelated.hidden = true;
     renderSource();
     if (!ui.sourceDialog.open) ui.sourceDialog.showModal();
-    fetchHistory(item.id).then((body) => {
-      if (token === sourceState.token && ui.sourceDialog.open) renderRelated(ui.sourceRelated, body, false);
+    fetchPublication(item.id).then((body) => {
+      if (token === sourceState.token && ui.sourceDialog.open) renderRelated(ui.sourceRelated, body);
     }).catch(() => { /* 保存的原卷仍可查看，关联资料读取失败不遮住它。 */ });
-  }
-
-  // ------------------------------------------------------------ 版本历史（只读）
-
-  const historyState = { token: 0, selected: "", previous: "" };
-  const historyStatusNames = { published: "当前入库版", superseded: "已被新版替代", withdrawn: "已撤回" };
-
-  function reviewLabel(item) {
-    return item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对` : "人工核对";
-  }
-
-  function historyDate(value) {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("zh-CN", { hour12: false });
-  }
-
-  async function fetchHistory(id, compare = "") {
-    const query = compare ? `?compare=${encodeURIComponent(compare)}` : "";
-    const response = await fetch(`/api/library/${encodeURIComponent(id)}${query}`, { cache: "no-store" });
-    if (!response.ok) {
-      let message = "读取历史版本失败，请稍后重试。";
-      try { message = (await response.json()).error || message; } catch { /* 404 may be HTML */ }
-      throw new Error(message);
-    }
-    return response.json();
-  }
-
-  function openHistory(item) {
-    ui.historyTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
-    ui.historyVersions.replaceChildren();
-    ui.historyRelated.hidden = true;
-    ui.historyDiff.open = false;
-    ui.historyDialog.showModal();
-    loadHistoryVersion(item.id);
-  }
-
-  function historyPanel(item) {
-    const panel = node("section", "history-panel");
-    const head = node("header", "history-panel-head");
-    head.append(node("h4", "", `第 ${item.version} 版 · ${historyStatusNames[item.status] || item.status}`),
-      node("p", "", `${historyDate(item.published_at)} 入库 · ${reviewLabel(item)}`));
-    const tools = node("div", "section-tools");
-    const source = iconButton("button", "button button-quiet button-small", "查看这版原卷位置", "source");
-    source.addEventListener("click", () => openSource(item));
-    tools.append(source);
-    head.append(tools);
-    const paper = node("div", "paper");
-    QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "collapsed" });
-    panel.append(head, paper);
-    if (item.origin) panel.append(node("p", "history-origin", `题源：${item.origin}`));
-    return panel;
-  }
-
-  function renderHistoryChanges(fields, before, selected) {
-    ui.historyChanges.replaceChildren();
-    const textFields = fields.filter((field) => typeof field.before === "string");
-    ui.historyDiff.hidden = textFields.length === 0;
-    textFields.forEach((field) => {
-      const section = node("section", "history-change");
-      section.append(node("h4", "", field.label));
-      const columns = node("div", "history-change-text");
-      [["before", before], ["after", selected]].forEach(([side, item]) => {
-        const column = node("div");
-        column.append(node("p", "helper", `第 ${item.version} 版`));
-        const text = node("pre");
-        if (Array.isArray(field.segments)) {
-          field.segments.forEach((segment) => {
-            const value = segment[side];
-            if (!value) return;
-            const tag = segment.kind === "equal" ? "span" : side === "before" ? "del" : "ins";
-            text.append(node(tag, "", value));
-          });
-        } else text.textContent = field[side];
-        if (!text.textContent) text.textContent = "（空）";
-        column.append(text);
-        columns.append(column);
-      });
-      section.append(columns);
-      ui.historyChanges.append(section);
-    });
-  }
-
-  async function loadHistoryVersion(id, compare = "") {
-    const token = ++historyState.token;
-    historyState.selected = id;
-    historyState.previous = compare;
-    ui.historyStatus.textContent = "正在读取历史版本…";
-    ui.historyPreview.replaceChildren();
-    ui.historyControls.hidden = true;
-    ui.historyDiff.hidden = true;
-    ui.historyRelated.hidden = true;
-    ui.historyVersions.querySelectorAll("button").forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.id === id));
-    });
-    try {
-      let body = await fetchHistory(id, compare);
-      if (token !== historyState.token || !ui.historyDialog.open) return;
-      let selected = body.publication;
-      let versions = body.history || [selected];
-      const current = versions.find((row) => row.id === selected.id);
-      const previousId = compare || current?.previous_id || "";
-      if (!compare && previousId) {
-        body = await fetchHistory(id, previousId);
-        selected = body.publication;
-        versions = body.history || [selected];
-      }
-      if (token !== historyState.token || !ui.historyDialog.open) return;
-      historyState.previous = previousId;
-      ui.historyVersions.replaceChildren();
-      versions.forEach((row) => {
-        const button = node("button", "history-version");
-        button.type = "button";
-        button.dataset.id = row.id;
-        button.setAttribute("aria-pressed", String(row.id === selected.id));
-        button.append(node("strong", "", `第 ${row.version} 版`),
-          node("span", "history-version-state", historyStatusNames[row.status] || row.status),
-          node("span", "", historyDate(row.published_at)), node("span", "", reviewLabel(row)),
-          node("span", "", row.previous_id ? (row.changes?.length ? `改了：${row.changes.join("、")}` : "题面未变，重新入库") : selected.draft_id ? "首次入库" : "保留的入库记录"));
-        button.addEventListener("click", () => loadHistoryVersion(row.id));
-        ui.historyVersions.append(button);
-      });
-      const older = versions.filter((row) => row.version < selected.version);
-      ui.historyCompare.replaceChildren();
-      older.forEach((row) => ui.historyCompare.append(new Option(`第 ${row.version} 版`, row.id)));
-      ui.historyCompare.value = previousId;
-      ui.historyControls.hidden = older.length === 0;
-      const before = body.comparison?.publication;
-      const fields = body.comparison?.changes || [];
-      ui.historyPreview.classList.toggle("single", !before);
-      if (before) ui.historyPreview.append(historyPanel(before));
-      ui.historyPreview.append(historyPanel(selected));
-      ui.historySummary.textContent = fields.length ? `改了：${fields.map((field) => field.label).join("、")}` : "题面内容未变化";
-      ui.historyStatus.textContent = versions.length === 1
-        ? (selected.draft_id ? "只有这一版入库记录。以后修改题目并重新核对、入库，就能在这里比较。"
-          : "这版题面已保留，但关联题卡已不存在，无法确定其他版本。")
-        : `共 ${versions.length} 个入库版本 · 正在查看第 ${selected.version} 版${before ? `，与第 ${before.version} 版比较` : "（首次入库）"}`;
-      renderHistoryChanges(fields, before, selected);
-      renderRelated(ui.historyRelated, body, true);
-    } catch (error) {
-      if (token !== historyState.token || !ui.historyDialog.open) return;
-      ui.historyStatus.textContent = error.message || "历史读取失败";
-      const retry = node("button", "button button-small", "重试");
-      retry.type = "button";
-      retry.addEventListener("click", () => loadHistoryVersion(id, compare));
-      ui.historyPreview.replaceChildren(retry);
-    }
   }
 
   // ---------------------------------------------------------------- 组卷
@@ -2259,6 +2199,7 @@
     render();
   });
   $("clearSelection").addEventListener("click", () => { state.selected.clear(); render(); });
+  $("withdrawSelected").addEventListener("click", () => withdrawSelected());
   $("generateSelectedTags").addEventListener("click", () => queueJobs("tags", { ids: [...state.selected] }));
   $("generateSelectedAnswers").addEventListener("click", () => queueJobs("answer", { ids: [...state.selected] }));
   $("addSelected").addEventListener("click", () => {
@@ -2371,11 +2312,6 @@
   ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => ui.sourcePages.addEventListener(type, stopSourcePan));
   ui.sourcePages.addEventListener("dragstart", (event) => event.preventDefault());
   window.addEventListener("blur", stopSourcePan);
-  ui.historyDialog.addEventListener("click", (event) => {
-    if (event.target === ui.historyDialog || event.target.closest("[data-close]")) ui.historyDialog.close();
-  });
-  ui.historyDialog.addEventListener("close", () => { ++historyState.token; });
-  ui.historyCompare.addEventListener("change", () => loadHistoryVersion(historyState.selected, ui.historyCompare.value));
   $("confirmDialog").addEventListener("click", (event) => {
     if (event.target === $("confirmDialog")) $("confirmDialog").close();
   });

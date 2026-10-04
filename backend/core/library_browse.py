@@ -72,10 +72,15 @@ def library_rows(params, *, omit: str = ""):
 
 def facet_counts(params) -> dict:
     sources, types, reviews, answers, tags = {}, {}, {"human": 0, "ai": 0}, {"yes": 0, "no": 0}, {}
-    for row in library_rows(params, omit="document").values("paper_id", "source_filename"):
+    for row in library_rows(params, omit="document").values("paper_id", "source_filename", "published_at"):
         key = str(row["paper_id"]) if row["paper_id"] else ""
-        entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"], "count": 0})
+        entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"],
+            "count": 0, "first_published_at": row["published_at"], "last_published_at": row["published_at"]})
         entry["count"] += 1
+        if row["published_at"] and (not entry["first_published_at"] or row["published_at"] < entry["first_published_at"]):
+            entry["first_published_at"] = row["published_at"]
+        if row["published_at"] and (not entry["last_published_at"] or row["published_at"] > entry["last_published_at"]):
+            entry["last_published_at"] = row["published_at"]
     for kind in library_rows(params, omit="type").values_list("question_type", flat=True):
         types[kind] = types.get(kind, 0) + 1
     for source in library_rows(params, omit="review").values_list("review_source", flat=True):
@@ -92,7 +97,6 @@ def facet_counts(params) -> dict:
         "tags": sorted(({"tag": key, "count": value} for key, value in tags.items()),
                        key=lambda item: (-item["count"], item["tag"])),
     }
-
 
 def serialize_items(publications) -> list[dict]:
     publications = list(publications)

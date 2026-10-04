@@ -965,6 +965,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     try { window.localStorage.setItem(key, value); } catch { /* 浏览器禁止存储时只在本页有效 */ }
   }
 
+  // 1.12.6：顶栏「正式题库」是整页跳转，筛选、当前题和展开的卡片原本只活在内存里，
+  // 从题库点回「录入终审」就回到默认位置。写进 sessionStorage，落地时再读回来。
+  // 用 sessionStorage 而不是 localStorage：换一台机器、隔一天回来，不该被旧现场劫持。
+  const REVIEW_STATE_KEY = "qb-review-state";
+
+  function saveReviewState() {
+    try {
+      window.sessionStorage.setItem(REVIEW_STATE_KEY, JSON.stringify({
+        paperId: state.paperId, filter: state.filter, current: state.current,
+        expanded: [...state.expanded], savedAt: Date.now()
+      }));
+    } catch { /* 浏览器禁止存储时只在本页有效 */ }
+  }
+
+  function readReviewState() {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(REVIEW_STATE_KEY) || "null");
+      return saved && typeof saved === "object" ? saved : null;
+    } catch { return null; }
+  }
+
+  function restoreReviewState(saved) {
+    if (!saved) return;
+    (Array.isArray(saved.expanded) ? saved.expanded : [])
+      .filter((id) => questionById(id)).forEach((id) => state.expanded.add(id));
+    if (FILTERS.some((filter) => filter.key === saved.filter)) state.filter = saved.filter;
+    renderPaper();
+    const current = questionById(saved.current);
+    if (current && visible(current)) {
+      setCurrent(current.id, { focus: true });
+      document.querySelector(`.card[data-id="${current.id}"]`)?.scrollIntoView({ block: "start" });
+    }
+  }
+
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -1436,6 +1470,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       url.searchParams.delete("draft");
       history.replaceState(null, "", url);
       window.scrollTo({ top: 0 });
+      saveReviewState();
     }
     renderPaperList();
     // 旧题的卡先留在屏幕上（压暗、不接收点击），等新题到了再整批换掉。
@@ -1854,7 +1889,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const ids = QBCutReading.cutReadingSummary(state.questions).eligibleIds;
     if (!ids.length) return;
     if (!state.status?.reader || state.status.assistant_mode) {
-      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → API 配置中配置；也可改字或直接原图审核。");
+      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → 服务与密钥里配置；也可改字或直接原图审核。");
       renderCutReadingStage();
       return;
     }
@@ -1921,6 +1956,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (state.filter === key) return;
     state.filter = key;
     renderPaper();
+    saveReviewState();
   }
 
   function renderFilters(c) {
@@ -1981,28 +2017,34 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // 题号左边的方框：打勾就是“标记通过”，已通过的再点一下就是撤销。
+  // 1.12.6：方框是一个完整可逆的开关。题库里已经放着这道题（哪怕这道卡
+  // 从没被人亲自打过勾）时，方框同样是实心的；取消它就同时把题库里的那版
+  // 撤下来。以前这里只管“通过”，题库那条原封不动，所以看着像点了没反应。
   function approvalTick(q) {
     const approved = isHumanApproved(q);
     const byAi = isAiApproved(q);
-    const blocked = !approved && !byAi && figureBlocksApproval(q);
-    const typeBlocked = !approved && !byAi && !blocked && typeBlocksApproval(q);
-    const tick = el("button", `card-tick${byAi ? " ai" : ""}`);
+    const published = isSettled(q);
+    const ticked = approved || byAi || published;
+    const blocked = !ticked && figureBlocksApproval(q);
+    const typeBlocked = !ticked && !blocked && typeBlocksApproval(q);
+    const tick = el("button", `card-tick${byAi ? " ai" : ""}${published && !approved ? " published" : ""}`);
     tick.type = "button";
-    tick.setAttribute("aria-pressed", byAi ? "mixed" : String(approved));
-    tick.setAttribute("aria-label", approved ? `撤销第 ${q.number} 题的通过`
-      : byAi ? `确认第 ${q.number} 题（${agentLabel(q)} 已通过）` : `第 ${q.number} 题标记通过`);
-    tick.title = approved ? "已标记通过；再点一下撤销（U）"
+    tick.setAttribute("aria-pressed", byAi ? "mixed" : String(ticked));
+    tick.setAttribute("aria-label", ticked ? `撤销第 ${q.number} 题的通过`
+      : blocked ? `处理第 ${q.number} 题的配图` : `第 ${q.number} 题标记通过`);
+    tick.title = ticked ? (published ? "已通过并入库；取消勾会同时从题库撤回（题卡和原卷都保留）"
+      : "已标记通过；再点一下撤销（U）")
       : byAi ? `${agentLabel(q)} 对照原卷后打的勾，你还没核对。核对无误就点一下，变成你的通过（Enter）；不对就按 U 撤销`
         : blocked ? "配图还没处理好，点一下去处理"
           : typeBlocked ? "题型还没定，点一下去选题型"
           : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
             : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
-    tick.disabled = !(approved || byAi || blocked || typeBlocked || canApprove(q));
+    tick.disabled = !(ticked || blocked || typeBlocked || canApprove(q));
     tick.append(icon("check"));
     tick.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (approved) approveQuestion(q, false);
+      if (ticked) revokeQuestion(q);
       else if (blocked) focusFigureReview(q);
       else if (typeBlocked) focusTypePicker(q);
       else approveQuestion(q, true);
@@ -2122,6 +2164,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function setCurrent(id, { scroll = false, focus = false } = {}) {
     state.current = id;
+    saveReviewState();
     cardNodes().forEach((card) => card.classList.toggle("is-current", Number(card.dataset.id) === id));
     const card = id !== null ? document.querySelector(`.card[data-id="${id}"]`) : null;
     // A card the reader jumped to (J/K, N, 通过后下一张) stays lit until they scroll themselves.
@@ -2316,6 +2359,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function setExpanded(id, on, { auto = false } = {}) {
     if (on) state.expanded.add(id); else state.expanded.delete(id);
     if (on && auto) state.autoExpanded.add(id); else state.autoExpanded.delete(id);
+    saveReviewState();
   }
 
   // J/K 跳到一张收起的题：展开它；上一张自动展开的收回去，页面不会越翻越长。
@@ -2414,7 +2458,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (!q) return;
         event.preventDefault(); openViewer(q); break;
       case "u":
-        if (!event.repeat && q && isApproved(q)) { event.preventDefault(); approveQuestion(q, false); }
+        if (!event.repeat && q && (isApproved(q) || isSettled(q))) { event.preventDefault(); revokeQuestion(q); }
         break;
       case "e":
         if (q) {
@@ -2962,7 +3006,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else if (key === "Enter") { event.preventDefault(); viewerApprove(); }
     else if (key.toLowerCase() === "u") {
       const q = questionById(viewer.id);
-      if (q && isApproved(q)) { event.preventDefault(); approveQuestion(q, false, { advance: false }); }
+      if (q && (isApproved(q) || isSettled(q))) { event.preventDefault(); revokeQuestion(q, { advance: false }); }
     }
     else if (key === "?") { event.preventDefault(); openShortcutHelp("review", { comparison: true }); }
     else if (key === " ") { event.preventDefault(); $("viewerDialog").close(); }
@@ -3382,7 +3426,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.append(el("p", "hint", `${service ? `“${service}”` : "看图读题服务"}还没有 API Key，所以这次识读没有发出请求。`
       + "原卷、已切好的题目和人工改过的内容都保留着：配好密钥后可以直接重新识读，"
       + "也可以先对照原图审核或改字，不影响这一份资料。"));
-    box.append(button("打开 API 配置", "small primary", () => openCredentialSettings("reading"),
+    box.append(button("打开密钥窗口", "small primary", () => openCredentialSettings("reading"),
       "在本机填写这家的 API Key；填好后回到题卡点“重新 AI 识读”即可"));
     return box;
   }
@@ -3628,7 +3672,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const notReady = readerUnavailable();
       read.disabled = Boolean(q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
         || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready") || Boolean(notReady);
-      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
+      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → 服务与密钥”里填好；原图和已切好的题目都保留着。`;
       else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
       actions.append(read);
     }
@@ -3786,7 +3830,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderPaper();
   }
 
-  async function approveQuestion(q, approved, { advance = true } = {}) {
+  // 1.12.6：撤销全部走 revokeQuestion（它同时处理题库里的那版），
+  // 所以这里只负责"打勾通过"。
+  async function approveQuestion(q, approved = true, { advance = true } = {}) {
     const confirming = approved && isAiApproved(q);
     try {
       const data = await api(`/api/questions/${q.id}/approve`, { method: "POST", body: { approved } });
@@ -3798,16 +3844,50 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const left = c.todo;
         toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
           : left ? `第 ${q.number} 题已通过并入库` : "本卷已全部通过并入库",
-          left ? "" : "success", { label: "撤销", onClick: () => approveQuestion(fresh, false, { advance: false }) });
+          left ? "" : "success", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
         teach({ type: "approve", number: q.number });
         if (advance) focusNext(q);
-      } else {
-        toast(`已撤销第 ${q.number} 题的通过`, "", advance
-          ? { label: "恢复通过", onClick: () => approveQuestion(fresh, true, { advance: false }) } : null);
-        setCurrent(q.id);
       }
       return true;
     } catch (error) { toast(error.message, "error"); return false; }
+  }
+
+  // 1.12.6：取消勾 = 撤销通过 + 把题库里那版撤下来，两步都要有结果。
+  // 只清 approved 是不够的：题库记录会原封不动，用户会以为删掉了其实没有。
+  // 撤回后题卡和原卷都保留，改字后可以重新入库（撤回端点只返回 publication，
+  // 不含试卷，所以要重拉整卷让侧栏和筛选数字跟上）。
+  async function revokeQuestion(q, { advance = true } = {}) {
+    const live = q.publication || null;
+    const wasApproved = isApproved(q);
+    let withdrawn = false;
+    try {
+      if (wasApproved) {
+        const data = await api(`/api/questions/${q.id}/approve`, { method: "POST", body: { approved: false } });
+        applyQuestion(data);
+        setExpanded(q.id, false);
+      }
+    } catch (error) { toast(`没能撤销第 ${q.number} 题的通过：${error.message}`, "error"); return false; }
+    if (live?.id) {
+      try {
+        // 必须带一个空 JSON 体：撤回端点要 Content-Type 才认这次请求，
+        // 光发一个没有 body 的 POST 会被挡成「请求格式不正确」，题库那一版
+        // 留在原地 —— 界面看起来像撤了，其实没撤。
+        await api(`/api/library/${live.id}/withdraw`, { method: "POST", body: {} });
+        withdrawn = true;
+      } catch (error) {
+        toast(`已撤销第 ${q.number} 题的通过，但没能从题库撤回：${error.message}。`
+          + "题库里那一版还在，可在正式题库里撤回。", "error");
+        await refreshPaper();
+        return false;
+      }
+    }
+    const fresh = questionById(q.id) || q;
+    toast(withdrawn ? `已撤销第 ${q.number} 题的通过并从题库撤回；题卡和原卷都保留`
+      : `已撤销第 ${q.number} 题的通过`, "", advance
+      ? { label: "恢复通过", onClick: () => approveQuestion(fresh, true, { advance: false }) } : null);
+    if (withdrawn) await refreshPaper();
+    setCurrent(q.id);
+    return true;
   }
 
   function focusNext(q) {
@@ -4769,23 +4849,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsStop").disabled = changingCutMode;
     $("settingsReparse").disabled = changingCutMode;
     $("manualProcessing").disabled = $("pageManualCut").disabled = changingCutMode;
-    // Keep the recovery action beside the processing status. The local
-    // fallback already has a primary cutting action in its three-step panel.
+    // 1.12.6: the manual switch lives only in 试卷操作. A prominent button beside
+    // the status invited clicks, but the action abandons AI cutting and restarts
+    // by hand, so the menu is the honest place for it.
     const cloudCutting = QBProgress.canSwitchMinerUToManual(paper), canContinue = QBProgress.canContinueAiCut(paper);
-    $("paperManualEntry").hidden = !switchingManual && !cloudCutting;
-    $("paperManualFallback").hidden = !switchingManual && !cloudCutting;
-    $("paperManualFallback").disabled = changingCutMode;
-    $("paperManualFallback").textContent = switchingManual ? "正在准备手工切题…" : "改为手工切题";
     $("paperContinueAi").hidden = !continuingAi && !canContinue;
     $("paperContinueAi").disabled = changingCutMode || (!cloudCutting && (paperReadSubmissionPending(paper.id)
       || state.questions.some(q => q.ocr_pending || q.reread_requested)));
     $("paperContinueAi").textContent = continuingAi ? "正在继续 AI 切题…" : "继续 AI 切题";
     $("paperContinueAi").title = cloudCutting ? "保留当前任务，继续等待，不重新提交"
       : "优先使用本机已有解析；需要重新提交原稿时会先说明";
-    $("paperManualHint").textContent = switchingManual ? "正在停止本机等待并准备原卷，已有成果保留。"
-      : continuingAi ? "正在恢复自动切题，原卷和已保存题目保留。"
-        : cloudCutting ? "可以停止等待，直接框题；原卷和已有题目保留。"
-          : "手工范围和已保存题目保留，也可继续 AI 切题补充未切出的题目。";
+    $("settingsManualFallback").title = switchingManual
+      ? "正在停止本机等待并准备原卷，已有成果保留。"
+      : "停止等待 MinerU，直接从原卷框题；原卷和已保存的题目都会保留，随时可以再切回 AI。";
     const groups = suggestedSplitGroups(paper);
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
@@ -4963,9 +5039,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     closeSettingsThen(() => {
       if (state.paperId === paperId) void switchToManual(null, { stopMinerU: true });
     });
-  });
-  $("paperManualFallback").addEventListener("click", () => {
-    void switchToManual(null, { stopMinerU: true });
   });
   $("paperContinueAi").addEventListener("click", () => {
     $("paperMenu").open = false;
@@ -5406,7 +5479,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? null : el("p", "hint", "Ctrl+Enter 保存 · Esc 取消");
     bar.append(saveButton, cancel);
     if (shortcutNote) bar.append(shortcutNote);
-    editor.append(title, typeRow, originRow, stemRow, previewBox, tableTools, optionBox, extra, bar);
+    // 1.12.6：保存条移到标题右边、钉在面板顶部。原来它钉在底部，还专门在
+    // 卡片底部留了 62px 空地挡着内容。
+    const head = el("div", "editor-head");
+    head.append(title, bar);
+    editor.append(head, typeRow, originRow, stemRow, tableTools, optionBox, extra);
 
     const collect = () => ({
       stem: stem.value,
@@ -5486,15 +5563,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         showPosition();
       });
     };
+    // 1.12.6：预览放回左栏原卷下面 —— 右边只管打字，左边看排版结果。
+    // 关键是让它和右边的题干顶对在同一条水平线上：原来左边比右边低一截，
+    // 打字时视线在两个错位的框之间来回跳。这里量出差的像素，补成外边距。
+    const alignPreviewWithStem = () => {
+      const source = card.querySelector(".source-sticky");
+      if (!source || !source.contains(previewBox)) { previewBox.style.marginTop = ""; return; }
+      const target = stem.getBoundingClientRect().top;
+      // 改外边距会反过来移动自己，且 fitStem/showPosition 之后题干的行数还会变，
+      // 一次算不准。迭代到对齐或不再变化为止。
+      for (let pass = 0; pass < 3; pass += 1) {
+        const gap = target - preview.getBoundingClientRect().top;
+        if (Math.abs(gap) < 1.5) break;
+        // 截图特别高时左边已经越过右边，此时不再往下推。
+        const next = Math.max(0, Math.min((parseFloat(previewBox.style.marginTop) || 0) + gap, 240));
+        if (Math.abs(next - (parseFloat(previewBox.style.marginTop) || 0)) < 1) break;
+        previewBox.style.marginTop = `${Math.round(next)}px`;
+      }
+    };
     const placePreview = () => {
       const source = card.querySelector(".source-sticky");
       const shot = source?.querySelector(".crop, .crop-missing");
-      const room = window.innerHeight - viewTop() - 48 - (shot?.offsetHeight || 0);
-      const beside = Boolean(source && getComputedStyle(source).position === "sticky" && room >= 180);
-      if (beside && previewBox.parentNode !== source) source.append(previewBox);
-      else if (!beside && previewBox.previousElementSibling !== stemRow) stemRow.after(previewBox);
+      // 搬去左栏的前提：题卡还是左右两栏（左栏原卷 sticky），且原卷截图下方
+      // 仍给得起一块预览的高度。窄屏左栏不是 sticky，就老老实实留在题干下面。
+      const beside = Boolean(source && getComputedStyle(source).position === "sticky"
+        && window.innerWidth > 1100 && viewTop() + 72 + (shot?.offsetHeight || 0) < window.innerHeight - 180);
+      if (beside) {
+        if (previewBox.parentElement !== source) source.append(previewBox);
+      } else if (previewBox.parentElement !== editor || previewBox.previousElementSibling !== stemRow) {
+        stemRow.after(previewBox);
+      }
       previewBox.classList.toggle("beside", beside);
-      previewBox.style.setProperty("--preview-room", beside ? `${Math.round(room - 30)}px` : "none");
+      const room = window.innerHeight - viewTop() - 72;
+      previewBox.style.setProperty("--preview-room", `${Math.round(room - 30)}px`);
+      if (beside) alignPreviewWithStem();
     };
     const relayout = () => { fitStem(); placePreview(); updatePosition(); };
     editor.addEventListener("input", update);
@@ -7561,6 +7663,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // continuation must not queue OCR while the original pages are prepared.
     newUploadReadContinuations.delete(id);
     renderManualEntryState();
+    // 1.12.6: the switch now happens from 试卷操作, so reopen that menu to show
+    // the in-progress state instead of a button that vanished from the page.
+    $("paperMenu").open = true;
     try {
       // The API switches the whole paper. `page` only positions the canvas;
       // sending it as a page-restriction would imply unsupported cloud scope.
@@ -7783,8 +7888,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function sendUpload(form, label) {
     toast(`正在上传 ${label}…`);
-    const data = await api("/api/papers", { method: "POST", form });
-    if (data.duplicate) toast("这份试卷之前上传过，已为你打开");
+    let data = await api("/api/papers", { method: "POST", form });
+    // 1.12.6: 归档不等于可以重录。以前归档过的原件再传一次会静悄悄新建一份任务，
+    // 题库里于是出现两份同名来源。现在命中归档的那份先问清楚。
+    if (data.duplicate && data.archived) {
+      const again = await confirmDialog({
+        title: "这份资料之前录过",
+        text: `《${data.paper?.display_name || label}》已经录过一次，题目已经进库，现在那份任务归档着。\n再录一遍会让题库里出现两份同名来源。\n\n恢复原来那份继续用，还是确实要重新录一遍？`,
+        ok: "仍然重新录入",
+        cancel: "恢复原来那份",
+        focusCancel: true
+      });
+      if (!again) {
+        await restoreArchivedPaper(data.paper.id);
+        return data.paper;
+      }
+      form.append("force", "1");
+      data = await api("/api/papers", { method: "POST", form });
+      toast("已新建一份，名字后面加了序号，题库里能和原来那份分开", "success");
+    } else if (data.duplicate) toast("这份试卷之前上传过，已为你打开");
     else if (data.paper?.id) newUploadReadContinuations.add(data.paper.id);
     return data.paper;
   }
@@ -8270,7 +8392,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     node.className = `settings-ready ${automaticParseReady() ? "ready" : "missing"}`;
     node.textContent = automaticParseReady() ? "可以直接导入，程序先在本机切题。云处理已配置，使用前会说明发送范围；实际可用性以处理结果为准。"
-      : "现在就能导入资料、从原卷选题，不需要密钥。以后需要云处理或主动识读时，再到设置中的 API 配置填写密钥。";
+      : "现在就能导入资料、从原卷选题，不需要密钥。以后需要云处理或主动识读时，再到设置中的服务与密钥里填写密钥。";
   }
 
   function openWelcome() {
@@ -8876,8 +8998,29 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           requestAnimationFrame(() => focusTypePicker(questionById(draft)));
         }
       }
-    } else if (state.papers.length) {
-      await selectPaper(state.papers[0].id);
+    } else {
+      // URL 没带卷号时先问上一段审核现场：从题库点回「录入终审」该回到原处，
+      // 而不是默认筛选 + 第一张卡。URL 优先，分享链接和书签不受影响。
+      // 现场里那份卷可能已经归档，因此不在 state.papers 里 —— 不能拿
+      // state.papers 当准入条件，否则归档卷的现场会被静悄悄丢掉。
+      const saved = readReviewState();
+      let opened = false;
+      if (saved?.paperId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saved.paperId)) {
+        try {
+          if (!state.papers.some((paper) => paper.id === saved.paperId)) {
+            const data = await api(`/api/papers/${saved.paperId}`);
+            if (!data.paper) throw new Error("这份试卷已经不在了");
+            if (!data.paper.archived) state.papers.push(data.paper);
+          }
+          await selectPaper(saved.paperId);
+          restoreReviewState(saved);
+          opened = true;
+        } catch (error) {
+          // 卷被删了或打不开：退回第一份，不能卡在空白页。
+          toast(error.message || "上一段的试卷已打不开，已回到第一份", "error");
+        }
+      }
+      if (!opened && state.papers.length) await selectPaper(state.papers[0].id);
     }
     loadTeaching();
     if (teaching.active && !state.papers.some((paper) => paper.id === teaching.paper)) exitTeaching();

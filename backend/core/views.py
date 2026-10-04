@@ -895,6 +895,27 @@ def model_settings(request):
 # ---------------------------------------------------------------- 试卷
 
 @csrf_exempt
+def _find_duplicate(sha256_value, material_type: str):
+    """同一份原件只应有一份任务，归档不等于可以重录。
+
+    1.12.6 之前这里带 ``archived=False``，于是归档过的卷再传一次就会新建任务，
+    题库里留下两份同名来源。命中时优先回未归档的那份，那是用户还看得见的。
+    """
+    return Paper.objects.filter(sha256=sha256_value, material_type=material_type)\
+        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING))\
+        .order_by("archived", "-created_at").first()
+
+
+def _distinct_task_name(filename: str) -> str:
+    """重录同名原件时给新任务加序号，题库里两条来源必须能分开。"""
+    stem, suffix = Path(filename).stem[:248], Path(filename).suffix
+    for index in range(2, 100):
+        candidate = f"{stem} ({index}){suffix}"
+        if not Paper.objects.filter(task_name=candidate).exists():
+            return candidate
+    return f"{stem} ({uuid.uuid4().hex[:6]}){suffix}"
+
+
 def papers(request):
     if request.method == "GET":
         if request.GET.get("archived") == "only":
@@ -923,7 +944,7 @@ def papers(request):
     if mode == "mineru" and (not readers.configured("mineru") or not _reading_ready()):
         return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
                       "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
-                      "密钥在“设置 → 常用 → 填写或更换密钥”里填写")
+                      "密钥在“设置 → 服务与密钥”里填写")
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -950,13 +971,15 @@ def papers(request):
     digest = hashlib.sha256()
     for chunk in upload.chunks():
         digest.update(chunk)
-    existing = Paper.objects.filter(sha256=digest.hexdigest(), material_type=material_type, archived=False)\
-        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING)).first()
-    if existing:
-        return JsonResponse({"paper": paper_json(existing), "duplicate": True})
+    existing = _find_duplicate(digest.hexdigest(), material_type)
+    if existing and not (existing.archived and request.POST.get("force") == "1"):
+        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
+                             "archived": bool(existing.archived)})
+    filename = Path(upload.name).name[:255]
     paper = Paper(
-        filename=Path(upload.name).name[:255], kind=kind, sha256=digest.hexdigest(),
+        filename=filename, kind=kind, sha256=digest.hexdigest(),
         material_type=material_type,
+        task_name=_distinct_task_name(filename) if existing else "",
         processing_plan={"schema": 1, "mode": mode, "revision": 0},
         status=Paper.Status.READY if mode != "mineru" else Paper.Status.QUEUED,
     )
@@ -1038,13 +1061,14 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     combined = hashlib.sha256(
         f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()
     ).hexdigest()
-    existing = Paper.objects.filter(sha256=combined, material_type=material_type, archived=False)\
-        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING)).first()
-    if existing:
-        return JsonResponse({"paper": paper_json(existing), "duplicate": True})
+    existing = _find_duplicate(combined, material_type)
+    if existing and not (existing.archived and request.POST.get("force") == "1"):
+        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
+                             "archived": bool(existing.archived)})
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
     paper = Paper(filename=name[:255], kind="image", sha256=combined, material_type=material_type,
+                  task_name=_distinct_task_name(name) if existing else "",
                   processing_plan={"schema": 1, "mode": parse_mode, "revision": 0},
                   status=Paper.Status.READY if parse_mode != "mineru" else Paper.Status.QUEUED)
     folder = settings.DATA_ROOT / str(paper.id)
@@ -1798,7 +1822,7 @@ def paper_read_cut_questions(request, paper_id):
                 candidates.append(question)
         if candidates and not _vision_ready(paper):
             return _error(_reader_unavailable_sentence(paper)
-                + "请在“设置 → API 配置”里补上密钥；也可以直接原图审核，"
+                + "请在“设置 → 服务与密钥”里补上密钥；也可以直接原图审核，"
                 "或由当前 AI 助手对照原图改字。", 409)
         now = timezone.now()
         for question in candidates:
@@ -2575,7 +2599,7 @@ def question_action(request, question_id, action: str):
             if (source_images.is_image(question) or question.processing_mode == "manual") and (
                     not _vision_ready(question.paper) or readers.assistant_mode()):
                 return _error(_reader_unavailable_sentence(question.paper)
-                    + "请在“设置 → API 配置”里补上密钥后重新识读；也可以直接由当前 AI 助手对照原图改字，原图始终保留。", 409)
+                    + "请在“设置 → 服务与密钥”里补上密钥后重新识读；也可以直接由当前 AI 助手对照原图改字，原图始终保留。", 409)
             if not source_images.is_image(question):
                 question.edited = False
             current_review = question.figure_review if isinstance(question.figure_review, dict) else {}
@@ -3077,6 +3101,45 @@ def library_withdraw(request, publication_id):
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     library.withdraw(publication)
     return JsonResponse({"publication": library.publication_json(publication)})
+
+
+@csrf_exempt
+def library_withdraw_batch(request):
+    """一批题一起从题库撤下。
+
+    1.12.6 之前只有单题撤回，清一份 25 题的卷要点 25 下。这里一个事务里逐条
+    撤回并逐条回报结果：哪几条撤了、哪几条没撤、为什么没撤。不静默吞掉，
+    否则用户会以为 25 道全撤了，其实有几道根本没动。
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    from . import library_browse
+    try:
+        ids = library_browse.normalize_ids((_body(request) or {}).get("ids"))
+    except library_browse.BrowseError as error:
+        return _error(str(error))
+    if not ids:
+        return _error("请先勾选要撤回的题目")
+    found = {str(pk): pk for pk in PublishedQuestion.objects.filter(pk__in=ids).values_list("pk", flat=True)}
+    withdrawn, skipped = [], []
+    with transaction.atomic():
+        for value in ids:
+            if value not in found:
+                skipped.append({"id": value, "reason": "题库里已经没有这道题"})
+                continue
+            publication = PublishedQuestion.objects.select_related("paper").get(pk=found[value])
+            if publication.status == PublishedQuestion.Status.WITHDRAWN:
+                skipped.append({"id": value, "reason": "这道题已经撤回过了"})
+                continue
+            if publication.status == PublishedQuestion.Status.SUPERSEDED:
+                skipped.append({"id": value, "reason": "已被新版替代，请撤回当前那一版"})
+                continue
+            library.withdraw(publication)
+            withdrawn.append(value)
+    return JsonResponse({"withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped})
 
 
 # ---------------------------------------------------------------- 功能开关与题库任务

@@ -174,6 +174,24 @@ class PhotoPaperTests(TestCase):
         self.assertEqual(plain.status_code, 201)
         self.assertFalse(Paper.objects.get(pk=plain.json()["paper"]["id"]).photos["enhance"])
 
+    def test_archiving_photo_pages_does_not_license_a_second_task_for_the_same_photos(self):
+        # 1.12.6：归档过的照片卷再传一次同样这组照片，不该多出一份同名任务。
+        batch = {"IMG_1.jpg": jpeg_bytes(marked_page(1)), "IMG_2.jpg": jpeg_bytes(marked_page(2))}
+        first = self.upload(batch)
+        self.assertEqual(first.status_code, 201, first.content)
+        archived = Paper.objects.get()
+        archived.archived = True
+        archived.save(update_fields=["archived", "updated_at"])
+        again = self.upload(batch)
+        self.assertTrue(again.json().get("duplicate"))
+        self.assertTrue(again.json().get("archived"))
+        self.assertEqual(Paper.objects.count(), 1)
+        forced = self.upload(batch, force="1")
+        self.assertEqual(forced.status_code, 201, forced.content)
+        self.assertEqual(Paper.objects.count(), 2)
+        self.assertNotEqual(Paper.objects.get(pk=forced.json()["paper"]["id"]).display_name,
+            archived.display_name, "两份来源必须能在题库里分开")
+
     def test_mixing_pdf_and_photos_or_bad_image_is_rejected(self):
         response = self.upload({"a.jpg": jpeg_bytes(marked_page(1)), "b.pdf": b"%PDF-1.4"})
         self.assertEqual(response.status_code, 400)

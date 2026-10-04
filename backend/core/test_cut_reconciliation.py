@@ -122,6 +122,70 @@ class ReimportingTheSameOriginalTests(NothingWasCutCase):
         self.assertEqual(Paper.objects.count(), 1)
 
 
+class ReimportingAnArchivedOriginalTests(NothingWasCutCase):
+    """1.12.6：归档不是"可以再录一遍"。
+
+    以前查重带 archived=False，归档过的原件再传一次会静悄悄新建一份任务，
+    题库里于是出现两份同名来源（真库复现：两份 202510汶源初四数学月考.pdf，
+    各 25 题全入库）。
+    """
+
+    def upload(self, data, **extra):
+        handle = io.BytesIO(data)
+        handle.name = "月考卷.pdf"
+        return self.client.post("/api/papers", {"file": [handle], "parse_mode": "auto",
+            "allow_cloud": "0", **extra}, HTTP_X_QB_REQUEST="1")
+
+    def archive(self, paper):
+        paper.archived = True
+        paper.save(update_fields=["archived", "updated_at"])
+        return paper
+
+    def test_uploading_an_archived_original_never_creates_a_second_task(self):
+        same = scan_pdf()
+        first = self.upload(same)
+        self.assertEqual(first.status_code, 201, first.content)
+        original = self.archive(Paper.objects.get())
+        again = self.upload(same)
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertTrue(again.json().get("duplicate"))
+        self.assertTrue(again.json().get("archived"), "前端据此问「恢复原来那份」还是「仍然重新录入」")
+        self.assertEqual(again.json()["paper"]["id"], str(original.id))
+        self.assertEqual(Paper.objects.count(), 1)
+
+    def test_force_reimports_but_names_the_new_task_so_two_sources_stay_distinguishable(self):
+        same = scan_pdf()
+        self.upload(same)
+        self.archive(Paper.objects.get())
+        again = self.upload(same, force="1")
+        self.assertEqual(again.status_code, 201, again.content)
+        self.assertFalse(again.json().get("duplicate"))
+        self.assertEqual(Paper.objects.count(), 2)
+        names = {paper.display_name for paper in Paper.objects.all()}
+        self.assertEqual(names, {"月考卷.pdf", "月考卷 (2).pdf"},
+            "题库按来源分组显示，两份同名会让「撤回所选」分不清撤的是哪份")
+
+    def test_force_on_a_live_duplicate_does_not_multiply_the_task(self):
+        # 未归档的重复本来就直接打开原卷，force 只对归档那份有意义。
+        same = scan_pdf()
+        self.upload(same)
+        again = self.upload(same, force="1")
+        self.assertTrue(again.json().get("duplicate"))
+        self.assertEqual(Paper.objects.count(), 1)
+
+    def test_a_visible_copy_wins_over_the_archived_one(self):
+        same = scan_pdf()
+        first = self.upload(same)
+        self.archive(Paper.objects.get())
+        live = self.upload(same, force="1").json()["paper"]
+        third = self.upload(same)
+        self.assertEqual(third.json()["paper"]["id"], live["id"],
+            "同时存在归档份和未归档份时，应回未归档的那份")
+        self.assertFalse(third.json().get("archived"))
+        self.assertEqual(Paper.objects.count(), 2)
+        self.assertIsNotNone(first)
+
+
 class NoVerdictIsClaimedTests(NothingWasCutCase):
     def test_the_api_no_longer_reports_a_cut_verdict(self):
         paper = self.paper_with_cards(self.paper(data=scan_pdf()), 1, 2)

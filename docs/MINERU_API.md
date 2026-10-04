@@ -24,7 +24,7 @@
 
 ## Token、额度与费用
 
-精准 API 使用 `Authorization: Bearer <Token>`。Token 在 [API 管理页](https://mineru.net/apiManage/token) 登录后创建；凭据由使用者在题有据的“设置 → 常用 → 填写或更换密钥”中填写，不发给 AI、不放进公开日志。
+精准 API 使用 `Authorization: Bearer <Token>`。Token 在 [API 管理页](https://mineru.net/apiManage/token) 登录后创建；凭据由使用者在题有据的“设置 → 服务与密钥”中填写，不发给 AI、不放进公开日志。
 
 **有效期以 Token 管理页显示的实际到期日期为准。** 当前公开 API 文档只区分 Token 错误 `A0202` 与过期 `A0211`，未给出适用于所有账户的固定有效天数。2026-01-24 的 [旧讨论 #4412](https://github.com/opendatalab/MinerU/discussions/4412) 是用户提出的 14 天续期诉求，不能作为当前“所有 Token 每 14 天过期”的依据。
 

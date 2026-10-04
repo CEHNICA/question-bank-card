@@ -9,7 +9,7 @@ const dom = require("./credential-test-dom.js");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
-assert.match(html, /id="settingsCredentialOpen"[^>]*>API 配置<\/button>/);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>打开密钥窗口<\/button>/);
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 

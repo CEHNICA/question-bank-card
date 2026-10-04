@@ -33,8 +33,13 @@ assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
 assert.match(html, /id="libraryAIAPISettingsMount"/);
 assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true, confirm: confirmDialog \}\)/);
 assert.doesNotMatch(html + js, /libraryAISettingsMount/);
-assert.equal((html.match(/>API 配置<\/button>/g) || []).length, 2, "One outer tab and one configuration button");
-assert.match(html, /id="settingsCredentialOpen"[^>]*>API 配置<\/button>/);
+// 1.12.6: “API 配置” 曾在一屏里出现三次（左侧 tab、内容区标题、底部按钮），
+// 看着分不清哪个能点。现在三处各有各的说法，只有底部按钮是入口。
+assert.doesNotMatch(html, />API 配置<\/button>/, "No entry may still be called plain “API 配置”");
+assert.doesNotMatch(html, /id="settingsServicesTitle"[^>]*>API 配置</, "The section heading is not “API 配置” either");
+assert.match(html, /data-settings-tab="settingsGeneral"[^>]*>服务与密钥</);
+assert.match(html, /id="settingsServicesTitle"[^>]*>读题与看图服务</);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>打开密钥窗口<\/button>/);
 assert.doesNotMatch(html + js, /settingsAI\b|settingsAPIOpen/);
 assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialSettings \}\)/);
 
@@ -84,7 +89,7 @@ for (const hash of ["#ai", "#api", "#services", "", "#display", "#help", "#about
   }
 }
 const navigation = routes(); navigation.context.openSettings();
-assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["API 配置", "显示与导出", "帮助", "关于"]);
+assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["服务与密钥", "显示与导出", "帮助", "关于"]);
 for (let index = 0; index < navigation.tabs.length; index++) {
   for (const key of ["ArrowLeft", "ArrowRight"]) {
     let prevented = false;

@@ -21,15 +21,33 @@ def seed():
         value = os.environ.get(name)
         if not value or not Path(value).resolve().is_relative_to(ROOT / "tmp"):
             raise SystemExit(f"{name} must be inside this checkout's tmp directory")
-    from check_library_history_browser import seed as seed_history
-    seed_history()
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "qb_server.settings")
+    sys.path.insert(0, str(ROOT / "backend"))
+    import django
+    django.setup()
     from django.conf import settings
+    from django.core.management import call_command
+    from django.utils import timezone
     from core import library
     from core.models import Paper, Question, PublishedQuestion
     import shutil
 
+    call_command("migrate", verbosity=0)
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    base = Question.objects.get(number=12)
+    fixture = json.loads((ROOT / "backend/core/demo_data/demo-paper.json").read_text(encoding="utf-8"))
+    paper = Paper.objects.create(filename="出处理离线演示.pdf", kind="pdf", sha256="browser-source",
+                                 pages=fixture["pages"], status="ready")
+    folder = settings.DATA_ROOT / str(paper.id)
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / "backend/core/demo_data/demo-paper.pdf", folder / "source.pdf")
+    paper.source_path = str(folder / "source.pdf")
+    paper.save()
+    base = Question.objects.create(paper=paper, number=12, question_type="free_response", stem="求 $1+1$。")
+    content = library.final_content(base)
+    row = PublishedQuestion.objects.create(question=base, paper=paper, source_filename=paper.filename,
+        number=12, question_type="free_response", version=1, content=content,
+        content_hash=library.content_hash(content), search_text=library._search_text(content),
+        status="published", published_at=timezone.now())
     base.stem = "设集合 $A=\\{x|x>1\\}$，求 $\\complement_U A$。"
     base.question_type = "single_choice"
     base.options = {"A": "空集", "B": "$\\{x|x\\leq 1\\}$"}
@@ -127,22 +145,15 @@ def check(url):
         page.screenshot(path=str(OUTPUT / "source-question.png"))
         dialog.get_by_role("button", name="关闭", exact=True).click()
 
-        card.get_by_role("button", name="版本历史", exact=True).click()
-        expect(page.locator("#historyRelated")).to_be_visible()
-        page.locator("#historyRelated summary").click()
-        expect(page.locator("#historyRelated")).to_contain_text("题面相同的其他资料")
-        expect(page.locator("#historyRelated")).to_contain_text("题面相近的其他资料（需核对）")
-        expect(page.locator("#historyVersions button")).to_have_count(1)
-        page.locator("#historyRelated").get_by_role("button", name="查看这份资料的历史", exact=True).first.click()
-        expect(page.locator("#historyTitle")).to_contain_text("另一份资料1.pdf")
-        expect(page.locator("#historyVersions button")).to_have_count(1)
-        page.locator("#historyRelated summary").click()
-        page.locator("#historyRelated").get_by_role("button", name="查看原卷", exact=True).first.click()
+        card.get_by_role("button", name="查看出处", exact=True).click()
+        expect(page.locator("#sourceRelated")).to_be_visible()
+        page.locator("#sourceRelated summary").click()
+        expect(page.locator("#sourceRelated")).to_contain_text("题面相同的其他资料")
+        expect(page.locator("#sourceRelated")).to_contain_text("题面相近的其他资料（需核对）")
+        page.screenshot(path=str(OUTPUT / "related-sources.png"))
+        page.locator("#sourceRelated").get_by_role("button", name="查看原卷", exact=True).first.click()
         expect(dialog).to_be_visible()
         dialog.get_by_role("button", name="关闭", exact=True).click()
-        expect(page.locator("#historyDialog")).to_be_visible()
-        page.screenshot(path=str(OUTPUT / "related-sources.png"))
-        page.locator("#historyDialog").get_by_role("button", name="关闭", exact=True).click()
 
         # A failed original still leaves a useful fallback in cropped mode.
         page.route("**/api/documents/*/pages/*/preview", lambda route: route.fulfill(status=404, body="missing"))
@@ -152,12 +163,15 @@ def check(url):
         dialog.get_by_role("button", name="关闭", exact=True).click()
 
         page.set_viewport_size({"width": 390, "height": 844})
-        card.get_by_role("button", name="版本历史", exact=True).click()
-        expect(page.locator("#historyStatus")).to_contain_text("只有这一版")
-        assert page.locator("#historyDialog").evaluate("e => e.scrollWidth <= e.clientWidth + 1")
+        page.locator(f"#q-{ids[1]}").get_by_role("button", name="查看出处", exact=True).click()
+        expect(dialog).to_be_visible()
+        assert page.locator("#sourceDialog").evaluate("e => e.scrollWidth <= e.clientWidth + 1")
+        dialog.get_by_role("button", name="关闭", exact=True).click()
+        # 1.12.6 removed 版本历史; nothing in the library may still offer it.
+        assert page.get_by_role("button", name="版本历史", exact=True).count() == 0
         assert not errors, errors
         browser.close()
-    print("Library UX browser checks passed: clear filters, crop/position/zoom, separate related histories, missing source, narrow viewport")
+    print("Library UX browser checks passed: clear filters, crop/position/zoom, related sources, missing source, narrow viewport")
 
 
 if __name__ == "__main__":

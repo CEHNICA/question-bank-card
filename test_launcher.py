@@ -218,7 +218,7 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(name, web)
         self.assertEqual(web["QB_MINERU_CONFIGURED"], "0")
         self.assertEqual(web["QB_MINIMAX_CONFIGURED"], "0")
-        self.assertIn("设置 → 常用 → 填写或更换密钥", environments["_stdout"])
+        self.assertIn("设置 → 服务与密钥", environments["_stdout"])
 
     def test_console_fallback_keeps_good_saved_account_when_first_is_invalid(self):
         saved = {

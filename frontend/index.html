@@ -58,7 +58,7 @@
     </header>
     <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
       <div class="settings-nav" role="tablist" aria-label="设置分区">
-        <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">API 配置</button>
+        <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">服务与密钥</button>
         <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">显示与导出</button>
         <button type="button" role="tab" data-settings-tab="settingsReview" aria-selected="false">帮助</button>
         <button type="button" role="tab" data-settings-tab="settingsAbout" aria-selected="false">关于</button>
@@ -66,7 +66,7 @@
       <div class="settings-scroll">
         <div id="settingsGeneral" class="settings-page" role="tabpanel">
           <section class="settings-section" aria-labelledby="settingsServicesTitle">
-            <h3 id="settingsServicesTitle">API 配置</h3>
+            <h3 id="settingsServicesTitle">读题与看图服务</h3>
             <p id="settingsReady" class="settings-ready">正在检查…</p>
             <div class="api-status-list" aria-label="读题服务的密钥">
               <div><span><strong>MinerU</strong><small>新资料的文字识别与切题</small></span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
@@ -82,7 +82,7 @@
             </details>
             <div class="api-settings-actions">
               <p class="settings-footnote">读题、标签与答案的 API 密钥和模型统一在这里配置。</p>
-              <button id="settingsCredentialOpen" class="button" type="button">API 配置</button>
+              <button id="settingsCredentialOpen" class="button" type="button" title="填写或更换 API 密钥">打开密钥窗口</button>
             </div>
           </section>
         </div>
@@ -130,7 +130,7 @@
               <p>为同一道题添加多个片段；翻到下一页继续框选，等题干、选项和图都完整后再保存。调整已有题可用“调整范围”。</p>
             </details>
             <details class="teaching-help"><summary>补充或修改答案</summary>
-              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
+              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → 服务与密钥”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
             </details>
             <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
               <p>等待时可改为手工切题，原卷和已保存题目会保留。框好后完成切题；读题服务不可用时，仍可对照原图审核，也可配置服务后重试。</p>
@@ -266,10 +266,6 @@
           <div class="paper-actions">
             <button id="publishButton" class="button primary" type="button" hidden>入库</button>
           </div>
-        </div>
-        <div id="paperManualEntry" class="manual-cut-entry" hidden>
-          <button id="paperManualFallback" class="button primary" type="button">改为手工切题</button>
-          <span id="paperManualHint" role="status">可以停止等待，直接框题；原卷和已有题目保留。</span>
         </div>
         <section id="cutReadingStage" class="cut-reading-stage" aria-labelledby="cutReadingTitle" hidden>
           <ol id="cutReadingSteps" class="cut-reading-steps" aria-label="整理题目步骤"></ol>
@@ -777,7 +773,7 @@
     <div class="dialog-head"><div><h3 id="automaticGuideTitle">自动切题入门</h3><p class="hint">这是操作流程说明。手工示例没有经过 MinerU 或 AI 处理。</p></div><button class="button quiet" type="button" data-close>关闭</button></div>
     <ol class="automatic-guide-steps">
       <li><b>1</b><div><strong>导入资料</strong><p>上传 PDF、Word 或照片。原卷先保存在本机，程序先尝试在本机自动切题。</p></div></li>
-      <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → API 配置”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
+      <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → 服务与密钥”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
       <li><b>3</b><div><strong>核对后通过</strong><p>对照原卷检查题干、选项和配图，改好错漏后勾选通过，题目自动进入正式题库。</p></div></li>
       <li><b>4</b><div><strong>选题、预览、导出</strong><p>在正式题库把题目加入试题篮，打开组卷预览，再导出 PDF 或 Word。</p></div></li>
     </ol>

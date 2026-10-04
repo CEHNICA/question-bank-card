@@ -38,14 +38,15 @@ function harness(options = {}) {
   vm.runInNewContext(helper + render + "\nglobalThis.aiBusy = aiCutContinuations;globalThis.manualBusy = manualSwitches;", context);
   return { context, $, requests, confirmations, notices, updates, refreshes, stageEntryStates, sidebar: () => sidebarRefreshes };
 }
-test("direct manual recovery and menu AI continuation stay available while MinerU waits; continuing submits nothing", async () => {
+test("menu recovery and menu AI continuation stay available while MinerU waits; continuing submits nothing", async () => {
   assert.match(html, /id="paperContinueAi"[^>]*>继续 AI 切题<\/button>/);
   assert(html.indexOf('id="paperContinueAi"') > html.indexOf('id="paperMenu"'));
-  assert(html.indexOf('id="paperContinueAi"') < html.indexOf('id="paperManualEntry"'));
+  assert(html.indexOf('id="paperContinueAi"') < html.indexOf('id="cutReadingStage"'));
+  assert.doesNotMatch(html, /paperManualEntry|paperManualFallback/, "1.12.6: both cut-mode switches live in 试卷操作 only");
   for (const status of ["queued", "parsing", "segmenting"]) {
     const h = harness({ paper: paper({ parse_mode: "mineru", status, processing: { stage: status, mineru: { state: "pending", for_seconds: 90 } } }) });
     const original = clone(h.context.state); h.context.renderSettingsTask();
-    assert.equal(h.$("paperManualEntry").hidden, false); assert.equal(h.$("paperManualFallback").hidden, false); assert.equal(h.$("paperContinueAi").hidden, false);
+    assert.equal(h.$("settingsManualFallback").hidden, false); assert.equal(h.$("paperContinueAi").hidden, false);
     assert.equal(await h.context.continueAiCut(), true);
     assert.equal(h.requests.length, 0); assert.equal(h.confirmations.length, 0); assert.equal(h.refreshes.length, 0); assert.equal(h.sidebar(), 0);
     assert.deepEqual(clone(h.context.state), original); assert(h.notices[0].text.includes("不会重新提交"));
@@ -54,11 +55,11 @@ test("direct manual recovery and menu AI continuation stay available while Miner
 test("manual, native and stopped pages visibly offer AI continuation without duplicating manual buttons", async () => {
   for (const value of [paper(), paper({ parse_mode: "native" }), paper({ status: "failed" }), paper({ parse_mode: "mineru", status: "failed", stopped: true })]) {
     const h = harness({ paper: value }); h.context.renderSettingsTask();
-    assert.equal(h.$("paperManualEntry").hidden, true, "Manual-ready papers have one stage action, with AI continuation in the menu"); assert.equal(h.$("paperContinueAi").hidden, false); assert.equal(h.$("paperManualFallback").hidden, true);
+    assert.equal(h.$("settingsManualFallback").hidden, true, "Manual-ready papers have one stage action, with AI continuation in the menu"); assert.equal(h.$("paperContinueAi").hidden, false);
   }
   for (const value of [null, paper({ archived: true }), paper({ demo: true }), paper({ status: "needs_grouping" }), paper({ parse_mode: "mineru", status: "reading" }), paper({ parse_mode: "mineru", status: "ready" })]) {
     assert.equal(App.canContinueAiCut(value), false);
-    if (value) { const h = harness({ paper: value }); h.context.renderSettingsTask(); assert.equal(h.$("paperManualEntry").hidden, true); assert.equal(await h.context.continueAiCut(), false); assert.equal(h.requests.length, 0); }
+    if (value) { const h = harness({ paper: value }); h.context.renderSettingsTask(); assert.equal(await h.context.continueAiCut(), false); assert.equal(h.requests.length, 0); }
   }
 });
 test("confirmed continuation sends the precise revision once and preserves every stored question", async () => {
@@ -84,7 +85,7 @@ test("confirmation and submission lock repeat clicks and conflicting manual/stop
   const h = harness({ confirm: () => confirmGate.promise, api: async () => { await requestGate.promise; return { paper: paper({ parse_mode: "mineru", status: "queued" }), action: "queued_mineru", changed: true }; } });
   const first = h.context.continueAiCut(); await settle();
   assert.equal(h.confirmations.length, 1); assert.equal(await h.context.continueAiCut(), false);
-  for (const id of ["paperContinueAi", "paperManualFallback", "settingsStop", "settingsReparse", "manualProcessing", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
+  for (const id of ["paperContinueAi", "settingsStop", "settingsReparse", "manualProcessing", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
   assert.deepEqual(h.stageEntryStates, [true], "Existing cutting-stage actions must be redrawn while confirmation is pending");
   confirmGate.resolve(true); await settle(); assert.equal(h.requests.length, 1); assert.equal(await h.context.continueAiCut(), false);
   requestGate.resolve(); await first; assert.equal(h.requests.length, 1); assert.equal(h.context.aiBusy.size, 0);

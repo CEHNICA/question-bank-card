@@ -81,6 +81,7 @@ urlpatterns = [
     path("api/m3/papers", views.m3_papers),
     path("api/library", views.library_list),
     path("api/library/batch", library_browse.library_batch),
+    path("api/library/withdraw-batch", views.library_withdraw_batch),
     path("api/library/export-docx", library_export.export_docx_view),
     path("api/library/export-pdf", library_pdf.export_pdf_view),
     path("api/library/drafts", library_drafts.drafts_view),
