@@ -5,13 +5,14 @@ from pathlib import Path
 import tempfile
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from . import library_ai_settings as service
 from .test_library_ai_settings import protected_test_bytes
 
 
-class APIKeyRevealTests(SimpleTestCase):
+class APIKeyRevealTests(TestCase):
+    # 1.13.4：密钥读取前会先拉一次设置，设置里带着「题库里还差几道」，那是一次读库。
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

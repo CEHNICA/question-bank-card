@@ -374,6 +374,29 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
     return extras
 
 
+def needs_tags(extras: dict | None) -> bool:
+    return not tags_of(extras)
+
+
+def needs_answer(extras: dict | None, content: dict | None) -> bool:
+    return not (str((content or {}).get("answer") or "").strip() or (extras or {}).get("ai_answer"))
+
+
+def generation_backlog() -> dict:
+    """题库里还差几道才补齐：{tags, answer, total}。
+
+    生成要花钱，开关旁边就得摆着数字，让用户看着数字决定，而不是点下去才知道。
+    这里只数「还差什么」，不数「正在跑」——正在跑的由任务列表说。
+    判据和 ``library_jobs.queue_on_intake`` 是同一套，别各数一遍。
+    """
+    live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+    tags = answer = 0
+    for extras, content in live.values_list("extras", "content"):
+        tags += needs_tags(extras)
+        answer += needs_answer(extras, content)
+    return {"tags": tags, "answer": answer, "total": live.count()}
+
+
 def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuestion:
     """Store tags / AI answer on a library entry: no new version, no re-approval."""
     publication.extras = extras

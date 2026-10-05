@@ -36,7 +36,9 @@ def answer_response(text="【答案】2【图示】2", *, model="doubao-offline-
     return response
 
 
-class IndependentAISettingsTests(SimpleTestCase):
+class IndependentAISettingsTests(TestCase):
+    # 1.13.4：设置接口会连着「题库里还差几道」一起下发，好让开关旁边摆着数字。
+    # 这是一次读库，所以这一组从 SimpleTestCase 升到 TestCase。
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

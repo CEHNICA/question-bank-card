@@ -5140,10 +5140,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       label.append(text, input);
       (["origin_split", "chinese_quotes"].includes(item.key) ? advancedBox : box).append(label);
     });
-    const note = $("featureNote");
-    const tags = (data.features || []).find((item) => item.key === "knowledge_tags");
-    $("knowledgeDetails").hidden = !(tags?.enabled && data.knowledge_file);
-    note.textContent = data.knowledge_file || "";
+    // 知识点目录原来挂在「显示与导出」页底下的「题面整理」里，和题面整理毫无关系。
+    // 1.13.4 搬去「标签与答案」面板——打标签只能从目录里选，目录就该在开关旁边。
   }
 
   function openSettings() {

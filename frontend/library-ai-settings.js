@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const API = "/api/settings/library-ai";
-  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, keyPending: new Set(), reading: {}, confirm: null };
+  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, keyPending: new Set(), reading: {}, confirm: null, advancedTouched: false };
   const defaults = {
     deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-v4-pro", supports_images: false },
     doubao: { base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "", supports_images: false },
@@ -24,6 +24,8 @@
   const savedRows = new Map();
   const revealTimers = new Map();
   let revealEpoch = 0, revealController = null, revealedProvider = null, revealing = false;
+  // 1.13.4：知识点目录的只读预览。打标签只能在目录里选，目录就该看得见。
+  let catalogueDialog = null, catalogue = null;
   const $ = (id) => document.getElementById(id);
   const keyInput = (provider) => $(`libraryAIKey-${provider}`);
 
@@ -78,6 +80,8 @@
       .library-ai-switch input{flex:none;margin-top:4px;accent-color:var(--accent)}
       .library-ai-switch span{display:grid;min-width:0;gap:2px}.library-ai-switch small{color:var(--muted)}
       .library-ai-timing{margin-left:25px}.library-ai-timing[hidden]{display:none}
+      .library-ai-timing small{color:var(--muted);font-size:12px}
+      .library-ai-cost{color:var(--muted) !important}
       .library-ai-advanced>summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:4px 0}
       .library-ai-advanced[open]>summary{margin-bottom:10px}
       .library-ai-api-fields{display:grid;gap:11px}.library-ai-api-fields[hidden],.library-ai-section[hidden]{display:none}
@@ -87,6 +91,28 @@
       .library-ai-actions .settings-save-result{flex:1;min-width:120px}
       .library-ai-section .button{justify-self:start;max-width:100%;white-space:normal}
       .library-ai-panel{min-width:0}
+      .library-ai-knowledge{gap:8px}
+      .library-ai-knowledge-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0}
+      .library-ai-knowledge-head strong{font-size:14px}
+      .library-ai-knowledge-head span{color:var(--muted);font-size:13px}
+      .library-ai-knowledge-note{font-size:13px !important;color:var(--ink-2)}
+      .library-ai-knowledge-tools{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0}
+      .library-ai-knowledge-tools .settings-path{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+      .catalogue-dialog{width:min(760px,94vw);max-height:min(88vh,900px);max-height:min(88dvh,900px);padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:inherit}
+      .catalogue-dialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+      .catalogue-dialog::backdrop{background:rgba(24,42,38,.5)}
+      .catalogue-bar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}
+      .catalogue-bar h3{margin:0;font-size:16px;flex:none}
+      .catalogue-bar .settings-path{font-size:12px;color:var(--muted);overflow-wrap:anywhere;text-align:right}
+      .catalogue-body{display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;padding:12px 18px;min-height:0}
+      .catalogue-body input{width:100%;min-height:36px;padding:7px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--bg);color:inherit;font:inherit;font-size:13px}
+      .catalogue-list{overflow-y:auto;min-height:0;padding-right:2px}
+      .catalogue-chapter{margin:12px 0 6px;font-size:12px;font-weight:600;color:var(--ink-2)}
+      .catalogue-chapter:first-child{margin-top:0}
+      .catalogue-point{display:inline-block;margin:0 5px 5px 0;padding:3px 10px;border:1px solid var(--line-strong);border-radius:99px;background:var(--bg);color:var(--ink-2);font-size:12.5px}
+      .catalogue-empty{color:var(--muted);font-size:13px;padding:8px 0}
+      .catalogue-foot{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;padding:10px 18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+      .catalogue-foot .settings-path{font-size:12px;overflow-wrap:anywhere}
       .library-ai-panel .dialog-head{padding:0 0 16px;border:0;background:none}
       .library-ai-panel .dialog-head h2{font-size:23px}
       .library-ai-panel .library-ai-body{padding:0;background:none;gap:24px;overflow:visible}
@@ -126,11 +152,19 @@
         <div class="library-ai-body">
           <p id="libraryAIState" class="library-ai-status" role="status" aria-live="polite">正在读取本机设置…</p>
           <section class="library-ai-section" aria-label="分别开启功能">
-            <p>两项默认关闭。开启后，可在题库单题生成或勾选批量生成。</p>
+            <p id="libraryAICost" class="library-ai-cost"></p>
             <label class="library-ai-switch"><input id="libraryAITags" type="checkbox"><span><strong>生成知识点标签</strong><small>从知识点目录选标签，方便下次找题。</small></span></label>
-            <label id="libraryAITagsTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAITagsIntake" type="checkbox"><span>新题入库时生成标签</span></label>
+            <label id="libraryAITagsTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAITagsIntake" type="checkbox"><span>新题入库时生成标签<small id="libraryAITagsBacklog"></small></span></label>
             <label class="library-ai-switch"><input id="libraryAIAnswer" type="checkbox"><span><strong>补充 AI 参考答案</strong><small>原卷无答案时补充解答，保存为“AI 参考 · 未核对”。</small></span></label>
-            <label id="libraryAIAnswerTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAIAnswerIntake" type="checkbox"><span>新题入库时生成参考答案</span></label>
+            <label id="libraryAIAnswerTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAIAnswerIntake" type="checkbox"><span>新题入库时生成参考答案<small id="libraryAIAnswerBacklog"></small></span></label>
+          </section>
+          <section id="libraryAIKnowledge" class="library-ai-section library-ai-knowledge" aria-label="知识点目录" hidden>
+            <p class="library-ai-knowledge-head"><strong>知识点目录</strong><span id="libraryAIKnowledgeCount">正在读取…</span></p>
+            <p class="library-ai-knowledge-note">标签只能从这个目录里选，模型和自己都不能临时造词。要增删知识点，用记事本打开下面的文件，每行一个，# 开头的是章名。</p>
+            <p class="library-ai-knowledge-tools">
+              <button id="libraryAIKnowledgeOpen" class="button small" type="button">查看目录</button>
+              <span id="libraryAIKnowledgeFile" class="settings-path"></span>
+            </p>
           </section>
           <section class="library-ai-section" aria-label="生成方式" hidden>
             <input id="libraryAIMode" type="hidden" value="api">
@@ -182,10 +216,37 @@ ${keyBlocks()}
       </form>`;
     (host || document.body).append(dialog);
     $("libraryAISettingsForm").addEventListener("submit", (event) => { event.preventDefault(); void save(); });
+    $("libraryAIKnowledgeOpen").addEventListener("click", () => void openCatalogue());
+    catalogueDialog = document.createElement("dialog");
+    catalogueDialog.id = "knowledgeCatalogueDialog";
+    catalogueDialog.className = "catalogue-dialog";
+    catalogueDialog.setAttribute("aria-labelledby", "catalogueTitle");
+    catalogueDialog.innerHTML = `
+      <header class="catalogue-bar">
+        <h3 id="catalogueTitle">知识点目录</h3>
+        <button id="catalogueClose" class="button quiet" type="button">关闭</button>
+      </header>
+      <div class="catalogue-body">
+        <input id="libraryAIKnowledgeSearch" type="search" placeholder="搜知识点或章名，例如 函数" aria-label="在知识点目录里搜索">
+        <div id="catalogueList" class="catalogue-list" aria-label="知识点目录"></div>
+      </div>
+      <footer class="catalogue-foot">
+        <span id="catalogueFile" class="settings-path"></span>
+        <span>标签只能从这里选。要增删，用记事本打开上面这个文件，每行一个知识点，# 开头的是章名。</span>
+      </footer>`;
+    document.body.append(catalogueDialog);
+    $("catalogueClose").addEventListener("click", () => catalogueDialog.close());
+    $("libraryAIKnowledgeSearch").addEventListener("input", renderCatalogue);
     for (const id of fields) {
       if (id === "libraryAIMode") continue;
       const changed = () => {
         if (["libraryAITags", "libraryAIAnswer"].includes(id)) renderTiming();
+        // 「入库时生成」这两个开关一改，费用那句话要当场跟着变。
+        if (["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake"].includes(id) && state.current) {
+          renderCost(state.current);
+        }
+        // 目录这一段跟着「生成知识点标签」走，当场就跟着开关走，别等保存后重读。
+        if (id === "libraryAITags") $("libraryAIKnowledge").hidden = !$(id).checked;
         const switchingProvider = id === "libraryAIProvider" && $(id).value !== state.provider;
         if (switchingProvider) {
           state.provider = $(id).value;
@@ -471,13 +532,38 @@ ${keyBlocks()}
     $("libraryAIAPIFields").hidden = !isAPI();
     $("libraryAIAssistantHelp").hidden = true;
     $("libraryAIAdvanced").hidden = !isAPI();
-    if (isAPI()) $("libraryAIAdvanced").open = true;
     $("libraryAISave").textContent = "保存 API 设置";
+  }
+
+  // 1.13.4：模型配置那一块展开有 1669px。以前每次打开面板都自动展开，
+  // 整块面板 2169px 高，视口才 1000px，四个功能开关被顶到屏幕外。
+  // 现在默认收起——没配好 API 时才替用户展开，此外一旦他自己动过就不再插手。
+  function syncAdvanced(apiReady) {
+    if (!isAPI()) return;
+    if (!apiReady && !state.advancedTouched) $("libraryAIAdvanced").open = true;
   }
 
   function renderTiming() {
     $("libraryAITagsTiming").hidden = !$("libraryAITags").checked;
     $("libraryAIAnswerTiming").hidden = !$("libraryAIAnswer").checked;
+  }
+
+  // 1.13.4：生成要花钱。以前这两行只含糊地提了一句「会用到额度」，既没写几次，也没写还差几道，
+  // 用户点下去才知道花了多少。这里把「每道新题几次调用」和「题库里还差几道」摆出来。
+  // 判据是四个开关当下的状态：功能没开，入库时生成就不算数。
+  function renderCost(body) {
+    const backlog = body.backlog || { tags: 0, answer: 0, total: 0 };
+    const on = (id) => Boolean($(id)?.checked);
+    const tagsRunning = on("libraryAITags") && on("libraryAITagsIntake");
+    const answerRunning = on("libraryAIAnswer") && on("libraryAIAnswerIntake");
+    const perQuestion = Number(tagsRunning) + Number(answerRunning);
+    const queued = (tagsRunning ? backlog.tags : 0) + (answerRunning ? backlog.answer : 0);
+    $("libraryAICost").textContent = perQuestion
+      ? `题库现在 ${backlog.total} 道题。开着「入库时生成」，每道新题入库会调用 ${perQuestion} 次服务；`
+        + `还没做的共 ${queued} 道（${[tagsRunning && `标签 ${backlog.tags}`, answerRunning && `答案 ${backlog.answer}`].filter(Boolean).join("、")}）。`
+      : "两项默认关闭。开启后，可在题库单题生成或勾选批量生成；都开「入库时生成」的话，每道新题入库要调用两次服务。";
+    $("libraryAITagsBacklog").textContent = `题库里还差 ${backlog.tags} 道有标签`;
+    $("libraryAIAnswerBacklog").textContent = `题库里还差 ${backlog.answer} 道有答案`;
   }
 
   function renderCapabilities() {
@@ -578,7 +664,10 @@ ${keyBlocks()}
         || typeof body.base_url !== "string" || typeof body.model !== "string"
         || typeof body.supports_images !== "boolean" || typeof body.thinking !== "boolean"
         || typeof body.on_intake?.tags !== "boolean" || typeof body.on_intake?.answer !== "boolean"
-        || typeof body.features?.knowledge_tags !== "boolean" || typeof body.features?.ai_answer !== "boolean") {
+        || typeof body.features?.knowledge_tags !== "boolean" || typeof body.features?.ai_answer !== "boolean"
+        || typeof body.knowledge?.total !== "number" || typeof body.knowledge?.chapters !== "number"
+        || typeof body.knowledge?.file !== "string"
+        || !["tags", "answer", "total"].every((key) => typeof body.backlog?.[key] === "number")) {
       throw new Error("设置状态读取不完整，请重新读取设置后再试。");
     }
     return body;
@@ -586,6 +675,62 @@ ${keyBlocks()}
     if (error.name === "AbortError") throw new Error(payload === undefined ? "读取超时，请重新读取设置。" : "操作结果尚未确认，请稍后重新读取设置；不会自动重试或再次测试。");
       throw error;
     } finally { clearTimeout(timeout); requests.delete(controller); }
+  }
+
+  function renderKnowledge(body) {
+    // 目录只有在开着「生成知识点标签」时才相关，免得关了功能还让人去管目录。
+    $("libraryAIKnowledge").hidden = !body.features.knowledge_tags;
+    if (!body.features.knowledge_tags) return;
+    // 大小和文件位置随设置一起下发，面板一打开就有，不必先发一次请求。
+    const summary = body.knowledge || { total: 0, chapters: 0, file: "" };
+    $("libraryAIKnowledgeCount").textContent = summary.total
+      ? `${summary.total} 个知识点，分 ${summary.chapters} 章` : "知识点目录是空的";
+    $("libraryAIKnowledgeFile").textContent = summary.file || "";
+    if (catalogue) $("catalogueFile").textContent = summary.file || "";
+  }
+
+  async function loadCatalogue() {
+    try {
+      const response = await fetch("/api/settings/knowledge", { cache: "no-store", headers: { "X-QB-Request": "1" } });
+      const body = await response.json();
+      if (!response.ok || !Array.isArray(body.points)) throw new Error(body.error || "目录没读到");
+      catalogue = body;
+      $("libraryAIKnowledgeCount").textContent = `${body.total} 个知识点，分 ${body.chapters} 章`;
+      $("libraryAIKnowledgeFile").textContent = body.file || "";
+      $("catalogueFile").textContent = body.file || "";
+      renderCatalogue();
+    } catch (error) {
+      $("libraryAIKnowledgeCount").textContent = `目录没读到：${error.message || "稍后再试一次"}`;
+    }
+  }
+
+  function renderCatalogue() {
+    const list = $("catalogueList");
+    if (!list || !catalogue) return;
+    const keyword = String($("libraryAIKnowledgeSearch")?.value || "").trim();
+    // 章名一起搜：搜「圆锥」要能看到椭圆、双曲线、抛物线，这三个词本身不含「圆锥」。
+    const shown = keyword ? catalogue.points.filter((item) => item.point.includes(keyword) || (item.chapter || "").includes(keyword)) : catalogue.points;
+    list.replaceChildren();
+    if (!shown.length) {
+      list.append(Object.assign(document.createElement("p"), { className: "catalogue-empty", textContent: keyword ? `目录里没有含“${keyword}”的知识点。` : "目录是空的。" }));
+      return;
+    }
+    let chapter = null;
+    for (const item of shown) {
+      if (item.chapter && item.chapter !== chapter) {
+        chapter = item.chapter;
+        list.append(Object.assign(document.createElement("p"), { className: "catalogue-chapter", textContent: chapter }));
+      }
+      list.append(Object.assign(document.createElement("span"), { className: "catalogue-point", textContent: item.point }));
+    }
+  }
+
+  async function openCatalogue() {
+    if (!catalogue) await loadCatalogue();
+    if (!catalogue) { $("libraryAIKnowledgeCount").textContent = "目录没读到，稍后再试一次"; return; }
+    $("libraryAIKnowledgeSearch").value = "";
+    renderCatalogue();
+    if (!catalogueDialog.open) catalogueDialog.showModal();
   }
 
   function render(body) {
@@ -596,15 +741,17 @@ ${keyBlocks()}
     $("libraryAITagsIntake").checked = body.on_intake.tags;
     $("libraryAIAnswerIntake").checked = body.on_intake.answer;
     renderTiming();
+    renderCost(body);
     $("libraryAIMode").value = "api";
     $("libraryAIProvider").value = body.provider;
     $("libraryAIBaseURL").value = body.base_url || "";
     $("libraryAIModel").value = body.model || "";
     $("libraryAIImages").checked = body.supports_images === true;
     $("libraryAIThinking").checked = body.thinking !== false;
-    $("libraryAIAdvanced").open = body.mode === "api" || $("libraryAIAdvanced").open;
     renderMode();
+    syncAdvanced(body.api_ready);
     renderCapabilities(); renderSavedKeys();
+    renderKnowledge(body);
     state.baseline = effectiveSettings(); state.dirty = false;
     $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "请为答题助手配置 API，保存并测试后再生成。";
     $("libraryAIState").classList.toggle("error", !body.api_ready);
@@ -630,6 +777,7 @@ ${keyBlocks()}
   function deactivate() {
     if (isMutating() || syncDirty()) return false;
     state.active = false; ++state.session;
+    if (catalogueDialog?.open) catalogueDialog.close();
     for (const [controller, request] of requests) if (!request.mutating) controller.abort();
     clearSecret(); state.current = null; state.baseline = null;
     state.dirty = false; state.busy = false; state.operation = null;
@@ -644,6 +792,9 @@ ${keyBlocks()}
     state.current = null; state.baseline = null; state.dirty = false; state.busy = true; state.operation = "load";
     clearSecret();
     $("libraryAIAdvanced").open = false;
+    // 用户一旦自己开合过模型配置，就别再替他决定这一块该不该展开。
+    // isTrusted 区分「他自己点的」和「代码设的」，不然每读一次设置都会被当成他动过。
+    $("libraryAIAdvanced").ontoggle = (event) => { state.advancedTouched = event.isTrusted; };
     $("libraryAITagsTiming").hidden = true;
     $("libraryAIAnswerTiming").hidden = true;
     $("libraryAIAPIFields").hidden = true;
@@ -676,6 +827,7 @@ ${keyBlocks()}
   }
 
   function close() {
+    if (catalogueDialog?.open) catalogueDialog.close();
     if (state.inline) { discard(); return; }
     if (syncDirty() && !window.confirm("这些设置还没保存。放弃更改并关闭？")) return;
     dialog.close();

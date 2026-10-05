@@ -117,6 +117,42 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-tag { font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); cursor: pointer; }
 .library-tag:hover { border-color: var(--accent); color: var(--accent); }
 .library-tag.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+/* 1.13.4：标签打错了要能改、要能删。标签行末尾加一个很轻的「改」，
+   不做成常驻大按钮——筛选 chip 仍然是主操作，改是偶尔才用的事。 */
+.library-tags-edit { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 99px;
+  border: 1px dashed var(--line-strong); background: transparent; color: var(--muted); cursor: pointer; }
+.library-tags-edit:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+.tag-editor-dialog { width: min(760px, 94vw); max-height: min(88dvh, 900px); padding: 0;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: inherit; }
+/* 四行：标题栏 / 正文（里面才是搜索、已选、目录三行）/ 说明 / 底栏。
+   目录必须自己滚动，底栏的「保存标签」任何时候都得看得见。 */
+.tag-editor-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.tag-editor-dialog::backdrop { background: rgba(24, 42, 38, .5); }
+.tag-editor-dialog.loading .tag-editor-list { opacity: .45; }
+.tag-editor-bar { display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+  border-bottom: 1px solid var(--line); }
+.tag-editor-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.tag-editor-heading h3 { margin: 0; font-family: var(--ui-font); font-size: 16px; }
+.tag-editor-place { margin: 0; color: var(--muted); font-size: 12.5px; }
+.tag-editor-spacer { flex: 1 1 auto; }
+.tag-editor-body { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; padding: 12px 18px 0; min-height: 0; }
+.tag-editor-search { font: inherit; font-size: 13px; padding: 7px 11px; border-radius: 9px;
+  border: 1px solid var(--line-strong); background: var(--bg); color: inherit; }
+.tag-editor-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; }
+.tag-editor-picked-label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.tag-editor-empty { color: var(--muted); font-size: 12px; }
+.tag-editor-list { overflow-y: auto; min-height: 0; padding: 2px 2px 6px; }
+.tag-editor-chapter { margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.tag-editor-chapter:first-child { margin-top: 2px; }
+.tag-editor-point { font: inherit; font-size: 12.5px; padding: 4px 11px; border-radius: 99px;
+  border: 1px solid var(--line-strong); background: var(--bg); color: var(--ink-2); cursor: pointer; margin: 0 5px 5px 0; }
+.tag-editor-point:hover { border-color: var(--accent); color: var(--accent); }
+.tag-editor-point.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+/* 说明这一行要盖住目录的滚动区，不然最后一行知识点被文字压着，像出了错。 */
+.tag-editor-note { margin: 0; padding: 8px 18px; background: var(--surface);
+  border-top: 1px solid var(--line); font-size: 12px; }
+.tag-editor-foot { display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+  border-top: 1px solid var(--line); }
 .qb-answer.ai-answer { border-top-style: dotted; }
 /* 1.10.5: 每道题单独“看答案” */
 .library-answer { margin-top: 12px; }

@@ -121,10 +121,9 @@ def queue_on_intake(publication: PublishedQuestion) -> list[LibraryJob]:
     for kind, feature in FEATURE_OF.items():
         if not state.get("on_intake", {}).get(kind) or not features.enabled(feature):
             continue
-        if kind == "tags" and library.tags_of(publication.extras):
+        if kind == "tags" and not library.needs_tags(publication.extras):
             continue
-        if kind == "answer" and (str((publication.content or {}).get("answer") or "").strip()
-                                 or (publication.extras or {}).get("ai_answer")):
+        if kind == "answer" and not library.needs_answer(publication.extras, publication.content):
             continue
         try:
             jobs.append(enqueue(publication, kind))

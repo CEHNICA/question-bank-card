@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, api_key_reveal, export_preferences, practice
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, api_key_reveal, export_preferences, practice
 
 urlpatterns = [
     path("", views.index_page),
@@ -33,6 +33,7 @@ urlpatterns = [
     path("api/settings/credentials/key/reveal", api_key_reveal.credential_reveal_view),
     path("api/settings/models", views.model_settings),
     path("api/settings/features", views.feature_settings),
+    path("api/settings/knowledge", views.knowledge_catalogue),
     path("api/settings/library-ai", views.library_ai_settings_view),
     path("api/settings/library-ai/share-reading-key", views.library_ai_share_reading_key_view),
     path("api/settings/library-ai/test", views.library_ai_test_view),
@@ -94,6 +95,7 @@ urlpatterns = [
     path("api/library/assistant/complete", views.library_assistant_complete),
     path("api/library/<uuid:publication_id>/solution", library_solutions.solution_view),
     path("api/library/<uuid:publication_id>/question", library_question_editor.question_editor),
+    path("api/library/<uuid:publication_id>/tags", library_tags.tags_view),
     path("api/library/<uuid:publication_id>/solution-images", library_solutions.image_upload),
     path("api/library/<uuid:publication_id>/solution-images/<uuid:asset_id>", library_solutions.image_view),
     path("api/library/<uuid:publication_id>", views.library_detail),

@@ -3181,16 +3181,28 @@ def library_ai_settings_view(request):
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
         return _error("标签与答案设置只能在本机使用", 403)
     if request.method == "GET":
-        return JsonResponse(library_ai_settings.public_status())
+        return JsonResponse(_ai_settings_with_backlog())
     rejected = _guard(request)
     if rejected:
         return rejected
     try:
-        return JsonResponse(library_ai_settings.save(_body(request)))
+        return JsonResponse(_ai_settings_with_backlog(library_ai_settings.save(_body(request))))
     except library_ai_settings.ServiceError as error:
         return _error(str(error), 409)
     except library_ai_settings.SettingsError as error:
         return _error(str(error), 400)
+
+
+def _ai_settings_with_backlog(status: dict | None = None) -> dict:
+    """设置连着「题库里还差几道」一起下发。
+
+    生成要花钱，开关旁边得摆着数字。这一个数字只在这里算一次：前端两处都只读它，
+    别让题库页和设置页各数一遍、又说出两句互相矛盾的话。
+    """
+    from . import library_ai_settings
+    body = dict(status or library_ai_settings.public_status())
+    body["backlog"] = library.generation_backlog()
+    return body
 
 
 @csrf_exempt
@@ -3259,6 +3271,19 @@ def feature_settings(request):
     message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
     return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path()),
                          "message": message})
+
+
+@csrf_exempt
+def knowledge_catalogue(request):
+    """知识点目录的只读预览。打标签只能在目录里选，这个目录就该看得见。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    rejected = _guard(request, json_body=False)
+    if rejected:
+        return rejected
+    points = knowledge.load()
+    return JsonResponse({"file": str(knowledge.path()), "points": points, "total": len(points),
+                         "chapters": len({item["chapter"] for item in points if item["chapter"]})})
 
 
 @csrf_exempt

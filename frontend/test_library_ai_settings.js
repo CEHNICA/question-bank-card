@@ -46,7 +46,8 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     dispatchEvent(event) { this.events.push(event); } };
   const current = { mode: "assistant", provider: "deepseek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro",
     configured: false, key_configured: false, ready: true, api_ready: false, verified: false, supports_images: false, thinking: true,
-    features: { knowledge_tags: false, ai_answer: false }, on_intake: { tags: false, answer: false }, message: "交给当前助手处理" };
+    features: { knowledge_tags: false, ai_answer: false }, knowledge: { total: 73, chapters: 18, file: "C:/data/knowledge-points.txt" },
+    on_intake: { tags: false, answer: false }, backlog: { tags: 12, answer: 5, total: 40 }, message: "交给当前助手处理" };
   const calls = [];
   let respond = () => ({ ...current, features: { ...current.features } });
   let okay = true;

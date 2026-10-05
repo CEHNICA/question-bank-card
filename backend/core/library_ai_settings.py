@@ -20,7 +20,7 @@ import requests
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
-from . import credential_settings, features
+from . import credential_settings, features, knowledge
 
 ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_URL = ARK_BASE + "/chat/completions"
@@ -242,9 +242,23 @@ def public_status() -> dict:
         "verified_at": str(config.get("verified_at") or "") if verified else "",
         "resolved_model": str(config.get("resolved_model") or "") if verified else "",
         "features": {key: switches[key] for key in sorted(FEATURE_KEYS)},
+        "knowledge": _knowledge_summary(switches["knowledge_tags"]),
         "on_intake": config["on_intake"],
         "message": ASSISTANT_MESSAGE if assistant else "独立 API 已通过合成题连接测试；按所选图像与思考设置生成，答案仍需核对。" if verified else UNAVAILABLE,
     }
+
+
+def _knowledge_summary(enabled: bool) -> dict:
+    """目录有多大、放在哪。关着标签功能时不必去读这个文件。"""
+    if not enabled:
+        return {"total": 0, "chapters": 0, "file": ""}
+    try:
+        points = knowledge.load()
+    except OSError:
+        return {"total": 0, "chapters": 0, "file": str(knowledge.path())}
+    return {"total": len(points),
+            "chapters": len({item["chapter"] for item in points if item["chapter"]}),
+            "file": str(knowledge.path())}
 
 
 def _key_operation(operation, label: str = "API Key") -> tuple[str, str]:

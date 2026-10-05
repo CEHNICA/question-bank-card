@@ -1,0 +1,52 @@
+"use strict";
+
+/*
+ * 1.13.4 「标签与答案」面板的两处改动（静态回归）：
+ *   1. 模型配置不再每次自动展开 —— 展开 1669px，整个面板 2169px，1000px 的视口放不下。
+ *   2. 知识点目录从「显示与导出」页搬到这儿，并给了一份只读预览。
+ */
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+
+const panelJs = fs.readFileSync(require.resolve("./library-ai-settings.js"), "utf8");
+const indexHtml = fs.readFileSync(require.resolve("./index.html"), "utf8");
+const appJs = fs.readFileSync(require.resolve("./app.js"), "utf8");
+
+// ---- 1. 模型配置不再自动展开
+assert.doesNotMatch(panelJs, /if \(isAPI\(\)\) \$?\("libraryAIAdvanced"\)\.open = true/,
+  "不再无条件展开模型配置");
+assert.doesNotMatch(panelJs, /libraryAIAdvanced"\)\.open = body\.mode === "api" \|\|/,
+  "也不再看 mode 强行展开");
+assert.match(panelJs, /function syncAdvanced\(apiReady\)/, "改成按需展开");
+assert.match(panelJs, /if \(!apiReady && !state\.advancedTouched\) \$?\("libraryAIAdvanced"\)\.open = true/,
+  "只有 API 没配好时才替用户展开");
+assert.match(panelJs, /ontoggle = \(event\) => \{ state\.advancedTouched = event\.isTrusted; \}/,
+  "用户自己开合过就不再插手，并且要分清是他点的还是代码设的");
+
+// ---- 2. 知识点目录搬进这个面板
+assert.ok(!indexHtml.includes('id="knowledgeDetails"'), "「显示与导出」页不再挂知识点目录的入口");
+assert.ok(!indexHtml.includes('id="featureNote"'), "那条只剩文件路径的说明一起搬走了");
+assert.ok(!appJs.includes("knowledgeDetails"), "app.js 里对应的显隐逻辑一并删干净");
+assert.match(panelJs, /id="libraryAIKnowledge"[^>]*aria-label="知识点目录"/, "面板里有知识点目录这一段");
+assert.match(panelJs, /id="libraryAIKnowledgeOpen"[^>]*>查看目录</, "有「查看目录」的入口");
+assert.match(panelJs, /\/api\/settings\/knowledge"/, "预览读的是目录接口");
+assert.match(panelJs, /X-QB-Request": "1"/, "目录接口也要本机页面的请求头");
+assert.match(panelJs, /item\.point\.includes\(keyword\) \|\| \(item\.chapter \|\| ""\)\.includes\(keyword\)/,
+  "搜章名也要搜得到：椭圆、双曲线、抛物线都不含「圆锥」");
+assert.match(panelJs, /catalogue-dialog\[open\]\{display:grid;grid-template-rows:auto minmax\(0,1fr\) auto\}/,
+  "目录自己滚，底栏那句说明任何时候都在");
+assert.match(panelJs, /if \(id === "libraryAITags"\) \$?\("libraryAIKnowledge"\)\.hidden = !\$\(id\)\.checked/,
+  "关掉标签功能，这一段当场就跟着藏起来");
+
+// ---- 3. 生成要花钱，数字得摆在开关旁边
+assert.match(panelJs, /每道新题入库会调用 \$\{perQuestion\} 次服务/, "写明每道新题会调用几次服务");
+assert.match(panelJs, /题库里还差 \$\{backlog\.tags\} 道有标签/, "标签那一行带着还差几道");
+assert.match(panelJs, /题库里还差 \$\{backlog\.answer\} 道有答案/, "答案那一行带着还差几道");
+assert.match(panelJs, /const tagsRunning = on\("libraryAITags"\) && on\("libraryAITagsIntake"\)/,
+  "功能没开，「入库时生成」就不该算进调用次数");
+const libraryJs = fs.readFileSync(require.resolve("./library.js"), "utf8");
+assert.match(libraryJs, /由已配置的 API 生成，每道题一次调用，会用到服务额度/,
+  "题库页那把批量生成的按钮也写明了一次一题；不写「每道题一次调用」就等于没提示");
+assert.doesNotMatch(panelJs, /会用到服务额度/, "面板里旧的那句零信息量的提示已经换成了具体数字");
+

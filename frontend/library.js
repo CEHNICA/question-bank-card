@@ -331,7 +331,7 @@
     }
     box.hidden = !tools.length;
     if (tools.length) {
-      if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，会用到服务额度："), ...tools);
+      if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，每道题一次调用，会用到服务额度："), ...tools);
       else box.append(node("span", "helper", "请到“设置 → 服务与密钥”配置并测试答题 API。"));
     }
   }
@@ -653,6 +653,158 @@
     return box;
   }
 
+  // 改知识点标签。标签打错以前唯一的出路是撤回重录；标签只是筛选用的分类，
+  // 不是题面的一部分，所以这里只写 extras，不新建版本、不重新审核。
+  let tagDialog = null, tagTarget = null, tagCatalogue = [], tagPicked = [];
+
+  function tagEndpoint(item) { return `/api/library/${encodeURIComponent(item.id)}/tags`; }
+
+  function ensureTagDialog() {
+    if (tagDialog) return tagDialog;
+    tagDialog = node("dialog", "tag-editor-dialog");
+    tagDialog.id = "tagEditorDialog";
+    tagDialog.setAttribute("aria-labelledby", "tagEditorTitle");
+    const bar = node("header", "tag-editor-bar");
+    const heading = node("div", "tag-editor-heading");
+    const title = node("h3", "", "知识点标签"); title.id = "tagEditorTitle";
+    const place = node("p", "tag-editor-place");
+    heading.append(title, place);
+    const close = node("button", "button button-quiet", "关闭");
+    close.type = "button";
+    close.addEventListener("click", () => tagDialog.close());
+    bar.append(heading, node("span", "tag-editor-spacer"), close);
+    const body = node("div", "tag-editor-body");
+    const search = node("input", "tag-editor-search");
+    search.type = "search";
+    search.placeholder = "搜知识点，例如 函数";
+    search.setAttribute("aria-label", "在知识点目录里搜索");
+    search.id = "tagEditorSearch";
+    search.addEventListener("input", renderTagList);
+    const picked = node("div", "tag-editor-picked");
+    picked.id = "tagEditorPicked";
+    const list = node("div", "tag-editor-list");
+    list.id = "tagEditorList";
+    list.setAttribute("aria-label", "知识点目录");
+    body.append(search, picked, list);
+    const note = node("p", "helper tag-editor-note", "标签只用于筛选和搜索，不改动题面。清空之后这道题可以重新自动生成标签。");
+    const foot = node("footer", "tag-editor-foot");
+    const clear = node("button", "button button-quiet", "清除全部标签");
+    clear.type = "button";
+    clear.id = "tagEditorClear";
+    clear.addEventListener("click", () => { tagPicked = []; renderTagPicked(); renderTagList(); });
+    const cancel = node("button", "button", "取消");
+    cancel.type = "button";
+    cancel.id = "tagEditorCancel";
+    cancel.addEventListener("click", () => tagDialog.close());
+    const save = node("button", "button button-primary", "保存标签");
+    save.type = "button";
+    save.id = "tagEditorSave";
+    save.addEventListener("click", saveTags);
+    foot.append(clear, node("span", "tag-editor-spacer"), cancel, save);
+    tagDialog.append(bar, body, note, foot);
+    document.body.append(tagDialog);
+    return tagDialog;
+  }
+
+  function renderTagPicked() {
+    const box = $("tagEditorPicked");
+    if (!box) return;
+    const limit = tagDialog?.dataset.max || "3";
+    box.replaceChildren(node("span", "tag-editor-picked-label", `已选 ${tagPicked.length} / ${limit}`));
+    // 按存下来的顺序显示，不是按目录顺序：自动打的标签是有先后的，
+    // 打开对话框又原样关掉，不该把顺序改掉。
+    tagPicked.forEach((point) => {
+      const chip = node("button", "library-tag active", point);
+      chip.type = "button";
+      chip.title = "去掉这个知识点";
+      chip.addEventListener("click", () => { tagPicked = tagPicked.filter((value) => value !== point); renderTagPicked(); renderTagList(); });
+      box.append(chip);
+    });
+    if (!tagPicked.length) box.append(node("span", "tag-editor-empty", "还没有选。保存空的就等于清除标签。"));
+  }
+
+  function renderTagList() {
+    const list = $("tagEditorList");
+    if (!list) return;
+    const keyword = String($("tagEditorSearch")?.value || "").trim();
+    // 章名也一起搜：目录里搜“圆锥”要能找到椭圆、双曲线、抛物线，
+    // 可这三个词本身都不含“圆锥”，只在它们所属的章名里。
+    const shown = keyword ? tagCatalogue.filter((item) => item.point.includes(keyword) || (item.chapter || "").includes(keyword)) : tagCatalogue;
+    list.replaceChildren();
+    if (!shown.length) {
+      list.append(node("p", "library-empty", keyword ? `目录里没有含“${keyword}”的知识点。` : "知识点目录是空的。"));
+      return;
+    }
+    let chapter = null;
+    shown.forEach((item) => {
+      if (item.chapter && item.chapter !== chapter) {
+        chapter = item.chapter;
+        list.append(node("p", "tag-editor-chapter", chapter));
+      }
+      const on = tagPicked.includes(item.point);
+      const chip = node("button", `tag-editor-point${on ? " active" : ""}`, item.point);
+      chip.type = "button";
+      chip.setAttribute("aria-pressed", String(on));
+      chip.title = on ? "取消这个知识点" : "加上这个知识点";
+      chip.addEventListener("click", () => {
+        if (on) tagPicked = tagPicked.filter((value) => value !== item.point);
+        else if (tagPicked.length >= Number(tagDialog.dataset.max || 3)) { toast(`一道题最多 ${tagDialog.dataset.max} 个知识点`, "error"); return; }
+        else tagPicked = [...tagPicked, item.point];
+        renderTagPicked();
+        renderTagList();
+      });
+      list.append(chip);
+    });
+  }
+
+  async function openTagEditor(item) {
+    const dialog = ensureTagDialog();
+    tagTarget = item;
+    tagDialog.dataset.max = "3";
+    $("tagEditorSearch").value = "";
+    tagDialog.classList.add("loading");
+    try {
+      const response = await fetch(tagEndpoint(item), { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "打不开知识点目录");
+      tagCatalogue = body.catalogue || [];
+      tagDialog.dataset.max = String(body.max || 3);
+      tagPicked = [...(body.tags || [])];
+      dialog.querySelector(".tag-editor-place").textContent =
+        `${item.source_filename} · 第 ${item.number} 题${body.source === "human" ? " · 当前是人工改过的" : body.source ? ` · 当前由 ${body.source} 自动生成` : ""}`;
+      renderTagPicked();
+      renderTagList();
+      if (!dialog.open) dialog.showModal();
+      $("tagEditorSearch").focus();
+    } catch (error) {
+      toast(`${error.message || "打不开知识点目录"} 稍后再试。`, "error");
+    } finally {
+      tagDialog.classList.remove("loading");
+    }
+  }
+
+  async function saveTags() {
+    if (!tagTarget) return;
+    const save = $("tagEditorSave");
+    save.disabled = true;
+    try {
+      const response = await fetch(tagEndpoint(tagTarget), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ tags: tagPicked.slice() })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "这次保存没成功");
+      tagDialog.close();
+      toast(body.tags.length ? `已改成：${body.tags.join("、")}` : "标签已清空，这道题可以重新自动生成", "success");
+      load();
+    } catch (error) {
+      toast(`${error.message || "这次保存没成功"} 标签没有改动。`, "error");
+    } finally {
+      save.disabled = false;
+    }
+  }
+
   // 知识点标签：不属于题面快照，单独显示。
   function extrasNode(item) {
     const box = node("div", "library-extras");
@@ -666,6 +818,12 @@
         chip.addEventListener("click", () => { state.tag = state.tag === tag ? "" : tag; syncUrl(); load(); });
         row.append(chip);
       });
+      const edit = node("button", "library-tags-edit", "改");
+      edit.type = "button";
+      edit.id = "libraryTagEdit";
+      edit.title = "改这道题的知识点标签：换掉、去掉，或清空后重新自动生成";
+      edit.addEventListener("click", () => openTagEditor(item));
+      row.append(edit);
       box.append(row);
     }
     Object.entries(item.job_errors || {})
