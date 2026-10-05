@@ -441,6 +441,16 @@ body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
 /* Arrange the basket in the preview: move a question within its section or drop it. */
 .print-question-tools { position: absolute; right: -13mm; top: 0; z-index: 2; padding: 0; margin: 0; font-family: var(--ui-font); color: #26352f; }
 .print-question-tools[open] { z-index: 4; }
+/* 1.13.3：预览为了把 210mm 宽的纸缩到窗口宽度，给每张 .exam-page 套了
+   transform: scale()（exam-layout.js 的 scale()）。transform 会开一个独立的层叠
+   上下文，所以 .print-question-tools 写的 z-index 只在这一张纸里有效，出不来这张纸。
+   题排在纸的下部时，菜单伸出纸外落到后面那张纸上，被整块盖住、点不动 ——
+   实测同一场景下去掉缩放就能点到（49/49 个探测点），带着缩放一个都点不到。
+   展开时把整张纸抬到其它纸之上：必须是纸的层级，提菜单没用。
+   2 而不是更大：.print-controls 那条吸顶工具条是 3，纸不能压过它。 */
+.exam-page.tools-open { z-index: 2; }
+/* 菜单只往下展开，题排在纸的下部就必然出纸。放不下时向上翻。 */
+.print-question-tools.opens-up > .print-question-actions { top: auto; bottom: calc(100% + 4px); }
 .print-question-tools > summary { display: block; list-style: none; min-height: 28px; box-sizing: border-box; padding: 4px 8px; border: 1px solid #a4b4ac; border-radius: 6px; background: #fff; box-shadow: 0 2px 7px #00000018; font-size: 12px; cursor: pointer; }
 .print-question-tools > summary::-webkit-details-marker { display: none; }
 .print-question-actions { position: absolute; right: 0; top: calc(100% + 4px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; width: 214px; max-width: calc(100vw - 48px); box-sizing: border-box; padding: 8px; background: #fff; border: 1px solid #8fa69a; border-radius: 8px; box-shadow: 0 6px 20px #0000002b; }

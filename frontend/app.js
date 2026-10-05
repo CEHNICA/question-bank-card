@@ -3329,12 +3329,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function confirmCurrentFigures(q, { ignoreRemaining = false } = {}) {
     const figures = confirmedFigurePayload(q);
-    if (!figures.length) {
+    const unresolved = unclassifiedCandidates(q);
+    // 1.13.3: 「零配图 + 明确其余候选都无关」是一个完整的决定，不是缺了一步。
+    // 面板文案一直承诺这个动作，原来这里却把它当成缺步骤弹回去，于是题面本来
+    // 就没图的题点不到它。后端收到空配图会记成「已人工确认本题无图」，往下走即可。
+    if (!figures.length && !(ignoreRemaining && unresolved.length)) {
       toast("当前还没有已选配图，请先从原卷中选择图片", "error");
       openFigureEditor(q);
       return false;
     }
-    const unresolved = unclassifiedCandidates(q);
     if (unresolved.length && !ignoreRemaining) {
       toast(`还有 ${unresolved.length} 张候选图未处理，请逐张检查或明确其余均无关`, "error");
       openFigureEditor(q);
@@ -3342,9 +3345,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (ignoreRemaining) {
       const ok = await confirmDialog({
-        title: `确认其余 ${unresolved.length} 张候选图均与本题无关？`,
-        text: `将保留当前配图及其“题干/选项”归属，并把其余候选标记为无关${candidatePageLabel(unresolved)}。如果题目范围切到了后面的内容，建议取消并先点“调整题目范围”。`,
-        ok: "确认当前配图"
+        title: figures.length
+          ? `确认其余 ${unresolved.length} 张候选图均与本题无关？`
+          : `确认这 ${unresolved.length} 张候选图都与本题无关？`,
+        text: figures.length
+          ? `将保留当前配图及其“题干/选项”归属，并把其余候选标记为无关${candidatePageLabel(unresolved)}。如果题目范围切到了后面的内容，建议取消并先点“调整题目范围”。`
+          : `本题现在一张配图也没有。确认后会记成「已人工确认本题无图」，以后不会再因为这几张图挡住你通过${candidatePageLabel(unresolved)}。如果原卷上其实有图，请取消，改点“检查 ${unresolved.length} 张候选图”。`,
+        ok: figures.length ? "确认当前配图" : "确认都无关"
       });
       if (!ok) return false;
     }
@@ -3357,7 +3364,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       applyQuestion(data);
       if ($("viewerDialog").open) renderViewer();
-      toast(`已确认第 ${q.number} 题的当前配图及归属；请再次核对并标记通过`, "success");
+      toast(figures.length
+        ? `已确认第 ${q.number} 题的当前配图及归属；请再次核对并标记通过`
+        : `已确认这 ${unresolved.length} 张候选图都与第 ${q.number} 题无关；本题记为无图，请再核对并标记通过`, "success");
       return true;
     } catch (error) {
       toast(error.message, "error");
@@ -3418,7 +3427,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           button(`检查 ${count} 张候选图`, "small primary", () => openFigureEditor(q), "逐张确认候选图属于题干、某个选项或与本题无关", { iconName: "image" }),
           button("题目范围切多了 · 调整范围", "small", () => adjustQuestionRegions(q), "如果候选图来自后面的例题或下一题，先缩短本题原卷范围"),
         );
-        if ((q.figures || []).length) actions.append(button(`当前配图正确，其余 ${count} 张无关`, "small", () => confirmCurrentFigures(q, { ignoreRemaining: true }), "保留当前归属，并明确把所有剩余候选标记为无关"));
+        // 1.13.3: 这个按钮原来被「有配图才显示」挡着，可上面那句文案一直承诺
+        // 「或明确确认其余候选均与本题无关」。题面本来就没有图的题（AI 多框了几张
+        // 手写或别题的图）点不到这个动作 —— 文案和界面对不上。
+        if ((q.figures || []).length) {
+          actions.append(button(`当前配图正确，其余 ${count} 张无关`, "small", () => confirmCurrentFigures(q, { ignoreRemaining: true }), "保留当前归属，并明确把所有剩余候选标记为无关"));
+        } else {
+          actions.append(button(`这 ${count} 张候选图都与本题无关`, "small", () => confirmCurrentFigures(q, { ignoreRemaining: true }), "本题没有配图；明确这几张候选都不是它的图"));
+        }
       } else if (review.status === "blocked_missing") {
         actions.append(
           button("补选配图", "small primary", () => openFigureEditor(q), "从原卷中补选缺少的图片", { iconName: "image" }),

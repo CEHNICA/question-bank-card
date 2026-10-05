@@ -560,6 +560,13 @@ body.drawer-open { overflow: hidden; }
 .figure-review:focus { outline: 3px solid rgba(192, 126, 24, .22); outline-offset: 2px; }
 .figure-review.attention { animation: figure-review-attention .85s ease-out; }
 @keyframes figure-review-attention { 35% { box-shadow: 0 0 0 5px rgba(211, 151, 41, .25); } }
+/* 1.13.3：这块面板是此刻唯一要动手的东西，可它没有层级，滚动时会被卡片自己底部
+   那条吸底操作条（白底、z-index 4）整个盖住 —— 实测 19 题里有 8 题的面板和它相交，
+   最狠一次 24 个探测点一个都点不到，面板下半截整个消失。抬到 5 就压得住它。
+   不做吸顶：sticky 的约束矩形是正文栏，卡片一滚过视野，面板就被拽着一起走，
+   在这里不起作用；而顶栏和筛选条盖住往上滚的内容本来就是吸顶件的正常行为。
+   改字全屏（.card.editing）是固定网格、正文栏自己滚，不需要也不该管。 */
+.card:not(.compact) .card-body > .figure-review:first-child { position: relative; z-index: 5; }
 .rendered { min-height: 40px; }
 /* A printed line is about forty characters; on a wide screen the options stay near their stem. */
 .qb-question.rendered { max-width: 62em; }

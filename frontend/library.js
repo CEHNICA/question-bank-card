@@ -1926,6 +1926,9 @@
         const number = parseInt(question.querySelector(".qb-number")?.textContent, 10) || seen.size;
         question.append(printTools(printState.items, group, group.indexOf(item), number));
       });
+      // 重渲染会换掉所有工具面板：新节点的 open 是在挂监听之前设的，收不到 toggle，
+      // 这里补一次定位，否则改完选项重新排版后，展开着的那个又会掉回被盖住的状态。
+      ui.paper.querySelectorAll(".print-question-tools[open]").forEach(placePrintTools);
       $("printPageStatus").textContent = `A4 · 共 ${result.page_count} 页 · ${printState.items.length} 题`;
       $("printLayoutWarnings").textContent = result.warnings.join(" ");
       $("printLayoutWarnings").hidden = !result.warnings.length;
@@ -2029,7 +2032,12 @@
       if (tools.open) {
         printState.activeToolId = item.id;
         ui.paper.querySelectorAll(".print-question-tools[open]").forEach(other => { if (other !== tools) other.open = false; });
-      } else if (printState.activeToolId === item.id) printState.activeToolId = null;
+        placePrintTools(tools);
+      } else {
+        if (printState.activeToolId === item.id) printState.activeToolId = null;
+        tools.classList.remove("opens-up");
+        tools.closest(".exam-page")?.classList.remove("tools-open");
+      }
     });
     const move = (step) => {
       const other = group[position + step];
@@ -2120,6 +2128,32 @@
     actions.append(up, down, remove, optionLayout, answerSpace, pageBreak, editAnswer);
     tools.append(actions);
     return tools;
+  }
+
+  // 1.13.3: 决定「调整」菜单往哪边展开，并把整张纸抬到其它纸之上。
+  // 纸被 ExamLayout.scale() 套了 transform: scale()，自己就是一个层叠上下文，
+  // 菜单的 z-index 出不来这张纸（详见 library.css 里 .exam-page.tools-open）。
+  // 菜单原本只往下展开，题排在纸的下部就出纸、被后面那张纸整块盖死、点不动。
+  // 量的时候只用 getBoundingClientRect：它给的是缩放后的值，同一坐标系可比；
+  // offsetHeight 不受 transform 影响，拿来比会差一个缩放系数。
+  function placePrintTools(tools) {
+    const page = tools.closest(".exam-page");
+    const actions = tools.querySelector(".print-question-actions");
+    tools.classList.remove("opens-up");
+    page?.classList.add("tools-open");
+    if (!page || !actions) return;
+    const paper = page.getBoundingClientRect();
+    const limit = Math.min(paper.bottom, window.innerHeight);
+    const down = actions.getBoundingClientRect();
+    if (down.top >= Math.max(paper.top, 0) && down.bottom <= limit) return;
+    // 下面放不下，试上面。
+    tools.classList.add("opens-up");
+    const up = actions.getBoundingClientRect();
+    if (up.top >= Math.max(paper.top, 0) && up.bottom <= limit) return;
+    // 两边都放不下：留纸内更多的那一边，别整个掉到纸外。
+    const inPaperDown = Math.min(down.bottom, paper.bottom) - Math.max(down.top, paper.top);
+    const inPaperUp = Math.min(up.bottom, paper.bottom) - Math.max(up.top, paper.top);
+    if (inPaperDown > inPaperUp) tools.classList.remove("opens-up");
   }
 
   async function waitForPrintAssets() {
@@ -2403,8 +2437,14 @@
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
-  window.addEventListener("resize", () => { if (ui.sheet.open) window.ExamLayout?.scale(ui.paper); });
-  $("printSettings").addEventListener("toggle", () => { if (ui.sheet.open) requestAnimationFrame(() => window.ExamLayout?.scale(ui.paper)); });
+  // 缩放系数变了，同一页里「下面放不放得下」的答案也会变，展开着的菜单要重新定位。
+  const rescalePrintPaper = () => {
+    if (!ui.sheet.open) return;
+    window.ExamLayout?.scale(ui.paper);
+    ui.paper.querySelectorAll(".print-question-tools[open]").forEach(placePrintTools);
+  };
+  window.addEventListener("resize", rescalePrintPaper);
+  $("printSettings").addEventListener("toggle", () => requestAnimationFrame(rescalePrintPaper));
   window.addEventListener("beforeunload", protectLibraryBeforeUnload);
   document.addEventListener("click", handleLibraryNavigation);
   ui.tagSelect.addEventListener("change", () => { state.tag = ui.tagSelect.value; syncUrl(); load(); });
