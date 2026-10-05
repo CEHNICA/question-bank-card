@@ -15,7 +15,7 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
-from . import features, library, library_assistant, library_drafts, library_export, library_jobs, library_pdf, library_solutions
+from . import features, library, library_assistant, library_drafts, library_export, library_jobs, library_pdf, library_question_editor as editor, library_solutions
 from .models import LibraryJob, LibrarySolution, Paper, PublishedQuestion, Question
 from .test_library_export import document_xml, field, math_field, NS
 
@@ -394,6 +394,86 @@ class LibrarySolutionTests(TransactionTestCase):
         other.refresh_from_db()
         self.assertEqual(other.status, "failed")
         self.assertEqual(other.result, {})
+
+    # 1.13.5：题面一改，题目就换成新一版，原来那份解析跟着落到**旧版**上，而旧版
+    # 本身不在题库里。拿走了就得给条回来的路 —— 下面这几条量的是那条路本身，
+    # 以及它不能被走歪：只认本题上一版的图，别人的图照样拒。
+    def replaced_by_new_stem(self):
+        """造出「填了解析（带一张图）→ 改题面」的局面。"""
+        figure = self.asset()
+        solution = self.save(answer="旧答案", analysis="旧解析过程。",
+                             figures=[{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
+                             sync_library=True)
+        old = self.pub
+        # 题面编辑器只让「已入库、来源题卡也在可改状态」的题走这条路。
+        old.question.state = Question.State.GREEN
+        library.approve(old.question, now=timezone.now())
+        old.question.save()
+        data = editor.editor_data(old)
+        payload = {key: data[key] for key in ("revision", "content_hash", "stem", "options", "question_type", "body_mode")}
+        new, _, _ = editor.save(old, payload | {"stem": "改过的题干 $x+1=0$。"})
+        return old, new, solution, figure
+
+    def test_stale_solution_is_offered_read_only_after_the_question_is_replaced(self):
+        old, new, solution, _figure = self.replaced_by_new_stem()
+        old.refresh_from_db()  # sync_library=True 写的是库里的 extras，内存里那份是旧的
+        data = self.client.get(f"/api/library/{new.pk}/solution").json()
+        # history 只列本题自己的版本，跨版本的旧解析只能走 previous 那一条路。
+        self.assertIsNone(data["solution"])
+        self.assertEqual(data["history"], [])
+        self.assertEqual(data["previous"]["answer"], "旧答案")
+        self.assertEqual(data["previous"]["analysis"], "旧解析过程。")
+        self.assertTrue(data["previous"]["needs_check"])
+        self.assertEqual(data["previous"]["from_version"], old.version)
+        # 只给一条填回来的路，归属校验一个字没松。
+        self.assertEqual(library_solutions.selected(old).pk, solution.pk)
+        self.assertIsNone(library_solutions.selected(new))
+        with self.assertRaises(library_solutions.SolutionError):
+            library_solutions.selected(new, str(solution.pk))
+
+    def test_saving_the_stale_solution_carries_its_figure_onto_the_new_version(self):
+        old, new, _solution, figure = self.replaced_by_new_stem()
+        fresh = library_solutions.save(new, {"answer": "旧答案", "analysis": "旧解析过程。",
+            "figures": [{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
+            "base_revision": None, "sync_library": True})
+        self.assertEqual(fresh.publication_id, new.pk)
+        # 图落在新版本自己的目录里，不是还指着旧目录的路径。
+        _spec, target = library_solutions._asset_spec(new.pk, figure["id"])
+        self.assertEqual(target.parent.name, str(new.pk))
+        self.assertEqual(library_solutions._asset(new.pk, figure["id"])[1],
+                         library_solutions._asset(old.pk, figure["id"])[1])
+        new.refresh_from_db()
+        self.assertNotIn("solution_needs_review_id", new.extras)
+        self.assertEqual(new.extras["solution_id"], str(fresh.pk))
+
+    def test_figure_from_an_unrelated_question_is_still_rejected(self):
+        _, new, _solution, _figure = self.replaced_by_new_stem()
+        stranger = self.publication(stem="另一道题", answer="B")
+        other = self.asset(stranger, "blue")
+        with self.assertRaises(library_solutions.SolutionError) as caught:
+            library_solutions.save(new, {"answer": "A", "analysis": "抄别人的图", "base_revision": None,
+                                         "sync_library": False, "figures": [{"id": other["id"]}]})
+        self.assertEqual(caught.exception.status, 409)
+        # 搬图这条路不能顺手把别的题的图片也收进来。
+        self.assertEqual(LibrarySolution.objects.filter(publication_id=new.pk).count(), 0)
+        with self.assertRaises(library_solutions.SolutionError):
+            library_solutions._asset_spec(new.pk, other["id"])
+
+    def test_broken_review_pointer_does_not_lock_the_editor(self):
+        new = self.publication(stem="待核对记号坏了", answer="B")
+        new.extras = {"solution_needs_review_id": "not-a-uuid"}
+        new.save(update_fields=["extras"])
+        response = self.client.get(f"/api/library/{new.pk}/solution")
+        # 这个记号坏掉只该让「旧解析」那一块消失，不能连编辑器一起打不开。
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["previous"])
+
+    def test_missing_old_solution_row_leaves_the_editor_usable(self):
+        _, new, solution, _figure = self.replaced_by_new_stem()
+        LibrarySolution.objects.filter(pk=solution.pk).delete()
+        response = self.client.get(f"/api/library/{new.pk}/solution")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["previous"])
 
 
 def create_export_fixture(folder):

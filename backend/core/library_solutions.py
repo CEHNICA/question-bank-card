@@ -86,6 +86,33 @@ def _asset(publication_id, asset_id):
         raise SolutionError("解析图片缺失或校验失败，请重新添加，原解析未被覆盖", 409) from None
 
 
+def _adopt_review_asset(publication, asset_id):
+    """题面一改，题目就换了新一版，解析图跟着留在旧版的目录里。界面上那个
+    「填回编辑区」把它带回来时，存图只认当前版本目录，不搬一份就是 409「图片
+    缺失或校验失败」，老师看到的是自己刚点了一下就红了。这里按原字节复制一份到
+    当前版本，再交回 _asset 走一遍同样的校验。只认 extras 里自己记下的那一条旧
+    解析，不认任何别的来源。"""
+    review_id = (publication.extras or {}).get("solution_needs_review_id")
+    if not review_id:
+        return None
+    try:
+        older = LibrarySolution.objects.filter(pk=identity(review_id)).first()
+    except SolutionError:
+        return None
+    if older is None:
+        return None
+    figure = next((item for item in older.figures if isinstance(item, dict) and item.get("id") == str(asset_id)), None)
+    if figure is None:
+        return None
+    spec, data = _asset(older.publication_id, figure["id"])
+    folder = _folder(publication.pk)
+    folder.mkdir(parents=True, exist_ok=True)
+    spec = {**spec, "publication_id": str(publication.pk)}
+    (folder / (str(asset_id) + ".png")).write_bytes(data)
+    (folder / (str(asset_id) + ".json")).write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+    return _asset(publication.pk, asset_id)
+
+
 def _figure_json(publication_id, value):
     # Listing hundreds of library entries or historical versions must not
     # decode every full image. Retrieval, save and export verify actual bytes.
@@ -165,7 +192,15 @@ def save(publication, payload):
         if key in seen:
             raise SolutionError("同一张解析图片不能重复添加")
         seen.add(key)
-        spec, _data = _asset(publication.pk, key)
+        try:
+            spec, _data = _asset(publication.pk, key)
+        except SolutionError:
+            # 上一版解析的图在旧目录里（老师正要点「填回编辑区」）。搬不过来就
+            # 保持原来那句报错，不要在这里静默把配图丢掉。
+            adopted = _adopt_review_asset(publication, key)
+            if adopted is None:
+                raise
+            spec, _data = adopted
         width = value.get("display_width", min(178, max(20, spec["width"] * 25.4 / 150)))
         position, paragraph = value.get("position", "after"), value.get("paragraph", 0)
         if type(width) not in {float, int} or not math.isfinite(width) or not 5 <= width <= 178 \
@@ -214,6 +249,27 @@ def solution_view(request, publication_id):
             return JsonResponse({"solution": solution_json(row), "base_revision": (publication.extras or {}).get("solution_id")}, status=201)
         row = selected(publication, request.GET.get("revision"))
         fingerprint = library.generation_fingerprint(publication.content, publication.pk)
+        # 1.13.5：题面一改，题目就换成新一版，原来那份解析留在**旧版**上 ——
+        # 那一行属于上一道题，不属于这道，旧版本身又不在题库里。不把它取出来给
+        # 界面一条回来的路，老师填过的那份就永远看不见了。这里只读出来显示、允许
+        # 填回编辑区；save() 那边的归属校验一个字没松，它仍然不能直接覆盖本题。
+        previous = None
+        review_id = (publication.extras or {}).get("solution_needs_review_id")
+        if review_id and row is None:
+            # 这个编号坏掉只该让「旧解析」这一块消失，不能连编辑器一起打不开。
+            try:
+                older = LibrarySolution.objects.filter(pk=identity(review_id)).select_related("publication").first()
+            except SolutionError:
+                older = None
+            if older is not None:
+                try:
+                    previous = {**solution_json(older, fingerprint=older.fingerprint), "needs_check": True,
+                                "from_version": older.publication.version}
+                except SolutionError as error:
+                    previous = {"id": str(older.pk), "answer": older.answer, "analysis": older.analysis,
+                                "figures": [], "created_at": older.created_at.isoformat(),
+                                "needs_check": True, "from_version": older.publication.version,
+                                "asset_error": str(error)}
         raw_ai = (publication.extras or {}).get("ai_answer")
         ai_answer = None
         ai_stale = False
@@ -233,6 +289,7 @@ def solution_view(request, publication_id):
                     "created_at": item.created_at.isoformat(), "needs_check": True})
         return JsonResponse({"solution": solution_json(row) if row else None,
             "base_revision": (publication.extras or {}).get("solution_id"),
+            "previous": previous,
             "origin": {"answer": str((publication.content or {}).get("answer") or ""), "analysis": str((publication.content or {}).get("analysis") or "")},
             "ai_answer": ai_answer, "ai_answer_stale": ai_stale,
             "history": history})

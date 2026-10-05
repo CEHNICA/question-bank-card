@@ -628,6 +628,15 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .answer-editor-preview-column > .answer-editor-preview { margin: 0; min-height: 180px; }
 .answer-origin { margin: 16px 0 0; }
 .answer-origin select { max-width: 100%; }
+/* 1.13.5：题面改过之后被搁置的那份解析。用琥珀底和一条侧边线标成「旁的一栏」，
+   别让它看起来像当前编辑区里的内容 —— 填回来要点按钮，不会自动生效。 */
+.answer-set-aside { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--amber-line);
+  border-left: 3px solid var(--amber); border-radius: var(--radius); background: var(--amber-soft); }
+.answer-set-aside > strong { display: block; font-size: 13px; }
+.answer-set-aside > .helper { margin: 4px 0 0; }
+.answer-set-aside > .paper { padding: 12px; margin: 8px 0; border: 1px solid var(--line);
+  border-radius: 9px; background: #fff; }
+.answer-set-aside > .answer-image-tools { margin: 0; }
 .answer-sync { font-size: 13px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
 .answer-ai-draft { padding: 12px; background: var(--amber-soft); border-radius: 9px; }
 .answer-crop { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }

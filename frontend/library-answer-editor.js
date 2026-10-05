@@ -92,6 +92,34 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       sourceArea.setAttribute("aria-label", "原卷本题");
       sourceArea.append(question);
       const fields = node("div", "answer-editor-fields");
+      // 1.13.5：题面一改，原来存的那份解析就被挪到一边「待核对」。挪走的东西
+      // 必须给条回来的路 —— 改前改后界面上能点的东西一模一样，等于老师白填了一遍。
+      // 刻意不做成一个会切换编辑区的下拉：那和「原卷」挤在一处会让人以为下面的
+      // 字也跟着换。这里是一块只读的旧内容 + 一个「填回编辑区」，填回来还得自己保存。
+      const setAside = node("section", "answer-set-aside"); setAside.hidden = true;
+      const setAsideTitle = node("strong", "", "题面改过，原来保存的解析还留着");
+      const setAsideBody = node("div", "paper");
+      const restore = node("button", "button button-small", "填回编辑区"); restore.type = "button";
+      restore.addEventListener("click", async () => {
+        if (!current?.setAside || loading || saving) return;
+        // 填回是「用旧的盖掉现在编辑区里的字」。老师很可能已经对着新题面写了半段，
+        // 这一下按下去就没了 —— 那种丢字最贵。已经有内容就问一句。
+        const session = epoch;
+        if (S.hasContent(current.value) && current.dirty
+          && !await confirm({ title: "用原来那份盖掉现在编辑区里的内容？", text: "你在本题已经改过答案或解析。填回后这里会换成原来那份，刚才改的不会留着。", ok: "填回" })) return;
+        if (session !== epoch || !dialog.open || !current?.setAside) return;
+        current.value = S.editable(current.setAside);
+        current.dirty = true;
+        controls.answer.value = current.value.answer;
+        controls.analysis.value = current.value.analysis;
+        renderFigures(); renderPreview(); updateEditStatus();
+        notify("原来那份解析已填进编辑区。核对题面后点保存，才会对这次出卷生效。");
+      });
+      setAside.append(setAsideTitle,
+        node("p", "helper", "下面这份和当前题面对不上了。请核对后决定：照抄、另写，或者放着不管。"),
+        setAsideBody);
+      const asideActions = node("div", "answer-image-tools"); asideActions.append(restore);
+      setAside.append(asideActions);
       const answerLabel = node("label", "", "答案结果");
       const answer = node("textarea"); answer.id = "answerEditorResult"; answer.rows = 2; answer.placeholder = "如 B，或 x＝3"; answerLabel.append(answer);
       const analysisLabel = node("label", "", "解析过程");
@@ -135,12 +163,12 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const inputColumn = node("div", "answer-editor-input-column"), previewColumn = node("section", "answer-editor-preview-column");
       previewColumn.setAttribute("aria-label", "答案解析实时预览");
       const editBody = node("div", "answer-editor-edit");
-      editBody.append(fields, imageTools, figures, crop, origin);
+      editBody.append(fields, setAside, imageTools, figures, crop, origin);
       inputColumn.append(sourceArea, editBody);
       previewColumn.append(previewTitle, node("p", "helper", "公式与配图随输入更新。保存后用于出卷。"), preview, aiDraft);
       workspace.append(inputColumn, previewColumn);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
-      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
       // Display caret and selection, the same idea as the review 改字 editor.
       // Moving the caret or selecting text is not an edit: it must not set
@@ -191,6 +219,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const busy = loading || saving || uploading;
       controls.save.disabled = busy || !current || pendingSaves.has(current?.item.id); controls.answer.disabled = busy; controls.analysis.disabled = busy;
       controls.sync.disabled = busy || scope === "library"; controls.upload.disabled = busy; controls.cropToggle.disabled = busy || !current?.item.document_id;
+      controls.restore.disabled = busy || !current?.setAside;
       const ready = apiSettings?.api_ready === true;
       controls.ai.hidden = controls.pickMissing.hidden = !ready;
       controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
@@ -235,7 +264,9 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
           const body = await api(endpoint(item) + query);
           const initial = S.editorInitial(item, body);
           const loaded = S.signature(initial.value);
-          record = { item, ...initial, loaded, dirty: loaded !== initial.saved, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], aiJob: null };
+          // 题面被改过之后，原来那份解析挂在**旧版**上，而旧版不在题库里，
+          // 所以 body.history 看不见它。后端专门跨版本取了一份 previous 过来。
+          record = { item, ...initial, loaded, dirty: loaded !== initial.saved, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], setAside: S.hasContent(body.previous) ? body.previous : null, aiJob: null };
         }
         if (requestToken !== token || !dialog.open) return;
         current = record; renderFields(); renderList();
@@ -256,7 +287,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         const record = current?.item.id === item.id ? current : drafts.get(item.id);
         const quality = record ? S.completeness({ solution: record.value }) : S.completeness(item); const labels = { missing: "缺答案解析", result_only: "只有结果，待补过程", ready: "已有解析" };
         button.append(node("strong", "", itemLabel(item)), node("span", `answer-quality ${quality}`, record?.ai_fields?.length ? "含现有 AI 初稿，保存后出卷" : labels[quality]));
-        if (item.solution_needs_review) button.append(node("span", "answer-quality result_only", "题面有改动，解析待核对"));
+        if (item.solution_needs_review) button.append(node("span", "answer-quality result_only", "题面有改动，原解析还在，编辑器里可填回"));
         const job = jobs.get(item.id);
         if (job) {
           const state = jobDraftState(job, record, item);
@@ -280,6 +311,13 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.questionBody.replaceChildren();
       if (controls.question.open) QB.renderQuestion(controls.questionBody, current.item.content, { showNumber: false, showAnswer: "none" });
       controls.status.textContent = `${itemLabel(current.item)} · ${isDirty() ? "有未保存的编辑" : "原卷内容保留，修改后点保存"}`;
+      controls.setAsideBody.replaceChildren();
+      controls.setAside.hidden = !current.setAside;
+      if (current.setAside) {
+        const from = current.setAside.from_version;
+        controls.setAsideTitle.textContent = from ? `第 ${from} 版题面时填的解析，还在` : "题面改过，原来保存的解析还留着";
+        S.render(controls.setAsideBody, current.setAside, { node, QB, empty: "原来那份解析没有文字。" });
+      }
       controls.originBody.replaceChildren();
       if (controls.origin.open) S.render(controls.originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" });
       positionArmed = false; lastField = "analysis";
@@ -389,9 +427,13 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         if (jobDraftState({ status: "done", result: record.suggestion }, record) === "saved") record.suggestion = null;
         record.base = body.base_revision ?? (sync ? body.solution.id : record.base);
         record.history.unshift(body.solution);
+        // 刚存的这版就是当前生效的解析，之前「待核对」的那份不再另搁一边了。
+        record.setAside = null;
+        record.item.solution_needs_review = false;
         onSaved(record.item, body.solution, { sync, scope: savedScope, scopeContext: savedContext });
         if (requestToken !== token || !dialog.open || current !== record) { notify(`返回后已确认${itemLabel(record.item)}的答案解析保存成功。`); return; }
-        const item = items.find(item => item.id === record.item.id); if (item) { item.solution = body.solution; item.solution_revision = body.solution.id; }
+        const item = items.find(item => item.id === record.item.id);
+        if (item) { item.solution = body.solution; item.solution_revision = body.solution.id; item.solution_needs_review = false; }
         renderFields(); renderList(); showJobSummary(); controls.status.textContent = sync ? "已保存到题库，原卷答案解析保留。" : "已保存，用于当前组卷。保存组卷草稿后，下次可继续。";
       } catch (error) { if (requestToken === token && dialog.open) controls.status.textContent = error.message; notify(requestEpoch === epoch ? error.message : `${itemLabel(record.item)}的保存尚未确认：${error.message} 下次打开后请核对已保存版本。`, "error"); }
       finally { pendingSaves.delete(record.item.id); if (requestEpoch === epoch) saving = false; if (dialog.open) { setBusy(); if (requestEpoch !== epoch && current?.item.id === record.item.id) updateEditStatus(); } }
