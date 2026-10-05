@@ -1,9 +1,9 @@
-﻿"""全屏改字 / 全屏答案解析：点保存 → 读 API → 改回去。
+"""全屏改字 / 全屏答案解析：点保存 → 读 API → 改回去。
 
 界面看着对不算数。这里真的点保存，再回头读后端确认文字落库了，
 最后把原文改回去。只对开发服务器（真库副本）跑。
 
-用法： python tools/check_fullscreen_editors.py --url http://127.0.0.1:8802 --paper <uuid>
+用法： python tools/check_fullscreen_editors.py --url http://127.0.0.1:8803 --paper <uuid>
 """
 
 import argparse
@@ -17,7 +17,7 @@ MARK = "（全屏保存往返验证）"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--paper", required=True)
     args = parser.parse_args()
     url = args.url.rstrip("/")

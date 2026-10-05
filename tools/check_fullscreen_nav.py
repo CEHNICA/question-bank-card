@@ -1,6 +1,6 @@
-﻿"""全屏改字里点「下一题」：应该直接切到下一道题，左栏试卷列表保持隐藏。
+"""全屏改字里点「下一题」：应该直接切到下一道题，左栏试卷列表保持隐藏。
 
-用法： python tools/check_fullscreen_nav.py --url http://127.0.0.1:8802 --paper <uuid>
+用法： python tools/check_fullscreen_nav.py --url http://127.0.0.1:8803 --paper <uuid>
 """
 
 import argparse
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--paper", required=True)
     args = parser.parse_args()
     url = args.url.rstrip("/")

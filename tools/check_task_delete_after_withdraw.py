@@ -8,8 +8,8 @@ DOM 上写着「已入库」不算数，这里断言的是任务从列表消失�
   $env:QB_DATA_ROOT="<repo>\\tmp\\task-delete\\data"
   python tools/check_task_delete_after_withdraw.py --seed
   # 另开一个窗口起 Django（不起 worker）：
-  $env:QB_PORT=8802; .\.venv\\Scripts\\python.exe manage.py runserver 127.0.0.1:8802
-  python tools/check_task_delete_after_withdraw.py --url http://127.0.0.1:8802
+  $env:QB_PORT=8803; .\.venv\\Scripts\\python.exe manage.py runserver 127.0.0.1:8803
+  python tools/check_task_delete_after_withdraw.py --url http://127.0.0.1:8803
 """
 
 import argparse
@@ -82,7 +82,7 @@ def seed():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--seed", action="store_true")
     parser.add_argument("--width", type=int, default=1600)
     parser.add_argument("--height", type=int, default=1000)

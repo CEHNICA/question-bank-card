@@ -3,7 +3,7 @@
 DOM 上写着「已展开」不算数 —— 每一项都去读真实状态（localStorage 里的篮、
 body 上的 class、抽屉的 hidden）。只读题库，不改题。
 
-用法： python tools/check_site_drawer.py --url http://127.0.0.1:8802
+用法： python tools/check_site_drawer.py --url http://127.0.0.1:8803
 """
 
 import argparse
@@ -18,7 +18,7 @@ OUTPUT = ROOT / "tmp" / "layout"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--width", type=int, default=1366)
     parser.add_argument("--height", type=int, default=768)
     args = parser.parse_args()
@@ -90,15 +90,20 @@ def main():
         page.wait_for_timeout(500)
         stored = page.evaluate("JSON.parse(localStorage.getItem('qb-basket') || '[]').length")
         check("点「加入试题篮」后篮里真有题", stored == 1, f"qb-basket = {stored}")
-        topbar_basket = page.locator(".topbar-basket")
-        check("篮里有题，顶栏出现入口", topbar_basket.is_visible(), topbar_basket.inner_text().replace("\n", " "))
-        check("顶栏工具区这时才占位", page.evaluate("getComputedStyle(document.querySelector('.topbar-tools')).display") != "none")
 
-        # 点顶栏的篮 → 抽屉拉开、篮展开、列表里看得见那道题
-        topbar_basket.click()
+        # 1.13.x 之后篮的入口是右边缘那条常驻把手（.basket-handle，position: fixed）：
+        # 顶栏那个篮按钮撤了，篮面板也不再搬进抽屉 —— test_library_compact.js 钉的就是
+        # 这个改版。脚本原来还在等 .topbar-basket，那个元素早没了，一等就是 30 秒超时。
+        handle = page.locator("#basketHandle")
+        check("右边缘有一条常驻的篮把手", handle.is_visible(), handle.get_attribute("aria-label") or "")
+        check("把手上的计数跟着篮里的题走",
+              (handle.locator("#basketHandleCount").inner_text() or "").strip() == "1")
+        check("顶栏不再有篮的按钮", page.locator(".topbar-basket").count() == 0)
+
+        handle.click()
         page.wait_for_timeout(400)
-        check("点顶栏的篮会拉开抽屉", page.evaluate("window.QBSiteDrawer.isOpen()"))
-        check("篮面板展开", page.locator("#basketPanel").is_visible())
+        check("点把手会展开篮面板", page.locator("#basketPanel").is_visible())
+        check("展开篮不会顺手把导航抽屉也拉开", not page.evaluate("window.QBSiteDrawer.isOpen()"))
         check("篮列表里有那道题", page.locator("#basketList .basket-row").count() == 1)
         page.screenshot(path=str(OUTPUT / "drawer-basket.png"))
         page.keyboard.press("Escape")
@@ -125,37 +130,33 @@ def main():
         else:
             check("「更多筛选」空时整条不出现", True)
 
-        # 抽屉里收起篮
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-        check("Esc 收起抽屉", not page.evaluate("window.QBSiteDrawer.isOpen()"))
-        page.click(".drawer-trigger")
+        # 1.13.x 之后篮不在抽屉里了，抽屉里已经没有「收起篮」这个按钮可言 ——
+        # 原来的 .site-drawer-title-button 在当前页面里根本不存在，一等就是 30 秒超时。
+        # 该验的是右边缘那条常驻把手本身能不能把篮收回去。
+        if not page.locator("#basketPanel").is_visible():
+            page.locator("#basketHandle").click()
+            page.wait_for_timeout(300)
+        check("篮这时是展开着的", page.locator("#basketPanel").is_visible())
+        page.locator("#basketHandle").click()
         page.wait_for_timeout(300)
-        page.locator(".site-drawer-title-button").click()
-        page.wait_for_timeout(300)
-        check("抽屉里收起篮", not page.locator("#basketPanel").is_visible())
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
+        check("再点一次把手能把篮收回去", not page.locator("#basketPanel").is_visible())
 
-        # ---- 专注浏览：进得去也退得出（退出的按钮在顶栏，不在关着的抽屉里）
-        print("== 专注浏览 ==")
-        page.click(".drawer-trigger")
-        page.wait_for_timeout(300)
-        page.locator("#libraryFocusBrowse").click()
+        # ---- 收侧栏：1.12.7 之后开关就是侧栏接缝上那个小按钮
+        # （.rail-collapse），不再是「专注浏览」文字按钮在顶栏和抽屉之间搬来搬去。
+        # 脚本原来等的 #libraryFocusBrowse 那个元素在当前页面里已经不存在。
+        print("== 收侧栏 ==")
+        rail_toggle = page.locator("#libraryRailToggle")
+        check("侧栏接缝上有一个收侧栏的按钮", rail_toggle.count() == 1)
+        check("点之前侧栏是展开的", page.locator("#libraryRail").is_visible())
+        rail_toggle.click()
         page.wait_for_timeout(350)
-        check("进了专注浏览", page.evaluate("document.body.classList.contains('library-focus-mode')"))
-        check("退出按钮搬到了顶栏", page.locator(".topbar-tools #libraryFocusBrowse").count() == 1)
-        check("顶栏工具区这时可见", page.evaluate("getComputedStyle(document.querySelector('.topbar-tools')).display") != "none")
-        check("抽屉已经合上（否则遮罩会挡住顶栏的退出按钮）", not page.evaluate("window.QBSiteDrawer.isOpen()"))
-        check("筛选条收起了", not page.locator("#libraryRail").is_visible())
+        check("点一下侧栏收起来了", page.evaluate("document.body.classList.contains('library-focus-mode')"))
+        check("侧栏真的不见了", not page.locator("#libraryRail").is_visible())
         page.screenshot(path=str(OUTPUT / "focus-mode.png"))
-        page.locator(".topbar-tools #libraryFocusBrowse").click()
+        rail_toggle.click()
         page.wait_for_timeout(350)
-        check("从顶栏退出了专注浏览", not page.evaluate("document.body.classList.contains('library-focus-mode')"))
-        check("按钮搬回抽屉", page.locator('.site-drawer [data-slot="library"] #libraryFocusBrowse').count() == 1)
-        check("筛选条回来了", page.locator("#libraryRail").is_visible())
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
+        check("再点一下侧栏回来了", not page.evaluate("document.body.classList.contains('library-focus-mode')"))
+        check("侧栏真的回来了", page.locator("#libraryRail").is_visible())
 
         # ---- 批量条：全选入口常驻，三个按钮勾了才出现
         print("== 批量条 ==")

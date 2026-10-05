@@ -10,7 +10,7 @@ OUTPUT = ROOT / "tmp" / "edit-panel"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--paper", required=True)
     args = parser.parse_args()
     url = args.url.rstrip("/")

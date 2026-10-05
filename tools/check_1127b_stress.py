@@ -11,7 +11,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-URL = "http://127.0.0.1:8802"
+URL = "http://127.0.0.1:8803"
 SHOT = Path(r"C:\Users\Administrator\question-bank-card\tmp\accept-1127b")
 SHOT.mkdir(parents=True, exist_ok=True)
 

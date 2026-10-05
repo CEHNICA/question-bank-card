@@ -1,6 +1,6 @@
 """打印预览里不许出现侧栏和它的遮罩 —— 打出来的组卷只有题目。
 
-用法： python tools/check_library_print.py --url http://127.0.0.1:8802
+用法： python tools/check_library_print.py --url http://127.0.0.1:8803
 """
 
 import argparse
@@ -14,7 +14,7 @@ OUTPUT = ROOT / "tmp" / "layout"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     parser.add_argument("--width", type=int, default=1366)
     args = parser.parse_args()
     url = args.url.rstrip("/")

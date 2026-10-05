@@ -12,7 +12,7 @@ transform: scale()（exam-layout.js 的 scale()）。transform 会开一个独�
      再展开菜单，确认补上的层级让菜单仍然完全可点。
 
 用法：先起一个开发服务器（QB_DATABASE / QB_DATA_ROOT 指到有题的库），
-再 .\\backend\\.venv\\Scripts\\python.exe tools\\check_print_tools_overlay.py --base http://127.0.0.1:8802
+再 .\\backend\\.venv\\Scripts\\python.exe tools\\check_print_tools_overlay.py --base http://127.0.0.1:8803
 """
 
 import argparse
@@ -163,7 +163,7 @@ async def check_pushed_past_sheet(page):
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="http://127.0.0.1:8802")
+    parser.add_argument("--base", default="http://127.0.0.1:8803")
     args = parser.parse_args()
 
     failures = 0

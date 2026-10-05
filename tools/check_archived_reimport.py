@@ -37,7 +37,7 @@ def post_multipart(url, fields, filename, content):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8802")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
     args = parser.parse_args()
     url = args.url.rstrip("/")
     db = Path(os.environ["QB_DATABASE"])
