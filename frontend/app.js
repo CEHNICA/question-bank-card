@@ -2206,13 +2206,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return state.questions.find((q) => q.id === id) || null;
   }
 
-  function setCurrent(id, { scroll = false, focus = false } = {}) {
+  function setCurrent(id, { scroll = false, focus = false, hold = scroll } = {}) {
     state.current = id;
     saveReviewState();
     cardNodes().forEach((card) => card.classList.toggle("is-current", Number(card.dataset.id) === id));
     const card = id !== null ? document.querySelector(`.card[data-id="${id}"]`) : null;
-    // A card the reader jumped to (J/K, N, 通过后下一张) stays lit until they scroll themselves.
-    if (card && scroll) state.followHold = true;
+    // A card the reader jumped to (J/K, N, 通过后下一张, 键盘 Tab 进来) stays lit
+    // until they scroll themselves. hold 默认跟着 scroll，老调用点行为不变。
+    if (card && hold) state.followHold = true;
     markReading();
     if (card && scroll) card.scrollIntoView({ behavior: "smooth", block: "start" });
     if (card && focus) card.focus({ preventScroll: true });
@@ -3652,6 +3653,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     card.tabIndex = -1;
     card.setAttribute("aria-label", questionLabel(q));
     card.addEventListener("pointerdown", () => { if (state.current !== q.id) setCurrent(q.id); });
+    // 1.13.5：只用键盘时这张卡也是暗的。专注模式把非当前题压到 34% 不透明度，
+    // 焦点圈跟着一起只剩 34% —— Tab 走过别的卡的「改字」「配图」「标记通过」时，
+    // 屏幕上几乎看不出焦点在哪（实测 Tab 60 次有 27 次落在这类地方）。
+    // 鼠标点一下本来就会把这张卡点亮，键盘也该一样。
+    // hold 是必须的：Tab 会把控件滚进视口，随即触发滚动跟随，而跟随认的是
+    // 「视口最上面那张卡」，不是「焦点所在那张卡」——不按住的话，这张卡刚点亮
+    // 就又被压暗，等于没改。
+    card.addEventListener("focusin", () => { if (state.current !== q.id) setCurrent(q.id, { hold: true }); });
 
     if (approvedCompact) {
       const row = el("div", "compact-row");

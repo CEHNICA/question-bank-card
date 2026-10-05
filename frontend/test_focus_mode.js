@@ -30,7 +30,14 @@ assert.match(js, /container\.classList\.toggle\("reading", reading\);/);
 assert.match(js, /return \(bar \? bar\.offsetHeight : 56\) \+/);
 // The card being read follows the scroll, but not while a jump scrolls past cards.
 assert.match(js, /window\.addEventListener\("scroll", \(\) => \{\s*if \(!state\.focus \|\| followFrame\) return;/);
-assert.match(js, /if \(card && scroll\) state\.followHold = true;/);
+assert.match(js, /function setCurrent\(id, \{ scroll = false, focus = false, hold = scroll \} = \{\}\)/);
+assert.match(js, /if \(card && hold\) state\.followHold = true;/);
+// 1.13.5: keyboard focus lights the card too, and holds it.  Without the hold the
+// scroll-follow immediately re-dims it — focus lands on a control, the browser
+// scrolls it into view, and the follow logic picks the card at the top of the
+// viewport instead of the one holding focus.  hold defaults to scroll, so every
+// existing caller behaves exactly as before.
+assert.match(js, /card\.addEventListener\("focusin", \(\) => \{ if \(state\.current !== q\.id\) setCurrent\(q\.id, \{ hold: true \}\); \}\);/);
 assert.match(js, /if \(!state\.followHold\) \{\s*const card = readingCard\(\);/);
 assert.match(js, /window\.addEventListener\("wheel", releaseFollow, \{ passive: true \}\)/);
 // The card being read sits under a reading line a third of the way down;
