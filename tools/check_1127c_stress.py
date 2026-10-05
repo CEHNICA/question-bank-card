@@ -268,6 +268,72 @@ def run(pg):
     check("页面文字里没有「导入时先在本机切题」", "导入时先在本机切题" not in gone["text"])
     check("服务状态列表还在（没被误删）", pg.evaluate("() => document.querySelectorAll('.api-status-list .api-state').length") >= 4)
 
+    print("\n=== 13. 批量条吸顶")
+    BULK = """() => { const b = document.querySelector('.library-bulk');
+      const t = document.querySelector('.topbar');
+      const r = b.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height),
+        topbarH: Math.round(t.getBoundingClientRect().height),
+        stuck: b.classList.contains('stuck'),
+        varH: getComputedStyle(document.documentElement).getPropertyValue('--library-bulk-h').trim() }; }"""
+    for w in [1650, 1366, 1100, 979, 820, 560, 390]:
+        pg.set_viewport_size({"width": w, "height": 900})
+        pg.goto(URL + "/library?bk=" + str(w), wait_until="load"); pg.wait_for_timeout(2400)
+        if w <= 979:
+            pg.click("#libraryFilterToggle"); pg.wait_for_timeout(600)
+        at_top = pg.evaluate(BULK)
+        pg.evaluate("() => window.scrollTo(0, 1200)"); pg.wait_for_timeout(700)
+        far = pg.evaluate(BULK)
+        # 正好等于，不是 <=：小于说明被顶栏或别的东西压住了
+        check("%d 宽滚 1200 后条正好吸在顶栏下（%d）" % (w, far["topbarH"]), far["top"] == far["topbarH"], far)
+        check("%d 宽滚下去时条有 .stuck" % w, far["stuck"] is True, far)
+        check("%d 宽 --library-bulk-h 等于条高" % w, far["varH"] == "%dpx" % far["h"], far)
+        pg.evaluate("() => window.scrollTo(0, 0)"); pg.wait_for_timeout(700)
+        check("%d 宽滚回顶部后 .stuck 撤掉" % w, pg.evaluate(BULK)["stuck"] is False)
+        if w <= 979:
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
+    pg.screenshot(path=str(SHOT / "10-bulk-stuck.png"), full_page=False)
+
+    print("\n=== 14. 跳到某道题：题顶不被吸顶的条压住")
+    for w in [1650, 1366, 560, 390]:
+        pg.set_viewport_size({"width": w, "height": 900})
+        pg.goto(URL + "/library?jmp=" + str(w), wait_until="load"); pg.wait_for_timeout(2400)
+        if w <= 979:
+            pg.click("#libraryFilterToggle"); pg.wait_for_timeout(600)
+        g = pg.evaluate("""() => { document.querySelectorAll('.library-card')[6]
+            .scrollIntoView({ block: 'start', behavior: 'instant' });
+          return null; }""")
+        pg.wait_for_timeout(700)
+        j = pg.evaluate("""() => { const c = document.querySelectorAll('.library-card')[6].getBoundingClientRect();
+          const b = document.querySelector('.library-bulk').getBoundingClientRect();
+          return { cardTop: Math.round(c.top), barBottom: Math.round(b.bottom) }; }""")
+        print("     %d 宽：条底 %d，题顶 %d" % (w, j["barBottom"], j["cardTop"]))
+        check("%d 宽跳过去的题没被压在条下面" % w, j["cardTop"] >= j["barBottom"], j)
+        if w <= 979:
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
+
+    print("\n=== 15. 窄屏上批量条收成一行，功能没丢")
+    pg.set_viewport_size({"width": 390, "height": 900})
+    pg.goto(URL + "/library?nb=1", wait_until="load"); pg.wait_for_timeout(2600)
+    idle = pg.evaluate(BULK)
+    check("390 宽没勾选时条只有一行（%dpx）" % idle["h"], idle["h"] <= 40, idle)
+    check("窄屏上状态文字收起来了",
+          pg.evaluate("() => getComputedStyle(document.querySelector('#libraryStatus')).display") == "none")
+    pg.evaluate("""() => { document.querySelectorAll('.library-card-select').forEach((b, i) => {
+        if (i < 3) { b.checked = true; b.dispatchEvent(new Event('change', { bubbles: true })); } }); }""")
+    pg.wait_for_timeout(800)
+    sel = pg.evaluate("""() => ({ h: Math.round(document.querySelector('.library-bulk').getBoundingClientRect().height),
+      add: !document.querySelector('#addSelected').closest('.bulk-actions').hidden
+        || getComputedStyle(document.querySelector('.bulk-actions')).display !== 'none',
+      n: document.querySelector('#selectionCount').textContent })""")
+    print("     勾了 3 题：%dpx，%s" % (sel["h"], sel["n"]))
+    check("390 宽勾了 3 题时条不超过 75px（%d）" % sel["h"], sel["h"] <= 75, sel)
+    check("勾选之后批量按钮还在（不能因为收窄就把功能收没了）", sel["add"] is True, sel)
+    check("勾选计数跟着变", "3" in sel["n"], sel)
+    pg.screenshot(path=str(SHOT / "11-bulk-narrow.png"))
+    pg.click("#clearSelection"); pg.wait_for_timeout(700)
+    check("取消勾选后复原", "0" in pg.evaluate("() => document.querySelector('#selectionCount').textContent"))
+
 
 
 with sync_playwright() as p:

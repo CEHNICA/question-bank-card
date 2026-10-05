@@ -942,6 +942,36 @@
     }
   }
 
+  // 1.12.10：批量条吸顶以后，两件事得跟着它走 ——
+  // ① 它占多高，量出来写进 --library-bulk-h，跳题时给题目让出这么高；
+  // ② 它吸住了没有，吸住了加个 .stuck（阴影在 CSS 里）。
+  // 用 ResizeObserver 量高度：勾选变化会让按钮出现/消失、窄屏会排成两行、
+  // 窗口变窄会重新折行 —— 这三种情况滚动监听都看不见，只有观察尺寸能跟上。
+  const bulkBar = document.querySelector(".library-bulk");
+  const measureBulkBar = () => {
+    if (!bulkBar) return;
+    const hidden = getComputedStyle(bulkBar).display === "none";
+    // 写在 :root 上而不是条自己身上：题卡是条的后代兄弟，两边才都读得到。
+    document.documentElement.style.setProperty("--library-bulk-h", hidden ? "0px" : `${bulkBar.offsetHeight}px`);
+  };
+  if (bulkBar && window.ResizeObserver) new window.ResizeObserver(measureBulkBar).observe(bulkBar);
+  measureBulkBar();
+
+  let bulkFrame = 0;
+  const syncBulkBar = () => {
+    if (bulkFrame) return;
+    bulkFrame = requestAnimationFrame(() => {
+      bulkFrame = 0;
+      if (!bulkBar) return;
+      const top = document.querySelector(".topbar")?.offsetHeight || 56;
+      bulkBar.classList.toggle("stuck", bulkBar.getBoundingClientRect().top <= top + 1 && window.scrollY > 0);
+      measureBulkBar();
+    });
+  };
+  window.addEventListener("scroll", syncBulkBar, { passive: true });
+  window.addEventListener("resize", syncBulkBar, { passive: true });
+  syncBulkBar();
+
   function questionSignature(item) {
     return JSON.stringify([item, state.features, state.ai.mode, state.basket.includes(item.id)]);
   }

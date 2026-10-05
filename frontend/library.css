@@ -78,7 +78,11 @@ body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-coll
 
 /* 题目卡片 */
 .library-card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-  scroll-margin-top: calc(var(--topbar-h) + 20px); transition: box-shadow .18s, border-color .18s; overflow: visible; }
+  /* 条一吸顶就多占了 --library-bulk-h 那么高，跳到某道题时必须给它让出来，
+     否则那道题的顶部会被压在条下面。这个值由 library.js 用 ResizeObserver 量出来
+     （条隐藏时是 0px），不写死 —— 窄屏上条会排成两行，写死 34 就不够了。 */
+  scroll-margin-top: calc(var(--topbar-h) + var(--library-bulk-h, 0px) + 12px);
+  transition: box-shadow .18s, border-color .18s; overflow: visible; }
 .library-card:hover { box-shadow: var(--shadow); }
 .library-card.in-basket { border-color: #9cc2b5; }
 .library-card.in-basket::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
@@ -177,13 +181,29 @@ body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
 .library-advanced > summary { width: max-content; cursor: pointer; padding: 3px 0; }
 .library-advanced[open] > .library-filters { margin-top: 10px; }
 .library-advanced .library-extra-tools { margin-top: 10px; }
-/* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。 */
-.library-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; font-size: 12.5px; }
+/* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。
+   1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了。吸在顶栏下面，
+   top 用 var(--topbar-h) —— 顶栏在 ≤760px 时会变成 52px，跟着走就行。
+   z-index 20 是照终审页那条工具条（styles.css:383）取的：压在顶栏（40）和
+   侧栏接缝按钮（30）之下，题卡和篮子把手（都是 4）之上。侧栏是另一条栅格列，
+   窄屏时它是 61 的浮层，两边都不会盖到它。 */
+.library-bulk { position: sticky; top: var(--topbar-h); z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; font-size: 12.5px; }
+/* 吸住时才加阴影：题卡从底下滑过去，光靠那条 1px 下边框会像是被削掉一块。
+   样式照抄终审页的 .toolbar.stuck（styles.css:386），JS 那边照抄 app.js:8458。 */
+.library-bulk.stuck { box-shadow: 0 8px 18px -14px rgba(22, 44, 39, .45); }
 .library-bulk label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
 .library-bulk input, .library-card-select { accent-color: var(--accent); width: 17px; height: 17px; flex: none; cursor: pointer; }
 .library-bulk #selectionCount { color: var(--muted); }
 .bulk-actions { display: none; align-items: center; gap: 6px; margin-left: auto; }
 .library-bulk.has-selection .bulk-actions { display: flex; }
+/* 窄屏（≤760px，和 styles.css:1192 顶栏变高的那个断点对齐）：批量条排不下两行。
+   收掉「已显示 X / 共 Y 题」这段 —— 它最长也最不常用。上面那几个批量按钮不用动，
+   它们本来就在 .library-bulk.has-selection 时才出现。实测 390px：没勾选 59→34px，
+   勾了 3 题 93→68px。 */
+@media (max-width: 760px) {
+  .library-bulk #libraryStatus { display: none; }
+}
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }
 .library-filter-chip { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); padding: 5px 8px; font: 12px/1.4 var(--ui-font); overflow-wrap: anywhere; text-align: left; }
 .library-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
@@ -721,7 +741,6 @@ body.printing { overflow: hidden; }
   .library-focus-mode .rail-toggle { display: inline-flex !important; }
 }
 .library-focus-mode .library-main { max-width: none; }
-.library-focus-mode .library-card { scroll-margin-top: calc(var(--topbar-h) + 20px); }
 .library-focus-mode .topbar-tools { align-items: center; }
 @media (max-width: 900px) {
   .question-viewer-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; }

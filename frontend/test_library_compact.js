@@ -77,6 +77,19 @@ for (const page of ["index.html", "library.html"]) {
   assert.match(html, /<script src="\/site-drawer\.js" defer><\/script>/, `${page} 要加载抽屉`);
 }
 
+// 1.12.10：批量条吸顶。四条一起钉 —— 少钉任何一条，下一轮都会退化回去。
+assert.match(libraryCss, /\.library-bulk \{[^}]*position: sticky; top: var\(--topbar-h\); z-index: 20;/);
+assert.match(libraryCss, /\.library-bulk\.stuck \{[^}]*box-shadow:/);
+// 跳题的预留必须跟着条的真实高度走，不能写死 —— 窄屏上条会排成两行。
+assert.match(libraryCss, /\.library-card \{[^}]*scroll-margin-top: calc\(var\(--topbar-h\) \+ var\(--library-bulk-h, 0px\) \+ 12px\);/);
+assert.ok(!libraryCss.includes(".library-focus-mode .library-card { scroll-margin-top"),
+  "专注模式那条是重复的：条隐藏时 --library-bulk-h 已经是 0");
+assert.match(libraryJs, /setProperty\("--library-bulk-h"/);
+assert.match(libraryJs, /ResizeObserver/);
+assert.match(libraryJs, /bulkBar\.classList\.toggle\("stuck"/);
+// 窄屏收状态文字
+assert.match(libraryCss, /@media \(max-width: 760px\) \{[\s\S]*?\.library-bulk #libraryStatus \{ display: none; \}/);
+
 // ---- 状态行并进批量条，元素和 aria 属性原样保留
 const bulk = libraryHtml.slice(libraryHtml.indexOf('class="library-bulk"'), libraryHtml.indexOf('id="libraryLoadError"'));
 for (const id of ["selectVisible", "selectionCount", "addSelected", "withdrawSelected", "clearSelection", "libraryStatus"]) {
