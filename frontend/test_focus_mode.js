@@ -69,6 +69,15 @@ assert.match(js, /root\.requestFullscreen\(\{ navigationUI: "hide" \}\)\.catch\(
 assert.match(js, /document\.addEventListener\("fullscreenchange", \(\) => \{\s*if \(!document\.fullscreenElement\) setReviewFullscreen\(false\);/);
 assert.match(js, /case "q":\s*event\.preventDefault\(\);\s*setReviewFullscreen/);
 assert.match(js, /\$\("toolbarPaper"\)\.replaceChildren\(el\("strong", "", paperDisplayName/);
+// 1.12.7d：点过工具栏的开关之后，Enter 曾经变成「再点一次开关」——最荒唐的是
+// 全屏那个，想通过一道题却把屏幕整个铺开了。鼠标点完必须把焦点交回题卡；
+// 键盘 Tab 过来激活的（detail 为 0）不抢，Tab 顺序和连按空格切开关都要留着。
+assert.match(js, /function releaseToggleFocus\(event\) \{\s*if \(event\.detail === 0\) return;/);
+assert.match(js, /\$\("fullscreenToggle"\)\.addEventListener\("click", \(event\) => \{\s*setReviewFullscreen\([\s\S]*?releaseToggleFocus\(event\);/);
+assert.match(js, /\$\("focusToggle"\)\.addEventListener\("click", \(event\) => \{ setFocus\(!state\.focus\); releaseToggleFocus\(event\); \}\)/);
+assert.match(js, /\$\("lensToggle"\)\.addEventListener\("click", \(event\) => \{ setLens\(!state\.lens\); releaseToggleFocus\(event\); \}\)/);
+const menuGuard = new RegExp('\\$\\("toolsMenu"\\)\\.addEventListener\\("toggle",[\\s\\S]*?if \\(\\$' + '\\("toolsMenu"\\)\\.open\\) return;');
+assert.match(js, menuGuard);
 console.log("full-screen review checks: OK");
 
 // J/K pressed quickly: the card just jumped to may still be scrolling in, so keep

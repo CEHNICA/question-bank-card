@@ -168,6 +168,41 @@ def run(pg):
     pg.keyboard.press("Escape"); pg.wait_for_timeout(700)
     check("Esc 能退出全屏改字", pg.evaluate("() => !document.querySelector('.card.editing')"))
 
+    # 1.12.7d：点过工具栏开关之后焦点赖在按钮上，Enter 变成「再点一次开关」。
+    # 老师报的现象是「按 Enter 竟然全屏了」——全屏那个开关吃掉了本该「通过这道题」的键。
+    print("\n=== 7. 审核工具栏：点过开关之后 Enter 仍然是「通过」")
+    pg.set_viewport_size({"width": 1440, "height": 900})
+    pg.goto(URL + "/?t=1", wait_until="load"); pg.wait_for_timeout(2500)
+    if pg.locator("#welcomeDialog[open]").count():
+        pg.evaluate("() => document.querySelector('#welcomeDialog').close()"); pg.wait_for_timeout(400)
+    for i in range(min(6, pg.locator("#paperList .paper-link").count())):
+        pg.locator("#paperList .paper-link").nth(i).click(); pg.wait_for_timeout(2000)
+        if pg.evaluate("() => document.querySelectorAll('.card').length") >= 6: break
+    pg.click("#cards .card"); pg.wait_for_timeout(800)
+
+    def where():
+        return pg.evaluate("""() => ({ fs: document.documentElement.classList.contains('review-fullscreen'),
+          card: document.activeElement?.classList?.contains?.('card') || false,
+          id: document.activeElement?.dataset?.id || document.activeElement?.tagName })""")
+
+    pg.click("#fullscreenToggle"); pg.wait_for_timeout(700)
+    check("进全屏时焦点已经交回题卡", where()["card"] and where()["fs"], where())
+    pg.click("#fullscreenToggle"); pg.wait_for_timeout(700)
+    before = where()
+    pg.keyboard.press("Enter"); pg.wait_for_timeout(1500)
+    after = where()
+    check("退出全屏后按 Enter 不会又全屏", not after["fs"], after)
+    check("按 Enter 换到了下一道题（等于通过）", after["id"] != before["id"], (before, after))
+    for tid, name in [("#focusToggle", "专注"), ("#lensToggle", "放大镜"), ("#toolsMenu summary", "工具")]:
+        pg.click(tid); pg.wait_for_timeout(500)
+        if tid == "#toolsMenu summary":
+            pg.click(tid); pg.wait_for_timeout(500)
+        mid = where()
+        pg.keyboard.press("Enter"); pg.wait_for_timeout(1400)
+        done = where()
+        check("点过「%s」后 Enter 仍然是换题，不是全屏" % name, not done["fs"] and done["id"] != mid["id"], (mid, done))
+    pg.screenshot(path=str(SHOT / "enter-after-toggle.png"))
+
 
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, executable_path=EXE)

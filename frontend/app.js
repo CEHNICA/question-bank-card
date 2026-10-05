@@ -2282,6 +2282,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     markReading();
   }
 
+  // 工具栏这几个是「开关」，不是编辑目标。鼠标点过一次之后焦点就留在按钮上，
+  // 接着按 Enter 会被浏览器当成「再点一次这个按钮」——最荒唐的是全屏那一个：
+  // 想按 Enter 通过这道题，屏幕却整个铺开了，而且看不出为什么会这样。
+  // 鼠标点完就把焦点交回题卡，Enter 重新变回「通过这道题」。
+  // 键盘 Tab 过来按 Enter/空格的（detail 为 0）不抢焦点：那样连按空格反复切
+  // 开关是正常用法，Tab 顺序也不该被改。
+  function releaseToggleFocus(event) {
+    if (event.detail === 0) return;
+    const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
+    if (card) card.focus({ preventScroll: true });
+    else event.currentTarget.blur();
+  }
+
   function setFocus(on) {
     state.focus = on;
     writePref("qb-focus", on ? "1" : "0");
@@ -2317,15 +2330,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   document.addEventListener("fullscreenchange", () => {
     if (!document.fullscreenElement) setReviewFullscreen(false);
   });
-  $("fullscreenToggle").addEventListener("click", () =>
-    setReviewFullscreen(!document.documentElement.classList.contains("review-fullscreen")));
+  $("fullscreenToggle").addEventListener("click", (event) => {
+    setReviewFullscreen(!document.documentElement.classList.contains("review-fullscreen"));
+    releaseToggleFocus(event);
+  });
 
   let followFrame = 0;
   window.addEventListener("scroll", () => {
     if (!state.focus || followFrame) return;
     followFrame = requestAnimationFrame(() => { followFrame = 0; followReading(); });
   }, { passive: true });
-  $("focusToggle").addEventListener("click", () => setFocus(!state.focus));
+  $("focusToggle").addEventListener("click", (event) => { setFocus(!state.focus); releaseToggleFocus(event); });
 
   // 键盘移动：当前卡还在屏幕里就从它往前/往后走一张；
   // 已经滚走了，就先落到屏幕里最上面那张。
@@ -2718,7 +2733,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!on) hideLens();
   }
 
-  $("lensToggle").addEventListener("click", () => setLens(!state.lens));
+  $("lensToggle").addEventListener("click", (event) => { setLens(!state.lens); releaseToggleFocus(event); });
+
+  // 「工具」这个折叠菜单同理：用鼠标点开再点收，焦点会留在它的 summary 上，
+  // 下一按 Enter 就变成「把菜单重新拉开」而不是通过这道题。关掉时交回题卡。
+  $("toolsMenu").addEventListener("toggle", (event) => {
+    if ($("toolsMenu").open) return;
+    const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
+    if (card && document.activeElement === $("toolsMenu").querySelector("summary")) card.focus({ preventScroll: true });
+  });
 
   document.addEventListener("pointermove", (event) => {
     // 放大对照已有 Ctrl+滚轮缩放；放大镜只服务普通题卡，避免两套方式叠加。
