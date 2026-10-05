@@ -24,8 +24,10 @@ MAX_DRAFTS = 100
 MAX_STORE_BYTES = 2 * 1024 * 1024
 MAX_TITLE_LENGTH = 120
 LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
-PRINT_DEFAULTS = {"answers": True, "origin": False, "ai_answers": False,
-                  "document": "combined", "font_size": 12, "answer_space": "none", "student_info": True,
+# 1.12.9：默认只出题目卷。answers 这一栏下面第 75 行会按 document 重算，
+# 这里跟着改只是别让常量自相矛盾。
+PRINT_DEFAULTS = {"answers": False, "origin": False, "ai_answers": False,
+                  "document": "questions", "font_size": 12, "answer_space": "none", "student_info": True,
                   "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": [],
                   "answer_layout": "inline", "answer_space_overrides": {}}
 INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}

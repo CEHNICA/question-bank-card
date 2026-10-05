@@ -107,7 +107,7 @@ class LibraryExportTests(TestCase):
         self.figure(first)
         before = list(PublishedQuestion.objects.values())
         questions = list(Question.objects.values())
-        result = self.post(self.payload([first, second], print_options={"origin": True, "font_size": 14, "answer_space": "large"}))
+        result = self.post(self.payload([first, second], print_options={"document": "combined", "origin": True, "font_size": 14, "answer_space": "large"}))
         self.assertEqual(result.status_code, 200, result.content[:300])
         self.assertEqual(result["X-Question-Count"], "2")
         self.assertIn("filename*=UTF-8''", result["Content-Disposition"])
@@ -204,13 +204,13 @@ class LibraryExportTests(TestCase):
 
     def test_ai_is_off_by_default_and_requires_both_explicit_choices(self):
         pub = self.publication(extras={"ai_answer": {"answer": "AI合成参考", "analysis": "合成解析"}})
-        result = self.post(self.payload([pub], print_options={"ai_answers": True}))
+        result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": True}))
         self.assertEqual(result.status_code, 200)
         self.assertNotIn("AI合成参考", "".join(document_xml(result.content).itertext()))
         features.save({"ai_answer": True})
         result = self.post(self.payload([pub]))
         self.assertNotIn("AI合成参考", "".join(document_xml(result.content).itertext()))
-        result = self.post(self.payload([pub], print_options={"ai_answers": True}))
+        result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": True}))
         text = "".join(document_xml(result.content).itertext())
         self.assertIn("AI合成参考", text)
         self.assertIn("AI 参考 · 未核对", text)
@@ -220,16 +220,16 @@ class LibraryExportTests(TestCase):
     def test_original_answer_wins_and_original_analysis_is_last_fallback(self):
         features.save({"ai_answer": True})
         pub = self.publication(answer="原卷答案", extras={"ai_answer": {"answer": "AI答案"}})
-        result = self.post(self.payload([pub], print_options={"ai_answers": True}))
+        result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": True}))
         text = "".join(document_xml(result.content).itertext())
         self.assertIn("原卷答案", text)
         self.assertNotIn("AI答案", text)
         pub.content["answer"] = ""
         pub.content["analysis"] = "原卷解析"
         pub.save(update_fields=["content"])
-        result = self.post(self.payload([pub], print_options={"ai_answers": False}))
+        result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": False}))
         self.assertIn("原卷解析", "".join(document_xml(result.content).itertext()))
-        result = self.post(self.payload([pub], print_options={"ai_answers": True}))
+        result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": True}))
         self.assertIn("AI答案", "".join(document_xml(result.content).itertext()))
 
     def test_unavailable_ids_abort_whole_export_and_never_substitute_new_version(self):
@@ -518,7 +518,7 @@ class LibraryExportTests(TestCase):
         first = self.publication(kind="single_choice", answer="甲")
         second = self.publication(kind="single_choice", answer="乙")
         third = self.publication(kind="free_response", answer="丙")
-        options = {"question_breaks": [str(first.id), str(second.id), str(third.id)]}
+        options = {"question_breaks": [str(first.id), str(second.id), str(third.id)], "document": "combined"}
         response = self.post(self.payload([first, second, third], print_options=options))
         self.assertEqual(response.status_code, 200)
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
@@ -770,6 +770,12 @@ class LibraryExportTests(TestCase):
 
 class DraftPrintCompatibilityTests(TestCase):
     def test_legacy_and_explicit_documents_and_validation(self):
+        # 1.12.9：新建草稿默认只出题目卷。老草稿里显式写着 answers 的照旧尊重 ——
+        # 里面那句 answers 推回 combined 的规则必须留着，否则用户当年存的
+        # 「题目＋答案」会在打开时被悄悄改成题目卷。
+        self.assertEqual(library_drafts.PRINT_DEFAULTS["document"], "questions")
+        self.assertEqual(library_drafts.PRINT_DEFAULTS["answers"], False)
+        self.assertEqual(library_drafts._print_options({})["document"], "questions")
         self.assertEqual(library_drafts._print_options({"answers": False})["document"], "questions")
         self.assertEqual(library_drafts._print_options({"answers": True})["document"], "combined")
         self.assertEqual(library_drafts._print_options({"answers": False, "document": "answers"})["answers"], True)

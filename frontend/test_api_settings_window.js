@@ -8,7 +8,8 @@ const source = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf(
 const listenerStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = js.slice(listenerStart, js.indexOf("  // Queue the values captured", listenerStart));
 const leaveSource = js.slice(js.indexOf("  async function prepareSettingsLeave()"), js.indexOf("  async function saveModelSettingsNow("));
-const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  function renderSettingsReady()"));
+// 1.12.9：renderSettingsReady 连同那行提示一起删了，切片终点换成下一个函数。
+const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  async function loadFeatureSwitches()"));
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes; }); return { promise, resolve }; };
 const turns = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
 

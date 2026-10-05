@@ -48,9 +48,30 @@ assert.match(libraryHtml, /id="basketPanel"[^>]*class="basket-panel"(?![^>]*data
 assert.ok(!libraryHtml.includes('data-drawer="basket"'), "抽屉里不再有试题篮");
 assert.ok(!libraryHtml.includes('id="basketPreviewShortcut"'), "组卷预览只在篮里，没有第二个家");
 // 把手改成悬浮：它骑在视口右缘，不占栅格列，收起时那 26px 全还给题目。
-assert.match(libraryCss, /\.basket-handle \{ position: fixed; right: 0; top: 50vh;/, "把手钉在视口右缘正中");
+assert.match(libraryCss, /\.basket-handle \{ --basket-fill: 0; position: fixed; right: 0; top: 50vh;/, "把手钉在视口右缘正中");
 assert.ok(!libraryCss.includes(".library-workspace > .basket-handle { grid-column"), "把手是 fixed，不进栅格流");
 assert.match(libraryCss, /body\.library-basket-open \.library-workspace \{ grid-template-columns: 212px minmax\(0, 1fr\) 300px; \}/, "展开时才让出第三列");
+
+// 1.12.9 第 1 条：有题时把手点亮，越多越浓，20 题封顶。强度是 JS 写的一个 0–1 的数，
+// 颜色和辉光都在样式里算 —— 别有人改回在 JS 里拼 rgba，那样 hover 就改不动了。
+assert.match(libraryJs, /handle\.style\.setProperty\("--basket-fill", \(Math\.min\(1, state\.basket\.length \/ 20\)\)\.toFixed\(3\)\);/);
+assert.match(libraryCss, /\.basket-handle::before \{[^}]*opacity: var\(--basket-fill\);/);
+assert.match(libraryCss, /0 0 calc\(2px \+ 9px \* var\(--basket-fill\)\) rgba\(31, 107, 95, calc\(\.06 \+ \.24 \* var\(--basket-fill\)\)\);/,
+  "辉光的范围和浓淡都跟着题数走，不是固定的一圈");
+
+// 1.12.9 第 2 条：输出内容默认只出题目。页面初始值、代码兜底、服务端草稿默认三处
+// 必须一致，只改一处就会出现「界面默认题目、下次开草稿又变回题目＋答案」。
+assert.match(libraryHtml, /<option value="questions" selected>题目<\/option>/, "页面初始值落在「题目」");
+assert.ok(!libraryHtml.includes('<option value="combined" selected>'), "旧的 selected 已经从「题目＋答案」上摘掉");
+assert.match(libraryJs, /: "answers" in options \? \(options\.answers \? "combined" : "questions"\) : "questions";/,
+  "兜底默认是「题目」，但老草稿只有 answers 时的推法必须和服务端一致");
+
+// 1.12.9 第 3 条：专注模式 + 篮展开时题面曾经只剩 309px。两条规则打架过一次，
+// 这里钉死，别有人为了「统一」把这两条删掉。
+assert.match(libraryCss, /\.library-focus-mode\.library-basket-open \.library-workspace \{ grid-template-columns: minmax\(0, 1fr\) 300px; \}/,
+  "专注模式下篮子只占第二列");
+assert.match(libraryCss, /\.library-focus-mode \.library-workspace > \.basket-panel \{ grid-column: 2; \}/,
+  "篮子面板跟着挪到第二列");
 for (const page of ["index.html", "library.html"]) {
   const html = fs.readFileSync(require.resolve(`./${page}`), "utf8");
   assert.match(html, /<script src="\/site-drawer\.js" defer><\/script>/, `${page} 要加载抽屉`);

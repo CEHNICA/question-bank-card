@@ -190,6 +190,85 @@ def run(pg):
         check("%d 宽无横向溢出" % w, s == 0, s)
     pg.set_viewport_size({"width": 1366, "height": 900})
 
+    # ---- 1.12.9 ----
+    print("\n=== 9. 篮子把手：有题就亮，题目越多越浓")
+    pg.set_viewport_size({"width": 1366, "height": 900})
+    pg.goto(URL + "/library?gl=1", wait_until="load"); pg.wait_for_timeout(2500)
+    every = pg.evaluate("() => fetch('/api/library?limit=50').then(r=>r.json()).then(j=>j.items.map(i=>i.id))")
+    check("题库里有足够多的题可以试浓度", len(every) >= 40, len(every))
+
+    def fill(n):
+        ids = every[:n]
+        pg.evaluate("(ids) => localStorage.setItem('qb-basket', JSON.stringify(ids))", ids)
+        pg.reload(wait_until="load"); pg.wait_for_timeout(2100)
+        return pg.evaluate("""() => { const h = document.querySelector('.basket-handle');
+          const cs = getComputedStyle(h);
+          const before = getComputedStyle(h, '::before');
+          return { n: document.querySelector('#basketHandleCount').textContent,
+            fill: parseFloat(cs.getPropertyValue('--basket-fill')),
+            overlay: parseFloat(before.opacity),
+            shadow: cs.boxShadow }; }""")
+
+    for n, want in [(0, 0.0), (1, 0.05), (5, 0.25), (20, 1.0), (40, 1.0)]:
+        s = fill(n)
+        print("     篮里 %2d 题 -> --basket-fill=%s 底色不透明度=%s" % (n, s["fill"], s["overlay"]))
+        check("%d 题时浓度是 %g" % (n, want), abs(s["fill"] - want) < 0.001, s)
+        check("%d 题时底色跟着浓度走" % n, abs(s["overlay"] - s["fill"]) < 0.01, s)
+    one, many = fill(1), fill(20)
+    check("1 题明显比 20 题淡", many["overlay"] - one["overlay"] >= 0.4, (one["overlay"], many["overlay"]))
+    check("辉光跟着浓度变（阴影串不同）", one["shadow"] != many["shadow"], (one["shadow"][:40], many["shadow"][:40]))
+    pg.screenshot(path=str(SHOT / "06-handle-glow.png"))
+
+    print("\n=== 10. 专注 + 篮展开：题面必须还是整屏宽")
+    pg.set_viewport_size({"width": 1650, "height": 900})
+    pg.goto(URL + "/library?fo=1", wait_until="load"); pg.wait_for_timeout(2500)
+    pg.evaluate("(ids) => localStorage.setItem('qb-basket', JSON.stringify(ids))", every[:5])
+    pg.reload(wait_until="load"); pg.wait_for_timeout(2400)
+    pg.click(".rail-collapse"); pg.wait_for_timeout(500)          # 进专注
+    check("专注已开", pg.evaluate("() => document.body.classList.contains('library-focus-mode')"))
+    pg.click(".basket-handle"); pg.wait_for_timeout(700)
+    geo = pg.evaluate("""() => { const ws = document.querySelector('.library-workspace');
+      const r = document.querySelector('.library-results').getBoundingClientRect();
+      return { cols: getComputedStyle(ws).gridTemplateColumns, resultsW: Math.round(r.width),
+        wsW: Math.round(ws.getBoundingClientRect().width) }; }""")
+    # 1650 − 左右各 20px 内边距 = 1610 的工作区；篮子 300 + 列间距 16 之外全归题目。
+    want = 1650 - 40 - 300 - 16
+    print("     列：", geo["cols"], " 题面宽：", geo["resultsW"], "（应为 %d）" % want)
+    check("专注+篮展开时列不是 212px 开头", not geo["cols"].startswith("212px"), geo)
+    check("专注+篮展开时题目拿走除篮子外的全部宽度", geo["resultsW"] == want, (geo, want))
+    check("篮子只占 300px，中间没有空列", geo["cols"].split() == ["%dpx" % want, "300px"], geo)
+    check("没有横向溢出", pg.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth") == 0)
+    pg.screenshot(path=str(SHOT / "07-focus-plus-basket.png"))
+    pg.click(".basket-handle"); pg.wait_for_timeout(400)
+    pg.click(".rail-collapse"); pg.wait_for_timeout(400)
+
+    print("\n=== 11. 组卷默认只出题目")
+    pg.set_viewport_size({"width": 1366, "height": 900})
+    pg.goto(URL + "/library?pd=1", wait_until="load"); pg.wait_for_timeout(2500)
+    pg.click(".basket-handle"); pg.wait_for_timeout(500)
+    pg.click("#basketButton"); pg.wait_for_timeout(2600)
+    pd = pg.evaluate("""() => ({ doc: document.querySelector('#printDocument').value,
+      label: document.querySelector('#printDocument').selectedOptions[0].textContent,
+      layoutHidden: document.querySelector('#printAnswerLayoutBox').hidden,
+      open: Boolean(document.querySelector('#printSheet[open]')) })""")
+    print("     ", pd)
+    check("组卷预览能打开", pd["open"])
+    check("输出内容默认是「题目」", pd["doc"] == "questions" and pd["label"] == "题目", pd)
+    check("答案解析位置那一行自动藏起来了", pd["layoutHidden"] is True, pd)
+    # 切到「题目＋答案」时那一行要回来
+    pg.select_option("#printDocument", "combined"); pg.wait_for_timeout(800)
+    check("切到题目＋答案后答案解析位置那行回来",
+          pg.evaluate("() => document.querySelector('#printAnswerLayoutBox').hidden") is False)
+    pg.screenshot(path=str(SHOT / "08-print-default.png"))
+
+    print("\n=== 12. 设置里那行本机切题提示没了")
+    pg.goto(URL + "/settings?x=1", wait_until="load"); pg.wait_for_timeout(1800)
+    gone = pg.evaluate("() => ({ el: document.querySelectorAll('#settingsReady').length, text: document.body.innerText })")
+    check("设置页不再有那个提示元素", gone["el"] == 0, gone)
+    check("页面文字里没有「导入时先在本机切题」", "导入时先在本机切题" not in gone["text"])
+    check("服务状态列表还在（没被误删）", pg.evaluate("() => document.querySelectorAll('.api-status-list .api-state').length") >= 4)
+
+
 
 with sync_playwright() as p:
     b = p.chromium.launch(headless=True, executable_path=EXE)

@@ -28,7 +28,7 @@ GEOM = """() => {
   const c = b('.library-card');
   return { vw: innerWidth, vh: innerHeight,
     topbar: b('.topbar'), brand: b('.brand'), tools: b('.topbar-tools'),
-    basketEntry: b('.topbar-basket'), preview: b('#basketButton'),
+    basketEntry: b('.basket-handle'), preview: b('#basketButton'),
     rail: b('.library-rail'), seam: b('.rail-collapse'), card: c,
     rightGap: c ? Math.round(innerWidth - c.r) : null,
     focus: document.body.classList.contains('library-focus-mode'),
@@ -37,19 +37,22 @@ GEOM = """() => {
 
 DRAWER = """() => {
   const sec = document.querySelector('.site-drawer-group[data-group=basket]');
-  const slot = document.querySelector('.site-drawer-group[data-group=basket] .site-drawer-slot');
-  const panel = document.querySelector('#basketPanel');
-  const list = document.querySelector('#basketList');
   const body = document.querySelector('.site-drawer-body');
   return { open: !document.querySelector('.drawer-scrim').hidden,
-    groupShown: sec ? !sec.hidden : null, slotShown: slot ? !slot.hidden : null,
-    panelDisp: panel ? getComputedStyle(panel).display : null,
-    panelH: panel ? Math.round(panel.getBoundingClientRect().height) : null,
-    rows: list ? list.querySelectorAll('.basket-row').length : 0,
-    titles: [...document.querySelectorAll('.site-drawer-group[data-group=basket] .site-drawer-title')]
-      .map(n => n.innerText.replace(/\\s+/g,' ').trim()),
-    innerScrolls: list ? list.scrollHeight > list.clientHeight : null,
+    groupShown: sec ? !sec.hidden : null,
     bodyScrolls: body ? body.scrollHeight > body.clientHeight : null };
+}"""
+
+PANEL = """() => {
+  const p = document.querySelector('#basketPanel');
+  const list = document.querySelector('#basketList');
+  const r = p ? p.getBoundingClientRect() : null;
+  return { open: Boolean(document.body.classList.contains('library-basket-open')),
+    hidden: p ? p.hidden : null, disp: p ? getComputedStyle(p).display : null,
+    w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0,
+    rows: list ? list.querySelectorAll('.basket-row').length : 0,
+    titles: [...document.querySelectorAll('.basket-panel-head h2, .site-drawer-title')]
+      .map(n => n.innerText.replace(/\\s+/g,' ').trim()).filter(t => t.includes('试题篮')) };
 }"""
 
 
@@ -65,8 +68,12 @@ def run(pg):
     g = pg.evaluate(GEOM)
     check("顶栏仍 48px", g["topbar"]["h"] == 48, g["topbar"]["h"])
     check("品牌链接 <= 120px", g["brand"]["w"] <= 120, g["brand"]["w"])
-    check("顶栏右端有「试题篮」入口", bool(g["basketEntry"] and g["basketEntry"]["w"] > 0), g["basketEntry"])
-    check("「组卷预览」在顶栏里（不在侧栏）", bool(g["preview"] and g["preview"]["l"] > 400), g["preview"])
+    check("右缘有一条常驻的篮子把手", bool(g["basketEntry"] and g["basketEntry"]["w"] > 0), g["basketEntry"])
+    # 1.12.7b 之后组卷预览搬进了篮面板，面板关着时它没有尺寸，量不到位置 ——
+    # 只能问它「住哪儿」：它必须挂在篮面板里，且不在顶栏、不在侧栏。
+    check("「组卷预览」挂在篮面板里，不在顶栏也不在侧栏",
+          pg.evaluate("() => { const b = document.querySelector('#basketButton'); return Boolean(b"
+            + " && b.closest('#basketPanel') && !b.closest('.topbar') && !b.closest('.library-rail')); }"))
     check("侧栏 212px", g["rail"] and g["rail"]["w"] == 212, g["rail"])
     check("右侧空白 <= 20px", g["rightGap"] <= 20, g["rightGap"])
     check("第一道题 top <= 94", g["card"] and g["card"]["t"] <= 94, g["card"])
@@ -74,50 +81,73 @@ def run(pg):
     pg.mouse.click(900, 24); pg.wait_for_timeout(900)
     check("点顶栏中间空白不跳首页", pg.url == before, pg.url)
 
-    print("\n=== 2. 抽屉里的试题篮：两个状态都要有列表")
-    pg.click(".topbar-basket"); pg.wait_for_timeout(600)
+    # 1.12.7b：篮子从顶栏和导航抽屉里搬出去了，现在是右缘一条常驻把手 + 一个面板。
+    # 原来这四节测的是「抽屉里的试题篮」，那套东西已经不存在，留着只会一直红。
+    # 现在篮子本身的行为由 check_1127b_stress.py（收起/展开/窄屏互斥）和
+    # check_1127c_stress.py（把手发光/专注+篮）守着，这里只留和抽屉相关的两条。
+    print("\n=== 2. 抽屉里没有篮，只有导航和工具")
+    pg.click(".drawer-trigger"); pg.wait_for_timeout(600)
     d = pg.evaluate(DRAWER)
-    check("抽屉打开且篮这一组可见", d["open"] and d["groupShown"], d)
-    check("篮列表有内容（侧栏可见时）", d["panelDisp"] == "flex" and d["panelH"] > 100 and d["rows"] > 0, d)
-    check("「试题篮」只出现一次", len(d["titles"]) == 1, d["titles"])
-    check("列表不再自带滚动条（只留抽屉一根）", d["innerScrolls"] is False, d)
+    check("抽屉打开", d["open"], d)
+    check("抽屉里没有试题篮这一组", d["groupShown"] is None, d)
+    check("抽屉里有其它组", pg.evaluate(
+        "() => [...document.querySelectorAll('.site-drawer-group')].filter(g=>!g.hidden).length >= 2"))
     pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
 
-    print("\n=== 3. 专注模式（收侧栏）下点篮 —— 这一版之前是坏的")
+    print("\n=== 3. 篮面板从右缘把手开，关了不占位")
+    pg.click(".basket-handle"); pg.wait_for_timeout(700)
+    pan = pg.evaluate(PANEL)
+    check("展开后篮面板出现且有列表", pan["open"] and pan["rows"] > 0 and pan["h"] > 100, pan)
+    check("「试题篮」只出现一次", len(pan["titles"]) == 1, pan["titles"])
+    pg.screenshot(path=str(SHOT / "stress-basket-panel.png"))
+    pg.click(".basket-handle"); pg.wait_for_timeout(500)
+    pan = pg.evaluate(PANEL)
+    check("收起后面板关掉且不占位", (not pan["open"]) and pan["w"] == 0, pan)
+
+    print("\n=== 4. 专注模式下篮子照样能开，题面不被挤走")
     pg.click(".rail-collapse"); pg.wait_for_timeout(600)
     g = pg.evaluate(GEOM)
     check("专注模式生效、侧栏没了", g["focus"] and g["rail"]["h"] == 0, g["rail"])
     check("侧栏接缝的 ‹/› 贴到左边缘", g["seam"] and g["seam"]["l"] < 60, g["seam"])
-    check("组卷预览留在顶栏右端（不跟着搬）", g["preview"] and g["preview"]["l"] > 400, g["preview"])
-    pg.click(".topbar-basket"); pg.wait_for_timeout(700)
-    d = pg.evaluate(DRAWER)
-    check("专注模式下篮列表照样出现", d["panelDisp"] == "flex" and d["panelH"] > 100 and d["rows"] > 0, d)
+    pg.click(".basket-handle"); pg.wait_for_timeout(700)
+    pan = pg.evaluate(PANEL)
+    check("专注模式下篮列表照样出现", pan["open"] and pan["rows"] > 0, pan)
+    check("专注+篮展开时题面没被挤成窄条", pg.evaluate(
+        "() => { const c = document.querySelector('.library-card'); return c ? c.getBoundingClientRect().width > 600 : false; }"))
     pg.screenshot(path=str(SHOT / "stress-focus-basket.png"))
-    pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    pg.click(".basket-handle"); pg.wait_for_timeout(400)
     pg.click(".rail-collapse"); pg.wait_for_timeout(500)
     check("再点一次侧栏弹回来", not pg.evaluate(GEOM)["focus"])
 
-    print("\n=== 4. 组卷预览不乱跑")
+    print("\n=== 4. 组卷预览：篮开着才点得到，位置不乱跑")
+    pg.click(".basket-handle"); pg.wait_for_timeout(600)
     spots = []
-    for label in ["初始", "开抽屉", "关抽屉"] :
+    for label in ["篮开", "开抽屉", "关抽屉"]:
         if label == "开抽屉": pg.click(".drawer-trigger"); pg.wait_for_timeout(400)
         if label == "关抽屉": pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
         g = pg.evaluate(GEOM)
         spots.append((label, g["preview"]["l"], g["preview"]["t"]))
     check("三个状态下按钮位置都不变", len({(l, t) for _, l, t in spots}) == 1, spots)
-    check("按钮始终可见", all(t >= 0 and t < 96 for _, _, t in spots), spots)
+    # 1.12.7b 之后组卷预览在篮面板底部，不是顶栏那一条。别再拿「t < 96」当可见。
+    check("按钮在屏幕内且有尺寸", all(0 <= l and 0 < t < 900 for _, l, t in spots), spots)
     pg.click("#basketButton"); pg.wait_for_timeout(2500)
     check("点组卷预览能打开组卷窗口", pg.evaluate("() => Boolean(document.querySelector('#printSheet[open]'))"))
     pg.click("#closePrint"); pg.wait_for_timeout(600)
+    pg.click(".basket-handle"); pg.wait_for_timeout(400)
 
-    print("\n=== 5. 篮空了这一组整个消失")
+    print("\n=== 5. 篮空时把手上没有组卷预览，篮面板不出组卷按钮")
     pg.evaluate("() => localStorage.setItem('qb-basket','[]')"); pg.reload(wait_until="load"); pg.wait_for_timeout(2600)
-    check("空篮时顶栏没有这两个按钮", not pg.evaluate(GEOM)["basketEntry"] or pg.evaluate(GEOM)["basketEntry"]["w"] == 0)
-    pg.click(".drawer-trigger"); pg.wait_for_timeout(500)
-    d = pg.evaluate(DRAWER)
-    check("空篮时抽屉里没有试题篮这一组", d["groupShown"] is False, d)
+    check("空篮时把手上写着 0", pg.evaluate("() => document.querySelector('#basketHandleCount').textContent") == "0")
+    check("空篮时把手仍然在（篮空着也得看得见往哪儿加题）",
+          bool(pg.evaluate(GEOM)["basketEntry"] and pg.evaluate(GEOM)["basketEntry"]["w"] > 0))
+    pg.click(".basket-handle"); pg.wait_for_timeout(600)
+    check("空篮时面板里的组卷预览藏起来", pg.evaluate("() => document.querySelector('#basketButton').hidden") is True)
+    pg.click(".basket-handle"); pg.wait_for_timeout(300)
+    pg.evaluate("() => localStorage.setItem('qb-basket','[]')"); pg.reload(wait_until="load"); pg.wait_for_timeout(2600)
+    check("空篮时抽屉里没有试题篮这一组", pg.evaluate(DRAWER)["groupShown"] is None)
     check("抽屉里其它组还在（页面/题库/工具）",
           pg.evaluate("() => [...document.querySelectorAll('.site-drawer-group')].filter(g=>!g.hidden).length >= 3"))
+    pg.click(".drawer-trigger"); pg.wait_for_timeout(300)
     pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
 
     print("\n=== 6. 题卡「更多」点外面关、Esc 焦点回来")
@@ -147,10 +177,14 @@ def run(pg):
         check("%d 宽无横向溢出" % w, g["scrollX"] == 0, g["scrollX"])
     pg.set_viewport_size({"width": 1366, "height": 768})
 
-    print("\n=== 9. 设置页与密钥窗口说同一件事")
+    print("\n=== 9. 设置页：服务状态灯说清楚谁配了")
     pg.goto(URL + "/settings", wait_until="load"); pg.wait_for_timeout(2600)
-    ready = pg.evaluate("() => (document.querySelector('#settingsReady')||{}).textContent || ''")
-    check("设置页提到 MinerU 已配好时不再说它没配", "MinerU" not in ready or "还需 MinerU" not in ready, ready[:70])
+    # 1.12.9：那行「导入时先在本机切题……」已经删掉，状态灯必须还在 ——
+    # 删提示行的时候顺手把状态灯一起删掉，是这里要挡的事。
+    check("设置页不再有那行提示", pg.evaluate("() => document.querySelectorAll('#settingsReady').length") == 0)
+    lamps = pg.evaluate("() => [...document.querySelectorAll('.api-status-list .api-state')].map(n=>n.textContent.trim())")
+    check("四家服务的状态灯都还在", len(lamps) == 4, lamps)
+    check("状态灯都有结论（不是「正在读取…」）", all(v and "正在读取" not in v for v in lamps), lamps)
     mineru = pg.evaluate("() => (document.querySelector('#settingsMineruState')||{}).textContent || ''")
     check("MinerU 状态灯有结论", mineru in ("已填写", "已填写（旧环境变量）", "未填写"), mineru)
     note = pg.evaluate("() => { const n=document.querySelector('#settingsMineruState'); const r=n&&n.parentElement.querySelector('.api-source-note'); return r?r.textContent:''; }")

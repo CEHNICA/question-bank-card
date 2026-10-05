@@ -244,7 +244,7 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   assert(css.includes(".library-focus-mode .library-rail, .library-focus-mode .library-bulk"));
   assert(!css.includes(".library-focus-mode .basket-panel"), "专注模式不许再把篮藏掉");
   assert(shared.includes(".topbar-basket-label, .topbar-preview-label") === false, "顶栏不再有篮的按钮");
-  assert(css.includes(".basket-handle { position: fixed; right: 0; top: 50vh;"), "篮的把手悬浮在右边缘视口正中，不占题目宽度");
+  assert(css.includes(".basket-handle { --basket-fill: 0; position: fixed; right: 0; top: 50vh;"), "篮的把手悬浮在右边缘视口正中，不占题目宽度");
   assert(css.includes("body.library-basket-open .library-workspace { grid-template-columns: 212px minmax(0, 1fr) 300px; }"), "展开时才占第三列");
   // 全屏看题的缩放条后面原来挂着一条快捷键提示，占掉整条工具栏宽度。提示都在设置里。
   const viewerJs = fs.readFileSync(path.join(__dirname, "library-question-viewer.js"), "utf8");

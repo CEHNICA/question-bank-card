@@ -206,12 +206,12 @@
         <summary>排版与内容</summary>
         <div class="print-options-body">
           <label class="print-field">试卷标题 <input id="printTitle" type="text" value="练习"></label>
-          <label class="print-field">输出内容 <select id="printDocument"><option value="questions">题目</option><option value="answers">答案与解析</option><option value="combined" selected>题目＋答案</option></select></label>
+          <label class="print-field">输出内容 <select id="printDocument"><option value="questions" selected>题目</option><option value="answers">答案与解析</option><option value="combined">题目＋答案</option></select></label>
           <label id="printAnswerLayoutBox" class="print-field">答案解析位置 <select id="printAnswerLayout"><option value="inline" selected>逐题紧跟</option><option value="appendix">卷末集中</option></select></label>
           <label class="print-field">分页 <select id="printPagination"><option value="compact" selected>连续排版，节省纸张</option><option value="keep">尽量保持单题完整</option></select></label>
           <label class="print-field">选择题选项 <select id="printOptionLayout"><option value="auto" selected>自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option><option value="vertical">四个选项竖排</option></select></label>
           <p id="printImageHint" class="print-options-note" hidden>原图题保留卷面排版，选项与字号不会重新排列。转为文字题后可调整选项排版。</p>
-          <input id="printAnswers" type="checkbox" checked hidden aria-hidden="true" tabindex="-1">
+          <input id="printAnswers" type="checkbox" hidden aria-hidden="true" tabindex="-1">
           <label class="library-toggle switch" title="题号后印上原有题源"><input id="printOrigin" type="checkbox"><span class="switch-track" aria-hidden="true"></span>印题源</label>
           <label id="printAiBox" class="library-toggle switch" hidden><input id="printAiAnswers" type="checkbox"><span class="switch-track" aria-hidden="true"></span>附 AI 参考（未核对）</label>
           <p id="printAnswerStatus" class="print-answer-status" role="status" aria-live="polite"></p>

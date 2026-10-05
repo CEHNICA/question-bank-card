@@ -1282,7 +1282,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("m3Button").hidden = !s.m3_available;
     if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}（本机安装）`;
     renderSettingsModels();
-    renderSettingsReady();
     return true;
   }
 
@@ -5076,24 +5075,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
   });
 
-  function renderSettingsReady() {
-    const s = state.status;
-    const node = $("settingsReady");
-    if (!s || !node) return;
-    const configured = s.configured || s.engines?.configured || {};
-    const vision = Boolean(configured.minimax || configured.siliconflow || configured.modelscope);
-    // 1.12.7：切题和识读分开说。以前 MinerU 已经配好、只缺看图服务时，这里写
-    // 「可选的云处理还需 MinerU、一家看图读题服务」，读起来像 MinerU 也没配。
-    const mineru = cloudCutReady();
-    const missing = [!mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务"].filter(Boolean);
-    node.className = `settings-ready ${automaticParseReady() ? "ready" : mineru ? "ready" : "missing"}`;
-    node.textContent = mineru
-      ? (vision || s.assistant_mode
-        ? "导入时先在本机切题。云处理已配置，经你允许后用于本机无法切出的资料；实际可用性以处理结果为准。"
-        : "导入时先在本机切题；本机切不出的资料（照片、扫描件）经你允许后交给已配置的 MinerU。切完想在题卡上「AI 识读这题」时，还需要一家看图读题服务。")
-      : missing.length ? `导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 ${missing.join("、")} 密钥。`
-        : "导入资料和从原卷选题可直接使用。需要云处理时再配置读题服务。";
-  }
+  // 1.12.9：这里原来有一行「导入时先在本机切题……」，整个函数连同它一起删了。
+  // 上面四家服务的状态列表已经把「谁配了、谁没配」说清楚了，那行只是把内部
+  // 流程复述一遍（「先在本机切、切不出的再上云」），对要动手的人没有新增信息。
+  // 欢迎窗口里那条同类提示留着 —— 那里是第一次打开，没有这张列表可替代。
 
   // 设置 → 题面与显示（存在数据目录的 features.json，网页和后台共用）。
   async function loadFeatureSwitches() {
@@ -5148,7 +5133,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (window.location.pathname !== "/settings") { void leaveFor("/settings"); return; }
     void loadFeatureSwitches();
     renderSettingsModels();
-    renderSettingsReady();
     $("settingsLens").checked = state.lens;
     $("settingsFocus").checked = state.focus;
     $("settingsAutoExpand").checked = state.autoExpand;

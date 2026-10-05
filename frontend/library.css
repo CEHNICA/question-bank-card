@@ -150,15 +150,25 @@ body.library-basket-open .library-workspace { grid-template-columns: 212px minma
 .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
 
 /* 收起时右边只留这一条把手，骑在屏幕右缘上，像贴在边上一个小抽屉拉手。
-   它一直都在：篮空着也得看得见往哪儿加题。 */
-.basket-handle { position: fixed; right: 0; top: 50vh; z-index: 4; transform: translateY(-50%);
+   它一直都在：篮空着也得看得见往哪儿加题。
+   --basket-fill 是「浓度」，0–1，由 library.js 按篮里的题数写进来：0 题 0，20 题封顶。
+   颜色和辉光全在样式里算，JS 不拼 rgba —— 拼出来的颜色没法被 hover 复用。 */
+.basket-handle { --basket-fill: 0; position: fixed; right: 0; top: 50vh; z-index: 4; transform: translateY(-50%);
   display: grid; justify-items: center; gap: 3px; width: 26px; padding: 9px 0 7px;
   border: 1px solid var(--line); border-right: 0; border-radius: 9px 0 0 9px;
-  background: var(--surface); color: var(--muted); box-shadow: var(--shadow-sm);
-  transition: color .15s, border-color .15s, background .15s; }
+  background: var(--surface); color: var(--muted);
+  /* 辉光跟着题数走：几乎看不见 → 20 题时外面一圈明显的墨绿。 */
+  box-shadow: var(--shadow-sm),
+    0 0 calc(2px + 9px * var(--basket-fill)) rgba(31, 107, 95, calc(.06 + .24 * var(--basket-fill)));
+  transition: color .15s, border-color .15s, box-shadow .25s; }
+/* 半透明墨绿底。position: fixed 已经是包含块，inset:0 直接贴满把手。 */
+.basket-handle::before { content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: var(--accent-soft); opacity: var(--basket-fill); pointer-events: none; transition: opacity .25s; }
+.basket-handle > * { position: relative; }
 .basket-handle .icon { width: 16px; height: 16px; }
 .basket-handle-count { font: 700 12px/1 var(--ui-font); font-variant-numeric: tabular-nums; }
-.basket-handle:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
+.basket-handle:hover { color: var(--ink); border-color: var(--line-strong); }
+.basket-handle:hover::before { opacity: min(1, calc(var(--basket-fill) + .25)); }
 .basket-handle:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 body.library-basket-open .basket-handle { color: var(--accent); border-color: #bcd8cd; }
 body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
@@ -698,6 +708,12 @@ body.printing { overflow: hidden; }
 /* 侧栏藏了，栅格要收回单列，否则题目会被塞进 212px 那条空列里。 */
 .library-focus-mode .library-workspace { grid-template-columns: minmax(0, 1fr); padding-top: 0; }
 .library-focus-mode .library-workspace > .library-results { grid-column: 1; }
+/* 1.12.9：上面那条「篮展开占第三列」（body.library-basket-open .library-workspace）
+   特异性更高，会把专注模式的单列覆盖回三列；题目因此被塞进 212px 那条本该放
+   侧栏的列里，1650 宽下只剩 309px，右边空一大片。专注模式下侧栏已经没了，
+   篮子只占第二列。 */
+.library-focus-mode.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
+.library-focus-mode .library-workspace > .basket-panel { grid-column: 2; }
 .library-focus-mode .rail-toggle { display: none !important; }
 /* 窄屏上侧栏是右侧浮层，本来就不占宽度，收不收都一样 —— 但顶栏那个「筛选」
    必须留着：否则「宽屏进了专注、再把窗口拖窄」会卡在侧栏既藏起来又打不开。 */

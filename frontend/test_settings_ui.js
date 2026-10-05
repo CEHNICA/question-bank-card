@@ -46,7 +46,10 @@ assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialS
 // Run the actual settings route and navigation handlers against the tabs parsed
 // from the page. Old answer bookmarks must work on both entry and hash changes.
 const vm = require("node:vm"), dom = require("./credential-test-dom.js");
-const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  function renderSettingsReady()"));
+// 1.12.9：那行提示和 renderSettingsReady 一起删了，切片终点改用下一个函数。
+// 注意：indexOf 找不到会返回 -1，slice(a, -1) 会悄悄切掉最后一个字符还不报错 —���
+// 换终点时一定要确认这个字符串还在。
+const routeSource = js.slice(js.indexOf("  const SETTINGS_HASHES = {"), js.indexOf("  async function loadFeatureSwitches()"));
 const openSource = js.slice(js.indexOf("  function openSettings()"), js.indexOf('  $("settingsButton").addEventListener'));
 function routes(hash = "") {
   const listeners = new Map(), nodes = new Map(), opened = [], navigated = [];
@@ -64,7 +67,7 @@ function routes(hash = "") {
     querySelector(selector) { assert.equal(selector, "#settingsDialog .settings-scroll"); return $("scroll"); }
   }, state: { lens: false, focus: false, autoExpand: true }, modelFormDirty: false,
   openCredentialSettings(tab) { opened.push(tab); $("credentialDialog").open = true; },
-  loadFeatureSwitches: () => {}, renderSettingsModels: () => {}, renderSettingsReady: () => {},
+  loadFeatureSwitches: () => {}, renderSettingsModels: () => {},
   showModelSaveResult: () => {}, loadStatus: () => {},
   leaveFor: (url) => navigated.push(url), anyDialogOpen: () => $("credentialDialog").open,
   requestAnimationFrame: (fn) => fn() });
@@ -107,9 +110,12 @@ assert.deepEqual(navigation.opened, [], "Normal outer tab navigation does not op
 navigation.location.pathname = "/library"; navigation.location.hash = "#ai";
 navigation.listeners.get("hashchange")(); assert.deepEqual(navigation.opened, []);
 navigation.context.openSettings(); assert.deepEqual(navigation.navigated, ["/settings"]);
-// Local import is available without cloud credentials.
-assert.match(html, /id="settingsReady"/);
-assert.match(js, /导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 \$\{missing\.join\("、"\)\} 密钥/);
+// 1.12.9：这行「导入时先在本机切题……」连同 renderSettingsReady 整个删了。
+// 上面四家服务的状态列表已经说清谁配了谁没配，再复述一遍内部流程没有新信息。
+// 断言只钉「函数和元素不存在」——app.js 里留了一段说明为什么删的注释，
+// 那是给人看的，不该被一条「文件里不许出现这几个字」的断言误伤。
+assert.doesNotMatch(html, /id="settingsReady"/);
+assert.doesNotMatch(js, /function renderSettingsReady/);
 assert.match(js, /现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU/);
 assert.doesNotMatch(js, /新资料的题卡先用 MinerU 的文字/);
 // 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。

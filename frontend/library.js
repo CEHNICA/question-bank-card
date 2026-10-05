@@ -882,13 +882,16 @@
 
   function renderBasket() {
     const panel = $("basketPanel");
+    const handle = $("basketHandle");
     panel.hidden = !state.basketVisible;
     $("basketPanelCount").textContent = String(state.basket.length);
     $("basketHandleCount").textContent = String(state.basket.length);
     $("selectedViewCount").textContent = String(state.basket.length);
     $("clearBasketPanel").disabled = !state.basket.length;
     document.body.classList.toggle("library-basket-has-items", state.basket.length > 0);
-    const handle = $("basketHandle");
+    // 有题时把手点亮，题目越多越绿，20 题封顶。这里只写一个 0–1 的数，
+    // 底色和辉光交给 CSS：颜色要是在这里拼成 rgba，hover 和动画就都改不动了。
+    handle.style.setProperty("--basket-fill", (Math.min(1, state.basket.length / 20)).toFixed(3));
     const label = state.basketVisible ? "收起试题篮" : `展开试题篮（${state.basket.length} 题）`;
     handle.setAttribute("aria-expanded", String(state.basketVisible));
     handle.title = label; handle.setAttribute("aria-label", label);
@@ -1414,8 +1417,14 @@
   }
 
   function normalizePrintOptions(options = {}) {
+    // 1.12.9：默认只出题目。要答案的人自己切「题目＋答案」，多出来的是
+    // 一次点击，少出来的是一份混在题目卷里、老师得自己划掉的答案。
+    // 什么都不给 → 题目；老草稿只有 answers、没有 document 的，照它当时的意思走
+    // （服务端 library_drafts._print_options() 也是这么推的，两边必须一样，
+    // 不然一个存了 answers 的老草稿会在某一侧被悄悄改成题目卷）。
     const document = ["questions", "answers", "combined"].includes(options.document)
-      ? options.document : options.answers === false ? "questions" : "combined";
+      ? options.document
+      : "answers" in options ? (options.answers ? "combined" : "questions") : "questions";
     return {
       answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
       answer_layout: options.answer_layout === "appendix" ? "appendix" : "inline",
