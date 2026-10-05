@@ -448,7 +448,8 @@ body.drawer-open { overflow: hidden; }
   content-visibility: auto; contain-intrinsic-size: auto 320px; }
 .card.compact { contain-intrinsic-size: auto 52px; }
 .card.is-current, .card.editing { content-visibility: visible; }
-.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; z-index: 1; }
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; z-index: 1;
+  pointer-events: none; }
 .card.state-yellow::before { background: var(--amber-bar); }
 .card.state-red::before { background: var(--red); }
 .card.state-green::before { background: var(--green-bar); }
@@ -592,6 +593,28 @@ body.drawer-open { overflow: hidden; }
 .more-menu { position: absolute; z-index: 5; right: 0; bottom: calc(100% + 6px); display: grid; min-width: 200px; padding: 6px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); animation: pop .14s ease-out; }
 .more-menu .button { justify-content: flex-start; font-size: 13px; min-height: 32px; }
+/* 「更多」是向上展开的，而操作条吸在这张卡片的底边上 —— 卡片露在屏幕里只剩一条的时候，
+   菜单有一半伸到卡片上沿外面去了。1.10.3 给 .card 加的 overflow: clip（600 题首屏优化
+   靠它）就把菜单顶部切掉了：1920×1080 滚到底时，最后一张卡的 4 项里第 1 项整个消失，
+   点都点不到。菜单开着的时候放开这张卡的裁剪。
+   还要抬两层，各有各的原因：
+   - 整张卡抬到 6：菜单所在那层是 4，而上一张卡的「配图待办」面板是 5，压不过它；
+   - 操作条本身抬到 6：同一张卡的配图待办面板（5）本来就压在操作条（4）上面
+     ——那是 1.13.3 为了压住吸底操作条故意抬的，菜单一开就得让位。
+   关着的时候照旧裁剪、照旧 4 和 5，性能那套和面板的遮挡关系都不受影响。
+   放开裁剪后，卡片自己那几个贴边的方角会顶出 12px 圆角，逐个补上同样的圆角：
+   左边 3px 状态色条（:before，最显眼，一眼能看出方角）、左栏底色、顶部标题栏。 */
+.card:has(.card-actions > details.more[open]) { overflow: visible; z-index: 6; }
+.card:has(.card-actions > details.more[open]) .card-actions { z-index: 6; }
+/* 左边这条 3px 状态色条没法用 border-radius 补：盒子只有 3px 宽，浏览器会把 12px
+   的圆角自动缩到 1/4，补出来的弧和卡片自己的圆角对不上。所以摊成 24px 宽（24px 才
+   装得下 12px 的圆角），用一条遮罩只把左边 3px 留下来 —— 各状态填的是颜色还是渐变
+   都不受影响（state-ai 那条虚线也照样能用），弧线和卡片完全一致，看不出是放开裁剪的。 */
+.card:has(.card-actions > details.more[open])::before { width: 24px; border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  -webkit-mask-image: linear-gradient(90deg, #000 0 3px, transparent 3px);
+  mask-image: linear-gradient(90deg, #000 0 3px, transparent 3px); }
+.card:has(.card-actions > details.more[open]) .card-source { border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+.card:has(.card-actions > details.more[open]) .card-head { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .reads { display: grid; gap: 10px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--line); }
 .read-label { font-size: 11.5px; color: var(--muted); font-weight: 700; letter-spacing: .04em; }
 .read-error { color: var(--red); font-size: 13px; }
