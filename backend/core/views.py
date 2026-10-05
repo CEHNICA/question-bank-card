@@ -1547,8 +1547,15 @@ def paper_detail(request, paper_id):
                 paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
                 if paper.status not in {Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING}:
                     return _error("任务还在处理中；只有待终审、待确认结构或失败的任务可以删除")
-                if paper.publications.exists():
-                    return _error("这项任务已有正式题库记录，为保留来源追溯不能删除")
+                # 只有题库里还活着的题才拦着删。撤回过的记录连同题面快照都留在
+                # 题库里：paper 是 SET_NULL，卷名字符串也抄在记录自己身上，所以
+                # 删掉这份原卷不会丢掉「这道错题出自我哪份资料」。以前这里数的是
+                # 全部记录，题全部撤回之后仍然删不掉，只能归档。
+                live_publications = paper.publications.filter(status=PublishedQuestion.Status.PUBLISHED)
+                if live_publications.exists():
+                    count = live_publications.values("question_id").distinct().count()
+                    return _error(
+                        f"这项任务还有 {count} 道题在正式题库里；先在正式题库撤回这几道，才能删除这项任务")
                 structure = paper.structure or {}
                 if structure.get("split_from") or structure.get("split_children") or Paper.objects.filter(
                     structure__split_from=paper_id_text,

@@ -128,6 +128,15 @@ assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\
 assert.doesNotMatch(html, /id="settingsTask"/);
 assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
 
+// 1.13.1：题库里还有活题才拦删除，撤回完就应该能删。
+// 提示必须给出路（先去题库撤回），不能只丢一句“不能删除”让人反复试。
+assert.match(js, /if \(\(paper\.counts\?\.published \|\| 0\) > 0\) \{[\s\S]*?先在正式题库撤回这几道，才能删除任务/);
+assert.match(js, /`已有 \$\{published\} 道题在正式题库里。先在正式题库撤回这几道，就能删除这项任务；撤回后题面快照仍留在题库。`/);
+assert.doesNotMatch(js, /为保留来源追溯只能归档/);
+assert.doesNotMatch(js, /已有正式题库记录的任务不能删除/);
+// 确认框要说明删掉任务不会毁掉题库里那些撤回记录的题面快照。
+assert.match(js, /题库里还留着的、已经撤回的那些题的题面快照不受影响，仍然查得到。/);
+
 // 读题设置只保留一个实际读题模型；第二读和裁决入口已移除。
 for (const id of ["settingsPrimaryModel"]) {
   assert.match(html, new RegExp(`id="${id}"`));

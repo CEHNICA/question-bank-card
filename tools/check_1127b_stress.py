@@ -133,40 +133,66 @@ def run(pg):
         pg.evaluate("() => document.querySelector('#welcomeDialog').close()"); pg.wait_for_timeout(400)
     # 换一份真有配图的卷：示例试卷里没有图，角标那条断言就落空了。
     picked = None
-    for i in range(min(8, pg.locator("#paperList .paper-link").count())):
+    links = pg.locator("#paperList .paper-link").count()
+    for i in range(links):
         pg.locator("#paperList .paper-link").nth(i).click(); pg.wait_for_timeout(1800)
         n = pg.locator("#cards .card:not(.compact)").count()
         if n < 3: continue
-        pg.locator("#cards .card:not(.compact) button", has_text="改字").first.click(); pg.wait_for_timeout(2000)
-        picked = (i, n, bool(pg.evaluate("() => !!document.querySelector('.editor-preview .qb-figure')")))
-        if picked[2]: break
-        pg.keyboard.press("Escape"); pg.wait_for_timeout(600)
-    print("     选中的卷序号/题卡数/有配图:", picked)
-    check("进到了带配图的题卡里", bool(picked and picked[2]), picked)
-    # 点到头为止：按钮自己会灰，那说明走到了最后一道，不是 bug。
-    seq = [number(pg.evaluate(EDIT)["title"])]
-    for k in range(6):
-        st = pg.evaluate(EDIT)
-        if st["nextDisabled"]: break
-        pg.click("button:has-text('下一题')"); pg.wait_for_timeout(1500)
-        seq.append(number(pg.evaluate(EDIT)["title"]))
-    print("     连点下一题：", seq)
-    check("连点下一题，题号逐一 +1", len(seq) >= 2 and all(b - a == 1 for a, b in zip(seq, seq[1:])), seq)
-    back = [seq[-1]]
-    for k in range(6):
-        st = pg.evaluate(EDIT)
-        if st["prevDisabled"]: break
-        pg.click("button:has-text('上一题')"); pg.wait_for_timeout(1500)
-        back.append(number(pg.evaluate(EDIT)["title"]))
-    print("     连点上一题：", back)
-    check("连点上一题，题号逐一 -1", len(back) >= 2 and all(b - a == -1 for a, b in zip(back, back[1:])), back)
-    check("回到第一题后「上一题」灰掉", bool(pg.evaluate(EDIT)["prevDisabled"]), pg.evaluate(EDIT))
-    check("来回数一遍回到同一题", back[-1] == seq[0], (seq[0], back[-1]))
-    e = pg.evaluate(EDIT)
-    check("预览里原卷裁片有角标和细边", e["figBorder"] not in (None, "0px") and "原卷" in str(e["figLabel"]), e)
-    pg.screenshot(path=str(SHOT / "edit-figure.png"))
-    pg.keyboard.press("Escape"); pg.wait_for_timeout(700)
-    check("Esc 能退出全屏改字", pg.evaluate("() => !document.querySelector('.card.editing')"))
+        # 卷内也要扫：配图不一定长在第一道题上（几何卷的图常在后面几题）。
+        # 只看第一张卡会得出「这份库里没有带配图的题卡」这种错的结论。
+        for c in range(min(n, 4)):
+            pg.locator("#cards .card:not(.compact) button", has_text="改字").nth(c).click(); pg.wait_for_timeout(1600)
+            has_figure = bool(pg.evaluate("() => !!document.querySelector('.editor-preview .qb-figure')"))
+            if has_figure:
+                picked = (i, n, True)
+                break
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(500)
+        if picked: break
+    print("     扫了 %d 份卷，选中的卷序号/题卡数/有配图: %s" % (links, picked))
+    # 扫完全部卷还是没配图的题卡：这一节测不了，如实说，别让它变成一段 TypeError。
+    # 写死「前 8 份卷」选卷子会随卷增删失效 —— 挑到没图的卷时，失败报的是
+    # 「TypeError: NoneType」，看着像代码坏了，其实只是这一节没测到。
+    if not (picked and picked[2]):
+        print("     SKIP 这份库里没有带配图的题卡：第 6 节（改字上下题方向、图上角标）测不了")
+        # 扫描时点开的「全屏看题」弹窗还开着的话，它会盖住整页，
+        # 下一节点任何按钮都会超时 —— 收尾时顺手关掉，别让跳过变成后面的假故障。
+        for dialog_id in ("#viewerDialog", "#pageDialog", "#editorDialog"):
+            if pg.locator(dialog_id + "[open]").count():
+                pg.evaluate("(id) => document.querySelector(id).close()", dialog_id)
+                pg.wait_for_timeout(300)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    else:
+        # 点到头为止：按钮自己会灰，那说明走到了最后一道，不是 bug。
+        seq = [number(pg.evaluate(EDIT)["title"])]
+        for k in range(6):
+            st = pg.evaluate(EDIT)
+            if st["nextDisabled"]: break
+            pg.click("button:has-text('下一题')"); pg.wait_for_timeout(1500)
+            seq.append(number(pg.evaluate(EDIT)["title"]))
+        print("     连点下一题：", seq)
+        check("连点下一题，题号逐一 +1", len(seq) >= 2 and all(b - a == 1 for a, b in zip(seq, seq[1:])), seq)
+        back = [seq[-1]]
+        for k in range(6):
+            st = pg.evaluate(EDIT)
+            if st["prevDisabled"]: break
+            pg.click("button:has-text('上一题')"); pg.wait_for_timeout(1500)
+            back.append(number(pg.evaluate(EDIT)["title"]))
+        print("     连点上一题：", back)
+        check("连点上一题，题号逐一 -1", len(back) >= 2 and all(b - a == -1 for a, b in zip(back, back[1:])), back)
+        check("来回数一遍回到同一题", back[-1] == seq[0], (seq[0], back[-1]))
+        # 图的断言要趁还停在那张带图的题卡上做：往后翻到别的题，图就没了。
+        e = pg.evaluate(EDIT)
+        check("预览里原卷裁片有角标和细边", e["figBorder"] not in (None, "0px") and "原卷" in str(e["figLabel"]), e)
+        pg.screenshot(path=str(SHOT / "edit-figure.png"))
+        # 「上一题」灰掉的断言要真走到头才有意义。走到头指的是当前这一屏题卡的第一张，
+        # 不是题号 1 —— 回收站里的题和折叠起来的题不在这一屏里。
+        for k in range(30):
+            if pg.evaluate(EDIT)["prevDisabled"]: break
+            pg.click("button:has-text('上一题')"); pg.wait_for_timeout(900)
+        first = pg.evaluate(EDIT)
+        check("走到第一张题卡后「上一题」灰掉", bool(first["prevDisabled"]), first)
+        pg.keyboard.press("Escape"); pg.wait_for_timeout(700)
+        check("Esc 能退出全屏改字", pg.evaluate("() => !document.querySelector('.card.editing')"))
 
     # 1.12.7d：点过工具栏开关之后焦点赖在按钮上，Enter 变成「再点一次开关」。
     # 老师报的现象是「按 Enter 竟然全屏了」——全屏那个开关吃掉了本该「通过这道题」的键。
@@ -179,6 +205,12 @@ def run(pg):
         pg.locator("#paperList .paper-link").nth(i).click(); pg.wait_for_timeout(2000)
         if pg.evaluate("() => document.querySelectorAll('.card').length") >= 6: break
     pg.click("#cards .card"); pg.wait_for_timeout(800)
+    # 点题卡可能弹出「全屏看题」，它盖住整页，之后任何按钮都点不动。
+    # 这一节要按的是审核工具栏，所以先把浮层收干净，点不到时才能说是真的坏了。
+    for dialog_id in ("#viewerDialog", "#pageDialog", "#editorDialog"):
+        if pg.locator(dialog_id + "[open]").count():
+            pg.evaluate("(id) => document.querySelector(id).close()", dialog_id)
+            pg.wait_for_timeout(300)
 
     def where():
         return pg.evaluate("""() => ({ fs: document.documentElement.classList.contains('review-fullscreen'),

@@ -4347,14 +4347,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     if (!paper || !["ready", "failed", "needs_grouping"].includes(paper.status)) return;
     if ((paper.counts?.published || 0) > 0) {
-      toast("这项任务已有正式题库记录，为保留来源追溯只能归档", "error");
+      toast(`这项任务还有 ${paper.counts.published} 道题在正式题库里；先在正式题库撤回这几道，才能删除任务`, "error");
       return;
     }
     if (!(await discardEdits())) return;
     const displayName = paperDisplayName(paper);
     const ok = await confirmDialog({
       title: `删除任务“${displayName}”？`,
-      text: "会永久删除这项任务、上传的原文件和全部草稿题卡，且无法撤销。已有正式题库记录的任务不能删除，只能归档。",
+      text: "会永久删除这项任务、上传的原文件和全部草稿题卡，且无法撤销。"
+        + "题库里还留着的、已经撤回的那些题的题面快照不受影响，仍然查得到。",
       ok: "删除任务",
       danger: true
     });
@@ -5020,7 +5021,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsDelete").hidden = published > 0 || isSplitTask
       || !["ready", "failed", "needs_grouping"].includes(paper.status);
     $("settingsDangerHint").textContent = published > 0
-      ? `已有 ${published} 道正式题库记录。为保留来源追溯，只能归档，不能永久删除。`
+      ? `已有 ${published} 道题在正式题库里。先在正式题库撤回这几道，就能删除这项任务；撤回后题面快照仍留在题库。`
       : isSplitTask ? "这是拆分资料的原稿或子任务；为保留双向追溯，只能归档。"
       : active && stoppable ? "任务正在处理中：先点上面的“停止处理”，停下来以后就能删除。"
       : active ? "任务正在处理中，完成或失败后才能永久删除。"
