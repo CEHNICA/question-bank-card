@@ -271,7 +271,10 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   .library-bulk #libraryStatus { display: none; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }
-.library-filter-chip { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); padding: 5px 8px; font: 12px/1.4 var(--ui-font); overflow-wrap: anywhere; text-align: left; }
+.library-filter-chip { display: flex; align-items: baseline; gap: 6px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); padding: 5px 8px; font: 12px/1.4 var(--ui-font); text-align: left; }
+/* 名字太长时截断，「×」留在同一行末尾。完整名字放在 title 里，鼠标停上去能看全。 */
+.library-filter-chip > .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-filter-chip > .drop { flex: none; color: var(--muted); }
 .library-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 .library-card-meta { padding-top: 13px; }
 .library-card.compact .paper { padding-top: 10px; padding-bottom: 8px; }

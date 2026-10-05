@@ -965,9 +965,14 @@
     if (box.hidden) return;
     labels.forEach(([key, label]) => {
       if (!label) return;
-      const remove = node("button", "library-filter-chip", `${label} ×`);
+      // 标签名和卷名都可能有二十来个字（目录里就有「分类加法计数原理与分步乘法计数原理」），
+      // 212px 的筛选栏装不下。以前「标签 ×」是一整段文字，断行会断在词中间，
+      // × 被挤到第二行单独待着，看着像出了错。改成名字截断、× 永远跟在同一行。
+      const remove = node("button", "library-filter-chip");
       remove.type = "button";
+      remove.title = label;
       remove.setAttribute("aria-label", `取消${label}`);
+      remove.append(node("span", "label", label), node("span", "drop", "×"));
       remove.addEventListener("click", () => { state[key] = ""; ui.search.value = state.q; syncUrl(); void load(); });
       box.append(remove);
     });
