@@ -106,7 +106,7 @@ function editor(guard, id, initial) {
   assert.match(js, /async function selectPaper\(id\) \{\s*if \(state\.paperId !== id && !\(await discardEdits\(\)\)\) return;/);
   assert.match(js, /window\.addEventListener\("beforeunload", \(event\) => \{\s*QBEdits\.protectBeforeUnload\(event, editGuard\)/);
   assert.match(js, /async function leaveFor\(url\) \{\s*if \(!\(await prepareSettingsLeave\(\)\) \|\| !\(await discardEdits\(\)\)\) return false;/);
-  assert.match(js, /const cancel = button\("取消", "", \(\) => discardEdits\(\[q\.id\]\)\)/);
+  assert.match(js, /const back = button\("← 返回", "", \(\) => discardEdits\(\[q\.id\]\)\);/);
   assert.match(js, /event\.stopPropagation\(\); discardEdits\(\[q\.id\]\)/);
   assert.match(js, /label: "去题库看看", onClick: \(\) => leaveFor\("\/library"\)/);
   for (const name of ["deletePaper", "archivePaper"]) {

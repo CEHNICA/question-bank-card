@@ -149,8 +149,14 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
             elif plan.get("native_numbering_fallback"):
                 plan["fallback_reason"] = MULTI_PAPER_MANUAL_REASON
             else:
-                plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
-                    if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
+                # 1.12.7：照片本来就没有文字层，说「本地文字层没有可靠题卡」像是在说
+                # 老师的材料坏了。材料性质（没文字层）和能力问题（本机切不出题）分开说。
+                if paper.kind == "image":
+                    plan["fallback_reason"] = ("这份资料是照片，本机没有可用的文字层来切题，已保留原页供手工切题。"
+                        if not allow_cloud else "这份资料是照片，本机切不出题；云端切题未就绪，已保留原页供手工切题。")
+                else:
+                    plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
+                        if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
             plan["pages"] = [{**page, "mode": "manual"} for page in plan.get("pages", [])]
         paper.processing_plan = plan
         paper.save(update_fields=["processing_plan", "status", "updated_at"])

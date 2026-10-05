@@ -716,6 +716,7 @@ library_ai_script = _frontend("library-ai-settings.js", "application/javascript;
 export_settings_script = _frontend("export-settings.js", "application/javascript; charset=utf-8")
 library_question_viewer_script = _frontend("library-question-viewer.js", "application/javascript; charset=utf-8")
 browser_interactions_script = _frontend("browser-interactions.js", "application/javascript; charset=utf-8")
+site_drawer_script = _frontend("site-drawer.js", "application/javascript; charset=utf-8")
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
@@ -1033,7 +1034,7 @@ def papers(request):
         try:
             if mode == "auto":
                 paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
-                    cloud_ready=readers.configured("mineru") and _reading_ready())
+                    cloud_ready=_cloud_cut_ready())
             else:
                 intake.prepare(paper, mode)
         except Exception as exc:
@@ -1094,7 +1095,7 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
         try:
             if parse_mode == "auto":
                 paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
-                    cloud_ready=readers.configured("mineru") and _reading_ready())
+                    cloud_ready=_cloud_cut_ready())
             else:
                 intake.prepare(paper, parse_mode)
         except Exception as exc:
@@ -2303,6 +2304,20 @@ def _reading_ready() -> bool:
     """A new paper can be read: some vision service has a key (the worker
     falls back to it), or the saved choice is AI-assistant reading."""
     return _vision_ready() or readers.assistant_mode(_saved_configuration())
+
+
+def _cloud_cut_ready() -> bool:
+    """Cloud cutting only needs MinerU.
+
+    1.12.7: this used to be ``configured("mineru") and _reading_ready()``, which
+    tied two different jobs together.  MinerU reads the page and cuts the cards
+    by itself; a vision service is only needed afterwards, when someone asks to
+    read one specific card.  Requiring it here meant a machine with a perfectly
+    good MinerU token silently refused to cut photos and scans at all — the
+    teacher got "处理失败" with no way to tell what was missing.  The missing
+    reader is now reported where it actually matters, at the reading step.
+    """
+    return readers.configured("mineru")
 
 
 def _reader_unavailable_sentence(paper: Paper | None) -> str:

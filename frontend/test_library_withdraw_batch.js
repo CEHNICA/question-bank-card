@@ -17,10 +17,13 @@ const cut = (from, to) => source.slice(source.indexOf(from), source.indexOf(to))
 // 按钮挂在批量选题条上，和「加入试题篮」同一排。
 assert.match(html, /<button id="withdrawSelected"[^>]*disabled[\s\S]*?>撤回所选<\/button>/);
 assert.match(html, /id="withdrawSelected"[^>]*title="把勾选的题从正式题库撤下；题卡和原卷都保留，可以重新入库"/);
-const bulk = html.slice(html.indexOf('class="library-bulk"'), html.indexOf('id="libraryStatus"'));
+// 按钮挂在批量选题条上，和「加入试题篮」同一排。1.12.7 把状态行也并进了这一行，
+// 所以这段切片要罩住整条批量条（到下一块 library-load-error 为止）。
+const bulk = html.slice(html.indexOf('class="library-bulk"'), html.indexOf('id="libraryLoadError"'));
 for (const id of ["selectVisible", "addSelected", "withdrawSelected", "clearSelection"]) {
   assert.ok(bulk.includes(`id="${id}"`), `批量条里应有 ${id}`);
 }
+assert.ok(bulk.includes('id="libraryStatus"'), "状态行已经并进批量条，不再单占一行");
 // 跟着勾选状态启停，和「加入试题篮」一样。
 const sync = cut("  function syncSelection()", "  async function batchItems(");
 assert.match(sync, /\$\("withdrawSelected"\)\.disabled = !state\.selected\.size;/);

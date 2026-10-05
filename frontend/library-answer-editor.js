@@ -50,33 +50,48 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       if (dialog) return;
       dialog = node("dialog", "answer-editor-dialog"); dialog.id = "answerEditorDialog";
       dialog.setAttribute("aria-labelledby", "answerEditorTitle");
-      const head = node("header", "source-dialog-head");
+      // 1.12.7：答案解析也改成全屏。原来左边一条 230px 的题号侧栏、下面一条钉在
+      // 底部的「同时保存到题库 + 保存答案解析」，改字那边同样的毛病这里全有。
+      // 现在顶栏一条横排操作栏收着返回、题号进度、存题库和保存；题号列表改成顶栏
+      // 第二条的横排题号带；正文是三块 —— 左上原卷本题、左下编辑区、右边整列预览。
+      // 1.12.7：顶部从 232px 压到一条操作栏 + 一条题号带。常驻的说明句子全部降级成
+      // 按钮的 title —— 屏幕上只留「现在是什么状态」和「能点什么」。
+      const bar = node("header", "answer-editor-bar");
+      const heading = node("div", "answer-editor-heading");
       const title = node("h3", "", "答案解析"); title.id = "answerEditorTitle";
-      const subtitle = node("p", "helper"); subtitle.id = "answerEditorScope";
-      const heading = node("div"); heading.append(node("p", "eyebrow", "备课"), title, subtitle);
+      const place = node("p", "answer-editor-place");
+      heading.append(title, place);
       const keyHints = node("div", "answer-editor-shortcuts"); root.QBShortcutHelp?.mountHint(keyHints, "answers"); heading.append(keyHints);
-      const close = node("button", "button button-quiet button-small", "返回"); close.type = "button"; close.addEventListener("click", closeEditor);
-      head.append(heading, close);
-      const main = node("div", "answer-editor-layout");
-      const nav = node("aside", "answer-editor-nav");
-      const navHint = node("p", "helper", "点题号编辑答案解析；需要生成时，只勾选本次要处理的题。");
+      const back = node("button", "button button-quiet", "返回"); back.type = "button"; back.addEventListener("click", closeEditor);
+      const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+      const syncLabel = node("label", "answer-sync"); const sync = node("input"); sync.type = "checkbox"; sync.id = "answerEditorSync";
+      syncLabel.append(sync, document.createTextNode("同时保存到题库"));
+      const save = node("button", "button button-primary", "保存答案解析"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
+      bar.append(back, heading, status, syncLabel, save);
+
+      const strip = node("div", "answer-editor-strip");
       const pickMissing = node("button", "button button-small", "勾选缺解析的题"); pickMissing.type = "button";
       pickMissing.addEventListener("click", () => { selection = new Set(items.filter(item => S.completeness(item) !== "ready").map(item => item.id)); renderList(); });
       const ai = node("button", "button button-primary button-small", "AI 补充所选题"); ai.type = "button"; ai.id = "answerEditorAi"; ai.addEventListener("click", queueSelected);
       const list = node("div", "answer-editor-list"); list.setAttribute("aria-label", "本次题目与 AI 选择");
+      list.title = "点题号切题；要 AI 补解析时，只勾选本次要处理的题。";
       const aiStatus = node("p", "helper answer-ai-status"); aiStatus.setAttribute("role", "status"); aiStatus.setAttribute("aria-live", "polite");
       const aiTools = node("div", "answer-ai-tools");
       const checkAi = node("button", "button button-small", "刷新生成结果"); checkAi.type = "button"; checkAi.id = "answerEditorCheckAi"; checkAi.addEventListener("click", refreshAiResults);
-      checkAi.title = "查询本次生成的进度和结果，不会重新生成、核对答案或覆盖正在编辑的文字。";
+      checkAi.title = "查询本次生成的进度和结果，不会重新生成、核对答案或覆盖正在编辑的文字。初稿保存后才用于出卷。";
       const cancelAi = node("button", "button button-quiet button-small", "取消所选任务"); cancelAi.type = "button"; cancelAi.id = "answerEditorCancelAi"; cancelAi.addEventListener("click", cancelSelected);
       aiTools.append(checkAi, cancelAi);
       const apiNote = node("p", "helper answer-api-note"); apiNote.id = "answerEditorApiNote";
-      nav.append(navHint, pickMissing, ai, aiStatus, aiTools, apiNote, list);
-      const panel = node("section", "answer-editor-panel");
-      const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-      const question = node("details", "answer-question"); question.append(node("summary", "", "查看本题"));
+      const aiRow = node("div", "answer-ai-row");
+      aiRow.append(pickMissing, ai, aiTools, aiStatus, apiNote);
+      strip.append(list, aiRow);
+      const question = node("details", "answer-question"); question.open = true;
+      question.append(node("summary", "", "原卷本题"));
       const questionBody = node("div", "paper"); question.append(questionBody);
       question.addEventListener("toggle", () => { if (question.open && current) QB.renderQuestion(questionBody, current.item.content, { showNumber: false, showAnswer: "none" }); });
+      const sourceArea = node("section", "answer-editor-source");
+      sourceArea.setAttribute("aria-label", "原卷本题");
+      sourceArea.append(question);
       const fields = node("div", "answer-editor-fields");
       const answerLabel = node("label", "", "答案结果");
       const answer = node("textarea"); answer.id = "answerEditorResult"; answer.rows = 2; answer.placeholder = "如 B，或 x＝3"; answerLabel.append(answer);
@@ -120,20 +135,18 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         if (record) { current.value = S.editable(record); current.ai_fields = []; current.ai_stale = false; current.dirty = true; renderFields(); }
       });
       origin.append(originBody, history);
-      const footer = node("footer", "answer-editor-footer");
-      const syncLabel = node("label", "answer-sync"); const sync = node("input"); sync.type = "checkbox"; sync.id = "answerEditorSync";
-      syncLabel.append(sync, document.createTextNode("同时保存到题库"));
-      const save = node("button", "button button-primary", "保存答案解析"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
-      footer.append(syncLabel, save);
+      // 三区：左上是原卷本题，左下是编辑区（答案结果、解析过程、配图、裁图、原卷
+      // 答案与历史），右边整列是实时预览。原来那条钉在底部的保存条取消。
       const workspace = node("div", "answer-editor-workspace");
       const inputColumn = node("div", "answer-editor-input-column"), previewColumn = node("section", "answer-editor-preview-column");
       previewColumn.setAttribute("aria-label", "答案解析实时预览");
-      inputColumn.append(fields, imageTools, figures, crop);
+      const editBody = node("div", "answer-editor-edit");
+      editBody.append(fields, imageTools, figures, crop, origin);
+      inputColumn.append(sourceArea, editBody);
       previewColumn.append(previewTitle, node("p", "helper", "公式与配图随输入更新。保存后用于出卷。"), preview, aiDraft);
       workspace.append(inputColumn, previewColumn);
-      panel.append(status, question, workspace, origin, footer);
-      main.append(nav, panel); dialog.append(head, main); document.body.append(dialog);
-      controls = { subtitle, nav, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, footer, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      dialog.append(bar, strip, workspace); document.body.append(dialog);
+      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
       // Display caret and selection, the same idea as the review 改字 editor.
       // Moving the caret or selecting text is not an edit: it must not set
@@ -189,7 +202,10 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
       controls.checkAi.disabled = polling || checkingApi; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
       controls.cancelAi.hidden = !selectedActiveJobs().length;
-      controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : ready ? "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → 服务与密钥”配置并测试；可先手工编辑，返回后点“刷新生成结果”。";
+      // API 配好了的时候，这句话是一句解释，挂在 AI 按钮上；没配好的时候它是唯一
+      // 告诉你「要去设置里做点什么」的地方，必须留在明面上。
+      if (ready) { controls.ai.title = "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。"; controls.apiNote.textContent = ""; controls.apiNote.hidden = true; }
+      else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → 服务与密钥”配置并测试；可先手工编辑，返回后点“刷新生成结果”。"; }
       for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
       controls.history.disabled = busy;
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
@@ -202,8 +218,9 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
       items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null; selection = new Set((options.selected || []).filter(id => items.some(item => item.id === id)));
-      controls.subtitle.textContent = scope === "library" ? "保存到题库供以后使用，原卷答案保留。" : "保存后用于当前组卷；勾选后也可同步到题库。";
-      controls.aiStatus.textContent = "刷新只查询生成进度和结果；初稿保存后才用于出卷。";
+      // 「保存到题库还是只用于这份卷子」这句话以前常驻在标题下面，占一行。
+      // 它说明的是「勾了会发生什么」，挂在这个勾选框的提示上更合适。
+      controls.syncLabel.title = scope === "library" ? "保存到题库供以后使用，原卷答案保留。" : "保存后用于当前组卷；勾选后也可同步到题库。";
       returnFocus = document.activeElement; if (!dialog.open) dialog.showModal(); renderList();
       const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
       await Promise.all([readApiSettings(), item ? choose(item) : Promise.resolve()]);
@@ -231,6 +248,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     }
     function renderList() {
       controls.list.replaceChildren();
+      controls.place.textContent = current ? `${itemLabel(current.item)} / 共 ${items.length} 题` : `共 ${items.length} 题`;
       items.forEach(item => {
         const row = node("div", `answer-list-row${current?.item.id === item.id ? " active" : ""}`);
         const box = node("input"); box.type = "checkbox"; box.checked = selection.has(item.id); box.setAttribute("aria-label", `AI 补充${itemLabel(item)}`);
@@ -247,6 +265,11 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
           if (job.error) button.append(node("span", "answer-job-error", job.error));
           if (job.executor === "api" && jobsPending.has(job.status) && job.timeout_at && Number.isFinite(Date.parse(job.timeout_at))) button.append(node("span", "answer-job-deadline", `超过 ${new Date(job.timeout_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 未完成将超时`));
         }
+        // 题号带只有一格宽，完整状态改放 title：颜色点先说个大概，鼠标停上去说全的。
+        row.dataset.state = job && (job.status === "failed" || ["cancelled", "timed_out"].includes(job.status)) ? "failed"
+          : job && jobsPending.has(job.status) ? "working"
+          : item.solution_needs_review ? "review" : quality;
+        button.title = [...button.children].map(child => child.textContent).join(" · ");
         button.addEventListener("click", () => choose(item)); row.append(box, button); controls.list.append(row);
       });
       setBusy();
@@ -482,7 +505,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       finally { if (session === epoch) { cancelling = false; setBusy(); } }
     }
     function showJobSummary() {
-      const values = [...jobs.values()]; if (!values.length) { controls.aiStatus.textContent = requestedIds.size ? "暂未查到这批任务的状态。点“刷新生成结果”重新查询，当前编辑内容保留。" : "刷新只查询生成进度和结果，不会重新生成或覆盖编辑内容。初稿保存后才用于出卷。"; return; }
+      const values = [...jobs.values()]; if (!values.length) { controls.aiStatus.textContent = requestedIds.size ? "暂未查到这批任务的状态。点“刷新生成结果”重新查询，当前编辑内容保留。" : ""; return; }
       const running = values.filter(job => job.executor === "api" && jobsPending.has(job.status)).length;
       const finished = values.filter(job => job.result && jobsSucceeded.has(job.status));
       const states = finished.map(job => { const id = job.publication_id || job.publication; return jobDraftState(job, current?.item.id === id ? current : drafts.get(id), items.find(item => item.id === id)); });
@@ -497,7 +520,8 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       if (retained) messages.push(`${retained} 题另有 AI 初稿可对照，已保存解析保留`);
       if (failed.length) messages.push(`${failed.length} 题未完成，勾选可重试${failed[0].error ? `：${failed[0].error}` : ""}`);
       if (failed.some(job => job.status === "failed" && !job.cancelled && !job.timed_out && !["cancelled", "timed_out"].includes(job.terminal_reason))) messages.push("请到“设置 → 服务与密钥”检查服务商、密钥和模型，再重试");
-      controls.aiStatus.textContent = messages.join("；") + "。" + queueNote;
+      // 顶部那条状态行现在只在真有话要说时才占地方，空着就空着。
+      controls.aiStatus.textContent = [messages.join("；") + "。", queueNote].filter(Boolean).join(" ");
     }
     async function pollJobs() {
       root.clearTimeout(pollTimer); const session = epoch;
@@ -529,7 +553,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         jobs = fresh; renderList(); showJobSummary();
         const active = [...jobs.values()].filter(job => job.executor === "api" && jobsPending.has(job.status));
         if (active.length && Date.now() - watchedSince < MAX_WATCH) pollTimer = root.setTimeout(pollJobs, 4000);
-        else if (active.length) controls.aiStatus.textContent += " 自动刷新已暂停，点“刷新生成结果”可继续查询。";
+        else if (active.length) controls.aiStatus.textContent = [controls.aiStatus.textContent, "自动刷新已暂停，点“刷新生成结果”可继续查询。"].filter(Boolean).join(" ");
       } catch (error) { if (dialog.open && session === epoch) { controls.aiStatus.textContent = `${error.message}。本地编辑内容保留，稍后重新勾选可重试。`; } }
       finally { if (session === epoch) { polling = false; setBusy(); if (pollAgain && dialog.open) { pollAgain = false; void pollJobs(); } } }
     }

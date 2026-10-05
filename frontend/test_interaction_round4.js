@@ -61,7 +61,9 @@ assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"
 assert.match(css, /\.library-withdraw \{ color: var\(--muted\) !important; \}/);
 assert.match(libraryJs, /function printTools\(items, group, position, number\)/);
 assert.match(libraryCss, /\.print-question-tools/);
-assert.match(libraryCss, /\.library-main \{ max-width: 1480px;/);
+// 1.12.7：上限从 1480 放宽到 1760，1536 屏上右边不再空 60px；上限本身留着，
+// 免得 2560 的屏上题面一行拉到底。
+assert.match(libraryCss, /\.library-main \{ max-width: 1760px;/);
 assert.match(libraryCss, /@media \(max-width: 979px\)/);
 
 // Finishing a paper offers the next one that still has cards to review.

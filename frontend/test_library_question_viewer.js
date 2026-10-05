@@ -224,16 +224,27 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   viewer.close(); assert.equal(document.activeElement, freshCaller); assert.equal(document.body.style.overflow, "");
   runTasks(0);
 
-  const host = node("div"), focus = root.LibraryQuestionViewer.mountFocus({ node, host });
-  focus.button.emit("click"); assert(document.body.classList.contains("library-focus-mode")); assert.equal(focus.button.textContent, "退出专注浏览");
-  assert.equal(focus.button["aria-pressed"], "true");
-  focus.button.emit("click"); assert(!document.body.classList.contains("library-focus-mode")); assert.equal(focus.button.textContent, "专注浏览");
+  // 1.12.7：专注开关是侧栏接缝上的小按钮，只切状态和图标，不再换位置、也没有文字。
+  const seam = node("button"); seam.append(node("use"));
+  const focus = root.LibraryQuestionViewer.mountFocus({ button: seam });
+  assert.equal(focus.button, seam);
+  focus.button.emit("click"); assert(document.body.classList.contains("library-focus-mode"));
+  assert.equal(focus.button["aria-expanded"], "false", "Collapsed rail: the button offers to bring it back");
+  assert.equal(focus.button.title, "展开筛选栏");
+  focus.button.emit("click"); assert(!document.body.classList.contains("library-focus-mode"));
+  assert.equal(focus.button["aria-expanded"], "true", "Rail back: the button now offers to collapse it");
   assert.equal(JSON.stringify(item), snapshot); assert(requests.every(value => !value.options.method));
 
   const css = fs.readFileSync(path.join(__dirname, "library.css"), "utf8"), library = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
   assert(css.includes(".question-viewer-dialog { width: calc(100vw - 16px)"));
   assert(css.includes("height: calc(100dvh - 16px)"));
-  assert(css.includes(".library-focus-mode .library-toolbar, .library-focus-mode .basket-panel"));
+  // 1.12.7：专注模式藏的是侧栏。篮已经搬进抽屉了，跟着一起藏的话，专注模式下
+  // 点开抽屉只剩「试题篮 N」一个标题、下面一片空白。
+  const shared = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+  assert(css.includes(".library-focus-mode .library-rail, .library-focus-mode .library-bulk"));
+  assert(!css.includes(".library-focus-mode .basket-panel"), "专注模式不许再把篮藏掉");
+  assert(shared.includes(".site-drawer .basket-list { max-height: none"), "抽屉里只留一根滚动条");
+  assert(shared.includes(".topbar-basket-label, .topbar-preview-label"), "窄屏顶栏只留图标和数字");;
   assert(css.includes(".question-viewer-content.native-images .qb-question-image img"));
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
   console.log("Question viewer: complete content, original image order/zoom, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");

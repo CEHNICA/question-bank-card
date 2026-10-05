@@ -38,16 +38,16 @@
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
-        <span id="engineLine" class="engine-line" hidden></span>
       </span>
     </a>
-    <nav class="topnav" aria-label="页面">
+    <nav class="topnav" aria-label="页面" data-drawer="nav">
       <a class="active" href="/" aria-current="page">录入终审</a>
       <a href="/library">正式题库</a>
       <a id="settingsButton" href="/settings">设置</a>
     </nav>
     <div class="topbar-tools">
-      <a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">源码</a>
+      <span id="engineLine" class="engine-line" hidden></span>
+      <a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" data-drawer="tools">源码</a>
     </div>
   </header>
 
@@ -854,6 +854,7 @@
   <script src="/static/export-settings.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
+  <script src="/site-drawer.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

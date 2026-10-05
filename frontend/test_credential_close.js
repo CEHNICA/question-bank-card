@@ -43,7 +43,7 @@ function scenario() {
     addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }, closest() { return $("credentialDialog"); }
   });
   const dialogs = [$("credentialDialog"), $("pageDialog"), $("keysDialog")];
-  const context = vm.createContext({ $, console, el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ $, console, state: { status: null }, credentialSourceNote: () => "", el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
     window: { addEventListener() {} },
     requestAnimationFrame(fn) { const id = ++frameId; frames.set(id, fn); return id; },
     cancelAnimationFrame(id) { frames.delete(id); },

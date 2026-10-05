@@ -80,7 +80,7 @@ function scenario() {
       querySelectorAll() { return closeButtons; }, showModal() { this.open = true; }, focus() {} });
     return nodes.get(id);
   }
-  const context = vm.createContext({ $, console, el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ $, console, state: { status: null }, credentialSourceNote: () => "", el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
     document: { addEventListener() {} }, window: { addEventListener() {} }, requestAnimationFrame(fn) { fn(); },
     toast(message, kind) { messages.push({ message, kind }); },
     confirmDialog: async (options) => { confirmations.push(options); return true; },

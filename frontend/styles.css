@@ -48,7 +48,7 @@
   --shadow: 0 1px 2px rgba(40, 36, 24, .05), 0 8px 22px -12px rgba(40, 36, 24, .16);
   --shadow-pop: 0 12px 32px -8px rgba(16, 34, 30, .22), 0 2px 6px rgba(16, 34, 30, .08);
   --shadow-lg: 0 28px 70px -12px rgba(12, 28, 24, .35);
-  --topbar-h: 56px;
+  --topbar-h: 48px;
   --ui-font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", "Noto Sans CJK SC", system-ui, sans-serif;
   --content-font: "Times New Roman", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun", "宋体", serif;
   --mono: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
@@ -76,14 +76,22 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   font: 600 11px/1 var(--mono); }
 
 /* ---------------------------------------------------------------- 顶栏 */
-.topbar { position: sticky; top: 0; z-index: 40; height: var(--topbar-h); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px;
+/* 顶栏只留 ☰ 和品牌：导航、工具、试题篮都在抽屉里。用最轻的一档画触发器
+   —— 32px 灰图标、无边框无底色，不让它看起来像第二个品牌。 */
+.topbar { position: sticky; top: 0; z-index: 40; height: var(--topbar-h); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
   padding: 0 clamp(14px, 2.4vw, 28px); background: rgba(255, 255, 255, .94); border-bottom: 1px solid var(--line);
   backdrop-filter: saturate(1.4) blur(10px); }
-.brand { display: flex; align-items: center; gap: 11px; min-width: 0; color: inherit; text-decoration: none; }
+.icon-button.drawer-trigger { width: 32px; height: 32px; margin-left: -6px; border: 0; background: none; color: var(--muted); }
+.icon-button.drawer-trigger:hover { background: var(--bg-sunken); color: var(--ink); }
+.icon-button.drawer-trigger .icon { width: 19px; height: 19px; }
+.drawer-staging { display: none; }
+/* 1.12.7：品牌只占内容那一块宽。抽屉把导航搬走以后，顶栏栅格只剩一个子元素，
+   auto 列会被拉满 —— 链接横跨整条顶栏，点中间任何空白处都会跳回首页。 */
+.brand { display: flex; align-items: center; gap: 9px; min-width: 0; justify-self: start; color: inherit; text-decoration: none; }
 .brand-mark { display: block; width: 34px; height: 34px; border-radius: 9px; flex: none; object-fit: cover;
   box-shadow: 0 1px 2px rgba(15, 45, 40, .18), 0 0 0 1px rgba(22, 63, 58, .10); }
 .brand-text { display: grid; min-width: 0; line-height: 1.25; }
-.brand-text strong, .brand h1 { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+.brand-text strong, .brand h1 { font-size: 13.5px; font-weight: 650; letter-spacing: .02em; }
 .engine-line, .brand .eyebrow { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .engine-line[hidden] { display: none; }
 .engine-line.warn { color: var(--amber); }
@@ -95,9 +103,18 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .topnav a:hover { color: var(--ink); }
 .topnav a.active { color: var(--ink); }
 .topnav a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
-.topbar-tools { display: flex; justify-content: flex-end; gap: 6px; }
+/* 顶栏的容器还留着，因为专注浏览的退出按钮要进这里；平时是空的就不占位。 */
+.topbar-tools { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.topbar-tools:not(:has(> :not([hidden]))) { display: none; }
+.topbar-basket { display: inline-flex; align-items: center; gap: 6px; }
+.topbar-basket-icon { display: inline-flex; }
+.topbar-basket-count { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
 .settings-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 11px; border-radius: 9px;
   border: 1px solid transparent; background: none; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+/* 「现在生效的是旧环境变量那份」的一句话说明。设置页和密钥窗口共用同一句，
+   免得两个界面各说各话。 */
+.api-source-note { margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.api-source-note::before { content: ""; }
 .settings-trigger:hover { background: var(--bg-sunken); color: var(--ink); }
 .settings-trigger .icon { width: 17px; height: 17px; }
 .settings-home { max-width: 1080px; margin: 24px auto 60px; padding: 0 24px; }
@@ -113,6 +130,55 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   background: none; color: var(--muted); }
 .icon-button:hover { background: var(--bg-sunken); color: var(--ink); }
 .icon-button .icon { width: 18px; height: 18px; }
+
+/* ---------------------------------------------------------------- 抽屉 */
+/* 导航、工具、试题篮、操作说明都收在这里。它默认关着，不占常驻高度；打开时
+   盖在页面上（不挤压内容），Esc / 点遮罩 / 点导航都收起。 */
+body.drawer-open { overflow: hidden; }
+.drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(22, 44, 39, .34); backdrop-filter: blur(2px); animation: drawer-fade .18s ease; }
+.site-drawer { position: fixed; z-index: 61; top: 0; left: 0; bottom: 0; width: 300px; display: flex; flex-direction: column;
+  background: var(--surface); border-right: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: drawer-in .2s cubic-bezier(.2, .8, .2, 1); }
+@keyframes drawer-in { from { transform: translateX(-100%); } }
+@keyframes drawer-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .site-drawer, .drawer-scrim { animation: none; } }
+.site-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 11px 11px 16px; border-bottom: 1px solid var(--line); }
+.site-drawer-brand { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+.site-drawer-close { width: 30px; height: 30px; }
+.site-drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 22px; }
+.site-drawer-group { display: grid; gap: 2px; padding: 8px 0; }
+.site-drawer-group + .site-drawer-group { border-top: 1px solid var(--line); }
+.site-drawer-title { margin: 0; padding: 3px 8px 5px; font-size: 11.5px; font-weight: 700; letter-spacing: .08em; color: var(--muted); }
+.site-drawer-title-button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; text-align: left; }
+.site-drawer-title-button::after { content: "▾"; margin-left: auto; color: var(--faint); }
+.site-drawer-title-button[aria-expanded="false"]::after { content: "▸"; }
+.site-drawer-count { font-variant-numeric: tabular-nums; }
+.site-drawer-slot { display: grid; gap: 2px; min-width: 0; }
+.site-drawer-slot:empty { display: none; }
+/* 竖排时不再用下划线，当前页改成整行底色加左侧墨绿条。
+   justify-self: stretch 是必须的：窄屏那条 @media 会给 .topnav 加 justify-self: center，
+   收进抽屉之后菜单项就不该再居中缩成一小条。 */
+.site-drawer .topnav { display: grid; gap: 2px; height: auto; justify-self: stretch; }
+.site-drawer .topnav a { min-height: 38px; padding: 0 10px 0 12px; border-radius: 8px; color: var(--ink-2); }
+.site-drawer .topnav a:hover { background: var(--bg-sunken); color: var(--ink); }
+.site-drawer .topnav a.active { background: var(--accent-soft); color: var(--accent-dark); box-shadow: inset 3px 0 0 var(--accent); }
+.site-drawer .topnav a.active::after { content: none; }
+/* 只给菜单行本身整幅宽。用后代选择器会把篮里的「移出」也撑满整行，
+   把题名挤成一列字。 */
+.site-drawer-slot > .source-link, .site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; }
+.site-drawer .library-shortcut-hint { margin: 0; }
+.site-drawer .basket-panel { position: static; max-height: none; padding: 2px 2px 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
+/* 篮不再自己滚：抽屉主体就是那根滚动条。之前列表限高 44vh 再自带一根，
+   抽屉里就套了两层滚动条，拖的往往不是你想拖的那根。 */
+.site-drawer .basket-list { max-height: none; overflow: visible; }
+/* 篮面板自己的标题删了（组标题已经写了名字和数量），只留「清空」并靠右。 */
+.site-drawer .basket-panel-head { display: flex; justify-content: flex-end; }
+@media (max-width: 560px) {
+  .site-drawer { width: min(86vw, 320px); }
+  /* 顶栏挤不下四个字了，只留图标和数字。 */
+  .topbar-basket-label, .topbar-preview-label { display: none; }
+  .topbar-basket, #basketButton { padding-inline: 8px; }
+}
+@media print { .site-drawer, .drawer-scrim, .drawer-staging { display: none !important; } }
 
 /* ---------------------------------------------------------------- 按钮 */
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 14px;
@@ -170,7 +236,7 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .layout { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: calc(100vh - var(--topbar-h)); }
 .sidebar { position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
   padding: 16px 14px 20px; background: var(--surface); border-right: 1px solid var(--line); scrollbar-width: thin; }
-.main { padding: 22px clamp(16px, 2.6vw, 36px) 96px; min-width: 0; }
+.main { padding: 14px clamp(16px, 2.6vw, 36px) 96px; min-width: 0; }
 
 .drop-zone { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 1px 12px; padding: 11px 12px;
   border: 1.5px dashed #c9c4b6; border-radius: 12px; background: var(--surface-2); cursor: pointer;
@@ -540,13 +606,50 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .lens.on { opacity: 1; transform: none; }
 
 /* ---------------------------------------------------------------- 改字 */
-.editor { display: grid; gap: 12px; max-width: 1100px; }
-/* 1.12.6：标题和保存条并成一行，省掉一整行；保存条钉在面板顶部而不是底部，
-   底部那块 62px 预留也一并去掉。 */
-.editor-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap;
-  position: sticky; top: calc(var(--topbar-h) + 6px); z-index: 5; margin: -4px -6px 0; padding: 6px 6px 8px;
-  background: var(--surface); border-bottom: 1px solid #efede6; box-shadow: 0 10px 12px -12px rgba(22, 44, 39, .35); }
-.editor-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+/* 1.12.7：点「改字」直接占满整屏。左上原卷、左下编辑、右边预览，顶栏一条操作栏
+   收着返回、换题、题型和保存。三块按网格排，顶边天然在同一条线上；没有悬浮条，
+   屏幕下半永远不会被压住，也不再需要按像素去追题干的位置。 */
+body.qb-editing { overflow: hidden; }
+body.qb-editing .topbar, body.qb-editing .sidebar, body.qb-editing .to-top { display: none; }
+body.qb-editing .layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+body.qb-editing .main { padding: 0; overflow: hidden; }
+
+.card.editing {
+  position: fixed; inset: 0; z-index: 60; height: 100dvh;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas: "bar bar" "source preview" "body preview";
+  background: var(--bg); border: 0; border-radius: 0; box-shadow: none;
+}
+.card.editing::before, .card.editing > .card-head { display: none; }
+/* 左上：原卷截图。截图矮时这块就矮，下面的编辑区自然多拿空间；截图高时封顶
+   42dvh，框内自己滚，不会把编辑区顶出屏幕。 */
+.card.editing > .card-source { grid-area: source; min-height: 0; display: grid;
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.card.editing .source-sticky { position: static; min-height: 0; max-height: 42dvh;
+  display: flex; flex-direction: column; gap: 6px; }
+.card.editing .source-sticky > .crop { flex: 0 1 auto; min-height: 0; overflow-y: auto; align-content: start; }
+.card.editing .source-sticky > .source-note { flex: none; }
+/* 左下：编辑区，整栏自己滚。短答案的输入框不必跟着整栏拉成一整行宽。 */
+.card.editing > .card-body { grid-area: body; min-height: 0; overflow-y: auto; padding: 16px 20px 26px; }
+.card.editing .option-inputs, .card.editing .editor .field.inline { max-width: 34em; }
+/* 右边：预览占满整列。 */
+.card.editing > .editor-preview-box { grid-area: preview; min-height: 0; margin: 0; padding: 14px 18px 18px;
+  background: var(--surface-2); border-left: 1px solid var(--line); }
+.card.editing .editor { max-width: none; align-content: start; }
+.card.editing .editor-preview { max-height: none; height: 100%; }
+/* 顶栏：一条横排操作栏。 */
+.editor-bar { grid-area: bar; display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+  padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--line);
+  box-shadow: 0 8px 14px -14px rgba(22, 44, 39, .5); }
+.editor-bar-place { display: flex; align-items: center; gap: 8px; }
+.editor-bar-count { font-size: 13.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.editor-bar-spacer { flex: 1 1 auto; }
+.editor-bar-type { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+.editor-bar-type select { width: auto; min-width: 9em; padding: 6px 8px; border: 1px solid var(--line-strong);
+  border-radius: 8px; background: #fff; color: var(--ink); }
+.editor-bar-type select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.editor-bar .hint { margin: 0; }
 .field { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
 .field.inline { grid-template-columns: 3.2em minmax(0, 1fr); align-items: center; }
 .field input, .field textarea, .field select { width: 100%; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink);
@@ -558,12 +661,8 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .option-inputs input { font-family: var(--mono); font-size: 14px; }
 .extra summary { cursor: pointer; font-size: 13px; color: var(--ink-2); padding: 4px 0; }
 .extra { display: grid; gap: 8px; }
-.editor-preview-box { display: grid; gap: 5px; }
-/* 预览留在题干下面（窄屏）时给一段上限高度，长题也不会把下面的选项顶出屏幕。 */
-.editor-preview { max-height: var(--preview-room, none); overflow: auto; overscroll-behavior: contain; }
-/* 1.12.6：搬去左栏时上方留出的空档由 JS 按「和题干顶对齐」算出来填，
-   这里只管左右撑满、顶端有一条分隔线，左栏读起来是「原卷 → 预览」两段。 */
-.editor-preview-box.beside { max-width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
+.editor-preview-box { display: grid; gap: 5px; align-content: start; }
+.card.editing > .editor-preview-box { grid-template-rows: auto auto minmax(0, 1fr); }
 .preview-label { margin: 0; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
 .editor-preview { position: relative; min-width: 0; max-width: 100%; border: 1px dashed rgba(31, 107, 95, .45); border-radius: var(--radius); padding: 10px 14px; background: #fff; overflow-x: auto; overflow-anchor: none; }
 .editor-position-hint { margin: 0; color: #165b4e; font-size: 12px; font-weight: 600; line-height: 1.55; }
@@ -582,9 +681,8 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .qb-preview-active-symbol .katex-html [style*="#1f6b5f"] { background: #fff2a8; outline: 2px solid #006b50; outline-offset: 1px; box-shadow: 0 0 0 3px #fff2a8; border-radius: 2px; }
 .qb-preview-active-region { outline: 3px solid #006b50; outline-offset: 2px; background: rgba(31, 107, 95, .14); }
 .qb-preview-empty-field { margin: 8px 0 0; color: var(--muted); }
-.editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-/* 1.12.6：保存条不再钉在卡片底部，卡片底部那 62px 预留一起删掉。 */
-.editor-actions .hint { margin: 0 0 0 auto; }
+.editor { display: grid; gap: 14px; }
+.editor-preview { overflow: auto; overscroll-behavior: contain; }
 
 /* ---------------------------------------------------------------- 对话框 */
 dialog { border: 0; border-radius: 16px; padding: 0; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-lg); }
@@ -1054,6 +1152,8 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .toast[popover]:not(:popover-open) { display: none; }
 .toast { position: fixed; right: 24px; bottom: 78px; z-index: 80; display: flex; align-items: center; gap: 12px; max-width: min(440px, calc(100vw - 48px));
   padding: 10px 10px 10px 16px; border-radius: 12px; background: #1d2e2b; color: #f1f5f3; font-size: 13.5px; box-shadow: var(--shadow-pop);
+  /* 提示条是给人看的，不该挡住它飘到的那块界面上的按钮。里面的按钮仍然可点。 */
+  pointer-events: none;
   animation: toast-in .22s cubic-bezier(.2,.8,.2,1); }
 .toast:not(:has(.toast-action)) { padding-right: 16px; }
 .toast::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #9fd4b3; }
@@ -1061,7 +1161,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .toast.error { background: #8e2f20; }
 .toast.error::before { background: #ffc9bd; }
 .toast-text { min-width: 0; }
-.toast-action { flex: none; border: 0; border-radius: 8px; padding: 5px 11px; background: rgba(255,255,255,.14); color: #fff; font-size: 13px; font-weight: 600; }
+.toast-action { flex: none; border: 0; border-radius: 8px; padding: 5px 11px; background: rgba(255,255,255,.14); color: #fff; font-size: 13px; font-weight: 600; pointer-events: auto; }
 .toast-action:hover { background: rgba(255,255,255,.24); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .to-top { position: fixed; right: 24px; bottom: 24px; z-index: 30; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
@@ -1078,6 +1178,16 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .card { grid-template-columns: 1fr; }
   .card-source { border-right: 0; border-bottom: 1px solid var(--line); }
   .source-sticky { position: static; }
+  /* 1.12.7：全屏改字在窄屏退回单列，从上往下是顶栏、原卷、编辑、预览。
+     原卷按内容高度给（不再抢固定高度），编辑区和预览各分剩下的。 */
+  .card.editing { grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "bar" "source" "body" "preview"; }
+  .card.editing > .card-source { border-right: 0; }
+  .card.editing .source-sticky { max-height: 34dvh; }
+  .card.editing > .editor-preview-box { border-left: 0; border-top: 1px solid var(--line); }
+  .card.editing > .card-body { padding: 14px 16px 20px; }
+  .editor-bar { padding: 8px 12px; }
 }
 @media (max-width: 900px) {
   .card-actions .kbd-hint { display: none; }

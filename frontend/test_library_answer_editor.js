@@ -59,8 +59,32 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await editor.open([original, other], { scope: "paper", focus: original.id, selected: [original.id] }); await settle();
   const workspace = descend(document.body).find(element => element.className === "answer-editor-workspace");
   assert.deepEqual(workspace.children.map(element => element.className), ["answer-editor-input-column", "answer-editor-preview-column"]);
-  assert(workspace.children[0].children.some(element => element.className === "answer-editor-fields"));
+  // 1.12.7: the left column is the full-height one — 原卷本题 on top, the fields below.
+  const left = workspace.children[0];
+  assert.deepEqual(left.children.map(element => element.className), ["answer-editor-source", "answer-editor-edit"]);
+  assert(left.children[0].children.some(element => element.className === "answer-question"));
+  assert(left.children[1].children.some(element => element.className === "answer-editor-fields"));
   assert(workspace.children[1].children.some(element => element.className === "paper answer-editor-preview"));
+  // 1.12.7: fullscreen. The bar holds 返回 / 存题库 / 保存, the strip above the three
+  // zones holds the question numbers, and nothing is pinned over the lower half.
+  const bar = descend(document.body).find(element => element.className === "answer-editor-bar");
+  const strip = descend(document.body).find(element => element.className === "answer-editor-strip");
+  assert.deepEqual(byId("answerEditorDialog").children.map(element => element.className),
+    ["answer-editor-bar", "answer-editor-strip", "answer-editor-workspace"]);
+  assert(bar.children.includes(byId("answerEditorSave")) && descend(bar).includes(byId("answerEditorSync")),
+    "保存答案解析 和 同时保存到题库 moved from the bottom bar into the top bar");
+  assert(strip.children.some(element => element.className === "answer-editor-list"),
+    "The question numbers are a strip under the top bar, not a left sidebar");
+  assert.equal(descend(document.body).find(element => element.className === "answer-question").open, true,
+    "原卷本题 starts open in the top-left zone");
+  const answerCss = fs.readFileSync(path.join(__dirname, "library.css"), "utf8");
+  assert.doesNotMatch(answerCss, /\.answer-editor-footer|\.answer-editor-nav/,
+    "1.12.7: the bottom sticky bar and the 230px sidebar are gone");
+  assert.match(answerCss, /\.answer-editor-dialog \{[^}]*height: 100dvh;/);
+  assert.match(answerCss, /\.answer-editor-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/);
+  assert.match(answerCss, /\.answer-editor-input-column \{ grid-column: 1;[^}]*grid-template-rows: minmax\(0, auto\) minmax\(0, 1fr\);/,
+    "The left column stacks 原卷本题 over the editing area, so the two fill one full-height column");
+  assert.match(answerCss, /\.answer-editor-preview-column \{ grid-column: 2;/);
   assert.equal(byId("answerEditorCopyTask"), undefined); assert(!document.body.textContent.includes("复制助手任务说明"));
   assert.equal(byId("answerEditorCheckAi").textContent, "刷新生成结果");
   assert(byId("answerEditorCheckAi").title.includes("不会重新生成"));

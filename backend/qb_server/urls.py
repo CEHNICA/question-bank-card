@@ -11,6 +11,7 @@ urlpatterns = [
     path("settings", views.index_page),
     path("app.js", views.app_script),
     path("browser-interactions.js", views.browser_interactions_script),
+    path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
     path("library-workspace.js", views.library_workspace_script),

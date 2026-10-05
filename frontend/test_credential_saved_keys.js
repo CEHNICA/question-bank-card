@@ -28,6 +28,9 @@ function scenario() {
   const metadata = () => ({ services: Object.fromEntries(Object.entries(counts).map(([service, count]) => [service, { configured: count > 0, count }])) });
   const context = {
     $, el: dom.el, icon: dom.icon, AbortController, console,
+    // 密钥来源标注要读 /api/status（这台电脑上「生效的」是旧环境变量那份），
+    // 所以这两个测试桩也得有 state；这里没有旧环境变量，判定就是「没有说明」。
+    state: { status: null }, credentialSourceNote: () => "",
     document: { hidden: false, addEventListener(type, fn) { (events[type] ||= []).push(fn); } },
     window: { addEventListener(type, fn) { (windows[type] ||= []).push(fn); } },
     requestAnimationFrame() { return 0; }, cancelAnimationFrame() {}, anyDialogOpen: () => $("credentialDialog").open,

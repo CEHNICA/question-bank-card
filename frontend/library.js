@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   "use strict";
 
   const QB = window.QBRender;
@@ -33,7 +33,6 @@
     basketMissing: [],
     basketToken: 0,
     basketLoading: false,
-    basketVisible: window.matchMedia("(min-width: 980px)").matches,
     draft: null,
     draftDirty: false,
     draftBaseline: null,
@@ -268,6 +267,9 @@
     renderAnswerFilters(facets.answers || {});
     renderTagFilter(facets.tags || []);
     renderExtraTools();
+    // 四个分组全空时，「更多筛选」点开了也是一片空白 —— 那就不出现。
+    $("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox, ui.extraTools]
+      .every((box) => box.hidden);
     const selectedView = state.view === "selected";
     for (const control of [ui.search, ui.source, $("sortSelect"), ...document.querySelectorAll("#typeFilters button, .library-advanced button, .library-advanced select")]) control.disabled = selectedView;
   }
@@ -412,7 +414,26 @@
     return questionViewer.open(item, { returnFocus, navigation: questionViewerNavigation(item),
       returnFocusResolver: () => document.getElementById(`q-${item.id}`)?.querySelector(".library-full-button") });
   }
-  window.LibraryQuestionViewer.mountFocus({ node, host: document.querySelector(".library-results-head") });
+  // 收侧栏的小按钮就长在侧栏右边那道缝上（.rail-collapse），抽屉里不再放一份。
+  const focusToggle = window.LibraryQuestionViewer.mountFocus({ button: $("libraryRailToggle") });
+
+  // 题卡的「更多」是原生 <details>：点开以后，点页面别处 —— 包括一大片空白 ——
+  // 它不会自己收起来，只能再点一次「更多」。这里补上：点外面关、Esc 关、
+  // 开一个就把别的收起来。三条规则加在一起八行，比重写成一个自绘菜单划算得多。
+  function closeOtherCardMenus(except) {
+    for (const node of document.querySelectorAll(".library-card-more[open]")) if (node !== except) node.open = false;
+  }
+  document.addEventListener("pointerdown", (event) => {
+    const open = document.querySelector(".library-card-more[open]");
+    if (open && !open.contains(event.target)) open.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const open = document.querySelector(".library-card-more[open]");
+    if (!open) return;
+    open.open = false;
+    open.querySelector("summary")?.focus({ preventScroll: true });
+  });
 
   // 录过两次的卷在题库里同名。日期只到天仍会撞（同一天录两次照样分不出），
   // 所以带上时分 —— 用户要判断的正是「哪份是后录的」。
@@ -532,11 +553,13 @@
     const more = node("details", "library-card-more");
     more.append(node("summary", "", "更多"));
     const menu = node("div", "library-card-menu");
+    const closeMenu = () => { more.open = false; };
     const review = iconButton("a", "button button-quiet button-small", "回到题卡", "back");
     review.href = draftLink(item);
+    review.addEventListener("click", closeMenu);
     const withdraw = iconButton("button", "button button-quiet button-small library-withdraw", "撤回", "undo");
     withdraw.title = "从正式题库撤下；题卡和原卷都保留，可以重新入库";
-    withdraw.addEventListener("click", () => withdrawItem(item));
+    withdraw.addEventListener("click", () => { closeMenu(); withdrawItem(item); });
     const inBasket = state.basket.includes(item.id);
     const basket = iconButton("button", `button ${inBasket ? "button-outline" : ""} button-small`, inBasket ? "已在试题篮" : "加入试题篮", inBasket ? "check" : "plus");
     basket.setAttribute("aria-pressed", String(inBasket));
@@ -547,11 +570,13 @@
       render();
     });
     const editAnswer = iconButton("button", "button button-quiet button-small", "编辑答案解析", "plus");
-    editAnswer.addEventListener("click", () => openAnswerEditor([item], { scope: "library" }));
+    editAnswer.addEventListener("click", () => { closeMenu(); openAnswerEditor([item], { scope: "library" }); });
     const editQuestion = node("button", "button button-quiet button-small", "修改题目");
-    editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
+    editQuestion.type = "button"; editQuestion.addEventListener("click", () => { closeMenu(); openQuestionEditor(item); });
     menu.append(editQuestion, editAnswer, review, withdraw, ...jobButtons(item));
     more.append(menu);
+    // 原生 details 各开各的。开一个就把别的收起来，页面上不会同时挂好几个小窗口。
+    more.addEventListener("toggle", () => { if (more.open) closeOtherCardMenus(more); });
     actions.append(origin, full, expand, more, node("span", "actions-spacer"), basket);
     article.append(meta, paper, actions);
     if (state.focus === item.id) article.classList.add("focused");
@@ -788,6 +813,7 @@
     $("selectVisible").indeterminate = count > 0 && count < shown.length;
     $("selectVisible").disabled = !shown.length;
     $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
+    document.querySelector(".library-bulk")?.classList.toggle("has-selection", state.selected.size > 0);
     for (const [id, feature] of [["generateSelectedTags", "knowledge_tags"], ["generateSelectedAnswers", "ai_answer"]]) {
       const button = $(id);
       button.hidden = !state.features[feature] || state.ai.mode !== "api" || state.ai.api_ready !== true;
@@ -839,22 +865,19 @@
 
   function renderBasket() {
     const panel = $("basketPanel");
-    panel.hidden = !state.basketVisible;
-    document.querySelector(".library-workspace").classList.toggle("basket-collapsed", !state.basketVisible);
-    const toggle = $("basketToggle");
-    toggle.textContent = `${state.basketVisible ? "收起" : "打开"}试题篮（${state.basket.length}）`;
-    toggle.setAttribute("aria-expanded", String(state.basketVisible));
-    $("basketPanelCount").textContent = String(state.basket.length);
+    panel.hidden = false;
     $("selectedViewCount").textContent = String(state.basket.length);
     $("clearBasketPanel").disabled = !state.basket.length;
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = !state.basket.length;
     ui.basketButton.disabled = state.basketLoading;
-    // Keep one preview control: in the rail when open, beside its toggle when closed.
-    const shortcut = $("basketPreviewShortcut");
-    shortcut.hidden = state.basketVisible || !state.basket.length;
-    const previewParent = state.basketVisible ? panel : shortcut;
-    if (ui.basketButton.parentElement !== previewParent) previewParent.append(ui.basketButton);
+    // 「组卷预览」钉在顶栏，和「试题篮 N」并排。它原来在侧栏和篮面板之间搬，
+    // 用户找不到它；篮展开收起时它还总落在折叠线以下。顶栏本来就是空的一行，
+    // 篮空时它自己隐藏，.topbar-tools 也就整块不占位，纵向一行都不多花。
+    const tools = document.querySelector(".topbar-tools");
+    if (tools && ui.basketButton.parentElement !== tools) tools.append(ui.basketButton);
+    // 篮的入口跟着篮走：篮里有题才在顶栏给一个按钮，抽屉里那一组也跟着计数。
+    window.QBSiteDrawer?.setBasketCount(state.basket.length);
     $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
     $("allQuestionsButton").classList.toggle("active", state.view === "all");
     $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
@@ -2078,6 +2101,43 @@
     syncExportButtons();
   }
 
+  // 导出的结果是一张留下来的卡片，不是闪一下就没的小字：说清文件叫什么、几道题、
+  // 存在哪，而且能一键打开 —— 存到指定文件夹时后台会回一张凭据，前端以前校验完就扔了。
+  function renderExportStatus({ text, path = "", tone = "", actions = [] }) {
+    const status = $("printExportStatus");
+    status.replaceChildren();
+    status.className = `print-export-status no-print${tone ? ` is-${tone}` : ""}`;
+    status.hidden = false;
+    if (text) status.append(node("strong", "", text));
+    if (path) status.append(node("span", "print-export-path", path));
+    if (actions.length) {
+      const row = node("div", "print-export-actions");
+      for (const action of actions) row.append(action);
+      status.append(row);
+    }
+  }
+
+  function exportAction(label, title, run) {
+    const button = node("button", "button button-small", label);
+    button.type = "button"; button.title = title;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { await run(); }
+      catch (error) { toast(error.message || "打不开这个位置", "error"); }
+      finally { button.disabled = false; }
+    });
+    return button;
+  }
+
+  function openExported(target, fileToken) {
+    // 凭据是一次性的（后台 pop 掉），所以「打开文件」用它；「打开文件夹」不带凭据，
+    // 走已保存的导出位置，可以反复点。
+    const body = fileToken ? { target, file_token: fileToken } : { target };
+    return api("/api/export-preferences/open", { method: "POST", body }).then((result) => {
+      if (!result?.opened) throw new Error("这个位置打不开，请在文件夹里确认文件是否还在。");
+    });
+  }
+
   async function exportPaper(format) {
     if (printState.exporting || state.draftSaving) return;
     if (!await checkMissingAnswers(format)) return;
@@ -2106,13 +2166,31 @@
         status.textContent = format === "pdf" ? "正在生成 PDF 文件…" : "正在生成 Word 文件…";
         const result = await window.ExamExport.download(printState.items, { title: ui.printTitle.value.trim() || "练习", print_options: options, format,
           solutions: solutions.fixedSelections(printState.solutions, printState.items.map(item => item.id)) });
-        status.textContent = result.saved ? `已保存到 ${result.path}` : `已导出 ${result.filename}`;
-        if (result.warning) status.textContent += `；${result.warning}`;
-        toast(result.saved ? "文件已保存到设置的文件夹" : format === "pdf" ? "PDF 文件已生成" : "Word 文件已生成", "success");
+        const count = result.question_count || printState.items.length;
+        const warning = result.warning ? `；${result.warning}` : "";
+        if (result.saved) {
+          renderExportStatus({
+            text: `已导出 ${count} 道题${warning}`, path: result.path,
+            actions: [
+              exportAction("打开文件", `用默认程序打开 ${result.filename}`, () => openExported("file", result.file_token)),
+              exportAction("打开文件夹", "打开导出文件夹", () => openExported("directory"))
+            ]
+          });
+          toast("文件已保存到设置的文件夹", "success");
+        } else {
+          // 没配导出目录时文件走浏览器下载，页面确实不知道它落到哪儿 ——
+          // 不编一个路径，只说清文件名，并把设置入口给出来。
+          const link = node("a", "button button-small link-button", "设置导出位置");
+          link.href = "/settings#display";
+          renderExportStatus({ text: `已下载 ${count} 道题：${result.filename}${warning}`, actions: [link] });
+          ui.sheet.scrollTo?.({ top: 0 });
+          toast(`${format === "pdf" ? "PDF" : "Word"} 文件已下载`, "success");
+        }
+        if (result.warning) status.append(document.createTextNode(`　${result.warning}`));
       }
     } catch (error) {
-      status.textContent = error.message || "导出失败，请重试";
-      toast(status.textContent, "error");
+      renderExportStatus({ text: error.message || "导出失败，请重试", tone: "error" });
+      toast(error.message || "导出失败，请重试", "error");
     } finally {
       printState.exporting = false;
       setExportBusy(false);
@@ -2182,16 +2260,9 @@
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
   $("sortSelect").addEventListener("change", () => { state.sort = $("sortSelect").value; syncUrl(); load(); });
-  $("basketToggle").addEventListener("click", () => {
-    state.basketVisible = !state.basketVisible;
-    renderBasket();
-    if (state.basketVisible && window.matchMedia("(max-width: 979px)").matches) {
-      const headerHeight = document.querySelector(".topbar")?.offsetHeight || 56;
-      const panelTop = $("basketPanel").getBoundingClientRect().top + window.scrollY;
-      // The review page's global scroll-padding includes another toolbar; do not double it here.
-      window.scrollTo({ top: panelTop - headerHeight - 12, behavior: "instant" });
-    }
-  });
+  // 抽屉里的「试题篮 N」不再折叠，篮的内容就在标题下面。点它只是让题库把篮
+  // 重新画一遍（比如刚加过题、或上次的滚动位置已经不在了），不需要再决定显不显示。
+  window.QBSiteDrawer?.onBasketChange?.(() => { renderBasket(); });
   $("allQuestionsButton").addEventListener("click", () => { state.view = "all"; render(); });
   $("basketViewButton").addEventListener("click", async () => { state.view = "selected"; render(); await refreshBasket({ force: true }); });
   $("selectVisible").addEventListener("change", () => {
@@ -2315,18 +2386,32 @@
   $("confirmDialog").addEventListener("click", (event) => {
     if (event.target === $("confirmDialog")) $("confirmDialog").close();
   });
-  const toolbar = document.querySelector(".library-toolbar");
-  const syncToolbar = () => {
-    const top = document.querySelector(".topbar")?.offsetHeight || 56;
-    toolbar.classList.toggle("stuck", window.scrollY > 0 && toolbar.getBoundingClientRect().top <= top + 1);
-    document.documentElement.style.setProperty("--library-toolbar-h", `${toolbar.offsetHeight}px`);
-    const toolbarBottom = toolbar.getBoundingClientRect().bottom;
-    document.documentElement.style.setProperty("--basket-top", `${Math.max(top, toolbarBottom) + 18}px`);
+  // 查找与筛选在左侧栏，窄屏（≤979px）改成右侧浮层。触发按钮在顶栏右端，
+  // 和左端的导航抽屉分开，两个面板不会同时开着。
+  const railToggle = $("libraryFilterToggle");
+  const railScrim = $("libraryRailScrim");
+  const setRail = (open) => {
+    if (open) {
+      window.QBSiteDrawer?.close?.();
+      // 窄屏上侧栏是浮层，专注模式把它 display:none 掉了。要不然「宽屏进了专注、
+      // 再把窗口拖窄」会卡在一个既看不见也打不开的侧栏上。
+      if (document.body.classList.contains("library-focus-mode")) focusToggle?.set(false);
+    }
+    document.body.classList.toggle("rail-open", open);
+    railScrim.hidden = !open;
+    railToggle.setAttribute("aria-expanded", String(open));
+    if (open) document.querySelector(".library-rail .library-search input")?.focus({ preventScroll: true });
   };
-  new ResizeObserver(syncToolbar).observe(toolbar);
-  window.addEventListener("scroll", syncToolbar, { passive: true });
-  window.addEventListener("resize", syncToolbar);
-  syncToolbar();
+  railToggle.addEventListener("click", () => setRail(!document.body.classList.contains("rail-open")));
+  railScrim.addEventListener("click", () => setRail(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !document.body.classList.contains("rail-open")) return;
+    // 和抽屉同一规矩：原生 <dialog> 在 top layer，永远盖住侧栏，Esc 先让给它。
+    if (document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    setRail(false);
+    railToggle.focus({ preventScroll: true });
+  });
   $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
   window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
   window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");

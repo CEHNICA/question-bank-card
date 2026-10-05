@@ -22,6 +22,8 @@
     <symbol id="i-printer" viewBox="0 0 24 24"><path d="M7 9V4h10v5"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7 14h10v6H7z"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2h.01"/></symbol>
     <symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.3M12 16.8h.01"/></symbol>
+    <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="M14.5 5 8 12l6.5 7"/></symbol>
+    <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9.5 5 16 12l-6.5 7"/></symbol>
   </svg>
 
   <header class="topbar site-header">
@@ -29,82 +31,90 @@
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
-        <span class="engine-line">正式题库 · 收录核对通过的题面</span>
       </span>
     </a>
-    <nav class="topnav header-nav" aria-label="页面">
+    <nav class="topnav header-nav" aria-label="页面" data-drawer="nav">
       <a class="header-link" href="/">录入终审</a>
       <a class="header-link active" href="/library" aria-current="page">正式题库</a>
       <a class="header-link" href="/settings">设置</a>
     </nav>
-    <div class="topbar-tools"><button id="libraryRestoreHints" class="button quiet small" type="button" hidden>恢复操作提示</button><button id="libraryKeysButton" class="button quiet small" type="button">快捷键</button><a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码">源码</a></div>
+    <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false">筛选</button><button id="libraryRestoreHints" class="button quiet small" type="button" hidden data-drawer="tools">恢复操作提示</button><button id="libraryKeysButton" class="button quiet small" type="button" data-drawer="tools">快捷键</button><a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码" data-drawer="tools">源码</a></div>
   </header>
 
+  <!-- 抽屉的搬运暂存位：下面这些按钮平时不出现在页面上，site-drawer.js 启动时
+       把它们按 data-drawer 搬进抽屉对应分组，id 不变、事件照旧。 -->
+  <div class="drawer-staging" hidden>
+    <button id="openDrafts" class="button button-quiet button-small" type="button" data-drawer="library">组卷草稿</button>
+  </div>
+
   <main class="library-main">
-    <section class="library-toolbar" aria-label="查找题目">
-      <div class="library-search">
-        <svg class="icon search-icon" aria-hidden="true"><use href="#i-search"/></svg>
-        <input id="searchInput" type="search" placeholder="搜索题干、选项、答案，如 ∠BAD、AB//CD、平行四边形" aria-label="搜索题目" autocomplete="off">
-        <kbd class="search-kbd" aria-hidden="true">/</kbd>
-      </div>
-      <div class="library-filters">
-        <label class="library-select">
-          <span>来源</span>
-          <select id="sourceSelect" aria-label="来源试卷"><option value="">全部试卷</option></select>
-        </label>
-        <div id="typeFilters" class="draft-filters" role="group" aria-label="题型"></div>
-        <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
-        <button id="basketToggle" class="button button-small" type="button" aria-controls="basketPanel" aria-expanded="true">收起试题篮</button>
-        <span id="basketPreviewShortcut" class="basket-preview-shortcut" hidden></span>
-      </div>
-      <details id="advancedFilters" class="library-advanced">
-        <summary>更多筛选</summary>
-        <div class="library-filters">
-        <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
-        <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
-        <label id="tagFilterBox" class="library-select" hidden>
-          <span>知识点</span>
-          <select id="tagSelect" aria-label="知识点"><option value="">全部知识点</option></select>
-        </label>
-        </div>
-        <div id="extraTools" class="library-extra-tools" hidden></div>
-      </details>
-      <div id="libraryShortcutHint" class="library-shortcut-hint"></div>
-    </section>
     <div class="library-workspace">
-      <section class="library-results" aria-label="题目列表">
-        <div class="library-results-head">
+      <!-- 查找和筛选在左侧栏，不占顶部高度：顶到第一道题之间只剩顶栏和批量条。 -->
+      <aside class="library-rail" id="libraryRail" aria-label="查找题目">
+        <div class="library-search">
+          <svg class="icon search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="searchInput" type="search" placeholder="搜索题干、选项…" title="搜索题干、选项、答案，如 ∠BAD、AB//CD、平行四边形" aria-label="搜索题目" autocomplete="off">
+          <kbd class="search-kbd" aria-hidden="true">/</kbd>
+        </div>
+        <div id="activeFilters" class="active-filters" aria-label="当前筛选" hidden></div>
+        <div class="library-filters">
           <div class="draft-filters" role="group" aria-label="浏览范围">
             <button id="allQuestionsButton" class="draft-filter active" type="button" aria-pressed="true">全部题目</button>
             <button id="basketViewButton" class="draft-filter" type="button" aria-pressed="false">已选题目 <span id="selectedViewCount" class="count">0</span></button>
           </div>
-          <button id="openDrafts" class="button button-quiet button-small" type="button">组卷草稿</button>
+          <label class="library-select">
+            <span>来源</span>
+            <select id="sourceSelect" aria-label="来源试卷"><option value="">全部试卷</option></select>
+          </label>
+          <div id="typeFilters" class="draft-filters" role="group" aria-label="题型"></div>
+          <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
         </div>
-        <div id="activeFilters" class="active-filters" aria-label="当前筛选" hidden></div>
+        <details id="advancedFilters" class="library-advanced">
+          <summary>更多筛选</summary>
+          <div class="library-filters">
+          <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
+          <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
+          <label id="tagFilterBox" class="library-select" hidden>
+            <span>知识点</span>
+            <select id="tagSelect" aria-label="知识点"><option value="">全部知识点</option></select>
+          </label>
+          </div>
+          <div id="extraTools" class="library-extra-tools" hidden></div>
+        </details>
+        <div id="libraryShortcutHint" class="library-shortcut-hint" data-drawer="hint"></div>
+      </aside>
+      <button id="libraryRailToggle" class="rail-collapse" type="button" aria-controls="libraryRail"
+        aria-expanded="true" title="收起筛选栏" aria-label="收起筛选栏">
+        <svg class="icon" aria-hidden="true"><use href="#i-chev-left"/></svg>
+      </button>
+      <section class="library-results" aria-label="题目列表">
         <div class="library-bulk" aria-label="批量选题">
           <label><input id="selectVisible" type="checkbox">选择当前已显示题目</label>
           <span id="selectionCount" role="status" aria-live="polite">已勾选 0 题</span>
-          <button id="addSelected" class="button button-small" type="button" disabled>加入试题篮</button>
-          <button id="withdrawSelected" class="button button-quiet button-small" type="button" disabled
-            title="把勾选的题从正式题库撤下；题卡和原卷都保留，可以重新入库">撤回所选</button>
-          <button id="clearSelection" class="button button-quiet button-small" type="button" disabled>取消勾选</button>
-          <button id="generateSelectedTags" class="button button-quiet button-small" type="button" hidden disabled>生成标签</button>
-          <button id="generateSelectedAnswers" class="button button-quiet button-small" type="button" hidden disabled>生成参考答案</button>
+          <span id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</span>
+          <div class="bulk-actions">
+            <button id="addSelected" class="button button-small" type="button" disabled>加入试题篮</button>
+            <button id="withdrawSelected" class="button button-quiet button-small" type="button" disabled
+              title="把勾选的题从正式题库撤下；题卡和原卷都保留，可以重新入库">撤回所选</button>
+            <button id="clearSelection" class="button button-quiet button-small" type="button" disabled>取消勾选</button>
+            <button id="generateSelectedTags" class="button button-quiet button-small" type="button" hidden disabled>生成标签</button>
+            <button id="generateSelectedAnswers" class="button button-quiet button-small" type="button" hidden disabled>生成参考答案</button>
+          </div>
         </div>
-        <p id="libraryStatus" class="library-status" role="status" aria-live="polite">正在读取题库…</p>
         <div id="libraryLoadError" class="library-load-error" role="alert" hidden></div>
         <div id="assistantTaskNotice" class="library-load-error" role="status" aria-live="polite" hidden></div>
         <div id="libraryList" class="library-list"></div>
         <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
       </section>
-      <aside id="basketPanel" class="basket-panel" aria-labelledby="basketPanelTitle">
-        <div class="basket-panel-head"><h2 id="basketPanelTitle">试题篮 <span id="basketPanelCount">0</span></h2><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
+      <aside id="basketPanel" class="basket-panel" aria-label="试题篮" data-drawer="basket">
+        <div class="basket-panel-head"><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
         <p id="basketSummary" class="helper">先找到题目，再加入试题篮。</p>
         <div id="basketLoadError" class="library-load-error" role="alert" hidden></div>
         <ol id="basketList" class="basket-list"></ol>
-        <button id="basketButton" class="button button-primary basket-preview no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>组卷预览 <span id="basketCount">0</span> 题</button>
+        <button id="basketButton" class="button button-primary basket-preview no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg><span class="topbar-preview-label">组卷预览</span> <span id="basketCount">0</span> 题</button>
       </aside>
     </div>
+    <div id="libraryRailScrim" class="rail-scrim" hidden></div>
   </main>
 
   <dialog id="questionDialog" class="question-dialog" aria-labelledby="questionTitle">
@@ -186,7 +196,7 @@
       <button id="exportPdf" class="button button-primary" type="button">导出 PDF</button>
       <button id="printButton" type="button" hidden aria-hidden="true">打印</button>
     </div>
-    <p id="printExportStatus" class="print-export-status no-print" role="status" aria-live="polite" hidden></p>
+    <div id="printExportStatus" class="print-export-status no-print" role="status" aria-live="polite" hidden></div>
     <div class="print-workspace">
       <details id="printSettings" class="print-options no-print" open>
         <summary>排版与内容</summary>
@@ -236,6 +246,7 @@
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
+  <script src="/site-drawer.js" defer></script>
   <script src="/library-workspace.js" defer></script>
   <script src="/library-solutions.js" defer></script>
   <script src="/library-answer-editor.js" defer></script>

@@ -196,8 +196,11 @@ assert.deepEqual(drawn({ total: 25, done: 0, todo: 25, green: 21, yellow: 4, red
   { title: "不用再看 0 · 还要看 25", parts: [["todo", "100%", "var(--amber-bar)"]] });
 assert.deepEqual(drawn({ total: 10, done: 10, todo: 0, green: 0, yellow: 0, approved: 0, settled: 10 }),
   { title: "不用再看 10 · 还要看 0", parts: [["done", "100%", "var(--green-bar)"]] });
-assert.deepEqual(drawn({ total: 4, done: 0, todo: 0, waiting: 4 }), { title: undefined, parts: [] });
-assert.equal(meterContext.meter({ counts: { total: 0 } }).children.length, 0);
-assert.equal(meterContext.meter({}).children.length, 0, "没有题数的试卷画一条空条，不报错");
+assert.equal(meterContext.meter({ counts: { total: 4, done: 0, todo: 0, waiting: 4 } }), null,
+  "全部还在识读时不画绿条：上面那行文字已经说清这个状态了");
+// 1.12.7：没有题数时什么都不画。空壳 .mini-meter 也会画出自己的 3px 灰轨，
+// 失败的卷在列表里就多一根像坏掉的进度条。
+assert.equal(meterContext.meter({ counts: { total: 0 } }), null, "没有题数的试卷不画条");
+assert.equal(meterContext.meter({}), null, "没有题数的试卷不画条，也不报错");
 assert.doesNotMatch(meterSource, /--red\)/, "识读失败不再单独占一段颜色");
 assert.doesNotMatch(meterSource, /已通过 \$\{/, "绿色那段不是“已通过”：已入库但没打勾的题一道都没有");

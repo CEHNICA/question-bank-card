@@ -103,6 +103,9 @@ const QBUpload = (() => {
   async function resolveUploadPolicy({ cloudReady = false, acknowledged = false } = {}, confirmCloud) {
     // Capture permission for this upload. Local import never depends on cloud
     // credentials or agreement to send the original document elsewhere.
+    // 1.12.7: cloudReady 现在只代表「MinerU 配好了，能云端切题」。看图读题服务
+    // 只在切完之后「AI 识读这题」那一步才需要，缺它不该把切题也一起关掉 ——
+    // 照片没有文字层，关掉就等于导入后必然「处理失败」，而且看不出缺什么。
     const allowCloud = Boolean(cloudReady && (acknowledged || (typeof confirmCloud === "function" && await confirmCloud())));
     return Object.freeze({ parseMode: "auto", allowCloud });
   }
@@ -1318,7 +1321,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const bar = el("span", "mini-meter");
     // Don't show a green “done” bar while every card is still waiting for a
     // read. The processing line above already describes that active state.
-    if (!total || Number(counts.waiting || 0) >= total) return bar;
+    // Nothing to draw at all means no element: an empty .mini-meter still
+    // paints its 3px grey track, which reads as a broken progress bar on a
+    // failed or empty paper.
+    if (!total || Number(counts.waiting || 0) >= total) return null;
     [["done", done, "var(--green-bar)"], ["todo", todo, "var(--amber-bar)"]].forEach(([key, count, color]) => {
       if (!count) return;
       const part = el("span");
@@ -1353,7 +1359,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         item.classList.add("fresh");
         link.append(el("span", "fresh-dot", "新"));
       }
-      link.append(meta, miniMeter(paper));
+      link.append(meta);
+      const bar = miniMeter(paper);
+      if (bar) link.append(bar);
       if (paper.id === state.paperId) link.setAttribute("aria-current", "true");
       link.addEventListener("click", () => selectPaper(paper.id));
       item.append(link);
@@ -1564,9 +1572,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
   }
 
+  // 这份资料是不是已经全部处理完。进度条、绿色完成条、卷名下面那句话以前各算各的，
+  // 同一件事在页面上摆了三遍（一次 46px、一次 60px、一次 20px）。判定收在这里，
+  // 一处说了算：全部处理完时只留绿色那条，另外两处让位给题目。
+  function paperComplete(c) {
+    return c.all > 0 && !c.todo && !c.green && !c.waiting && state.paper.status === "ready";
+  }
+
   function renderMeter(c) {
     const meter = $("reviewMeter");
-    meter.hidden = !c.all;
+    meter.hidden = !c.all || paperComplete(c);
     if (!c.all) return;
     const segments = [
       ["approved", c.approved, "已入库", "var(--accent)"],
@@ -1598,7 +1613,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function renderDoneBanner(c) {
     const banner = $("doneBanner");
-    const done = c.all > 0 && !c.todo && !c.green && !c.waiting && state.paper.status === "ready";
+    const done = paperComplete(c);
     banner.hidden = !done;
     if (!done) return;
     const text = el("span");
@@ -1664,19 +1679,34 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (c.green) {
       // 和上一句同一个口径：todo 已经归零，剩下的就是不用再看的。
       statusText.textContent = `${c.all} 道题，${c.approved} 题已入库。`;
+    } else if (paperComplete(c)) {
+      // 绿色完成条已经把「全部 N 题已处理完」写在下面了，这里不再重复一遍。
+      statusText.textContent = "";
     } else {
       statusText.textContent = `全部 ${c.all} 题已处理完。` + aiNote(c);
     }
-    if (!isProcessing && paper.parse_mode === "native") {
-      const manualPages = (paper.processing_plan?.pages || []).filter((page) => page.mode === "manual");
-      if (manualPages.length) statusText.append(el("span", "processing-detail", `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));
-      const warnings = paper.processing_plan?.warnings;
+    if (!isProcessing) {
+      // 1.12.7：这两行以前只在 parse_mode 还是「native」时显示，而失败时后台已经
+      // 把它改成「manual」了 —— 于是「这份资料没有 PDF 文字层」被吞掉，用户只看到
+      // 「本地文字层没有可靠题卡」，那句话像在说材料坏了。照片本来就没有文字层。
+      const plan = paper.processing_plan || {};
+      const manualPages = (plan.pages || []).filter((page) => page.mode === "manual");
+      const noTextLayer = !paper.parse_mode || paper.parse_mode !== "mineru";
+      if (manualPages.length && noTextLayer) {
+        statusText.append(el("span", "processing-detail", `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));
+      }
+      const warnings = plan.warnings;
       if (Array.isArray(warnings) && warnings.length) statusText.append(el("span", "processing-detail", warnings.map(String).join("；")));
     }
     // Only known completed local/cloud route explanations move to history.
     // Failures, missing pages, structure issues and unknown warnings stay visible.
-    if (paper.processing_plan?.fallback_reason && !QBReviewGuidance.historicalParseReason(paper)) {
-      statusText.append(el("span", "processing-detail", String(paper.processing_plan.fallback_reason)));
+    // 后台拼那条红条时用的就是这句 fallback_reason（前面加「自动切题没有切出任何题目：」），
+    // 红条里已经有了就别在这儿再说一遍。判据用「红条是否包含这一句」，不要用
+    // 「状态是不是失败」—— worker 失败时红条可能是另一句话，那时这行仍然有用。
+    const reason = String(paper.processing_plan?.fallback_reason || "");
+    const inErrorBar = Boolean(reason) && String(paper.error || "").includes(reason);
+    if (reason && !inErrorBar && !QBReviewGuidance.historicalParseReason(paper)) {
+      statusText.append(el("span", "processing-detail", reason));
     }
     const processingPanel = $("processingPanel");
     processingPanel.hidden = !isProcessing;
@@ -1817,9 +1847,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
     } else if (summary.eligibleIds.length) {
+      const notReady = readerUnavailable();
       const read = button(`识读未完成题目（${summary.eligibleIds.length} 题）`, "primary", () => readCutQuestions());
-      read.disabled = paperReadSubmissionPending(paper.id) || paper.status !== "ready";
+      read.disabled = paperReadSubmissionPending(paper.id) || paper.status !== "ready" || Boolean(notReady);
       if (paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
+      if (notReady) {
+        // 和题卡上的「AI 识读这题」同一套做法：不让你点进一次注定失败的请求，
+        // 直接把原因写进这块面板自己的红条，并放出去配置的链接。
+        cutReadingErrors.set(state.paperId, readerUnavailableSentence(notReady));
+        read.title = "先在“设置 → 服务与密钥”里填好密钥，再回来识读。";
+      }
       if (cutReadingRequests.has(paper.id)) read.textContent = "正在提交识读……";
       actions.append(read);
     }
@@ -1841,7 +1878,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const error = stopError || cutReadingErrors.get(paper.id);
     $("cutReadingError").hidden = !error;
     $("cutReadingError").textContent = error || "";
-    $("cutReadingSettings").hidden = !error || Boolean(stopError) || !/(配置.*(?:读题|看图)|(?:读题|看图).*(?:配置|密钥))/.test(error);
+    // 「API Key」也算要人动手去配：readerUnavailableSentence 说的是「还没有 API Key」，
+    // 原来那条正则只认「配置/密钥」连用，会把这个链接藏掉。
+    $("cutReadingSettings").hidden = !error || Boolean(stopError)
+      || !/(配置.*(?:读题|看图)|(?:读题|看图).*(?:配置|密钥)|API\s*Key|去“?设置)/i.test(error);
   }
 
   function openManualCut() {
@@ -1917,7 +1957,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (state.paperId !== paperId) return;
       const message = error.name === "TimeoutError" ? "识读提交结果尚未确认，请稍后查看题卡。保存的范围与原图都保留。" : error.message;
       cutReadingErrors.set(paperId, message);
-      toast(message, "error");
+      // 红条是常驻的、位置固定、不压住任何按钮；toast 会飘到题卡上盖住
+      // 「改字 / 调整范围 / AI 识读这题」，而且和红条是同一句话。
+      // 这里以前不重画，红条其实压根没出现，是 toast 在替它兜底 ——
+      // 现在红条自己出来，toast 就不必了。
+      renderCutReadingStage();
       if (error.name === "TimeoutError") void refreshPaper();
     } finally {
       cutReadingRequests.delete(paperId);
@@ -1943,7 +1987,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (state.paperId !== paperId) return;
       const message = error.name === "TimeoutError" ? "停止识读的结果尚未确认，请稍后查看状态或重试；原图裁片保留。" : `未能停止识读：${error.message}`;
       cutReadingStopErrors.set(paperId, message);
-      toast(message, "error");
+      // 和上面同一个道理：这块面板自己的红条常驻、不压住按钮，toast 是重复。
+      renderCutReadingStage();
       if (error.name === "TimeoutError") void refreshPaper();
     } finally {
       cutReadingStops.delete(paperId);
@@ -3688,6 +3733,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
     more.append(menu);
+    // 点外面收起在这个文件末尾已经统一处理了（details.more[open]），这里只补一条：
+    // 原生 details 各开各的，开一个就把别的收起来。
+    more.addEventListener("toggle", () => {
+      if (!more.open) return;
+      for (const node of document.querySelectorAll("details.more[open]")) if (node !== more) node.open = false;
+    });
     actions.append(more);
     body.append(actions);
     card.append(head, source, body);
@@ -4363,11 +4414,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // ---------------------------------------------------------------- 设置
+  // 「这个服务到底填没填密钥」有两个来源：/api/status 说的是**现在生效的**
+  // （后台读环境变量），密钥窗口读的是**新密钥库**。这台电脑上两者可以不一致
+  // —— 旧的 Windows 环境变量里还留着一把能用的 Token，新库是空的。那时候
+  // 「已填写」和「共保存 0 个」都是真的，凑在一起就成了两个答案。
+  // 判定只有这一处，设置页和密钥窗口都用它；只说明「生效的是哪一份」，
+  // 不动后台判定、不迁移、不碰环境变量。
+  const LEGACY_KEY_NOTE = "这台电脑上还留着一份旧的 Windows 环境变量密钥，密钥窗口里看不到它。点“打开密钥窗口”重新填一次就能统一。";
 
-  function setApiState(id, configured) {
+  function credentialStoreFresh() {
+    // 只读、no-store、响应里没有任何密钥明文，缓存到内存里不存在泄露风险。
+    return api("/api/settings/credentials")
+      .then((payload) => { state.credentialStore = payload?.services || {}; return state.credentialStore; })
+      .catch(() => null);
+  }
+
+  function credentialSourceNote(service) {
+    const stored = state.credentialStore?.[service];
+    if (stored && stored.configured) return "";
+    const configured = state.status?.configured || state.status?.engines?.configured || {};
+    const live = service === "mineru"
+      ? Boolean(state.status?.mineru || configured.mineru) : Boolean(configured[service]);
+    return live ? LEGACY_KEY_NOTE : "";
+  }
+
+  function setApiState(id, configured, note = "") {
     const node = $(id);
-    node.textContent = configured ? "已填写" : "未填写";
+    node.textContent = configured ? (note ? "已填写（旧环境变量）" : "已填写") : "未填写";
     node.className = `api-state ${configured ? "ready" : "missing"}`;
+    const row = node.parentElement;
+    let hint = row?.querySelector?.(".api-source-note");
+    if (note) {
+      if (!hint) { hint = el("p", "api-source-note"); row?.append?.(hint); }
+      hint.textContent = note;
+    } else if (hint) hint.remove();
   }
 
   function selectedEngine(engines, role, fallback) {
@@ -4431,11 +4511,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!status) return;
     const engines = status.engines || {};
     const configured = status.configured || engines.configured || {};
-    setApiState("settingsMineruState", Boolean(status.mineru || configured.mineru));
-    setApiState("settingsMinimaxState", Boolean(configured.minimax));
-    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow));
-    setApiState("settingsModelscopeState", Boolean(configured.modelscope));
+    setApiState("settingsMineruState", Boolean(status.mineru || configured.mineru), credentialSourceNote("mineru"));
+    setApiState("settingsMinimaxState", Boolean(configured.minimax), credentialSourceNote("minimax"));
+    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow), credentialSourceNote("siliconflow"));
+    setApiState("settingsModelscopeState", Boolean(configured.modelscope), credentialSourceNote("modelscope"));
+    renderSettingsModelsTail();
+    // 密钥库那一份要单独拉一次才判得出「两个来源不一致」。慢一拍没关系：
+    // 第一次先按 /api/status 画，拉回来再改文案，不会闪出错的话。
+    if (!state.credentialStorePromise) state.credentialStorePromise = credentialStoreFresh();
+    state.credentialStorePromise.then(() => {
+      if (state.status === status) renderApiSourceNotes();
+    });
+  }
 
+  function renderApiSourceNotes() {
+    if (!state.status) return;
+    const configured = state.status.configured || state.status.engines?.configured || {};
+    setApiState("settingsMineruState", Boolean(state.status.mineru || configured.mineru), credentialSourceNote("mineru"));
+    setApiState("settingsMinimaxState", Boolean(configured.minimax), credentialSourceNote("minimax"));
+    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow), credentialSourceNote("siliconflow"));
+    setApiState("settingsModelscopeState", Boolean(configured.modelscope), credentialSourceNote("modelscope"));
+  }
+
+  function renderSettingsModelsTail() {
+    const status = state.status;
+    const engines = status.engines || {};
     // A status response can arrive while another choice is still being saved,
     // or while a model ID is being typed. Keep that newer form intact.
     if (modelFormDirty) return;
@@ -4735,6 +4835,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     credentialSavedRows.clear();
     const services = payload?.services || {};
     credentialServices = services;
+    // 密钥窗口的判据也存进同一个地方：设置页那边要靠它说「生效的是哪一份」。
+    state.credentialStore = services;
     let total = 0;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       const status = services[service] || {};
@@ -4743,6 +4845,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const node = $(field.state);
       node.textContent = `已保存 ${count} 个`;
       node.className = `api-state ${status.configured ? "ready" : "missing"}`;
+      // 这个库是空的、但 /api/status 说这台电脑上有一份旧环境变量密钥在生效 ——
+      // 说清楚，别让「共保存 0 个」和设置页的「已填写」各说各的。
+      const note = credentialSourceNote(service);
+      const block = $(field.state).parentElement?.parentElement || $(field.state).parentElement;
+      let hint = block?.querySelector?.(".api-source-note");
+      if (note) {
+        if (!hint) { hint = el("p", "api-source-note"); block?.append?.(hint); }
+        hint.textContent = note;
+      } else if (hint) hint.remove();
       $(field.remove).hidden = !status.configured;
       $(field.remove).disabled = credentialBusy || !status.configured;
       renderCredentialSavedRows(service, field, count);
@@ -4948,10 +5059,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!s || !node) return;
     const configured = s.configured || s.engines?.configured || {};
     const vision = Boolean(configured.minimax || configured.siliconflow || configured.modelscope);
-    const missing = [!s.mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务"].filter(Boolean);
-    node.className = `settings-ready ${automaticParseReady() ? "ready" : "missing"}`;
-    node.textContent = automaticParseReady()
-      ? "导入时先在本机切题。云处理已配置，经你允许后用于本机无法切出的资料；实际可用性以处理结果为准。"
+    // 1.12.7：切题和识读分开说。以前 MinerU 已经配好、只缺看图服务时，这里写
+    // 「可选的云处理还需 MinerU、一家看图读题服务」，读起来像 MinerU 也没配。
+    const mineru = cloudCutReady();
+    const missing = [!mineru && "MinerU", !vision && !s.assistant_mode && "一家看图读题服务"].filter(Boolean);
+    node.className = `settings-ready ${automaticParseReady() ? "ready" : mineru ? "ready" : "missing"}`;
+    node.textContent = mineru
+      ? (vision || s.assistant_mode
+        ? "导入时先在本机切题。云处理已配置，经你允许后用于本机无法切出的资料；实际可用性以处理结果为准。"
+        : "导入时先在本机切题；本机切不出的资料（照片、扫描件）经你允许后交给已配置的 MinerU。切完想在题卡上「AI 识读这题」时，还需要一家看图读题服务。")
       : missing.length ? `导入资料和从原卷选题可直接使用，无需密钥。可选的云处理还需 ${missing.join("、")} 密钥。`
         : "导入资料和从原卷选题可直接使用。需要云处理时再配置读题服务。";
   }
@@ -5353,6 +5469,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       state.editing.delete(q.id);
       editGuard.release(q.id);
       card.querySelector(".editor")?.remove();
+      // 1.12.7：顶栏和预览是整张卡的直接子元素，崩了也要一起收干净，
+      // 否则左边试卷列表会一直消失、退不出全屏。
+      card.querySelector(".editor-bar")?.remove();
+      card.querySelector(".editor-preview-box")?.remove();
+      document.body.classList.remove("qb-editing");
       card.classList.remove("editing");
       for (const [selector, hidden] of [[".rendered", false], [".card-actions", false], [".card-origin", false], [".card-toggle", false]]) {
         const node = card.querySelector(selector);
@@ -5371,8 +5492,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.editing.add(q.id);
     setCurrent(q.id);
     const editor = el("form", "editor");
-    const title = el("div", "editor-title");
-    title.append(el("span", "", `改字 · 第 ${q.number} 题`));
     const typeSelect = el("select");
     Object.entries(TYPE_NAMES).forEach(([value, label]) => {
       const option = el("option", "", label);
@@ -5380,8 +5499,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       option.selected = value === q.question_type;
       typeSelect.append(option);
     });
-    const typeRow = el("label", "field inline");
-    typeRow.append(el("span", "", "题型"), typeSelect);
     const origin = el("input", "origin-input");
     origin.value = q.origin || "";
     origin.maxLength = 120;
@@ -5471,19 +5588,45 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? el("p", "editor-position-hint", "") : el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
     positionHint.hidden = !positionHint.textContent;
     previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), positionHint, preview);
+    // 顶栏是整张卡的直接子元素，不在 <form> 里，所以这个按钮不能是 submit ——
+    // 点了什么都不会发生。改成普通按钮，转手提交表单。
     const saveButton = el("button", "button primary", "保存");
-    saveButton.type = "submit";
-    const cancel = button("取消", "", () => discardEdits([q.id]));
-    const bar = el("div", "editor-actions");
+    saveButton.type = "button";
+    saveButton.addEventListener("click", () => editor.requestSubmit());
     const shortcutNote = window.QBShortcutHelp?.hintDismissed?.("editor-shortcut")
       ? null : el("p", "hint", "Ctrl+Enter 保存 · Esc 取消");
-    bar.append(saveButton, cancel);
+    // 1.12.7：改字占满整屏，顶栏一条操作栏收着返回、换题、题型和保存。
+    // 原来钉在面板顶部/底部的那种悬浮条取消，屏幕下半永远不会被压住。
+    // 全屏里也要能换题，否则藏起试卷列表后很容易不知道自己在第几题。
+    // 换题只能在展开着的题卡之间走：已通过而没展开的题渲染成一行摘要，根本没有
+    // 题干可改，从 DOM 里挑出真正能打开的那些，才不会跳过去扑个空。
+    const siblings = [...document.querySelectorAll(".card:not(.compact)")]
+      .map(node => state.questions.find(item => String(item.id) === node.dataset.id)).filter(Boolean);
+    const here = siblings.findIndex((item) => item.id === q.id);
+    const jump = async (delta) => {
+      const other = siblings[here + delta];
+      if (!other) return;
+      if (state.editing.has(other.id)) { toast("那道题正在改字，先保存或取消", "error"); return; }
+      if (!(await discardEdits([q.id]))) return;
+      const target = document.querySelector(`.card[data-id="${other.id}"]`);
+      if (target) openEditor(target, other);
+    };
+    const back = button("← 返回", "", () => discardEdits([q.id]));
+    back.title = "回到审核列表；有未保存的改动会先问一句";
+    const place = el("div", "editor-bar-place");
+    place.append(el("span", "editor-bar-count", `第 ${q.number} 题 / 共 ${state.questions.length} 题`));
+    const prevButton = button("‹ 上一题", "small", () => jump(-1));
+    const nextButton = button("下一题 ›", "small", () => jump(1));
+    prevButton.disabled = here <= 0;
+    nextButton.disabled = here < 0 || here >= siblings.length - 1;
+    place.append(prevButton, nextButton);
+    const typeField = el("label", "editor-bar-type");
+    typeField.append(el("span", "", "题型"), typeSelect);
+    const bar = el("div", "editor-bar");
+    bar.append(back, place, el("span", "editor-bar-spacer"), typeField);
     if (shortcutNote) bar.append(shortcutNote);
-    // 1.12.6：保存条移到标题右边、钉在面板顶部。原来它钉在底部，还专门在
-    // 卡片底部留了 62px 空地挡着内容。
-    const head = el("div", "editor-head");
-    head.append(title, bar);
-    editor.append(head, typeRow, originRow, stemRow, tableTools, optionBox, extra);
+    bar.append(saveButton);
+    editor.append(originRow, stemRow, tableTools, optionBox, extra);
 
     const collect = () => ({
       stem: stem.value,
@@ -5563,55 +5706,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         showPosition();
       });
     };
-    // 1.12.6：预览放回左栏原卷下面 —— 右边只管打字，左边看排版结果。
-    // 关键是让它和右边的题干顶对在同一条水平线上：原来左边比右边低一截，
-    // 打字时视线在两个错位的框之间来回跳。这里量出差的像素，补成外边距。
-    const alignPreviewWithStem = () => {
-      const source = card.querySelector(".source-sticky");
-      if (!source || !source.contains(previewBox)) { previewBox.style.marginTop = ""; return; }
-      const target = stem.getBoundingClientRect().top;
-      // 改外边距会反过来移动自己，且 fitStem/showPosition 之后题干的行数还会变，
-      // 一次算不准。迭代到对齐或不再变化为止。
-      for (let pass = 0; pass < 3; pass += 1) {
-        const gap = target - preview.getBoundingClientRect().top;
-        if (Math.abs(gap) < 1.5) break;
-        // 截图特别高时左边已经越过右边，此时不再往下推。
-        const next = Math.max(0, Math.min((parseFloat(previewBox.style.marginTop) || 0) + gap, 240));
-        if (Math.abs(next - (parseFloat(previewBox.style.marginTop) || 0)) < 1) break;
-        previewBox.style.marginTop = `${Math.round(next)}px`;
-      }
-    };
-    const placePreview = () => {
-      const source = card.querySelector(".source-sticky");
-      const shot = source?.querySelector(".crop, .crop-missing");
-      // 搬去左栏的前提：题卡还是左右两栏（左栏原卷 sticky），且原卷截图下方
-      // 仍给得起一块预览的高度。窄屏左栏不是 sticky，就老老实实留在题干下面。
-      const beside = Boolean(source && getComputedStyle(source).position === "sticky"
-        && window.innerWidth > 1100 && viewTop() + 72 + (shot?.offsetHeight || 0) < window.innerHeight - 180);
-      if (beside) {
-        if (previewBox.parentElement !== source) source.append(previewBox);
-      } else if (previewBox.parentElement !== editor || previewBox.previousElementSibling !== stemRow) {
-        stemRow.after(previewBox);
-      }
-      previewBox.classList.toggle("beside", beside);
-      const room = window.innerHeight - viewTop() - 72;
-      previewBox.style.setProperty("--preview-room", `${Math.round(room - 30)}px`);
-      if (beside) alignPreviewWithStem();
-    };
-    const relayout = () => { fitStem(); placePreview(); updatePosition(); };
+    // 1.12.7：预览不再追着题干上下对齐。全屏三块区域是网格排的，顶边天然在
+    // 同一条线上，原来那套按差值算 margin 的微调（placePreview /
+    // alignPreviewWithStem）连同它对窗口尺寸、原卷图片加载时机的依赖一起去掉了。
     editor.addEventListener("input", update);
-    // A taller stem changes the room the preview may use, and the original crop
-    // only knows its height once the image has loaded. Both used to leave the
-    // layout measured against a stale height until the window was resized.
-    stem.addEventListener("input", relayout);
-    window.addEventListener("resize", relayout);
-    const shot = card.querySelector(".source-sticky .crop img, .source-sticky .crop");
-    if (shot && !shot.complete) shot.addEventListener("load", relayout, { once: true });
-    if (window.ResizeObserver) {
-      const observer = new ResizeObserver(() => { fitStem(); placePreview(); });
-      observer.observe(stem);
-      editor.addEventListener("qb:editor-teardown", () => observer.disconnect(), { once: true });
-    }
+    stem.addEventListener("input", fitStem);
+    window.addEventListener("resize", () => { fitStem(); updatePosition(); });
     editor.addEventListener("keydown", (event) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey) return;
       if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); discardEdits([q.id]); }
@@ -5648,9 +5748,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       cancelAnimationFrame(frame);
       cancelAnimationFrame(positionFrame);
       document.removeEventListener("selectionchange", selectionChanged);
-      window.removeEventListener("resize", relayout);
+      window.removeEventListener("resize", fitStem);
       previewBox.remove();
+      bar.remove();
       editor.remove();
+      document.body.classList.remove("qb-editing");
       card.querySelector(".rendered").hidden = false;
       card.querySelector(".card-actions").hidden = false;
       if (toggle) toggle.hidden = false;
@@ -5663,9 +5765,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const originLine = card.querySelector(".card-origin");
     if (originLine) originLine.hidden = true;
     card.querySelector(".reads")?.remove();
+    // 1.12.7：顶栏和预览是整张卡的直接子元素 —— 全屏网格按它们排（左上原卷、
+    // 左下编辑、右边预览），不再塞进题卡的正文栏里跟别的块抢位置。
+    card.append(bar, previewBox);
     card.querySelector(".card-body").append(editor);
-    // The original stays in sight while typing: the left column is sticky.
+    // 点「改字」就占满整屏：左边的试卷列表和顶栏收起来，只剩这一道题。
     card.classList.add("editing");
+    document.body.classList.add("qb-editing");
     let prefilled = null;
     let prefillSelection = null;
     if (prefill) {
@@ -5681,11 +5787,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } else toast("原题文字或替换范围已经变化，未填入识读结果；请重新核对", "error");
     }
     fitStem();
-    placePreview();
     update();
     (prefilled || stem).focus({ preventScroll: true });
     if (prefillSelection) prefilled.setSelectionRange(...prefillSelection);
-    card.scrollIntoView({ block: "start" });
   }
 
   // ---------------------------------------------------------------- 框选识读（1.10.2）
@@ -7863,11 +7967,26 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return Boolean(state.status?.automatic_parse_ready);
   }
 
+  // 1.12.7：云端**切题**只认 MinerU；看图读题服务是切完之后「AI 识读这题」那一步
+  // 才需要的。以前两件事绑在一起，害得一台明明有 MinerU 的电脑导入照片后必然失败。
+  function cloudCutReady() {
+    const configured = state.status?.configured || state.status?.engines?.configured || {};
+    return Boolean(state.status?.mineru || configured.mineru);
+  }
+
   // The backend answers this the same way the reading worker will, so a card can
   // say “no key for the service you chose” before the request instead of after.
   function readerUnavailable() {
     const readiness = state.status?.reader_readiness;
     return readiness && readiness.ready === false ? readiness : null;
+  }
+
+  // 后台给的是同一件事的另一种说法（views.py _reader_unavailable_sentence），
+  // 但那边不知道这块面板上还有什么可做，所以本地这句把「直接原图审核 / 继续手工切题」
+  // 一起写出来。键入一个按钮都不该点进一次注定失败的请求。
+  function readerUnavailableSentence(notReady) {
+    const service = notReady?.label || "看图读题服务";
+    return `还没有可用的看图读题模型：所选的“${service}”还没有 API Key，本机也没有其他已配置的服务。也可以直接原图审核，或继续手工切题。`;
   }
 
   function renderUploadAvailability() {
@@ -7877,7 +7996,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 云服务已经配好时不再挂这行常驻提示：它一直在说一件你早就知道的事，
     // 真到了会把资料发出去的那一步，弹窗里本来就会写清发送范围。
     const note = $("uploadNote");
-    if (automaticParseReady()) { note.hidden = true; note.textContent = ""; return; }
+    if (cloudCutReady()) { note.hidden = true; note.textContent = ""; return; }
     note.hidden = false;
     note.textContent = "自动判断资料，先在本机切题；未切出的题可以从原卷选取，无需密钥。";
   }
@@ -7924,7 +8043,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     let acknowledged = false;
     try { acknowledged = Boolean(sessionStorage.getItem("qb-cloud-upload-ack")); } catch { /* 无存储时每次都提示 */ }
-    const policy = await QBUpload.resolveUploadPolicy({ cloudReady: automaticParseReady(), acknowledged }, () => confirmDialog({
+    const policy = await QBUpload.resolveUploadPolicy({ cloudReady: cloudCutReady(), acknowledged }, () => confirmDialog({
       title: "本机无法切题时，允许云处理吗？",
       text: "资料会先保存在本机并尝试切题。若本机无法切题，允许后才会把原稿发送给已配置的 MinerU，并按现有读题设置使用看图服务或 AI 助手，可能使用服务额度。系统不会预先擦除姓名、手写或批改痕迹。\n\n不允许也能导入，然后从原卷选取题目。此选择适用于本次上传；允许后本窗口后续上传不再重复提示。",
       ok: "允许使用已配置服务",
@@ -8424,9 +8543,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text: "每份试卷的进度写在列表里，点一下继续；原卷会一直保留。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "核对后通过，自动入库",
       text: "先对照原卷核对题面，错字用“改字”修正。确认完整正确后打勾，通过即入库。" },
-    { target: () => document.querySelector('.topnav a[href="/library"]'), title: "找题和组卷",
+    { target: () => document.querySelector('.topnav a[href="/library"]'), title: "找题和组卷", drawer: true,
       text: "正式题库可以搜索、全屏看题和选题组卷；选好题后先看预览，再导出。" },
-    { target: () => $("settingsButton"), title: "遇到问题时看帮助",
+    { target: () => $("settingsButton"), title: "遇到问题时看帮助", drawer: true,
       text: "设置 → 帮助有新手练习、补图和跨页说明、常见问题与快捷键。" }
   ];
 
@@ -8485,8 +8604,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function startTour() {
     tourMode(false);
     if (document.documentElement.classList.contains("review-fullscreen")) setReviewFullscreen(false);
+    // 导航在抽屉里，关着的时候聚光灯只能照到一片空白 —— 先拉开再筛步骤。
+    const drawer = window.QBSiteDrawer;
+    tour.drawer = null;
+    if (drawer && TOUR_STEPS.some((step) => step.drawer)) drawer.open();
     tour.steps = TOUR_STEPS.filter((step) => tourVisible(step.target()));
-    if (!tour.steps.length) return;
+    if (!tour.steps.length) { drawer?.close?.(); return; }
     tour.index = 0;
     $("tour").hidden = false;
     document.documentElement.classList.add("touring");
@@ -8495,6 +8618,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function endTour() {
     clearTimeout(tour.pending);
+    if (tour.drawer) window.QBSiteDrawer?.close?.();
+    tour.drawer = null;
     teachingTarget?.classList.remove("teaching-target");
     teachingTarget = null;
     $("tour").hidden = true;
@@ -8505,6 +8630,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function showTourStep() {
     const step = tour.steps[tour.index];
+    // 每一步只在自己需要的时候把抽屉拉开，走过去就合上。
+    if (step.drawer !== tour.drawer) {
+      if (step.drawer) window.QBSiteDrawer?.open?.();
+      else if (tour.drawer) window.QBSiteDrawer?.close?.();
+      tour.drawer = step.drawer || null;
+    }
     const target = step.target();
     if (!tourVisible(target)) {
       // The page changed under the tour (a card was re-rendered): move on.

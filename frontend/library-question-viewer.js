@@ -207,22 +207,24 @@
     return { open, close, isOpen: () => Boolean(dialog?.open) };
   }
 
-  function mountFocus({ node, host }) {
-    if (!host) return null;
-    const headerTools = root.document.querySelector?.(".topbar-tools");
-    const button = node("button", "button button-quiet button-small library-focus-toggle", "专注浏览");
-    button.type = "button"; button.id = "libraryFocusBrowse"; button.setAttribute("aria-pressed", "false");
-    button.title = "暂时收起筛选和试题篮，选题与草稿会保留";
+  // 1.12.7：收侧栏的开关是侧栏接缝上那个小按钮（.rail-collapse），不再是一个
+  // 「专注浏览」文字按钮在顶栏和抽屉之间来回搬 —— 搬来搬去用户根本记不住它在哪。
+  // 按钮从头到尾待在原地，只换图标和说明。
+  function mountFocus({ button }) {
+    if (!button) return null;
+    const use = (id) => { const glyph = button.querySelector?.("use"); if (glyph) glyph.setAttribute("href", `#${id}`); };
     const set = active => {
       const keepFocus = root.document.activeElement === button;
-      root.document.body.classList.toggle("library-focus-mode", Boolean(active));
-      button.textContent = active ? "退出专注浏览" : "专注浏览";
-      button.setAttribute("aria-pressed", String(Boolean(active)));
-      (active && headerTools ? headerTools : host).append(button);
+      const on = Boolean(active);
+      root.document.body.classList.toggle("library-focus-mode", on);
+      button.setAttribute("aria-expanded", String(!on));
+      const label = on ? "展开筛选栏" : "收起筛选栏";
+      button.title = label; button.setAttribute("aria-label", label);
+      use(on ? "i-chev-right" : "i-chev-left");
       if (keepFocus) button.focus({ preventScroll: true });
     };
     button.addEventListener("click", () => set(!root.document.body.classList.contains("library-focus-mode")));
-    host.append(button); return { button, set };
+    set(false); return { button, set };
   }
   return { create, mountFocus };
 });

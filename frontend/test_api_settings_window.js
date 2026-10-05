@@ -56,6 +56,7 @@ function scenario() {
     discard() { if (this.isBusy()) return false; this.dirty = false; this.key = ""; calls.push("discard-answer"); return true; }
   };
   const context = vm.createContext({ $, el: dom.el, icon: dom.icon, console, AbortController, setTimeout, clearTimeout,
+  state: { status: null }, credentialSourceNote: () => "",
     window: { LibraryAISettings: ai, addEventListener(name, fn) { windowEvents.set(name, fn); }, location: { pathname: "/settings", hash: "", search: "" } },
     document: { addEventListener() {}, querySelectorAll(selector) { if (selector === "[data-settings-tab]") return tabs; if (selector === "#settingsDialog .settings-page") return pages; throw new Error(selector); }, querySelector() { return $("scroll"); } },
     requestAnimationFrame(fn) { frames.set(++frame, fn); return frame; }, cancelAnimationFrame(id) { frames.delete(id); },

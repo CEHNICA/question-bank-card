@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 // 关闭 API 配置窗口曾经“卡一下”：模型设置没保存时，关闭会先等一次
 // /api/settings/models，再等一次 loadStatus，两次往返串行，而且中间什么都不显示。
@@ -46,7 +46,7 @@ function scenario() {
   for (const label of ["close", "cancel"]) closeButtons.push({ label, disabled: false, events: {},
     addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }, closest() { return $("credentialDialog"); } });
   const dialogs = [$("credentialDialog"), $("pageDialog")];
-  const context = vm.createContext({ $, console, el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ $, console, state: { status: null }, credentialSourceNote: () => "", el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
     window: { addEventListener() {} },
     button: (...args) => dom.el("button", "", ...args),
     requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {},

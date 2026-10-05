@@ -20,6 +20,8 @@ function scenario() {
     cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), QBCutReading: Cut,
     paperReadSubmissionPending: () => context.cutReadingStops.has(context.state.paperId) || context.cutReadingRequests.has(context.state.paperId),
     QBRegionWait: { boundedRequest: (task) => task(undefined) }, renderReadingControls() {},
+    // 停止失败时错误改由这块面板自己的红条常驻显示，toast 不再重复一遍。
+    renderCutReadingStage() { context.stagesRendered = (context.stagesRendered || 0) + 1; },
     refreshPaper: async () => { questions[0].ocr_pending = false; questions[0].content_revision += 1; },
     api: async (url, options) => { requests.push({ url, method: options.method, body: options.body }); return { stopped: 1, message: "Local reading stopped" }; },
     toast: (message, kind) => messages.push({ message, kind }) };
@@ -82,7 +84,10 @@ function scenario() {
   assert.equal(JSON.stringify(failure.questions), before, "A failed stop cannot pretend that reading was stopped");
   assert.match(failure.context.cutReadingStopErrors.get("cut-test"), /未能停止识读：Offline/);
   assert.equal(failure.context.cutReadingStops.size, 0, "The button remains available for a retry after failure");
-  assert.equal(failure.messages[0].kind, "error");
+  // 1.12.7：失败提示只留这块面板自己的红条一处，不再叠一个飘过来的 toast
+  // —— toast 固定在右下角、不挡鼠标之前，正好压在题卡的「改字 / 调整范围」上。
+  assert.equal(failure.messages.length, 0, "The same sentence must not appear twice");
+  assert.equal(failure.context.stagesRendered, 1, "The red bar is re-rendered so the sentence is actually visible");
 
   const busy = scenario();
   busy.context.cutReadingRequests.add("cut-test");
