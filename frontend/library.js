@@ -119,6 +119,17 @@
     }
   }
 
+  // 1.13.4：把手的荧光在用户第一次展开篮子之后就永久停掉。存在本机，
+  // 和试题篮同一个作用域；存不住时退化成「这次还会闪」。
+  const BASKET_HANDLE_SEEN_PREF = "qb-basket-handle-seen";
+  function basketHandleSeen() {
+    try { return window.localStorage.getItem(BASKET_HANDLE_SEEN_PREF) === "1"; } catch { return false; }
+  }
+  function markBasketHandleSeen() {
+    try { window.localStorage.setItem(BASKET_HANDLE_SEEN_PREF, "1"); } catch { /* 只在本页有效 */ }
+    document.body.classList.add("library-basket-seen");
+  }
+
   function saveBasket() {
     prunePrintChoices();
     try { window.localStorage.setItem("qb-basket", JSON.stringify(state.basket)); } catch { /* 浏览器禁止存储时，试题篮只在本页有效 */ }
@@ -877,7 +888,7 @@
     const label = next ? "收起试题篮" : `展开试题篮（${state.basket.length} 题）`;
     if (handle) { handle.title = label; handle.setAttribute("aria-label", label); }
     $("basketPanel").hidden = !next;
-    if (next) setRail(false);
+    if (next) { setRail(false); if (!basketHandleSeen()) markBasketHandleSeen(); }
   }
 
   function renderBasket() {
@@ -889,9 +900,7 @@
     $("selectedViewCount").textContent = String(state.basket.length);
     $("clearBasketPanel").disabled = !state.basket.length;
     document.body.classList.toggle("library-basket-has-items", state.basket.length > 0);
-    // 有题时把手点亮，题目越多越绿，20 题封顶。这里只写一个 0–1 的数，
-    // 底色和辉光交给 CSS：颜色要是在这里拼成 rgba，hover 和动画就都改不动了。
-    handle.style.setProperty("--basket-fill", (Math.min(1, state.basket.length / 20)).toFixed(3));
+    document.body.classList.toggle("library-basket-seen", basketHandleSeen());
     const label = state.basketVisible ? "收起试题篮" : `展开试题篮（${state.basket.length} 题）`;
     handle.setAttribute("aria-expanded", String(state.basketVisible));
     handle.title = label; handle.setAttribute("aria-label", label);

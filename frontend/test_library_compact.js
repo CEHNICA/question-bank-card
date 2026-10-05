@@ -48,16 +48,37 @@ assert.match(libraryHtml, /id="basketPanel"[^>]*class="basket-panel"(?![^>]*data
 assert.ok(!libraryHtml.includes('data-drawer="basket"'), "抽屉里不再有试题篮");
 assert.ok(!libraryHtml.includes('id="basketPreviewShortcut"'), "组卷预览只在篮里，没有第二个家");
 // 把手改成悬浮：它骑在视口右缘，不占栅格列，收起时那 26px 全还给题目。
-assert.match(libraryCss, /\.basket-handle \{ --basket-fill: 0; position: fixed; right: 0; top: 50vh;/, "把手钉在视口右缘正中");
+assert.match(libraryCss, /\.basket-handle \{ position: fixed; right: 0; top: 50vh;/, "把手钉在视口右缘正中");
 assert.ok(!libraryCss.includes(".library-workspace > .basket-handle { grid-column"), "把手是 fixed，不进栅格流");
 assert.match(libraryCss, /body\.library-basket-open \.library-workspace \{ grid-template-columns: 212px minmax\(0, 1fr\) 300px; \}/, "展开时才让出第三列");
 
-// 1.12.9 第 1 条：有题时把手点亮，越多越浓，20 题封顶。强度是 JS 写的一个 0–1 的数，
-// 颜色和辉光都在样式里算 —— 别有人改回在 JS 里拼 rgba，那样 hover 就改不动了。
-assert.match(libraryJs, /handle\.style\.setProperty\("--basket-fill", \(Math\.min\(1, state\.basket\.length \/ 20\)\)\.toFixed\(3\)\);/);
-assert.match(libraryCss, /\.basket-handle::before \{[^}]*opacity: var\(--basket-fill\);/);
-assert.match(libraryCss, /0 0 calc\(2px \+ 9px \* var\(--basket-fill\)\) rgba\(31, 107, 95, calc\(\.06 \+ \.24 \* var\(--basket-fill\)\)\);/,
-  "辉光的范围和浓淡都跟着题数走，不是固定的一圈");
+// 1.13.4：「越绿越亮」那套浓度撤了。实测篮里 1 道题时把手和空篮的最大色差只有
+// 2/255、5 道题 7/255，真实使用区间里等于没有；有题没看改成荧光呼吸灯。
+assert.doesNotMatch(libraryCss, /--basket-fill/, "题数浓度已撤，别再加回来");
+assert.doesNotMatch(libraryJs, /--basket-fill/);
+assert.doesNotMatch(libraryCss, /\.basket-handle::before/, "半透明墨绿底一起撤了");
+// 1.13.4 荧光呼吸灯：只有「有题 + 没展开 + 没看过」三个条件同时成立才亮。
+assert.match(libraryCss,
+  /body\.library-basket-has-items:not\(\.library-basket-open\):not\(\.library-basket-seen\) \.basket-handle::after \{[^}]*animation: basket-handle-fluoresce 2\.8s ease-in-out infinite;/,
+  "荧光的三个条件缺一不可");
+const fluoresce = libraryCss.match(/@keyframes basket-handle-fluoresce \{[\s\S]*?\n\}/);
+assert.ok(fluoresce, "荧光关键帧在");
+assert.match(fluoresce[0], /background-color: var\(--glow-off\)/);
+assert.match(fluoresce[0], /background-color: var\(--glow-on\)/);
+assert.match(fluoresce[0], /box-shadow: -8px 0 15px/, "波峰的内层溢光往左偏");
+assert.match(fluoresce[0], /-14px 0 28px/, "波峰的外层柔晕也往左偏");
+// 溢光被视口切掉一半会露硬边：把手右边缘到视口实测是 0，所以每层的 x 偏移必须
+// 不小于该层模糊半径的一半，让右边界落在视口上、强度已衰减到 0。
+for (const layer of fluoresce[0].matchAll(/(-?\d+)px 0 (\d+)px/g)) {
+  assert.ok(Math.abs(Number(layer[1])) >= Number(layer[2]) / 2,
+    `溢光层 ${layer[1]}px/${layer[2]}px 的右边界会被视口切掉`);
+}
+assert.match(libraryCss, /@media \(prefers-reduced-motion: reduce\) \{ \.basket-handle::after \{ animation: none !important; \} \}/,
+  "减少动态效果时必须写 animation: none 且要 !important：只压 duration 的话 infinite 动画仍会转，不加 !important 又会被上面那条三类的状态选择器盖住");
+assert.match(libraryJs, /document\.body\.classList\.toggle\("library-basket-seen", basketHandleSeen\(\)\);/,
+  "看过一次之后不再闪，标志跟着每次渲染同步");
+assert.match(libraryJs, /if \(next\) \{ setRail\(false\); if \(!basketHandleSeen\(\)\) markBasketHandleSeen\(\); \}/,
+  "展开篮子那一刻记下「已经看过」");
 
 // 1.12.9 第 2 条：输出内容默认只出题目。页面初始值、代码兜底、服务端草稿默认三处
 // 必须一致，只改一处就会出现「界面默认题目、下次开草稿又变回题目＋答案」。

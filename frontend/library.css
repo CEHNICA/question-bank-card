@@ -168,29 +168,45 @@ body.library-basket-open .library-workspace { grid-template-columns: 212px minma
 .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
 
 /* 收起时右边只留这一条把手，骑在屏幕右缘上，像贴在边上一个小抽屉拉手。
-   它一直都在：篮空着也得看得见往哪儿加题。
-   --basket-fill 是「浓度」，0–1，由 library.js 按篮里的题数写进来：0 题 0，20 题封顶。
-   颜色和辉光全在样式里算，JS 不拼 rgba —— 拼出来的颜色没法被 hover 复用。 */
-.basket-handle { --basket-fill: 0; position: fixed; right: 0; top: 50vh; z-index: 4; transform: translateY(-50%);
+   它一直都在：篮空着也得看得见往哪儿加题。 */
+.basket-handle { position: fixed; right: 0; top: 50vh; z-index: 4; transform: translateY(-50%);
   display: grid; justify-items: center; gap: 3px; width: 26px; padding: 9px 0 7px;
   border: 1px solid var(--line); border-right: 0; border-radius: 9px 0 0 9px;
   background: var(--surface); color: var(--muted);
-  /* 辉光跟着题数走：几乎看不见 → 20 题时外面一圈明显的墨绿。 */
-  box-shadow: var(--shadow-sm),
-    0 0 calc(2px + 9px * var(--basket-fill)) rgba(31, 107, 95, calc(.06 + .24 * var(--basket-fill)));
+  box-shadow: var(--shadow-sm);
   transition: color .15s, border-color .15s, box-shadow .25s; }
-/* 半透明墨绿底。position: fixed 已经是包含块，inset:0 直接贴满把手。 */
-.basket-handle::before { content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: var(--accent-soft); opacity: var(--basket-fill); pointer-events: none; transition: opacity .25s; }
 .basket-handle > * { position: relative; }
 .basket-handle .icon { width: 16px; height: 16px; }
 .basket-handle-count { font: 700 12px/1 var(--ui-font); font-variant-numeric: tabular-nums; }
 .basket-handle:hover { color: var(--ink); border-color: var(--line-strong); }
-.basket-handle:hover::before { opacity: min(1, calc(var(--basket-fill) + .25)); }
 .basket-handle:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 body.library-basket-open .basket-handle { color: var(--accent); border-color: #bcd8cd; }
 body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
 .basket-handle:disabled { opacity: .6; }
+/* 荧光呼吸灯：篮里有题、没打开、用户还没展开过一次时，整条把手像一根贴在
+   屏幕右缘的灯管 —— 底色从纸白涨到亮薄荷绿，光往左溢出来。
+   强度是固定的，不跟题数走：1.12.9 那套「越绿越亮」实测 1 题时最大色差只有
+   2/255、5 题 7/255，真实使用区间里等于没有，已经撤掉了。
+   画在 ::after 上而不是把手上：把手的 box-shadow 带着 .25s 的 transition，
+   同一属性上再挂动画会每帧都走一遍过渡，脉动会发糊。
+   底色和溢光写在同一个关键帧里，构造上就不会失步。
+   光晕的 x 负偏移都不小于该层模糊半径的一半：把手右边缘到视口边缘实测是 0，
+   对称的外发光会被切掉一半，往左偏之后右边界正好落在视口上、强度已衰减到 0。 */
+.basket-handle::after { --glow-off: #d8efe6; --glow-on: #9fe3c6;
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  z-index: -1; pointer-events: none; }
+@keyframes basket-handle-fluoresce {
+  0%, 100% { background-color: var(--glow-off);
+    box-shadow: -2px 0 4px rgba(31, 107, 95, .18), 0 0 0 1px rgba(31, 107, 95, .12); }
+  50% { background-color: var(--glow-on);
+    box-shadow: -8px 0 15px rgba(31, 107, 95, .40), -14px 0 28px rgba(47, 168, 132, .30); } }
+body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen) .basket-handle { border-color: #8fd4bb; }
+body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen) .basket-handle::after {
+  animation: basket-handle-fluoresce 2.8s ease-in-out infinite; }
+/* 必须写 animation: none：全局那条 reduced-motion 只压 animation-duration，
+   infinite 动画仍会以 0.01ms 的周期一直转。
+   这条要 !important：上面那条状态选择器带了三个类，比这条具体，不加就会被它盖住。 */
+@media (prefers-reduced-motion: reduce) { .basket-handle::after { animation: none !important; } }
 .library-advanced { font-size: 13px; color: var(--ink-2); }
 .library-advanced > summary { width: max-content; cursor: pointer; padding: 3px 0; }
 .library-advanced[open] > .library-filters { margin-top: 10px; }
