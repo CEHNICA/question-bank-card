@@ -7,6 +7,7 @@
   4. 题库页常驻的两条快捷键提示条消失，「恢复操作提示」按钮也没了
   5. 答案解析里的「历史版本」下拉删掉
 """
+import json
 import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -75,6 +76,19 @@ VIEWER = """() => {
   return { tools: [...d.querySelectorAll('.question-viewer-tools > *')].map(n => n.textContent.replace(/\\s+/g,' ').trim()),
            shortcutNodes: d.querySelectorAll('.question-viewer-shortcuts, .question-viewer-tip').length };
 }"""
+
+# 筛选栏：横向滚动条就是 scrollWidth 大于可见宽；「越过右缘」的元素直接点名是谁顶的。
+RAIL = """() => { const r = document.querySelector('.library-rail'); const rr = r.getBoundingClientRect();
+  const btns = [...document.querySelectorAll('#extraTools .button')];
+  const btn = btns[btns.length - 1];
+  return { cw: r.clientWidth, sw: r.scrollWidth, railW: Math.round(rr.width),
+    past: [...r.querySelectorAll('*')].filter(n => n.getBoundingClientRect().right > rr.right + 1)
+      .map(n => ({ cls: (n.id || n.className || n.tagName).toString().slice(0, 30),
+                   over: Math.round(n.getBoundingClientRect().right - rr.right) })),
+    btnW: btn ? Math.round(btn.getBoundingClientRect().width) : 0,
+    btnH: btn ? Math.round(btn.getBoundingClientRect().height) : 0,
+    btnRight: btn ? Math.round(btn.getBoundingClientRect().right) : 0,
+    railRight: Math.round(rr.right) }; }"""
 
 
 def run(pg):
@@ -333,6 +347,74 @@ def run(pg):
     pg.screenshot(path=str(SHOT / "11-bulk-narrow.png"))
     pg.click("#clearSelection"); pg.wait_for_timeout(700)
     check("取消勾选后复原", "0" in pg.evaluate("() => document.querySelector('#selectionCount').textContent"))
+
+    print("\n=== 16. 导出结果卡上的「打开文件 / 打开文件夹」真点一次")
+    # 这两个按钮以前调的是 library.js 里根本不存在的 api()，点一下抛 ReferenceError，
+    # 弹一句英文 "api is not defined"，看着就是「没反应」。98 个前端测试、1383 个后端
+    # 测试全绿也没拦住 —— 没有任何一个测试点过它。
+    # 断言的是「请求确实发出去了」，不是「文件夹真的打开了」：后者要么在桌面留下
+    # 一个测试文件，要么弹出资源管理器，都会污染这台机器。
+    pg.set_viewport_size({"width": 1366, "height": 900})
+    pg.goto(URL + "/library?op=1", wait_until="load"); pg.wait_for_timeout(2600)
+    ids = pg.evaluate("() => fetch('/api/library?limit=8').then(r=>r.json()).then(j=>j.items.map(i=>i.id))")
+    pg.evaluate("(ids) => localStorage.setItem('qb-basket', JSON.stringify(ids))", ids)
+    pg.reload(wait_until="load"); pg.wait_for_timeout(2600)
+    # 假导出：不真的生成文件，也不往磁盘写东西
+    pg.evaluate("""() => { window.ExamExport = Object.assign({}, window.ExamExport, { download: async () => ({
+        saved: true, filename: '练习.pdf', path: 'C:\\\\Users\\\\Test\\\\练习.pdf',
+        file_token: '假凭据', question_count: 8 }) }); }""")
+    opened = []
+    def _route(route):
+        opened.append(route.request.post_data)
+        route.fulfill(status=200, content_type="application/json", body='{"opened": true}')
+    pg.route("**/api/export-preferences/open", _route)
+    pg.click(".basket-handle"); pg.wait_for_timeout(600)
+    pg.click("#basketButton"); pg.wait_for_timeout(2600)
+    pg.click("#exportPdf"); pg.wait_for_timeout(3000)
+    card = pg.evaluate("""() => { const s = document.querySelector('#printExportStatus');
+      return { text: s.innerText.replace(/\\s+/g,' '), buttons: [...s.querySelectorAll('button')].map(b=>b.textContent) }; }""")
+    print("     导出结果卡：", card["text"][:70], "| 按钮", card["buttons"])
+    check("导出结果卡上有那两个按钮", card["buttons"] == ["打开文件", "打开文件夹"], card["buttons"])
+    before_errs = len(errs)
+    for label, want_target, want_token in [("打开文件", "file", True), ("打开文件夹", "directory", False)]:
+        opened.clear()
+        pg.locator("#printExportStatus button", has_text=label).first.click()
+        pg.wait_for_timeout(1200)
+        body = opened[0] if opened else {}
+        parsed = json.loads(body) if body else {}
+        check("点「%s」发出了请求" % label, len(opened) == 1, opened)
+        check("「%s」target=%s" % (label, want_target), parsed.get("target") == want_target, parsed)
+        check("「%s」%s凭据" % (label, "带" if want_token else "不带"),
+              ("file_token" in parsed) == want_token, parsed)
+    toast = pg.evaluate("() => document.querySelector('#toast')?.innerText || ''")
+    check("没有弹出报错提示", "not defined" not in toast and "错误" not in toast, toast)
+    check("点这两个按钮没有抛 JS 异常", len(errs) == before_errs, errs[before_errs:])
+    pg.unroute("**/api/export-preferences/open")
+    pg.screenshot(path=str(SHOT / "12-export-actions.png"))
+
+    print("\n=== 17. 筛选栏「更多筛选」展开后不出现横向滚动条")
+    for w in [1650, 1366, 1100, 979, 820, 560, 390]:
+        pg.set_viewport_size({"width": w, "height": 900})
+        pg.goto(URL + "/library?adv=" + str(w), wait_until="load"); pg.wait_for_timeout(2400)
+        if w <= 979:
+            pg.click("#libraryFilterToggle"); pg.wait_for_timeout(600)
+        before = pg.evaluate(RAIL)
+        if pg.locator(".library-advanced summary").count():
+            pg.click(".library-advanced summary"); pg.wait_for_timeout(700)
+        g = pg.evaluate(RAIL)
+        past = [x for x in g["past"] if "svg" not in x["cls"]]
+        print("     %4d 宽 侧栏 %d：关 %d/%d  开 %d/%d  越界 %s" % (
+            w, g["cw"], before["sw"], before["cw"], g["sw"], g["cw"], past or "无"))
+        check("%4d 宽「更多筛选」关着时无横向溢出" % w, before["sw"] <= before["cw"], before)
+        check("%4d 宽展开后无横向溢出" % w, g["sw"] <= g["cw"], g)
+        check("%4d 宽没有元素越过侧栏右缘" % w, not past, past[:3])
+        check("%4d 宽按钮没被切掉" % w, g["btnRight"] <= g["railRight"] and g["btnW"] <= g["cw"], g)
+        if w > 979:
+            check("%4d 宽按钮标签换成了两行（不是被削掉）" % w, g["btnH"] >= 36, g)
+        if w <= 979:
+            pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
+    pg.set_viewport_size({"width": 1366, "height": 900})
+    pg.screenshot(path=str(SHOT / "13-rail-advanced.png"))
 
 
 

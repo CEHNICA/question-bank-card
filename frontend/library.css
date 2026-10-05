@@ -17,10 +17,24 @@
    题面就多看一道题。窄屏（≤979px）侧栏改成右侧浮层，见本文件末尾。 */
 .library-rail { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100dvh - var(--topbar-h) - 28px);
   overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 12px; align-content: start; min-width: 0; padding-right: 4px; }
+/* 筛选栏永远不该横向滚动：横向一滚，右边的条件就藏起来了。
+   两个坑叠在一起才会出这个毛病 ——
+   ① 上面只写了 overflow-y: auto，按规范另一个轴的 visible 会被算成 auto，
+      所以这一栏本来就可能长出横向滚动条；
+   ② 网格项的「自动最小尺寸」是 min-content，某个孩子一变宽，整列跟着变宽。
+   min-width: 0 把 ② 拆掉：孩子再宽也只能占自己那份，文字按 ① 换行。
+   故意不写 overflow-x: hidden —— 那会把溢出悄悄切掉，连 test_library_compact.js
+   和压力脚本里那条 scrollWidth == clientWidth 的断言都测不出来了。 */
+.library-rail > * { min-width: 0; }
 .library-rail .library-filters { flex-direction: column; align-items: stretch; gap: 10px; }
 .library-rail .library-select { flex-direction: column; align-items: stretch; gap: 5px; }
 .library-rail .library-select select { width: 100%; max-width: none; }
 .library-rail .active-filters { flex-direction: column; align-items: flex-start; margin: 0; }
+/* 1.13：.button 全局是 white-space: nowrap。「给原卷没答案的题做 AI 参考答案」一行
+   最小要 226px，212px 的筛选栏装不下 —— 「更多筛选」一展开就把这一栏顶宽，
+   冒出横向滚动条。同一份 CSS 里 .settings-actions-grid .button 和
+   .settings-help-actions .button 早就为了同样的理由改回 normal 了。 */
+.library-extra-tools .button { white-space: normal; }
 /* 竖排时题型是一堆 chip，灰底胶囊会变成边缘不齐的方块，各自带边框更干净。 */
 .library-rail #typeFilters { background: none; padding: 0; gap: 6px; }
 .library-rail #typeFilters .draft-filter { border: 1px solid var(--line); background: var(--surface); }

@@ -2185,13 +2185,20 @@
     return button;
   }
 
-  function openExported(target, fileToken) {
+  async function openExported(target, fileToken) {
     // 凭据是一次性的（后台 pop 掉），所以「打开文件」用它；「打开文件夹」不带凭据，
     // 走已保存的导出位置，可以反复点。
+    // 1.13：这里原来调的是一个本文件里根本不存在的 api() —— 点一下抛 ReferenceError，
+    // 弹出来的是英文的 "api is not defined"，看上去就是「没反应」。后端、凭据、
+    // 一次性令牌全都是好的，断的只有这一环。本文件所有其它请求都是直接 fetch
+    // 加那两个头，照着写。
     const body = fileToken ? { target, file_token: fileToken } : { target };
-    return api("/api/export-preferences/open", { method: "POST", body }).then((result) => {
-      if (!result?.opened) throw new Error("这个位置打不开，请在文件夹里确认文件是否还在。");
-    });
+    const response = await fetch("/api/export-preferences/open", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+      body: JSON.stringify(body) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "打不开这个位置，请检查文件是否还在。");
+    if (!result?.opened) throw new Error("这个位置打不开，请在文件夹里确认文件是否还在。");
   }
 
   async function exportPaper(format) {

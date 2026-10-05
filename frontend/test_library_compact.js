@@ -77,6 +77,31 @@ for (const page of ["index.html", "library.html"]) {
   assert.match(html, /<script src="\/site-drawer\.js" defer><\/script>/, `${page} 要加载抽屉`);
 }
 
+// 1.13：「打开文件 / 打开文件夹」原来调的是本文件里根本不存在的 api()，一点就抛
+// ReferenceError，弹出来的是英文的 "api is not defined"，看着像「没反应」。
+// 后端接口是好的、98 个前端测试和 1383 个后端测试也全绿 —— 因为没有一个测试点过它。
+// 静态这一条能挡住「再写一个不存在的函数」，真的点一次靠 tools/check_1127c_stress.py。
+// 剥掉行注释和块注释再扫：不然「为什么不能调 api()」这句解释本身就会把自己判成有罪。
+const libraryJsCode = libraryJs
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+assert.match(libraryJs, /async function openExported\(target, fileToken\)/);
+assert.match(libraryJs, /fetch\("\/api\/export-preferences\/open", \{\s*method: "POST", headers: \{ "Content-Type": "application\/json", "X-QB-Request": "1" \}/,
+  "打开导出位置必须走 fetch 并带上这两个头，少一个会被 _guard 挡成 403");
+assert.ok(!/(?<![.\w$])api\s*\(/.test(libraryJsCode), "代码里没有 api 这个函数，别再调它");
+
+// 1.13：「更多筛选」一展开就冒出横向滚动条。两条都要钉：只钉 white-space: normal，
+// 下一个长标签还会把这一栏顶宽。
+assert.match(libraryCss, /\.library-extra-tools \.button \{ white-space: normal; \}/);
+assert.match(libraryCss, /\.library-rail > \* \{ min-width: 0; \}/);
+// 只盯侧栏自己那一处：文件里本来就有几处正当的 overflow-x: hidden
+// （题干、编辑器列表横向滚动），不能一刀切。判之前先剥注释 ——
+// 「故意不写 overflow-x: hidden」这句解释本身也会被一刀切误伤。
+const libraryCssCode = libraryCss.replace(/\/\*[\s\S]*?\*\//g, " ");
+const railRule = libraryCssCode.slice(libraryCssCode.indexOf(".library-rail {"), libraryCssCode.indexOf(".library-rail .library-filters"));
+assert.ok(!railRule.includes("overflow-x: hidden"),
+  "不能靠 hidden 遮掉筛选栏的溢出：那会让 scrollWidth == clientWidth 的断言永远为真，回归测试就瞎了");
+
 // 1.12.10：批量条吸顶。四条一起钉 —— 少钉任何一条，下一轮都会退化回去。
 assert.match(libraryCss, /\.library-bulk \{[^}]*position: sticky; top: var\(--topbar-h\); z-index: 20;/);
 assert.match(libraryCss, /\.library-bulk\.stuck \{[^}]*box-shadow:/);
