@@ -244,8 +244,13 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   assert(css.includes(".library-focus-mode .library-rail, .library-focus-mode .library-bulk"));
   assert(!css.includes(".library-focus-mode .basket-panel"), "专注模式不许再把篮藏掉");
   assert(shared.includes(".topbar-basket-label, .topbar-preview-label") === false, "顶栏不再有篮的按钮");
-  assert(css.includes(".basket-handle { position: sticky;"), "篮的把手一直钉在右边缘视口正中");
-  assert(css.includes("body.library-basket-open .library-workspace { --basket-w: 300px; }"), "展开时占第三列");;
+  assert(css.includes(".basket-handle { position: fixed; right: 0; top: 50vh;"), "篮的把手悬浮在右边缘视口正中，不占题目宽度");
+  assert(css.includes("body.library-basket-open .library-workspace { grid-template-columns: 212px minmax(0, 1fr) 300px; }"), "展开时才占第三列");
+  // 全屏看题的缩放条后面原来挂着一条快捷键提示，占掉整条工具栏宽度。提示都在设置里。
+  const viewerJs = fs.readFileSync(path.join(__dirname, "library-question-viewer.js"), "utf8");
+  assert.ok(!viewerJs.includes("question-viewer-shortcuts") && !viewerJs.includes("question-viewer-tip"),
+    "全屏看题的缩放条后面不再挂快捷键提示");
+  assert.deepEqual(byClass("question-viewer-tools").children.map(child => child.textContent), ["适合宽度", "图片原尺寸", "−", "100%", "＋"], "工具栏只剩缩放本身");
   assert(css.includes(".question-viewer-content.native-images .qb-question-image img"));
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
   console.log("Question viewer: complete content, original image order/zoom, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");

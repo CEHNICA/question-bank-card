@@ -25,10 +25,21 @@ assert.ok(!libraryJs.includes("--basket-top"), "篮子不吸顶了，不必再�
 // ---- 导航与工具折进抽屉，但类名一个字没改
 assert.match(libraryHtml, /<nav class="topnav header-nav"[^>]*data-drawer="nav">/);
 assert.match(libraryHtml, /<a class="header-link" href="\/">录入终审<\/a>/, "导航字面保留，教学巡演和未保存拦截都按它定位");
-for (const id of ["libraryRestoreHints", "libraryKeysButton"]) {
-  assert.match(libraryHtml, new RegExp(`id="${id}"[^>]*data-drawer="tools"`), `${id} 进了抽屉的工具组`);
-}
-assert.match(libraryHtml, /class="source-link"[^>]*data-drawer="tools"/);
+assert.match(libraryHtml, /id="libraryKeysButton"[^>]*data-drawer="tools"/, "快捷键按钮留在抽屉的工具组");
+// 1.12.7：抽屉里三样东西删了 —— 源码链接、整个「操作说明」组、还有「恢复操作提示」。
+// 源码在设置 → 关于里（AGPL 义务由那一栏和发布页承担），操作说明在设置里，
+// 顶到第一道题之前的横条能少一条是一条。
+assert.ok(!libraryHtml.includes("libraryRestoreHints"), "题库页不再挂「恢复操作提示」按钮");
+assert.ok(!libraryHtml.includes('class="source-link"'), "抽屉里不再有源码链接");
+assert.ok(!fs.readFileSync(require.resolve("./index.html"), "utf8").includes('class="source-link"'), "录入终审那一页的抽屉里也不再是源码");
+assert.ok(!stylesCss.includes(".source-link"), "相关的样式一起删干净");
+const drawerJs2 = fs.readFileSync(require.resolve("./site-drawer.js"), "utf8");
+assert.ok(!/name:\s*"hint"/.test(drawerJs2), "抽屉不再有「操作说明」组");
+assert.ok(!stylesCss.includes(".library-shortcut-hint"), "抽屉里那条提示的样式不再需要");
+assert.ok(!libraryHtml.includes('id="libraryShortcutHint"') && !libraryHtml.includes('id="printShortcutHint"'),
+  "题库页不再常驻两条快捷键提示条");
+assert.ok(!libraryJs.includes("mountHint"), "提示条搬去了设置，题库页一个都不挂");
+assert.ok(!libraryJs.includes("syncRestoreHints"), "没有在这里关掉的提示，就没有「恢复」要同步");
 assert.match(libraryHtml, /id="openDrafts"[^>]*data-drawer="library"/, "组卷草稿和专注浏览同在题库组");
 // 1.12.7：篮回到题库页自己身上 —— 右边缘一条常驻把手 + 一个抽屉面板。
 // 顶栏那两个按钮撤掉了，导航抽屉（☰）里也不再有一份。
@@ -36,7 +47,10 @@ assert.match(libraryHtml, /id="basketHandle"[^>]*class="basket-handle"|class="ba
 assert.match(libraryHtml, /id="basketPanel"[^>]*class="basket-panel"(?![^>]*data-drawer)/, "篮面板在工作区里，不再搬进抽屉");
 assert.ok(!libraryHtml.includes('data-drawer="basket"'), "抽屉里不再有试题篮");
 assert.ok(!libraryHtml.includes('id="basketPreviewShortcut"'), "组卷预览只在篮里，没有第二个家");
-assert.match(libraryHtml, /id="libraryShortcutHint"[^>]*data-drawer="hint"/);
+// 把手改成悬浮：它骑在视口右缘，不占栅格列，收起时那 26px 全还给题目。
+assert.match(libraryCss, /\.basket-handle \{ position: fixed; right: 0; top: 50vh;/, "把手钉在视口右缘正中");
+assert.ok(!libraryCss.includes(".library-workspace > .basket-handle { grid-column"), "把手是 fixed，不进栅格流");
+assert.match(libraryCss, /body\.library-basket-open \.library-workspace \{ grid-template-columns: 212px minmax\(0, 1fr\) 300px; \}/, "展开时才让出第三列");
 for (const page of ["index.html", "library.html"]) {
   const html = fs.readFileSync(require.resolve(`./${page}`), "utf8");
   assert.match(html, /<script src="\/site-drawer\.js" defer><\/script>/, `${page} 要加载抽屉`);

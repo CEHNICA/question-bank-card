@@ -40,10 +40,9 @@
       const native = button("图片原尺寸", "questionViewerNative", () => { controls.content.classList.add("native-images"); setZoom(100); });
       const less = button("−", "questionViewerZoomOut", () => setZoom(zoom - 25)); less.setAttribute("aria-label", "缩小题目");
       const more = button("＋", "questionViewerZoomIn", () => setZoom(zoom + 25)); more.setAttribute("aria-label", "放大题目");
-      const keyHints = node("div", "question-viewer-shortcuts");
-      if (root.QBShortcutHelp) root.QBShortcutHelp.mountHint(keyHints, "library", { fullScreen: true });
-      else keyHints.append(node("span", "question-viewer-tip", "← / → 上下题 · Esc 返回 · Ctrl + 滚轮缩放"));
-      tools.append(fit, native, less, percent, more, keyHints);
+      // 全屏看题以前在缩放条后面挂着一条快捷键提示，占掉整条工具栏的宽度。
+      // 这些键在设置里查得到，工具栏只留缩放本身。
+      tools.append(fit, native, less, percent, more);
       const viewport = node("div", "question-viewer-viewport"); viewport.tabIndex = 0; viewport.setAttribute("aria-label", "完整题目与答案");
       const content = node("div", "question-viewer-content");
       const question = node("article", "paper question-viewer-question");

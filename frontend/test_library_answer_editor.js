@@ -82,6 +82,24 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
     "1.12.7: the bottom sticky bar and the 230px sidebar are gone");
   assert.match(answerCss, /\.answer-editor-dialog \{[^}]*height: 100dvh;/);
   assert.match(answerCss, /\.answer-editor-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/);
+  // 1.12.7：进来就勾上正在看的那道题。以前还得再点一下眼前这道题才勾上，
+  // 而人已经在这一题里改字了，忘了勾就等于这次白点。
+  const checkedBoxes = () => descend(document.body).filter(element => String(element.className).startsWith("answer-list-row"))
+    .map(row => row.children[0].checked);
+  assert.deepEqual(checkedBoxes(), [true, false], "显式传了 selected 就照它说的办");
+  await byText("返回").emit("click");
+  await editor.open([other, original], { scope: "paper", focus: other.id }); await settle();
+  assert.deepEqual(checkedBoxes(), [true, false], "没传 selected 时默认勾上会打开的那道题");
+  await byText("返回").emit("click");
+  await editor.open([original, other], { scope: "paper", focus: original.id, selected: [] }); await settle();
+  assert.deepEqual(checkedBoxes(), [false, false], "显式传空数组（只保留在本机那一路）仍然一道都不勾");
+  await editor.open([original, other], { scope: "paper", focus: original.id, selected: [original.id] }); await settle();
+  // 「历史版本」下拉删了：它挂在「原卷」折叠面板底部，展开才看得见，
+  // 可它切的是整个编辑区，和「原卷」不是一回事。
+  assert.equal(descend(document.body).find(element => element["aria-label"] === "已保存的答案解析历史"), undefined);
+  const originPanel = descend(document.body).find(element => element.className === "answer-origin");
+  assert.equal(descend(originPanel).find(element => element.tagName === "SUMMARY").textContent, "原卷答案解析",
+    "折叠面板标题不再写「与历史」——那里已经没有历史下拉了");
   assert.match(answerCss, /\.answer-editor-input-column \{ grid-column: 1;[^}]*grid-template-rows: minmax\(0, auto\) minmax\(0, 1fr\);/,
     "The left column stacks 原卷本题 over the editing area, so the two fill one full-height column");
   assert.match(answerCss, /\.answer-editor-preview-column \{ grid-column: 2;/);
@@ -138,7 +156,8 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   let releaseImageSave; saveGate = new Promise(resolve => { releaseImageSave = resolve; });
   await byId("answerEditorDialog").emit("keydown", { key: "s", ctrlKey: true }); await settle();
   assert.equal(width.disabled, true); assert.equal(position.disabled, true); assert.equal(paragraph.disabled, true);
-  assert.equal(descend(document.body).find(element => element["aria-label"] === "已保存的答案解析历史").disabled, true, "History and image editing are locked while a save is in flight");
+  assert.equal(descend(document.body).find(element => element["aria-label"] === "已保存的答案解析历史"), undefined,
+    "「历史版本」下拉删了；保存进行中图片编辑照样锁住");
   releaseImageSave(); await settle(); saveGate = null;
   const noBlurSave = JSON.parse(requests.filter(value => value.opts.method === "POST" && value.url.endsWith("/solution")).at(-1).opts.body);
   assert.equal(noBlurSave.figures[0].display_width, 50); assert.equal(noBlurSave.figures[0].paragraph, 1);

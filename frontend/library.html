@@ -38,7 +38,7 @@
       <a class="header-link active" href="/library" aria-current="page">正式题库</a>
       <a class="header-link" href="/settings">设置</a>
     </nav>
-    <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false">筛选</button><button id="libraryRestoreHints" class="button quiet small" type="button" hidden data-drawer="tools">恢复操作提示</button><button id="libraryKeysButton" class="button quiet small" type="button" data-drawer="tools">快捷键</button><a class="source-link" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer" title="查看 AGPLv3 源代码" data-drawer="tools">源码</a></div>
+    <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false">筛选</button><button id="libraryKeysButton" class="button quiet small" type="button" data-drawer="tools">快捷键</button></div>
   </header>
 
   <!-- 抽屉的搬运暂存位：下面这些按钮平时不出现在页面上，site-drawer.js 启动时
@@ -81,7 +81,6 @@
           </div>
           <div id="extraTools" class="library-extra-tools" hidden></div>
         </details>
-        <div id="libraryShortcutHint" class="library-shortcut-hint" data-drawer="hint"></div>
       </aside>
       <button id="libraryRailToggle" class="rail-collapse" type="button" aria-controls="libraryRail"
         aria-expanded="true" title="收起筛选栏" aria-label="收起筛选栏">
@@ -240,7 +239,6 @@
         <p id="printPageStatus" class="print-page-status no-print" role="status" aria-live="polite">正在排版…</p>
         <p id="printLayoutWarnings" class="print-layout-warnings no-print" role="status" hidden></p>
         <p class="print-order-hint no-print">A4 · 按题型分组。点题目旁“调整”可改顺序、选项、留白或另起一页。Esc 返回题库。</p>
-        <div id="printShortcutHint" class="print-shortcut-hint no-print"></div>
         <article id="printPaper" class="print-paper"></article>
       </section>
     </div>

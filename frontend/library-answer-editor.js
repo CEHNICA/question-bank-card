@@ -61,7 +61,6 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const title = node("h3", "", "答案解析"); title.id = "answerEditorTitle";
       const place = node("p", "answer-editor-place");
       heading.append(title, place);
-      const keyHints = node("div", "answer-editor-shortcuts"); root.QBShortcutHelp?.mountHint(keyHints, "answers"); heading.append(keyHints);
       const back = node("button", "button button-quiet", "返回"); back.type = "button"; back.addEventListener("click", closeEditor);
       const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const syncLabel = node("label", "answer-sync"); const sync = node("input"); sync.type = "checkbox"; sync.id = "answerEditorSync";
@@ -125,18 +124,13 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       cropSurface.append(cropImage, cropBox); cropScroll.append(cropSurface, cropHint); crop.append(cropBar, cropScroll);
       const previewTitle = node("h4", "", "实时预览"); const preview = node("div", "paper answer-editor-preview");
       const aiDraft = node("details", "answer-ai-draft"); aiDraft.hidden = true; aiDraft.append(node("summary", "", "AI 初稿（当前编辑内容已保留）")); const aiPreview = node("div", "paper"); aiDraft.append(aiPreview);
-      const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷答案解析与历史")); const originBody = node("div", "paper");
+      const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷答案解析")); const originBody = node("div", "paper");
       origin.addEventListener("toggle", () => { if (origin.open && current) S.render(originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" }); });
-      const history = node("select"); history.setAttribute("aria-label", "已保存的答案解析历史");
-      history.addEventListener("change", async () => {
-        if (!history.value || !current) return;
-        if (isDirty() && !await confirm({ title: "打开这版答案解析？", text: "当前未保存的编辑内容将换成所选历史版本，原卷内容保留。", ok: "打开历史版本" })) { history.value = ""; return; }
-        const record = (current.history || []).find(value => value.id === history.value);
-        if (record) { current.value = S.editable(record); current.ai_fields = []; current.ai_stale = false; current.dirty = true; renderFields(); }
-      });
-      origin.append(originBody, history);
+      // 「查看已保存的解析版本」这个下拉删掉了：它挂在「原卷」那块折叠面板底部，
+      // 展开才看得见，可它切的是整个编辑区，和「原卷」不是一回事，两件事挤在一处
+      // 只会让人以为下面的文字也会跟着换。history 记录本身保留，保存后版本号照旧递增。
       // 三区：左上是原卷本题，左下是编辑区（答案结果、解析过程、配图、裁图、原卷
-      // 答案与历史），右边整列是实时预览。原来那条钉在底部的保存条取消。
+      // 答案），右边整列是实时预览。原来那条钉在底部的保存条取消。
       const workspace = node("div", "answer-editor-workspace");
       const inputColumn = node("div", "answer-editor-input-column"), previewColumn = node("section", "answer-editor-preview-column");
       previewColumn.setAttribute("aria-label", "答案解析实时预览");
@@ -146,7 +140,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       previewColumn.append(previewTitle, node("p", "helper", "公式与配图随输入更新。保存后用于出卷。"), preview, aiDraft);
       workspace.append(inputColumn, previewColumn);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
-      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, history, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
+      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
       // Display caret and selection, the same idea as the review 改字 editor.
       // Moving the caret or selecting text is not an edit: it must not set
@@ -207,7 +201,6 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       if (ready) { controls.ai.title = "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。"; controls.apiNote.textContent = ""; controls.apiNote.hidden = true; }
       else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → 服务与密钥”配置并测试；可先手工编辑，返回后点“刷新生成结果”。"; }
       for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
-      controls.history.disabled = busy;
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
     }
     function selectedActiveJobs() { return [...jobs.values()].filter(job => selection.has(job.publication_id || job.publication) && jobsPending.has(job.status)); }
@@ -217,12 +210,18 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       init(); ++token; ++epoch; stopWaiting(); current = null; drafts = new Map(); jobs = new Map(); requestedIds = new Set(); watchedSince = Date.now(); queueNote = "";
       apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
-      items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null; selection = new Set((options.selected || []).filter(id => items.some(item => item.id === id)));
+      items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null;
+      // 这一轮会先打开哪一道题，先定下来，后面两处都要用同一个答案。
+      const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
+      // 勾选框是给 AI 补解析挑题的。以前进来还得再点一下眼前这道题才勾上，
+      // 而人已经在这一题里改字了 —— 忘了勾就等于这次白点。调用方显式给了
+      // selected（哪怕是空数组，比如「只保留在本机」那一路）就照它说的办。
+      const picked = "selected" in options ? options.selected : [item?.id];
+      selection = new Set((picked || []).filter(id => items.some(item => item.id === id)));
       // 「保存到题库还是只用于这份卷子」这句话以前常驻在标题下面，占一行。
       // 它说明的是「勾了会发生什么」，挂在这个勾选框的提示上更合适。
       controls.syncLabel.title = scope === "library" ? "保存到题库供以后使用，原卷答案保留。" : "保存后用于当前组卷；勾选后也可同步到题库。";
       returnFocus = document.activeElement; if (!dialog.open) dialog.showModal(); renderList();
-      const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
       await Promise.all([readApiSettings(), item ? choose(item) : Promise.resolve()]);
     }
     async function choose(item) {
@@ -283,9 +282,6 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.status.textContent = `${itemLabel(current.item)} · ${isDirty() ? "有未保存的编辑" : "原卷内容保留，修改后点保存"}`;
       controls.originBody.replaceChildren();
       if (controls.origin.open) S.render(controls.originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" });
-      controls.history.replaceChildren(node("option", "", "查看已保存的解析版本"));
-      (current.history || []).forEach((record, index) => { const option = node("option", "", `${index + 1}. ${record.created_at ? new Date(record.created_at).toLocaleString("zh-CN", { hour12: false }) : "已保存版本"}`); option.value = record.id; controls.history.append(option); });
-      controls.history.hidden = !current.history?.length;
       positionArmed = false; lastField = "analysis";
       controls.aiDraft.hidden = !current.suggestion;
       if (current.suggestion) S.render(controls.aiPreview, current.suggestion, { node, QB });

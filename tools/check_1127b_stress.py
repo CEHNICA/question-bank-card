@@ -105,7 +105,7 @@ def run(pg):
     pg.click(".drawer-trigger"); pg.wait_for_timeout(500)
     d = pg.evaluate(DRAWER)
     check("导航抽屉里没有试题篮了", "basket" not in d["groups"], d["groups"])
-    check("抽屉里其它组还在", len(d["groups"]) >= 3, d["groups"])
+    check("抽屉里其它组还在", len(d["groups"]) >= 2, d["groups"])
     pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
 
     print("\n=== 4. 七个宽度零横向溢出")

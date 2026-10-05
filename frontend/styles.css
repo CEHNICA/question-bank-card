@@ -123,16 +123,13 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .settings-home .settings-description { margin: 0; }
 .settings-home > .settings-head { padding: 0 0 20px; background: none; border: 0; }
 .settings-panel { min-width: 0; }
-.source-link { display: inline-flex; align-items: center; min-height: 34px; padding: 0 8px; border-radius: 9px;
-  color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 600; }
-.source-link:hover { background: var(--bg-sunken); color: var(--ink); }
 .icon-button { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid transparent;
   background: none; color: var(--muted); }
 .icon-button:hover { background: var(--bg-sunken); color: var(--ink); }
 .icon-button .icon { width: 18px; height: 18px; }
 
 /* ---------------------------------------------------------------- 抽屉 */
-/* 导航、工具、试题篮、操作说明都收在这里。它默认关着，不占常驻高度；打开时
+/* 导航和工具收在这里。它默认关着，不占常驻高度；打开时
    盖在页面上（不挤压内容），Esc / 点遮罩 / 点导航都收起。 */
 body.drawer-open { overflow: hidden; }
 .drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(22, 44, 39, .34); backdrop-filter: blur(2px); animation: drawer-fade .18s ease; }
@@ -164,14 +161,13 @@ body.drawer-open { overflow: hidden; }
 .site-drawer .topnav a.active::after { content: none; }
 /* 只给菜单行本身整幅宽。用后代选择器会把篮里的「移出」也撑满整行，
    把题名挤成一列字。 */
-.site-drawer-slot > .source-link, .site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; }
-.site-drawer .library-shortcut-hint { margin: 0; }
+.site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; }
 /* 篮不再住在导航抽屉里：它是干活的面，不是菜单项。☰ 留给导航和工具。 */
 .site-drawer .basket-panel { position: static; max-height: none; padding: 2px 2px 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
 @media (max-width: 560px) {
   .site-drawer { width: min(86vw, 320px); }
   /* 窄屏上两个右侧面板会撞：篮抽屉展开时按 86vw 走，别把题面挤没。 */
-  body.library-basket-open .library-workspace { --basket-w: min(86vw, 320px); }
+  body.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr) min(86vw, 320px); }
   .basket-handle { width: 24px; }
 }
 @media print { .site-drawer, .drawer-scrim, .drawer-staging { display: none !important; } }
@@ -1527,6 +1523,5 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
 .answer-editor-dialog > .source-dialog-head .shortcut-hint-panel .shortcut-note,
 .answer-editor-dialog > .source-dialog-head .shortcut-hint-panel .key-row { color: var(--ink-2); }
 .answer-editor-dialog > .source-dialog-head .shortcut-hint-panel .shortcut-expand-label { color: var(--accent); }
-.question-viewer-shortcuts, .answer-editor-shortcuts, .print-shortcut-hint { flex-basis: 100%; }
 .page-shortcut-reference { margin-top: 8px; }
 @media (max-width: 600px) { .shortcut-help-body { padding: 16px; } .shortcut-main th, .shortcut-main td { padding: 8px 6px; } }

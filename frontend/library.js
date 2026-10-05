@@ -2431,34 +2431,10 @@
     railToggle.focus({ preventScroll: true });
   });
   $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
-  window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
-  window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
-  // The library surface needs its own way back: without it a hint dismissed
-  // here could only be restored from the intake page.
-  function syncRestoreHints() {
-    const button = $("libraryRestoreHints");
-    if (!button) return;
-    const off = window.QBShortcutHelp?.dismissedCategories?.() || [];
-    button.hidden = !off.length;
-    button.textContent = `恢复操作提示（${off.length}）`;
-  }
-  $("libraryRestoreHints")?.addEventListener("click", () => {
-    window.QBShortcutHelp?.restoreHints?.();
-    window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
-    window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
-    syncRestoreHints();
-    void load();
-  });
-  window.addEventListener("qb:hint-dismissed", syncRestoreHints);
-  window.addEventListener("qb:hints-restored", syncRestoreHints);
-  window.addEventListener("storage", (event) => {
-    if (event.key === window.QBShortcutHelp?.DISMISSED_PREF) {
-      window.QBShortcutHelp?.mountHint($("libraryShortcutHint"), "library");
-      window.QBShortcutHelp?.mountHint($("printShortcutHint"), "print");
-      syncRestoreHints();
-    }
-  });
-  syncRestoreHints();
+  // 原来这里常驻两条提示条（题库快捷键、打印快捷键）外加一个「恢复操作提示」按钮。
+  // 三样加起来是横在题目上方的一整条，眼睛得先扫过它才看得到题。提示内容都在
+  // 设置里那一栏（快捷键按钮 / ? 键），这页不再挂常驻提示，也不再需要「恢复」——
+  // 没有被这里关掉的东西，就没有东西要恢复。
   document.addEventListener("keydown", (event) => {
     const editable = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
     const ordinary = !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat

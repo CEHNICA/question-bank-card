@@ -137,22 +137,22 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-more { display: flex; justify-content: center; margin: 22px 0; }
 .library-more .button { min-width: 160px; }
 
-/* Teacher browsing: the questions take the rest, search and filters ride in the left rail,
-   and the basket is a drawer on the right edge. */
-.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr) var(--basket-w);
-  gap: 16px; align-items: start; padding-top: 12px; --basket-w: 30px; }
-body.library-basket-open .library-workspace { --basket-w: 300px; }
-/* 三个格子都要写死：把手和篮面板都在第三格，不写死的话自动排布会把侧栏挤走，
-   题目反而被塞进 212px 那条窄列。 */
+/* Teacher browsing: the questions take the rest, search and filters ride in the left rail.
+   篮子把手贴在屏幕右缘，不进栅格 —— 收起时那 30px 全还给题目。 */
+.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr);
+  gap: 16px; align-items: start; padding-top: 12px; }
+/* 只有展开的时候才把第三列让出来给面板。 */
+body.library-basket-open .library-workspace { grid-template-columns: 212px minmax(0, 1fr) 300px; }
+/* 把手是 fixed 的，不进栅格流；面板才占第三格。不写死 grid-column 的话，
+   自动排布会把侧栏挤走，题目反而被塞进 212px 那条窄列。 */
 .library-workspace > .library-rail { grid-column: 1; grid-row: 1; }
 .library-workspace > .library-results { grid-column: 2; grid-row: 1; min-width: 0; }
-.library-workspace > .basket-handle { grid-column: 3; grid-row: 1; }
 .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
 
-/* 收起时右边只留这一条把手。它一直都在：篮空着也得看得见往哪儿加题。
-   骑在工作区右边那道缝上，像贴在屏幕右缘的一个小抽屉拉手。 */
-.basket-handle { position: sticky; top: 50vh; z-index: 4; align-self: start; justify-self: end;
-  margin-right: -13px; display: grid; justify-items: center; gap: 3px; width: 26px; padding: 9px 0 7px;
+/* 收起时右边只留这一条把手，骑在屏幕右缘上，像贴在边上一个小抽屉拉手。
+   它一直都在：篮空着也得看得见往哪儿加题。 */
+.basket-handle { position: fixed; right: 0; top: 50vh; z-index: 4; transform: translateY(-50%);
+  display: grid; justify-items: center; gap: 3px; width: 26px; padding: 9px 0 7px;
   border: 1px solid var(--line); border-right: 0; border-radius: 9px 0 0 9px;
   background: var(--surface); color: var(--muted); box-shadow: var(--shadow-sm);
   transition: color .15s, border-color .15s, background .15s; }
@@ -233,9 +233,8 @@ body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
   /* 窄屏上右侧已经有筛选浮层了，篮抽屉不能再占一列 —— 两者改成同一个位置的浮层，
      互相替换（开一个关另一个由 library.js 的 setRail / setBasketPanel 保证）。 */
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
-  .library-workspace > .basket-handle { position: fixed; right: 0; top: 50vh; margin-right: 0; }
-  /* 从顶栏下面开始，不然这个浮层会盖住顶栏右端的「筛选」，那个按钮就点不到了
-     —— 想开筛选的人正被篮挡住。筛选浮层同样从顶栏下面开始。 */
+  /* 把手本来就是 fixed 的，从顶栏下面开始才不会盖住顶栏右端的「筛选」——
+     想开筛选的人正被篮挡住。筛选浮层同样从顶栏下面开始。 */
   body.library-basket-open .basket-panel { position: fixed; z-index: 61; top: var(--topbar-h); right: 0; bottom: 0;
     width: min(88vw, 320px); max-height: none; height: auto; border-radius: 0; border-left: 1px solid var(--line);
     box-shadow: var(--shadow-lg); overflow: hidden; }
@@ -671,7 +670,6 @@ body.printing { overflow: hidden; }
 .question-viewer-navigation-status:empty { display: none; }
 .question-viewer-tools { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 22px; border-bottom: 1px solid var(--line); background: #fff; }
 .question-viewer-percent { min-width: 48px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
-.question-viewer-tip { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .question-viewer-viewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 32px; }
 .question-viewer-content { width: 100%; max-width: 1180px; margin: 0 auto; padding: clamp(18px, 3vw, 38px); background: white; border: 1px solid #d9e1d8; border-radius: 8px; color: #182720; font-size: 18px; line-height: 1.85; }
 .question-viewer-question { font-size: inherit; line-height: inherit; }
@@ -719,7 +717,6 @@ body.printing { overflow: hidden; }
   .question-viewer-head { padding: 10px 12px; gap: 8px; }
   .question-viewer-navigation > .button { padding: 7px 8px; font-size: 12.5px; }
   .question-viewer-tools { padding: 6px 12px; }
-  .question-viewer-tip { display: none; }
   .question-viewer-viewport { padding: 8px 8px 18px; }
   .question-viewer-content { padding: 14px; font-size: 16px; }
   .question-viewer-content .qb-options { grid-template-columns: 1fr; }
