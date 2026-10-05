@@ -111,7 +111,9 @@ assert.ok(trigger.classList.contains("drawer-trigger"), "顶栏最前面是触�
 assert.ok(trigger.classList.contains("icon-button"));
 assert.equal(nav.parentNode.getAttribute("data-slot"), "nav", "导航被搬进抽屉的「页面」组");
 assert.equal(sourceLink.parentNode.getAttribute("data-slot"), "tools", "工具按钮被搬进抽屉的「工具」组");
-assert.equal(basketPanel.parentNode.getAttribute("data-slot"), "basket", "试题篮被搬进抽屉");
+// 1.12.7：篮不住在这个抽屉里了。它是题库页右边缘一条常驻把手 + 一个抽屉面板，
+// 干活的面不是菜单项；☰ 留给导航和工具。
+assert.equal(drawer.slot("basket"), null, "抽屉里没有试题篮这一组了");
 
 // ---- 打开：焦点进抽屉，背景锁滚
 doc.activeElement = trigger;
@@ -159,29 +161,11 @@ assert.equal(drawer.isOpen(), true, "点 ☰ 打开");
 trigger.fire("click");
 assert.equal(drawer.isOpen(), false, "再点 ☰ 关闭");
 
-// ---- 篮里有题才在顶栏给入口
-const topbarBasket = topbarTools.children[0];
-assert.equal(topbarBasket.hidden, true, "篮空着时顶栏没有入口");
-drawer.setBasketCount(3);
-assert.equal(topbarBasket.hidden, false, "篮里有题，顶栏给入口");
-assert.equal(topbarBasket.querySelector(".topbar-basket-count").textContent, "3");
-const basketGroup = panel.querySelector('[data-group="basket"]');
-assert.equal(basketGroup.hidden, false, "抽屉里有「试题篮」这一组");
-drawer.setBasketCount(0);
-assert.equal(topbarBasket.hidden, true, "篮空了入口又收起来");
-drawer.setBasketCount(2);
-assert.equal(panel.querySelector(".site-drawer-count").textContent, "2", "抽屉里的篮计数跟着更新");
+// ---- 1.12.7：顶栏不再有任何篮相关按钮，篮的入口是题库页右边缘那条把手
+assert.equal(topbarTools.children.length, 0, "顶栏不再有篮的入口；篮子归题库页自己管");
+assert.equal(panel.querySelector('[data-group="basket"]'), null, "抽屉里没有试题篮这一组");
+for (const name of ["setBasketCount", "setBasketVisible", "onBasketChange"]) {
+  assert.equal(typeof drawer[name], "undefined", `${name} 已经和抽屉没关系了`);
+}
 
-// ---- 篮不再是折叠项：点标题只登记一次「看一下」，显示由数量决定
-const seen = [];
-drawer.onBasketChange(action => seen.push(action));
-const basketTitle = basketGroup.querySelector(".site-drawer-title");
-basketTitle.fire("click");
-assert.deepEqual(seen, ["show"], "点篮的标题要通知题库页把篮画出来");
-assert.equal(drawer.isOpen(), false, "组内点标题不自动拉开抽屉");
-assert.equal(basketGroup.hidden, false, "篮里有题就整组都显示，不需要再展开一次");
-topbarBasket.fire("click");
-assert.equal(drawer.isOpen(), true, "点顶栏的篮会拉开抽屉");
-assert.deepEqual(seen, ["show", "show"], "顶栏入口也是登记一次「看一下」，没有收起这一说");
-
-console.log("Site drawer: closed by default, focus moved in, Esc yields to dialog, basket entry only when stocked: OK");
+console.log("Site drawer: closed by default, focus moved in, Esc yields to dialog, navigation and tools only: OK");

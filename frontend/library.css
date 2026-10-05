@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 正式题库页。共用的令牌、顶栏、按钮、对话框和题面排版在 styles.css 里，
  * 这里只放题库列表、查看出处和组卷打印。
  */
@@ -137,12 +137,32 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-more { display: flex; justify-content: center; margin: 22px 0; }
 .library-more .button { min-width: 160px; }
 
-/* Teacher browsing: the questions take the rest, search and filters ride in the left rail. */
-.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr); gap: 16px; align-items: start; padding-top: 12px; }
-/* 三个格子都要写死：接缝上那个按钮和侧栏都在第一格，不写死的话自动排布会把
-   侧栏挤到第二格去，题目反而被塞进 212px 那条窄列。 */
+/* Teacher browsing: the questions take the rest, search and filters ride in the left rail,
+   and the basket is a drawer on the right edge. */
+.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr) var(--basket-w);
+  gap: 16px; align-items: start; padding-top: 12px; --basket-w: 30px; }
+body.library-basket-open .library-workspace { --basket-w: 300px; }
+/* 三个格子都要写死：把手和篮面板都在第三格，不写死的话自动排布会把侧栏挤走，
+   题目反而被塞进 212px 那条窄列。 */
 .library-workspace > .library-rail { grid-column: 1; grid-row: 1; }
 .library-workspace > .library-results { grid-column: 2; grid-row: 1; min-width: 0; }
+.library-workspace > .basket-handle { grid-column: 3; grid-row: 1; }
+.library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
+
+/* 收起时右边只留这一条把手。它一直都在：篮空着也得看得见往哪儿加题。
+   骑在工作区右边那道缝上，像贴在屏幕右缘的一个小抽屉拉手。 */
+.basket-handle { position: sticky; top: 50vh; z-index: 4; align-self: start; justify-self: end;
+  margin-right: -13px; display: grid; justify-items: center; gap: 3px; width: 26px; padding: 9px 0 7px;
+  border: 1px solid var(--line); border-right: 0; border-radius: 9px 0 0 9px;
+  background: var(--surface); color: var(--muted); box-shadow: var(--shadow-sm);
+  transition: color .15s, border-color .15s, background .15s; }
+.basket-handle .icon { width: 16px; height: 16px; }
+.basket-handle-count { font: 700 12px/1 var(--ui-font); font-variant-numeric: tabular-nums; }
+.basket-handle:hover { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
+.basket-handle:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+body.library-basket-open .basket-handle { color: var(--accent); border-color: #bcd8cd; }
+body.library-basket-has-items .basket-handle { color: var(--accent-dark); }
+.basket-handle:disabled { opacity: .6; }
 .library-advanced { font-size: 13px; color: var(--ink-2); }
 .library-advanced > summary { width: max-content; cursor: pointer; padding: 3px 0; }
 .library-advanced[open] > .library-filters { margin-top: 10px; }
@@ -168,15 +188,19 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-card-more > summary { padding: 6px 9px; cursor: pointer; color: var(--ink-2); }
 .library-card-menu { position: absolute; z-index: 16; right: 0; top: calc(100% + 4px); min-width: 165px; max-width: calc(100vw - 40px); display: grid; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-pop); }
 .library-card-menu .button { justify-content: flex-start; }
-/* 篮在抽屉里：不再吸顶、不再自带卡片外框。 */
+/* 篮在右边，收起时只占一条把手，展开时占第三列。跟着题库一起滚，不固定在视口上 ——
+   固定的话题目一长它就悬在半空。 */
 .basket-panel { display: flex; flex-direction: column; min-height: 0;
-  padding: 15px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0; }
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0;
+  position: sticky; top: calc(var(--topbar-h) + 12px); height: calc(100dvh - var(--topbar-h) - 28px); }
+.basket-panel[hidden] { display: none; }
 .basket-panel-head, .basket-panel > .helper, .basket-preview { flex: none; }
 .basket-panel > .helper { overflow-wrap: anywhere; }
 .basket-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .basket-panel h2 { margin: 0; font: 600 16px/1.5 var(--ui-font); }
 .basket-panel h2 span { color: var(--accent); font-variant-numeric: tabular-nums; }
-.basket-list { list-style: none; margin: 13px 0 0; padding: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.basket-list { list-style: none; margin: 13px 0 0; padding: 0; min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .basket-row { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding: 10px 0; }
 .basket-item-open { flex: 1; min-width: 0; text-align: left; border: 0; padding: 0; background: none; color: var(--ink); font-family: var(--ui-font); }
 .basket-item-open strong { display: block; font-size: 12.5px; font-weight: 600; }
@@ -184,8 +208,6 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .basket-item-open .basket-item-error { color: var(--amber); }
 .basket-remove { flex: none; }
 .basket-preview { width: 100%; margin-top: 13px; }
-.basket-preview-shortcut { display: inline-flex; max-width: 100%; }
-.basket-preview-shortcut .basket-preview { width: auto; min-height: 34px; margin-top: 0; padding-block: 6px; font-size: 12.5px; }
 .basket-panel .library-load-error { flex: 0 1 auto; min-height: 0; overflow: auto; padding: 9px; font-size: 12px; }
 .question-dialog { padding: 0; width: min(1000px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); background: var(--surface); }
 .question-dialog[open] { display: flex; flex-direction: column; }
@@ -208,18 +230,25 @@ a.library-type.undecided:hover { text-decoration: underline; }
 /* 屏幕不够宽，212px 的侧栏会从题目身上啃掉一块（820 时正文只剩 471px）。
    这时侧栏改成右侧浮层：不占宽度，触发按钮在顶栏右端，和左端的 ☰ 分开。 */
 @media (max-width: 979px) {
+  /* 窄屏上右侧已经有筛选浮层了，篮抽屉不能再占一列 —— 两者改成同一个位置的浮层，
+     互相替换（开一个关另一个由 library.js 的 setRail / setBasketPanel 保证）。 */
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
+  .library-workspace > .basket-handle { position: fixed; right: 0; top: 50vh; margin-right: 0; }
+  /* 从顶栏下面开始，不然这个浮层会盖住顶栏右端的「筛选」，那个按钮就点不到了
+     —— 想开筛选的人正被篮挡住。筛选浮层同样从顶栏下面开始。 */
+  body.library-basket-open .basket-panel { position: fixed; z-index: 61; top: var(--topbar-h); right: 0; bottom: 0;
+    width: min(88vw, 320px); max-height: none; height: auto; border-radius: 0; border-left: 1px solid var(--line);
+    box-shadow: var(--shadow-lg); overflow: hidden; }
   .rail-toggle { display: inline-flex; }
   /* 侧栏是浮层了，本来就不占宽度，收它没有意义。顶栏那个「筛选」是唯一的入口，
      专注模式里也必须留着 —— 规则在本文件后面 focus-mode 那段。 */
   .rail-collapse { display: none; }
-  .library-rail { position: fixed; z-index: 61; top: 0; right: 0; bottom: 0; width: min(88vw, 300px);
+  .library-rail { position: fixed; z-index: 61; top: var(--topbar-h); right: 0; bottom: 0; width: min(88vw, 300px);
     max-height: none; padding: 14px 16px 28px; background: var(--surface);
     border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
     transform: translateX(100%); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
   body.rail-open .library-rail { transform: none; }
-  body.rail-open { overflow: hidden; }
-  .basket-panel { position: static; grid-row: 1; max-height: calc(100dvh - var(--topbar-h) - 24px); scroll-margin-top: calc(var(--topbar-h) + 12px); }
+  body.rail-open, body.library-basket-open { overflow: hidden; }
   .library-select select { max-width: min(300px, 65vw); }
   .library-rail .library-select select { max-width: none; }
   /* 侧栏窄，chip 横向滚动会把后面的选项藏起来 —— 竖着换行。 */
@@ -581,7 +610,7 @@ body.printing { overflow: hidden; }
 
 @media print {
   :root { background: #fff; }
-  .site-header, .topbar, .no-print, .toast, .site-drawer, .drawer-scrim, .drawer-staging, .library-rail, .rail-scrim, .rail-collapse { display: none !important; }
+  .site-header, .topbar, .no-print, .toast, .site-drawer, .drawer-scrim, .drawer-staging, .library-rail, .rail-scrim, .rail-collapse, .basket-panel, .basket-handle { display: none !important; }
   body.printing > *:not(.print-sheet) { display: none !important; }
   body.printing { overflow: visible; background: #fff; }
   .print-sheet { position: static; width: auto; height: auto; max-height: none; padding: 0; background: #fff; overflow: visible; border-radius: 0; box-shadow: none; animation: none; }

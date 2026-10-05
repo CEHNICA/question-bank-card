@@ -106,12 +106,17 @@
         <div id="libraryList" class="library-list"></div>
         <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
       </section>
-      <aside id="basketPanel" class="basket-panel" aria-label="试题篮" data-drawer="basket">
-        <div class="basket-panel-head"><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
+      <button id="basketHandle" class="basket-handle" type="button" aria-controls="basketPanel"
+        aria-expanded="false" title="展开试题篮">
+        <svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>
+        <span id="basketHandleCount" class="basket-handle-count">0</span>
+      </button>
+      <aside id="basketPanel" class="basket-panel" aria-label="试题篮">
+        <div class="basket-panel-head"><h2>试题篮 <span id="basketPanelCount">0</span></h2><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
         <p id="basketSummary" class="helper">先找到题目，再加入试题篮。</p>
         <div id="basketLoadError" class="library-load-error" role="alert" hidden></div>
         <ol id="basketList" class="basket-list"></ol>
-        <button id="basketButton" class="button button-primary basket-preview no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg><span class="topbar-preview-label">组卷预览</span> <span id="basketCount">0</span> 题</button>
+        <button id="basketButton" class="button button-primary basket-preview no-print" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>组卷预览 <span id="basketCount">0</span> 题</button>
       </aside>
     </div>
     <div id="libraryRailScrim" class="rail-scrim" hidden></div>

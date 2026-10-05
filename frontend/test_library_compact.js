@@ -30,7 +30,12 @@ for (const id of ["libraryRestoreHints", "libraryKeysButton"]) {
 }
 assert.match(libraryHtml, /class="source-link"[^>]*data-drawer="tools"/);
 assert.match(libraryHtml, /id="openDrafts"[^>]*data-drawer="library"/, "组卷草稿和专注浏览同在题库组");
-assert.match(libraryHtml, /id="basketPanel"[^>]*data-drawer="basket"/);
+// 1.12.7：篮回到题库页自己身上 —— 右边缘一条常驻把手 + 一个抽屉面板。
+// 顶栏那两个按钮撤掉了，导航抽屉（☰）里也不再有一份。
+assert.match(libraryHtml, /id="basketHandle"[^>]*class="basket-handle"|class="basket-handle"[^>]*id="basketHandle"/, "右边缘有一条常驻把手");
+assert.match(libraryHtml, /id="basketPanel"[^>]*class="basket-panel"(?![^>]*data-drawer)/, "篮面板在工作区里，不再搬进抽屉");
+assert.ok(!libraryHtml.includes('data-drawer="basket"'), "抽屉里不再有试题篮");
+assert.ok(!libraryHtml.includes('id="basketPreviewShortcut"'), "组卷预览只在篮里，没有第二个家");
 assert.match(libraryHtml, /id="libraryShortcutHint"[^>]*data-drawer="hint"/);
 for (const page of ["index.html", "library.html"]) {
   const html = fs.readFileSync(require.resolve(`./${page}`), "utf8");

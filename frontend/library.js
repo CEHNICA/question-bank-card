@@ -33,6 +33,8 @@
     basketMissing: [],
     basketToken: 0,
     basketLoading: false,
+    // 右边缘那个篮抽屉展开没有。默认收起，只留一条把手。
+    basketVisible: false,
     draft: null,
     draftDirty: false,
     draftBaseline: null,
@@ -863,21 +865,36 @@
     }
   }
 
+  // 1.12.7：篮是右边缘一条常驻把手 + 一个抽屉面板，「组卷预览」就放在篮里。
+  // 之前它在顶栏、侧栏、篮面板三处搬来搬去，用户找不到；现在位置固定、只差一次点击。
+  function setBasketPanel(open) {
+    const next = Boolean(open);
+    if (next === state.basketVisible) return;
+    state.basketVisible = next;
+    document.body.classList.toggle("library-basket-open", next);
+    const handle = $("basketHandle");
+    handle?.setAttribute("aria-expanded", String(next));
+    const label = next ? "收起试题篮" : `展开试题篮（${state.basket.length} 题）`;
+    if (handle) { handle.title = label; handle.setAttribute("aria-label", label); }
+    $("basketPanel").hidden = !next;
+    if (next) setRail(false);
+  }
+
   function renderBasket() {
     const panel = $("basketPanel");
-    panel.hidden = false;
+    panel.hidden = !state.basketVisible;
+    $("basketPanelCount").textContent = String(state.basket.length);
+    $("basketHandleCount").textContent = String(state.basket.length);
     $("selectedViewCount").textContent = String(state.basket.length);
     $("clearBasketPanel").disabled = !state.basket.length;
+    document.body.classList.toggle("library-basket-has-items", state.basket.length > 0);
+    const handle = $("basketHandle");
+    const label = state.basketVisible ? "收起试题篮" : `展开试题篮（${state.basket.length} 题）`;
+    handle.setAttribute("aria-expanded", String(state.basketVisible));
+    handle.title = label; handle.setAttribute("aria-label", label);
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = !state.basket.length;
     ui.basketButton.disabled = state.basketLoading;
-    // 「组卷预览」钉在顶栏，和「试题篮 N」并排。它原来在侧栏和篮面板之间搬，
-    // 用户找不到它；篮展开收起时它还总落在折叠线以下。顶栏本来就是空的一行，
-    // 篮空时它自己隐藏，.topbar-tools 也就整块不占位，纵向一行都不多花。
-    const tools = document.querySelector(".topbar-tools");
-    if (tools && ui.basketButton.parentElement !== tools) tools.append(ui.basketButton);
-    // 篮的入口跟着篮走：篮里有题才在顶栏给一个按钮，抽屉里那一组也跟着计数。
-    window.QBSiteDrawer?.setBasketCount(state.basket.length);
     $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
     $("allQuestionsButton").classList.toggle("active", state.view === "all");
     $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
@@ -2260,9 +2277,8 @@
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
   $("sortSelect").addEventListener("change", () => { state.sort = $("sortSelect").value; syncUrl(); load(); });
-  // 抽屉里的「试题篮 N」不再折叠，篮的内容就在标题下面。点它只是让题库把篮
-  // 重新画一遍（比如刚加过题、或上次的滚动位置已经不在了），不需要再决定显不显示。
-  window.QBSiteDrawer?.onBasketChange?.(() => { renderBasket(); });
+  // 篮的入口就是右边缘那条把手，导航抽屉（☰）里不再有试题篮：☰ 留给导航和工具。
+  $("basketHandle").addEventListener("click", () => setBasketPanel(!state.basketVisible));
   $("allQuestionsButton").addEventListener("click", () => { state.view = "all"; render(); });
   $("basketViewButton").addEventListener("click", async () => { state.view = "selected"; render(); await refreshBasket({ force: true }); });
   $("selectVisible").addEventListener("change", () => {
@@ -2396,6 +2412,8 @@
       // 窄屏上侧栏是浮层，专注模式把它 display:none 掉了。要不然「宽屏进了专注、
       // 再把窗口拖窄」会卡在一个既看不见也打不开的侧栏上。
       if (document.body.classList.contains("library-focus-mode")) focusToggle?.set(false);
+      // 窄屏上右侧已经有筛选浮层了，篮抽屉要让位：两个浮层不同时开。
+      if (document.body.classList.contains("library-basket-open")) setBasketPanel(false);
     }
     document.body.classList.toggle("rail-open", open);
     railScrim.hidden = !open;

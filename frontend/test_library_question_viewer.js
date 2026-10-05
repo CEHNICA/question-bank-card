@@ -243,8 +243,9 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   const shared = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
   assert(css.includes(".library-focus-mode .library-rail, .library-focus-mode .library-bulk"));
   assert(!css.includes(".library-focus-mode .basket-panel"), "专注模式不许再把篮藏掉");
-  assert(shared.includes(".site-drawer .basket-list { max-height: none"), "抽屉里只留一根滚动条");
-  assert(shared.includes(".topbar-basket-label, .topbar-preview-label"), "窄屏顶栏只留图标和数字");;
+  assert(shared.includes(".topbar-basket-label, .topbar-preview-label") === false, "顶栏不再有篮的按钮");
+  assert(css.includes(".basket-handle { position: sticky;"), "篮的把手一直钉在右边缘视口正中");
+  assert(css.includes("body.library-basket-open .library-workspace { --basket-w: 300px; }"), "展开时占第三列");;
   assert(css.includes(".question-viewer-content.native-images .qb-question-image img"));
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
   console.log("Question viewer: complete content, original image order/zoom, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");

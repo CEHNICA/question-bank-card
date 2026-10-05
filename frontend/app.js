@@ -5600,16 +5600,24 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 全屏里也要能换题，否则藏起试卷列表后很容易不知道自己在第几题。
     // 换题只能在展开着的题卡之间走：已通过而没展开的题渲染成一行摘要，根本没有
     // 题干可改，从 DOM 里挑出真正能打开的那些，才不会跳过去扑个空。
-    const siblings = [...document.querySelectorAll(".card:not(.compact)")]
+    // 这份名单**每次点的时候现算**。以前在构建操作栏那一刻抓一次存进闭包，可换题
+    // 会 discardEdits → 重画卡片列表 → 旧闭包里的下标和节点引用全都对不上：
+    // 实测「下一题」第一下没反应、「上一题」反而往前走一题。
+    const editableSiblings = () => [...document.querySelectorAll(".card:not(.compact)")]
       .map(node => state.questions.find(item => String(item.id) === node.dataset.id)).filter(Boolean);
+    const siblings = editableSiblings();
     const here = siblings.findIndex((item) => item.id === q.id);
     const jump = async (delta) => {
-      const other = siblings[here + delta];
+      const list = editableSiblings();
+      const from = list.findIndex((item) => item.id === q.id);
+      const other = list[from + delta];
       if (!other) return;
       if (state.editing.has(other.id)) { toast("那道题正在改字，先保存或取消", "error"); return; }
       if (!(await discardEdits([q.id]))) return;
+      // 目标节点必须在这之后再找：那一步可能已经把卡片列表重画过了。
       const target = document.querySelector(`.card[data-id="${other.id}"]`);
-      if (target) openEditor(target, other);
+      if (!target) { toast("那道题刚刚变了，请再点一次", "error"); return; }
+      openEditor(target, other);
     };
     const back = button("← 返回", "", () => discardEdits([q.id]));
     back.title = "回到审核列表；有未保存的改动会先问一句";

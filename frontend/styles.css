@@ -166,17 +166,13 @@ body.drawer-open { overflow: hidden; }
    把题名挤成一列字。 */
 .site-drawer-slot > .source-link, .site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; }
 .site-drawer .library-shortcut-hint { margin: 0; }
+/* 篮不再住在导航抽屉里：它是干活的面，不是菜单项。☰ 留给导航和工具。 */
 .site-drawer .basket-panel { position: static; max-height: none; padding: 2px 2px 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
-/* 篮不再自己滚：抽屉主体就是那根滚动条。之前列表限高 44vh 再自带一根，
-   抽屉里就套了两层滚动条，拖的往往不是你想拖的那根。 */
-.site-drawer .basket-list { max-height: none; overflow: visible; }
-/* 篮面板自己的标题删了（组标题已经写了名字和数量），只留「清空」并靠右。 */
-.site-drawer .basket-panel-head { display: flex; justify-content: flex-end; }
 @media (max-width: 560px) {
   .site-drawer { width: min(86vw, 320px); }
-  /* 顶栏挤不下四个字了，只留图标和数字。 */
-  .topbar-basket-label, .topbar-preview-label { display: none; }
-  .topbar-basket, #basketButton { padding-inline: 8px; }
+  /* 窄屏上两个右侧面板会撞：篮抽屉展开时按 86vw 走，别把题面挤没。 */
+  body.library-basket-open .library-workspace { --basket-w: min(86vw, 320px); }
+  .basket-handle { width: 24px; }
 }
 @media print { .site-drawer, .drawer-scrim, .drawer-staging { display: none !important; } }
 
@@ -1300,6 +1296,15 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .intake-mode small { font-weight: 400; color: var(--muted); line-height: 1.65; }
 .qb-figure img { display: block; max-width: min(100%, 320px); max-height: 220px; object-fit: contain; mix-blend-mode: multiply; }
 .qb-option .qb-figure img { max-height: 150px; }
+/* 1.12.7：原卷裁片和排版文字要一眼分得开。照片上常常印着铅笔草稿和旁边那道题
+   的字，裁得宽一点就会把那些浅色痕迹一起框进来，看着像两层字叠在一起 ——
+   其实那就是原片。给它一道细边和一个小角标，一眼就知道是拍下来的原卷。 */
+.card.editing .editor-preview .qb-figure { position: relative; display: inline-block; padding: 3px;
+  border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.card.editing .editor-preview .qb-figure::after { content: "原卷"; position: absolute; top: 0; right: 0;
+  padding: 0 5px; border-radius: 0 5px 0 6px; background: var(--bg-sunken); color: var(--muted);
+  font: 10px/16px var(--ui-font); letter-spacing: .04em; pointer-events: none; }
+.card.editing .editor-preview .qb-figure img { border-radius: 3px; }
 .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 4px; }
 .table-tools .hint { flex: 1 1 260px; margin: 0; color: var(--muted); font-size: 12px; }
 .qb-figure-action { display: flex; justify-content: center; margin-top: 4px; font-family: var(--ui-font); }

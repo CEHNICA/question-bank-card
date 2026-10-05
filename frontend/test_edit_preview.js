@@ -49,7 +49,11 @@ assert.match(js, /const jump = async \(delta\) => \{[\s\S]*?if \(!\(await discar
 // Switching questions only walks cards that can actually be opened. An approved but
 // unexpanded question renders as a one-line summary with no body, so jumping there
 // used to leave the editor closed with nothing open — 1.12.7 hit it on the walk.
-assert.match(js, /const siblings = \[\.\.\.document\.querySelectorAll\("\.card:not\(\.compact\)"\)\][\s\S]*?const here = siblings\.findIndex\(\(item\) => item\.id === q\.id\);/);
+// The list is recomputed on every click: grabbing it once when the bar is built meant
+// the closed editor kept a stale index and a stale node, so "next" did nothing and
+// "previous" walked forward.
+assert.match(js, /const editableSiblings = \(\) => \[\.\.\.document\.querySelectorAll\("\.card:not\(\.compact\)"\)\]/);
+assert.match(js, /const jump = async \(delta\) => \{\s*const list = editableSiblings\(\);\s*const from = list\.findIndex\(\(item\) => item\.id === q\.id\);/);
 assert.doesNotMatch(js, /const siblings = state\.questions\.filter\(visible\);/);
 assert.match(js, /place\.append\(el\("span", "editor-bar-count", `第 \$\{q\.number\} 题 \/ 共 \$\{state\.questions\.length\} 题`\)\);/);
 // The stem box grows with its text.
