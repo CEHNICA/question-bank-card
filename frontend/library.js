@@ -1491,7 +1491,9 @@
 
   let printAnswersPreference = ui.printAnswers.checked;
   const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
-    optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "", solutions: {}, solutionRecords: new Map(), missingAcknowledged: "" };
+    optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "",
+    // autoOrigin：这些题的「origin」是打开预览时因为没答案自动补的默认，不是这份卷子的选择。
+    solutions: {}, autoOrigin: new Set(), solutionRecords: new Map(), missingAcknowledged: "" };
   const printNames = new Map();
   let answerEditor = null;
   let questionEditor = null;
@@ -1734,11 +1736,27 @@
   async function resolvePrintSolutions(items) {
     await Promise.all(items.map(async item => {
       const revision = printState.solutions[item.id];
-      if (revision === "origin") { item.solution = null; item.solution_revision = "origin"; return; }
+      // 「origin」有两种来路，待遇不能一样：
+      //  · 存草稿时记下的（autoOrigin 里没有）—— 那时候这道题就这样，是这份卷子的选择，
+      //    题库后来同步进来的解析不能顶掉它。
+      //  · 打开预览时因为「当时没答案」自动补上的（autoOrigin 里有）—— 只是那一次的默认，
+      //    用户在题卡上填了答案就该用新的。否则界面上明明写着「已保存到题库」，回到组卷
+      //    还是「没有答案」，「分别导出题目卷与答案卷」一直灰着，刷新一下又好了。
+      if (revision === "origin") {
+        if (printState.autoOrigin.has(item.id) && item.solution?.id) {
+          printState.solutions[item.id] = item.solution.id;
+          printState.solutionRecords.set(item.solution.id, item.solution);
+          printState.autoOrigin.delete(item.id);
+          item.solution_revision = item.solution.id;
+          return;
+        }
+        item.solution = null; item.solution_revision = "origin"; return;
+      }
       if (!revision) {
         const selected = item.solution?.id || "origin";
         printState.solutions[item.id] = selected; item.solution_revision = selected;
-        if (item.solution?.id) printState.solutionRecords.set(selected, item.solution);
+        if (item.solution?.id) { printState.solutionRecords.set(selected, item.solution); printState.autoOrigin.delete(item.id); }
+        else printState.autoOrigin.add(item.id);
         return;
       }
       let saved = printState.solutionRecords.get(revision);
@@ -1890,6 +1908,8 @@
             saveBasket();
             state.draft = current;
             printState.solutions = solutions.draftSelections(current.solutions, current.ids);
+            // 草稿里的每一个版本号都是存下来的选择，包括那些「当时没答案」写下的 origin。
+            printState.autoOrigin = new Set();
             state.draftDirty = false;
             ui.printTitle.value = current.title;
             applyPrintOptions(current.print_options);

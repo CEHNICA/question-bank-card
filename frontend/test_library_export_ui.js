@@ -10,7 +10,7 @@ const controls = Object.fromEntries([
 ].map(id => [id, { value: "", checked: false, disabled: false }]));
 const ui = { printAnswers: {}, printOrigin: {}, printAi: {}, paper: { querySelectorAll: () => [] } };
 const state = { features: { ai_answer: false } };
-const printState = { items: [{}], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0 };
+const printState = { items: [{}], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, autoOrigin: new Set() };
 const sandbox = { $: id => controls[id], ui, state, printState, solutions: require("./library-solutions.js"), printAnswersPreference: true, document: { fonts: { ready: Promise.resolve() } }, setTimeout, clearTimeout };
 vm.createContext(sandbox);
 vm.runInContext(source.slice(source.indexOf("  function normalizePrintOptions("), source.indexOf("  function printAnswerContent(")), sandbox);
@@ -110,6 +110,18 @@ vm.runInContext(source.slice(source.indexOf("  async function resolvePrintSoluti
   assert.equal(legacy[0].solution, null); assert.equal(legacy[0].solution_revision, "origin");
   assert.equal(solutionFetches, 0); assert.equal(original.solution.answer, "之后同步 B", "Per-paper origin choices do not alter the library snapshot");
   assert.equal(sandbox.solutions.selected(legacy[0]).content.answer, "原卷 A");
+  // 1.13.5：打开预览时因为「当时没答案」自动补下的 origin 只是那一次的默认，不是选择。
+  // 用户在题卡上填了答案，同一次使用里再打开组卷就该用新填的那份 ——
+  // 否则界面上写着「已保存到题库」，试卷上还是「没有答案」，分别导出一直灰着。
+  printState.solutions = {}; printState.solutionRecords = new Map(); printState.autoOrigin = new Set();
+  const bare = [{ id: "a", content: {} }]; await sandbox.resolvePrintSolutions(bare);
+  assert.equal(bare[0].solution_revision, "origin");
+  assert(printState.autoOrigin.has("a"), "自动补上的 origin 要单独记一笔，别和草稿里存下来的选择混为一谈");
+  const filled = [{ id: "a", content: {}, solution: { id: "just-saved", answer: "刚填的", analysis: "步骤" } }];
+  await sandbox.resolvePrintSolutions(filled);
+  assert.equal(filled[0].solution_revision, "just-saved");
+  assert.equal(sandbox.solutions.selected(filled[0]).content.answer, "刚填的");
+  assert(!printState.autoOrigin.has("a"), "换成真解析之后就不再是自动补的了");
   const fixed = { id: "fixed-revision", answer: "新编辑 C", analysis: "明确保存步骤" };
   printState.solutions.a = fixed.id; printState.solutionRecords.set(fixed.id, fixed);
   const edited = [{ ...original }]; await sandbox.resolvePrintSolutions(edited);
