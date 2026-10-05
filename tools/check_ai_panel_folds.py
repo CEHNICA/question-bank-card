@@ -30,6 +30,7 @@ MEASURE = """() => {
   const dialog = document.querySelector('#libraryAISettingsDialog');
   const advanced = document.querySelector('#libraryAIAdvanced');
   const save = document.querySelector('#libraryAISave');
+  const body = dialog.querySelector('.library-ai-body');
   return {
     viewport: window.innerHeight,
     dialog: box(dialog),
@@ -38,6 +39,7 @@ MEASURE = """() => {
     tags: box(document.querySelector('#libraryAITags')),
     answer: box(document.querySelector('#libraryAIAnswer')),
     saveBottom: save ? box(save).bottom : 0,
+    bodyScrolls: Boolean(body && body.scrollHeight > body.clientHeight + 1),
   };
 }"""
 
@@ -76,10 +78,13 @@ def run(page) -> None:
     page.screenshot(path=f"{SHOTS}/panel_before.png")
     check(expanded["advanced"]["height"] > 1000,
           f"展开后模型配置自己就 {expanded['advanced']['height']:.0f}px 高")
-    check(expanded["dialog"]["height"] > folded["dialog"]["height"] + 500,
-          f"整个面板从 {folded['dialog']['height']:.0f}px 涨到 {expanded['dialog']['height']:.0f}px")
-    check(expanded["dialog"]["height"] > expanded["viewport"] or expanded["saveBottom"] > expanded["viewport"],
-          f"展开后保存按钮底边 {expanded['saveBottom']:.0f}px，一屏 {expanded['viewport']}px 放不下")
+    # 1.13.4 补：面板被限高之后，展开模型配置不再把整个面板撑高——
+    # 正文自己滚，底栏钉在原地。改动前整个面板会涨到 2169px、「保存」掉到 2391px。
+    check(expanded["dialog"]["height"] <= folded["dialog"]["height"] + 2,
+          f"展开后整个面板没被撑高（{folded['dialog']['height']:.0f}px → {expanded['dialog']['height']:.0f}px）")
+    check(expanded["bodyScrolls"], "多出来的内容由正文区自己滚")
+    check(expanded["saveBottom"] <= expanded["viewport"],
+          f"展开后「保存 API 设置」底边 {expanded['saveBottom']:.0f}px 仍在视口内")
 
     # API 没配好的时候，那一块要自动展开——用户本来就得进去改。
     ready = json.loads(page.request.get(f"{BASE}/api/settings/library-ai").text())

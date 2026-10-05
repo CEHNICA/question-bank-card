@@ -24,6 +24,20 @@ assert.match(panelJs, /if \(!apiReady && !state\.advancedTouched\) \$?\("library
 assert.match(panelJs, /ontoggle = \(event\) => \{ state\.advancedTouched = event\.isTrusted; \}/,
   "用户自己开合过就不再插手，并且要分清是他点的还是代码设的");
 
+// 面板被限高这件事很容易被后来的样式改回「按内容长高」，那就白改了：
+// 1366×768 上「保存 API 设置」会掉到 941px 处，用户看不到。
+assert.match(panelJs, /\.library-ai-panel\{min-width:0;display:flex;flex-direction:column;height:100%;min-height:0\}/,
+  "挂载在设置页里的面板要自己撑满、自己滚");
+assert.match(panelJs, /\.library-ai-panel \.library-ai-body\{padding:0;background:none;gap:24px;overflow:auto;min-height:0\}/,
+  "正文区在挂载模式下也得保留 auto，不能被改回 visible");
+assert.match(panelJs, /\.library-ai-form\{display:flex;flex-direction:column;min-height:0;flex:1\}/,
+  "表单要占满面板，底栏才有理由钉在原地");
+const stylesCss = fs.readFileSync(require.resolve("./styles.css"), "utf8");
+assert.match(stylesCss, /\.library-ai-mount \{ display: flex; flex-direction: column; flex: 1; min-height: 0; \}/,
+  "挂载点本身要能撑开，否则 height:100% 无处可算");
+assert.match(stylesCss, /#credentialAnswerPanel \{ display: flex; flex-direction: column; \}/,
+  "答案那一页的外层是 flex 列，面板才有确定高度可依");
+
 // ---- 2. 知识点目录搬进这个面板
 assert.ok(!indexHtml.includes('id="knowledgeDetails"'), "「显示与导出」页不再挂知识点目录的入口");
 assert.ok(!indexHtml.includes('id="featureNote"'), "那条只剩文件路径的说明一起搬走了");

@@ -69,7 +69,7 @@
     style.textContent = `
       .library-ai-dialog{width:min(690px,94vw);max-height:92vh;max-height:92dvh;padding:0;overflow:hidden}
       .library-ai-dialog[open]{display:flex;flex-direction:column}
-      .library-ai-form{display:flex;flex-direction:column;min-height:0}
+      .library-ai-form{display:flex;flex-direction:column;min-height:0;flex:1}
       .library-ai-body{flex:1;padding:16px 20px;overflow:auto;min-height:0;display:grid;gap:12px;background:var(--bg)}
       .library-ai-form .dialog-head,.library-ai-actions{flex:none}
       .library-ai-section{display:grid;gap:9px;padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
@@ -90,7 +90,7 @@
       .library-ai-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--line);background:var(--surface)}
       .library-ai-actions .settings-save-result{flex:1;min-width:120px}
       .library-ai-section .button{justify-self:start;max-width:100%;white-space:normal}
-      .library-ai-panel{min-width:0}
+      .library-ai-panel{min-width:0;display:flex;flex-direction:column;height:100%;min-height:0}
       .library-ai-knowledge{gap:8px}
       .library-ai-knowledge-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0}
       .library-ai-knowledge-head strong{font-size:14px}
@@ -115,7 +115,7 @@
       .catalogue-foot .settings-path{font-size:12px;overflow-wrap:anywhere}
       .library-ai-panel .dialog-head{padding:0 0 16px;border:0;background:none}
       .library-ai-panel .dialog-head h2{font-size:23px}
-      .library-ai-panel .library-ai-body{padding:0;background:none;gap:24px;overflow:visible}
+      .library-ai-panel .library-ai-body{padding:0;background:none;gap:24px;overflow:auto;min-height:0}
       .library-ai-panel .library-ai-section{border:0;padding:0;background:none;border-radius:0;gap:12px}
       .library-ai-panel .library-ai-section p,.library-ai-panel .library-ai-section label{font-size:14px}
       .library-ai-panel .library-ai-switch{padding:14px 0;border-bottom:1px solid var(--line);gap:12px}

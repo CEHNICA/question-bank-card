@@ -1082,6 +1082,10 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-tabs button { padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 650; cursor: pointer; }
 .credential-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
 .credential-panel { min-height: 0; overflow-y: auto; background: var(--bg); }
+/* 「标签与答案」挂在这一页里。外面这层是滚动容器，挂在里面的面板必须自己撑满、
+   自己滚，否则面板按内容长高，「保存 API 设置」会被顶到 1366×768 这类屏幕的视口外面。 */
+#credentialAnswerPanel { display: flex; flex-direction: column; }
+.library-ai-mount { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .credential-panel[hidden] { display: none; }
 .credential-panel > .settings-models { margin: 0 20px 20px; background: var(--surface); }
 #credentialAnswerPanel { padding: 16px 20px; }
