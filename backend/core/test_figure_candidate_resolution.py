@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 from django.test import TestCase
 
+from core import figure_policy
 from core.models import Paper, Question
 
 
@@ -69,3 +71,75 @@ class FigureCandidateResolutionTests(TestCase):
         self.assertEqual(question["figure_review"]["status"], "ok")
         self.assertEqual(question["figure_review"]["source"], "human")
         self.assertEqual(question["figure_review"]["ignored_candidates"], [self.second_key])
+
+
+class FigureRoleVocabularyTests(TestCase):
+    """所有写入过的角色都不能被算成 conflict 候选 —— 这是 policy 守口的一部分。
+    老代码只认 {"none", "decoration"} 为「已排除」，把 row / other / foreign /
+    candidate / page_border / q / qOtherQuestion / q1a 都误判成 conflict。
+    """
+
+    def test_unknown_role_in_assignments_does_not_block_approval(self):
+        candidates = [
+            {"label": "1", "page_idx": 0, "bbox": [10, 10, 100, 100]},
+            {"label": "2", "page_idx": 0, "bbox": [200, 200, 300, 300]},
+        ]
+        for role in ("none", "decoration", "table", "q3", "row", "other", "foreign",
+                     "candidate", "page_border"):
+            with self.subTest(role=role):
+                # candidate 1 是本题的题干配图；candidate 2 用了被测词表。
+                review = figure_policy.automatic_review(
+                    stem="如图，选择一个正确的图形。",
+                    options={"A": "图 A"},
+                    candidate_labels={"1", "2"},
+                    assignments={"1": "stem", "2": role},
+                    figures=[{"slot": "stem", "page_idx": 0, "bbox": [0, 0, 5, 5],
+                              "source": "auto"}],
+                    own_number=1,
+                )
+                self.assertNotIn("candidate_unclassified", review.get("signals", []),
+                                 f"role={role} 仍被算成未分类：{review}")
+
+    def test_malformed_q_role_does_not_match_as_foreign(self):
+        # q / qOtherQuestion / q1a 不是合法 foreign 角色，不能像 qN 那样被划进
+        # 「已分配给别题」。但只要 assignments 里写过，就视为已分清。
+        for role in ("q", "qOtherQuestion", "q1a", "q12.5"):
+                with self.subTest(role=role):
+                    review = figure_policy.automatic_review(
+                        stem="如图，选择一个正确的图形。",
+                        options={"A": "图 A"},
+                        candidate_labels={"1", "2"},
+                        assignments={"1": "stem", "2": role},
+                        figures=[{"slot": "stem", "page_idx": 0, "bbox": [0, 0, 5, 5],
+                                  "source": "auto"}],
+                        own_number=1,
+                    )
+                    self.assertNotIn("candidate_unclassified", review.get("signals", []),
+                                     f"role={role} 被算成未分类：{review}")
+
+    def test_strict_q_role_with_other_question_number_is_foreign(self):
+        review = figure_policy.automatic_review(
+            stem="如图，选择一个正确的图形。",
+            options={"A": "图 A"},
+            candidate_labels={"1", "2"},
+            assignments={"1": "stem", "2": "q3"},
+            figures=[{"slot": "stem", "page_idx": 0, "bbox": [0, 0, 5, 5],
+                      "source": "auto"}],
+            own_number=1,
+        )
+        self.assertNotIn("candidate_unclassified", review.get("signals", []),
+                         "q3 落进未分类：{review}".replace("已", "已"))
+
+    def test_q_role_for_own_question_treated_as_stem(self):
+        # 有人手动写了 q<own_number> 也得当成 stem，不然它会落进「未分类」。
+        review = figure_policy.automatic_review(
+            stem="如图，选择一个正确的图形。",
+            options={"A": "图 A"},
+            candidate_labels={"1", "2"},
+            assignments={"1": "q1", "2": "none"},
+            figures=[{"slot": "stem", "page_idx": 0, "bbox": [0, 0, 5, 5],
+                      "source": "auto"}],
+            own_number=1,
+        )
+        self.assertNotIn("candidate_unclassified", review.get("signals", []),
+                         f"q<own> 仍被算成未分类：{review}")

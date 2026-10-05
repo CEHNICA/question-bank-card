@@ -29,7 +29,11 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 10
+FIGURE_REVIEW_POLICY_VERSION = 11
+
+# 「这张候选图印在别题里」的角色写法。严格匹配 q 后跟若干数字，避免把
+# q / qOtherQuestion / q1a 这种坏值也当合法 foreign。
+FOREIGN_QUESTION_ROLE = re.compile(r"^q\d+$")
 
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
@@ -473,6 +477,7 @@ def automatic_review(
     figures: list[dict],
     reader_missing: bool = False,
     described_slots: set[str] | None = None,
+    own_number: int | None = None,
 ) -> dict:
     """Combine existing text/reader results without doing any additional recognition."""
     input_hash = _automatic_input_hash(
@@ -504,18 +509,28 @@ def automatic_review(
         if figure.get("slot") == "stem" or figure.get("slot") in OPTION_SLOTS
     }
     missing_descriptions = sorted((described_slots or set()) - bound_slots)
-    foreign_labels = {label for label, role in assignments.items() if role.startswith("q") and role[1:].isdigit()}
+    # assignments 里出现过的候选图都视为「已决定归属」——这是「同一件事两处各算
+    # 一遍」的同类问题：老代码只把 {"none", "decoration"} 算「明确排除」，
+    # 把 row / other / foreign / candidate / page_border / q / qOtherQuestion /
+    # q1a 等都误判成 conflict，让通过一直卡住。
+    # 任何不是 stem / 选项槽 / 表 / 别题的角色，都表示「这张候选图不归这道题」
+    # ——row 共享、other 跨页异物、page_border 页边装饰，含义都是一样的。
+    own_q_role = f"q{own_number}" if own_number is not None else None
     bound_labels = {
         label for label, role in assignments.items()
-        if role == "stem" or role in OPTION_SLOTS
+        if role == "stem" or role in OPTION_SLOTS or (own_q_role is not None and role == own_q_role)
+    }
+    foreign_labels = {
+        label for label, role in assignments.items()
+        if FOREIGN_QUESTION_ROLE.fullmatch(role) and role != own_q_role
     }
     decoration_labels = {label for label, role in assignments.items() if role == "decoration"}
     # A table written into the stem as text is resolved, not a missing picture.
     table_labels = {label for label, role in assignments.items() if role == "table"}
-    explicitly_excluded = {
-        label for label, role in assignments.items() if role in {"none", "decoration"}
-    }
-    unclassified = candidate_labels - foreign_labels - bound_labels - explicitly_excluded - table_labels
+    classified_labels = bound_labels | foreign_labels | table_labels
+    explicitly_excluded = set(assignments.keys()) - classified_labels
+    # unclassified：连 assignments 里都没出现过的候选图 —— 这些才是真正「未分类」。
+    unclassified = candidate_labels - classified_labels - explicitly_excluded
     excluded_count = len(explicitly_excluded)
     drawing_request = asks_student_to_draw(stem, options)
     # ``missing_figure`` is a coarse reader boolean.  A concrete bound crop is
@@ -612,8 +627,11 @@ def recheck_automatic_review(
         excluded_count = max(0, int(previous.get("excluded_count") or 0))
     except (TypeError, ValueError):
         unclassified_count, excluded_count = 0, 0
-    if "candidate_unclassified" in signals and not unclassified_count:
-        unclassified_count = 1
+    # 老补丁：signals 里出现 candidate_unclassified 而 unclassified_count 缺失
+    # 时强行补成 1。这本补丁会留过期的不可疑信号，让用户点了「明确无关」
+    # 之后还是带着 conflict。原始数据里有 unclassified_count 以外字段不要这样补丁。
+    # 现在每张候选图只要进过 assignments 就算分清，unclassified_count=0
+    # + 信号里仍有 candidate_unclassified 不再发生，这个补丁退役。
 
     pending = {f"pending-{index}" for index in range(unclassified_count)}
     excluded = {f"excluded-{index}" for index in range(excluded_count)}
@@ -792,6 +810,7 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
             figures=review_figures,
             reader_missing=bool(primary.get("missing_figure") or missing_option_slots),
             described_slots=described_slots | missing_option_slots,
+            own_number=getattr(question, "number", None),
         )
     else:
         # If the original raw reads have already been compacted away, retain

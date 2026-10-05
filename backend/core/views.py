@@ -176,9 +176,16 @@ def _unclassified_candidate_details(
     assignments = {
         str(label): str(role) for label, role in (primary.get("figures") or {}).items()
     } if isinstance(primary.get("figures"), dict) else {}
+    # 跟 figure_policy.automatic_review 同步：任何「不是本题的图」都视为已分清。
+    # 老的只认 {"none", "table"} + q<digits>，把 decoration/row/other/page_border
+    # 等都漏成「未处理」，与策略口径冲突。strict 正则卡住 q<digits>，避免
+    # q / qOtherQuestion 这种坏值被放过。
+    import re as _re
+    _foreign_q = _re.compile(r"^q\d+$")
+    _bound = {"stem", "A", "B", "C", "D", "E"}
     resolved_elsewhere_labels = {
         label for label, role in assignments.items()
-        if role in {"none", "table"} or (role.startswith("q") and role[1:].isdigit())
+        if role not in _bound and role != "table" and not _foreign_q.match(role)
     }
     selected = _selected_candidate_keys(question, figures)
     ignored = set(ignored_candidates if isinstance(ignored_candidates, list)
