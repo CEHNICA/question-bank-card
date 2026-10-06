@@ -139,5 +139,27 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
   assert.equal(fallback.warning,"文件夹不可写，已改用浏览器下载。");assert.equal(links.length,previous+1);
   global.fetch=async(url)=>{if(url==="/api/export-preferences")throw new Error("settings unavailable");return response();};
   await Export.download([item],{print_options:{document:"questions"}});assert.equal(links.length,previous+2);
+
+  // 屏幕上核对过几页就报几页，后端才能发现「发下来的不是他看过的那份」。
+  // Word 没有页数概念，把页数塞进 Word 的请求只会让后端拒掉一次本来没问题的导出。
+  global.fetch=attachmentOnly(async(url,request)=>{
+    requests.push({url,request});
+    return String(url).includes("export-pdf")
+      ?response({"Content-Type":"application/pdf","Content-Disposition":"attachment; filename*=UTF-8''%E6%95%B0%E5%AD%A6.pdf"},new TextEncoder().encode("%PDF-1.7\nsynthetic\n%%EOF"))
+      :response();
+  });
+  const pages=links.length;
+  await Export.download([item],{format:"pdf",preview_page_count:4,print_options:{document:"questions"}});
+  assert.equal(requests.at(-1).url,"/api/library/export-pdf");
+  assert.equal(JSON.parse(requests.at(-1).request.body).preview_page_count,4);
+  assert.equal(links.length,pages+1);
+  await Export.download([item],{format:"pdf",print_options:{document:"questions"}});
+  assert.equal(Object.hasOwn(JSON.parse(requests.at(-1).request.body),"preview_page_count"),false,"没有页数就是没有页数，不能猜一个");
+  await Export.download([item],{format:"docx",preview_page_count:4,print_options:{document:"questions"}});
+  assert.equal(Object.hasOwn(JSON.parse(requests.at(-1).request.body),"preview_page_count"),false,"Word 没有页数，不该带上它");
+  for(const bad of[0,-1,2.5,"4"]){
+    await Export.download([item],{format:"pdf",preview_page_count:bad,print_options:{document:"questions"}});
+    assert.equal(Object.hasOwn(JSON.parse(requests.at(-1).request.body),"preview_page_count"),false,`页数 ${bad} 不该送出去`);
+  }
   console.log("Word download transport, failure containment and repeated-click protection: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

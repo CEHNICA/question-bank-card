@@ -235,10 +235,10 @@ def settle(page, label: str, timeout: int = 90000) -> str:
     return f"（等 {label} 的结果等了 {timeout // 1000}s，没等到）"
 
 
-def replay(page, post: dict) -> tuple[int, bytes, str]:
+def replay(page, post: dict) -> tuple[int, bytes, str, dict]:
     response = page.request.post(post["url"], data=post["body"],
                                  headers={"Content-Type": "application/json", "X-QB-Request": "1"})
-    return response.status, response.body(), response.headers.get("content-type", "")
+    return response.status, response.body(), response.headers.get("content-type", ""), response.headers
 
 
 def main() -> int:
@@ -446,7 +446,7 @@ def preview_checks(page, picked: dict) -> int:
 
 def export_checks(page, label: str, post: dict, stems, status: str, expect_answers: bool) -> int:
     failures = 0
-    code, blob, mime = replay(page, post)
+    code, blob, mime, _ = replay(page, post)
     if not check(code == 200 and blob[:2] == b"PK", f"{label} 文件拿到了（HTTP {code}，{len(blob)} 字节，{mime}）"):
         print(f"  状态栏写的是：{status[:140]}")
         return failures + 1
@@ -477,7 +477,7 @@ def export_checks(page, label: str, post: dict, stems, status: str, expect_answe
 
 def split_checks(page, post: dict, stems, status: str, count: int) -> int:
     failures = 0
-    code, blob, mime = replay(page, post)
+    code, blob, mime, _ = replay(page, post)
     if not check(code == 200 and blob[:2] == b"PK", f"分卷文件拿到了（HTTP {code}，{len(blob)} 字节，{mime}）"):
         print(f"  状态栏写的是：{status[:140]}")
         return failures + 1
@@ -538,13 +538,33 @@ def pdf_text(blob: bytes) -> str:
 
 def pdf_checks(page, post: dict, status: str, stems=None, expect_answers: bool = True) -> int:
     failures = 0
-    code, blob, mime = replay(page, post)
+    code, blob, mime, headers = replay(page, post)
     if not check(code == 200 and blob[:5] == b"%PDF-", f"PDF 文件头合法（HTTP {code}，{len(blob)} 字节，{mime}）"):
         return failures + 1
     pages = blob.count(b"/Type /Page") + blob.count(b"/Type/Page")
     failures += fail_count(check(pages >= 1, f"PDF 里有 {pages} 页"))
     failures += fail_count(check(blob.rstrip().endswith(b"%%EOF"), "PDF 收尾完整（%%EOF 在）"))
     open(f"{SHOTS}/paper.pdf", "wb").write(blob)
+    # 页数闭环：请求里带的必须是屏幕上那一份的页数，导回来的 PDF 也必须是这个页数。
+    # 「老师核对过的那份」和「发下去的那份」不是同一份，比页数最省事也最准。
+    try:
+        sent = json.loads(post["body"]).get("preview_page_count")
+    except (TypeError, ValueError):
+        sent = None
+    on_screen = page.evaluate("() => Number(document.getElementById('printPaper')?.dataset.pageCount) || 0")
+    reported = int(headers.get("x-page-count") or 0)
+    failures += fail_count(check(isinstance(sent, int) and sent > 0,
+                                 f"导 PDF 时带上了屏幕上的页数（发了 {sent}）"))
+    failures += fail_count(check(sent == on_screen,
+                                 f"请求里的页数 {sent} = 屏幕上的 {on_screen}"))
+    failures += fail_count(check(reported == on_screen,
+                                 f"导回来的 PDF 是 {reported} 页 = 屏幕上的 {on_screen} 页"))
+    # 页数对不上时必须拒发。把请求里的页数改掉再发一次，看它到底给不给。
+    tampered = dict(post, body=json.dumps({**json.loads(post["body"]),
+                                           "preview_page_count": (on_screen or 1) + 1}))
+    bad_code, bad_blob, bad_mime, _ = replay(page, tampered)
+    failures += fail_count(check(bad_code == 409 and not bad_blob.startswith(b"%PDF-"),
+                                 f"页数对不上时不发卷（HTTP {bad_code}，{bad_mime}，{len(bad_blob)} 字节）"))
     if not stems:
         return failures
     # 以前这里只到「是个 PDF、有页」就收工。一份空白页或整页缺题的 PDF 一样能过 ——

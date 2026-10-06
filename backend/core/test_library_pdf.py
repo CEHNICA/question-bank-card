@@ -175,6 +175,34 @@ class PdfExportTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("浏览器缺失", response.json()["error"])
 
+    def test_page_count_must_match_the_paper_the_teacher_checked_on_screen(self):
+        pub = self.publication()
+        payload = self.payload([pub], output_format="pdf")
+        payload["preview_page_count"] = 2
+        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 2)):
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["X-Page-Count"], "2")
+        # 屏幕上核对的是 3 页，发下来的是 2 页：那份文件不是他看过的那份，不发。
+        payload["preview_page_count"] = 3
+        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 2)):
+            response = self.post(payload)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("重新预览", response.json()["error"])
+        self.assertNotEqual(response.get("Content-Type"), "application/pdf")
+        # 没带这个数的老客户端照旧放行，不能因为新字段把别人挡在门外。
+        for absent in ({}, {"preview_page_count": None}):
+            payload.pop("preview_page_count", None)
+            payload.update(absent)
+            with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 2)):
+                self.assertEqual(self.post(payload).status_code, 200, absent)
+        # 说不清是几页的数一律拒，不能拿它去比。
+        for bad in (0, -1, "2", 2.5, [2]):
+            payload["preview_page_count"] = bad
+            with mock.patch.object(pdf, "_render") as renderer:
+                self.assertEqual(self.post(payload).status_code, 400, bad)
+            renderer.assert_not_called()
+
 
 class PdfBrowserStartupTests(SimpleTestCase):
     def wait_for_port(self, reads, *, polls=None, deadline=.2):

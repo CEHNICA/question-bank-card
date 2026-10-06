@@ -167,7 +167,7 @@
     return paperGroups(items).flatMap(([, group]) => group.map((item) => item.id));
   }
 
-  async function download(items, { title, print_options, solutions, format = "docx" } = {}) {
+  async function download(items, { title, print_options, solutions, format = "docx", preview_page_count } = {}) {
     if (downloading) throw new Error("正在导出，请稍候。");
     if (!Array.isArray(items) || !items.length) throw new Error("请先选题，再导出试卷。");
     if (!["docx", "split", "pdf"].includes(format)) throw new Error("请选择 PDF、Word 或分卷 Word。");
@@ -200,7 +200,11 @@
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
         .filter(([id, value]) => selectedIds.has(id) && ["none", "small", "medium", "large"].includes(value)));
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
-      const body = JSON.stringify({ ids: ordered.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
+      // The PDF the teacher checked on screen is the PDF they get. Send the page
+      // count the preview settled on so the server can refuse a file that would
+      // not match it, instead of silently handing over a different paper.
+      const body = JSON.stringify({ ids: ordered.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format,
+        ...(format === "pdf" && Number.isInteger(preview_page_count) && preview_page_count > 0 ? { preview_page_count } : {}) });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");
       const headers = { "Content-Type": "application/json", "X-QB-Request": "1" };
       // A machine preference is deliberately separate from this paper/draft.

@@ -490,7 +490,7 @@ def _render(document):
 
 
 def export(payload):
-    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions"} or payload.get("format", "pdf") != "pdf":
+    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions", "preview_page_count"} or payload.get("format", "pdf") != "pdf":
         raise word.ExportError("PDF 导出内容格式不正确")
     try:
         ids = normalize_ids(payload.get("ids"))
@@ -501,10 +501,18 @@ def export(payload):
     if not ids or len(ids) != len(payload["ids"]):
         raise word.ExportError("请检查选题编号后重新打开组卷")
     word._utf16_map(title, "卷名")
+    previewed = payload.get("preview_page_count")
+    if previewed is not None and (type(previewed) is not int or not 1 <= previewed <= MAX_PAGES):
+        raise word.ExportError("请重新打开组卷预览后再导出 PDF")
     captured, use_ai = word._capture(ids, payload.get("rendered_fields"), options, "pdf", solutions=payload.get("solutions"))
     document = _html_document(captured, title, options)
     data, pages = _render(document)
     word._recheck(captured, options, use_ai)
+    # The teacher checked the paper on screen and is about to print this file.
+    # A different page count means the file is not what was checked, so it is
+    # refused rather than downloaded; re-opening the preview is one click.
+    if previewed is not None and previewed != pages:
+        raise word.ExportError("排版有变化，请重新预览后导出。", 409)
     return data, word.safe_filename(title) + ".pdf", len(ids), pages
 
 

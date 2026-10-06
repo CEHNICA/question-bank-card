@@ -2626,6 +2626,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
         if (typeof window.ExamExport?.download !== "function") throw new Error("导出组件未载入，请刷新页面后重试");
         status.textContent = format === "pdf" ? "正在生成 PDF 文件…" : "正在生成 Word 文件…";
         const result = await window.ExamExport.download(printState.items, { title: ui.printTitle.value.trim() || "练习", print_options: options, format,
+          // 预览停在几页就报几页；后端排出来对不上就拒发，不让老师拿到不是他看过的那份。
+          preview_page_count: Number(ui.paper.dataset.pageCount) || undefined,
           solutions: solutions.fixedSelections(printState.solutions, printState.items.map(item => item.id)) });
         const count = result.question_count || printState.items.length;
         const warning = result.warning ? `；${result.warning}` : "";
