@@ -25,6 +25,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 import zipfile
 from io import BytesIO
 from xml.sax.saxutils import unescape
@@ -393,7 +394,7 @@ def main() -> int:
             pdf = last_post(posts, "export-pdf")
             failures += fail_count(check(pdf is not None, "点「导出 PDF」真的发了一次请求"))
             if pdf:
-                failures += pdf_checks(page, pdf, status)
+                failures += pdf_checks(page, pdf, status, stems, expect_answers=True)
 
             # ── 八、导完之后按钮回得来吗 ────────────────────────────
             after = page.evaluate(BUTTON_STATE)
@@ -521,7 +522,21 @@ def split_checks(page, post: dict, stems, status: str, count: int) -> int:
     return failures
 
 
-def pdf_checks(page, post: dict, status: str) -> int:
+def pdf_text(blob: bytes) -> str:
+    """PDF 里能搜到的文字。
+
+    Chrome 导出时中文会被映射到 CJK 兼容区（U+2F00–U+2FDF）：看起来一模一样，
+    码位不同。不做 NFKC 归一化就搜不到，命中率会掉一大截。
+    """
+    try:
+        import pymupdf as pdf
+    except ImportError:                      # 老版本只有 fitz 这个名字
+        import fitz as pdf
+    with pdf.open(stream=blob, filetype="pdf") as document:
+        return unicodedata.normalize("NFKC", "".join(page.get_text() for page in document))
+
+
+def pdf_checks(page, post: dict, status: str, stems=None, expect_answers: bool = True) -> int:
     failures = 0
     code, blob, mime = replay(page, post)
     if not check(code == 200 and blob[:5] == b"%PDF-", f"PDF 文件头合法（HTTP {code}，{len(blob)} 字节，{mime}）"):
@@ -530,6 +545,27 @@ def pdf_checks(page, post: dict, status: str) -> int:
     failures += fail_count(check(pages >= 1, f"PDF 里有 {pages} 页"))
     failures += fail_count(check(blob.rstrip().endswith(b"%%EOF"), "PDF 收尾完整（%%EOF 在）"))
     open(f"{SHOTS}/paper.pdf", "wb").write(blob)
+    if not stems:
+        return failures
+    # 以前这里只到「是个 PDF、有页」就收工。一份空白页或整页缺题的 PDF 一样能过 ——
+    # 而 PDF 恰恰是老师真正拿去印的那一份。
+    text = signature(pdf_text(blob))
+    lost = [qid for qid, snippet in stems if snippet and snippet not in text]
+    if not check(not lost, f"PDF 里 {len(stems) - len(lost)}/{len(stems)} 道题的题干都在（缺 {lost}）"):
+        for qid, snippet in stems:
+            if qid in lost:
+                print(f"    少了这道，界面上找的片段是：{snippet!r}")
+        print(f"    PDF 里的纯文字有 {len(text)} 字：{text[:300]!r}")
+    found = text.count(MARK)
+    if expect_answers:
+        failures += fail_count(check(found >= len(stems),
+                                     f"PDF 里带上了借进去的 {len(stems)} 段答案（{found} 处「{MARK}」）"))
+    else:
+        failures += fail_count(check(found == 0, f"PDF 里没混进答案（{found} 处「{MARK}」）"))
+    numbers = [int(m) for m in re.findall(r"(?m)^\s*(\d+)\s*[.．、]", pdf_text(blob))]
+    print(f"  PDF 里看到的题号：{numbers[:12]}")
+    failures += fail_count(check(len(numbers) == len(stems),
+                                 f"PDF 里题号个数 {len(numbers)} = 篮里 {len(stems)} 道"))
     return failures
 
 
