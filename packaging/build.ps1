@@ -182,6 +182,22 @@ if (-not (Test-Path -LiteralPath $ThirdPartyLicenses -PathType Container)) {
     throw "Required third-party license directory is missing: $ThirdPartyLicenses"
 }
 
+# 版本号写在这两处：这里的 -Version 和 backend/core/version.py。「关于」面板和
+# tiyouju --version 读的都是后者 —— 两边不一致时装出去的软件会报一个比它实际旧
+# 好几个版本的号。构建末尾本来有一道冻结产物的检查，但要等 PyInstaller 跑完一分
+# 钟才发现，所以在开跑前先读源码查一遍。
+$declaredVersionPath = Join-Path $ProjectRoot 'backend\core\version.py'
+$declaredVersionText = [System.Text.UTF8Encoding]::new($false, $true).GetString(
+    [System.IO.File]::ReadAllBytes($declaredVersionPath)
+)
+if ($declaredVersionText -notmatch 'APP_VERSION\s*=\s*"([^"]+)"') {
+    throw "Could not read APP_VERSION from $declaredVersionPath"
+}
+$declaredVersion = $Matches[1]
+if ($declaredVersion -ne $Version) {
+    throw "backend/core/version.py says APP_VERSION = '$declaredVersion' but this build is '$Version'. Update backend/core/version.py to '$Version' and commit it first."
+}
+
 Write-Host "[1/6] Preparing isolated Python 3.12 build environment..."
 New-BuildVirtualEnvironment
 Invoke-Native -FilePath $BuildPython -ArgumentList @('-c', 'import sys;sys.exit(not(sys.version_info[:2]==(3,12)and sys.maxsize>2**32))')
