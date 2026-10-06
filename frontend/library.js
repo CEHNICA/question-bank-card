@@ -2259,7 +2259,21 @@
   // Width fitting happens in the shared A4 paginator for both preview and PDF.
   // This UI check only reports its result; it must not rescale a paginated page.
   function preparePrintLayout() {
-    const tooWide = ui.paper.querySelectorAll('.katex[data-exam-math-overflow="1"]').length;
+    const overflow = [...ui.paper.querySelectorAll('.katex[data-exam-math-overflow="1"]')];
+    // The application's own export refuses to run while a formula cannot fit A4.
+    // The browser's own print shortcut cannot be refused, and the formula is then
+    // cut at the paper edge — 80 terms went in, 32 came out. Print the LaTeX source
+    // for those formulas instead: it wraps, so no term is silently dropped.
+    ui.paper.querySelectorAll(".print-formula-fallback").forEach(item => item.remove());
+    for (const math of overflow) {
+      const span = math.closest(".qb-math");
+      const raw = span?.dataset.raw;
+      if (!span || !raw) continue;
+      const fallback = node("div", "print-formula-fallback");
+      fallback.append(node("code", "", raw.replace(/^\$+|\$+$/g, "")));
+      span.append(fallback);
+    }
+    const tooWide = overflow.length;
     const notice = $("printLayoutNotice");
     notice.textContent = tooWide ? `${tooWide} 处公式超出 A4 正文。可调整本次正文字号，或导出 Word 继续排版；题库内容不受影响。` : "";
     notice.hidden = !tooWide;

@@ -371,23 +371,18 @@ def run(port):
             page.pdf(path=str(path), format="A4", print_background=True, prefer_css_page_size=True)
             info = pdf_info(path)
             text = "".join(v["text"] for v in info["pages"]).replace("\n", "").replace(" ", "")
-            assert "987654321" in text, text[-500:]
-            # 这里原本还要求：走浏览器自己的快捷打印时，放不下的公式改印完整 LaTeX 源码。
-            # 那条兜底没有实现 —— .print-formula-fallback 的样式还在（library.css:438/759），
-            # 但造这个节点的代码没有了。
-            # 实测：应用自己的导出被挡住了，可浏览器快捷打印这条路没挡，公式按原尺寸
-            # 排出 A4，超出纸边的部分被切掉，80 项只剩前 32 项进了 PDF。
-            # 这是真缺陷，如实记下来 —— 别用一条 >=80 的断言把它变成「预期行为」。
+            # 走浏览器自己的快捷打印时，放不下的公式改印完整 LaTeX 源码。
+            # 之前这条兜底没有实现：样式还在，造节点的代码没了，公式按原尺寸排出 A4，
+            # 超出纸边的部分被切掉，80 项只剩前 32 项进了 PDF。
+            # 断言要落在「一项都不能少」上，别写成 >=32 那种把截断当预期的话。
             terms = text.count("x")
-            assert terms > 0 and "987654321" in text, {"terms": terms, "tail": text[-500:]}
-            if terms < 80:
-                report.setdefault("warnings", []).append(
-                    f"浏览器快捷打印这条路没挡住超宽公式：80 项只有 {terms} 项进了 PDF，"
-                    "超出 A4 纸边的部分被切掉了。应用自己的导出按钮是挡住的，只有这条路径会中招。")
+            assert terms >= 80, {"terms": terms, "tail": text[-500:]}
+            assert "987654321" in text, text[-500:]
+            assert not any(v["outside_page"] for v in info["pages"]), info
             report["pdfs"].append(info)
             report["checks"].append(
                 "unfittable formula blocks the app's own print and export with a notice; "
-                "the browser shortcut path prints it oversized and the part past the page edge is lost")
+                "the browser shortcut path prints the full LaTeX source instead of cutting it at the page edge")
             page.emulate_media(media="screen")
             page.keyboard.press("Escape")
             restored = page.evaluate("document.activeElement.id")

@@ -6261,7 +6261,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     writePref(CROP_GUIDANCE_PREF, cropGuidanceEnabled ? "1" : "0");
     showCropGuide(cropGuidanceText);
   }
-  $("pageGuideDismiss").addEventListener("click", () => setCropGuidanceEnabled(false));
   $("pageGuidanceToggle").addEventListener("change", (event) => setCropGuidanceEnabled(event.target.checked));
   window.addEventListener("storage", (event) => {
     if (event.key !== CROP_GUIDANCE_PREF) return;

@@ -755,8 +755,10 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .page-crop-workspace { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
 .page-crop-messages { position: absolute; z-index: 4; top: 12px; left: 16px; max-width: min(720px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .page-crop-guide { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; padding: 8px 12px; border-radius: 8px; color: var(--accent); background: var(--accent-soft); box-shadow: var(--shadow); font-size: 13px; }
+/* 1.14.0：画框提示浮在原卷上，整条都不能吃点击 —— 窄屏时它的「以后不再提示」按钮
+   正好压在用户正要点的第二个角上，点下去收不到框，只把提示关掉了。同一个开关在
+   「快捷键」面板里有，那儿不遮画布。 */
 .page-crop-guide[hidden] { display: none; }
-.page-crop-guide button { pointer-events: auto; font-size: 12px; padding: 4px 6px; }
 .page-crop-workspace > .page-stage { min-width: 0; }
 .page-crop-preview { flex: 0 0 290px; min-width: 0; overflow: auto; padding: 14px; border-left: 1px solid var(--line); background: var(--surface); }
 .page-crop-preview[hidden] { display: none; }

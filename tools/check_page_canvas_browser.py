@@ -88,10 +88,31 @@ def check(url, fixture):
             first_card().get_by_role("button",name="调整范围",exact=True).click()
             settle_modal(page,"#pageDialog")
             page.wait_for_function("(()=>{const i=document.querySelector('#pageStage .stage-surface img');return i&&i.complete&&i.naturalWidth>0})()")
+        def close_regions_discarding():
+            # The editor refuses to drop drawn boxes silently, so take the real
+            # "discard" branch a user would take instead of forcing the close.
+            page.locator("#pageDialogClose").click()
+            expect(page.locator("#confirmDialog")).to_be_visible()
+            expect(page.locator("#confirmOk")).to_have_text("丢弃改动")
+            page.locator("#confirmOk").click()
+            expect(page.locator("#pageDialog")).not_to_be_visible()
         def open_viewer():
             first_card().locator(".source-note").click()
             settle_modal(page,"#viewerDialog")
             page.wait_for_function("[...document.querySelectorAll('#viewerCrop img')].every(i=>i.complete&&i.naturalWidth>0)")
+        def draw_point(fx,fy):
+            # A real press at this image fraction has to land on screen. The editor centres the
+            # existing region on open, which pushes the top of a tall page off-screen, so scroll
+            # the stage to the top first and refuse to click a point the user could not reach.
+            viewport.evaluate("v=>v.scrollTo(0,0)")
+            page.wait_for_function("(()=>{const s=document.querySelector('#pageStage');"
+                "const r=s.querySelector('.stage-surface').getBoundingClientRect();const b=s.getBoundingClientRect();"
+                "return r.top>=b.top&&r.left>=b.left})()")
+            stage=viewport.bounding_box();point=surface.bounding_box()
+            x=point["x"]+point["width"]*fx;y=point["y"]+point["height"]*fy
+            assert stage["x"]<=x<=stage["x"]+stage["width"] and stage["y"]<=y<=stage["y"]+stage["height"],{
+                "fx":fx,"fy":fy,"point":{"x":x,"y":y},"stage":stage,"surface":point}
+            return {"x":x,"y":y}
         for width in (1440,650,390):
             result={};report["widths"][str(width)]=result
             try:
@@ -100,10 +121,10 @@ def check(url, fixture):
                 expect(page.locator("#pageDialogSave")).not_to_be_visible();assert boxes(page)==[]
                 expect(page.locator("#pageCanvasHint")).to_contain_text("鼠标左键")
                 page.locator("#pageZoomWidth").click();expect(zoom).to_have_text("100%")
-                result["view_zoom_in_anchor"]=wheel_anchor(page,viewport,surface,"#pageStage .stage-surface",zoom,-120,allow_boundary_limit=True)
+                result["view_zoom_in_anchor"]=wheel_anchor(page,viewport,surface,zoom,-120,allow_boundary_limit=True)
                 for _ in range(3):page.locator("#pageZoomIn").click()
                 result["view_pan_and_release"]=pan_and_release(page,viewport)
-                result["view_zoom_out_anchor"]=wheel_anchor(page,viewport,surface,"#pageStage .stage-surface",zoom,120,allow_boundary_limit=True)
+                result["view_zoom_out_anchor"]=wheel_anchor(page,viewport,surface,zoom,120,allow_boundary_limit=True)
                 assert boxes(page)==[],"Read-only drag unexpectedly created a region"
                 assert surface.locator("img").evaluate("i=>!i.draggable"),"Native image drag enabled"
                 # Hold left drag while navigating by the real focused button.
@@ -115,7 +136,7 @@ def check(url, fixture):
                 assert not geometry(viewport)["panning"]
                 stable=geometry(viewport);page.mouse.move(rect["x"]+95,rect["y"]+95,steps=4)
                 assert geometry(viewport)==stable,"Page switching retained a previous drag"
-                result["view_page_2_anchor"]=wheel_anchor(page,viewport,surface,"#pageStage .stage-surface",zoom,-120,allow_boundary_limit=True)
+                result["view_page_2_anchor"]=wheel_anchor(page,viewport,surface,zoom,-120,allow_boundary_limit=True)
                 # Closing with mouse held clears capture and all pending gestures.
                 page.mouse.move(rect["x"]+70,rect["y"]+70);page.mouse.down();page.keyboard.press("Escape");page.mouse.up()
                 expect(page.locator("#pageDialog")).not_to_be_visible();open_paper()
@@ -142,30 +163,39 @@ def check(url, fixture):
                 assert abs(moved["left"]-(start["left"]-40))<=2 and abs(moved["top"]-(start["top"]-35))<=2,{"before":start,"after":moved}
                 assert boxes(page)==original_boxes,"Middle-pan changed boxes"
                 page.locator("#pageZoomWidth").click();expect(zoom).to_have_text("100%");viewport.evaluate("v=>v.scrollTo(0,0)")
-                # Empty strip to the left of the existing region: ordinary left drag
-                # still creates a correctly scaled region rather than panning.
-                rect=surface.bounding_box()
-                a={"x":rect["x"]+rect["width"]*.02,"y":rect["y"]+rect["height"]*.04}
-                b={"x":rect["x"]+rect["width"]*.075,"y":rect["y"]+rect["height"]*.11}
-                page.mouse.move(**a);page.mouse.down();page.mouse.move(b["x"],b["y"],steps=7)
+                # Empty strip to the left of the existing region: the editor draws with
+                # click-two-corners, so a plain left press there starts a new region
+                # instead of panning.
+                a=draw_point(.02,.04);b=draw_point(.075,.11)
+                page.mouse.click(**a)
                 held_dimensions=surface.bounding_box();held_zoom=zoom.inner_text()
                 page.keyboard.press("0");page.keyboard.press("w")
                 page.evaluate("()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
                 assert surface.bounding_box()==held_dimensions and zoom.inner_text()==held_zoom,"0/W resized the canvas during a draw"
-                page.mouse.up()
-                expect(page.locator("#pageStage .edit-box:not(.drawing)")).to_have_count(len(original_boxes)+1)
+                page.mouse.click(**b)
+                def draw_state():
+                    def at(point):
+                        return page.evaluate("""([x,y])=>{const n=document.elementFromPoint(x,y);
+                            return n?n.tagName.toLowerCase()+(n.id?'#'+n.id:'')
+                                +(typeof n.className==='string'&&n.className?'.'+n.className.trim().split(/\\s+/).join('.'):''):null;}""",[point["x"],point["y"]])
+                    return {"boxes":boxes(page),"guide":page.locator("#pageCropGuideText").inner_text(),
+                            "result":page.locator("#pageCropResult").inner_text(),
+                            "drawing":page.locator("#pageStage .edit-box.drawing").evaluate_all(
+                                "ns=>ns.map(n=>({l:n.style.left,t:n.style.top,w:n.style.width,h:n.style.height}))"),
+                            "a":a,"b":b,"at_a":at(a),"at_b":at(b),"zoom":zoom.inner_text(),
+                            "surface":surface.bounding_box(),"stage":viewport.bounding_box()}
+                assert len(boxes(page))==len(original_boxes)+1,draw_state()
                 drawn=boxes(page)[-1];result["drawn_region"]=drawn
                 for key,target in (("left",2),("top",4),("width",5.5),("height",7)):
                     assert abs(float(drawn[key].rstrip("%"))-target)<.15,{"drawn":drawn,"target":target,"key":key}
                 after_draw=boxes(page)
                 # Cancel during an in-progress rectangle removes only that rectangle.
-                page.mouse.move(a["x"],a["y"]+rect["height"]*.15);page.mouse.down()
-                page.mouse.move(b["x"],b["y"]+rect["height"]*.15,steps=4)
+                page.mouse.click(**a);page.mouse.move(b["x"],b["y"],steps=4)
                 viewport.dispatch_event("pointercancel",{"pointerId":1,"pointerType":"mouse","bubbles":True});page.mouse.up()
                 expect(page.locator("#pageStage .drawing")).to_have_count(0)
                 assert boxes(page)==after_draw,"Cancelled draw left a region behind"
                 page.screenshot(path=str(OUTPUT/f"edit-left-draw-{width}.png"))
-                page.locator("#pageDialogClose").click();open_regions()
+                close_regions_discarding();open_regions()
                 assert boxes(page)==original_boxes,"Canceling editor persisted unsaved boxes"
                 page.locator("#pageDialogClose").click()
                 report["passed"].append(f"{width}px: Space+left and middle pan preserve all regions; ordinary left draws correctly; 0/W cannot resize active draw; pointercancel and cancel discard new region")
@@ -173,12 +203,12 @@ def check(url, fixture):
                 open_viewer();viewport=page.locator("#viewerSource");zoom=page.locator("#zoomLevel")
                 page.locator("#zoomWidth").click()
                 first=page.locator("#viewerCrop .crop-seg").first
-                result["comparison_zoom_in_anchor"]=wheel_anchor(page,viewport,first,"#viewerCrop .crop-seg",zoom,-120)
+                result["comparison_zoom_in_anchor"]=wheel_anchor(page,viewport,first,zoom,-120)
                 for _ in range(3):page.locator("#zoomIn").click()
                 result["comparison_pan_and_release"]=pan_and_release(page,viewport)
-                result["comparison_zoom_out_anchor"]=wheel_anchor(page,viewport,first,"#viewerCrop .crop-seg",zoom,120)
+                result["comparison_zoom_out_anchor"]=wheel_anchor(page,viewport,first,zoom,120)
                 second=page.locator("#viewerCrop .crop-seg").nth(1);second.evaluate("s=>s.scrollIntoView({block:'start'})")
-                result["comparison_page_2_anchor"]=wheel_anchor(page,viewport,second,"#viewerCrop .crop-seg:nth-child(3)",zoom,-120)
+                result["comparison_page_2_anchor"]=wheel_anchor(page,viewport,second,zoom,-120)
                 rect=viewport.bounding_box();page.mouse.move(rect["x"]+65,rect["y"]+65);page.mouse.down()
                 page.mouse.move(rect["x"]+50,rect["y"]+50,steps=3)
                 page.locator("#viewerNext").focus();page.keyboard.press("ArrowRight");page.mouse.up()

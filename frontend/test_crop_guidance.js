@@ -31,7 +31,7 @@ const initial = harness();
 initial.context.showCropGuide("移动鼠标到另一角，再点一下固定范围");
 assert.equal(initial.$("pageCropGuide").hidden, false);
 initial.context.showCropResult("第7题已保存", false);
-initial.$("pageGuideDismiss").events.click();
+initial.$("pageGuidanceToggle").events.change({ target: { checked: false } });
 assert.deepEqual(initial.writes, [["qb-crop-guidance", "0"]]);
 assert.equal(initial.$("pageCropGuide").hidden, true);
 assert.equal(initial.$("pageGuidanceToggle").checked, false);
@@ -56,8 +56,10 @@ assert.equal(initial.$("pageCropGuide").hidden, true);
 assert.match(html, /class="page-crop-workspace">\s*<div class="page-crop-messages">[\s\S]*?id="pageCropResult"[\s\S]*?id="pageCropGuide"[\s\S]*?id="pageStage"/);
 assert.match(css, /\.page-crop-workspace\s*\{[^}]*position:\s*relative/);
 assert.match(css, /\.page-crop-messages\s*\{[^}]*position:\s*absolute[^}]*pointer-events:\s*none/);
-assert.match(css, /\.page-crop-guide button\s*\{[^}]*pointer-events:\s*auto/);
+// 提示条是浮在原卷上的，里面不能再放能点的东西。窄屏时「以后不再提示」正好压在
+// 用户正要点的第二个角上，点下去框没收成，只把提示关了。同一个开关在「快捷键」面板里。
+assert.match(html, /id="pageCropGuide"[^>]*>\s*<span id="pageCropGuideText"><\/span>\s*<\/div>/);
+assert.doesNotMatch(css, /page-crop-(?:messages|guide)[^{]*\{[^}]*pointer-events:\s*auto/);
 assert.match(html, /id="pageGuidanceToggle"/);
-assert.match(html, /id="pageGuideDismiss"[^>]*>以后不再提示/);
 
 console.log("Crop guidance: out-of-flow overlay, geometry-independent DOM updates, persistent opt-out, recovery switch and always-visible necessary feedback: OK");

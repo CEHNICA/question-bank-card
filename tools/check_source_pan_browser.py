@@ -41,13 +41,16 @@ def geometry(viewport):
 
 
 def pointer_point(viewport, target):
-    return viewport.evaluate("""(v, selector) => {
-        const a=v.getBoundingClientRect(), b=document.querySelector(selector).getBoundingClientRect();
+    # Measure the element the caller is actually holding. Re-typing it as a CSS
+    # selector is how ":nth-child(3)" ended up asking for a node that is not the
+    # second crop segment, and the failure read as a missing element.
+    return viewport.evaluate("""(v, el) => {
+        const a=v.getBoundingClientRect(), b=el.getBoundingClientRect();
         const left=Math.max(a.left+20,b.left+10), right=Math.min(a.left+v.clientWidth-20,b.right-10);
         const top=Math.max(a.top+20,b.top+10), bottom=Math.min(a.top+v.clientHeight-20,b.bottom-10);
         if (right<=left || bottom<=top) throw Error('Target not visible in canvas');
         return {x:left+(right-left)*.43,y:top+(bottom-top)*.42};
-    }""", target)
+    }""", target.element_handle())
 
 
 def relative_point(target, point):
@@ -55,8 +58,8 @@ def relative_point(target, point):
         x:(p.x-r.left)/r.width,y:(p.y-r.top)/r.height,width:r.width,height:r.height};}""", point)
 
 
-def wheel_anchor(page, viewport, target, selector, zoom, delta, allow_boundary_limit=False):
-    point = pointer_point(viewport, selector)
+def wheel_anchor(page, viewport, target, zoom, delta, allow_boundary_limit=False):
+    point = pointer_point(viewport, target)
     before = relative_point(target, point)
     old_zoom = zoom.inner_text()
     page.mouse.move(point["x"], point["y"])
@@ -158,11 +161,11 @@ def run(port):
                     first=page.locator(".source-surface").nth(0)
                     # Tag the actual DOM image so resizing must preserve it and its loaded state.
                     page.locator(".source-surface img").first.evaluate("i=>i.dataset.qaIdentity='preserved'")
-                    result["zoom_in_anchor"]=wheel_anchor(page,viewport,first,".source-surface",zoom,-150)
+                    result["zoom_in_anchor"]=wheel_anchor(page,viewport,first,zoom,-150)
                     expect(page.locator(".source-surface img").first).to_have_attribute("data-qa-identity","preserved")
                     page.locator("#sourceZoomIn").click(); page.locator("#sourceZoomIn").click()
                     result["pan_and_release"]=pan_and_release(page,viewport)
-                    result["zoom_out_anchor"]=wheel_anchor(page,viewport,first,".source-surface",zoom,80)
+                    result["zoom_out_anchor"]=wheel_anchor(page,viewport,first,zoom,80)
                     assert page.locator(".source-surface img").evaluate_all("imgs=>imgs.every(i=>i.draggable===false)"), "Native image drag still enabled"
                     # A held drag must end on close, even when release arrives after the dialog closes.
                     rect=viewport.bounding_box(); page.mouse.move(rect["x"]+70,rect["y"]+70); page.mouse.down()
@@ -177,7 +180,7 @@ def run(port):
                     # Use page 2 so cross-page mouse anchoring cannot incorrectly measure page 1.
                     second=page.locator(".source-surface").nth(1)
                     second.evaluate("s=>s.scrollIntoView({block:'start'})")
-                    result["page_2_anchor"]=wheel_anchor(page,viewport,second,".source-page:nth-child(2) .source-surface",zoom,-100)
+                    result["page_2_anchor"]=wheel_anchor(page,viewport,second,zoom,-100)
                     page.locator("#sourceFit").click()
                     fitted=geometry(viewport); result["fit"]=fitted
                     assert fitted["left"]==0 and fitted["top"]==0, fitted

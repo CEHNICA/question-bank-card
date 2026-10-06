@@ -320,7 +320,10 @@ def check(url):
 
         # A deliberately wide fraction must reveal the selected last term in
         # the preview's own horizontal scroll area, keeping the page still.
-        long_formula = "长式 $\\frac{" + "+".join("1234567890" for _ in range(5)) + "}{1}$"
+        # 8 段十位数：390px 下预览宽约 352px，5 段刚好塞得下、压根不溢出，
+        # 量到的 scrollLeft 永远是 0 —— 那不是「预览不滚动」，是这条样本不够宽。
+        # 再长（12 段）预览里就不排这个公式了，量不到东西。
+        long_formula = "长式 $\\frac{" + "+".join("1234567890" for _ in range(8)) + "}{1}$"
         stem.fill(long_formula)
         expect(card(second=True).locator(".editor-preview .qb-math")).to_have_attribute("data-raw", long_formula[3:])
         position(stem, "9", length=1, last=True)
@@ -352,7 +355,9 @@ def check(url):
         card().get_by_role("button", name="确认位置并填入改字", exact=True).click()
         editor = card().locator(".editor")
         expect(editor.locator(".stem-input")).to_have_value(fixture["stem"].replace(fixture["old_formula"], fixture["new_formula"]))
-        expect(editor.get_by_role("button", name="保存", exact=True)).to_be_enabled()
+        # 「保存」在 .editor-bar 上，不是改字表单的一部分（和「← 返回」一样），
+        # 所以要从题卡上找，不能在 .editor 里找。
+        expect(card().get_by_role("button", name="保存", exact=True)).to_be_enabled()
         assert question_snapshot() == before, "Confirming placement must only fill the editor"
         passed.append("Recommended exact replacement changes only editor, with recognizable before/after formulas and enabled manual save")
         close_editor()
@@ -368,10 +373,10 @@ def check(url):
         passed.append("Recommendation cannot overwrite existing unsaved stem; only one editor remains")
         close_editor()
 
+        # 手动兜底不再是「手动选择替换位置」那个下拉框了，现在是几个直接点的按钮
+        # （放到题干 / 填到选项 B）。选哪一块就是点哪个按钮。
         load_variant("manual")
-        manual = card().get_by_label("手动选择替换位置", exact=True)
-        manual.select_option("B")
-        card().get_by_role("button", name="填入选项 B（打开改字）", exact=True).click()
+        card().get_by_role("button", name="填到选项 B", exact=True).click()
         editor = card().locator(".editor")
         expect(editor.locator(".stem-input")).to_have_value(fixture["stem"])
         expect(editor.locator(".option-inputs input").nth(1)).to_have_value(fixture["new_formula"])
@@ -379,14 +384,17 @@ def check(url):
         close_editor()
 
         load_variant("stale")
+        # 位置建议过期后不给任何「一键填入」：面板上只剩手动改字 / 重新框选 / 关闭。
+        # 原来这条还要求「复制并打开改字」把识读原文复制进剪贴板 —— 那条路现在没有了，
+        # 改成断言现在真实存在的保证：没有一键填入，手动改字打开的仍是原题。
         expect(card().get_by_role("button", name="确认位置并填入改字", exact=True)).to_have_count(0)
-        manual = card().get_by_label("手动选择替换位置", exact=True)
-        manual.select_option("stem")
-        card().get_by_role("button", name="复制并打开改字", exact=True).click()
+        assert card().locator(".region-manual-target").count() == 0, \
+            {"位置建议已经过期，却还留着「放到题干 / 填到选项」这些一键填入": card().inner_text()[:300]}
+        card().get_by_role("button", name="手动改字", exact=True).click()
         editor = card().locator(".editor")
         expect(editor.locator(".stem-input")).to_have_value(fixture["stem"])
-        assert page.evaluate("navigator.clipboard.readText()") == fixture["new_formula"]
-        passed.append("Stale recommendation disables direct application; stem fallback copies recognized text and keeps entire stem")
+        assert question_snapshot() == before, "过期建议不该改动题目"
+        passed.append("Stale recommendation offers no one-click apply; manual edit still opens the original stem")
         close_editor()
 
         assert not errors, errors
