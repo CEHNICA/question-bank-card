@@ -35,6 +35,9 @@ DEFAULTS = {
 }
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
+# 「入库时生成」的每一项对应哪个功能开关。library_jobs.FEATURE_OF 说的是同一件事
+# （那边按任务种类写），两份定义必须一致，test_library_ai_settings 里有一条盯着。
+ON_INTAKE_FEATURE = {"tags": "knowledge_tags", "answer": "ai_answer"}
 KEY_PROVIDER_ORDER = ("deepseek", "minimax", "doubao", "custom")
 PROVIDER_NAMES = {"deepseek": "DeepSeek", "minimax": "MiniMax", "doubao": "豆包", "custom": "其他兼容服务"}
 # MiniMax is the only provider both halves use, so it is the only one whose key
@@ -372,6 +375,14 @@ def save(payload: dict) -> dict:
             raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None
         if changes:
             features.save(changes)
+            # 功能关着的时候，「入库时生成」不能留在开着的状态。
+            # 生成本身会同时看两个开关（library_jobs.FEATURE_OF），所以眼下不会多花钱；
+            # 可这种存下来的组合是颗雷：用户哪天把功能打开，每道新题入库就悄悄
+            # 恢复调用一次服务，他自己再也想不起来这件事曾经打开过。
+            stale = {kind: False for kind, feature in ON_INTAKE_FEATURE.items() if not features.enabled(feature)}
+            if stale and {**config["on_intake"], **stale} != config["on_intake"]:
+                config["on_intake"] = {**config["on_intake"], **stale}
+                _write_settings(config)
     return public_status()
 
 

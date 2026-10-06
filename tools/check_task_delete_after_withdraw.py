@@ -17,15 +17,29 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tmp" / "task-delete-shots"
 LIVE_NAME = "还有活题的资料.pdf"
 DONE_NAME = "已全部撤回的资料.pdf"
+SANDBOX = ROOT / "tmp" / "task-delete"
+PORT = 8987
+
+
+def isolated_paths():
+    for name in ("QB_DATABASE", "QB_DATA_ROOT"):
+        value = os.environ.get(name)
+        if not value or not Path(value).resolve().is_relative_to(ROOT / "tmp"):
+            raise SystemExit(f"{name} must be inside this checkout's tmp directory")
+    Path(os.environ["QB_DATA_ROOT"]).mkdir(parents=True, exist_ok=True)
 
 
 def seed():
+    isolated_paths()
     for name in ("QB_DATABASE", "QB_DATA_ROOT"):
         value = os.environ.get(name)
         if not value or not Path(value).resolve().is_relative_to(ROOT / "tmp"):
@@ -80,20 +94,49 @@ def seed():
     print(f"seeded live={live.id} done={done.id}")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8803")
-    parser.add_argument("--seed", action="store_true")
-    parser.add_argument("--width", type=int, default=1600)
-    parser.add_argument("--height", type=int, default=1000)
-    args = parser.parse_args()
-    if args.seed:
-        seed()
-        return
+def run_isolated():
+    """Seed a private database, serve it, test it, then stop the whole tree."""
+    shutil.rmtree(SANDBOX, ignore_errors=True)
+    os.environ["QB_DATABASE"] = str(SANDBOX / "db.sqlite3")
+    os.environ["QB_DATA_ROOT"] = str(SANDBOX / "data")
+    isolated_paths()
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", PORT)) == 0:
+            raise SystemExit(f"Port {PORT} is already occupied; no existing service will be stopped")
+    seed()
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    with (OUT / "server.log").open("w", encoding="utf-8") as log:
+        server = subprocess.Popen([sys.executable, str(ROOT / "backend/manage.py"), "runserver",
+            f"127.0.0.1:{PORT}", "--noreload"], cwd=ROOT, env=os.environ.copy(),
+            stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+        try:
+            deadline = time.monotonic() + 40
+            while time.monotonic() < deadline:
+                if server.poll() is not None:
+                    raise RuntimeError("Isolated server exited before becoming ready")
+                with socket.socket() as probe:
+                    if probe.connect_ex(("127.0.0.1", PORT)) == 0:
+                        break
+                time.sleep(0.1)
+            else:
+                raise TimeoutError("Isolated server did not become ready")
+            main(f"http://127.0.0.1:{PORT}")
+        finally:
+            # The Windows venv launcher creates a child Python process, so
+            # terminate this exact process tree rather than the launcher only.
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, check=False)
+            else:
+                server.terminate()
+            server.wait(timeout=10)
+    print("Isolated server stopped", flush=True)
 
+
+def main(url=None, width=1600, height=1000):
     from playwright.sync_api import sync_playwright
 
-    url = args.url.rstrip("/")
+    url = (url or "http://127.0.0.1:8803").rstrip("/")
     ids = json.loads((OUT / "seed.json").read_text(encoding="utf-8"))
     OUT.mkdir(parents=True, exist_ok=True)
     report, failures = [], 0
@@ -107,7 +150,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True,
                                     executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe")
-        page = browser.new_page(viewport={"width": args.width, "height": args.height})
+        page = browser.new_page(viewport={"width": width, "height": height})
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -176,12 +219,15 @@ def main():
         check("题库条数没被动过（撤回记录不是活题，删任务不该动它）",
               library_total() == before_total, f"{before_total} → {library_total()}")
 
-        # 撤回记录的快照还在题库里可查
+        # 撤回的那两道不该混在题库列表里；活着的两道应该在。
+        # 这里按卡片数比对，不按题库 total：列表一页只放一部分，
+        # 拿 total 当分页后的卡片数，在数据多起来之后必然对不上。
         page.goto(f"{url}/library", wait_until="networkidle")
         page.wait_for_timeout(1200)
-        check("撤回记录不出现在题库列表里（本来就不该在）",
-              page.query_selector_all(".library-card").__len__() == before_total)
-        report.append(f"题库当前 {before_total} 条（两份卷各 2 道，共 4 道：2 道活的 + 2 道撤回的）")
+        shown = len(page.query_selector_all(".library-card"))
+        check("撤回记录不出现在题库列表里（本来就不该在）", shown == 2,
+              f"列表里有 {shown} 张卡，题库报 {library_total()} 条")
+        report.append(f"题库当前 {library_total()} 条（两份卷各 2 道：2 道活的 + 2 道撤回的）")
 
         check("没有 JS 报错", not errors, "; ".join(errors[:4]))
         browser.close()
@@ -193,4 +239,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run", action="store_true", help="seed an isolated database, serve it, test it, stop it")
+    parser.add_argument("--url", default="http://127.0.0.1:8803")
+    parser.add_argument("--seed", action="store_true")
+    args = parser.parse_args()
+    if args.run:
+        run_isolated()
+    elif args.seed:
+        seed()
+    else:
+        main(args.url)

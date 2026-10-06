@@ -22,7 +22,12 @@ def metrics(field):
     return field.evaluate("""e => ({width:e.clientWidth,scrollWidth:e.scrollWidth,height:e.clientHeight,
         scrollHeight:e.scrollHeight,overflowX:getComputedStyle(e).overflowX,overflowY:getComputedStyle(e).overflowY,
         tabindex:e.getAttribute('tabindex'),marker:e.dataset.printOverflow || null,
-        math:[...e.querySelectorAll('.katex-html')].map(m => {const a=m.getBoundingClientRect(),b=e.getBoundingClientRect();
+        math:[...e.querySelectorAll('.qb-math')].map(m => ({
+            size:parseFloat(getComputedStyle(m.querySelector('.katex')).fontSize),
+            fitted:m.querySelector('.katex').style.getPropertyValue('--print-math-size') || null,
+            overflow:m.querySelector('.katex').dataset.examMathOverflow || null,
+            base:[...m.querySelectorAll('.katex-html')].map(h => h.getBoundingClientRect().width)})),
+        katex:[...e.querySelectorAll('.katex-html')].map(m => {const a=m.getBoundingClientRect(),b=e.getBoundingClientRect();
           return {top:a.top-b.top,bottom:a.bottom-b.top,height:a.height};})})""")
 
 
@@ -30,9 +35,15 @@ def run(port, probe=False):
     OUT.mkdir(parents=True, exist_ok=True)
     short = fixture_item("short", 1, stem="经过点 $(3,1)$，斜率为 $\\dfrac{1}{2}$ 的直线方程是____。")
     tall = fixture_item("tall", 2, stem="短分数：$\\dfrac{1+x^2}{1+x^2}$。")
-    long = fixture_item("long", 3, stem="长分数：$\\dfrac{1}{" + "+".join(["x^2"] * 24) + "}=24681$。")
-    items = [short, tall, long]
-    body = {"items": items, "total": 3, "features": {}, "facets": {"sources": [], "types": {"single_choice":3}}}
+    # 纸面版心宽 178mm ≈ 655px，排版时公式只缩到 12px 为止，再宽才让它横着滚。
+    # 三档分别落在三个分支上：放得下、缩一缩还看得清、再也缩不下去。
+    tight_stem = "\\dfrac{1}{" + "+".join(["x^2"] * 24) + "}"
+    long_stem = "\\dfrac{1}{" + "+".join(["x^2"] * 40) + "}=24681"
+    tight = fixture_item("tight", 3, stem="刚好多一点：$" + tight_stem + "$。")
+    long = fixture_item("long", 4, stem="长分数：$" + long_stem + "$。")
+    items = [short, tall, tight, long]
+    body = {"items": items, "total": 4, "features": {}, "facets": {"sources": [], "types": {"single_choice":4}}}
+    by_id = {item["id"]: item for item in items}
     server = ThreadingHTTPServer(("127.0.0.1", port), partial(FrontendHandler, directory=str(ROOT / "frontend")))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -47,8 +58,15 @@ def run(port, probe=False):
             def route_request(route):
                 request = route.request
                 parsed = urlparse(request.url)
+                # 打开卷子会先核对一遍选题快照（POST）。不答它，openPrint 会把
+                # 全部选题算成「未载入」，卷面上一道题都没有。
+                if parsed.path == "/api/library/batch" and request.method == "POST":
+                    ids = (request.post_data_json or {}).get("ids", [])
+                    route.fulfill(json={"items": [by_id[i] for i in ids if i in by_id],
+                                        "missing": [{"id": i, "reason": "not_found"} for i in ids if i not in by_id]})
+                    return
                 if parsed.hostname != "127.0.0.1" or request.method != "GET":
-                    report["forbidden"].append(request.url)
+                    report["forbidden"].append(f"{request.method} {request.url}")
                     route.abort()
                 elif parsed.path == "/api/library":
                     route.fulfill(json=body)
@@ -63,13 +81,19 @@ def run(port, probe=False):
             page.wait_for_load_state("networkidle")
             for item in items:
                 page.locator(f"#q-{item['id']}").get_by_role("button",name="加入试题篮",exact=True).click()
+            # 「组卷预览」在试题篮抽屉里，篮没拉开就点不到（真人也是先拉把手）。
+            page.locator("#basketHandle").click()
+            expect(page.locator("#basketPanel")).to_be_visible()
+            # 选题是异步读的：角标还没跳到 3 就点「组卷预览」，打开的是空卷。
+            expect(page.locator("#basketHandleCount")).to_have_text(str(len(items)), timeout=10000)
             page.locator("#basketButton").click()
-            expect(page.locator(".print-question")).to_have_count(3)
+            # 打开卷子要先核对一遍选题快照，这一步是网络往返；5 秒不够就是还没排完。
+            expect(page.locator(".print-question")).to_have_count(4, timeout=20000)
             for width in (650,390,1440):
                 page.set_viewport_size({"width":width,"height":1050})
                 page.wait_for_timeout(100)
                 fields = {}
-                for key in ("short","tall","long"):
+                for key in ("short","tall","tight","long"):
                     field = page.locator(f'.print-question[data-question-id="{key}"] .qb-stem-body')
                     fields[key] = metrics(field)
                 report["fields"][str(width)] = fields
@@ -81,8 +105,15 @@ def run(port, probe=False):
                     assert value["width"] == value["scrollWidth"], value
                     assert value["overflowX"] == value["overflowY"] == "visible", value
                     assert value["tabindex"] is None and value["marker"] is None, value
+                # 放得下就不动，放不下就缩，但缩完还得看得清（≥12px）。
+                tight = fields["tight"]
+                assert tight["math"] and all(m["fitted"] is not None for m in tight["math"]), tight
+                assert all(m["overflow"] is None for m in tight["math"]), tight
+                assert all(m["size"] >= 12 for m in tight["math"]), ("A formula shrunk to fit must stay readable", tight)
+                assert tight["width"] == tight["scrollWidth"] and tight["marker"] is None, tight
                 long_field = page.locator('.print-question[data-question-id="long"] .qb-stem-body')
                 assert fields["long"]["scrollWidth"] > fields["long"]["width"], fields["long"]
+                assert fields["long"]["math"][0]["overflow"] == "1", fields["long"]
                 expect(long_field).to_have_attribute("tabindex","0")
                 expect(long_field).to_have_attribute("data-print-overflow","1")
                 expect(page.locator(".print-overflow-hint")).to_have_count(1)

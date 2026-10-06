@@ -266,9 +266,11 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 /* 窄屏（≤760px，和 styles.css:1192 顶栏变高的那个断点对齐）：批量条排不下两行。
    收掉「已显示 X / 共 Y 题」这段 —— 它最长也最不常用。上面那几个批量按钮不用动，
    它们本来就在 .library-bulk.has-selection 时才出现。实测 390px：没勾选 59→34px，
-   勾了 3 题 93→68px。 */
+   勾了 3 题 93→68px。
+   只收 tone="plain"：data-tone="warn" 是「上次读取的结果还没应用」「撤回失败」这类话，
+   整条 display:none 会让手机上的用户完全不知道自己看的是旧数据。 */
 @media (max-width: 760px) {
-  .library-bulk #libraryStatus { display: none; }
+  .library-bulk #libraryStatus[data-tone="plain"] { display: none; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }
 .library-filter-chip { display: flex; align-items: baseline; gap: 6px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); padding: 5px 8px; font: 12px/1.4 var(--ui-font); text-align: left; }

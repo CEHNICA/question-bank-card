@@ -172,7 +172,9 @@ def check(url):
         def close_editor():
             editors = page.locator(".editor")
             if editors.count():
-                editors.first.get_by_role("button", name="取消", exact=True).click()
+                # 面板上原来那个「取消」已经改名成「← 返回」；它是题卡的直接子元素，
+                # 不在改字表单里，所以要从题卡上找，不能在 .editor 里找。
+                page.locator(".card.editing").get_by_role("button", name="← 返回", exact=True).click()
                 if page.locator("#confirmDialog").is_visible():
                     page.locator("#confirmDialog").get_by_role("button", name="丢弃改动", exact=True).click()
                 expect(page.locator(".editor")).to_have_count(0)

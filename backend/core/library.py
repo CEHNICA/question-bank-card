@@ -603,6 +603,30 @@ def withdraw(publication: PublishedQuestion) -> PublishedQuestion:
     return publication
 
 
+def _content_with_figure_state(publication: PublishedQuestion) -> dict:
+    """题面里的配图文件和题面分开存。换机器、原卷被挪走或清理过之后，
+    库里的记录还在、文件已经不在了 —— 这时界面不该去取一张必然 404 的图，
+    也不该只留个裂图，标出来由界面照实说。"""
+    content = publication.content or {}
+    figures = content.get("figures") or []
+    if not figures:
+        return content
+    folder = settings.DATA_ROOT / "library" / str(publication.pk)
+    missing = set()
+    for index, figure in enumerate(figures):
+        if not isinstance(figure, dict):
+            continue
+        name = figure.get("file") or f"figure-{index + 1}.png"
+        if not (folder / str(name)).is_file():
+            missing.add(index)
+    if not missing:
+        return content
+    marked = deepcopy(content)
+    for index in missing:
+        marked["figures"][index]["missing"] = True
+    return marked
+
+
 def publication_json(publication: PublishedQuestion) -> dict:
     from . import library_solutions
     solution, solution_error = None, ""
@@ -623,7 +647,7 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "review": {"source": publication.review_source or "human", "agent": publication.review_agent},
         "published_at": publication.published_at.isoformat(),
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
-        "content": publication.content,
+        "content": _content_with_figure_state(publication),
         "origin": str((publication.content or {}).get("origin") or ""),
         "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()),
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),

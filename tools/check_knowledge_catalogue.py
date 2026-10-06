@@ -30,6 +30,12 @@ def open_panel(page):
     page.wait_for_selector("#credentialDialog[open]", timeout=15000)
     page.locator("#credentialAnswerTab").click()
     page.wait_for_selector("#libraryAISettingsDialog", state="visible", timeout=8000)
+    # 目录这一段跟着「生成知识点标签」走：本机默认没开，整段不渲染，
+    # 后面点「查看目录」会直接找不到按钮。先把它打开（不保存，走完就丢）。
+    tags = page.locator("#libraryAITags")
+    if tags.count() and not tags.is_checked():
+        tags.check()
+        page.wait_for_timeout(1200)
     page.wait_for_timeout(900)
 
 
@@ -43,6 +49,14 @@ def run(page) -> None:
 
     open_panel(page)
     section = page.locator("#libraryAIKnowledge")
+    # 目录的规模是从服务端读回来的：功能关着时服务端不读那个文件，前端在面板里
+    # 勾开开关也补不上（它只管显示，不去重新拉）。这时候量到的「正在读取…」不是
+    # 界面坏了，是这台机器压根没开着这个功能 —— 如实说，别当成缺陷。
+    served = page.request.get(f"{BASE}/api/settings/library-ai", headers={"X-QB-Request": "1"}).json()
+    if not served.get("features", {}).get("knowledge_tags"):
+        print("     SKIP 本机没开「生成知识点标签」，服务端不读知识点目录，"
+              "这一节量不到（先把功能打开再跑）")
+        return
     check(section.count() == 1 and section.is_visible(), "「标签与答案」面板里有知识点目录这一段")
     count_text = page.locator("#libraryAIKnowledgeCount").inner_text()
     check("个知识点" in count_text, f"说清了目录有多大：{count_text}")

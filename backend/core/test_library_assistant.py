@@ -63,7 +63,10 @@ class AssistantSettingsTests(SimpleTestCase):
         self.assertEqual(state["model"], "ep-offline-pro")
         self.assertEqual(state["on_intake"], {"tags": False, "answer": True})
         service.save({"features": {"ai_answer": False}})
-        self.assertTrue(service.public_status()["on_intake"]["answer"])
+        # 1.13.9：功能一关，「入库时生成」跟着关。原来这里断言的是「保留用户的偏好」，
+        # 可那一行这时候是藏着的 —— 用户看不见自己留了开关，等他哪天把功能打开，
+        # 每道新题入库就悄悄恢复一次调用。
+        self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": False})
         self.assertEqual(service.key_path("doubao").read_bytes(), before)
         self.network.assert_not_called()
 

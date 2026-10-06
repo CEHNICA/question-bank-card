@@ -101,7 +101,26 @@ async def check():
         page = await context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
 
+        # 这份脚本量的是 1.13 以前的「独立模型配置」那一页：设置页里原本有
+        # settingsModels 分区、校验模型 / 仲裁模型 / 套餐几栏。那套东西已经并进
+        # 密钥窗口（#credentialDialog，读题与切题页直接选服务商和模型），
+        # #settingsCheckerModel、#settingsArbiterModel、#settingsMinimaxPlan、
+        # #settingsModelRetry、#settingsReady 都不在了。
+        # 硬跑下去只会每轮卡 33 秒报「找不到按钮」，看不出是界面改版还是代码坏了
+        # —— 先说清楚，要按现在的窗口重写。退出码 3 = SKIP（见 run_acceptance）。
+        print("SKIP 这份脚本还在量 1.13 以前的模型配置界面；模型选择已并入密钥窗口"
+              "（#credentialDialog → 读题与切题），需要按新界面重写后才能继续跑。", flush=True)
+        raise SystemExit(3)
+
+        async def open_drawer():
+            # 1.12.7 起「设置」和导航都搬进了 ☰ 抽屉（#drawerTrigger 由 site-drawer.js 建），
+            # 抽屉关着的时候那个链接点不动 —— 真人要先开菜单。
+            if not await page.locator("#siteDrawer").is_visible():
+                await page.locator("#drawerTrigger").click()
+                await page.locator("#siteDrawer").wait_for(state="visible", timeout=8000)
+
         async def open_settings():
+            await open_drawer()
             await page.locator("#settingsButton").click()
             await page.locator('[data-settings-tab="settingsModels"]').click()
             await page.wait_for_load_state("networkidle")
@@ -216,6 +235,7 @@ async def check():
         # model save/status refresh, then deliver the stale status last.
         await page.locator("#settingsClose").click()
         control.update(hold_status=True, status_started=asyncio.Event(), status_release=asyncio.Event())
+        await open_drawer()
         await page.locator("#settingsButton").click()
         await asyncio.wait_for(control["status_started"].wait(), 5)
         await page.locator('[data-settings-tab="settingsModels"]').click()
@@ -232,6 +252,7 @@ async def check():
         await page.locator("#settingsClose").click()
         control["configured"] = True
         await page.reload(wait_until="networkidle")
+        await open_drawer()
         await page.locator("#settingsButton").click()
         await expect(page.locator("#settingsReady")).to_contain_text("所需密钥已配置")
         await expect(page.locator("#settingsReady")).to_contain_text("服务当前是否可用，以任务返回为准")

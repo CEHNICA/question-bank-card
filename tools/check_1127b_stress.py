@@ -162,6 +162,12 @@ def run(pg):
                 pg.wait_for_timeout(300)
         pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
     else:
+        # 换题只在「展开着的题卡」之间走：已通过而折叠着的题渲染成一行摘要，没有题面可改。
+        # 所以题号本来就不保证逐一 +1 —— 以前这条断言写成 +1，这份卷里第 12 题是折叠的，
+        # 于是它每次都红，报出来像是换题跳了一道（其实是有意跳过，且界面没说明）。
+        # 真正要保的是：**走过的每一道都在可换的那份名单里，而且一道不落、一道不多**。
+        walkable = pg.evaluate("""() => [...document.querySelectorAll('.card:not(.compact)')]
+            .map(n => Number((n.textContent.match(/第\\s*(\\d+)\\s*题/) || [])[1]))""")
         # 点到头为止：按钮自己会灰，那说明走到了最后一道，不是 bug。
         seq = [number(pg.evaluate(EDIT)["title"])]
         for k in range(6):
@@ -169,8 +175,10 @@ def run(pg):
             if st["nextDisabled"]: break
             pg.click("button:has-text('下一题')"); pg.wait_for_timeout(1500)
             seq.append(number(pg.evaluate(EDIT)["title"]))
+        print("     可换的题号：", walkable)
         print("     连点下一题：", seq)
-        check("连点下一题，题号逐一 +1", len(seq) >= 2 and all(b - a == 1 for a, b in zip(seq, seq[1:])), seq)
+        start = walkable.index(seq[0]) if seq[0] in walkable else -1
+        check("连点下一题，一道不落地往前走", start >= 0 and seq == walkable[start:start + len(seq)], (seq, walkable))
         back = [seq[-1]]
         for k in range(6):
             st = pg.evaluate(EDIT)
@@ -178,8 +186,11 @@ def run(pg):
             pg.click("button:has-text('上一题')"); pg.wait_for_timeout(1500)
             back.append(number(pg.evaluate(EDIT)["title"]))
         print("     连点上一题：", back)
-        check("连点上一题，题号逐一 -1", len(back) >= 2 and all(b - a == -1 for a, b in zip(back, back[1:])), back)
+        check("连点上一题，一道不落地往回走", back == list(reversed(seq)), back)
         check("来回数一遍回到同一题", back[-1] == seq[0], (seq[0], back[-1]))
+        # 折叠着的题不算在换题范围里，但「共 N 题」数的是整份卷 —— 差多少得说出来。
+        folded_note = pg.evaluate("() => (document.querySelector('.editor-bar-folded')||{}).textContent || ''")
+        check("折叠着的题在界面上写明了", (len(walkable) == 0) or bool(folded_note), folded_note)
         # 图的断言要趁还停在那张带图的题卡上做：往后翻到别的题，图就没了。
         e = pg.evaluate(EDIT)
         check("预览里原卷裁片有角标和细边", e["figBorder"] not in (None, "0px") and "原卷" in str(e["figLabel"]), e)

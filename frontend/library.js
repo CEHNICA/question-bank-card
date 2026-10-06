@@ -198,7 +198,7 @@
     // A quiet refresh (jobs finishing) reloads everything already shown, page by page.
     const wanted = quiet ? Math.max(40, state.items.length) : 40;
     const query = libraryQuery(state, { limit: Math.min(100, wanted), offset: append ? state.items.length : 0 });
-    if (!append && !quiet) ui.status.textContent = "正在读取题库…";
+    if (!append && !quiet) setStatus("正在读取题库…");
     try {
       const response = await fetch(`/api/library?${query}`, { cache: "no-store" });
       const body = await response.json();
@@ -223,7 +223,7 @@
       scheduleJobRefresh();
     } catch (error) {
       if (token === state.token) {
-        ui.status.textContent = state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。";
+        setStatus(state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。", "warn");
         const box = $("libraryLoadError");
         const retry = node("button", "button button-small", "重试读取");
         retry.id = "retryLibraryLoad";
@@ -919,10 +919,10 @@
     });
     const currentQuestion = state.catalog.get(state.questionReturnId);
     if ($("questionDialog").open && currentQuestion && state.questionSignature !== questionSignature(currentQuestion)) openQuestion(currentQuestion);
-    ui.status.textContent = state.view === "selected" ? `试题篮 ${state.basket.length} 题 · 已载入 ${shown.length} 题。已选题目不受搜索与筛选影响。`
+    setStatus(state.view === "selected" ? `试题篮 ${state.basket.length} 题 · 已载入 ${shown.length} 题。已选题目不受搜索与筛选影响。`
       : state.total
       ? `已显示 ${state.items.length} / 共 ${state.total} 题${state.q ? `，匹配“${state.q}”` : ""} · 每题保留入库版本。`
-      : "";
+      : "");
     ui.more.hidden = state.view === "selected" || state.items.length >= state.total;
     requestAnimationFrame(() => readingOverflowHints(ui.list));
     if (state.focus) {
@@ -938,6 +938,13 @@
   // question switch or a new window cannot bring a dismissed hint back.
   function hintHidden(category) {
     return Boolean(window.QBShortcutHelp?.hintDismissed?.(category));
+  }
+
+  // 「已显示 X / 共 Y 题」这类日常信息，窄屏收得起来；但「上次读取的结果还没应用」
+  // 「撤回失败」这类话不能跟着一起消失 —— 手机上出了问题，界面上一个字都没有。
+  function setStatus(text, tone = "plain") {
+    ui.status.textContent = text;
+    ui.status.dataset.tone = tone;
   }
 
   function readingOverflowHints(container) {
@@ -1261,7 +1268,7 @@
       toast(`已撤回“${item.source_filename} 第 ${item.number} 题”`, "success");
       load();
     } catch (error) {
-      ui.status.textContent = error.message || "撤回失败。";
+      setStatus(error.message || "撤回失败。", "warn");
       toast(error.message || "撤回失败", "error");
     }
   }
@@ -1306,7 +1313,7 @@
         ? `；${skipped.length} 道没撤成（${[...new Set(skipped.map((row) => row.reason))].join("、")}）` : "";
       toast(`已撤回 ${done} 道题${skippedText}`, skipped.length ? "error" : "success");
     } catch (error) {
-      ui.status.textContent = error.message || "撤回失败。";
+      setStatus(error.message || "撤回失败。", "warn");
       toast(error.message || "撤回失败", "error");
     } finally {
       button.disabled = !state.selected.size;
@@ -2207,13 +2214,16 @@
       await waitForPrintAssets();
       if (token !== printState.layoutToken || !ui.sheet.open) return;
       if (typeof window.ExamLayout?.paginate !== "function") throw new Error("分页组件未载入，请刷新页面后重试");
-      preparePrintLayout();
       const layoutHost = node("div", "print-paper");
       const result = await window.ExamLayout.paginate(flow, { host: layoutHost, ...currentPrintOptions() });
       if (token !== printState.layoutToken || !ui.sheet.open) return;
       ui.paper.replaceChildren(...result.pages);
       ui.paper.dataset.pageCount = String(result.page_count);
       window.ExamLayout.scale(ui.paper);
+      // 「太宽就挡住导出」必须排在排版之后算：data-exam-math-overflow 是分页时
+      // fitFormulas 标上去的，排在前面读的是上一版的卷面 —— 第一次打开一张
+      // 含有放不下的公式的卷子，按钮不会挡、提示也不出，印出来才发现被切了。
+      preparePrintLayout();
       const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
       const seen = new Set();
       ui.paper.querySelectorAll(".print-question").forEach(question => {
@@ -2229,6 +2239,10 @@
       // 重渲染会换掉所有工具面板：新节点的 open 是在挂监听之前设的，收不到 toggle，
       // 这里补一次定位，否则改完选项重新排版后，展开着的那个又会掉回被盖住的状态。
       ui.paper.querySelectorAll(".print-question-tools[open]").forEach(placePrintTools);
+      // 排好版才知道哪些字段真的溢出了。之前这个函数一次都没被调用过，
+      // 屏幕上那条 .print-paper [data-print-overflow] 规则因此永远不生效：
+      // 太宽的公式直接冲出纸边，既不能滚也进不了键盘 Tab。
+      requestAnimationFrame(() => updateOverflowHints());
       applyPrintFocus();
       $("printPageStatus").textContent = `A4 · 共 ${result.page_count} 页 · ${printState.items.length} 题`;
       $("printLayoutWarnings").textContent = result.warnings.join(" ");
@@ -2693,6 +2707,10 @@
   $("saveDraft").addEventListener("click", () => saveDraft());
   $("saveDraftAs").addEventListener("click", () => saveDraft({ copy: true }));
   document.addEventListener("library-ai-settings-saved", () => load({ quiet: true }));
+  // 关掉「公式横向查看提示」之后，已经开着的卷子要立刻把那句话收掉。
+  document.addEventListener("qb:hint-dismissed", (event) => {
+    if (event?.detail?.category === "reading-overflow" && ui.sheet.open) updateOverflowHints();
+  });
   ui.more.addEventListener("click", () => load({ append: true }));
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => exportPaper("print"));

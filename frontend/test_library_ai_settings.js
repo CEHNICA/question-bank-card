@@ -227,17 +227,21 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAIAnswerIntake").disabled, true);
   s.get("libraryAITagsIntake").checked = true;s.get("libraryAITagsIntake").trigger("input");
   s.get("libraryAITags").checked = false;s.get("libraryAITags").trigger("input");
-  assert.equal(s.get("libraryAITagsIntake").checked, true, "turning a feature off preserves its saved timing preference");
+  // 功能一关，入库时生成跟着收掉。原来是「保留用户的偏好」—— 但那一行这时候是藏着的，
+  // 用户看不见自己留了开关；等他哪天把功能打开，每道新题入库就悄悄恢复调用一次服务。
+  assert.equal(s.get("libraryAITagsIntake").checked, false, "turning a feature off closes its timing switch too");
   assert.equal(s.get("libraryAITagsIntake").disabled, true);
   assert.equal(s.get("libraryAITagsTiming").hidden, true);
   s.get("libraryAITags").checked = true;s.get("libraryAITags").trigger("input");
-  assert.equal(s.get("libraryAITagsIntake").checked, true);
+  assert.equal(s.get("libraryAITagsIntake").checked, false, "re-opening the feature does not resurrect it");
   s.response((_url, payload) => ({ ...s.current, mode: payload.mode, features: payload.features, on_intake: payload.on_intake }));
   s.get("libraryAISettingsForm").trigger("submit");
   await flush();
   assert.equal(s.calls.at(-1).payload.mode, "api", "only an explicit save changes legacy execution mode");
   assert.deepEqual(s.calls.at(-1).payload.features, { knowledge_tags: true, ai_answer: false });
-  assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: true, answer: false });
+// 上一步已经断言过「功能重新打开也不会自己复活入库时生成」，所以这里发出去的
+// 必须是 tags:false —— 旧断言写的是 true，等于把「偷偷恢复调用」当成正确行为。
+assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false });
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "keep" });
   assert.equal(s.calls.at(-1).headers["X-QB-Request"], "1");
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "assistant saves clear local password input without changing the stored key");
@@ -271,7 +275,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(saved.payload.thinking, true);
   assert.equal(saved.payload.reasoning_effort, "high");
   assert.deepEqual(saved.payload.features, { knowledge_tags: true, ai_answer: false });
-  assert.deepEqual(saved.payload.on_intake, { tags: true, answer: false });
+  assert.deepEqual(saved.payload.on_intake, { tags: false, answer: false });
   assert.deepEqual(saved.payload.key, { action: "replace", value: "offline-api-key" });
   assert.deepEqual(saved.payload.keys, { doubao: { action: "replace", value: "offline-doubao-key" } },
     "A second service's key is saved in the same submit, without switching which service is in use");

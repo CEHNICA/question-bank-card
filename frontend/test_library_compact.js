@@ -134,7 +134,16 @@ assert.match(libraryJs, /setProperty\("--library-bulk-h"/);
 assert.match(libraryJs, /ResizeObserver/);
 assert.match(libraryJs, /bulkBar\.classList\.toggle\("stuck"/);
 // 窄屏收状态文字
-assert.match(libraryCss, /@media \(max-width: 760px\) \{[\s\S]*?\.library-bulk #libraryStatus \{ display: none; \}/);
+// 窄屏只收日常计数（data-tone="plain"），警告必须留着：整条 display:none 会让
+// 手机上的用户在自己都察觉不到的情况下看着旧数据。
+assert.match(libraryCss, /@media \(max-width: 760px\) \{[\s\S]*?\.library-bulk #libraryStatus\[data-tone="plain"\] \{ display: none; \}/);
+assert.doesNotMatch(libraryCss, /\.library-bulk #libraryStatus \{ display: none; \}/,
+  "不能整条隐藏状态行：那会把「还没应用这次筛选」也一起藏掉");
+assert.match(libraryHtml, /id="libraryStatus"[^>]*data-tone="plain"/, "初始状态属于日常计数那一类");
+assert.match(libraryJs, /function setStatus\(text, tone = "plain"\)/);
+assert.match(libraryJs, /setStatus\(state\.items\.length \? "当前显示上一次读取的结果，尚未应用这次筛选。"/,
+  "读失败/旧数据要走 setStatus");
+assert.match(libraryJs, /题库尚未读取成功。", "warn"/, "读失败要标成 warn，不能在窄屏被收掉");
 
 // ---- 状态行并进批量条，元素和 aria 属性原样保留
 const bulk = libraryHtml.slice(libraryHtml.indexOf('class="library-bulk"'), libraryHtml.indexOf('id="libraryLoadError"'));

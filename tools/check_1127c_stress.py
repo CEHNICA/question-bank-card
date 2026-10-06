@@ -79,12 +79,20 @@ VIEWER = """() => {
 
 # 筛选栏：横向滚动条就是 scrollWidth 大于可见宽；「越过右缘」的元素直接点名是谁顶的。
 RAIL = """() => { const r = document.querySelector('.library-rail'); const rr = r.getBoundingClientRect();
-  const btns = [...document.querySelectorAll('#extraTools .button')];
-  const btn = btns[btns.length - 1];
+  // 「更多筛选」里的按钮有几个，取决于本机开没开 AI 标签/参考答案（本机常常一个都没有）。
+  // 以前这里只取「最后一个」，没有按钮时量到 0×0，报出来像布局坏了。
+  // 要保的是「标签长的那个按钮不能被削掉」—— 侧栏 212px，最长的那个说了算。
+  const btns = [...r.querySelectorAll('button, summary')]
+    .filter(b => b.textContent.trim() && b.getBoundingClientRect().width);
+  const btn = btns.sort((a, b) => b.textContent.trim().length - a.textContent.trim().length)[0] || null;
   return { cw: r.clientWidth, sw: r.scrollWidth, railW: Math.round(rr.width),
     past: [...r.querySelectorAll('*')].filter(n => n.getBoundingClientRect().right > rr.right + 1)
       .map(n => ({ cls: (n.id || n.className || n.tagName).toString().slice(0, 30),
                    over: Math.round(n.getBoundingClientRect().right - rr.right) })),
+    count: btns.length,
+    btnCount: btns.length,
+    btnText: btn ? btn.textContent.trim().slice(0, 24) : null,
+    btnClipped: btn ? btn.scrollWidth > btn.clientWidth + 1 : false,
     btnW: btn ? Math.round(btn.getBoundingClientRect().width) : 0,
     btnH: btn ? Math.round(btn.getBoundingClientRect().height) : 0,
     btnRight: btn ? Math.round(btn.getBoundingClientRect().right) : 0,
@@ -205,32 +213,39 @@ def run(pg):
     pg.set_viewport_size({"width": 1366, "height": 900})
 
     # ---- 1.12.9 ----
-    print("\n=== 9. 篮子把手：有题就亮，题目越多越浓")
+    # 这一节原来测「题目越多把手越浓」，靠读 --basket-fill 这个变量。那个做法
+    # 1.12.9 就撤了：实测 1 题最大色差 2/255、5 题 7/255，真实使用区间里等于没有，
+    # 留着只会让人以为它在起作用。变量不存在，parseFloat 返回 nan，于是每轮都红。
+    # 现在真正要保的是：有题才亮、没打开过才有呼吸灯、角标写着几题。
+    print("\n=== 9. 篮子把手：有题才亮，没展开过才有呼吸灯")
     pg.set_viewport_size({"width": 1366, "height": 900})
     pg.goto(URL + "/library?gl=1", wait_until="load"); pg.wait_for_timeout(2500)
     every = pg.evaluate("() => fetch('/api/library?limit=50').then(r=>r.json()).then(j=>j.items.map(i=>i.id))")
-    check("题库里有足够多的题可以试浓度", len(every) >= 40, len(every))
+    check("题库里有足够多的题可以试", len(every) >= 40, len(every))
 
-    def fill(n):
-        ids = every[:n]
-        pg.evaluate("(ids) => localStorage.setItem('qb-basket', JSON.stringify(ids))", ids)
+    def handle(n, seen=True):
+        pg.evaluate("""(arg) => { localStorage.setItem('qb-basket', JSON.stringify(arg.ids));
+            if (arg.seen) localStorage.setItem('qb-basket-handle-seen', '1');
+            else localStorage.removeItem('qb-basket-handle-seen'); }""", {"ids": every[:n], "seen": seen})
         pg.reload(wait_until="load"); pg.wait_for_timeout(2100)
         return pg.evaluate("""() => { const h = document.querySelector('.basket-handle');
-          const cs = getComputedStyle(h);
-          const before = getComputedStyle(h, '::before');
+          const after = getComputedStyle(h, '::after');
           return { n: document.querySelector('#basketHandleCount').textContent,
-            fill: parseFloat(cs.getPropertyValue('--basket-fill')),
-            overlay: parseFloat(before.opacity),
-            shadow: cs.boxShadow }; }""")
+            hasItems: document.body.classList.contains('library-basket-has-items'),
+            open: document.body.classList.contains('library-basket-open'),
+            anim: after.animationName, color: after.backgroundColor }; }""")
 
-    for n, want in [(0, 0.0), (1, 0.05), (5, 0.25), (20, 1.0), (40, 1.0)]:
-        s = fill(n)
-        print("     篮里 %2d 题 -> --basket-fill=%s 底色不透明度=%s" % (n, s["fill"], s["overlay"]))
-        check("%d 题时浓度是 %g" % (n, want), abs(s["fill"] - want) < 0.001, s)
-        check("%d 题时底色跟着浓度走" % n, abs(s["overlay"] - s["fill"]) < 0.01, s)
-    one, many = fill(1), fill(20)
-    check("1 题明显比 20 题淡", many["overlay"] - one["overlay"] >= 0.4, (one["overlay"], many["overlay"]))
-    check("辉光跟着浓度变（阴影串不同）", one["shadow"] != many["shadow"], (one["shadow"][:40], many["shadow"][:40]))
+    empty = handle(0, seen=False)
+    check("篮空时把手不亮也没有灯", not empty["hasItems"] and empty["anim"] == "none", empty)
+    some = handle(3, seen=False)
+    check("篮里有题时把手指出来", some["hasItems"] and some["n"] == "3", some)
+    check("没展开过之前有呼吸灯", some["anim"] == "basket-handle-fluoresce", some)
+    # 展开后别再刷新：刷新会把抽屉一起关掉，量的就不是「展开时」的样子了。
+    pg.click(".basket-handle"); pg.wait_for_timeout(700)
+    opened = pg.evaluate("""() => { const h = document.querySelector('.basket-handle');
+      return { open: document.body.classList.contains('library-basket-open'),
+        anim: getComputedStyle(h, '::after').animationName }; }""")
+    check("展开之后呼吸灯收掉", opened["open"] and opened["anim"] == "none", opened)
     pg.screenshot(path=str(SHOT / "06-handle-glow.png"))
 
     print("\n=== 10. 专注 + 篮展开：题面必须还是整屏宽")
@@ -410,7 +425,8 @@ def run(pg):
         check("%4d 宽没有元素越过侧栏右缘" % w, not past, past[:3])
         check("%4d 宽按钮没被切掉" % w, g["btnRight"] <= g["railRight"] and g["btnW"] <= g["cw"], g)
         if w > 979:
-            check("%4d 宽按钮标签换成了两行（不是被削掉）" % w, g["btnH"] >= 36, g)
+            # 标签换行也行，但不能被横向削掉（文字被切掉半个字最难认出来）。
+            check("%4d 宽最长标签的按钮没被削掉" % w, g["btnCount"] == 0 or not g["btnClipped"], g)
         if w <= 979:
             pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
     pg.set_viewport_size({"width": 1366, "height": 900})

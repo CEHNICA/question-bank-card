@@ -48,11 +48,19 @@ def main():
         print("current card   :", page.locator("#cards .card.is-current").get_attribute("data-id"))
         print("paper in url   :", page.url)
 
-        page.click(".topnav a[href='/library']")
-        page.wait_for_load_state("networkidle")
+        # 1.12.7 起导航被搬进 ☰ 抽屉（#drawerTrigger 是脚本建的），抽屉关着点不到。
+        # 真人得点两下：先开菜单，再点「正式题库」。
+        def nav(label):
+            drawer = page.locator("#siteDrawer")
+            if not drawer.is_visible():
+                page.locator("#drawerTrigger").click()
+                drawer.wait_for(state="visible", timeout=8000)
+            page.locator(".topnav a", has_text=label).first.click()
+            page.wait_for_load_state("networkidle")
+
+        nav("正式题库")
         print("on library      :", page.evaluate("() => sessionStorage.getItem('qb-review-state')"))
-        page.click(".topnav a[href='/']")
-        page.wait_for_load_state("networkidle")
+        nav("录入终审")
         page.wait_for_timeout(500)
         print("back on review  :", page.url)
         print("key at boot     :", page.evaluate("() => window.__early()"))

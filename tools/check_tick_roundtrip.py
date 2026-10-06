@@ -6,6 +6,7 @@
 """
 
 import argparse
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -55,13 +56,27 @@ def main():
         page.get_by_role("tab", name="已入库", exact=False).first.click()
         page.wait_for_timeout(400)
 
-        card = page.locator("#cards .card").first
+        # 「已入库」这一页里，人工打过勾的和「题库里本来就有、还没人亲自打过」的混在一起。
+        # 主闭环对两种都成立，所以拿第一张卡就行。
+        cards = page.locator("#cards .card")
+        assert cards.count() > 0, "这份卷子的「已入库」页里一题都没有，闭环无从下手"
+        card = cards.first
         question = card.get_attribute("data-id")
         tick = card.locator(".card-tick")
-        # 入库但没打过勾的题，对号以前渲染成空的 —— 点了没反应就是这个原因。
-        assert "published" in (tick.get_attribute("class") or ""), tick.get_attribute("class")
-        assert tick.get_attribute("aria-pressed") == "true"
-        expect(tick).to_have_attribute("aria-label", "撤销第 1 题的通过")
+        # 题库里已经有的题，对号必须是按下的，不管当初是谁按的。
+        assert tick.get_attribute("aria-pressed") == "true", tick.get_attribute("aria-pressed")
+        expect(tick).to_have_attribute("aria-label", re.compile(r"^撤销第 \d+ 题的通过$"))
+
+        # 1.12.6 那条：入库但没人工打过勾的题，对号以前渲染成空的，点了没反应。
+        # 这种题不是每份卷子都有：有就量一下，没有就说清楚，别拿别的卡顶替
+        # —— 断言挂在不合适的卡上，报出来的 class="card-tick" 看着像产品坏了。
+        published_cards = page.locator("#cards .card", has=page.locator(".card-tick.published"))
+        if published_cards.count():
+            published_tick = published_cards.first.locator(".card-tick")
+            assert published_tick.get_attribute("aria-pressed") == "true", "题库里已有、还没人亲自打过勾的题，对号也要是实心的"
+            print("note   : 这份卷子里有『已入库但没人工打过勾』的题，对号同样是实心的")
+        else:
+            print("note   : 这份卷子里入库的题都人工打过勾，「published 对号渲染」这一段没测到")
         before_counters, before_total = counters(page), library_total(page, url)
         print("before  :", before_counters, "library:", before_total)
 

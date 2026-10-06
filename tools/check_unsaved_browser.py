@@ -112,43 +112,68 @@ def check(url):
             editor.locator(".stem-input").fill(marker)
             return editor
 
-        def choose_paper(item):
-            page.locator("#paperList .paper-link").filter(has_text=item["name"]).click()
-
         def expect_warning():
             expect(page.locator("#confirmDialog")).to_be_visible()
             expect(page.locator("#confirmTitle")).to_have_text("改字还没保存")
+            # 破坏性的默认焦点不能落在「丢弃改动」上。
+            expect(page.locator("#confirmDialog [value=cancel]")).to_be_focused()
 
         def keep_editing():
             page.locator("#confirmDialog").get_by_role("button", name="继续编辑", exact=True).click()
             expect(page.locator("#confirmDialog")).not_to_be_visible()
+            expect(page.locator(".card.editing")).to_have_count(1)
 
         def discard():
             page.locator("#confirmDialog").get_by_role("button", name="丢弃改动", exact=True).click()
             expect(page.locator("#confirmDialog")).not_to_be_visible()
+            expect(page.locator(".card.editing")).to_have_count(0)
 
+        def leave_editor_keeping():
+            # Esc 的监听挂在改字面板上，焦点必须在里面才收得到（真人手就停在
+            # 输入框里）；blur 到 body 之后按 Esc 什么也不会发生。
+            page.locator(".card.editing .stem-input").press("Escape")
+            expect_warning()
+            keep_editing()
+
+        def choose_paper(item, dirty=True):
+            # 改字时顶栏和试卷列表都收着，界面上点不到另一份卷 —— 先退出来。
+            # 改过字的退出去一定要被问一句，没改过的直接就退了。
+            if page.locator(".card.editing").count():
+                page.locator(".card.editing .stem-input").press("Escape")
+                if dirty:
+                    expect_warning()
+                    discard()
+                expect(page.locator(".card.editing")).to_have_count(0, timeout=8000)
+            page.locator("#paperList .paper-link").filter(has_text=item["name"]).click()
+
+        # 1.12.7 起点「改字」就占满整屏：顶栏和左边的试卷列表都收起来了
+        # （body.qb-editing 把 .topbar 和 .sidebar 一起 display:none），
+        # 「改字中直接点另一份卷」这个动作在界面上已经不存在了。真正要守的
+        # 是另一件事：没保存的字不会自己没了。出路只剩 Esc / 取消 / 返回，
+        # 三条都要先问一句；选「继续编辑」一个字都不能少。
         editor = open_editor("切卷时应该保留的临时输入")
-        choose_paper(second)
-        expect_warning()
-        expect(page.locator("#confirmDialog [value=cancel]")).to_be_focused()
-        page.screenshot(path=str(OUTPUT / "unsaved-warning.png"))
-        keep_editing()
-        expect(page.locator("#paperName")).to_have_text(first["name"])
+        expect(page.locator("#paperList")).not_to_be_visible()
+        leave_editor_keeping()
         expect(editor.locator(".stem-input")).to_have_value("切卷时应该保留的临时输入")
+        page.screenshot(path=str(OUTPUT / "unsaved-warning.png"))
+        # 放弃改动才真的退得出去；退干净之后换卷不该再多问一次。
         choose_paper(second)
-        expect_warning()
-        discard()
         expect(page.locator("#paperName")).to_have_text(second["name"])
+        expect(page.locator("#confirmDialog")).not_to_be_visible()
         expect(page.locator(".editor")).to_have_count(0)
         choose_paper(first)
         expect(page.locator("#paperName")).to_have_text(first["name"])
 
         editor = open_editor("取消前的临时输入")
-        editor.get_by_role("button", name="取消", exact=True).click()
+        # 面板上原来那个「取消」已经改名成「← 返回」；能主动离开改字的按钮
+        # 就是它和 Esc（面板下方写着「Ctrl+Enter 保存 · Esc 取消」）。
+        # 工具栏不是改字表单的一部分，要从题卡上找。
+        card = page.locator(".card.editing")
+        card.get_by_role("button", name="← 返回", exact=True).click()
         expect_warning()
         keep_editing()
         expect(editor.locator(".stem-input")).to_have_value("取消前的临时输入")
-        editor.get_by_role("button", name="取消", exact=True).click()
+        card.get_by_role("button", name="← 返回", exact=True).click()
         expect_warning()
         discard()
         expect(page.locator(".editor")).to_have_count(0)
@@ -165,14 +190,20 @@ def check(url):
         expect(page.locator(".editor")).to_have_count(0)
 
         editor = open_editor("跳转题库前的临时输入")
-        page.locator('.topnav a[href="/library"]').click()
-        expect_warning()
-        keep_editing()
+        # 改字时顶栏也一起收起来了（body.qb-editing .topbar display:none），
+        # 所以「改字中点导航去题库」这个动作在界面上根本不存在。出路只剩
+        # 改字面板自己那几个：Esc、「← 返回」、保存。
+        expect(page.locator("#drawerTrigger")).not_to_be_visible()
+        leave_editor_keeping()
         expect(editor.locator(".stem-input")).to_have_value("跳转题库前的临时输入")
         assert urlparse(page.url).path == "/"
-        page.locator('.topnav a[href="/library"]').click()
+        # 放弃改动之后导航恢复正常，而且不会再多问一句。
+        page.locator(".card.editing .stem-input").press("Escape")
         expect_warning()
         discard()
+        page.locator("#drawerTrigger").click()
+        page.locator("#siteDrawer").wait_for(state="visible", timeout=8000)
+        page.locator('.topnav a[href="/library"]').click()
         page.wait_for_url("**/library")
         page.wait_for_load_state("networkidle")
         assert not dialogs, "Custom navigation must not cause a second native warning"
@@ -194,17 +225,17 @@ def check(url):
         expect(page.locator("#paperName")).to_have_text(first["name"])
         native_action = "dismiss"
 
-        # Editing back to the original value should allow a paper switch and
-        # a later clean cancel, with no custom or native confirmation.
+        # Editing back to the original value should leave the editor without any
+        # question, and a paper switch then needs no confirmation either.
         editor = open_editor("稍后会改回去")
         editor.locator(".stem-input").fill(first["stem"])
-        choose_paper(second)
+        choose_paper(second, dirty=False)
         expect(page.locator("#paperName")).to_have_text(second["name"])
         expect(page.locator("#confirmDialog")).not_to_be_visible()
         choose_paper(first)
         expect(page.locator("#paperName")).to_have_text(first["name"])
         editor = open_editor(first["stem"])
-        editor.get_by_role("button", name="取消", exact=True).click()
+        editor.locator(".stem-input").press("Escape")
         expect(page.locator(".editor")).to_have_count(0)
         expect(page.locator("#confirmDialog")).not_to_be_visible()
         page.screenshot(path=str(OUTPUT / "restored.png"))
@@ -214,7 +245,7 @@ def check(url):
         context.close()
         browser.close()
     assert question_snapshot() == before, "UI tests must not save or change any fixture questions"
-    print("Browser checks passed: paper switch keep/discard, cancel, Esc, library navigation, native refresh, original-value recovery; no mutating requests or question changes", flush=True)
+    print("Browser checks passed: unsaved edits are unreachable from outside the editor (chrome is folded away), Esc and 返回 ask before letting go, 继续编辑 keeps every character, discard then paper switch and navigation are clean, native refresh still warns; no mutating requests or question changes", flush=True)
 
 
 def run():

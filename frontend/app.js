@@ -5654,6 +5654,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     back.title = "回到审核列表；有未保存的改动会先问一句";
     const place = el("div", "editor-bar-place");
     place.append(el("span", "editor-bar-count", `第 ${q.number} 题 / 共 ${state.questions.length} 题`));
+    // 「共 N 题」数的是整份卷，可「换题」只在展开着的题卡之间走（见上面的说明）。
+    // 两边对不上时不说清楚，老师会以为漏看了：从 11 按下一题到了 13，
+    // 或者按到最后一道按不动了，屏幕上一个字都没有交代。
+    const folded = state.questions.length - siblings.length;
+    if (folded > 0) {
+      place.append(el("span", "editor-bar-folded", folded === 1
+        ? "另有 1 题已通过、折叠着，换题不会经过"
+        : `另有 ${folded} 题已通过、折叠着，换题不会经过`));
+    }
     const prevButton = button("‹ 上一题", "small", () => jump(-1));
     const nextButton = button("下一题 ›", "small", () => jump(1));
     prevButton.disabled = here <= 0;

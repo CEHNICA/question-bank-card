@@ -140,6 +140,25 @@ class IndependentAISettingsTests(TestCase):
         self.assertEqual(result["keys"]["minimax"], {"configured": True, "count": 1, "shared_with_reading": False})
         self.transform.assert_not_called()
 
+    def test_closing_a_feature_also_closes_its_on_intake_switch(self):
+        # 「入库时生成」开着、功能关着，是一种用户自己摆不出来、也说不清的状态：
+        # 眼下不会多花钱（生成本来就两个开关都看），可哪天把功能打开，每道新题
+        # 入库就悄悄恢复调用一次服务。保存时按实际生效的状态对齐。
+        service.save({"features": {"knowledge_tags": True, "ai_answer": True},
+                      "on_intake": {"tags": True, "answer": True}})
+        self.assertEqual(service.public_status()["on_intake"], {"tags": True, "answer": True})
+        saved = service.save({"features": {"knowledge_tags": False, "ai_answer": False}})
+        self.assertEqual(saved["features"], {"knowledge_tags": False, "ai_answer": False})
+        self.assertEqual(saved["on_intake"], {"tags": False, "answer": False},
+                         "功能关掉时，入库时生成必须跟着关掉")
+        self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": False})
+
+    def test_on_intake_feature_map_agrees_with_the_worker(self):
+        # 两处各写了一份「任务种类 → 功能开关」的对应关系：这里改一处、那里忘了改，
+        # 就会出现「标签按 ai_answer 开关决定要不要生成」这种错位。
+        self.assertEqual({str(kind): feature for kind, feature in library_jobs.FEATURE_OF.items()},
+                         service.ON_INTAKE_FEATURE)
+
     def test_legacy_v1_provider_metadata_remains_visible_without_migration(self):
         # v1 is the old single Doubao credential. Reading metadata neither
         # upgrades settings nor opens the encrypted file.

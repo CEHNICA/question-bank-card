@@ -131,12 +131,16 @@ def run(page, publication, original) -> None:
     page.wait_for_timeout(1500)
     check(card.locator(".library-tags").count() == 0, "清空后卡片上不再有标签行")
     check(api(f"/api/library/{publication}/tags")["tags"] == [], "服务端也确认标签已空")
-    # 「打知识点标签」在卡片的「更多」菜单里。数得到不等于看得见，
-    # 必须把菜单点开，再确认这个按钮真的能看见、点得动。
+    # 「打知识点标签」在卡片的「更多」菜单里，而且**只在本机开了这个功能时才有**
+    # （没配 API 时 features.knowledge_tags 是 false，按钮根本不渲染）。
+    # 数得到不等于看得见，必须把菜单点开，再确认这个按钮真的能看见、点得动。
     card.locator(".library-card-more > summary").click()
     page.wait_for_timeout(300)
     regen = card.locator(".library-card-menu button", has_text="打知识点标签")
-    check(regen.count() == 1 and regen.is_visible(), "清空后「更多」菜单里的「打知识点标签」回来了")
+    if api("/api/library?limit=1")["features"].get("knowledge_tags"):
+        check(regen.count() == 1 and regen.is_visible(), "清空后「更多」菜单里的「打知识点标签」回来了")
+    else:
+        print("     SKIP 本机没开「知识点标签」功能，菜单里本来就没有这个按钮（feature=false）")
     card.locator(".library-card-more > summary").click()
     card.scroll_into_view_if_needed()
     page.wait_for_timeout(300)

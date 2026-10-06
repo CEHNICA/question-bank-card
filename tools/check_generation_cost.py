@@ -62,10 +62,14 @@ def run(page) -> None:
     check(f"还差 {backlog['answer']} 道" in answer_backlog, f"答案那一行：{answer_backlog}")
     page.screenshot(path=f"{SHOTS}/cost_line.png")
 
-    # 两个「入库时生成」都开着的时候，才说每道新题几次调用。
+    # 两个「入库时生成」都真的在跑的时候，才说每道新题几次调用。
+    # 主开关关着的时候不算 —— 功能都没开，「入库时生成」那个小开关是藏着的，
+    # 留着它只是历史值，不是眼下的开销。原来这里只看 on_intake，把主开关漏了。
+    intake_tags = served["features"]["knowledge_tags"] and served["on_intake"]["tags"]
+    intake_answer = served["features"]["ai_answer"] and served["on_intake"]["answer"]
     both = "2 次" in cost
-    check(both == (served["on_intake"]["tags"] and served["on_intake"]["answer"]),
-          f"写着「2 次」和两个开关的实际状态一致（本机 tags={served['on_intake']['tags']} answer={served['on_intake']['answer']}）")
+    check(both == (intake_tags and intake_answer),
+          f"写着「2 次」和两个开关的实际状态一致（本机 标签入库={intake_tags} 答案入库={intake_answer}）")
 
     # 拨开关，费用那句话要当场跟着变，不能等保存后重读。
     intake_answer = page.locator("#libraryAIAnswerIntake")

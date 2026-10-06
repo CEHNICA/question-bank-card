@@ -32,6 +32,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 PYTHON = ROOT / "backend" / ".venv" / "Scripts" / "python.exe"
 LOGS = ROOT / "tmp" / "sweep"
+# 脚本自己说「测不了」的退出码。别用 2：argparse 参数错误也是 2。
+SKIP_EXIT = 3
 
 # 需要打包产物才能查的（题有据.exe + tiyouju.exe），日常跑不了。
 BUNDLE_ONLY = {"check_assistant_setup"}
@@ -48,7 +50,7 @@ FIXTURE_ROOT = ROOT / "tmp" / "sweep-ux-fixture"
 NEEDS_PAPER = {"check_fullscreen_editors", "check_fullscreen_nav", "check_review_restore", "check_tick_roundtrip"}
 RUN_FLAG = {"check_edit_assistance_browser", "check_library_recovery_browser", "check_model_settings_browser",
             "check_page_canvas_browser", "check_print_scroll_browser", "check_practice_browser",
-            "check_source_pan_browser", "check_unsaved_browser"}
+            "check_source_pan_browser", "check_task_delete_after_withdraw", "check_unsaved_browser"}
 
 
 def free_port() -> int:
@@ -185,9 +187,17 @@ def main() -> int:
                 extra = ["--url", base, *extra] if "--url" in _declared(name) else extra
 
             code, output, seconds = run_script(name, extra, env=env)
-            status = "ok" if code == 0 else "FAIL"
-            tail = "" if code == 0 else (output.strip().splitlines() or [""])[-1][:70]
-            results.append((name, status, f"{seconds:.0f}s {tail}".strip()))
+            # 退出码 3 = 脚本自己说「这份数据/这版界面测不了」。它跟跑挂了不是一回事，
+            # 混在 FAIL 里会让整张表看不出哪些是真问题。注意别用 2：argparse 的参数
+            # 错误也是 2，那是真的没跑起来。
+            if code == 0:
+                status = "ok"
+            elif code == SKIP_EXIT:
+                status = "SKIP"
+            else:
+                status = "FAIL"
+            note = "" if code == 0 else (output.strip().splitlines() or [""])[-1][:70]
+            results.append((name, status, f"{seconds:.0f}s {note}".strip()))
 
         width = max(len(name) for name, _, _ in results)
         for name, status, note in results:

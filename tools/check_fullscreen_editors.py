@@ -93,7 +93,11 @@ def main():
               .find(c => c.textContent.includes('已保存答案解析'));
             return card ? card.querySelector('.library-card-select') : null; }""")
         if not pick:
-            raise SystemExit("题库里没有已保存答案解析的题，跳过答案解析这一段")
+            # 测不了就说测不了。退出码 3 = SKIP（见 run_acceptance）：
+            # 跟「跑挂了」不是一回事，混在一起会让整张表看不出哪些是真问题。
+            print("SKIP 题库里没有已保存答案解析的题，答案解析这一段测不了；"
+                  "换一份带答案解析的库再跑。", flush=True)
+            raise SystemExit(3)
         pick.check(force=True)
         page.wait_for_timeout(120)
         page.locator("#addSelected").click()

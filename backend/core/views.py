@@ -3065,8 +3065,13 @@ def library_detail(request, publication_id):
         if not publication.question_id:
             return _error("这份历史题面已没有关联题卡，无法比较其他版本")
         before = get_object_or_404(PublishedQuestion, pk=compare_id, question_id=publication.question_id)
+        # 对照里嵌的是「当初存下的那份题面」。不能带现场派生出来的状态（比如配图文件
+        # 此刻还在不在）—— 那是界面上的一句提示，不是证据的一部分；混进来会让
+        # 「历史没被改过」这条断言看着像坏了，其实比的是两回事。
+        snapshot = library.publication_json(before)
+        snapshot["content"] = before.content or {}
         body["comparison"] = {
-            "publication": library.publication_json(before),
+            "publication": snapshot,
             "changes": library.publication_changes(before, publication),
         }
     return JsonResponse(body)

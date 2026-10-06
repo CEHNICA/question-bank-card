@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 题库公共排版与比对模块（审核页和正式题库页共用）。
  *
  * 三条原则：
@@ -1239,10 +1239,33 @@
   function figureElement(figure, resolveUrl, action) {
     const frame = document.createElement("figure");
     frame.className = "qb-figure";
+    // 这个函数不在 renderQuestion / answerRows 里，那两处的 make 是局部变量，
+    // 这里够不着 —— 自己建，别拿一个取不到的名字。文档也从 frame 上拿，
+    // 跟 renderQuestion 用 container.ownerDocument 是一个道理。
+    const note = () => {
+      const text = frame.ownerDocument.createElement("p");
+      text.className = "qb-image-error";
+      text.textContent = "这道题的配图没在原卷目录里。题面和答案不受影响；"
+        + "点「查看出处」可以回到原卷核对，或重新切一次这道题的图。";
+      return text;
+    };
+    // 后端已经核对过文件在不在：标了 missing 就不再发那个必然 404 的请求。
+    if (figure.missing) {
+      frame.classList.add("qb-figure-missing");
+      frame.append(note());
+      return frame;
+    }
     const image = document.createElement("img");
     image.loading = "lazy";
     image.alt = figure.slot === "stem" ? "题干配图" : `选项 ${figure.slot} 配图`;
     image.src = resolveUrl ? resolveUrl(figure) : figure.url;
+    // 文件在列表里存在、真正取的时候又没了（比如刚被清理掉）：同样照实说，
+    // 别只留一张裂图 —— 看上去像题目本身坏了，其实题面和答案都还在。
+    image.addEventListener("error", () => {
+      if (frame.querySelector(".qb-image-error")) return;
+      image.remove();
+      frame.prepend(note());
+    }, { once: true });
     frame.append(image);
     // The review page can offer an action under a figure (turn a table crop into text).
     const extra = typeof action === "function" ? action(figure) : null;

@@ -240,7 +240,12 @@ ${keyBlocks()}
     for (const id of fields) {
       if (id === "libraryAIMode") continue;
       const changed = () => {
-        if (["libraryAITags", "libraryAIAnswer"].includes(id)) renderTiming();
+        if (["libraryAITags", "libraryAIAnswer"].includes(id)) {
+          renderTiming();
+          // 功能一关，入库时生成跟着收掉，别把这种组合存进去。
+          const paired = $(id === "libraryAITags" ? "libraryAITagsIntake" : "libraryAIAnswerIntake");
+          if (paired && !$(id).checked) paired.checked = false;
+        }
         // 「入库时生成」这两个开关一改，费用那句话要当场跟着变。
         if (["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake"].includes(id) && state.current) {
           renderCost(state.current);
@@ -561,7 +566,8 @@ ${keyBlocks()}
     $("libraryAICost").textContent = perQuestion
       ? `题库现在 ${backlog.total} 道题。开着「入库时生成」，每道新题入库会调用 ${perQuestion} 次服务；`
         + `还没做的共 ${queued} 道（${[tagsRunning && `标签 ${backlog.tags}`, answerRunning && `答案 ${backlog.answer}`].filter(Boolean).join("、")}）。`
-      : "两项默认关闭。开启后，可在题库单题生成或勾选批量生成；都开「入库时生成」的话，每道新题入库要调用两次服务。";
+      : `两项默认关闭。题库现在 ${backlog.total} 道题，还差 ${backlog.tags} 道标签、${backlog.answer} 道答案；`
+        + "开启后可在题库单题生成或勾选批量生成，都开「入库时生成」的话，每道新题入库要调用两次服务。";
     $("libraryAITagsBacklog").textContent = `题库里还差 ${backlog.tags} 道有标签`;
     $("libraryAIAnswerBacklog").textContent = `题库里还差 ${backlog.answer} 道有答案`;
   }
@@ -738,8 +744,11 @@ ${keyBlocks()}
     state.baseline = null; clearSecret(); state.provider = body.provider;
     $("libraryAITags").checked = body.features.knowledge_tags;
     $("libraryAIAnswer").checked = body.features.ai_answer;
-    $("libraryAITagsIntake").checked = body.on_intake.tags;
-    $("libraryAIAnswerIntake").checked = body.on_intake.answer;
+    // 功能关着的时候，「入库时生成」跟着一起收掉。留着会出现一个用户没见过的
+    // 组合：上面写着「两项默认关闭」，下面两个开关却是开的；哪天把功能打开，
+    // 每道新题入库就悄悄恢复调用一次服务。读入时先按实际生效的状态对齐。
+    $("libraryAITagsIntake").checked = body.features.knowledge_tags && body.on_intake.tags;
+    $("libraryAIAnswerIntake").checked = body.features.ai_answer && body.on_intake.answer;
     renderTiming();
     renderCost(body);
     $("libraryAIMode").value = "api";
