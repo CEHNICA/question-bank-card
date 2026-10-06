@@ -98,6 +98,31 @@ def is_docx(blob: bytes) -> bool:
         return False
 
 
+PARA = re.compile(r"<w:p[ >].*?</w:p>", re.S)
+
+
+def paragraphs(blob: bytes) -> list[str]:
+    """按段落切开。题号是段首的「N.」，连成一片正文就分不出第几题了。"""
+    with zipfile.ZipFile(BytesIO(blob)) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    out = []
+    for para in PARA.findall(xml):
+        text = unescape("".join(WT.findall(para))).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def question_numbers(blob: bytes) -> list[int]:
+    """按出现顺序取出题号。段首形如「3. 」或「3.」（AI 参考 · 未核对）。"""
+    seen = []
+    for text in paragraphs(blob):
+        match = re.match(r"^(\d+)\s*[.．、]", text)
+        if match:
+            seen.append(int(match.group(1)))
+    return seen
+
+
 # 题干里混着公式：公式在 Word 里变成 OMML，原始字符不会原样出现，
 # 拿整段题干去比必然对不上。这里只取**不含公式的纯文字片段**去核对。
 PLAIN_STEM = """(block) => {
@@ -475,7 +500,23 @@ def split_checks(page, post: dict, stems, status: str, count: int) -> int:
     if answer:
         text = docx_parts(answer)["text"]
         found = text.count(MARK + "解析")
-        failures += fail_count(check(found >= count, f"答案卷里 {found}/{count} 段解析都在"))
+        if not check(found >= count, f"答案卷里 {found}/{count} 段解析都在"):
+            print("    答案卷的段落：")
+            for line in paragraphs(answer):
+                print(f"      {line[:90]}")
+        failures += fail_count(found >= count)
+        # 两卷必须**逐题对得上**。老师拿题目卷给学生、拿答案卷批改，题号错位
+        # 这件事在界面上永远不会提示，只会在考完之后才发现。以前这里只查了
+        # 「各自的题干/答案在不在」，两份文件各写各的也能全绿。
+        qnums = question_numbers(question) if question else []
+        anums = question_numbers(answer)
+        print(f"  题目卷题号 {qnums} / 答案卷题号 {anums}")
+        failures += fail_count(check(anums == qnums,
+                                     f"两卷题号完全一致（题目卷 {qnums}，答案卷 {anums}）"))
+        failures += fail_count(check(anums == list(range(1, len(anums) + 1)),
+                                     f"答案卷题号是 1..{count} 不跳号不重号（{anums}）"))
+        failures += fail_count(check(len(anums) == count,
+                                     f"答案卷题数 {len(anums)} = 篮里 {count} 道"))
     open(f"{SHOTS}/split.zip", "wb").write(blob)
     return failures
 
