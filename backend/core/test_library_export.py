@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import base64
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from unittest import mock
+from urllib.parse import unquote
 
 from django.test import Client, TestCase, override_settings
 from django.urls import path
@@ -47,8 +49,13 @@ def document_xml(data):
         return etree.fromstring(archive.read("word/document.xml"))
 
 
-@override_settings(ROOT_URLCONF=__name__)
-class LibraryExportTests(TestCase):
+class ExportFixture:
+    """Publication/payload/post helpers, shared with the opt-in browser module.
+
+    Not a TestCase on its own: test_library_export_browser reuses these without
+    re-running every assertion here.
+    """
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -101,6 +108,9 @@ class LibraryExportTests(TestCase):
         publication.save(update_fields=["content", "content_hash"])
         return target
 
+
+@override_settings(ROOT_URLCONF=__name__)
+class LibraryExportTests(ExportFixture, TestCase):
     def test_docx_is_complete_editable_and_does_not_write_question_data(self):
         first = self.publication(kind="free_response", answer="2", analysis="离线解析")
         second = self.publication(kind="single_choice", answer="A", options={"A": "甲", "B": "乙", "C": "丙", "D": "丁"})
@@ -332,15 +342,179 @@ class LibraryExportTests(TestCase):
         self.assertTrue(math.findall(".//m:limUpp", NS))
         self.assertFalse(math.findall(".//m:acc", NS))
 
-    def test_cancellation_is_rejected_instead_of_changing_to_a_box(self):
+    def test_cancellation_is_never_silently_turned_into_a_box(self):
+        """上游会把每个 menclose 都画成方框，划消就丢了。
+
+        不管走哪条路都不能出现那个方框：Word 能转就转原生公式，转不了就降级成
+        图片，绝不能悄悄把「划掉」印成「框起来」。
+        """
         for command, notation in (("cancel", "updiagonalstrike"), ("bcancel", "downdiagonalstrike"),
                                   ("xcancel", "updiagonalstrike downdiagonalstrike")):
             # Exact MathML enclosure shape produced by standard KaTeX.
             value = math_field("\\" + command + "{x}", f'<menclose notation="{notation}"><mi>x</mi></menclose>')
-            with self.assertRaises(export.ExportError):
-                export._field(value, value["source"], "合成划消公式")
+            segment = export._field(value, value["source"], "合成划消公式")[0]["segments"][0]
+            self.assertIsNone(segment["omml"], f"{command} 不该被转成一个 Word 公式")
+            self.assertIn("合成划消公式", segment["fallback"])
         boxed = math_field(r"\boxed{x}", '<menclose notation="box"><mi>x</mi></menclose>')
         self.assertTrue(export._field(boxed, boxed["source"], "合成方框")[0]["segments"][0]["omml"].findall(".//m:borderBox", NS))
+
+    def test_common_high_school_math_latex_corpus_becomes_native_editable_omml(self):
+        r"""常见高中数学公式使用生产版 KaTeX 输出的 MathML 转成可编辑 Word 公式。
+
+        语料由 tools\build_mathml_corpus.js 用仓库自带的 KaTeX 渲染，所以跑的是
+        生产环境真正的 MathML 形状，不是手写的理想形状。漏掉一个字形（\overline 的
+        U+203E、\acute 的 U+02CA、\grave 的 U+02CB）就会在这里变红。
+        """
+        corpus = json.loads((Path(export.__file__).parent / "test_mathml_corpus.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(corpus), 40, "语料本身要够大，否则这道闸门没有意义")
+        for item in corpus:
+            latex, mathml = item["latex"], item["mathml"]
+            with self.subTest(latex=latex):
+                # 语料存的是 KaTeX 完整的 <math>…</math>，前端就是这样送上来的。
+                source = "$" + latex + "$"
+                value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
+                         "segments": [{"type": "math", "start": 0, "end": units(source), "latex": latex,
+                                       "mathml": mathml, "display": False}]}]}
+                segment = export._field(value, source, "语料")[0]["segments"][0]
+                omml = segment["omml"]
+                self.assertIsNotNone(omml, "这条公式没有转成原生公式")
+                self.assertEqual(etree.QName(omml).localname, "oMath")
+                self.assertTrue(list(omml), "转出来是空的")
+                # 原生公式，不是把 LaTeX 源码塞进去。
+                self.assertNotIn("\\", "".join(omml.itertext()))
+
+    def unconvertible_field(self, latex, body, *, head="化简 ", tail=" 并写出结果。"):
+        """一条 Word 明确不支持的公式，夹在题干文字中间。"""
+        source = head + "$" + latex + "$" + tail
+        mathml = f'<math xmlns="{export.MATH_NS}"><semantics>{body}<annotation encoding="application/x-tex">' \
+                 + __import__("html").escape(latex) + '</annotation></semantics></math>'
+        cut = units(head) + units("$" + latex + "$")
+        segments = [{"type": "text", "start": 0, "end": units(head)},
+                    {"type": "math", "start": units(head), "end": cut, "latex": latex, "mathml": mathml,
+                     "display": False},
+                    {"type": "text", "start": cut, "end": units(source)}]
+        return {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source), "segments": segments}]}
+
+    def fake_picture(self):
+        buffer = io.BytesIO()
+        Image.new("RGBA", (120, 40), (0, 0, 0, 0)).save(buffer, "PNG")
+        return {"bytes": buffer.getvalue(), "size": (120, 40)}
+
+    def post_with_unconvertible_formula(self, *, browsable=True):
+        """把「浏览器能不能用」和「公式转不了怎么办」分开测，只 mock 排版那一层。"""
+        value = self.unconvertible_field(r"\cancel{x}", '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
+        pub = self.publication(stem=value["source"], kind="free_response")
+        payload = self.payload([pub])
+        payload["rendered_fields"][str(pub.id)]["stem"] = value
+        return payload, pub
+
+    def test_unconvertible_formula_becomes_a_picture_and_is_named_in_the_warning(self):
+        payload, _ = self.post_with_unconvertible_formula()
+        with mock.patch.object(export, "_formula_pictures", return_value=[self.fake_picture()]) as renderer:
+            result = self.post(payload)
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        xml = document_xml(result.content)
+        text = "".join(xml.itertext())
+        # 题干文字一个字不少，公式原样呈现，只是从可编辑公式变成图片。
+        self.assertIn("化简", text)
+        self.assertIn("并写出结果。", text)
+        self.assertNotIn("\\cancel", text)
+        self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
+        with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+            self.assertEqual(len([name for name in archive.namelist() if name.startswith("word/media/")]), 1)
+        # 警告要能让人在这一卷里直接找到那条公式：第几题、哪个位置。
+        warning = unquote(result["X-QB-Layout-Warning"])
+        self.assertIn("第 1 题", warning)
+        self.assertIn("题干", warning)
+        self.assertIn("图片", warning)
+        renderer.assert_called_once()
+
+    def test_direct_export_renders_fallback_even_without_a_warning_collector(self):
+        payload, _ = self.post_with_unconvertible_formula()
+        with mock.patch.object(export, "_formula_pictures", return_value=[self.fake_picture()]) as renderer:
+            data, _filename, _mime, _count = export.export(payload)
+        self.assertEqual(len(document_xml(data).findall(".//a:blip", NS)), 1)
+        renderer.assert_called_once()
+
+    def test_several_unconvertible_formulas_share_one_rendering_pass(self):
+        first = self.unconvertible_field(r"\cancel{x}", '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
+        second = self.unconvertible_field(r"\bcancel{y}", '<menclose notation="downdiagonalstrike"><mi>y</mi></menclose>')
+        one = self.publication(stem=first["source"])
+        two = self.publication(stem=second["source"])
+        payload = self.payload([one, two])
+        payload["rendered_fields"][str(one.id)]["stem"] = first
+        payload["rendered_fields"][str(two.id)]["stem"] = second
+        with mock.patch.object(export, "_formula_pictures", return_value=[self.fake_picture()] * 2) as renderer:
+            result = self.post(payload)
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        # 一次启动、一个文档、批量截完，不能每条公式开一次浏览器。
+        self.assertEqual(renderer.call_count, 1)
+        self.assertEqual(len(renderer.call_args[0][0]), 2)
+        self.assertEqual(len(document_xml(result.content).findall(".//a:blip", NS)), 2)
+
+    def test_a_formula_that_drew_nothing_is_refused_instead_of_becoming_a_blank(self):
+        """截出来全透明，等于在卷子上挖了个洞 —— 宁可整卷失败也不发。"""
+        def shot(pixel, *, draw=False):
+            buffer = io.BytesIO()
+            image = Image.new("RGBA", (120, 40), pixel)
+            if draw:
+                from PIL import ImageDraw
+                ImageDraw.Draw(image).line((10, 20, 100, 20), fill=(0, 0, 0, 255), width=4)
+            image.save(buffer, "PNG")
+            return {"data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        box = {"x": 0, "y": 0, "width": 120, "height": 40}
+        client = mock.Mock()
+        client.call.return_value = shot((0, 0, 0, 0))
+        with self.assertRaises(ValueError):
+            export._formula_png(client, box)
+        client.call.return_value = shot((255, 255, 255, 255), draw=True)
+        self.assertEqual(export._formula_png(client, box)["size"], (120, 40))
+        # 量不出尺寸的框说明排版没成功，同样不许当成一张空图塞进去。
+        for bad in ({"x": 0, "y": 0, "width": 0, "height": 40}, {"x": 0, "y": 0, "width": 9999, "height": 40},
+                    {"x": 0, "y": 0, "width": 120}, {"x": 0, "y": 0, "width": "120", "height": 40}):
+            with self.assertRaises(ValueError):
+                export._formula_png(client, bad)
+
+    def test_formula_capture_retries_a_blank_first_paint(self):
+        def shot(draw):
+            buffer = io.BytesIO()
+            image = Image.new("RGBA", (120, 40), (0, 0, 0, 0))
+            if draw:
+                from PIL import ImageDraw
+                ImageDraw.Draw(image).line((10, 20, 100, 20), fill=(0, 0, 0, 255), width=4)
+            image.save(buffer, "PNG")
+            return {"data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        client = mock.Mock()
+        client.call.side_effect = [shot(False), {}, shot(True)]
+        result = export._formula_png(client, {"x": 0, "y": 0, "width": 120, "height": 40})
+        self.assertEqual(result["size"], (120, 40))
+        self.assertEqual(client.call.call_count, 3)
+
+    def test_without_a_usable_browser_the_whole_download_is_still_refused(self):
+        from . import library_pdf
+        payload, _ = self.post_with_unconvertible_formula()
+        # 本机真的没有浏览器时，不许拿一张空白图片去补那个洞。
+        with mock.patch.object(library_pdf, "_browser_path", side_effect=library_pdf.word.ExportError(
+                "导出 PDF 需要本机 Microsoft Edge 或 Google Chrome；仍可导出 Word。", 503)):
+            result = self.post(payload)
+        # 宁可让用户改用 PDF，也不发一份读不懂的卷子。
+        self.assertEqual(result.status_code, 400)
+        self.assertIn("改用打印", result.json()["error"])
+        self.assertNotIn("Content-Disposition", result)
+
+    def test_pdf_export_never_becomes_a_picture(self):
+        value = self.unconvertible_field(r"\cancel{x}", '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
+        pub = self.publication(stem=value["source"])
+        payload = self.payload([pub])
+        payload["rendered_fields"][str(pub.id)]["stem"] = value
+        options = library_drafts._print_options(payload["print_options"], ids=payload["ids"])
+        with mock.patch.object(export, "_formula_pictures", side_effect=AssertionError("PDF must not render pictures")):
+            # PDF 路径根本不走 OMML，:364 那条老契约继续成立。
+            captured, use_ai = export._capture(payload["ids"], payload["rendered_fields"], options, "pdf")
+        segment = captured[0]["fields"]["stem"][0]["segments"][1]
+        self.assertEqual(segment["type"], "math")
+        self.assertIsNone(segment["omml"])
+        self.assertEqual(segment["latex"], r"\cancel{x}")
 
     def test_question_paragraphs_keep_together_and_release_the_final_chain(self):
         pub = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"})
@@ -374,7 +548,11 @@ class LibraryExportTests(TestCase):
         self.assertEqual(segment["mathml"], value["blocks"][0]["segments"][0]["mathml"])
         self.assertEqual(segment["latex"], r"\cancel{x}")
         export._recheck(captured, options, use_ai)
-        self.assertEqual(self.post(payload).status_code, 400)
+        # Word 侧走的是同一条路：这条公式转不了，但它只是降级成图片，不废掉整卷。
+        word_captured, _ = export._capture(payload["ids"], payload["rendered_fields"], options, "docx")
+        word_segment = word_captured[0]["fields"]["stem"][0]["segments"][0]
+        self.assertIsNone(word_segment["omml"])
+        self.assertIn("第 1 题", word_segment["fallback"])
         # Skipping OMML compatibility never skips XML, source or annotation checks.
         for mutation in (lambda raw: raw.replace("<mi>x</mi>", "<unsupported>x</unsupported>"),
                          lambda raw: raw.replace("<mi>x</mi>", '<mi onclick="bad">x</mi>'),

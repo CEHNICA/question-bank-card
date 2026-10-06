@@ -2,15 +2,24 @@
 
 The browser supplies KaTeX MathML and source offsets, never replacement prose
 or image URLs. Every field is checked against its stored publication before
-conversion. Failures abort the whole download; no raw-LaTeX fallback exists.
+conversion. A formula Word's own equation model cannot express is rendered to a
+picture and reported by position; when that rendering is unavailable the whole
+download is still refused rather than shipping a paper the reader cannot follow.
 """
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 import hashlib
 import io
+import json
+import os
 import re
+import subprocess
+import tempfile
+import threading
+import time
 import unicodedata
 import warnings
 import zipfile
@@ -53,12 +62,28 @@ MATHML_ELEMENTS = {"math", "semantics", "annotation", "mi", "mn", "mo", "mrow", 
 LINE_SPACING = 1.35
 PARAGRAPH_GAP_PT = 3
 QUESTION_GAP_PT = 8
+# 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
+# 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
+_UNSUPPORTED = object()
+_FALLBACK_REFUSAL = "这段公式暂不能准确转换为可编辑 Word 公式，请在预览核对并改用打印 / 保存 PDF"
+_FALLBACK_ADVICE = "这条公式在 Word 里只能以图片呈现"
+_FIELD_LABELS = {"stem": "题干", "answer": "答案", "analysis": "解析", "origin": "题源"}
+MAX_FALLBACK_FORMULAS = 32
+MAX_FALLBACK_BYTES = 16 * 1024 * 1024
+MAX_FORMULA_BOX = (1200, 300)
+FORMULA_CAPTURE_SCALE = 3
+CSS_PIXELS_PER_INCH = 96
+_picture_lock = threading.Lock()
 
 
 class ExportError(ValueError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+class _Unrepresentable(Exception):
+    """Valid KaTeX rendering that Word's own equation model cannot express."""
 
 
 def _fail(where, message, status=400):
@@ -161,6 +186,12 @@ def _math(segment, where, *, word_math=True):
     mathml2omml 0.0.2 closes groupChrPr with the wrong tag, and omits deg for
     square roots. The latter loses the radicand in a real LibreOffice render.
     These schema repairs are bounded; arbitrary malformed XML is never repaired.
+
+    Two outcomes, and they are not interchangeable. Everything that says the
+    client's rendering cannot be trusted (missing annotation, foreign nodes,
+    source mismatch) is a hard failure. Everything that only says Word's own
+    equation model cannot express a valid rendering returns _UNSUPPORTED, so the
+    caller can hand it to the picture renderer instead of losing the whole paper.
     """
     from lxml import etree
 
@@ -179,6 +210,7 @@ def _math(segment, where, *, word_math=True):
         if len(nodes) > 3000 or any(not isinstance(node.tag, str) or not node.tag.startswith(f"{{{MATH_NS}}}")
                                    for node in nodes):
             raise ValueError("nodes")
+        unsupported = None
         for node in nodes:
             if etree.QName(node).localname not in MATHML_ELEMENTS or len(list(node.iterancestors())) > 60 \
                     or any("href" in key.lower() or "src" in key.lower() or key.lower().startswith("on") for key in node.attrib):
@@ -186,40 +218,52 @@ def _math(segment, where, *, word_math=True):
             # Upstream turns every menclose into a box, silently losing strikes.
             # A boxed formula is safe; cancellation/radical/arrow enclosures aren't.
             if word_math and etree.QName(node).localname == "menclose" and node.get("notation", "longdiv") != "box":
-                raise ValueError("unsupported enclosure")
+                unsupported = "unsupported enclosure"
         annotations = root.findall(f".//{{{MATH_NS}}}annotation")
         if len(annotations) != 1 or annotations[0].get("encoding") != "application/x-tex" \
                 or len(annotations[0]) or "".join(annotations[0].itertext()) != latex \
                 or annotations[0].getparent().tag != f"{{{MATH_NS}}}semantics" or len(annotations[0].getparent()) < 2:
             raise ValueError("annotation")
         annotations[0].getparent().remove(annotations[0])
+        if unsupported:
+            # Integrity is settled first: only then does "Word can't express it"
+            # become a reason to degrade instead of refusing the download.
+            raise _Unrepresentable(unsupported)
         if not word_math:
             # PDF renders canonical source again through KaTeX; validated metadata
             # stays in the segment, without imposing Word's OMML support limits.
             return None
-        # Upstream SAX handler would print annotation characters as a side effect.
-        omml = _convert_math_root(root)
-        # Detect silent token loss in the converter, excluding intentional phantom.
-        tokens = []
-        for node in root.iter():
-            if etree.QName(node).localname not in {"mi", "mn", "mo", "mtext", "ms"} \
-                    or any(etree.QName(parent).localname == "mphantom" for parent in node.iterancestors()):
-                continue
-            token = "".join(node.itertext())
-            parent = node.getparent()
-            if parent is not None and parent.tag == f"{{{MATH_NS}}}mover" and parent.get("accent") == "true" \
-                    and len(parent) == 2 and node is parent[1]:
-                token = ACCENTS.get(token, token)
-            tokens.append(token)
-        output = "".join(omml.itertext()) + "".join(node.get(f"{{{OMML_NS}}}val", "") for node in omml.iter())
-        for token in tokens:
-            token = re.sub(r"[\s\u2061-\u2064]", "", token)
-            if token and token not in re.sub(r"\s", "", output):
-                raise ValueError("lost token")
-        return omml
+        try:
+            # Upstream SAX handler would print annotation characters as a side effect.
+            omml = _convert_math_root(root)
+            # Detect silent token loss in the converter, excluding intentional phantom.
+            tokens = []
+            for node in root.iter():
+                if etree.QName(node).localname not in {"mi", "mn", "mo", "mtext", "ms"} \
+                        or any(etree.QName(parent).localname == "mphantom" for parent in node.iterancestors()):
+                    continue
+                token = "".join(node.itertext())
+                parent = node.getparent()
+                if parent is not None and parent.tag == f"{{{MATH_NS}}}mover" and parent.get("accent") == "true" \
+                        and len(parent) == 2 and node is parent[1]:
+                    token = ACCENTS.get(token, token)
+                tokens.append(token)
+            output = "".join(omml.itertext()) + "".join(node.get(f"{{{OMML_NS}}}val", "") for node in omml.iter())
+            for token in tokens:
+                token = re.sub(r"[\s\u2061-\u2064]", "", token)
+                if token and token not in re.sub(r"\s", "", output):
+                    raise ValueError("lost token")
+            return omml
+        except (ValueError, TypeError, RuntimeError, NotImplementedError, AssertionError, IndexError, KeyError,
+                etree.XMLSyntaxError, xml.sax.SAXException):
+            # The rendering itself is valid and matches the stored source; only
+            # Word cannot express it. The reason is for the log, never the paper.
+            raise _Unrepresentable(unsupported or "omml conversion") from None
+    except _Unrepresentable:
+        return _UNSUPPORTED
     except (ValueError, TypeError, RuntimeError, NotImplementedError, AssertionError, IndexError, KeyError,
             etree.XMLSyntaxError, xml.sax.SAXException):
-        _fail(where, "这段公式暂不能准确转换为可编辑 Word 公式，请在预览核对并改用打印 / 保存 PDF" if word_math
+        _fail(where, _FALLBACK_REFUSAL if word_math
               else "公式排版结果无效，请重新打开组卷预览后再导出 PDF")
 
 
@@ -254,7 +298,13 @@ def _segments(source, segments, start, end, where, offsets=None, *, word_math=Tr
             _fail(where, "公式尚未转换，不能把 LaTeX 源码当作成功结果")
         if kind == "text" and re.search(r"<(?:table|tr|td|th)\b", raw, re.I):
             _fail(where, "表格尚未转换，不能把表格源码当作成功结果")
-        converted.append({**segment, "raw": raw, "omml": _math(segment, where, word_math=word_math) if kind == "math" else None})
+        omml = _math(segment, where, word_math=word_math) if kind == "math" else None
+        entry = {**segment, "raw": raw, "omml": None if omml is _UNSUPPORTED else omml}
+        if omml is _UNSUPPORTED:
+            # Remember where it is; the picture is filled in once for the whole
+            # paper, after every question has been checked.
+            entry["fallback"] = where
+        converted.append(entry)
         cursor = b
     if cursor != end:
         _fail(where, "排版结果没有完整覆盖原文，请重新打开组卷")
@@ -569,12 +619,245 @@ def _font(run, size, bold=False):
     return run
 
 
+_FORMULA_DRIVER = r"""
+window.__qbPictureStatus = {ready:false};
+(async () => {
+  try {
+    const data = JSON.parse(document.getElementById('formulaData').textContent);
+    const host = document.getElementById('qbFormulas');
+    host.replaceChildren(...data.map(item => {
+      const node = document.createElement('span');
+      node.className = 'qb-math';
+      katex.render(item.latex, node, {
+        displayMode: false, throwOnError: true, strict: 'ignore', trust: false,
+        maxSize: 10, maxExpand: 1000,
+        macros: {"\\parallel":"\\mathrel{/\\mkern-6mu/}","\\nparallel":"\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"}
+      });
+      return node;
+    }));
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const boxes = [];
+    for (const node of host.children) {
+      const r = node.getBoundingClientRect();
+      const padding = 2;
+      boxes.push({x: Math.max(0, r.x + scrollX - padding), y: Math.max(0, r.y + scrollY - padding),
+        width: r.width + padding * 2, height: r.height + padding * 2});
+    }
+    window.__qbPictureStatus = {ready:true, boxes};
+  } catch (error) {
+    window.__qbPictureStatus = {ready:true, error: String(error && error.message || error).slice(0, 200)};
+  }
+})();
+"""
+
+
+def _formula_document(requests, font_size):
+    """A fixed document holding every degraded formula, and nothing else."""
+    from . import library_pdf as pdf
+
+    if type(font_size) is not int or font_size not in (12, 14, 16):
+        _fail(requests[0]["where"], "公式字号不正确")
+    css, scripts = pdf._assets(Path(settings.FRONTEND_ROOT))
+    if re.search(r"</style", css, re.I):
+        _fail(requests[0]["where"], "公式排版资源不完整，请修复或重新安装题有据", 503)
+    import html as _html
+    import secrets
+
+    nonce = secrets.token_urlsafe(24)
+    data = json.dumps([{"latex": request["latex"]} for request in requests], ensure_ascii=False)
+    data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e") \
+               .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    policy = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+              "img-src data:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; "
+              "form-action 'none'; frame-src 'none'")
+    # Inline on one line, in reading order: the screenshot rect of each child
+    # is the formula, so nothing here can shift what a later formula looks like.
+    # The app stylesheet paints the paper colour on html/body; that would print a
+    # beige rectangle behind every formula in Word, and it would also make the
+    # blank-image check below impossible to trigger.
+    fixed = ("html,body{margin:0;background:transparent!important}"
+             "#qbFormulas{position:absolute;left:0;top:0;width:auto;padding:2px;"
+             f"font-size:{font_size}pt;color:#000;line-height:1.4;background:transparent}}"
+             "#qbFormulas>span{display:inline-block;vertical-align:middle;"
+             "background:transparent;padding:0}")
+    katex = ('<script nonce="' + nonce + '" src="data:application/javascript;base64,'
+             + base64.b64encode(scripts[0].encode("utf-8")).decode("ascii") + '"></script>')
+    return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+            '<meta http-equiv="Content-Security-Policy" content="' + _html.escape(policy, quote=True) + '">'
+            '<title>公式</title><style>' + css + fixed + '</style></head><body>'
+            '<div id="qbFormulas"></div>'
+            '<script id="formulaData" type="application/json">' + data + '</script>'
+            + katex + '<script nonce="' + nonce + '">' + _FORMULA_DRIVER + '</script></body></html>')
+
+
+def _formula_pictures(requests, font_size):
+    """Render every degraded formula to a PNG in one browser session.
+
+    One launch, one document, one screenshot per formula — starting a browser
+    per formula would make a long paper unusable. If the browser cannot be used
+    at all the caller still refuses the download: a paper the reader cannot
+    follow is worse than no paper.
+    """
+    if not _picture_lock.acquire(blocking=False):
+        raise ExportError("另一份试卷正在排版公式，请稍后重试。", 409)
+    try:
+        return _render_formula_pictures(requests, font_size)
+    finally:
+        _picture_lock.release()
+
+
+def _render_formula_pictures(requests, font_size):
+    """One browser session; every way it can fail ends in the same user advice."""
+    from . import library_pdf as pdf
+
+    where = requests[0]["where"]
+    process = client = None
+    try:
+        try:
+            executable = pdf._browser_path()
+            deadline = time.monotonic() + pdf.DEADLINE_SECONDS
+            with pdf._temporary_directory() as directory:
+                root = Path(directory).resolve()
+                if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith("tiyouju-pdf-"):
+                    raise ValueError("temporary directory")
+                profile = root / "profile"
+                flags = [str(executable), "--headless=new", "--disable-gpu", "--no-first-run",
+                         "--no-default-browser-check", "--disable-background-networking",
+                         "--disable-component-update", "--disable-sync", "--disable-extensions", "--no-proxy-server",
+                         "--host-resolver-rules=MAP * ~NOTFOUND", "--remote-debugging-port=0",
+                         "--remote-debugging-address=127.0.0.1", "--window-size=1280,1000",
+                         "--user-data-dir=" + str(profile), "about:blank"]
+                kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "shell": False}
+                if os.name == "nt":
+                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                process = subprocess.Popen(flags, **kwargs)
+                port = pdf._wait_debug_port(profile, process, deadline)
+                opener = pdf.build_opener(pdf.ProxyHandler({}))
+                target = pdf._wait_page_target(opener, port, process, deadline)
+                match = re.fullmatch(rf"ws://(?:127\.0\.0\.1|localhost):{port}(/devtools/page/[A-Za-z0-9_-]+)",
+                                     target["webSocketDebuggerUrl"])
+                if not match:
+                    raise ValueError("debug target")
+                client = pdf._CDP(port, match[1], deadline)
+                client.call("Page.enable")
+                client.call("Runtime.enable")
+                client.call("Network.enable")
+                client.call("Network.setBlockedURLs", {"urls": ["http://*", "https://*", "ws://*", "wss://*",
+                                                                    "ftp://*", "file://*"]})
+                # omitBackground alone still paints an opaque backdrop once the
+                # screenshot is clipped; this is what actually yields transparency.
+                client.call("Emulation.setDefaultBackgroundColorOverride", {"color": {"r": 0, "g": 0, "b": 0, "a": 0}})
+                client.call("Page.setDocumentContent", {"frameId": client.call("Page.getFrameTree")["frameTree"]["frame"]["id"],
+                                                        "html": _formula_document(requests, font_size)})
+                status = {}
+                while True:
+                    value = client.call("Runtime.evaluate", {"expression": "window.__qbPictureStatus || {ready:false}",
+                                                             "returnByValue": True})
+                    status = value.get("result", {}).get("value", {})
+                    if status.get("ready"):
+                        break
+                    pdf._remaining(deadline)
+                    time.sleep(.05)
+                boxes = status.get("boxes")
+                if status.get("error") or not isinstance(boxes, list) or len(boxes) != len(requests):
+                    raise ValueError("formula layout")
+                return [_formula_png(client, box) for box in boxes]
+        finally:
+            # Cleanup failures must not replace validated bytes or the main error.
+            pdf._cleanup_browser(client, process)
+            client = process = None
+    except Exception:
+        # No browser, no time, nothing drawn: every one of those ends the same way,
+        # and none of them may be turned into a blank box on the paper.
+        raise ExportError(f"{where}：{_FALLBACK_REFUSAL}", 400) from None
+
+
+def _formula_png(client, box):
+    """One clipped screenshot, refused unless it actually drew something."""
+    from PIL import Image
+
+    if not isinstance(box, dict) or any(type(box.get(key)) not in (int, float) for key in ("x", "y", "width", "height")):
+        raise ValueError("formula box")
+    width, height = box["width"], box["height"]
+    if not (0 < width <= MAX_FORMULA_BOX[0] and 0 < height <= MAX_FORMULA_BOX[1]):
+        raise ValueError("formula box")
+    clip = {"x": box["x"], "y": box["y"], "width": width, "height": height,
+            "scale": FORMULA_CAPTURE_SCALE}
+    for attempt in range(4):
+        result = client.call("Page.captureScreenshot", {"format": "png", "omitBackground": True,
+                                                        "captureBeyondViewport": True, "clip": clip})
+        try:
+            data = base64.b64decode(result.get("data", ""), validate=True)
+        except (ValueError, TypeError):
+            raise ValueError("formula png") from None
+        if not data.startswith(b"\x89PNG"):
+            raise ValueError("formula png")
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+                rgba = image.convert("RGBA")
+                white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                flat = Image.alpha_composite(white, rgba).convert("RGB")
+                size = image.size
+                # Composite over the Word page's white background before checking
+                # colour. Dropping alpha would turn black glyphs on transparency black.
+                colours = flat.getcolors(maxcolors=2)
+                visible = colours is None or len(colours) > 1
+        except Exception:
+            raise ValueError("unreadable formula png") from None
+        if visible:
+            return {"bytes": data, "size": size}
+        if attempt < 3:
+            # A just-inserted KaTeX SVG can report its final box one paint before
+            # Chromium composites its strokes. Give it two frames, then retry.
+            client.call("Runtime.evaluate", {"expression": "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+                                              "awaitPromise": True, "returnByValue": True})
+    raise ValueError("blank formula")
+
+
+def _fill_fallback_pictures(captured, font_size):
+    """Render every degraded formula in the paper at once; report each by position."""
+    pending = [segment for item in captured for blocks in item["fields"].values()
+               for block in blocks for segment in block.get("segments", ()) if segment.get("fallback")]
+    if not pending:
+        return []
+    if len(pending) > MAX_FALLBACK_FORMULAS:
+        _fail(pending[0]["fallback"], f"本卷有 {len(pending)} 条公式无法转为 Word 公式，请减少选题或改用打印 / 保存 PDF")
+    pictures = _formula_pictures([{"latex": segment["latex"], "where": segment["fallback"]} for segment in pending],
+                                 font_size)
+    if len(pictures) != len(pending) or sum(len(picture["bytes"]) for picture in pictures) > MAX_FALLBACK_BYTES:
+        _fail(pending[0]["fallback"], _FALLBACK_REFUSAL)
+    for segment, picture in zip(pending, pictures):
+        segment["picture"] = picture
+    return [f"{segment['fallback'].rsplit(' · ', 1)[0]} · "
+            f"{_field_label(segment['fallback'].rsplit(' · ', 1)[-1])}：{_FALLBACK_ADVICE}。" for segment in pending]
+
+
+def _field_label(name):
+    return f"选项 {name[-1]}" if name.startswith("options.") else _FIELD_LABELS.get(name, "正文")
+
+
 def _write_segments(paragraph, segments, size, bold=False):
+    from docx.shared import Mm
+
     for segment in segments:
         kind = segment["type"]
         if kind == "math":
-            # Native oMath, not screenshots. Display grouping is kept in one paragraph.
-            paragraph._p.append(deepcopy(segment["omml"]))
+            picture = segment.get("picture")
+            if picture:
+                # Word cannot express this one. Keep every character of it, as a
+                # picture sized like the text it sits between.
+                width, height = picture["size"]
+                # CDP captured at 3 px per CSS px. Convert using CSS's 96 dpi,
+                # or inline formulas become almost twice as large in Word.
+                scale = min(25.4 / (CSS_PIXELS_PER_INCH * FORMULA_CAPTURE_SCALE), 90 / width, 10 / height)
+                run = paragraph.add_run()
+                _font(run, size, bold)
+                run.add_picture(io.BytesIO(picture["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
+            else:
+                # Native oMath, not screenshots. Display grouping is kept in one paragraph.
+                paragraph._p.append(deepcopy(segment["omml"]))
         elif kind != "delimiter":
             shown = "________" if kind == "blank" else "（\u3000\u3000）" if kind == "bracket" else "▱" if kind == "parallelogram" else segment["raw"]
             _font(paragraph.add_run(shown), size, bold)
@@ -1135,6 +1418,11 @@ def export(payload, *, warnings=None):
         raise ExportError("导出格式只能选 docx 或 split")
     captured, use_ai = _capture(ids, payload.get("rendered_fields"), options, output_format, solutions=payload.get("solutions"))
     name = safe_filename(title)
+    # Formulas Word cannot express are rendered once for the whole paper, then
+    # reported by position so the teacher can find each one in the download.
+    fallback_warnings = _fill_fallback_pictures(captured, options["font_size"])
+    if warnings is not None:
+        warnings.extend(fallback_warnings)
     if warnings is not None and (options["document"] != "answers" or output_format == "split"):
         numbered = [item for _, group in _ordered(captured) for item in group]
         for number, item in enumerate(numbered, 1):

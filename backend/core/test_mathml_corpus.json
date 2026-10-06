@@ -1,0 +1,174 @@
+[
+ {
+  "latex": "\\overline{z}+z",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>z</mi><mo stretchy=\"true\">‾</mo></mover><mo>+</mo><mi>z</mi></mrow><annotation encoding=\"application/x-tex\">\\overline{z}+z</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\overline{AB}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy=\"true\">‾</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\overline{AB}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\overline{AB}=\\overrightarrow{AB}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy=\"true\">‾</mo></mover><mo>=</mo><mover accent=\"true\"><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy=\"true\">→</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\overline{AB}=\\overrightarrow{AB}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\acute{a}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>a</mi><mo>ˊ</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\acute{a}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\grave{a}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>a</mi><mo>ˋ</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\grave{a}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\vec{a}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>a</mi><mo>⃗</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\vec{a}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\hat{y}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>y</mi><mo>^</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\hat{y}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\bar{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>x</mi><mo>ˉ</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\bar{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\dot{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>x</mi><mo>˙</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\dot{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\tilde{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>x</mi><mo>~</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\tilde{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\overrightarrow{AB}\\cdot\\overrightarrow{CD}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy=\"true\">→</mo></mover><mo>⋅</mo><mover accent=\"true\"><mrow><mi>C</mi><mi>D</mi></mrow><mo stretchy=\"true\">→</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\overrightarrow{AB}\\cdot\\overrightarrow{CD}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\hat{y}=\\ln x",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi>y</mi><mo>^</mo></mover><mo>=</mo><mi>ln</mi><mo>⁡</mo><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\hat{y}=\\ln x</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\sqrt{x+1}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msqrt><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow></msqrt></mrow><annotation encoding=\"application/x-tex\">\\sqrt{x+1}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\frac{a}{b}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mfrac><mi>a</mi><mi>b</mi></mfrac></mrow><annotation encoding=\"application/x-tex\">\\frac{a}{b}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mfrac><mrow><mo>−</mo><mi>b</mi><mo>±</mo><msqrt><mrow><msup><mi>b</mi><mn>2</mn></msup><mo>−</mo><mn>4</mn><mi>a</mi><mi>c</mi></mrow></msqrt></mrow><mrow><mn>2</mn><mi>a</mi></mrow></mfrac></mrow><annotation encoding=\"application/x-tex\">\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\frac{\\pi}{3}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mfrac><mi>π</mi><mn>3</mn></mfrac></mrow><annotation encoding=\"application/x-tex\">\\frac{\\pi}{3}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\sqrt[3]{27}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mroot><mn>27</mn><mn>3</mn></mroot></mrow><annotation encoding=\"application/x-tex\">\\sqrt[3]{27}</annotation></semantics></math>"
+ },
+ {
+  "latex": "x^2+y^2",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup></mrow><annotation encoding=\"application/x-tex\">x^2+y^2</annotation></semantics></math>"
+ },
+ {
+  "latex": "a_1+a_2+\\cdots+a_n",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mi>a</mi><mn>1</mn></msub><mo>+</mo><msub><mi>a</mi><mn>2</mn></msub><mo>+</mo><mo>⋯</mo><mo>+</mo><msub><mi>a</mi><mi>n</mi></msub></mrow><annotation encoding=\"application/x-tex\">a_1+a_2+\\cdots+a_n</annotation></semantics></math>"
+ },
+ {
+  "latex": "x^{2}+y^{2}\\leqslant r^{2}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup><mo>⩽</mo><msup><mi>r</mi><mn>2</mn></msup></mrow><annotation encoding=\"application/x-tex\">x^{2}+y^{2}\\leqslant r^{2}</annotation></semantics></math>"
+ },
+ {
+  "latex": "e^{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>e</mi><mi>x</mi></msup></mrow><annotation encoding=\"application/x-tex\">e^{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "a^{n}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>a</mi><mi>n</mi></msup></mrow><annotation encoding=\"application/x-tex\">a^{n}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\lim_{x\\to 0}\\frac{\\sin x}{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mrow><mi>lim</mi><mo>⁡</mo></mrow><mrow><mi>x</mi><mo>→</mo><mn>0</mn></mrow></msub><mfrac><mrow><mi>sin</mi><mo>⁡</mo><mi>x</mi></mrow><mi>x</mi></mfrac></mrow><annotation encoding=\"application/x-tex\">\\lim_{x\\to 0}\\frac{\\sin x}{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\sum_{n=1}^{\\infty}\\frac{1}{n^{2}}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msubsup><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>1</mn></mrow><mi mathvariant=\"normal\">∞</mi></msubsup><mfrac><mn>1</mn><msup><mi>n</mi><mn>2</mn></msup></mfrac></mrow><annotation encoding=\"application/x-tex\">\\sum_{n=1}^{\\infty}\\frac{1}{n^{2}}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\int_{0}^{1}x^{2}\\,dx",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msubsup><mo>∫</mo><mn>0</mn><mn>1</mn></msubsup><msup><mi>x</mi><mn>2</mn></msup><mtext> </mtext><mi>d</mi><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\int_{0}^{1}x^{2}\\,dx</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\int_{a}^{b}f(x)\\,dx",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msubsup><mo>∫</mo><mi>a</mi><mi>b</mi></msubsup><mi>f</mi><mo stretchy=\"false\">(</mo><mi>x</mi><mo stretchy=\"false\">)</mo><mtext> </mtext><mi>d</mi><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\int_{a}^{b}f(x)\\,dx</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\left(\\frac{a}{b}\\right)",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo fence=\"true\">(</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo fence=\"true\">)</mo></mrow><annotation encoding=\"application/x-tex\">\\left(\\frac{a}{b}\\right)</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\left|x-1\\right|",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo fence=\"true\">∣</mo><mi>x</mi><mo>−</mo><mn>1</mn><mo fence=\"true\">∣</mo></mrow><annotation encoding=\"application/x-tex\">\\left|x-1\\right|</annotation></semantics></math>"
+ },
+ {
+  "latex": "[a,b]",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo stretchy=\"false\">[</mo><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi><mo stretchy=\"false\">]</mo></mrow><annotation encoding=\"application/x-tex\">[a,b]</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\{x\\mid x>0\\}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo stretchy=\"false\">{</mo><mi>x</mi><mo>∣</mo><mi>x</mi><mo>&gt;</mo><mn>0</mn><mo stretchy=\"false\">}</mo></mrow><annotation encoding=\"application/x-tex\">\\{x\\mid x&gt;0\\}</annotation></semantics></math>"
+ },
+ {
+  "latex": "A\\cap B",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>A</mi><mo>∩</mo><mi>B</mi></mrow><annotation encoding=\"application/x-tex\">A\\cap B</annotation></semantics></math>"
+ },
+ {
+  "latex": "a\\neq b",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mo mathvariant=\"normal\">≠</mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a\\neq b</annotation></semantics></math>"
+ },
+ {
+  "latex": "a\\approx b",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mo>≈</mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a\\approx b</annotation></semantics></math>"
+ },
+ {
+  "latex": "a\\equiv b",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mo>≡</mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a\\equiv b</annotation></semantics></math>"
+ },
+ {
+  "latex": "x\\propto y",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>x</mi><mo>∝</mo><mi>y</mi></mrow><annotation encoding=\"application/x-tex\">x\\propto y</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\alpha+\\beta+\\gamma=\\pi",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>α</mi><mo>+</mo><mi>β</mi><mo>+</mo><mi>γ</mi><mo>=</mo><mi>π</mi></mrow><annotation encoding=\"application/x-tex\">\\alpha+\\beta+\\gamma=\\pi</annotation></semantics></math>"
+ },
+ {
+  "latex": "40^\\circ",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mn>40</mn><mo>∘</mo></msup></mrow><annotation encoding=\"application/x-tex\">40^\\circ</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\mathrm{i}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi mathvariant=\"normal\">i</mi></mrow><annotation encoding=\"application/x-tex\">\\mathrm{i}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\log_{2}8",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mrow><mi>log</mi><mo>⁡</mo></mrow><mn>2</mn></msub><mn>8</mn></mrow><annotation encoding=\"application/x-tex\">\\log_{2}8</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\sin\\alpha+\\cos\\beta",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>sin</mi><mo>⁡</mo><mi>α</mi><mo>+</mo><mi>cos</mi><mo>⁡</mo><mi>β</mi></mrow><annotation encoding=\"application/x-tex\">\\sin\\alpha+\\cos\\beta</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\ln x",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>ln</mi><mo>⁡</mo><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\ln x</annotation></semantics></math>"
+ },
+ {
+  "latex": "f(x)=\\frac{1}{x}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>f</mi><mo stretchy=\"false\">(</mo><mi>x</mi><mo stretchy=\"false\">)</mo><mo>=</mo><mfrac><mn>1</mn><mi>x</mi></mfrac></mrow><annotation encoding=\"application/x-tex\">f(x)=\\frac{1}{x}</annotation></semantics></math>"
+ },
+ {
+  "latex": "\\binom{n}{k}",
+  "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo fence=\"true\">(</mo><mfrac linethickness=\"0px\"><mi>n</mi><mi>k</mi></mfrac><mo fence=\"true\">)</mo></mrow><annotation encoding=\"application/x-tex\">\\binom{n}{k}</annotation></semantics></math>"
+ }
+]
