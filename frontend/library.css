@@ -338,9 +338,13 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
   /* 把手本来就是 fixed 的，从顶栏下面开始才不会盖住顶栏右端的「筛选」——
      想开筛选的人正被篮挡住。筛选浮层同样从顶栏下面开始。 */
-  body.library-basket-open .basket-panel { position: fixed; z-index: 61; top: var(--topbar-h); right: 0; bottom: 0;
+  /* 浮层原来正好压在把手上（面板 z-index 61、把手 4，位置都是 right:0）：篮一打开，
+     把手就点不到了，Esc 也不管用，窄屏上这个篮子等于关不掉。往左让出把手那 26px，
+     再把把手提到面板之上，它才能继续当开关用。 */
+  body.library-basket-open .basket-panel { position: fixed; z-index: 61; top: var(--topbar-h); right: 26px; bottom: 0;
     width: min(88vw, 320px); max-height: none; height: auto; border-radius: 0; border-left: 1px solid var(--line);
     box-shadow: var(--shadow-lg); overflow: hidden; }
+  body.library-basket-open .basket-handle { z-index: 62; }
   .rail-toggle { display: inline-flex; }
   /* 侧栏是浮层了，本来就不占宽度，收它没有意义。顶栏那个「筛选」是唯一的入口，
      专注模式里也必须留着 —— 规则在本文件后面 focus-mode 那段。 */

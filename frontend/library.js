@@ -1546,6 +1546,9 @@
   let printAnswersPreference = ui.printAnswers.checked;
   const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
     optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "",
+    // 排版是异步的：A4 分页跑完会把整卷重排一遍，刚才拿到焦点的按钮随之被换掉。
+    // 这里记下「排完之后焦点该放回哪」，等重排结束再兑现（见 applyPrintFocus）。
+    printFocus: null,
     // autoOrigin：这些题的「origin」是打开预览时因为没答案自动补的默认，不是这份卷子的选择。
     solutions: {}, autoOrigin: new Set(), solutionRecords: new Map(), missingAcknowledged: "" };
   const printNames = new Map();
@@ -2048,9 +2051,32 @@
     box.append(retry);
   }
 
+  // 换序、移出之后，焦点要跟着题走。之前是 renderPrint 里同步 focus 一下就完事，
+  // 可分页是异步的：等它跑完，整卷连同工具面板都被换掉了，焦点掉回 body，
+  // 键盘用户按完回车就得从头 Tab 一遍。这里把请求留到重排之后再兑现。
+  function applyPrintFocus() {
+    const request = printState.printFocus;
+    printState.printFocus = null;
+    if (!request) return;
+    const blocks = Array.from(ui.paper.querySelectorAll(".print-question"));
+    if (!blocks.length) { $("closePrint").focus({ preventScroll: true }); return; }
+    const block = request.id
+      ? blocks.find(question => question.dataset.questionId === request.id)
+      : blocks[Math.min(request.index ?? 0, blocks.length - 1)];
+    if (!block) return;
+    const wanted = request.action ? block.querySelector(`[data-action="${request.action}"]`) : null;
+    const target = wanted && !wanted.disabled
+      ? wanted
+      : block.querySelector(".print-question-tools > summary, button:not(:disabled)");
+    target?.focus({ preventScroll: true });
+    block.scrollIntoView({ block: "nearest" });
+  }
+
   function renderPrint(items) {
     // Any new source, including an empty basket, invalidates pending pages.
     ++printState.layoutToken;
+    // 上一轮排完还没兑现的焦点请求就此作废：重排之后位置早就变了。
+    printState.printFocus = null;
     printState.layoutPending = false;
     printState.layoutError = "";
     printState.layoutPromise = Promise.resolve();
@@ -2203,6 +2229,7 @@
       // 重渲染会换掉所有工具面板：新节点的 open 是在挂监听之前设的，收不到 toggle，
       // 这里补一次定位，否则改完选项重新排版后，展开着的那个又会掉回被盖住的状态。
       ui.paper.querySelectorAll(".print-question-tools[open]").forEach(placePrintTools);
+      applyPrintFocus();
       $("printPageStatus").textContent = `A4 · 共 ${result.page_count} 页 · ${printState.items.length} 题`;
       $("printLayoutWarnings").textContent = result.warnings.join(" ");
       $("printLayoutWarnings").hidden = !result.warnings.length;
@@ -2325,12 +2352,8 @@
       const b = items.indexOf(other);
       [items[a], items[b]] = [items[b], items[a]];
       renderPrint(items);
-      const block = Array.from(ui.paper.querySelectorAll(".print-question"))
-        .find((question) => question.dataset.questionId === item.id);
-      const preferred = block?.querySelector(`[data-action="${step < 0 ? "up" : "down"}"]`);
-      const focus = preferred && !preferred.disabled ? preferred : block?.querySelector("button:not(:disabled)");
-      focus?.focus({ preventScroll: true });
-      block?.scrollIntoView({ block: "nearest" });
+      // 焦点等分页排完再给（applyPrintFocus），这里同步给的会被重排换掉。
+      printState.printFocus = { id: item.id, action: step < 0 ? "up" : "down" };
     };
     const up = node("button", "", "↑ 上移");
     up.type = "button";
@@ -2357,8 +2380,8 @@
       items.splice(items.indexOf(item), 1);
       renderPrint(items);
       render();
-      const next = ui.paper.querySelectorAll(".print-question-tools > summary")[Math.min(number - 1, items.length - 1)];
-      (next || $("closePrint")).focus({ preventScroll: true });
+      // 这道题没了，焦点落到顶上来的那道（原来那个位置）；同样等分页排完再给。
+      printState.printFocus = { index: number - 1 };
     });
     const optionLayout = node("select", "print-single-layout");
     optionLayout.setAttribute("aria-label", `第 ${number} 题选项排版`);

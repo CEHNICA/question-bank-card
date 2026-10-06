@@ -99,14 +99,16 @@ def check(url):
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/library")
         page.wait_for_load_state("networkidle")
+        # 题数从 seed 写的 fixture 取，不写死；下拉里的一项也按「文件名（几题）」拼出来。
+        total = len(ids)
 
         # All filters, including source and review, clear in one action.
-        page.get_by_label("来源试卷", exact=True).select_option(label="另一份资料1.pdf（1）")
+        page.get_by_label("来源试卷", exact=True).select_option(label="另一份资料1.pdf（1 题）")
         page.get_by_label("搜索题目", exact=True).fill("不存在的关键词-回归")
         expect(page.locator(".library-empty")).to_contain_text("其他关键词")
         expect(page.locator(".library-empty")).not_to_contain_text("录入终审")
         page.get_by_role("button", name="清除搜索与筛选", exact=True).click()
-        expect(page.locator(".library-card")).to_have_count(4)
+        expect(page.locator(".library-card")).to_have_count(total)
         expect(page.get_by_label("来源试卷", exact=True)).to_have_value("")
         expect(page.get_by_label("搜索题目", exact=True)).to_have_value("")
         assert not urlparse(page.url).query
@@ -156,7 +158,11 @@ def check(url):
         dialog.get_by_role("button", name="关闭", exact=True).click()
 
         # A failed original still leaves a useful fallback in cropped mode.
+        # 上面「查看原卷」已经把这一份原卷读进了浏览器缓存；命中缓存就不会再发请求，
+        # 路由拦不到，这条断言就成了永远为绿的摆设。先刷新把缓存清掉。
         page.route("**/api/documents/*/pages/*/preview", lambda route: route.fulfill(status=404, body="missing"))
+        page.reload()
+        page.wait_for_load_state("networkidle")
         page.locator(f"#q-{ids[1]}").get_by_role("button", name="查看出处", exact=True).click()
         expect(page.locator(".source-unavailable")).to_be_visible()
         page.unroute("**/api/documents/*/pages/*/preview")

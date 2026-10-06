@@ -454,10 +454,13 @@ def _capture(ids, rendered, options, output_format, *, word_math=None, solutions
     answer_fields = output_format == "split" or options["document"] != "questions"
     captured, total_bytes = [], 0
     for position, key in enumerate(ids, 1):
-        where = f"选题第 {position} 题"
+        where = f"第 {position} 题"
         publication = found.get(key)
         if publication is None or publication.status != PublishedQuestion.Status.PUBLISHED:
             _fail(where, "这条入库版已撤回、被替代或不存在；请返回组卷处理后再导出", 409)
+        # 报错要能让人直接在这一卷上找到那道题，还要说得出它是哪份原卷的第几题 ——
+        # 只给一个「本卷第 N 题」的话，想回原卷核对时还是得自己认。
+        where = f"第 {position} 题（{publication.source_filename or '原卷'}，原卷第 {publication.number} 题）"
         if not isinstance(publication.content, dict) or not isinstance(publication.content.get("stem"), str):
             _fail(where, "题目快照不完整", 409)
         content, extras = deepcopy(publication.content), deepcopy(publication.extras)

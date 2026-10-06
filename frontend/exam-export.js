@@ -96,6 +96,10 @@
 
   function serializeItem(item, options, format, index) {
     const content = item.content || {}, fields = {};
+    // 报错要能让人**直接在这一卷上找到那道题**。「原卷第 12 题」不够：老师手里
+    // 是一份组好的卷子，不知道第 12 题是哪道、也不知道是哪份原卷翻到的。
+    const where = `本卷第 ${index + 1} 题` + (item.source_filename || item.origin
+      ? `（${item.source_filename || item.origin}，原卷第 ${item.number ?? "?"} 题）` : "");
     const add = (name, value, literal = false) => {
       try {
         const source = String(value ?? "");
@@ -103,7 +107,7 @@
           segments: [{ type: "text", start: 0, end: source.length }] }] } : serializeField(source);
       } catch (error) {
         const label = name === "stem" ? "题干" : name === "analysis" ? "解析" : name === "answer" ? "答案" : name.startsWith("options.") ? `选项 ${name.slice(-1)}` : "题源";
-        throw new Error(`原卷第 ${item.number || index + 1} 题的${label}未能导出${format === "pdf" ? " PDF" : " Word"}：${error.message}`);
+        throw new Error(`${where}的${label}未能导出${format === "pdf" ? " PDF" : " Word"}：${error.message}`);
       }
     };
     if (options.document !== "answers" || format === "split") {
