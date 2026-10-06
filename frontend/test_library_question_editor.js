@@ -209,15 +209,20 @@ test("the real library parent refreshes the new version while retaining old bask
   assert(start >= 0 && end > start, "Parent integration region exists");
   const before = fixture().publication, after = { ...clone(before), id: "pub-new", version: 3 };
   const state = { catalog: new Map([[before.id, before]]), basket: [before.id], draft: { id: "saved-draft", ids: [before.id], solutions: { [before.id]: "human-solution-old" } }, questionReturnId: before.id };
-  const savedDraft = clone(state.draft), basket = clone(state.basket), refreshed = [], loaded = [], dialog = { open: true };
+  const savedDraft = clone(state.draft), basket = clone(state.basket), refreshed = [], loaded = [], basketChecks = [], dialog = { open: true };
   let options, opens = 0;
   const context = { state, node() {}, QB: {}, toast() {}, confirmDialog() {}, $: () => dialog, openQuestion: value => refreshed.push(value), load: value => { loaded.push(value); return Promise.resolve(); },
+    // 1.13.6：题面一改，篮里那道旧版本就作废了。这里只是**重新核一遍**，不是替老师
+    // 换题——换了就得 Basket 里那一行如实说「已经有新版本」，再由他点「换新版本」。
+    refreshBasket: value => { basketChecks.push(value); return Promise.resolve(); },
     window: { LibraryQuestionEditor: { create: value => { options = value; return { open: async () => { opens++; } }; } } } };
   vm.createContext(context); vm.runInContext(source.slice(start, end), context);
   await context.openQuestionEditor(before); await context.openQuestionEditor(before); assert.equal(opens, 2);
   options.onSaved(before, after);
   assert.equal(state.catalog.get(after.id), after); assert.equal(state.catalog.get(before.id), before);
   assert.equal(refreshed[0], after); assert.equal(loaded[0].quiet, true);
+  assert.equal(basketChecks.length, 1, "改完题面要把试题篮重新核一遍");
+  assert.equal(basketChecks[0].force, true, "篮里的编号没变，只能强制重核");
   assert.deepEqual(state.basket, basket); assert.deepEqual(state.draft, savedDraft, "Saved exam publications and their manual solution revisions are never silently replaced");
   dialog.open = false; options.onSaved(before, after); assert.equal(refreshed.length, 1, "A closed full-question viewer is not reopened by a late save");
 });

@@ -158,13 +158,49 @@ def run(pg):
     pg.mouse.click(1400, 880); pg.wait_for_timeout(450)
     check("点空白处菜单关掉", pg.evaluate("() => document.querySelectorAll('.library-card-more[open]').length") == 0)
     c0.locator(".library-card-more summary").click(); pg.wait_for_timeout(300)
-    pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(1800)
     check("Esc 也关，且焦点回到「更多」",
           pg.evaluate("() => { const a=document.activeElement; return document.querySelectorAll('.library-card-more[open]').length===0 && a && a.parentElement && a.parentElement.className==='library-card-more'; }"))
+    # Tab 进菜单里再按 Esc 是另一回事：焦点在菜单内的按钮上，菜单一收它就被藏起来，
+    # 浏览器会在布局处理完之后把焦点整个甩回 body。再叠上题库后台刷新还会再甩一次，
+    # 实测这一下来回能拖到一秒多 —— 等的时间必须比它长，否则这条量了个寂寞。
+    c0.locator(".library-card-more summary").click(); pg.wait_for_timeout(300)
+    pg.keyboard.press("Tab"); pg.wait_for_timeout(200)
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(1800)
+    check("Tab 进菜单再 Esc，焦点也回到「更多」",
+          pg.evaluate("() => { const a=document.activeElement; return document.querySelectorAll('.library-card-more[open]').length===0 && a && a.parentElement && a.parentElement.className==='library-card-more'; }"))
+    # 先把第 0 张的菜单收掉再去点第 1 张：菜单本来就是盖在下面那张卡上的，真人也是
+    # 先关再点。开着就硬点，Playwright 只会报「被菜单里的按钮挡住」——那是菜单的正常
+    # 行为，不是缺陷。
     c0.locator(".library-card-more summary").click(); pg.wait_for_timeout(250)
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
     c1 = pg.locator(".library-card").nth(1)
     c1.locator(".library-card-more summary").click(); pg.wait_for_timeout(400)
     check("同时只开一个", pg.evaluate("() => document.querySelectorAll('.library-card-more[open]').length") == 1)
+    # 关着的「更多」菜单不该还在卡片外面铺开。details 收起只是把内容藏起来，绝对定位
+    # 的菜单照样会算布局，铺到下一张卡上；那上面要是留着「AI 正在解答…」的半透明进度
+    # 条，下一张卡的「更多」就点不动了。
+    spill = pg.evaluate("""() => { const bad=[];
+      for (const c of document.querySelectorAll('.library-card')) {
+        const d = c.querySelector('.library-card-more'); if (!d || d.open) continue;
+        const m = d.querySelector('.library-card-menu'); if (!m) continue;
+        const r = m.getBoundingClientRect();
+        if (r.height > 0) bad.push({card: c.id, top: Math.round(r.top), bottom: Math.round(r.bottom),
+          cardBottom: Math.round(c.getBoundingClientRect().bottom)});
+        if (bad.length >= 3) break;
+      } return bad; }""")
+    check("关着的「更多」菜单不铺在卡片外面", not spill, spill)
+    # 命中测试要在**全关**的状态下做：菜单开着的时候它本来就该盖住下面那张卡。
+    pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
+    check("相邻两张卡的「更多」都点得动",
+          pg.evaluate("""() => { const out=[];
+            for (const c of [...document.querySelectorAll('.library-card')].slice(0, 4)) {
+              const s = c.querySelector('.library-card-more summary'); if (!s) continue;
+              const r = s.getBoundingClientRect();
+              const el = document.elementFromPoint(r.x + r.width/2, r.y + r.height/2);
+              out.push({id: c.id, ok: Boolean(el && (el === s || s.contains(el))),
+                        hit: el ? el.tagName + '.' + String(el.className || '').split(' ')[0] : null}); }
+            return out.length > 0 && out.every(v => v.ok) ? true : out; }"""))
 
     print("\n=== 7. 提示条不挡按钮")
     check("toast 鼠标穿透", pg.evaluate("() => getComputedStyle(document.querySelector('.toast') || document.body).pointerEvents") in ("none", "auto"))

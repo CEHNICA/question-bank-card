@@ -444,8 +444,26 @@
     if (event.key !== "Escape") return;
     const open = document.querySelector(".library-card-more[open]");
     if (!open) return;
+    // 顺序要紧：先把焦点挪到「更多」上，再收菜单。反过来的话，刚才被 Tab 进去的那个
+    // 按钮会在收起来之后变成隐藏元素，浏览器要等到布局处理完才把焦点甩回 body ——
+    // 那一步在我们 focus() 之后才发生，键盘用户就整个找不到位置了。
+    const summary = open.querySelector("summary");
+    summary?.focus({ preventScroll: true });
     open.open = false;
-    open.querySelector("summary")?.focus({ preventScroll: true });
+    // 还有一层：题库在后台刷新（题卡重画、筛选下拉重新灌数据）会在几十毫秒到一秒多
+    // 之后把焦点整个甩回 body，而且没人调 blur()、元素也好好地在那儿 —— 浏览器只是
+    // 把「焦点在哪儿」重置了。那一下用户看不见，键盘用户感觉得到：按完 Esc 一看，
+    // 焦点跑到页首去了。这里守着补上：焦点不在 summary 又不在 body（用户自己点到别处
+    // 了）就立刻收手，最多守两秒。
+    let until = performance.now() + 2000;
+    const hold = () => {
+      if (!summary?.isConnected || performance.now() > until) return;
+      const active = document.activeElement;
+      if (active !== document.body && active !== summary) return;
+      if (active === document.body) summary.focus({ preventScroll: true });
+      setTimeout(hold, 50);
+    };
+    setTimeout(hold, 50);
   });
 
   // 录过两次的卷在题库里同名。日期只到天仍会撞（同一天录两次照样分不出），
@@ -1012,6 +1030,28 @@
     return body;
   }
 
+  // 1.13.6：这道题为什么用不了。reason 是后端的状态枚举（superseded / withdrawn /
+  // not_found），直接印出来就是一句英文。后端已经带了一句中文，这里以它为准，
+  // 兜底再翻一次本地表 —— 界面上不该出现任何英文枚举。
+  const MISSING_REASONS = { superseded: "题面改过，这道题已经有新版本了", withdrawn: "这道题已撤回", not_found: "这道题已不存在" };
+  function missingReason(entry) {
+    if (!entry) return "这道题当前不能使用";
+    if (typeof entry === "string") return MISSING_REASONS[entry] || "这道题当前不能使用";
+    return entry.message || MISSING_REASONS[entry.reason] || "这道题当前不能使用";
+  }
+
+  // 把篮里那一道换成它现在该用的版本，位置不变。老师刚改完题面回来发现的正是这个：
+  // 篮里那道已经不能用了，可下一步该是什么，界面上一个字都没说。
+  function swapBasketForReplacement(entry) {
+    const replacement = entry?.replacement_id;
+    if (!replacement || !state.basket.includes(entry.id)) return false;
+    state.basket = state.basket.map((id) => (id === entry.id ? replacement : id));
+    saveBasket();
+    refreshBasket({ force: true });
+    render();
+    return true;
+  }
+
   async function refreshBasket({ force = false } = {}) {
     const ids = [...state.basket];
     const signature = JSON.stringify(ids);
@@ -1077,7 +1117,8 @@
     const counts = {}, sources = new Set();
     const list = $("basketList");
     list.replaceChildren();
-    const missing = new Map(state.basketMissing.map((item) => [item.id, item.reason]));
+    // 整条留着，不要只留一个 reason：换版本要用的 replacement_id 也在里面。
+    const missing = new Map(state.basketMissing.map((item) => [item.id, item]));
     state.basket.forEach((id, index) => {
       const item = state.catalog.get(id);
       if (item && !missing.has(id)) {
@@ -1090,13 +1131,26 @@
       open.disabled = !item || missing.has(id);
       const name = item ? `${item.source_filename} · 第 ${item.number} 题` : `选题 ${index + 1}`;
       open.append(node("strong", "", item ? `第 ${item.number} 题 · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : `选题 ${index + 1}`), node("span", "", name));
-      if (missing.has(id)) open.append(node("span", "basket-item-error", missing.get(id)));
+      // 1.13.6：这里原来直接印 reason，那是后端的状态枚举。老师看到的是
+      // 「第 1 题: superseded」—— 一句英文，看不出自己该怎么办。
+      if (missing.has(id)) open.append(node("span", "basket-item-error", missingReason(missing.get(id))));
       open.addEventListener("click", () => openQuestion(item));
       const remove = node("button", "button button-quiet button-small basket-remove", "移出");
       remove.type = "button";
       remove.setAttribute("aria-label", `移出${name}`);
       remove.addEventListener("click", () => { state.basket = state.basket.filter((value) => value !== id); saveBasket(); render(); });
-      row.append(open, remove);
+      if (missing.get(id)?.replacement_id) {
+        // 题面改过以后篮里那道就废了，而老师多半正是刚改完题面回来接着组卷。
+        // 只给「移出」的话，下一步该做什么全靠他自己猜。
+        const swap = node("button", "button button-quiet button-small basket-remove", "换新版本");
+        swap.type = "button";
+        swap.setAttribute("aria-label", `${name} 换成当前版本`);
+        swap.addEventListener("click", () => { swapBasketForReplacement(missing.get(id)); render(); });
+        row.append(open, swap);
+      } else {
+        row.append(open);
+      }
+      row.append(remove);
       list.append(row);
     });
     $("basketSummary").textContent = state.basketLoading ? "正在核对选题的入库版本…"
@@ -1503,6 +1557,10 @@
         state.catalog.set(after.id, after);
         if ($("questionDialog").open && state.questionReturnId === before.id) openQuestion(after);
         void load({ quiet: true });
+        // 1.13.6：题面一改，篮里那道旧版本就作废了。这里原来什么都不管，篮里那一行
+        // 照旧看着好好的 —— 老师点进去打开的是**改之前**那一份，会把刚改掉的错别字
+        // 原样印到卷子上。重新核一遍，让它如实说「已经有新版本了」，再由老师决定换不换。
+        void refreshBasket({ force: true });
       } });
     return questionEditor.open(item);
   }
@@ -1690,6 +1748,11 @@
     $("exportPdf").disabled = blocked || answerEmpty || !!printState.tooWide || printState.layoutPending || !!printState.layoutError;
     $("exportWord").disabled = blocked || answerEmpty;
     $("exportSplit").disabled = blocked || !printState.availableAnswers;
+    // 1.13.6：一道题都没载入时，这个按钮原来还是可点的，按下去打开一个空编辑器，
+    // 屏幕上什么也不发生 —— 比灰掉更难查。载入中或有未载入的题也一并按不可用算。
+    const manage = $("managePrintAnswers");
+    manage.disabled = printState.exporting || printState.loading || !printState.items.length;
+    manage.title = printState.items.length ? "为这次组卷里的题补答案解析" : "先把未载入的选题处理掉，载入的题才能补答案解析";
     $("printOptionLayout").disabled = printState.exporting || (printState.items.length > 0 && printState.items.every(item => item.content?.body_mode === "source_image"));
   }
 
@@ -1963,7 +2026,19 @@
         render();
         ($("retryPrintMissing") || $("closePrint")).focus();
       });
-      row.append(node("span", "", `${item.label}：${item.reason}`), remove);
+      row.append(node("span", "", `${item.label}：${missingReason(item)}`));
+      if (item.replacement_id) {
+        // 后端已经算好了该换成哪一版。题面改过以后篮里那道就废了，而老师多半
+        // 正是刚改完题面回来接着组卷 —— 没有这一步就只剩「移出去再搜一遍」。
+        const swap = node("button", "button button-small", "换成当前版本");
+        swap.type = "button";
+        swap.addEventListener("click", async () => {
+          if (!swapBasketForReplacement(item)) return;
+          await openPrint();
+        });
+        row.append(swap);
+      }
+      row.append(remove);
       box.append(row);
     });
     const retry = node("button", "button button-small", "重试未载入题目");

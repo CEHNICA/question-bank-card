@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 
 const controls = Object.fromEntries([
-  "printDocument", "printAnswerLayout", "printPagination", "printOptionLayout", "printFontSize", "printAnswerSpace", "printStudentInfo", "printButton", "exportPdf", "exportWord", "exportSplit", "printIndividualQuestion", "printIndividualOption", "printIndividualSpace", "printIndividualBreak", "printIndividualHint"
+  "printDocument", "printAnswerLayout", "printPagination", "printOptionLayout", "printFontSize", "printAnswerSpace", "printStudentInfo", "printButton", "exportPdf", "exportWord", "exportSplit", "managePrintAnswers", "printIndividualQuestion", "printIndividualOption", "printIndividualSpace", "printIndividualBreak", "printIndividualHint"
 ].map(id => [id, { value: "", checked: false, disabled: false }]));
 const ui = { printAnswers: {}, printOrigin: {}, printAi: {}, paper: { querySelectorAll: () => [] } };
 const state = { features: { ai_answer: false } };
@@ -74,10 +74,35 @@ printState.tooWide = 0; printState.layoutPending = true;
 sandbox.syncExportButtons(); assert.equal(controls.exportPdf.disabled, true);
 printState.layoutPending = false; printState.layoutError = "有图表高于A4";
 sandbox.syncExportButtons(); assert.equal(controls.exportPdf.disabled, true);
+
+// 1.13.6: 「答案解析」在一道题都没载入时不能还是可点的。点了只会打开一个空编辑器，
+// 屏幕上什么也不发生 —— 比灰掉难查得多。载入中也一样。
+assert.equal(controls.managePrintAnswers.disabled, false, "有题载入时能补答案解析");
+printState.loading = true;
+sandbox.syncExportButtons();
+assert.equal(controls.managePrintAnswers.disabled, true, "载入过程中不提供补答案解析");
+printState.loading = false;
+printState.items = [];
+sandbox.syncExportButtons();
+assert.equal(controls.managePrintAnswers.disabled, true, "一道题都没载入时不提供补答案解析");
+assert.ok(controls.managePrintAnswers.title, "灰掉时要说清为什么");
+printState.items = [{ id: "q1" }];
+sandbox.syncExportButtons();
+assert.equal(controls.managePrintAnswers.disabled, false, "题回来了，按钮就回来");
 printState.layoutError = "";
 printState.missing = [{ id: "withdrawn" }];
 sandbox.syncExportButtons();
 assert(controls.printButton.disabled && controls.exportWord.disabled && controls.exportSplit.disabled);
+
+vm.runInContext(source.slice(source.indexOf("  const MISSING_REASONS ="), source.indexOf("  async function refreshBasket(")), sandbox);
+assert.equal(sandbox.missingReason({ reason: "superseded" }), "题面改过，这道题已经有新版本了");
+assert.equal(sandbox.missingReason({ reason: "withdrawn" }), "这道题已撤回");
+assert.equal(sandbox.missingReason({ reason: "not_found" }), "这道题已不存在");
+assert.equal(sandbox.missingReason({ reason: "superseded", message: "这道题已有新版本，请核对后选择当前版本" }),
+  "这道题已有新版本，请核对后选择当前版本", "后端带来的中文说明优先于本地兜底");
+for (const entry of [{ reason: "superseded" }, { reason: "withdrawn" }, { reason: "not_found" }, { reason: "who_knows" }])
+  assert.ok(!/[a-z_]{4,}/.test(sandbox.missingReason(entry)), "界面上不能出现英文枚举：" + JSON.stringify(entry));
+assert.ok(sandbox.missingReason(null).length > 0, "没有条目时也要有一句能看的话");
 
 vm.runInContext(source.slice(source.indexOf("  function syncIndividualControls("), source.indexOf("  async function refreshPrintPages(")), sandbox);
 printState.items = [{ id: "second", content: { options: { A: "1" } } }];

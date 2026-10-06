@@ -286,6 +286,10 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-card-more { position: relative; font: 12.5px/1.5 var(--ui-font); }
 .library-card-more > summary { padding: 6px 9px; cursor: pointer; color: var(--ink-2); }
 .library-card-menu { position: absolute; z-index: 16; right: 0; top: calc(100% + 4px); min-width: 165px; max-width: calc(100vw - 40px); display: grid; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-pop); }
+/* 关着的时候菜单必须彻底不参与布局。details 收起只是把内容藏起来，绝对定位的菜单
+   照样会在卡片底下铺开将近 200px，正好压住下一张卡的「更多」—— 那张卡上正在解答的
+   题会在菜单里留一个半透明的进度条，点「更多」时它会抢走点击。 */
+.library-card-more:not([open]) > .library-card-menu { display: none; }
 .library-card-menu .button { justify-content: flex-start; }
 /* 篮在右边，收起时只占一条把手，展开时占第三列。跟着题库一起滚，不固定在视口上 ——
    固定的话题目一长它就悬在半空。 */

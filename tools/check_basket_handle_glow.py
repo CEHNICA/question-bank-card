@@ -227,8 +227,11 @@ async def main():
         one_bounds = extremes(one_fills, distance_from_white)
         twenty_bounds = extremes(twenty_fills, distance_from_white)
         notes.append(f"底色距白 1 题 {one_bounds} / 20 题 {twenty_bounds}")
-        check(one_bounds == twenty_bounds,
-              f"1 题和 20 题的荧光强弱完全一样（{one_bounds} vs {twenty_bounds}）")
+        # 和下面那行溢光一个道理，这里也要容差：波谷是**连续动画的采样最小值**，5 个
+        # 采样点落在周期的哪一段是随机的，波谷因此会差 1/255。真的「强度跟题数走」
+        # 会差几十 —— 动画本身就跨 41→96，差 2 远在噪声里。
+        check(all(abs(a - b) <= 2 for a, b in zip(one_bounds, twenty_bounds)),
+              f"1 题和 20 题的荧光强弱一样（{one_bounds} vs {twenty_bounds}，容差 2/255）")
         one_shadows = {read["boxShadow"] for read in one}
         twenty_shadows = {read["boxShadow"] for read in twenty}
         one_shadow_bound = extremes(one_shadows, widest)
@@ -247,7 +250,10 @@ async def main():
         notes.append(f"波峰溢光层：{layers}")
         check(bool(layers), f"解析出 {len(layers)} 层溢光")
         for offset, blur, spread in layers:
-            check(abs(offset) >= blur / 2,
+            # 设计点上这两个数**正好相等**（溢光往里收 blur/2，才不会顶出视口硬边）。
+            # 两个值都是从 box-shadow 字符串里解析出来的，带小数末位；拿 13.9987 去比
+            # 13.99875 会因为 5e-5 的差判成失败。留 0.1px，真露边是差好几像素的事。
+            check(abs(offset) >= blur / 2 - 0.1,
                   f"溢光层 {offset:g}px/{blur:g}px 的右边界落在视口内，不露硬边")
 
         # 10) 截图：波谷和波峰，带把手周围的留白
