@@ -251,7 +251,14 @@ ${keyBlocks()}
           renderCost(state.current);
         }
         // 目录这一段跟着「生成知识点标签」走，当场就跟着开关走，别等保存后重读。
-        if (id === "libraryAITags") $("libraryAIKnowledge").hidden = !$(id).checked;
+        if (id === "libraryAITags") {
+          $("libraryAIKnowledge").hidden = !$(id).checked;
+          // 服务端在功能关着时故意不读目录文件（读一次就会替用户建出这个文件），
+          // 那一档回的 0 是「还没读」，不是「目录是空的」。所以这里必须自己去问一次：
+          // 否则用户刚打开开关就先看见一句永远不兑现的「正在读取…」，
+          // 再或者更糟，看见「目录是空的」和一行空路径 —— 目录其实有几百个知识点。
+          if ($(id).checked && !catalogue) void loadCatalogue();
+        }
         const switchingProvider = id === "libraryAIProvider" && $(id).value !== state.provider;
         if (switchingProvider) {
           state.provider = $(id).value;
@@ -683,16 +690,26 @@ ${keyBlocks()}
     } finally { clearTimeout(timeout); requests.delete(controller); }
   }
 
+  // 目录那一行的说法只有这一处。刚打开面板、切换开关、从「查看目录」回来，
+  // 三条路都必须说同一件事，否则用户会先看见一句永远不兑现的「正在读取…」。
+  function showKnowledgeSummary(summary) {
+    const value = summary || { total: 0, chapters: 0, file: "" };
+    // 有文件却一个知识点都没有，多半是文件空的或打不开。说「目录是空的」会让用户
+    // 以为这套标签没得用，其实要做的只是看一眼下面那个文件。
+    $("libraryAIKnowledgeCount").textContent = value.total
+      ? `${value.total} 个知识点，分 ${value.chapters} 章`
+      : value.file ? "目录里读不出知识点，请看下面这个文件" : "知识点目录是空的";
+    $("libraryAIKnowledgeFile").textContent = value.file || "";
+    const cataloguePath = $("catalogueFile");
+    if (catalogue && cataloguePath) cataloguePath.textContent = value.file || "";
+  }
+
   function renderKnowledge(body) {
+    // 大小和文件位置随设置一起下发，面板一打开就有，不必先发一次请求。
+    // 关着标签功能时这一段是藏着的，但文字照样写：用户当场打开开关就能看见真实数量。
+    showKnowledgeSummary(body.knowledge);
     // 目录只有在开着「生成知识点标签」时才相关，免得关了功能还让人去管目录。
     $("libraryAIKnowledge").hidden = !body.features.knowledge_tags;
-    if (!body.features.knowledge_tags) return;
-    // 大小和文件位置随设置一起下发，面板一打开就有，不必先发一次请求。
-    const summary = body.knowledge || { total: 0, chapters: 0, file: "" };
-    $("libraryAIKnowledgeCount").textContent = summary.total
-      ? `${summary.total} 个知识点，分 ${summary.chapters} 章` : "知识点目录是空的";
-    $("libraryAIKnowledgeFile").textContent = summary.file || "";
-    if (catalogue) $("catalogueFile").textContent = summary.file || "";
   }
 
   async function loadCatalogue() {
@@ -701,9 +718,7 @@ ${keyBlocks()}
       const body = await response.json();
       if (!response.ok || !Array.isArray(body.points)) throw new Error(body.error || "目录没读到");
       catalogue = body;
-      $("libraryAIKnowledgeCount").textContent = `${body.total} 个知识点，分 ${body.chapters} 章`;
-      $("libraryAIKnowledgeFile").textContent = body.file || "";
-      $("catalogueFile").textContent = body.file || "";
+      showKnowledgeSummary(body);
       renderCatalogue();
     } catch (error) {
       $("libraryAIKnowledgeCount").textContent = `目录没读到：${error.message || "稍后再试一次"}`;

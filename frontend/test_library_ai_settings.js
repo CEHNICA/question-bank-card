@@ -88,7 +88,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     const item = list.children[0];
     return { list, item, number: item.children[0], value: item.children[1], eye: item.children[2] };
   };
-  return { window, document, current, calls, timers, apiWindowCalls, rowOf, get: (id) => elements.get(id),
+  // 面板会发好几类请求：读设置、问目录大小、存设置、探 API。断言「有没有重读设置」
+// 时必须只看第一类 —— 数 calls.length 会把打开标签开关时那次目录读取也算进去。
+  const settingsCalls = () => calls.filter((call) => call.url === "/api/settings/library-ai");
+  return { window, document, current, calls, settingsCalls, timers, apiWindowCalls, rowOf, get: (id) => elements.get(id),
     response: (fn, ok = true) => { respond = fn; okay = ok; }, consentClose: (value) => { confirm = value; } };
 }
 
@@ -111,18 +114,18 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   embedded.window.LibraryAISettings.hideSecrets();
   assert.equal(embedded.get("libraryAIKey-deepseek").value, "offline-embedded-unsaved-key"); assert.equal(embedded.get("libraryAIKey-deepseek").type, "password");
   assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), true, "Switching API tabs only hides secrets and preserves all real edits");
-  const mountedReadCount = embedded.calls.length; await embedded.window.LibraryAISettings.open(); await embedded.window.LibraryAISettings.activate();
-  assert.equal(embedded.calls.length, mountedReadCount); assert.equal(embedded.get("libraryAITags").checked, true);
+  const mountedReadCount = embedded.settingsCalls().length; await embedded.window.LibraryAISettings.open(); await embedded.window.LibraryAISettings.activate();
+  assert.equal(embedded.settingsCalls().length, mountedReadCount); assert.equal(embedded.get("libraryAITags").checked, true);
   assert.equal(embedded.get("apiSettingsDialog").modalOpens, 1, "Repeated open delegates cannot reopen or replace the shared active window");
   assert.equal(embedded.window.LibraryAISettings.deactivate(), false, "The parent cannot deactivate an unconfirmed dirty answer panel");
   embedded.get("libraryAICancel").trigger("click");
   assert.equal(embedded.get("apiSettingsDialog").open, true, "The child undo button only restores its own group; it cannot close the shared API window");
   assert.equal(embedded.window.LibraryAISettings.hasUnsavedChanges(), false); assert.equal(embedded.get("libraryAIKey-deepseek").value, "");
   assert.equal(embedded.window.APISettings.close(), true); assert.equal(embedded.window.LibraryAISettings.isBusy(), false);
-  const closedRequestCount = embedded.calls.length; embedded.get("libraryAISettingsForm").trigger("submit");
-  await flush(); assert.equal(embedded.calls.length, closedRequestCount, "A deactivated panel cannot submit an old form");
+  const closedRequestCount = embedded.settingsCalls().length; embedded.get("libraryAISettingsForm").trigger("submit");
+  await flush(); assert.equal(embedded.settingsCalls().length, closedRequestCount, "A deactivated panel cannot submit an old form");
   await embedded.window.LibraryAISettings.open();
-  assert.equal(embedded.calls.length, closedRequestCount + 1, "Reopening the shared window refreshes metadata rather than retaining a stale profile");
+  assert.equal(embedded.settingsCalls().length, closedRequestCount + 1, "Reopening the shared window refreshes metadata rather than retaining a stale profile");
   embedded.window.APISettings.close();
 
   const oldRead = setup({ ignoreAbort: true }); let finishOldRead;
@@ -168,7 +171,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAIDelete-deepseek").hidden, true, "没有密钥时不给出删除动作");
   assert.equal(s.rowOf(s, "doubao").item.className, "credential-saved-empty");
   assert.equal(s.get("libraryAITest").disabled, true);
-  assert.equal(s.calls.length, 1, "opening only reads non-secret settings");
+  assert.equal(s.settingsCalls().length, 1, "opening only reads non-secret settings");
   assert.equal(s.window.LibraryAISettings.hasUnsavedChanges(), false, "Showing the legacy assistant config as API-only does not manufacture a change");
 
   const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
@@ -247,10 +250,13 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "assistant saves clear local password input without changing the stored key");
   assert.doesNotMatch(s.get("libraryAIResult").textContent, /当前助手/);
   assert.equal(s.document.events.at(-1).type, "library-ai-settings-saved");
+  // 「助手模式不探 API」要看的是这一次点击有没有发出请求，不是面板一共发了几条：
+// 打开「生成知识点标签」现在会自己去问一次目录大小，那条跟 API 探测无关。
+  const beforeProbe = s.calls.length;
   s.get("libraryAITestConsent").checked = true;
   s.get("libraryAITest").trigger("click");
   await flush();
-  assert.equal(s.calls.length, 2, "assistant mode never probes an API, even with a forged consent event");
+  assert.equal(s.calls.length, beforeProbe, "assistant mode never probes an API, even with a forged consent event");
 
   s.get("libraryAIMode").value = "api";
   s.get("libraryAIMode").trigger("input");
@@ -282,9 +288,10 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "replacement key is cleared after save");
   assert.equal(s.get("libraryAIKey-doubao").value, "");
   assert.equal(s.get("libraryAITest").disabled, true, "saving does not consent to or start a paid probe");
+  const beforeUnconsentedProbe = s.calls.length;
   s.get("libraryAITest").trigger("click");
   await flush();
-  assert.equal(s.calls.length, 3, "test handler also requires fresh explicit consent");
+  assert.equal(s.calls.length, beforeUnconsentedProbe, "test handler also requires fresh explicit consent");
   s.get("libraryAITestConsent").checked = true;
   s.get("libraryAITestConsent").trigger("change");
   assert.equal(s.get("libraryAITest").disabled, false);
@@ -384,7 +391,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   broken.response(() => ({ ready: false }));
   await broken.window.LibraryAISettings.open();
   assert.equal(broken.get("libraryAISave").disabled, true, "an incomplete GET must not overwrite feature settings with defaults");
-  assert.equal(broken.calls.length, 1);
+  assert.equal(broken.settingsCalls().length, 1);
   const incompleteAPI = setup();
   incompleteAPI.response(() => ({ ...incompleteAPI.current, supports_images: undefined }));
   await incompleteAPI.window.LibraryAISettings.open();
@@ -400,13 +407,15 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(host.children.length, 1);
   assert.equal(inline.get("libraryAISettingsDialog").tagName, "SECTION");
   assert.equal(inline.get("libraryAISettingsDialog").modalOpens, 0, "the settings page never opens a nested modal");
-  assert.equal(inline.calls.length, 1, "mounting only reads stored settings");
+  assert.equal(inline.settingsCalls().length, 1, "mounting only reads stored settings");
   assert.equal(inline.get("libraryAITags").checked, false);
   assert.equal(inline.get("libraryAIAnswer").checked, false);
   inline.get("libraryAITags").checked = true; inline.get("libraryAITags").trigger("input");
   assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), true);
   await inline.window.LibraryAISettings.mount(host);
-  assert.equal(inline.calls.length, 1, "revisiting the tab cannot overwrite an unsaved draft");
+// 数的是「重读设置」那一条，不是面板所有请求：打开标签开关会自己去问一次目录大小。
+  assert.equal(inline.settingsCalls().length, 1,
+    "revisiting the tab cannot overwrite an unsaved draft");
   assert.equal(inline.get("libraryAITags").checked, true);
   let prevented = false;
   const unload = { preventDefault() { prevented = true; }, returnValue: undefined };
@@ -418,7 +427,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(inline.get("libraryAIKey-deepseek").value, "");
   assert.equal(inline.get("libraryAITags").checked, false);
   assert.equal(inline.window.LibraryAISettings.hasUnsavedChanges(), false);
-  assert.equal(inline.calls.length, 1, "discard restores the read snapshot without changing stored keys or flags");
+  assert.equal(inline.settingsCalls().length, 1, "discard restores the read snapshot without changing stored keys or flags");
   inline.get("libraryAITags").checked = true; inline.get("libraryAITags").trigger("input");
   let finishSave;
   inline.response((_url, payload) => new Promise((done) => { finishSave = () => done({ ...inline.current, features: payload.features, on_intake: payload.on_intake }); }));
@@ -661,5 +670,31 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1, "A bounded explicit test never automatically performs another test");
   assert.match(testTimeout.get("libraryAIResult").textContent, /结果.*未确认/); assert.equal(testTimeout.timers.size, 0);
   finishTimedTest({ ...testTimeout.current }); await flush(); assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1);
+  // 服务端在标签功能关着时故意不读目录文件（读一次就会替用户把这个文件建出来），
+  // 那一档回的 0 是「还没读」，不是「目录是空的」。可用户当场打开开关时这一段就显示出来了，
+  // 面板必须自己去问一次，不能让他先看见一句永远不兑现的「正在读取…」或者「目录是空的」。
+  const catalogue = setup();
+  catalogue.response(url => (url.includes("/knowledge")
+    ? { file: "C:/data/knowledge-points.txt", points: [{ point: "集合", chapter: "第一章" }], total: 1, chapters: 1 }
+    : { ...catalogue.current, knowledge: { total: 0, chapters: 0, file: "" } }));
+  await catalogue.window.LibraryAISettings.mount(catalogue.document.createElement("div"));
+  assert.equal(catalogue.get("libraryAIKnowledge").hidden, true, "the catalogue section stays hidden while tagging is off");
+  catalogue.get("libraryAITags").checked = true; catalogue.get("libraryAITags").trigger("input");
+  await flush();
+  assert.equal(catalogue.get("libraryAIKnowledge").hidden, false);
+  assert.equal(catalogue.get("libraryAIKnowledgeCount").textContent, "1 个知识点，分 1 章",
+    "revealing the section must read the real count, not leave a promise that never settles");
+  assert.equal(catalogue.get("libraryAIKnowledgeFile").textContent, "C:/data/knowledge-points.txt",
+    "the note tells the user to open the file below, so the path has to be there");
+
+  const unreadable = setup();
+  unreadable.response(url => (url.includes("/knowledge")
+    ? { file: "C:/data/knowledge-points.txt", points: [], total: 0, chapters: 0 }
+    : { ...unreadable.current, features: { knowledge_tags: true, ai_answer: false },
+        knowledge: { total: 0, chapters: 0, file: "C:/data/knowledge-points.txt" } }));
+  await unreadable.window.LibraryAISettings.mount(unreadable.document.createElement("div"));
+  assert.match(unreadable.get("libraryAIKnowledgeCount").textContent, /读不出/,
+    "a known file that yields no points is reported as unreadable, not as an empty catalogue");
+
   console.log("API settings, explicit eye reveal and secret lifecycle: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

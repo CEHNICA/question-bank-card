@@ -50,8 +50,12 @@ assert.match(panelJs, /item\.point\.includes\(keyword\) \|\| \(item\.chapter \|\
   "搜章名也要搜得到：椭圆、双曲线、抛物线都不含「圆锥」");
 assert.match(panelJs, /catalogue-dialog\[open\]\{display:grid;grid-template-rows:auto minmax\(0,1fr\) auto\}/,
   "目录自己滚，底栏那句说明任何时候都在");
-assert.match(panelJs, /if \(id === "libraryAITags"\) \$?\("libraryAIKnowledge"\)\.hidden = !\$\(id\)\.checked/,
+assert.match(panelJs, /if \(id === "libraryAITags"\) \{\s*\$\("libraryAIKnowledge"\)\.hidden = !\$\(id\)\.checked/,
   "关掉标签功能，这一段当场就跟着藏起来");
+assert.match(panelJs, /if \(\$\(id\)\.checked && !catalogue\) void loadCatalogue\(\)/,
+  "功能关着时服务端不回目录大小（读一次就会替用户把那个文件建出来），打开这一段得自己去问一次 —— 否则用户先看见一句永远不兑现的「正在读取…」");
+assert.match(panelJs, /showKnowledgeSummary\(body\.knowledge\);[\s\S]{0,140}\$\("libraryAIKnowledge"\)\.hidden = !body\.features\.knowledge_tags/,
+  "藏着的时候也把数字写进去：用户当场打开开关就该看见真实数量，而不是等一次没人发起的读取");
 
 // ---- 3. 生成要花钱，数字得摆在开关旁边
 assert.match(panelJs, /每道新题入库会调用 \$\{perQuestion\} 次服务/, "写明每道新题会调用几次服务");
