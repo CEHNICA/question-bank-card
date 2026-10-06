@@ -39,8 +39,13 @@ SEGMENT_KEYS = {"type", "start", "end", "latex", "mathml", "display", "displayGr
 GROUPS = (("single_choice", "选择题"), ("multiple_choice", "多选题"),
           ("fill_blank", "填空题"), ("true_false", "判断题"), ("free_response", "解答题"))
 FIELDS = {"stem", "answer", "analysis", "origin", *(f"options.{key}" for key in "ABCDE")}
-ACCENTS = {"⃗": "⃗", "→": "⃗", "←": "⃖", "↔": "⃡", "^": "̂", "~": "̃", "ˉ": "̅",
-           "¯": "̅", "˙": "̇", "¨": "̈", "ˇ": "̌", "˘": "̆", "´": "́", "`": "̀"}
+# KaTeX 把重音写成 mover 的第二个 <mo>。只有这张表里的字形能转成 OMML 的原生
+# <m:acc>；落在表外的（\overline 的 U+203E、\acute 的 U+02CA、\grave 的 U+02CB）
+# 会让整份 Word 导不出来 —— 高考卷里 \overline 极常见，缺一个就废掉一整卷。
+ACCENTS = {"⃗": "⃗", "→": "⃗", "←": "⃖", "↔": "⃡", "^": "̂", "~": "̃",
+           "ˉ": "̅", "¯": "̅", "‾": "̅",
+           "˙": "̇", "¨": "̈", "ˇ": "̌", "˘": "̆",
+           "´": "́", "ˊ": "́", "`": "̀", "ˋ": "̀"}
 MATHML_ELEMENTS = {"math", "semantics", "annotation", "mi", "mn", "mo", "mrow", "mtext", "mspace", "ms",
                    "mstyle", "mpadded", "mphantom", "mfrac", "msqrt", "mroot", "mfenced", "menclose", "msub",
                    "msup", "msubsup", "munder", "mover", "munderover", "mmultiscripts", "mprescripts", "none",
