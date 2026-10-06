@@ -97,12 +97,14 @@ def filtered(params: dict[str, list[str]]) -> list[dict]:
     return result
 
 
-def facets() -> dict:
+def facets(items: list[dict]) -> dict:
+    """Counted over whatever survived the filter — that is what the real backend does,
+    and it is why a search that matches nothing used to empty the whole filter rail."""
     types: dict[str, int] = {}
     tags: dict[str, int] = {}
     answers = {"yes": 0, "no": 0}
     reviews = {"human": 0, "ai": 0}
-    for item in ITEMS:
+    for item in items:
         types[item["question_type"]] = types.get(item["question_type"], 0) + 1
         for tag in item["tags"]:
             tags[tag] = tags.get(tag, 0) + 1
@@ -118,7 +120,7 @@ def library_body(query: str) -> dict:
     limit = int(_one(params, "limit") or PAGE)
     offset = int(_one(params, "offset") or 0)
     return {"items": matches[offset:offset + limit], "total": len(matches),
-            "features": {"ai_answer": False}, "facets": facets()}
+            "features": {"ai_answer": False}, "facets": facets(matches)}
 
 
 def status_numbers(page) -> tuple:
@@ -229,6 +231,98 @@ def run(port: int) -> None:
                 if not ok:
                     print("      " + json.dumps(entry, ensure_ascii=False)[:1000], flush=True)
 
+            def rail(page) -> dict:
+                return page.evaluate("""()=>({
+                  types: [...document.querySelectorAll('#typeFilters button')].map(n=>({
+                    text:n.textContent.trim(), disabled:n.disabled, active:n.getAttribute('aria-pressed')==='true'})),
+                  answersHidden: document.querySelector('#answerFilters')?.hidden,
+                  answers: [...document.querySelectorAll('#answerFilters button')].map(n=>n.textContent.trim()),
+                  reviewsHidden: document.querySelector('#reviewFilters')?.hidden,
+                  reviews: [...document.querySelectorAll('#reviewFilters button')].map(n=>n.textContent.trim()),
+                  advancedHidden: document.querySelector('#advancedFilters')?.hidden,
+                  cards: document.querySelectorAll('#libraryList .library-card').length,
+                })""")
+
+            def rail_case() -> None:
+                """A search that matches nothing must not take the filters with it."""
+                page.goto(f"http://127.0.0.1:{port}/library", wait_until="networkidle")
+                page.wait_for_selector("#libraryList .library-card", timeout=15000)
+                before = rail(page)
+                box = page.get_by_label("搜索题目", exact=True)
+                box.fill("这个题库里不存在的词")
+                box.press("Enter")
+                page.wait_for_selector("#libraryList .library-empty", timeout=15000)
+                page.wait_for_timeout(400)
+                after = rail(page)
+                entry = {"name": "搜索无结果时筛选栏不许塌", "before": before, "after": after}
+                report["cases"].append(entry)
+                # 题型固定五类 + 「全部」，一个都不能少；答案、审核两组和「更多筛选」都还在。
+                # 比的是标签不是数字 —— 数字本来就该跟着筛选变（0 是诚实的）。
+                labels = lambda rows: [row["text"].rstrip("0123456789") for row in rows]
+                keeps_types = labels(after["types"]) == labels(before["types"])
+                keeps_groups = (after["answersHidden"] is False and after["reviewsHidden"] is False
+                                and after["advancedHidden"] is False)
+                # 0 条的那几档要置灰；但当前选中的那一档不能置灰 —— 那正是用户退回来的出口。
+                zero_rows = [row for row in after["types"] if row["text"].endswith("0")]
+                greys_zero = all(row["disabled"] for row in zero_rows if not row["active"])
+                keeps_active = all(not row["disabled"] for row in after["types"] if row["active"])
+                no_cards = after["cards"] == 0
+                entry["ok"] = bool(keeps_types and keeps_groups and greys_zero and keeps_active and no_cards)
+                print(("PASS  " if entry["ok"] else "FAIL  ")
+                      + f"搜索无结果时筛选栏不许塌：题型 {len(after['types'])} 个按钮、"
+                        f"答案/审核两组都在={keeps_groups}、0 的都置灰={greys_zero}、"
+                        f"当前那档仍可点={keeps_active}", flush=True)
+                if not entry["ok"]:
+                    print("      " + json.dumps(entry, ensure_ascii=False)[:900], flush=True)
+                page.screenshot(path=str(OUT / "no-hit-rail.png"))
+
+            def lock_state(page) -> dict:
+                return page.evaluate("""()=>{
+                  const grab = sel => [...document.querySelectorAll(sel)].map(n=>n.disabled);
+                  return {search: document.querySelector('#searchInput').disabled,
+                          source: document.querySelector('#sourceSelect').disabled,
+                          sort: document.querySelector('#sortSelect').disabled,
+                          types: grab('#typeFilters button'),
+                          advanced: grab('.library-advanced button, .library-advanced select')};
+                }""")
+
+            def lock_case() -> None:
+                """「已选题」把筛选锁住，切回全部题目必须全部解开。
+
+                这条是被真回归撞出来的：解锁那一行原先从 disabled 反推「哪些是 0 条置灰的」，
+                于是「已选题」锁过的搜索框和来源在切回来之后永远解不开，只能刷新页面。
+                """
+                page.goto(f"http://127.0.0.1:{port}/library", wait_until="networkidle")
+                page.wait_for_selector("#libraryList .library-card", timeout=15000)
+                page.wait_for_timeout(300)
+                # 先点一档有题的题型，让「本来就没有所以置灰」和「已选题锁住」两种
+                # 来源分开 —— 否则切回来之后分不清哪个该解、哪个本来就该灰着。
+                page.locator("#typeFilters button", has_text="填空题").first.click()
+                page.wait_for_timeout(600)
+                base = lock_state(page)
+                page.locator("#basketViewButton").click()
+                page.wait_for_timeout(500)
+                locked = lock_state(page)
+                page.locator("#allQuestionsButton").click()
+                page.wait_for_timeout(500)
+                free = lock_state(page)
+                entry = {"name": "已选题锁筛选、切回来解得开", "base": base, "locked": locked, "free": free}
+                report["cases"].append(entry)
+                everything = lambda state: ([state["search"], state["source"], state["sort"]]
+                                           + state["types"] + state["advanced"])
+                all_locked = all(everything(locked))
+                # 判据是「和我进去之前一模一样」，不是「全都可点」：没有题的那几档
+                # 本来就该灰着，替它们解锁才是 bug。
+                back_to_base = free == base
+                # 搜索框、来源、排序永远不按 0 条置灰，所以这三个必须真的解开。
+                opened = not (free["search"] or free["source"] or free["sort"])
+                entry["ok"] = bool(all_locked and back_to_base and opened)
+                print(("PASS  " if entry["ok"] else "FAIL  ")
+                      + f"已选题时 {len(everything(locked))} 个控件全锁={all_locked}、"
+                        f"切回来和进去前一样={back_to_base}、搜索/来源/排序解开={opened}", flush=True)
+                if not entry["ok"]:
+                    print("      " + json.dumps(entry, ensure_ascii=False)[:900], flush=True)
+
             algebra, function = "代数", "函数"
             case("全部 120 道", {})
             case("单选 40 道（正好一页，不该有「加载更多」）", {"type": "single_choice"})
@@ -243,6 +337,8 @@ def run(port: int) -> None:
             case("代数 + AI 审核（40 道，全无答案）", {"tag": algebra, "review": "ai"})
             case("筛不出任何一道", {"type": "multiple_choice"})
             case("搜一个只有一道命中的词", {"q": "ZZTOPZZ"})
+            rail_case()
+            lock_case()
             page.screenshot(path=str(OUT / "library-final.png"), full_page=True)
             browser.close()
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

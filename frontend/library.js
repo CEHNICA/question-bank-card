@@ -17,6 +17,9 @@
     answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools")
   };
   const params = new URL(window.location.href).searchParams;
+  // 筛选栏里题型固定的排列顺序。题库里没有的也要占一个位置（数字 0、置灰），
+  // 免得另一个筛选把结果清空时，整排按钮跟着一起消失。
+  const FILTER_TYPES = ["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"];
   const state = {
     q: params.get("q") || "",
     document: params.get("document") || "",
@@ -266,33 +269,58 @@
     $("sortSelect").value = state.sort;
     ui.types.replaceChildren();
     const total = Object.values(facets.types).reduce((sum, value) => sum + value, 0);
-    const typeKeys = new Set([...Object.keys(facets.types), ...(state.type ? [state.type] : [])]);
-    [["", "全部题型", total], ...[...typeKeys].map((key) => [key, QB.TYPE_NAMES[key] || key, facets.types[key] || 0])]
+    // 服务端给的分面是「当前筛选之后」的。所以在搜索或标签筛不出东西时，分面会整个
+    // 空掉 —— 题型按钮会跟着全部消失，只剩一个「全部题型 0」，答题/审核分组整个不见，
+    // 「更多筛选」也跟着没了。用户只是敲错了一个词，整条筛选栏看上去像坏掉了。
+    // 题型是固定的五类，一律留着；没有的那一档置灰但仍然看得见。
+    const typeKeys = [...FILTER_TYPES,
+      ...Object.keys(facets.types).filter((key) => !FILTER_TYPES.includes(key)),
+      ...(state.type ? [state.type] : [])]
+      .filter((key, index, all) => all.indexOf(key) === index);
+    [["", "全部题型", total], ...typeKeys.map((key) => [key, QB.TYPE_NAMES[key] || key, facets.types[key] || 0])]
       .forEach(([key, label, count]) => {
         const button = node("button", `draft-filter${state.type === key ? " active" : ""}`);
         button.append(node("span", "", label), node("span", "count", count));
         button.type = "button";
         button.setAttribute("aria-pressed", String(state.type === key));
+        // 当前这一档是 0 时不能置灰 —— 那正是用户想取消掉的。
+        // 置灰写成标记、由结尾统一套用，不要在这里就直接设 disabled：结尾还要
+        // 把「已选题」的锁整体套上去，从 disabled 反推会把上一次锁过的控件永久锁死。
+        if (!count && state.type !== key) {
+          button.dataset.emptyFacet = "1";
+          button.title = `当前筛选下没有${label}`;
+        }
         button.addEventListener("click", () => { state.type = key; syncUrl(); load(); });
         ui.types.append(button);
       });
-    renderReviewFilters(facets.reviews || {});
-    renderAnswerFilters(facets.answers || {});
+    // 一个筛选把结果清空时，别把「这里本来还有什么」也一起收走：这时候保留
+    // 全部分组（数字如实是 0），用户才看得见题库里还有哪些东西可筛。
+    const emptied = !(Number(state.total) || 0);
+    renderReviewFilters(facets.reviews || {}, emptied);
+    renderAnswerFilters(facets.answers || {}, emptied);
     renderTagFilter(facets.tags || []);
     renderExtraTools();
     // 四个分组全空时，「更多筛选」点开了也是一片空白 —— 那就不出现。
     $("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox, ui.extraTools]
       .every((box) => box.hidden);
     const selectedView = state.view === "selected";
-    for (const control of [ui.search, ui.source, $("sortSelect"), ...document.querySelectorAll("#typeFilters button, .library-advanced button, .library-advanced select")]) control.disabled = selectedView;
+    // 「已选题」视图下所有筛选都要锁住。但上面刚刚标了「0 条」的那些不能一起解锁 ——
+    // 这一行以前会把它们全部改回可点，置灰等于没做。
+    const controls = [ui.search, ui.source, $("sortSelect"),
+      ...document.querySelectorAll("#typeFilters button, .library-advanced button, .library-advanced select")];
+    // 用标记而不是 disabled 反推：从 disabled 反推读的是上一次渲染留下的值，
+    // 「已选题」锁过的搜索框和来源就再也解不开了。
+    for (const control of controls) control.disabled = selectedView || control.dataset.emptyFacet === "1";
   }
 
   // 有没有答案：挑出原卷没给答案的题（补答案或做 AI 参考答案时用）。
-  function renderAnswerFilters(answers) {
+  function renderAnswerFilters(answers, emptied = false) {
     const box = ui.answerFilters;
     const yes = Number(answers.yes) || 0;
     const no = Number(answers.no) || 0;
-    box.hidden = !no && !state.answer;
+    // emptied：别的筛选把结果清空了。这时候保留整组（数字如实是 0），
+    // 用户才知道「有答案」这一档本来存在、只是这次一道都没有。
+    box.hidden = !emptied && !no && !state.answer;
     box.replaceChildren();
     if (box.hidden) return;
     [["", "全部", yes + no], ["yes", "有答案", yes], ["no", "无答案", no]].forEach(([key, label, count]) => {
@@ -300,6 +328,10 @@
       button.append(node("span", "", label), node("span", "count", count));
       button.type = "button";
       button.setAttribute("aria-pressed", String(state.answer === key));
+      if (!count && state.answer !== key) {
+        button.dataset.emptyFacet = "1";
+        button.title = `当前筛选下没有「${label}」的题`;
+      }
       button.addEventListener("click", () => { state.answer = key; syncUrl(); load(); });
       box.append(button);
     });
@@ -358,11 +390,11 @@
   }
 
   // 只在题库里有 AI 审核入库的题时出现：可以只看人工核对过的，或把 AI 审核的挑出来抽查。
-  function renderReviewFilters(reviews) {
+  function renderReviewFilters(reviews, emptied = false) {
     const box = $("reviewFilters");
     const ai = Number(reviews.ai) || 0;
     const human = Number(reviews.human) || 0;
-    box.hidden = !ai && !state.review;
+    box.hidden = !emptied && !ai && !state.review;
     box.replaceChildren();
     if (box.hidden) return;
     [["", "全部", ai + human], ["human", "人工核对", human], ["ai", "AI 审核", ai]].forEach(([key, label, count]) => {
@@ -371,6 +403,11 @@
       button.type = "button";
       button.setAttribute("aria-pressed", String(state.review === key));
       if (key === "ai") button.title = "AI 助手审核后入库、还没人工核对的题";
+      // 和题型、答案两档一致：当前筛选下一道都没有的那档置灰，但仍看得见。
+      if (!count && state.review !== key) {
+        button.dataset.emptyFacet = "1";
+        button.title = `当前筛选下没有「${label}」的题`;
+      }
       button.addEventListener("click", () => { state.review = key; syncUrl(); load(); });
       box.append(button);
     });
