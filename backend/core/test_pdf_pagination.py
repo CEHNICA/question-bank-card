@@ -209,3 +209,24 @@ class SharedPdfPaginationTests(SimpleTestCase):
         notes=[answer["text"] for page in geometry["pages"] for answer in page["answers"] if "AI" in answer["text"]]
         self.assertTrue(notes)
         self.assertTrue(all(text.startswith("（AI 参考，未核对）") for text in notes))
+
+    def test_source_image_origin_is_visible_in_preview_and_export_alike(self):
+        """原图题只建 .qb-stem，没有 .qb-stem-body。
+
+        题源在导出侧已经能落到 .qb-stem 上，预览侧却只认 .qb-stem-body，于是这类题
+        在屏幕上没有题源、导出的卷子上有 —— 老师照屏幕核对会对不上号。
+        """
+        before=deepcopy(self.items)
+        items=deepcopy(self.items)
+        items[0]["content"].update(body_mode="source_image",stem="",origin="2024 全国甲卷 第 1 题")
+        items[0]["images"]=[{"slot":"stem","bytes":self.image_bytes,"size":(363,349)}]
+        options={**self.options,"origin":True}
+        with mock.patch.object(pdf,"_DRIVER",_preview_driver()):
+            preview=pdf._html_document(items,"原图题源对齐",options)
+        exported=pdf._html_document(items,"原图题源对齐",options)
+        _,preview_count,preview_geometry=self.render(preview)
+        _,export_count,geometry=self.render(exported)
+        self.assertEqual(preview_count,export_count)
+        self.assert_geometry(preview_geometry,geometry)
+        self.assertIn("2024 全国甲卷 第 1 题",geometry["pages"][0]["questions"][0]["text"])
+        self.assertEqual(self.items,before)

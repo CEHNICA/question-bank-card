@@ -2173,7 +2173,9 @@
           const block = node("div", "print-question");
           QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
           const origin = item.origin || item.content?.origin;
-          if (ui.printOrigin.checked && origin) block.querySelector(".qb-stem-body")?.prepend(node("span", "print-origin", `（${origin}）`));
+          // 原图题只建 .qb-stem，没有 .qb-stem-body。两边的插入点必须一样，
+// 否则这类题在屏幕上没题源、导出的卷子上有，老师照着屏幕核对会找不到。
+if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || block.querySelector(".qb-stem"))?.prepend(node("span", "print-origin", `（${origin}）`));
           block.dataset.questionId = item.id;
           block.dataset.questionType = item.question_type;
           const space = window.ExamLayout.answerSpace(item.question_type, item.id, options);
