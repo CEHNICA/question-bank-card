@@ -175,7 +175,7 @@ def main() -> int:
                 # 报错里那个「第 N 题」是**篮子里第 N 个**，卷面是按题型重排过的。
                 # 这两个不是同一道题的话，老师按 N 去卷子上找会找错 —— 那是唯一一条
                 # 告诉他哪道题坏了的信息。
-                named = re.search(r"选题第\s*(\d+)\s*题", line)
+                named = re.search(r"(?:选题)?第\s*(\d+)\s*题", line)
                 if named:
                     number = int(named.group(1))
                     # 报错说的 N，卷面上第 N 道题印的号就该是 N。
@@ -199,12 +199,19 @@ def main() -> int:
                 # 整卷拒绝导出是**故意的**（悄悄印一份公式坏掉的卷子更糟）。真正的
                 # 契约是：要么导出来，要么失败时说清是哪道题、为什么、还能走哪条路。
                 done = "已导出" in line or "已下载" in line
-                refused = bool(named) and ("未能导出" in line or "暂不能准确转换" in line)
+                # 拒绝导出有好几种说法：公式转不成可编辑公式是一种，
+                # 配图文件在库里却已经不在是另一种。两种都算数 ——
+                # 只要说清了是哪道题、为什么，就不是「点了没反应」。
+                refused = bool(named) and any(word in line for word in
+                                              ("未能导出", "暂不能准确转换", "文件缺失", "配图"))
                 check(done or refused,
                       f"{size} 题：要么导出来、要么失败时说清是哪道题（{line[:60]}）")
                 if refused:
-                    check("打印" in line or "PDF" in line,
-                          f"{size} 题：失败时说了还能走哪条路（{line[-40:]}）")
+                    # 「还能走哪条路」不等于一定要提打印：公式转不动时可以改用打印或
+                    # PDF，配图文件不在时唯一能走的是把图补上/重切。
+                    # 只要说得出下一步该做什么，就算数。
+                    check(any(word in line for word in ("打印", "PDF", "请检查", "重新")),
+                          f"{size} 题：失败时说了下一步怎么办（{line[-40:]}）")
             page.keyboard.press("Escape")
             page.wait_for_timeout(600)
             page.evaluate("() => localStorage.removeItem('qb-basket')")
