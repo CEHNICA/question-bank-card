@@ -140,6 +140,29 @@
     return name || "试卷.docx";
   }
 
+  // 卷面按题型分组重排，这是**唯一**一份分组顺序：预览照它排、导出照它编号。
+  // 两边各写一份的话，迟早会对不上 —— 而对不上的后果是导出报错里那个「第 N 题」
+  // 指向卷面上的另一道题，老师按着找会找错。
+  const PAPER_GROUPS = [["single_choice", "选择题"], ["multiple_choice", "多选题"],
+    ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]];
+
+  function paperGroups(items) {
+    const list = (Array.isArray(items) ? items : []).filter((item) => item && typeof item === "object");
+    const known = new Set(PAPER_GROUPS.map(([key]) => key));
+    const groups = [];
+    for (const [key, name] of PAPER_GROUPS) {
+      const group = list.filter((item) => item.question_type === key);
+      if (group.length) groups.push([name, group]);
+    }
+    const others = list.filter((item) => !known.has(item.question_type));
+    if (others.length) groups.push(["其他", others]);
+    return groups;
+  }
+
+  function paperOrder(items) {
+    return paperGroups(items).flatMap(([, group]) => group.map((item) => item.id));
+  }
+
   async function download(items, { title, print_options, solutions, format = "docx" } = {}) {
     if (downloading) throw new Error("正在导出，请稍候。");
     if (!Array.isArray(items) || !items.length) throw new Error("请先选题，再导出试卷。");
@@ -149,10 +172,20 @@
     if ((options.document === "answers" || format === "split") && !items.some((item) => selectedAnswer(item, options))) throw new Error("所选题目没有可附的答案或解析，请先导出题目卷。");
     downloading = true;
     try {
+      // 先验编号，再排顺序 —— 排顺序要读 item.question_type，坏数据不能走到那一步。
+      const seenIds = new Set();
+      for (const item of items) {
+        if (!item || typeof item.id !== "string" || !item.id || seenIds.has(item.id)) throw new Error("选题编号不完整或重复，请重新打开组卷预览。");
+        seenIds.add(item.id);
+      }
+      // 按卷面顺序发，不是按试题篮顺序。后端报的「第 N 题」是 ids 里的位置，
+      // 篮里的顺序跟卷面（按题型重排）不是一回事时，老师按那个号去卷子上找会找错。
+      // 排出来的文件本身不受影响：后端还会按题型再分一次组，组内顺序不变。
+      const rank = new Map(paperOrder(items).map((id, index) => [id, index]));
+      const ordered = [...items].sort((a, b) => (rank.get(a.id) ?? items.length) - (rank.get(b.id) ?? items.length));
       const rendered_fields = {};
-      for (let index = 0; index < items.length; index++) {
-        if (!items[index] || typeof items[index].id !== "string" || !items[index].id || Object.hasOwn(rendered_fields, items[index].id)) throw new Error("选题编号不完整或重复，请重新打开组卷预览。");
-        rendered_fields[items[index].id] = serializeItem(items[index], options, format, index);
+      for (let index = 0; index < ordered.length; index++) {
+        rendered_fields[ordered[index].id] = serializeItem(ordered[index], options, format, index);
         if (index % 8 === 0) await new Promise((resolve) => root.setTimeout(resolve, 0));
       }
       const selectedIds = new Set(items.map(item => item.id));
@@ -163,7 +196,7 @@
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
         .filter(([id, value]) => selectedIds.has(id) && ["none", "small", "medium", "large"].includes(value)));
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
-      const body = JSON.stringify({ ids: items.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
+      const body = JSON.stringify({ ids: ordered.map((item) => item.id), title: String(title ?? "").trim() || "练习", print_options: options, rendered_fields, solutions: fixedSolutions, format });
       if (new TextEncoder().encode(body).byteLength > MAX_REQUEST) throw new Error("本次选题内容较多，请减少题目后分批导出。");
       const headers = { "Content-Type": "application/json", "X-QB-Request": "1" };
       // A machine preference is deliberately separate from this paper/draft.
@@ -205,5 +238,5 @@
     } finally { downloading = false; }
   }
 
-  return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, download });
+  return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, paperGroups, paperOrder, download });
 });

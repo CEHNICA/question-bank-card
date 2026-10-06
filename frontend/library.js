@@ -2076,15 +2076,22 @@
       syncExportButtons();
       return;
     }
-    const groups = [["single_choice", "选择题"], ["multiple_choice", "多选题"], ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]];
-    const known = new Set(groups.map(([key]) => key));
-    const ordered = [];
-    groups.forEach(([key, name]) => {
-      const group = items.filter((item) => item.question_type === key);
-      if (group.length) ordered.push([name, group]);
-    });
-    const others = items.filter((item) => !known.has(item.question_type));
-    if (others.length) ordered.push(["其他", others]);
+    // 分组顺序只有一份定义（导出那边也用同一份）：两边各写一份的话，后端报的
+    // 「第 N 题」迟早和卷面上看到的对不上。ExamExport 没载入时退回本地那份。
+    const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
+    const ordered = window.ExamExport?.paperGroups
+      ? window.ExamExport.paperGroups(items)
+      : (() => {
+        const out = [];
+        for (const [key, name] of [["single_choice", "选择题"], ["multiple_choice", "多选题"],
+          ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]]) {
+          const group = items.filter((item) => item.question_type === key);
+          if (group.length) out.push([name, group]);
+        }
+        const other = items.filter((item) => !knownTypes.has(item.question_type));
+        if (other.length) out.push(["其他", other]);
+        return out;
+      })();
     const chinese = ["一", "二", "三", "四", "五", "六"];
     let number = 0;
     const answers = [];
@@ -2181,8 +2188,8 @@
       ui.paper.replaceChildren(...result.pages);
       ui.paper.dataset.pageCount = String(result.page_count);
       window.ExamLayout.scale(ui.paper);
-      const seen = new Set();
       const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
+      const seen = new Set();
       ui.paper.querySelectorAll(".print-question").forEach(question => {
         const id = question.dataset.questionId;
         if (seen.has(id)) return;
