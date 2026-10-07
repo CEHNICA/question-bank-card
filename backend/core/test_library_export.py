@@ -520,7 +520,10 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_question_paragraphs_keep_together_and_release_the_final_chain(self):
         pub = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"})
         self.figure(pub, slot="A")
-        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False, "pagination": "keep"}))
+        # Vertical keeps each option in its own body paragraph, which is what
+        # this test reads; the two-column grid puts them in table cells.
+        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False,
+                                                                "pagination": "keep", "option_layout": "vertical"}))
         self.assertEqual(response.status_code, 200)
         xml = document_xml(response.content)
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
@@ -664,19 +667,22 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_global_and_per_question_columns_and_font_size_safe_fallback(self):
         first = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
         second = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
-        options = {"document": "questions", "option_layout": "four", "option_overrides": {str(second.id): "two"}}
+        # The per-question override still wins. Four columns arrive as two:
+        # the printed question box is 178mm, so the preview's own container
+        # query never shows four there either.
+        options = {"document": "questions", "option_layout": "four", "option_overrides": {str(second.id): "vertical"}}
         result = self.post(self.payload([first, second], print_options=options))
         tables = document_xml(result.content).findall(".//w:tbl", NS)
-        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [4, 2])
-        first.content["options"] = {key: "中文测试字符" for key in "ABCD"}  # six CJK characters
+        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [2])
+        first.content["options"] = {key: "长" * 14 for key in "ABCD"}  # wide enough to react to the font size
         first.save(update_fields=["content"])
         columns = []
         for size in (12, 16):
             result = self.post(self.payload([first], print_options={"document": "questions", "option_layout": "four", "font_size": size}))
             table = document_xml(result.content).find(".//w:tbl", NS)
-            columns.append(len(table.findall("w:tblGrid/w:gridCol", NS)))
+            columns.append(len(table.findall("w:tblGrid/w:gridCol", NS)) if table is not None else 0)
             self.assertIn(f'w:val="{size * 2}"'.encode(), etree.tostring(document_xml(result.content)))
-        self.assertEqual(columns, [4, 2])
+        self.assertEqual(columns, [2, 0], "a bigger font must still fall back: two columns, then one per line")
 
     def test_five_options_and_wide_forced_four_never_drop_or_shrink_content(self):
         pub = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCDE"})
@@ -806,25 +812,60 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
 
     def test_four_short_options_auto_uses_four_columns_and_complex_options_keep_vertical(self):
+        # Four short options: the preview and the PDF show them 2x2, because the
+        # printed question box is 178mm (673px) and styles.css turns four option
+        # columns into two under its 680px container query. Word must match.
         pub = self.publication(kind="single_choice", options={key: "离线选项" for key in "ABCD"})
         result = self.post(self.payload([pub], print_options={"document": "questions"}))
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertIsNotNone(table)
-        self.assertEqual(len(table.findall("w:tr", NS)), 1)
-        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 4)
+        self.assertEqual(len(table.findall("w:tr", NS)), 2)
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
         self.assertEqual(table.find("w:tblPr/w:tblBorders/w:top", NS).get(f'{{{NS["w"]}}}val'), "nil")
         for paragraph in table.findall("w:tr", NS)[-1].findall(".//w:p", NS):
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        # Wide, multi-line or diagram options still fall back to one per line.
         for mutation in (lambda: pub.content["options"].update(A="长" * 37),
-                         lambda: pub.content["options"].update(A="第一行\n第二行"),
-                         lambda: self.figure(pub, slot="A")):
+                         lambda: pub.content["options"].update(A="第一行\n第二行")):
             pub.content["options"]["A"] = "离线选项"
             mutation()
             pub.save(update_fields=["content"])
             response = self.post(self.payload([pub], print_options={"document": "questions"}))
             self.assertEqual(response.status_code, 200)
             self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
+
+    def test_four_option_figures_use_the_same_two_columns_as_the_preview(self):
+        # Diagrams on the choices are the case that reads worst when it drifts:
+        # the preview shows them 2x2 and the download used to show four lines.
+        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        pub.content["figures"] = []
+        for index, key in enumerate("ABCD", 1):
+            target = folder / f"figure-{index}.png"
+            Image.new("RGB", (240, 120), "red").save(target)
+            pub.content["figures"].append({"slot": key, "file": target.name,
+                                           "page_idx": 0, "bbox": [0, 0, 100, 100]})
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+        table = tree.find(".//w:tbl", NS)
+        self.assertIsNotNone(table, "four option diagrams must lay out as 2x2, not one per line")
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
+        self.assertEqual(len(table.findall("w:tr", NS)), 2)
+        self.assertEqual(len(table.findall(".//a:blip", NS)), 4)
+        for letter in "ABCD":
+            self.assertIn(letter + ".", "".join(tree.itertext()))
+        # A diagram too wide for two columns still goes one per line. Asking for
+        # two columns explicitly is what makes the download say it could not.
+        Image.new("RGB", (900, 300), "red").save(folder / "figure-1.png")
+        response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "two"}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
+        self.assertIn("X-QB-Layout-Warning", response)
 
     def test_explicit_picture_columns_retain_all_labels_images_and_natural_width(self):
         pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
@@ -837,7 +878,10 @@ class LibraryExportTests(ExportFixture, TestCase):
             pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
-        for mode, columns in (("four", 4), ("two", 2), ("vertical", 0), ("auto", 0)):
+        for mode, columns in (("four", 2), ("two", 2), ("vertical", 0), ("auto", 2)):
+            # "four" and "auto" both land on two columns: the preview's printed
+            # question box is 178mm, so four option columns never survive the
+            # 680px container query there either.
             with self.subTest(mode=mode):
                 response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": mode}))
                 self.assertEqual(response.status_code, 200, response.content[:100])
@@ -959,9 +1003,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNone(tree.find(".//w:tbl", NS), "a scanned page keeps one picture per line")
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
 
-    def test_stem_grid_leaves_option_figures_on_their_own_lines(self):
-        # Only the preview's figure row is gridded. Option diagrams keep the
-        # layout the option columns already give them.
+    def test_stem_and_option_figures_each_get_their_own_grid(self):
+        # The stem row and the option grid are separate: each follows the
+        # preview for its own area, and neither swallows the other's pictures.
         pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -978,9 +1022,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         tree = document_xml(response.content)
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 8)
         tables = tree.findall(".//w:tbl", NS)
-        self.assertEqual(len(tables), 1, "Auto option layout is vertical, so only the stem row is a grid")
-        self.assertEqual(len(tables[0].findall("w:tblGrid/w:gridCol", NS)), 2)
-        self.assertEqual(len(tables[0].findall(".//a:blip", NS)), 4)
+        self.assertEqual(len(tables), 2, "one grid for the stem figures, one for the options")
+        for table in tables:
+            self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
+            self.assertEqual(len(table.findall(".//a:blip", NS)), 4)
+        self.assertEqual(len(tables[0].findall("w:tr", NS)), 2)
+        self.assertEqual(len(tables[1].findall("w:tr", NS)), 2)
 
     def test_inline_missing_solution_does_not_emit_a_separate_placeholder(self):
         complete = self.publication(answer="2", analysis="有答案的过程")

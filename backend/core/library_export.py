@@ -953,6 +953,23 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
 # 是 1/96 英寸。实测四张 240px 的图预览排成 2×2，Word 原来每张一个段落，排成 1×4。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
+# styles.css: "@container qpaper (max-width: 680px) { .qb-options.cols-4 ->
+# two columns }". The container is .qb-question, and on a printed page that is
+# the 178mm text area (673px), so the preview and the PDF always show four
+# options as 2x2. Word is always that page, so it applies the same reduction:
+# without it every four-option question downloads as 1x4.
+#
+# Known remaining difference: five options each carrying a diagram. The
+# preview keeps five columns and lets the images shrink to ~82px, while Word
+# refuses to shrink content to hold a column count (it warns instead), so it
+# lays those out in two columns. Left alone on purpose.
+PREVIEW_OPTION_FOUR_COLUMN_MAX_PX = 680
+
+
+def _preview_option_columns(columns, text_width_mm=178):
+    if columns == 4 and text_width_mm / 25.4 * PREVIEW_PX_PER_INCH <= PREVIEW_OPTION_FOUR_COLUMN_MAX_PX:
+        return 2
+    return columns
 
 
 def _figure_columns(images, text_width_mm=178):
@@ -1155,8 +1172,7 @@ def _option_columns(item, options, *, text_width_mm=178):
     values = item["content"].get("options") or {}
     requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
     letters = [key for key in "ABCDE" if str(values.get(key) or "").strip() or any(image["slot"] == key for image in item["images"])]
-    pictures = any(image["slot"] in "ABCDE" for image in item["images"])
-    if len(letters) < 2 or requested == "vertical" or (pictures and requested == "auto"):
+    if len(letters) < 2 or requested == "vertical":
         return 1
     widths = []
     for letter in letters:
@@ -1183,7 +1199,7 @@ def _option_columns(item, options, *, text_width_mm=178):
     for columns in candidates:
         # Cell margins and a 10% reserve absorb font/rendering variation.
         if max(widths) <= (text_width_mm / columns - 4.0) * 0.90:
-            return columns
+            return _preview_option_columns(columns, text_width_mm)
     return 1
 
 

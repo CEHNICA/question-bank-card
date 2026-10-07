@@ -53,6 +53,25 @@ const dpiConstant = exporter.match(/PREVIEW_PX_PER_INCH\s*=\s*(\d+)/);
 assert.ok(dpiConstant, "one CSS pixel is 1/96 inch");
 assert.equal(Number(dpiConstant[1]), 96, "CSS px to inch is fixed by the browser");
 
+// --- option columns -----------------------------------------------------------
+// The container is .qb-question ("container: qpaper / inline-size"), so on a
+// printed page it is the 178mm text area: four option columns never survive
+// there. Word has to apply the same reduction or every four-option question
+// downloads as 1x4 while the preview shows 2x2.
+const query = styles.match(/@container\s+qpaper\s*\(max-width:\s*(\d+)px\)\s*\{\s*\.qb-options\.cols-4/);
+assert.ok(query, "styles.css reduces four option columns on a narrow question box");
+const fourColumnMaxPx = Number(query[1]);
+
+const optionMax = exporter.match(/PREVIEW_OPTION_FOUR_COLUMN_MAX_PX\s*=\s*(\d+)/);
+assert.ok(optionMax, "library_export.py names the option-column threshold it assumes");
+assert.equal(Number(optionMax[1]), fourColumnMaxPx,
+  `Word drops four option columns at ${optionMax[1]}px but the CSS does it at ${fourColumnMaxPx}px`);
+assert.ok(widthMm / 25.4 * 96 <= fourColumnMaxPx,
+  `the printed text area is ${(widthMm / 25.4 * 96).toFixed(1)}px, so four options really do become two`);
+
+assert.match(exporter, /def _preview_option_columns\(/,
+  "the reduction lives in one place both column decisions go through");
+
 // --- the wrapping itself, checked against what Chrome was measured doing ------
 // Cases come from measuring the real renderer at a 178mm container.
 function wrap(sizes, mm = widthMm, gapPxValue = gapPx) {
@@ -74,4 +93,5 @@ assert.equal(wrap([300, 300, 300, 300, 300]), 2, "five 300px diagrams wrap two p
 assert.equal(wrap([240]), 1, "one diagram is never a grid");
 
 console.log(`figure layout parity: ${gapPx}px gap, ${widthMm}mm text area, `
-  + `four 240px diagrams -> ${wrap(four)} per row (matches the measured preview)`);
+  + `four 240px diagrams -> ${wrap(four)} per row (matches the measured preview); `
+  + `four options -> 2 columns on the printed ${(widthMm / 25.4 * 96).toFixed(0)}px page`);
