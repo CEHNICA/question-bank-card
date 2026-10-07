@@ -81,7 +81,7 @@ class FigureStripTests(SimpleTestCase):
         return Image.new("RGB", size, "white")
 
     def figure(self, bbox, page_idx=0):
-        return {"page_idx": page_idx, "bbox": list(bbox)}
+        return {"page_idx": page_idx, "bbox": bbox}
 
     def strip_width(self, figures):
         return imaging.figure_strip(lambda index: self.page(), figures).width
@@ -121,6 +121,52 @@ class FigureStripTests(SimpleTestCase):
                                                 [self.figure([0, 0, 0, 0])]))
         self.assertIsNone(imaging.figure_strip(lambda index: self.page(), [self.figure([500, 400, 200, 600])]))
         self.assertIsNone(imaging.figure_strip(lambda index: self.page(), []))
+
+    def test_a_box_written_wrongly_also_gives_no_picture_at_all(self):
+        # 「裁不出图就返回 None」这条承诺以前只对坐标反了成立。少一维、坐标是
+        # 字符串或 None、NaN、无穷、超出页面：五种各自抛一种异常，其中三种
+        # 调用方的 ``except ValueError`` 接不住，一道题的框坏掉就整份卷子停住。
+        for bbox in ([0, 0, 100], [0, 0, 100, 100, 100], [], None, "0,0,100,100",
+                     [0, 0, 100, None], [0, 0, 100, "80"], [0, 0, 100, True],
+                     [0, 0, 100, float("nan")], [0, 0, 100, float("inf")],
+                     [-5, 0, 100, 100], [0, 0, 1001, 100]):
+            with self.subTest(bbox=bbox):
+                self.assertIsNone(imaging.figure_strip(lambda index: self.page(),
+                                                        [self.figure(bbox)]))
+
+    def test_one_bad_box_poisons_the_whole_strip(self):
+        good = self.figure([0, 0, 100, 100])
+        self.assertIsNone(imaging.figure_strip(lambda index: self.page(),
+                                                [good, self.figure([0, 0, 0, 0]), good]))
+
+    def test_a_page_that_cannot_be_loaded_gives_no_picture_at_all(self):
+        # 页码越界、缓存损坏、取页拿到不是图像的东西：同样是不给图。
+        for loader in (lambda index: None,
+                       lambda index: (_ for _ in ()).throw(IndexError("没有这一页")),
+                       lambda index: (_ for _ in ()).throw(ValueError("缓存坏了")),
+                       lambda index: (_ for _ in ()).throw(TypeError("不是图像"))):
+            with self.subTest(loader=loader):
+                self.assertIsNone(imaging.figure_strip(loader, [self.figure([0, 0, 100, 100])]))
+
+    def test_a_box_outside_the_page_is_still_clamped_not_rejected(self):
+        # ``figure_strip`` 自己加边距时就会算出负坐标和超过页宽的框；
+        # ``to_pixels`` 收超出页面的框是它的本分，不能一并拒掉。
+        self.assertEqual(imaging.to_pixels([-2, -2, 102, 22], (1000, 1000)),
+                         (0, 0, 102, 22))
+
+    def test_a_box_written_wrongly_raises_the_one_error_callers_catch(self):
+        # 调用方写的是 ``except ValueError``，所以格式不对也得是 ValueError，
+        # 不能是解包错、类型错、溢出那几种接不住的。
+        for bbox in ([0, 0, 100], [], None, "0,0,100,100",
+                     [0, 0, 100, None], [0, 0, 100, "80"],
+                     [0, 0, 100, float("nan")], [0, 0, 100, float("inf")]):
+            with self.subTest(bbox=bbox):
+                with self.assertRaises(ValueError):
+                    imaging.to_pixels(bbox, (1000, 1000))
+
+    def test_a_box_smaller_than_a_pixel_still_says_so(self):
+        with self.assertRaisesMessage(ValueError, "范围小于一个像素"):
+            imaging.to_pixels([100, 100, 100, 200], (1000, 1000))
 
 
 class GeometricOwnershipGateTests(TestCase):

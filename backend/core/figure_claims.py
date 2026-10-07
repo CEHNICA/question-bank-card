@@ -38,7 +38,15 @@ def frame_key(item: dict) -> str | None:
 def figure_frames(item: dict) -> list[dict]:
     if not isinstance(item, dict):
         return []
-    pieces = [item, *(item.get("parts") or [])]
+    parts = item.get("parts")
+    # ``parts`` is written as a list and validated on the way in, but a card can
+    # also come from an import or an older row.  Spreading a non-iterable here
+    # raised TypeError, and this runs over every figure of every card — one
+    # malformed row stopped the whole paper's ledger.  ``views``/``tables``
+    # already skip non-dict parts; do the same.
+    if not isinstance(parts, (list, tuple)):
+        parts = []
+    pieces = [item, *parts]
     return [{"page_idx": piece["page_idx"], "bbox": list(piece["bbox"])}
             for piece in pieces if frame(piece) is not None]
 

@@ -3,7 +3,7 @@ from copy import deepcopy
 
 from django.test import SimpleTestCase, TestCase
 
-from . import figure_policy, pipeline
+from . import figure_claims, figure_policy, pipeline
 from .models import Paper, Question, QuestionGroup
 
 
@@ -131,3 +131,41 @@ class FigureClaimWinnerIntegrationTests(TestCase):
         plain.refresh_from_db()
         self.assertEqual(len(cued.figures), 1)
         self.assertEqual(len(plain.figures), 1)
+
+    def test_one_broken_row_does_not_stop_the_whole_paper(self):
+        # ``figure_frames`` 以前把 ``parts`` 直接摊开：它不是列表（导入的数据、
+        # 老行）就抛 TypeError，而它遍历每张卡的每张图——一行坏数据就把整份卷子
+        # 的归属清单打断。写进去的路径是校验过的，读的路径也得站得住。
+        for parts in (5, "abc", 0, {"a": 1}, True):
+            with self.subTest(parts=parts):
+                self.assertEqual(
+                    figure_claims.figure_frames({**diagram(), "parts": parts}),
+                    [{"page_idx": 0, "bbox": list(BOX)}])
+
+    def test_parts_that_are_not_dicts_are_skipped(self):
+        figure = {**diagram(), "parts": [None, 5, {"page_idx": 0}, {"bbox": [0, 0, 9, 9]},
+                                         {"page_idx": 1, "bbox": [0, 0, 10, 10]}]}
+        self.assertEqual(
+            figure_claims.figure_frames(figure),
+            [{"page_idx": 0, "bbox": list(BOX)}, {"page_idx": 1, "bbox": [0, 0, 10, 10]}])
+
+    def test_a_paper_whose_cards_carry_broken_parts_still_gets_a_ledger(self):
+        good = self.question(12, CUED, figures=[diagram()])
+        broken = self.question(13, PLAIN, figures=[{**diagram(slot="A"), "parts": 5}])
+        ledger = pipeline.audit_figure_claims(self.paper, revision=1)
+        self.assertIn("figures", ledger)
+        # 同一张原卷图被两张卡认领，两边都要标出来——清单照常，只是别再中断。
+        self.assertEqual(len(ledger["conflicts"]), 2)
+        good.refresh_from_db()
+        broken.refresh_from_db()
+        self.assertEqual(len(good.figures), 1)
+        self.assertEqual(len(broken.figures), 1)
+
+    def test_a_null_in_the_flags_column_is_not_a_figure_flag(self):
+        # 旗标那一列出现空值时，``flag in {...}`` 直接抛「不可迭代」。调用方是
+        # 遍历整张卡的旗标，一行坏数据会让这张卡停住，而不只是它那一条旗标。
+        for flag in (None, 5, [], {}, True):
+            with self.subTest(flag=flag):
+                self.assertFalse(figure_policy.figure_flag(flag))
+        self.assertTrue(figure_policy.figure_flag(figure_policy.FLAG_NO_FIGURE))
+        self.assertTrue(figure_policy.figure_flag("B 选项是图，请确认"))

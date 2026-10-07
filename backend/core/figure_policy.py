@@ -1069,5 +1069,10 @@ DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE, FLAG_FIGURE_CL
 
 
 def figure_flag(flag: str) -> bool:
+    # A null in the flags column used to raise here ("argument of type 'NoneType'
+    # is not iterable").  Every caller iterates a whole card's flags, so one bad
+    # row stopped the card instead of just its flag.
+    if not isinstance(flag, str):
+        return False
     return flag in {FLAG_NO_FIGURE, LEGACY_FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, FLAG_UNCUED_FIGURE} \
         or "选项是图" in flag

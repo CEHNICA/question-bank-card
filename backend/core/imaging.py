@@ -46,9 +46,43 @@ def page_sizes(source: Path, kind: str) -> list[dict]:
                 for i, p in enumerate(pdf)]
 
 
+def _finite_box(bbox) -> tuple[float, float, float, float] | None:
+    """四个有限的数字就算一个框；超出页面由 ``to_pixels`` 的 clamp 负责。
+
+    以前这里直接 ``x0, y0, x1, y1 = bbox``：少一维、坐标是字符串、坐标是 None、
+    NaN 或无穷，分别会抛「解包不够」「拿字符串比大小」「NaN 转整数」「无穷转整数」
+    四种异常。调用方写的是 ``except ValueError``，其中三种根本接不住——一道题的
+    配图框坏掉，整份卷子的识读就停在半路，而不是这一张图不出来。
+
+    注意这里**不**拒绝超出 0–1000 的坐标：``figure_strip`` 加边距、
+    ``stack_regions`` 收整段范围，都会故意算出负数或超过页宽的框，交给 clamp。
+    """
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return None
+    if any(type(value) not in {int, float} or not math.isfinite(value) for value in bbox):
+        return None
+    return (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+
+
+def _croppable(bbox) -> tuple[float, float, float, float] | None:
+    """再加一条：框确实落在这一页里面，否则裁不出东西。
+
+    判定和 ``figure_claims.frame`` 一致，所以「这张图裁不出来」在清单、进编号、
+    发请求三处是同一个答案，不会出现某一处说裁得出、另一处崩掉。
+    """
+    box = _finite_box(bbox)
+    if box is None:
+        return None
+    x0, y0, x1, y1 = box
+    return box if 0 <= x0 < x1 <= 1000 and 0 <= y0 < y1 <= 1000 else None
+
+
 def to_pixels(bbox: list[float], size: tuple[int, int]) -> tuple[int, int, int, int]:
+    box_in_page = _finite_box(bbox)
+    if box_in_page is None:
+        raise ValueError("配图范围格式不正确")
     width, height = size
-    x0, y0, x1, y1 = bbox
+    x0, y0, x1, y1 = box_in_page
     box = (
         max(0, min(width - 1, math.floor(x0 * width / 1000))),
         max(0, min(height - 1, math.floor(y0 * height / 1000))),
@@ -228,14 +262,22 @@ def figure_strip(page_loader, figures: list[dict]) -> Image.Image | None:
 
     任何一幅的 bbox 裁不出图就返回 None，调用方必须放弃这次提问：发一张缺图的
     裁图等于让模型对着不存在的东西回答，它的「不是印刷插图」会读起来像结论。
+    框写得不对（少一维、坐标是字符串或 None、NaN、无穷、超出页面）同样算裁不出图，
+    一律返回 None 而不是往上抛——这条承诺以前只对「坐标反了」成立。
     """
     tiles = []
     for index, figure in enumerate(figures, 1):
-        page = page_loader(figure["page_idx"])
-        width, height = page.size
-        x0, y0, x1, y1 = figure["bbox"]
-        if x1 <= x0 or y1 <= y0:
+        box_in_page = _croppable(figure.get("bbox"))
+        if box_in_page is None:
             return None
+        try:
+            page = page_loader(figure.get("page_idx"))
+            width, height = page.size
+        except (LookupError, AttributeError, TypeError, ValueError):
+            # 页取不出来（页码越界、缓存损坏、page_loader 拿到不是图像的东西），
+            # 同样是不给图，而不是让整条流水线带着这一道题崩掉。
+            return None
+        x0, y0, x1, y1 = box_in_page
         pad = max(2.0, (y1 - y0) * .04)
         box = (max(0, min(width - 1, math.floor((x0 - pad) * width / 1000))),
                max(0, min(height - 1, math.floor((y0 - pad) * height / 1000))),
