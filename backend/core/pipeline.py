@@ -4648,6 +4648,15 @@ def _figure_decision_protected(question: Question) -> bool:
                 or any(item.get("source") == "manual" for item in question.figures or []))
 
 
+def _figure_slot(card: Question, key: str) -> str:
+    """Which slot of this card carries the contested frame (``stem`` if absent)."""
+    for figure in card.figures or []:
+        for piece in figure_claims.figure_frames(figure):
+            if figure_claims.frame_key(piece) == key:
+                return str(figure.get("slot") or "stem")
+    return "stem"
+
+
 def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> list[Question]:
     """Give every contested source frame to a single card.
 
@@ -4657,6 +4666,13 @@ def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> lis
     falls back to 缺图并等人工 and a card that never wanted one simply loses it.  A frame
     that is only shared on purpose (原卷注明多题共用) or that the text cannot separate is
     left exactly as it was: a wrong guess moves a correct picture onto the wrong card.
+
+    只收口题干配图。选项配图（图属于某个选项）是另一回事：四道选择题各带一张图
+    时这些图横排在同一行，邻题的候选范围会一起圈到它们，于是它们互相「抢」对方
+    的选项图——而「题干有没有说如图」回答不了「这张图属于谁」，题干里的如图指的是
+    题干自己的配图，不是选项图。用题干提示词去判选项图，会把邻题那一张撤掉，
+    那道题就真的少一张图了（实测这就是 1.14.4 的回归）。选项图的归属不一致仍按
+    原来的做法标出来交给人。
     """
     by_pk = {question.pk: question for question in questions}
     changed: list[Question] = []
@@ -4669,6 +4685,9 @@ def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> lis
     for key, owners in sorted(contested.items()):
         claimants = [by_pk.get(int(pk)) for pk in owners]
         if any(card is None or _figure_decision_protected(card) for card in claimants):
+            continue
+        if any(_figure_slot(card, key) != "stem" for card in claimants):
+            # 有人把同一张图认作某个选项的图：这不是「谁要图谁留」能判的。
             continue
         winner = figure_policy.contest_winner([
             {"id": card.pk, "stem": card.stem, "options": card.options} for card in claimants
@@ -4808,13 +4827,19 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
     call flips (the same strip came back all-``none`` after a single word was
     added to the prompt), which is why the removal decision needs two.
 
+    The second call gets its own frame: each surviving candidate is cropped on
+    its own, at full size, instead of being judged again inside the same strip.
+    A row of small option figures is the case this protects - four pictures side
+    by side are hard to tell apart even enlarged, and asking twice about the
+    same blurry evidence twice returns the same wrong answer twice, which takes
+    all four away at once.  Removal now needs two different framings to agree.
+
     What both calls agree on comes off.  Two rounds on 134 real cards agreed on
     "handwritten from edge to edge" for 7 candidates, and reading those 7 by eye
     found a printed rhombus among them - a fuzzy scan the reader took for
     handwriting.  The owner asked for removal anyway: a mistaken removal costs one
     hand-drawn replacement, while shipping every card with a doubtful picture
-    costs trust on every run.  The second call is what makes that trade safe
-    enough to make automatically.
+    costs trust on every run.
 
     An unreadable answer, a request error, or a candidate that cannot be cropped
     leaves the card exactly as it was.  Returns the number of cards changed.
@@ -4843,14 +4868,18 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
     for question, pending in targets:
         if not _run_current(paper.pk, revision):
             break
-        keys = {figure_claims.frame_key(item): item for item in question.figure_candidates or []}
+        # 编号跟着候选框的顺序走，模型点到的号才能对回这张几何配的图。框残缺
+        # （宽或高为零、坐标反了）的候选先剔掉：它既裁不出图，也进不了编号，
+        # 留着会让下面按它配对时直接崩。
+        candidates = [item for item in question.figure_candidates or []
+                      if figure_claims.frame_key(item) is not None]
+        if not candidates:
+            continue
+        keys = {figure_claims.frame_key(item): item for item in candidates}
         paired = [(figure, keys.get(figure_claims.frame_key(figure)))
                   for figure in pending]
         if not any(candidate is not None for _, candidate in paired):
             continue
-        # 编号跟着候选框的顺序走，模型点到的号才能对回这张几何配的图。
-        candidates = [item for item in question.figure_candidates or []
-                      if figure_claims.frame_key(item) is not None]
         try:
             strip = imaging.figure_strip(store.load, [{"page_idx": item["page_idx"],
                                                        "bbox": list(item["bbox"])}
@@ -4882,14 +4911,32 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
             confirmed = None
         if not confirmed:
             continue
-        unprinted = [figure for figure, position in indexed if position in confirmed]
-        if not unprinted:
+        # 第二问必须单独裁、放到最大再看一次。用同一张条图再问一遍等于用同样糊的
+        # 证据问两次：四道选择题的图横排在一起时每张本来就小，放大后并排更认不
+        # 出，两问会一起指向「都是手写」，四张图就这么没了。单独一张看清楚了，
+        # 答案才作数。
+        alone = {}
+        for figure, position in indexed:
+            if position not in confirmed:
+                continue
+            one = imaging.figure_strip(store.load,
+                                       [{"page_idx": figure["page_idx"], "bbox": list(figure["bbox"])}])
+            if one is None:
+                continue
+            try:
+                verdict = readers.confirm_all_handwritten(
+                    engine, imaging.jpeg_data_url(one), [1])
+            except readers.ReaderError:
+                verdict = None
+            if verdict == {1}:
+                alone[figure_claims.frame_key(figure)] = figure
+        if not alone:
             continue
+        unprinted = list(alone.values())
         # 两问都指向「整幅手写」就撤掉。实测 134 张真卡这一步会命中 7 张，逐张
         # 看下来至少有一张是印刷的菱形图（扫描件发糊，模型看成了手写）——按用户的
         # 要求仍然撤：撤错了手工再框一次，比让每次都带着一张可疑的图交付便宜。
-        # 两步判定在这里就是为这个服务的：单次会翻转，两次都否才算。
-        dropped = {figure_claims.frame_key(figure) for figure in unprinted}
+        dropped = set(alone)
         figures = [figure for figure in question.figures or []
                    if figure_claims.frame_key(figure) not in dropped]
         previous_review = stored_or_derived_review(question)

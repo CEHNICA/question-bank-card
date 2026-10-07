@@ -104,3 +104,30 @@ class FigureClaimWinnerIntegrationTests(TestCase):
         cued.refresh_from_db()
         self.assertEqual(plain.figures, [diagram()])
         self.assertEqual(cued.figures, [diagram()])
+
+    def test_an_option_picture_is_never_withdrawn_by_the_stem_rule(self):
+        # 四道选择题各带一张图，图横排在同一行，邻题的候选范围会一起圈到它们。
+        # 题干里的「如图」说的是题干自己的配图，回答不了「这张图属于哪个选项」，
+        # 用它判输家，那道题就真的少一张图（1.14.4 的回归）。
+        choice = self.question(12, CUED, figures=[diagram(slot="A"), diagram(slot="B", bbox=[600, 200, 900, 420])])
+        neighbour = self.question(13, PLAIN, figures=[diagram(slot="A")])
+        pipeline.audit_figure_claims(self.paper, revision=1)
+        choice.refresh_from_db()
+        neighbour.refresh_from_db()
+        self.assertEqual(len(choice.figures), 2)
+        self.assertEqual(len(neighbour.figures), 1)
+        self.assertEqual(choice.figures[0]["slot"], "A")
+        self.assertEqual(choice.figures[1]["slot"], "B")
+        # 冲突仍然标出来交给人，只是不再替他撤。
+        self.assertIn(figure_policy.FLAG_FIGURE_CLAIM_CONFLICT, neighbour.flags)
+
+    def test_the_stem_rule_still_applies_when_one_side_is_an_option_picture(self):
+        # 同一张图被当成「本题的题干配图」和「邻题的选项图」时，仍然不动手：
+        # 这已经分不清是谁的图了。
+        cued = self.question(13, CUED, figures=[diagram()])
+        plain = self.question(12, PLAIN, figures=[diagram(slot="A")])
+        pipeline.audit_figure_claims(self.paper, revision=1)
+        cued.refresh_from_db()
+        plain.refresh_from_db()
+        self.assertEqual(len(cued.figures), 1)
+        self.assertEqual(len(plain.figures), 1)

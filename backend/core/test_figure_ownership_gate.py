@@ -175,7 +175,8 @@ class GeometricOwnershipGateTests(TestCase):
         question = self.question()
         changed, asked = self.run_gate(set(), question, confirm={1})
         self.assertEqual(changed, 1)
-        self.assertEqual(asked.call_count, 1)
+        # 条图上一次，单独那一张再一次。
+        self.assertEqual(asked.call_count, 2)
         self.assertEqual(question.figures, [])
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertIn(figure_policy.FLAG_NO_FIGURE, question.flags)
@@ -270,6 +271,25 @@ class GeometricOwnershipGateTests(TestCase):
         self.assertEqual(asked.call_count, 0)
         self.assertEqual(len(question.figures), 1)
 
+    def test_a_strip_that_cannot_be_built_never_reaches_the_reader(self):
+        # bbox 畸形已经被上一道过滤挡掉了；figure_strip 自己也说裁不出来（空页、
+        # 零宽图，或者以后把拒绝条件收严）时，同样一张都不该发出去。少了图模型只
+        # 会自信地答 none，那是在替裁图背锅。
+        question = self.question()
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.imaging, "figure_strip", return_value=None), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership") as asked, \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten") as second:
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 0)
+        self.assertEqual(asked.call_count, 0)
+        self.assertEqual(second.call_count, 0)
+        self.assertEqual(question.figures, [owned(BOX)])
+
     def test_a_picture_the_reader_already_confirmed_is_not_asked_again(self):
         # 没有旗标 = 这张图本来就是读题模型自己认下的，再问一次只是花钱。
         question = self.question(flags=[])
@@ -290,11 +310,72 @@ class GeometricOwnershipGateTests(TestCase):
         foreign = self.question(number=15, figures=[dict(owned(BOX), source="other")],
                                 flags=[figure_policy.FLAG_FOREIGN_FIGURE])
         changed, asked = self.run_gate(set(), confirm={1})
-        self.assertEqual((changed, asked.call_count), (2, 2))
+        self.assertEqual((changed, asked.call_count), (2, 4))
         for item in (shared, foreign):
             item.refresh_from_db()
             self.assertEqual(item.figures, [])
             self.assertIn(figure_policy.FLAG_NO_FIGURE, item.flags)
+
+    def test_a_row_of_figures_survives_when_each_one_alone_is_readable(self):
+        # 四道选择题的图横排在一起：并排放大本来就难分清，在同一张糊图上问两遍
+        # 会得到同一个错答案，两遍都指向手写，四张图就这么全没了。单独裁一张、
+        # 放到最大再看，答案才作数。
+        question = self.question(
+            figure_candidates=[candidate(1, [0, 0, 200, 200]),
+                               candidate(2, [250, 0, 450, 200]),
+                               candidate(3, [500, 0, 700, 200]),
+                               candidate(4, [750, 0, 950, 200])],
+            figures=[owned([0, 0, 200, 200]), dict(owned([250, 0, 450, 200])),
+                     dict(owned([500, 0, 700, 200])), dict(owned([750, 0, 950, 200]))])
+        # 条图上说四张全是手写；每张单独放大看，答案都是「不是」。
+        alone = mock.Mock(side_effect=[{1, 2, 3, 4}, set(), set(), set(), set()])
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership", return_value=set()), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten", alone):
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 0)
+        self.assertEqual(len(question.figures), 4)
+        # 单独裁的那四张：前一张是条图上的第二问，后三张各自一次。
+        self.assertEqual([call.args[2] for call in alone.call_args_list],
+                         [[1, 2, 3, 4], [1], [1], [1], [1]])
+
+    def test_only_the_figure_that_still_looks_handwritten_alone_goes(self):
+        question = self.question(
+            figure_candidates=[candidate(1, [0, 0, 200, 200]),
+                               candidate(2, [250, 0, 450, 200])],
+            figures=[owned([0, 0, 200, 200]), dict(owned([250, 0, 450, 200]))])
+        alone = mock.Mock(side_effect=[{1, 2}, {1}, set()])
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership", return_value=set()), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten", alone):
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 1)
+        self.assertEqual(question.figures, [dict(owned([250, 0, 450, 200]))])
+
+    def test_a_figure_that_cannot_be_cropped_alone_is_not_removed(self):
+        question = self.question(
+            figure_candidates=[candidate(1), {"label": "2", "page_idx": 0,
+                                              "bbox": [400, 400, 400, 400]}],
+            figures=[owned(BOX), dict(owned([400, 400, 400, 400]))])
+        alone = mock.Mock(side_effect=[{1, 2}, {1}])
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership", return_value=set()), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten", alone):
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 1)
+        self.assertEqual(question.figures, [dict(owned([400, 400, 400, 400]))])
 
     def test_the_stem_travels_with_the_question(self):
         self.question()
