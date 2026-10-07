@@ -175,7 +175,7 @@ def main() -> int:
         folder.mkdir(parents=True, exist_ok=True)
         store = pipeline.PageStore(paper)
         cards = []
-        for q in Question.objects.filter(paper=paper).order_by("group__sequence", "number", "id"):
+        for q in Question.objects.filter(paper=paper).select_related("group").order_by("group__sequence", "number", "id"):
             crop_name = f"q{q.number:02d}_{q.id}.jpg"
             try:
                 if q.regions:
@@ -187,6 +187,7 @@ def main() -> int:
                 crop_name = f"ERROR {error}"
             cards.append({
                 "id": q.id, "number": q.number, "group": q.group_id, "section": q.section,
+                "group_sequence": q.group.sequence if q.group else None,
                 "type": q.question_type, "state": q.state, "flags": q.flags, "error": q.error,
                 "text_source": q.text_source, "stem": q.stem, "options": q.options,
                 "regions": q.regions, "figure_candidates": q.figure_candidates, "figures": q.figures,
