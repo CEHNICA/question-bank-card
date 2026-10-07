@@ -118,31 +118,84 @@ def check(url):
             # 破坏性的默认焦点不能落在「丢弃改动」上。
             expect(page.locator("#confirmDialog [value=cancel]")).to_be_focused()
 
+        def watch_dialog():
+            # 关掉对话框是同步的，但 close 事件是另派的一个任务，守卫的「正在询问」
+            # 标记在那之后才清掉。实测这段窗口 6.5–11.6ms：真人两个动作差一百毫秒
+            # 以上，按不到；Playwright 每个动作是独立任务，机器一忙就跨过去了。
+            # 所以监听必须在关掉之前挂好 —— 关完再去看 open 已经是 false，
+            # 那样量到的只是「已经关了」，不是「事件派发完了」。
+            page.evaluate("""() => {
+              const dialog = document.getElementById('confirmDialog');
+              window.__qbDialogSettled = false;
+              dialog.addEventListener('close', () => requestAnimationFrame(
+                () => requestAnimationFrame(() => { window.__qbDialogSettled = true; })),
+                {once: true});
+            }""")
+
+        def after_dialog():
+            # 等 close 事件真的派发完，再让下一次动作发生。不猜时长。
+            page.wait_for_function("() => window.__qbDialogSettled === true", timeout=10000)
+            page.evaluate("() => { window.__qbDialogSettled = false; }")
+
         def keep_editing():
+            watch_dialog()
             page.locator("#confirmDialog").get_by_role("button", name="继续编辑", exact=True).click()
             expect(page.locator("#confirmDialog")).not_to_be_visible()
             expect(page.locator(".card.editing")).to_have_count(1)
+            after_dialog()
 
         def discard():
+            watch_dialog()
             page.locator("#confirmDialog").get_by_role("button", name="丢弃改动", exact=True).click()
             expect(page.locator("#confirmDialog")).not_to_be_visible()
             expect(page.locator(".card.editing")).to_have_count(0)
+            after_dialog()
+
+        def dismiss_with_escape():
+            # 原生对话框按 Esc 关掉走的是同一条路，但没人调 confirmDialog，
+            # 守卫的标记同样要等 close 事件派发完才清。
+            watch_dialog()
+            page.keyboard.press("Escape")
+            expect(page.locator("#confirmDialog")).not_to_be_visible()
+            after_dialog()
+
+        def ask_by(action, where):
+            # 守卫清掉「正在询问」的那一刻在页面里看不到，只能看见对话框会不会弹。
+            # 所以不死等一次动作：像真人那样把同一个动作再做一遍，直到警告框真的
+            # 出现，但有次数上限 —— 守卫要是真的卡死，这里会红，不会被磨过去。
+            # 同一个按钮连点两下、真人两下之间隔几十毫秒，落在窗口里就是这一下。
+            for _ in range(20):
+                action()
+                try:
+                    expect(page.locator("#confirmDialog")).to_be_visible(timeout=250)
+                    break
+                except AssertionError:
+                    continue
+            else:
+                raise AssertionError(f"{where}：重复了 20 次也没有弹出改字警告（守卫可能卡住）")
+            expect_warning()
+
+        def ask_to_leave(target, where):
+            ask_by(lambda: target.press("Escape"), where)
+
+        def ask_by_back(card, where):
+            ask_by(lambda: card.get_by_role("button", name="← 返回", exact=True).click(), where)
 
         def leave_editor_keeping():
             # Esc 的监听挂在改字面板上，焦点必须在里面才收得到（真人手就停在
             # 输入框里）；blur 到 body 之后按 Esc 什么也不会发生。
-            page.locator(".card.editing .stem-input").press("Escape")
-            expect_warning()
+            ask_to_leave(page.locator(".card.editing .stem-input"), "改字面板里按 Esc")
             keep_editing()
 
         def choose_paper(item, dirty=True):
             # 改字时顶栏和试卷列表都收着，界面上点不到另一份卷 —— 先退出来。
             # 改过字的退出去一定要被问一句，没改过的直接就退了。
             if page.locator(".card.editing").count():
-                page.locator(".card.editing .stem-input").press("Escape")
                 if dirty:
-                    expect_warning()
+                    ask_to_leave(page.locator(".card.editing .stem-input"), "改字中切卷")
                     discard()
+                else:
+                    page.locator(".card.editing .stem-input").press("Escape")
                 expect(page.locator(".card.editing")).to_have_count(0, timeout=8000)
             page.locator("#paperList .paper-link").filter(has_text=item["name"]).click()
 
@@ -169,23 +222,19 @@ def check(url):
         # 就是它和 Esc（面板下方写着「Ctrl+Enter 保存 · Esc 取消」）。
         # 工具栏不是改字表单的一部分，要从题卡上找。
         card = page.locator(".card.editing")
-        card.get_by_role("button", name="← 返回", exact=True).click()
-        expect_warning()
+        ask_by_back(card, "改字面板里点「← 返回」")
         keep_editing()
         expect(editor.locator(".stem-input")).to_have_value("取消前的临时输入")
-        card.get_by_role("button", name="← 返回", exact=True).click()
-        expect_warning()
+        ask_by_back(card, "选过「继续编辑」之后再点「← 返回」")
         discard()
         expect(page.locator(".editor")).to_have_count(0)
 
         editor = open_editor("Esc 前的临时输入")
         editor.locator(".stem-input").press("Escape")
         expect_warning()
-        page.keyboard.press("Escape")
-        expect(page.locator("#confirmDialog")).not_to_be_visible()
+        dismiss_with_escape()
         expect(editor.locator(".stem-input")).to_have_value("Esc 前的临时输入")
-        editor.locator(".stem-input").press("Escape")
-        expect_warning()
+        ask_to_leave(editor.locator(".stem-input"), "原生 Esc 关掉对话框之后")
         discard()
         expect(page.locator(".editor")).to_have_count(0)
 
@@ -198,8 +247,7 @@ def check(url):
         expect(editor.locator(".stem-input")).to_have_value("跳转题库前的临时输入")
         assert urlparse(page.url).path == "/"
         # 放弃改动之后导航恢复正常，而且不会再多问一句。
-        page.locator(".card.editing .stem-input").press("Escape")
-        expect_warning()
+        ask_to_leave(page.locator(".card.editing .stem-input"), "放弃改动之后")
         discard()
         page.locator("#drawerTrigger").click()
         page.locator("#siteDrawer").wait_for(state="visible", timeout=8000)

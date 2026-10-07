@@ -325,6 +325,10 @@ def check(url):
         # 再长（12 段）预览里就不排这个公式了，量不到东西。
         long_formula = "长式 $\\frac{" + "+".join("1234567890" for _ in range(8)) + "}{1}$"
         stem.fill(long_formula)
+        # 预览是逐帧重排的：刚填进去的那一瞬，DOM 里还挂着旧题干的几条公式。
+        # 直接对 .qb-math 断言属性会在第一次采样就撞上「匹配到 4 个元素」——
+        # 那是还没排完，不是排错了。先等它收敛到唯一一条，再比内容。
+        expect(card(second=True).locator(".editor-preview .qb-math")).to_have_count(1)
         expect(card(second=True).locator(".editor-preview .qb-math")).to_have_attribute("data-raw", long_formula[3:])
         position(stem, "9", length=1, last=True)
         first_scroll = symbol_visible(second=True)
