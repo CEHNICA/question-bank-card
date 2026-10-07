@@ -173,19 +173,87 @@ class ScratchSpillTests(SimpleTestCase):
         result = segment.segment(PAGES[:1], blocks)
         return next(q for q in result["questions"] if q["number"] == number)
 
-    def test_handwritten_working_at_the_top_of_the_next_column_is_not_a_continuation(self):
+    def test_formula_only_next_column_is_kept_as_a_review_candidate_not_merged(self):
         working = "$\\frac{3(y+1)}{(x+1)(y+1)}$ $\\frac{4(x+1)}{(x+1)(y+1)}$ + $\\frac{4}{y+3xy}$"
-        self.assertEqual(len(self.regions_of(scratch_paper(working), 7)), 1)
-        self.assertEqual(len(self.regions_of(scratch_paper("$$(x-10)(-2x+60)$$", "equation"), 7)), 1)
-        # A choice question already showing A–D needs no word about it.
-        self.assertEqual(self.question(scratch_paper(working), 7)["segmentation_notes"], [])
+        for text, kind in ((working, "text"), ("$$(x-10)(-2x+60)$$", "equation")):
+            with self.subTest(kind=kind):
+                seven = self.question(scratch_paper(text, kind), 7)
+                self.assertEqual(len(seven["regions"]), 1)
+                self.assertEqual(len(seven["segmentation_notes"]), 1)
+                self.assertEqual(seven["segmentation_flags"], seven["segmentation_notes"])
+                self.assertFalse(seven["segmentation"]["range_limited"])
+                self.assertIn("暂未并入题卡范围", seven["segmentation_flags"][0])
+                diagnostic = seven["segmentation_diagnostics"][0]
+                self.assertEqual(diagnostic["code"], "ambiguous_formula_continuation")
+                self.assertEqual(diagnostic["action"], "pending_review")
+                self.assertEqual(diagnostic["page_idx"], 0)
+                self.assertNotIn({"page_idx": diagnostic["page_idx"], "bbox": diagnostic["bbox"]}, seven["regions"])
 
-    def test_leaving_out_a_formula_after_an_open_question_is_said_out_loud(self):
-        # It might be a printed display formula; the paper's notes say which card to check.
+    def test_a_display_formula_after_an_open_question_is_deferred_for_review(self):
+        # A recurrence can be printed content or working; OCR text cannot decide.
         seven = self.question(scratch_paper("$$a_{n+1}=2a_n+1$$", "equation", options=False), 7)
         self.assertEqual(len(seven["regions"]), 1)
         self.assertEqual(len(seven["segmentation_notes"]), 1)
         self.assertIn("第 7 题", seven["segmentation_notes"][0])
+        self.assertTrue(seven["segmentation_flags"])
+        self.assertEqual(seven["segmentation_diagnostics"][0]["action"], "pending_review")
+        self.assertFalse(seven["segmentation"]["range_limited"])
+
+    def test_a_formula_only_next_page_keeps_its_matrix_and_source_coordinates(self):
+        blocks = [
+            block(0, 0, [60, 800, 950, 900], "1. 已知矩阵如下，求矩阵的行列式。"),
+            block(1, 1, [60, 20, 950, 90], "$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$", "equation"),
+            block(2, 1, [60, 110, 950, 180], "2. 计算下列各式的值。"),
+        ]
+        result = segment.segment(PAGES[:2], blocks)
+        one = next(question for question in result["questions"] if question["number"] == 1)
+        self.assertEqual([region["page_idx"] for region in one["regions"]], [0])
+        self.assertEqual(one["segmentation_diagnostics"][0]["page_idx"], 1)
+        self.assertNotIn({"page_idx": one["segmentation_diagnostics"][0]["page_idx"],
+                          "bbox": one["segmentation_diagnostics"][0]["bbox"]}, one["regions"])
+        self.assertEqual(one["segmentation_diagnostics"][0]["action"], "pending_review")
+        self.assertTrue(one["segmentation_flags"])
+        self.assertFalse(one["segmentation"]["range_limited"])
+
+    def test_the_numbered_opening_is_not_an_ambiguous_continuation(self):
+        result = segment.segment(PAGES[:1], [
+            block(0, 0, [60, 100, 950, 180], "1. $$a_{n+1}=2a_n+1$$", "equation"),
+            block(1, 0, [60, 220, 950, 300], "2. 计算下列各式的值。"),
+        ])
+        one = next(question for question in result["questions"] if question["number"] == 1)
+        self.assertEqual(one["segmentation_diagnostics"], [])
+        self.assertEqual(one["segmentation_flags"], [])
+
+    def test_book_builder_keeps_formula_review_flag_and_the_complete_continuation(self):
+        blocks = [
+            block(0, 0, [60, 800, 950, 900], "1. 已知数列满足如下关系，求数列通项。"),
+            block(1, 1, [60, 20, 950, 90], "$$a_{n+1}=2a_n+1$$", "equation"),
+            block(2, 1, [60, 110, 950, 180], "2. 计算下列各式的值。"),
+        ]
+        layout, starts = segment.analyse(PAGES[:2], blocks)
+        for start in starts:
+            start.source_kind = "exercise"
+        one = segment.build_book_questions(layout, starts, blocks)[0]
+        self.assertEqual([region["page_idx"] for region in one["regions"]], [0, 1])
+        self.assertTrue(one["segmentation_flags"])
+        self.assertFalse(one["segmentation"]["range_limited"])
+        self.assertTrue(segment.center_in_regions(1, blocks[1]["bbox"], one["regions"]))
+
+    def test_book_safety_limit_is_explicit_when_it_stops_an_ambiguous_continuation(self):
+        pages = [{**PAGES[0], "page_idx": index} for index in range(6)]
+        blocks = [block(0, 0, [60, 800, 950, 900], "1. 已知数列满足下列关系，求数列通项。")]
+        blocks.extend(block(index, index, [60, 20, 950, 90], "$$a_{n+1}=2a_n+1$$", "equation")
+                      for index in range(1, 6))
+        blocks.append(block(6, 5, [60, 110, 950, 180], "2. 计算下列各式的值。"))
+        layout, starts = segment.analyse(pages, blocks)
+        for start in starts:
+            start.source_kind = "exercise"
+        one = segment.build_book_questions(layout, starts, blocks)[0]
+        self.assertEqual(len({region["page_idx"] for region in one["regions"]}), segment.BOOK_MAX_CARD_PAGES)
+        self.assertTrue(one["segmentation"]["range_limited"])
+        self.assertTrue(any("安全上限" in flag for flag in one["segmentation_flags"]))
+        self.assertEqual([diagnostic["action"] for diagnostic in one["segmentation_diagnostics"]],
+                         ["retained", "retained", "retained", "range_limited", "range_limited"])
 
     def test_printed_rest_of_the_question_still_follows_it(self):
         for text, kind in (("B. $\\forall x>0,y>0$", "text"),
@@ -195,9 +263,12 @@ class ScratchSpillTests(SimpleTestCase):
                            ("$A.\\ 1$", "text"),
                            ("Which of the following statements is true", "text"),
                            ("", "image")):
-            regions = self.regions_of(scratch_paper(text, kind), 7)
+            seven = self.question(scratch_paper(text, kind), 7)
+            regions = seven["regions"]
             self.assertEqual(len(regions), 2, text or kind)
             self.assertGreaterEqual(regions[1]["bbox"][0], 490)
+            self.assertEqual(seven["segmentation_diagnostics"], [])
+            self.assertEqual(seven["segmentation_flags"], [])
 
 
 class SectionTypeTests(SimpleTestCase):

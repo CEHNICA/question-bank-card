@@ -43,6 +43,60 @@ START_PAD = 9.0       # segment.START_PAD：题号上方原本留的白
 SNAPPABLE_SOURCES = {"mineru", "repaired", "inferred"}
 
 
+def _local_ink_level(gray: Image.Image) -> int:
+    """Adapt only when the cut strip clearly separates paper from strokes.
+
+    A fixed level misses pale print and treats a dark photograph's paper as
+    ink. Use two compact intensity groups as evidence, with the lighter,
+    dominant group representing the local paper. Broad shadows, nearly
+    uniform strips and overlapping groups keep the original level. The
+    adaptive level stays near the paper rather than halfway between classes,
+    so lighter strokes between the classes remain ink too.
+    """
+    histogram = gray.histogram()
+    total = sum(histogram)
+    weighted = sum(value * count for value, count in enumerate(histogram))
+    squared = sum(value * value * count for value, count in enumerate(histogram))
+    dark_count = dark_sum = dark_squared = 0
+    best, split, moments = -1.0, None, None
+    for value, count in enumerate(histogram):
+        dark_count += count
+        dark_sum += value * count
+        dark_squared += value * value * count
+        light_count = total - dark_count
+        if not dark_count or not light_count:
+            continue
+        dark_mean = dark_sum / dark_count
+        light_mean = (weighted - dark_sum) / light_count
+        separation = dark_count * light_count * (light_mean - dark_mean) ** 2
+        if separation > best:
+            best, split = separation, value
+            moments = (dark_count, dark_sum, dark_squared)
+    if split is None or moments is None:
+        return INK_LEVEL
+    dark_count, dark_sum, dark_squared = moments
+    light_count = total - dark_count
+    dark_mean, light_mean = dark_sum / dark_count, (weighted - dark_sum) / light_count
+    dark_std = max(0.0, dark_squared / dark_count - dark_mean ** 2) ** 0.5
+    light_std = max(0.0, (squared - dark_squared) / light_count - light_mean ** 2) ** 0.5
+    contrast = light_mean - dark_mean
+    # Neither a speck nor two large illumination zones prove a text/paper
+    # separation. A broad lighter group is also consistent with a shadow.
+    if not 0.005 <= dark_count / total <= 0.45 or light_std > 8:
+        return INK_LEVEL
+    if contrast < max(24.0, 4 * (dark_std + light_std)):
+        return INK_LEVEL
+    if light_mean > INK_LEVEL + 6 and dark_mean < INK_LEVEL - 6:
+        return INK_LEVEL  # the original level already separates these groups
+    paper_mode = max(range(split + 1, 256), key=lambda value: histogram[value])
+    # Include every shade darker than the paper's dominant brightness rather
+    # than discarding pale strokes near that mode as background noise. This
+    # can leave noisy rows marked as ink and refuse a move, which is safer
+    # than manufacturing a gap through a light fraction or underline. Every
+    # identified dark pixel is kept, including pixels on the histogram split.
+    return max(split + 1, paper_mode)
+
+
 def row_ink(page: Image.Image, x0: float, x1: float, y0: float, y1: float) -> list[tuple[float, float]]:
     """[(y, share of dark pixels)] for every pixel row between y0 and y1 (page units)."""
     width, height = page.size
@@ -51,7 +105,9 @@ def row_ink(page: Image.Image, x0: float, x1: float, y0: float, y1: float) -> li
     right = max(left + 1, min(width, int(round(x1 * width / 1000))))
     top = max(0, min(height - 1, int(y0 * height / 1000)))
     bottom = max(top + 1, min(height, int(round(y1 * height / 1000))))
-    ink = page.crop((left, top, right, bottom)).convert("L").point(lambda value: 255 if value < INK_LEVEL else 0)
+    gray = page.crop((left, top, right, bottom)).convert("L")
+    level = _local_ink_level(gray)
+    ink = gray.point(lambda value: 255 if value < level else 0)
     means = ink.resize((1, ink.height), Image.Resampling.BOX)
     return [((top + row + 0.5) * 1000 / height, means.getpixel((0, row)) / 255) for row in range(means.height)]
 

@@ -98,7 +98,7 @@ class FigureRowTests(TestCase):
         self.assertNotIn(pipeline.FLAG_FOREIGN_FIGURE, q9.flags)
         self.assertEqual(q9.state, Question.State.GREEN)
 
-    def test_no_flag_when_the_owners_reader_took_its_own_box_in_the_row(self):
+    def test_owner_agreement_confirms_only_its_own_pairing(self):
         row = _row()
         q4 = self.question(4, stem="如图将△ABC放在网格中", candidates=row,
                            figures=[{"slot": "stem", "page_idx": 0, "bbox": row[0]["bbox"], "source": "auto"}])
@@ -107,10 +107,13 @@ class FigureRowTests(TestCase):
         q5 = self.question(5, stem="如图，正比例函数 y=x 与反比例函数的图象相交于 A、B 两点")
         q6 = self.question(6, stem="已知，如图，在 Rt△ABC 中，CD⊥AB 于点 D")
         self.assertEqual(pipeline.distribute_figure_rows(self.paper), 3)
-        for question in (q4, q5, q6):
+        q4.refresh_from_db()
+        self.assertNotIn(pipeline.FLAG_ROW_FIGURE, q4.flags)
+        self.assertEqual(q4.state, Question.State.GREEN)
+        for question in (q5, q6):
             question.refresh_from_db()
-            self.assertNotIn(pipeline.FLAG_ROW_FIGURE, question.flags)
-            self.assertEqual(question.state, Question.State.GREEN)
+            self.assertIn(pipeline.FLAG_ROW_FIGURE, question.flags)
+            self.assertEqual(question.state, Question.State.YELLOW)
 
     def test_a_reader_that_picked_another_box_keeps_every_card_flagged(self):
         # 菱形周清第 15 题：读者选了最左边的图，按顺序它应是最右边那张。
@@ -134,6 +137,18 @@ class FigureRowTests(TestCase):
         self.question(14, stem="如图，在正五边形 ABCDE 的内部作正方形 CDFH")
         self.question(15, stem="如图，四边形 ABCD 是菱形", candidates=stacked)
         self.assertEqual(pipeline.distribute_figure_rows(self.paper), 0)
+
+    def test_row_never_replaces_an_edited_owner_or_target(self):
+        row = _row()
+        first = self.question(4, stem="如图求面积", candidates=row)
+        second = self.question(5, stem="如图求长度")
+        self.question(6, stem="如图求角度")
+        for target in (first, second):
+            target.edited = True
+            target.save()
+            self.assertEqual(pipeline.distribute_figure_rows(self.paper), 0)
+            target.edited = False
+            target.save()
 
 
 class PictureOptionRowTests(TestCase):
@@ -236,12 +251,12 @@ class FigureCueWordingTests(SimpleTestCase):
 
 
 class SketchBesideTextOptionTests(SimpleTestCase):
-    def test_a_drawing_tied_to_a_text_option_is_a_students_sketch(self):
+    def test_text_options_do_not_prove_a_diagram_is_a_students_sketch(self):
         options = {"A": "$y=-\\dfrac{2}{x}$", "B": "$y=|x|$", "C": "$y=x^2+x+1$", "D": "$y=2x-1$"}
         result = pipeline._sketches_beside_text_options(
             stem="下列函数中，在区间 $(-\\infty,0)$ 上单调递减的是（ ）", options=options,
             kind="single_choice", assignments={"1": "A", "2": "stem"})
-        self.assertEqual(result, {"1": "none", "2": "stem"})
+        self.assertEqual(result, {"1": "A", "2": "stem"})
 
     def test_picture_options_and_captioned_options_are_kept(self):
         kept = pipeline._sketches_beside_text_options(

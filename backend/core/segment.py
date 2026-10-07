@@ -1501,16 +1501,15 @@ _PRINTED_LABEL_RE = re.compile(
     r"^[\s$]*(?:\\(?:mathrm|text|textbf|mathbf|rm)\s*\{\s*)?(?:[A-EＡ-Ｅ]\s*\}?\s*(?:[.．、:]|\\[.,])"
     r"|[（(]\s*\d{1,2}\s*[)）])"
 )
-_OPTION_LABEL_RE = re.compile(r"(?:^|[\s$}（()）,，。;；:：])(?:\\(?:mathrm|text)\s*\{\s*)?([A-D])\s*\}?\s*[.．、]")
+AMBIGUOUS_CONTINUATION_FLAG_PREFIX = "续题内容待核查："
 
 
-def _looks_printed(block: dict) -> bool:
-    """Whether a MinerU box can be printed question text rather than working.
+def _has_continuation_support(block: dict) -> bool:
+    """Whether a continuation has words, labels or a supplied visual.
 
-    Printed lines of a Chinese exam carry Chinese or English words or an
-    option / sub-question label; a student's working in the margin is
-    formulas only (“$\\frac{3(y+1)}{(x+1)(y+1)}$ …”, “$(x-10)(-2x+60)$”).
-    Pictures count as printed: a figure can belong to the question above.
+    This is supporting evidence, not a printed/handwritten classifier. A
+    display formula without words can be either printed content or working.
+    Neither kind may be inferred merely from its OCR text.
     """
     if block.get("type") in FIGURE_TYPES:
         return True
@@ -1521,41 +1520,32 @@ def _looks_printed(block: dict) -> bool:
     return len(_HAN_RE.findall(words)) >= 2 or len(_LATIN_WORD_RE.findall(words)) >= 2
 
 
-def _drop_scratch_spill(regions: list[dict], blocks: list[dict]) -> tuple[list[dict], int]:
-    """Leave out continuation slots that hold only formulas without words.
+def _ambiguous_continuations(regions: list[dict], blocks: list[dict]) -> list[dict]:
+    """Record formula-only continuation bounds without merging them by default.
 
-    A question runs on to the top of the next column or page until the next
-    number.  When nothing there looks printed, it is usually a student's
-    working above the next question (2025级高一质量检测一：第 7 题拼上了右栏
-    顶上的手写分式，第 16 题拼上了“(x-10)(-2x+60)”), not the rest of this
-    one.  Returns the kept regions and how many slots were left out, so the
-    caller can say so (a printed formula on its own would look the same).
-    The first slot, where the number is, always stays; an empty slot is left
-    to the blank trim.
+    A question runs into the next column or page until its next boundary.
+    Pure formulas above that boundary might be student working, but can also
+    be a printed matrix, recurrence or display formula. The source adapters
+    do not supply reliable handwriting evidence, so preserve its source bounds
+    for review but keep the question crop unchanged. Empty slots
+    are left to the blank trim; the first slot remains the question opening.
     """
-    kept = regions[:1]
-    dropped = 0
+    diagnostics = []
     for region in regions[1:]:
         inside = [
             block for block in blocks
             if block.get("bbox") and block.get("type") not in NON_CONTENT
             and center_in_regions(int(block.get("page_idx", -1)), block["bbox"], [region])
         ]
-        if inside and not any(_looks_printed(block) for block in inside):
-            dropped += 1
-            continue
-        kept.append(region)
-    return kept, dropped
-
-
-def _options_complete(regions: list[dict], blocks: list[dict]) -> bool:
-    """Whether the kept range already shows option labels A, B, C and D."""
-    seen: set[str] = set()
-    for block in blocks:
-        if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES \
-                and center_in_regions(int(block.get("page_idx", -1)), block["bbox"], regions):
-            seen.update(_OPTION_LABEL_RE.findall(_plain_block_text(block.get("text"))))
-    return {"A", "B", "C", "D"} <= seen
+        if inside and not any(_has_continuation_support(block) for block in inside):
+            diagnostics.append({
+                "code": "ambiguous_formula_continuation",
+                "page_idx": int(region["page_idx"]),
+                "bbox": list(region["bbox"]),
+                "reason": "续栏或续页只有算式或零散符号，没有正文文字、选项标记或配图支持；无法确认是题目正文还是草稿。",
+                "action": "pending_review",
+            })
+    return diagnostics
 
 
 def _heading_floor(layout: Layout, start: Start) -> float:
@@ -1879,18 +1869,30 @@ def build_questions(
                 solution_boundary_seq = solution_boundary[1]
         regions = question_regions(layout, start, stop) or _fallback_regions(layout, start, stop)
         segmentation_notes: list[str] = []
+        segmentation_flags: list[str] = []
+        segmentation_diagnostics: list[dict] = []
         if not textbook:
-            regions, dropped = _drop_scratch_spill(regions, blocks)
-            if dropped and not _options_complete(regions, blocks):
-                segmentation_notes.append(
-                    f"第 {start.number} 题：下一栏（页）开头有一段只有算式、没有文字，像是草稿，没有拼进这道题；"
-                    "如果它是题目的一部分，请在题卡上调整原卷范围。")
+            segmentation_diagnostics = _ambiguous_continuations(regions, blocks)
+            if segmentation_diagnostics:
+                note = (
+                    f"{AMBIGUOUS_CONTINUATION_FLAG_PREFIX}第 {start.number} 题下一栏（页）开头有只有算式或零散符号的区域，"
+                    "可能是题目正文或草稿；暂未并入题卡范围，请对照原卷核查归属。"
+                )
+                segmentation_notes.append(note)
+                segmentation_flags.append(note)
+                deferred = {
+                    (item["page_idx"], tuple(item["bbox"]))
+                    for item in segmentation_diagnostics
+                }
+                regions = [region for region in regions
+                           if (region["page_idx"], tuple(region["bbox"])) not in deferred]
             regions = _cover_own_lines(regions, blocks)
         if start.source_kind in {"example", "exercise"}:
             regions = _tighten_book_local_left_column(layout, start, regions, blocks)
-        segmentation_flags: list[str] = []
+        range_limited = False
         if textbook:
             regions, segmentation_flags = _limit_book_regions(regions)
+            range_limited = bool(segmentation_flags)
         section = ""
         for heading in headings:
             if (heading["page"], heading["col"], heading["y"]) < here:
@@ -1969,10 +1971,11 @@ def build_questions(
             "source_marker": start.marker_text,
             "segmentation_flags": segmentation_flags,
             "segmentation_notes": segmentation_notes,
+            "segmentation_diagnostics": segmentation_diagnostics,
             "segmentation": {
                 "source_kind": start.source_kind,
                 "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
-                "range_limited": bool(segmentation_flags),
+                "range_limited": range_limited,
                 "solution_trimmed": solution_trimmed,
                 **({"solution_boundary_seq": solution_boundary_seq}
                    if solution_trimmed and solution_boundary_seq is not None else {}),
@@ -2157,6 +2160,12 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
     questions = build_questions(layout, starts, blocks)
     figures = [block for block in blocks if block.get("bbox") and block.get("type") in FIGURE_TYPES]
     for question in questions:
+        for diagnostic in question.get("segmentation_diagnostics") or []:
+            if diagnostic.get("action") == "pending_review":
+                region = {"page_idx": diagnostic["page_idx"], "bbox": list(diagnostic["bbox"])}
+                if region not in question["regions"]:
+                    question["regions"].append(region)
+                diagnostic["action"] = "retained"
         regions, flags = _limit_book_regions(question.get("regions") or [])
         question["regions"] = regions
         # For books the next printed question can begin against the bottom of a
@@ -2175,7 +2184,15 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
                 for block in figures
                 if center_in_regions(int(block["page_idx"]), block["bbox"], regions)
             ]
-        question["segmentation_flags"] = flags
+            for diagnostic in question.get("segmentation_diagnostics") or []:
+                if not center_in_regions(diagnostic["page_idx"], diagnostic["bbox"], regions):
+                    # The separate, explicitly flagged book-page safety limit
+                    # can still stop a runaway range. Do not claim a formula
+                    # beyond that limit survived in the rendered question.
+                    diagnostic["action"] = "range_limited"
+        question["segmentation_flags"] = list(dict.fromkeys([
+            *(question.get("segmentation_flags") or []), *flags,
+        ]))
         metadata = dict(question.get("segmentation") or {})
         metadata["range_limited"] = bool(flags)
         question["segmentation"] = metadata

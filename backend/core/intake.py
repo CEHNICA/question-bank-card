@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 from django.conf import settings
@@ -14,6 +15,75 @@ from .models import Block, Paper, Question, QuestionGroup, RegionRead
 MODES = {"auto", "manual", "native", "mineru"}
 BOOK_MANUAL_REASON = "教材或讲义中的题号可能按章节重新开始，本机暂不自动切题；已保留完整原页供手工框题，避免把不同章节的题合并。"
 MULTI_PAPER_MANUAL_REASON = "这份文件的题号多次从头开始，可能包含多套试卷。已保留完整原页供手工框题，避免把不同试卷的题合并。"
+
+
+def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[dict], dict[int, list[str]], list[str]]:
+    """Keep local boundary evidence visible without locating gaps remotely."""
+    from .pipeline import merged_question_flag
+
+    diagnostics, messages = [], []
+    flags: dict[int, list[str]] = {}
+    blocks_by_seq = {block.get("seq"): block for block in blocks}
+    for item in result.get("questions", []):
+        number = item["number"]
+        notes = list(dict.fromkeys(str(note) for note in item.get("segmentation_notes") or [] if note))
+        flags[number] = list(dict.fromkeys([
+            *(str(flag) for flag in item.get("segmentation_flags") or [] if flag), *notes,
+        ]))
+        messages.extend(notes)
+        if notes or flags[number] or item.get("segmentation"):
+            diagnostics.append({
+                "code": "question_segmentation_review", "question_number": number,
+                "notes": notes, "flags": list(flags[number]),
+                "metadata": deepcopy(item.get("segmentation") or {}),
+            })
+        for diagnostic in item.get("segmentation_diagnostics") or []:
+            if isinstance(diagnostic, dict):
+                diagnostics.append({**deepcopy(diagnostic), "question_number": number})
+
+    gaps: dict[int, dict] = {}
+    for number, previous in result.get("missing") or []:
+        record = gaps.setdefault(previous.number, {
+            "code": "missing_question_numbers", "question_number": previous.number,
+            "previous_number": previous.number, "numbers": [], "page_idx": previous.page,
+            "source_anchor_seq": previous.seq,
+        })
+        if number not in record["numbers"]:
+            record["numbers"].append(number)
+        warning = merged_question_flag(number)
+        previous_flags = flags.setdefault(previous.number, [])
+        if warning not in previous_flags:
+            previous_flags.append(warning)
+    for record in gaps.values():
+        block = blocks_by_seq.get(record["source_anchor_seq"])
+        if block and block.get("bbox"):
+            record["bbox"] = list(block["bbox"])
+        record["numbers"].sort()
+        numbers = "、".join(str(number) for number in record["numbers"])
+        record["message"] = (f"没有找到第 {numbers} 题的题号，可能和第 {record['previous_number']} 题在同一张卡里；"
+                             "请对照原卷，必要时调整范围或手工补题。")
+        messages.append(record["message"])
+        diagnostics.append(record)
+
+    leading = result.get("leading")
+    leading = asdict(leading) if is_dataclass(leading) else leading
+    if isinstance(leading, dict) and leading.get("status") in {"repaired", "suspected"}:
+        # The shared segmenter also serves MinerU imports. A native intake is
+        # still an original-image draft, never a promise of a subsequent read.
+        message = str(leading.get("message") or "").replace("MinerU 漏读了", "本地文字层未读到")
+        message = message.replace("新增题卡仍按正常流程识读。", "")
+        number = 1 if leading["status"] == "repaired" else leading.get("first_detected")
+        diagnostic = {**deepcopy(leading), "code": "leading_question_check",
+                      "question_number": number, "message": message}
+        candidate = blocks_by_seq.get(leading.get("candidate_seq"))
+        if candidate:
+            diagnostic.update(page_idx=candidate["page_idx"], bbox=list(candidate["bbox"]))
+        diagnostics.append(diagnostic)
+        if message:
+            messages.append(message)
+            if number is not None and message not in flags.setdefault(number, []):
+                flags[number].append(message)
+    return diagnostics, flags, list(dict.fromkeys(messages))
 
 
 def prepare(paper: Paper, mode: str) -> Paper:
@@ -81,6 +151,9 @@ def prepare(paper: Paper, mode: str) -> Paper:
             usable = {p["page_idx"] for p in plan["pages"] if p["mode"] == "native"}
             result = segment.segment(paper.pages, [b for b in extracted["blocks"] if b["page_idx"] in usable])
             items = result.get("questions", [])
+            diagnostics, segmentation_flags, messages = _native_segmentation_review(result, extracted["blocks"])
+            plan["warnings"] = list(dict.fromkeys([*(plan.get("warnings") or []), *messages]))
+            created_numbers = set()
             for index, item in enumerate(items):
                 if Question.all_objects.filter(paper=paper, group=group, number=item["number"]).exists():
                     continue
@@ -92,19 +165,33 @@ def prepare(paper: Paper, mode: str) -> Paper:
                     # The layout builder omits unreadable slots, so merely
                     # checking its output regions cannot reveal a skipped scan
                     # continuation. A question before that boundary is manual.
-                    plan.setdefault("warnings", []).append(
-                        f"第 {item['number']} 题后方有无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。")
+                    warning = f"第 {item['number']} 题后方有无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。"
+                    plan["warnings"].append(warning)
+                    diagnostics.append({"code": "unreadable_continuation", "question_number": item["number"],
+                                        "page_indices": [page for page in range(start_page, next_page) if page not in usable],
+                                        "message": warning})
                     continue
                 # Do not extend a partial text-layer question onto a scan page.
                 if not all(r["page_idx"] in usable for r in regions):
+                    warning = f"第 {item['number']} 题的范围包含无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。"
+                    plan["warnings"].append(warning)
+                    diagnostics.append({"code": "unreadable_continuation", "question_number": item["number"],
+                                        "page_indices": sorted({r["page_idx"] for r in regions if r["page_idx"] not in usable}),
+                                        "message": warning})
                     continue
                 draft = segment._text_in_regions(extracted["blocks"], regions)
                 Question.objects.create(paper=paper, group=group, number=item["number"],
                     section=item.get("section", ""), question_type=item.get("question_type", "unknown"),
                     regions=regions, regions_auto=regions, start_source="native", body_mode="source_image",
                     processing_mode="manual", stem=draft, text_source="native", state=Question.State.YELLOW,
-                    flags=["本地文字层切题初稿，请对照原卷确认范围；正文保留原图。"],
+                    flags=["本地文字层切题初稿，请对照原卷确认范围；正文保留原图。",
+                           *segmentation_flags.get(item["number"], [])],
                     source_anchor_seq=item.get("source_anchor_seq"))
+                created_numbers.add(item["number"])
+            for diagnostic in diagnostics:
+                diagnostic["question_created"] = diagnostic.get("question_number") in created_numbers
+            plan["segmentation_diagnostics"] = diagnostics
+            plan["warnings"] = list(dict.fromkeys(plan["warnings"]))
             paper.total = paper.questions.count()
             paper.progress = paper.total
             paper.processing_plan = plan

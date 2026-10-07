@@ -29,7 +29,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 11
+FIGURE_REVIEW_POLICY_VERSION = 12
 
 # 「这张候选图印在别题里」的角色写法。严格匹配 q 后跟若干数字，避免把
 # q / qOtherQuestion / q1a 这种坏值也当合法 foreign。
@@ -394,6 +394,90 @@ def candidate_key(item: dict) -> str | None:
         return f"{number:.1f}".rstrip("0").rstrip(".")
 
     return f"{item['page_idx']}:" + ",".join(shown(value) for value in (x0, y0, x1, y1))
+
+
+def _validated_layout(primary: dict, candidates: list[dict]) -> tuple[dict, dict, bool]:
+    """Validate saved option-marker evidence against the current unique crops."""
+    layout = primary.get("figure_layout") if isinstance(primary, dict) else None
+    if not isinstance(layout, dict):
+        return {}, {}, False
+    current = {}
+    duplicate_labels = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or candidate.get("label") is None:
+            continue
+        label = str(candidate["label"])
+        key = candidate_key(candidate)
+        if key is None:
+            continue
+        if label in current:
+            duplicate_labels.add(label)
+        current[label] = candidate
+    for label in duplicate_labels:
+        current.pop(label, None)
+    current_keys = {label: candidate_key(candidate) for label, candidate in current.items()}
+    saved_keys = layout.get("candidate_keys")
+    scope_matches = bool(current_keys) and not duplicate_labels \
+        and isinstance(saved_keys, dict) and saved_keys == current_keys
+    raw = layout.get("evidence")
+    evidence = {}
+    if isinstance(raw, dict):
+        for raw_label, item in raw.items():
+            label = str(raw_label)
+            candidate = current.get(label)
+            if (not isinstance(item, dict) or candidate is None
+                    or candidate.get("source") in {"manual", "human"}
+                    or candidate.get("manual") is True
+                    or item.get("source") != "printed_option_marker"
+                    or not isinstance(item.get("slot"), str) or item["slot"] not in OPTION_SLOTS
+                    or type(item.get("applied")) is not bool
+                    or not isinstance(item.get("candidate_key"), str)
+                    or current_keys[label] != item["candidate_key"]
+                    or type(item.get("page_idx")) is not int
+                    or item["page_idx"] != candidate["page_idx"]):
+                continue
+            evidence[label] = deepcopy(item)
+    return layout, evidence, scope_matches
+
+
+def validated_layout_assignments(
+    primary: dict, candidates: list[dict], assignments: dict,
+) -> dict[str, str]:
+    """Restore validated local roles without rewriting the raw reader evidence.
+
+    Old exclusions, foreign roles, and explicit competing option roles remain
+    authoritative.  This same helper is used by read-time and saved upgrades,
+    so a corrected option crop cannot be restored a second time as a stem.
+    """
+    resolved = dict(assignments or {})
+    _layout, evidence, _scope_matches = _validated_layout(primary, candidates)
+    for label, item in evidence.items():
+        current = resolved.get(label)
+        if item["applied"] and (current is None or current == "" or current == "stem"
+                                or current == item["slot"]):
+            resolved[label] = item["slot"]
+    return resolved
+
+
+def _validated_layout_diagnostics(primary: dict, candidates: list[dict], stored: dict) -> dict:
+    layout, evidence, scope_matches = _validated_layout(primary, candidates)
+    result = {"assignment_evidence": evidence} if evidence else {}
+    raw_conflicts = layout.get("conflicts", stored.get("assignment_conflicts"))
+    conflicts = []
+    if isinstance(raw_conflicts, list):
+        for item in raw_conflicts:
+            if not isinstance(item, dict) or not isinstance(item.get("reason"), str):
+                continue
+            label = item.get("candidate_label")
+            # Anonymous ambiguity diagnostics refer to the whole saved candidate
+            # set.  Candidate-specific diagnostics can also use a validated crop.
+            if not scope_matches and (label is None or str(label) not in evidence):
+                continue
+            if item not in conflicts:
+                conflicts.append(deepcopy(item))
+    if conflicts:
+        result["assignment_conflicts"] = conflicts
+    return result
 
 
 def missing_choice_figure_slots(
@@ -783,6 +867,7 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
             candidates=candidates,
             assignments=judged,
         )
+        assignments = validated_layout_assignments(primary, candidates, assignments)
         assignments.update({label: "none" for label in ignored_labels})
         review_figures = repaired_automatic_figures(
             figures=base_figures,
@@ -824,10 +909,13 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
             previous=stored if stored.get("source") in {None, "automatic"} else {},
         )
 
+    derived.update(_validated_layout_diagnostics(primary, candidates, stored))
     if (stored.get("source") == "automatic"
             and stored.get("status") in VALID_STATUSES
             and stored.get("policy_version") == FIGURE_REVIEW_POLICY_VERSION
-            and stored.get("input_hash") == derived.get("input_hash")):
+            and stored.get("input_hash") == derived.get("input_hash")
+            and all(stored.get(key) == derived.get(key)
+                    for key in ("assignment_evidence", "assignment_conflicts"))):
         return stored
 
     # Very old data and a few defensive call sites can contain a blocking
@@ -899,8 +987,10 @@ def persist_automatic_review_upgrades(questions) -> dict[str, int]:
             options=getattr(question, "options", None) or {},
             kind=kind,
             candidates=candidates,
-            assignments=primary.get("figures") or {},
+            assignments={**(primary.get("figures_followup") or {}), **(primary.get("figures") or {})}
+                if isinstance(primary.get("figures_followup"), dict) else (primary.get("figures") or {}),
         )
+        assignments = validated_layout_assignments(primary, candidates, assignments)
         raw_ignored = stored.get("ignored_candidates", [])
         ignored_keys = set(raw_ignored) if isinstance(raw_ignored, list) else set()
         assignments.update({
@@ -953,7 +1043,11 @@ def blocking_message(review: dict | None) -> str:
 # answers them; the automatic check never does.
 FLAG_ROW_FIGURE = "几道题的配图印在同一行，已按从左到右的顺序分配，请核对图与题是否对应"
 FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加上，请确认是否需要"
-DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE})
+FLAG_FIGURE_CLAIM_CONFLICT = "同一原卷配图被多道题或多个选项认领，请核对归属或确认共用关系"
+FLAG_SHARED_FIGURE = "原卷注明多道题共用配图，已补入对应题卡，请核对共用范围"
+FLAG_OPTION_ASSIGNMENT_CONFLICT = "印刷选项标签与识读的配图归属不一致，请核对对应选项"
+DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE, FLAG_FIGURE_CLAIM_CONFLICT,
+                            FLAG_SHARED_FIGURE, FLAG_OPTION_ASSIGNMENT_CONFLICT})
 
 
 def figure_flag(flag: str) -> bool:

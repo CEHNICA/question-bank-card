@@ -14,7 +14,7 @@ from PIL import Image
 from django.test import TestCase, RequestFactory, override_settings
 from django.utils import timezone
 
-from . import intake, library, native_pdf, pipeline, source_images, views
+from . import imaging, intake, library, native_pdf, pipeline, segment, source_images, views
 from .models import Paper, PublishedQuestion, Question, QuestionGroup, Block
 
 
@@ -268,6 +268,131 @@ class LocalIntakeTests(TestCase):
         self.assertTrue(paper.questions.exists())
         self.assertTrue(all(question.body_mode == "source_image" for question in paper.questions.all()))
         cloud.assert_not_called()
+        vision.assert_not_called()
+
+    def test_native_missing_numbers_warn_on_previous_card_and_group_diagnostics(self):
+        path = self.folder / "gap.pdf"
+        with fitz.open() as pdf:
+            page = pdf.new_page(width=400, height=600)
+            page.insert_text((30, 55), "1. Find x when x + 2 = 5.")
+            page.insert_text((30, 180), "4. Compute the area of this triangle.")
+            pdf.save(path)
+        paper = Paper.objects.create(filename=path.name, kind="pdf", source_path=str(path),
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(), status=Paper.Status.READY)
+        with mock.patch("core.pipeline.request_extract_file_from_pool") as cloud, \
+                mock.patch("core.pipeline.read_card") as vision:
+            intake.prepare(paper, "native")
+        paper.refresh_from_db()
+        self.assertEqual(list(paper.questions.values_list("number", flat=True)), [1, 4])
+        previous = paper.questions.get(number=1)
+        following = paper.questions.get(number=4)
+        self.assertIn(pipeline.merged_question_flag(2), previous.flags)
+        self.assertIn(pipeline.merged_question_flag(3), previous.flags)
+        self.assertNotIn(pipeline.merged_question_flag(2), following.flags)
+        gaps = [item for item in paper.processing_plan["segmentation_diagnostics"]
+                if item["code"] == "missing_question_numbers"]
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0]["numbers"], [2, 3])
+        self.assertEqual(gaps[0]["previous_number"], 1)
+        self.assertEqual(gaps[0]["page_idx"], 0)
+        self.assertTrue(gaps[0]["question_created"])
+        self.assertTrue(gaps[0]["bbox"])
+        self.assertTrue(any("第 2、3 题" in warning for warning in paper.processing_plan["warnings"]))
+        cloud.assert_not_called()
+        vision.assert_not_called()
+
+    def test_native_preserves_boundary_flags_notes_and_location_diagnostics(self):
+        paper = self.paper()
+        source = Path(paper.source_path)
+        blocks = native_pdf.extract(source)["blocks"]
+        result = segment.segment(imaging.page_sizes(source, "pdf"), blocks)
+        first = result["questions"][0]
+        first["segmentation_flags"] = ["续段范围需要核对", "续段范围需要核对"]
+        first["segmentation_notes"] = ["纯算式续段已保留，请对照原卷核对", "纯算式续段已保留，请对照原卷核对"]
+        detail = {"code": "ambiguous_formula_continuation", "page_idx": 0, "bbox": [30, 80, 300, 100],
+                  "reason": "无法确认是否为草稿", "action": "retained"}
+        first["segmentation_diagnostics"] = [detail]
+        first["segmentation"] = {"range_limited": False, "retained_continuation": True}
+        with mock.patch("core.intake.segment.segment", return_value=result):
+            intake.prepare(paper, "native")
+        paper.refresh_from_db()
+        question = paper.questions.get(number=1)
+        self.assertEqual(question.flags.count("续段范围需要核对"), 1)
+        self.assertEqual(question.flags.count("纯算式续段已保留，请对照原卷核对"), 1)
+        self.assertEqual(paper.processing_plan["warnings"].count("纯算式续段已保留，请对照原卷核对"), 1)
+        diagnostics = paper.processing_plan["segmentation_diagnostics"]
+        preserved = next(item for item in diagnostics if item["code"] == detail["code"])
+        self.assertEqual(preserved, {**detail, "question_number": 1, "question_created": True})
+        review = next(item for item in diagnostics if item["code"] == "question_segmentation_review"
+                      and item["question_number"] == 1)
+        self.assertEqual(review["metadata"], first["segmentation"])
+        self.assertEqual(review["notes"], ["纯算式续段已保留，请对照原卷核对"])
+        self.assertNotIn("question_created", detail)
+
+    def test_native_leading_suspicion_is_visible_on_paper_and_first_card(self):
+        paper = self.paper()
+        source = Path(paper.source_path)
+        blocks = native_pdf.extract(source)["blocks"]
+        result = segment.segment(imaging.page_sizes(source, "pdf"), blocks)
+        result["questions"] = result["questions"][1:]
+        message = "首个检测到的题号是第 2 题，前方还有疑似题目正文，但证据不足，可能漏了组首题。"
+        result["leading"] = segment.LeadingQuestionCheck(status="suspected", first_detected=2,
+            candidate_seq=blocks[0]["seq"], message=message)
+        with mock.patch("core.intake.segment.segment", return_value=result):
+            intake.prepare(paper, "native")
+        paper.refresh_from_db()
+        self.assertEqual(paper.questions.count(), 1)
+        self.assertIn(message, paper.questions.get(number=2).flags)
+        self.assertIn(message, paper.processing_plan["warnings"])
+        leading = next(item for item in paper.processing_plan["segmentation_diagnostics"]
+                       if item["code"] == "leading_question_check")
+        self.assertEqual(leading["status"], "suspected")
+        self.assertEqual(leading["question_number"], 2)
+        self.assertEqual(leading["bbox"], blocks[0]["bbox"])
+        self.assertTrue(leading["question_created"])
+
+    def test_native_keeps_diagnostics_for_card_skipped_before_unreadable_page(self):
+        paper = self.paper(mixed=True)
+        source = Path(paper.source_path)
+        blocks = native_pdf.extract(source)["blocks"]
+        result = segment.segment(imaging.page_sizes(source, "pdf"), [block for block in blocks if block["page_idx"] == 0])
+        last = result["questions"][-1]
+        last["segmentation_flags"] = ["可能包含未识别的下一题"]
+        last["segmentation_diagnostics"] = [{"code": "ambiguous_formula_continuation", "page_idx": 0,
+                                             "bbox": [30, 300, 200, 350], "action": "retained"}]
+        with mock.patch("core.intake.segment.segment", return_value=result):
+            intake.prepare(paper, "native")
+        paper.refresh_from_db()
+        self.assertFalse(paper.questions.filter(number=last["number"]).exists())
+        relevant = [item for item in paper.processing_plan["segmentation_diagnostics"]
+                    if item["question_number"] == last["number"]]
+        self.assertTrue(relevant)
+        self.assertTrue(all(item["question_created"] is False for item in relevant))
+        unreadable = next(item for item in relevant if item["code"] == "unreadable_continuation")
+        self.assertEqual(unreadable["page_indices"], [1])
+        self.assertTrue(any("未自动截成不完整题卡" in warning for warning in paper.processing_plan["warnings"]))
+
+    def test_native_inferred_first_number_does_not_promise_a_cloud_read(self):
+        paper = self.paper()
+        source = Path(paper.source_path)
+        blocks = native_pdf.extract(source)["blocks"]
+        result = segment.segment(imaging.page_sizes(source, "pdf"), blocks)
+        result["leading"] = segment.LeadingQuestionCheck(status="repaired", first_detected=2,
+            candidate_seq=blocks[0]["seq"], message=("MinerU 漏读了第 1 题题号，已用本地版面规则补出第 1 题。"
+                                                     "新增题卡仍按正常流程识读。题号由本地规则补出，请对照原卷核对。"))
+        with mock.patch("core.intake.segment.segment", return_value=result), \
+                mock.patch("core.pipeline.read_card") as vision:
+            intake.prepare(paper, "native")
+        paper.refresh_from_db()
+        inferred = paper.questions.get(number=1)
+        self.assertTrue(any("本地文字层未读到第 1 题题号" in flag for flag in inferred.flags))
+        self.assertTrue(all("正常流程识读" not in flag and "MinerU" not in flag for flag in inferred.flags))
+        diagnostic = next(item for item in paper.processing_plan["segmentation_diagnostics"]
+                          if item["code"] == "leading_question_check")
+        self.assertEqual(diagnostic["status"], "repaired")
+        self.assertEqual(diagnostic["first_detected"], 2)
+        self.assertEqual(diagnostic["question_number"], 1)
+        self.assertTrue(diagnostic["question_created"])
         vision.assert_not_called()
 
     def test_page_transfer_retains_success_manual_edits_and_publications(self):

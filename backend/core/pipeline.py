@@ -25,7 +25,7 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, demo, features, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
+    cuts, demo, features, figure_assignment, figure_claims, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
     textnorm, source_images,
 )
 from .account_pool import AccountPoolError, account_pool
@@ -364,6 +364,7 @@ def _row_as_choice_options(
 
 def _resolve_automatic_figure_assignments(
     *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
+    blocks: list[dict] | None = None,
 ) -> dict[str, str]:
     """Apply deterministic local evidence before trusting model image labels.
 
@@ -382,32 +383,23 @@ def _resolve_automatic_figure_assignments(
         candidates=candidates,
         assignments=_row_as_choice_options(
             stem=stem, options=options, kind=kind, candidates=candidates,
-            assignments=_sketches_beside_text_options(
-                stem=stem, options=options, kind=kind, assignments=assignments,
+            assignments=figure_assignment.option_assignments(
+                stem=stem, options=options, kind=kind, candidates=candidates,
+                assignments=_sketches_beside_text_options(
+                    stem=stem, options=options, kind=kind, assignments=assignments),
+                blocks=blocks,
             ),
         ),
     )
 
 
 def _sketches_beside_text_options(*, stem: str, options: dict, kind: str, assignments: dict) -> dict:
-    """A picture tied to an option that already has printed text is a student's sketch.
+    """Textual options alone cannot prove nearby diagrams are handwriting.
 
-    On a marked photo (凤城高一) readers tied the parabolas a student drew next
-    to “A. y=-2/x” to option A.  A choice question whose options are printed
-    as text, and whose wording asks for no picture, has no option pictures;
-    such a binding is dropped instead of turning the card yellow.
+    Retain the reader's evidence for the ordinary figure review.  A mixed
+    text/image option is legitimate even when the stem never says “如图”.
     """
-    texts = options or {}
-    all_printed_as_text = all(str(texts.get(key, "")).strip() for key in ("A", "B", "C", "D"))
-    if kind not in {"single_choice", "multiple_choice"} or not all_printed_as_text \
-            or has_figure_cue(stem, options):
-        # A lone captioned option (“A. 向右” beside an arrow) may really be a
-        # printed picture; only a question printed entirely as text is judged.
-        return assignments
-    return {
-        label: ("none" if role in readers.OPTION_KEYS else role)
-        for label, role in (assignments or {}).items()
-    }
+    return dict(assignments or {})
 
 
 def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dict]) -> list[str]:
@@ -503,7 +495,7 @@ def _drop_stale_automatic_figures(question: Question, candidates: list[dict]) ->
         if not isinstance(figure, dict):
             changed = True
             continue
-        if figure.get("source") in {"other", "row"} or candidate_key(figure) in valid_keys:
+        if figure.get("source") in {"other", "row", "shared"} or candidate_key(figure) in valid_keys:
             kept.append(figure)
         else:
             changed = True
@@ -2163,7 +2155,7 @@ def _apply_local_solution_shortening(
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
             or (
-                figure.get("source") in {"other", "row"}
+                figure.get("source") in {"other", "row", "shared"}
                 and segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
             )
         )
@@ -3738,19 +3730,29 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             if isinstance(update.get("read_a"), dict):
                 update["read_a"] = {**update["read_a"], "figures_followup": extra}
     provisional_kind = final.get("type") or snapshot["question_type"] or "unknown"
+    option_result = figure_assignment.option_evidence(
+        stem=final.get("stem", ""), options=final.get("options") or {},
+        kind=provisional_kind, candidates=snapshot["candidates"],
+        assignments=figure_source.get("figures") or {}, blocks=snapshot.get("witness_blocks"),
+    )
     figure_assignments = _resolve_automatic_figure_assignments(
         stem=final.get("stem", ""),
         options=final.get("options") or {},
         kind=provisional_kind,
         candidates=snapshot["candidates"],
         assignments=figure_source.get("figures") or {},
+        blocks=snapshot.get("witness_blocks"),
     )
     for label, role in figure_assignments.items():
         if label not in labels:
             continue
         box = {"page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"]}
         if role == "stem" or role in readers.OPTION_KEYS:
-            figures.append({"slot": role, **box, "source": "auto"})
+            figure = {"slot": role, **box, "source": "auto"}
+            evidence = option_result["evidence"].get(label)
+            if evidence and evidence.get("applied"):
+                figure["assignment_evidence"] = evidence
+            figures.append(figure)
         elif role.startswith("q") and role[1:].isdigit():
             foreign.append({
                 "number": int(role[1:]),
@@ -3805,6 +3807,23 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         reader_missing=bool(figure_source.get("missing_figure") or choice_missing),
         described_slots=described_slots | choice_missing_slots,
     )
+    if option_result["evidence"] or option_result["conflicts"]:
+        # Preserve the raw reader roles and keep geometry decisions separately.
+        local_evidence = {
+            label: {**evidence, "candidate_key": candidate_key(labels[label])}
+            for label, evidence in option_result["evidence"].items() if label in labels
+        }
+        review["assignment_evidence"] = local_evidence
+        for name in ("read_a", "read_b"):
+            if isinstance(update.get(name), dict) and ("stem" in update[name] or "figures" in update[name]):
+                update[name] = {**update[name], "figure_layout": {
+                    "evidence": local_evidence, "conflicts": option_result["conflicts"],
+                    "candidate_keys": {label: candidate_key(candidate) for label, candidate in labels.items()},
+                }}
+                break
+    if option_result["conflicts"]:
+        review["assignment_conflicts"] = option_result["conflicts"]
+        flags.append(figure_policy.FLAG_OPTION_ASSIGNMENT_CONFLICT)
     if review["status"] == BLOCKED_MISSING:
         if choice_missing:
             flags.append("选择题没有读出完整选项，请对照原卷补全；如果选项是图，再为对应选项添加配图")
@@ -3864,6 +3883,8 @@ def _snapshot(question: Question) -> dict:
                 flag for flag in (question.flags or [])
                 if str(flag).startswith("书本切题范围超过")
                 or str(flag).startswith(MERGED_QUESTION_FLAG_PREFIX)
+                or str(flag).startswith(segment.AMBIGUOUS_CONTINUATION_FLAG_PREFIX)
+                or flag == figure_policy.FLAG_SHARED_FIGURE
                 or flag == FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
             ]}
 
@@ -3926,7 +3947,7 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
     own_keys = {candidate_key(item) for item in question.figure_candidates or []}
     borrowed = [
         f for f in question.figures
-        if f.get("source") == "other" or (f.get("source") == "row" and candidate_key(f) not in own_keys)
+        if f.get("source") in {"other", "shared"} or (f.get("source") == "row" and candidate_key(f) not in own_keys)
     ]
     if borrowed and "figures" in fields:
         fields["figures"] = fields["figures"] + [
@@ -3934,12 +3955,16 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
         ]
         review_stem = question.stem if question.edited else fields.get("stem", question.stem)
         review_options = question.options if question.edited else fields.get("options", question.options)
+        reading_review = fields.get("figure_review") or {}
         fields["figure_review"] = recheck_automatic_review(
             stem=review_stem,
             options=review_options,
             figures=fields["figures"],
             previous=fields.get("figure_review"),
         )
+        for name in ("assignment_evidence", "assignment_conflicts"):
+            if name in reading_review:
+                fields["figure_review"][name] = deepcopy(reading_review[name])
         fields["flags"] = _flags_after_figure_review(
             fields.get("flags", []), fields["figure_review"], fields["figures"],
         )
@@ -4119,7 +4144,8 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                   for block in blocks_by_page.get(page, [])]
         snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
         snapshot["witness_blocks"] = [
-            {"page_idx": int(block["page_idx"]), "bbox": block["bbox"], "text": block.get("text") or ""}
+            {"page_idx": int(block["page_idx"]), "bbox": block["bbox"], "text": block.get("text") or "",
+             "seq": block.get("seq"), "type": block.get("type", "text")}
             for block in nearby
             if regions and block.get("bbox") and segment.center_in_regions(int(block["page_idx"]), block["bbox"], regions)
         ]
@@ -4285,6 +4311,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         return
     assign_foreign_figures(paper, foreign)
     distribute_figure_rows(paper)
+    audit_figure_claims(paper, revision=revision)
     if quota_error is not None:
         for snapshot in snapshots:
             if snapshot["body_mode"] == "source_image":
@@ -4320,6 +4347,7 @@ def _needs_row_figure(question: Question) -> bool:
     review = stored_or_derived_review(question)
     return (
         not question.figures
+        and not _figure_decision_protected(question)
         and not question.approved
         and review.get("source") != "human"
         and review.get("status") == BLOCKED_MISSING
@@ -4350,6 +4378,8 @@ def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> No
     """A reader's “this is question N's figure” guess loses to the row order."""
     for question in paper.questions.filter(processing_mode="auto", body_mode="text")\
             .exclude(id__in=keep | _continued_existing_ids(paper)):
+        if _figure_decision_protected(question):
+            continue
         figures = [
             figure for figure in question.figures or []
             if not (figure.get("source") == "other" and _same_box(figure, boxes))
@@ -4384,7 +4414,7 @@ def distribute_figure_rows(paper: Paper) -> int:
         .exclude(pk__in=_continued_existing_ids(paper)).order_by("group_id", "number", "id"))
     by_key = {(question.group_id, question.number): question for question in questions}
     for owner in questions:
-        if owner.approved or any(f.get("source") == "manual" for f in owner.figures or []):
+        if _figure_decision_protected(owner):
             continue
         row = _single_row([item for item in owner.figure_candidates or [] if item.get("bbox")])
         if row is None:
@@ -4393,17 +4423,24 @@ def distribute_figure_rows(paper: Paper) -> int:
         if targets is None:
             continue
         # The row's order is one piece of evidence; the owner's own reader is
-        # another.  When the reader tied exactly the box the order gives the
-        # owner (and nothing else), the two agree and nobody needs to check the
-        # pairing.  A reader that picked a different box (菱形周清第 15 题 took
-        # the leftmost, the order says rightmost) or none keeps every card flagged.
+        # another. When they agree on the owner's exact box, only the owner's
+        # pairing is confirmed. Each other card still needs its own reading
+        # evidence or a person's confirmation.
         own_box = row[targets.index(owner)]
         claimed = {
             label for label, role in ((owner.read_a or {}).get("figures") or {}).items()
             if role == "stem"
         }
-        confirmed = claimed == {str(own_box.get("label"))} and own_box.get("label") is not None
+        owner_confirmed = claimed == {str(own_box.get("label"))} and own_box.get("label") is not None
         for question, figure in zip(targets, row):
+            # One reader's agreement validates that question's pairing only.
+            own_candidate_labels = {
+                str(item.get("label")) for item in question.figure_candidates or []
+                if figure_claims.frame_key(item) == figure_claims.frame_key(figure) and item.get("label") is not None
+            }
+            own_reader_roles = (question.read_a or {}).get("figures") or {}
+            confirmed = (owner_confirmed if question is owner else
+                         any(own_reader_roles.get(label) == "stem" for label in own_candidate_labels))
             box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
             question.figures = [box]
             question.figure_review = automatic_review(
@@ -4433,12 +4470,12 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
         if targets.count() != 1:
             continue
         target = targets.first()
-        if target is None or any(f.get("source") == "manual" for f in target.figures):
+        if target is None or _figure_decision_protected(target):
             continue
         if _same_box(item, target.figures):
             continue
         previous_review = stored_or_derived_review(target)
-        had_own_figures = any(f.get("source") not in {"other", "row"} for f in target.figures or [])
+        had_own_figures = any(f.get("source") not in {"other", "row", "shared"} for f in target.figures or [])
         target.figures = target.figures + [{"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"],
                                             "source": "other"}]
         target.figure_review = recheck_automatic_review(
@@ -4458,6 +4495,95 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
         _invalidate_approval(target)
         target.save()
+
+
+def _figure_decision_protected(question: Question) -> bool:
+    return bool(question.approved or question.edited or question.processing_mode != "auto"
+                or question.body_mode != "text"
+                or (question.figure_review or {}).get("source") == "human"
+                or any(item.get("source") == "manual" for item in question.figures or []))
+
+
+def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
+    """Apply explicit shared captions and flag competing claims without choosing a winner."""
+    blocks_by_page = defaultdict(list)
+    for block in _block_dicts(paper):
+        blocks_by_page[int(block["page_idx"])].append(block)
+    with transaction.atomic():
+        current = Paper.objects.select_for_update().get(pk=paper.pk)
+        if revision is not None and int((current.processing_plan or {}).get("revision", 0)) != revision:
+            return {}
+        questions = list(current.questions.select_for_update().order_by("group_id", "number", "id"))
+        continued = _continued_existing_ids(current)
+        by_key = defaultdict(list)
+        for question in questions:
+            by_key[(question.group_id, question.number)].append(question)
+        all_blocks = [block for values in blocks_by_page.values() for block in values]
+        initial_ledger = figure_claims.build_ledger([{
+            "id": question.pk, "group_id": question.group_id, "number": question.number,
+            "candidates": question.figure_candidates, "figures": question.figures,
+        } for question in questions], all_blocks)
+        declarations = {entry["key"]: entry["shared_caption"] for entry in initial_ledger["figures"]
+                        if entry.get("shared_caption")}
+        handled = set()
+        for owner in questions:
+            if owner.pk in continued or _figure_decision_protected(owner):
+                continue
+            for candidate in [*(owner.figure_candidates or []), *(owner.figures or [])]:
+                key = figure_claims.frame_key(candidate)
+                if key is None or (owner.group_id, key) in handled:
+                    continue
+                declaration = declarations.get(key)
+                if declaration is None or owner.number not in declaration["numbers"]:
+                    continue
+                targets = [by_key[(owner.group_id, number)] for number in declaration["numbers"]]
+                if any(len(items) != 1 for items in targets):
+                    continue
+                handled.add((owner.group_id, key))
+                for (target,) in targets:
+                    if target.pk in continued or _figure_decision_protected(target):
+                        continue
+                    if any(figure_claims.frame_key(piece) == key for figure in target.figures or []
+                           for piece in figure_claims.figure_frames(figure)):
+                        continue
+                    target.figures = [*(target.figures or []), {
+                        "slot": "stem", "page_idx": candidate["page_idx"], "bbox": list(candidate["bbox"]),
+                        "source": "shared", "shared_numbers": declaration["numbers"],
+                    }]
+                    target.figure_review = recheck_automatic_review(
+                        stem=target.stem, options=target.options, figures=target.figures,
+                        previous=target.figure_review,
+                    )
+                    target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
+                    if figure_policy.FLAG_SHARED_FIGURE not in target.flags:
+                        target.flags.append(figure_policy.FLAG_SHARED_FIGURE)
+                    if target.state in {Question.State.GREEN, Question.State.YELLOW}:
+                        target.state = Question.State.YELLOW
+                    target.save()
+        ledger = figure_claims.build_ledger([{
+            "id": question.pk, "group_id": question.group_id, "number": question.number,
+            "candidates": question.figure_candidates, "figures": question.figures,
+            "protected": _figure_decision_protected(question) or question.pk in continued,
+        } for question in questions], all_blocks)
+        for question in questions:
+            if question.pk in continued or _figure_decision_protected(question):
+                continue
+            conflict_keys = ledger["conflicts"].get(str(question.pk), [])
+            flags = [flag for flag in question.flags or [] if flag != figure_policy.FLAG_FIGURE_CLAIM_CONFLICT]
+            if conflict_keys:
+                flags.append(figure_policy.FLAG_FIGURE_CLAIM_CONFLICT)
+            if flags == question.flags:
+                continue
+            question.flags = flags
+            if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW if flags else Question.State.GREEN
+            question.save(update_fields=["flags", "state", "updated_at"])
+        plan = deepcopy(current.processing_plan or {})
+        plan["figure_assignment_audit"] = ledger
+        current.processing_plan = plan
+        current.save(update_fields=["processing_plan", "updated_at"])
+        paper.processing_plan = plan
+    return ledger
 
 
 # ---------------------------------------------------------------- 总控
