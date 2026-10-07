@@ -948,17 +948,91 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
             paragraph = None
 
 
-def _write_images(document, item, slot):
+# 打印时的正文栏宽是 178mm（library.css 的 .print-flow），配图行用 flex + 14px 间距
+# 自然换行（styles.css 的 .qb-figures）。下面两个常量按同一套几何算：一 CSS 像素
+# 是 1/96 英寸。实测四张 240px 的图预览排成 2×2，Word 原来每张一个段落，排成 1×4。
+PREVIEW_PX_PER_INCH = 96
+PREVIEW_FIGURE_GAP_PX = 14
+
+
+def _figure_columns(images, text_width_mm=178):
+    """How many figures the preview puts on one row, counted the way it wraps.
+
+    .print-flow is 178mm wide and .qb-figure img is capped at 100% of it with no
+    height cap, so a figure is as wide as its pixels unless that exceeds the text
+    area. Rows fill greedily left to right. Answer/solution figures are not in this
+    row — they stack one per line in the preview too, and keep doing so.
+    """
+    widths = []
+    for image in images:
+        width = float(image["size"][0])
+        if width > 0:
+            widths.append(min(width, text_width_mm / 25.4 * PREVIEW_PX_PER_INCH))
+    if len(widths) < 2:
+        return 1
+    container = text_width_mm / 25.4 * PREVIEW_PX_PER_INCH
+    best = 1
+    used = widths[0]
+    count = 1
+    for width in widths[1:]:
+        if used + PREVIEW_FIGURE_GAP_PX + width <= container + 0.5:
+            used += PREVIEW_FIGURE_GAP_PX + width
+            count += 1
+        else:
+            best = max(best, count)
+            used, count = width, 1
+    return int(max(best, count))
+
+
+def _write_images(document, item, slot, columns=1):
     from docx.shared import Mm
-    for image in item["images"]:
-        if image["slot"] != slot:
-            continue
+    pictures = [image for image in item["images"] if image["slot"] == slot]
+    if not pictures:
+        return
+    if columns > 1 and len(pictures) > 1:
+        _write_figure_grid(document, pictures, columns)
+        return
+    for image in pictures:
         width, height = image["size"]
         # 150 dpi natural size, capped to the A4 text area and one-page height.
         scale = min(178 / width, (235 if slot == "body" else 210) / height, 25.4 / 150)
         paragraph = document.add_paragraph()
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
         paragraph.paragraph_format.keep_together = True
+
+
+def _write_figure_grid(document, pictures, columns, text_width_mm=178):
+    """Stem figures on the same rows the preview wraps them onto.
+
+    Images keep the 150 dpi size they always had; only the arrangement follows
+    the preview, so a question with four diagrams reads as 2×2 in the download
+    instead of four full-width lines.
+    """
+    from docx.shared import Mm
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    rows = (len(pictures) + columns - 1) // columns
+    table = document.add_table(rows=rows, cols=columns)
+    table.autofit = False
+    for column in table.columns:
+        column.width = Mm(text_width_mm / columns)
+    borders = OxmlElement("w:tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        border = OxmlElement("w:" + side)
+        border.set(qn("w:val"), "nil")
+        borders.append(border)
+    table._tbl.tblPr.append(borders)
+    for index, image in enumerate(pictures):
+        width, height = image["size"]
+        scale = min(178 / width, 210 / height, 25.4 / 150)
+        paragraph = table.cell(index // columns, index % columns).paragraphs[0]
+        # .qb-figures centres its row; the grid cells do the same job here.
+        paragraph.alignment = 1
+        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]),
+                                        width=Mm(width * scale), height=Mm(height * scale))
+        paragraph.paragraph_format.keep_together = True
+    for row in table.rows:
+        row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
 
 def _analysis_parts(blocks):
@@ -1340,7 +1414,13 @@ def _document(captured, title, options, mode):
             image_body = item["content"].get("body_mode", "text") == "source_image"
             _write_field(document, [] if image_body else item["fields"]["stem"], size,
                          prefix=prefix, where=item["where"], lead_segments=lead_segments)
-            _write_images(document, item, "body" if image_body else "stem")
+            # 原图题在预览里就是一张一张竖排（.qb-question-images 是 column 方向），
+            # 只有排版文字的题干配图跟着 .qb-figures 的换行走。
+            if image_body:
+                _write_images(document, item, "body")
+            else:
+                stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
+                _write_images(document, item, "stem", _figure_columns(stem_figures))
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)

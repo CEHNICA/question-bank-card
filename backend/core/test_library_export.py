@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import base64
+import hashlib
 import io
 import json
 import os
@@ -856,6 +857,130 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
         self.assertIn("X-QB-Layout-Warning", response)
+
+    def test_stem_figures_wrap_onto_the_same_rows_as_the_preview(self):
+        """The download must read like the preview: four diagrams stay 2x2.
+
+        The expected numbers below are what the browser actually produced for
+        frontend/styles.css (.qb-figures: flex-wrap, 14px gap, images capped at
+        100% of the 178mm .print-flow text area), measured with Chrome at a
+        178mm container. They are written out as literals on purpose — deriving
+        them from _figure_columns would only prove the function agrees with
+        itself.
+        """
+        for label, size, columns, rows in (
+            ("4 x 240px wraps to 2 columns", (240, 120), 2, 2),
+            ("3 x 240px wraps to 2 columns", (240, 120), 2, 2),
+            ("6 x 240px wraps to 2 columns", (240, 120), 2, 3),
+            ("4 x 320px still fits two per row", (320, 200), 2, 2),
+            ("4 x 120px stays on one row", (120, 90), 4, 1),
+            ("5 x 300px wraps to 2 columns", (300, 200), 2, 3),
+        ):
+            with self.subTest(label):
+                count = int(label[0])
+                pub = self.publication(kind="free_response")
+                folder = self.root / "library" / str(pub.id)
+                folder.mkdir(parents=True, exist_ok=True)
+                pub.content["figures"] = []
+                for index in range(1, count + 1):
+                    target = folder / f"figure-{index}.png"
+                    Image.new("RGB", size, "red").save(target)
+                    pub.content["figures"].append({"slot": "stem", "file": target.name,
+                                                   "page_idx": 0, "bbox": [0, 0, 100, 100]})
+                pub.content_hash = library.content_hash(pub.content)
+                pub.save(update_fields=["content", "content_hash"])
+
+                response = self.post(self.payload([pub], print_options={"document": "questions"}))
+                self.assertEqual(response.status_code, 200, response.content[:200])
+                tree = document_xml(response.content)
+                table = tree.find(".//w:tbl", NS)
+                self.assertIsNotNone(table, f"{label}: the figures must share one borderless grid")
+                self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), columns)
+                self.assertEqual(len(table.findall("w:tr", NS)), rows)
+                self.assertEqual(len(tree.findall(".//a:blip", NS)), count)
+                # Borderless, like the preview's plain figure row.
+                for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                    node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
+                    self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil", f"{label}: {side} border")
+                # Arrangement follows the preview; image size keeps the 150 dpi rule.
+                extents = tree.xpath(
+                    "//*[local-name()='extent' and namespace-uri()="
+                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")
+                self.assertTrue(all(abs(int(width) / 36000 - size[0] * 25.4 / 150) < .01 for width in extents))
+
+        # A figure wider than half the text area gets a row to itself in the
+        # preview, so the download keeps one picture per line instead of
+        # squeezing two onto a row and shrinking them.
+        pub = self.publication(kind="free_response")
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        pub.content["figures"] = []
+        for index in range(1, 5):
+            target = folder / f"figure-{index}.png"
+            Image.new("RGB", (400, 260), "red").save(target)
+            pub.content["figures"].append({"slot": "stem", "file": target.name,
+                                           "page_idx": 0, "bbox": [0, 0, 100, 100]})
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200)
+        tree = document_xml(response.content)
+        self.assertIsNone(tree.find(".//w:tbl", NS))
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
+
+    def test_a_single_stem_figure_stays_a_plain_paragraph(self):
+        pub = self.publication(kind="free_response")
+        self.figure(pub)
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200)
+        tree = document_xml(response.content)
+        self.assertIsNone(tree.find(".//w:tbl", NS))
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 1)
+
+    def test_source_image_papers_keep_one_picture_per_line(self):
+        # A scanned page is not a diagram: the preview stacks those one per line
+        # (.qb-question-images is a column), so the download must not grid them.
+        pub = self.publication(kind="single_choice", stem="")
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        images = []
+        for index in range(1, 5):
+            target = folder / f"question-{index}.png"
+            Image.new("RGB", (240, 120), "red").save(target)
+            images.append({"file": target.name, "width": 240, "height": 120,
+                           "page_idx": index - 1, "bbox": [0, 0, 100, 100], "order": index - 1,
+                           "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+        pub.content.update(body_mode="source_image", question_images=images, figures=[])
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+        self.assertIsNone(tree.find(".//w:tbl", NS), "a scanned page keeps one picture per line")
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
+
+    def test_stem_grid_leaves_option_figures_on_their_own_lines(self):
+        # Only the preview's figure row is gridded. Option diagrams keep the
+        # layout the option columns already give them.
+        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        pub.content["figures"] = []
+        for index, slot in enumerate(["stem"] * 4 + list("ABCD"), 1):
+            target = folder / f"figure-{index}.png"
+            Image.new("RGB", (240, 120), "red").save(target)
+            pub.content["figures"].append({"slot": slot, "file": target.name,
+                                           "page_idx": 0, "bbox": [0, 0, 100, 100]})
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 8)
+        tables = tree.findall(".//w:tbl", NS)
+        self.assertEqual(len(tables), 1, "Auto option layout is vertical, so only the stem row is a grid")
+        self.assertEqual(len(tables[0].findall("w:tblGrid/w:gridCol", NS)), 2)
+        self.assertEqual(len(tables[0].findall(".//a:blip", NS)), 4)
 
     def test_inline_missing_solution_does_not_emit_a_separate_placeholder(self):
         complete = self.publication(answer="2", analysis="有答案的过程")
