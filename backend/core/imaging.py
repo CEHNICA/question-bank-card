@@ -213,6 +213,62 @@ def jpeg_data_url(image: Image.Image, long_side: int = 2000, quality: int = 88) 
 _FONT_CACHE: dict[int, ImageFont.ImageFont] = {}
 
 
+STRIP_TILE_HEIGHT = 560   # 每幅候选图归一到这个高度（页面短边单位）
+STRIP_GAP = 24
+STRIP_MAX_ZOOM = 3.0
+
+
+def figure_strip(page_loader, figures: list[dict]) -> Image.Image | None:
+    """Crop every candidate figure on its own, scale them to one height, number them.
+
+    按题卡范围整段裁（``stack_regions``）在范围接近整页时会失效：跨栏大题、题组
+    的范围能到页面的七成以上，那张候选在整段图里只剩几十像素，模型看不清就答
+    「不是印刷插图」——实测 shengliesans 第 7 题就是这样被误否的。这里每张单独
+    裁、按自己的尺寸放大再横排，每一幅都看得清。
+
+    任何一幅的 bbox 裁不出图就返回 None，调用方必须放弃这次提问：发一张缺图的
+    裁图等于让模型对着不存在的东西回答，它的「不是印刷插图」会读起来像结论。
+    """
+    tiles = []
+    for index, figure in enumerate(figures, 1):
+        page = page_loader(figure["page_idx"])
+        width, height = page.size
+        x0, y0, x1, y1 = figure["bbox"]
+        if x1 <= x0 or y1 <= y0:
+            return None
+        pad = max(2.0, (y1 - y0) * .04)
+        box = (max(0, min(width - 1, math.floor((x0 - pad) * width / 1000))),
+               max(0, min(height - 1, math.floor((y0 - pad) * height / 1000))),
+               max(1, min(width, math.ceil((x1 + pad) * width / 1000))),
+               max(1, min(height, math.ceil((y1 + pad) * height / 1000))))
+        if box[2] <= box[0] or box[3] <= box[1]:
+            return None
+        tiles.append((index, page.crop(box).convert("RGB")))
+    if not tiles:
+        return None
+
+    scaled = []
+    for index, tile in tiles:
+        factor = min(STRIP_MAX_ZOOM, STRIP_TILE_HEIGHT / max(1, tile.height))
+        if abs(factor - 1) > .01:
+            tile = tile.resize((max(1, round(tile.width * factor)), STRIP_TILE_HEIGHT),
+                               Image.Resampling.LANCZOS)
+        scaled.append((index, tile))
+    canvas = Image.new("RGB", (sum(tile.width for _, tile in scaled)
+                               + STRIP_GAP * (len(scaled) + 1), STRIP_TILE_HEIGHT), "white")
+    draw = ImageDraw.Draw(canvas)
+    font = _font(max(24, STRIP_TILE_HEIGHT // 12))
+    x = STRIP_GAP
+    for index, tile in scaled:
+        canvas.paste(tile, (x, 0))
+        draw.rectangle([x, 0, x + tile.width - 1, STRIP_TILE_HEIGHT - 1],
+                       outline=(0, 90, 255), width=max(3, tile.width // 300))
+        draw.rectangle([x, 0, x + font.size + 26, font.size + 12], fill=(0, 90, 255))
+        draw.text((x + 12, 6), str(index), fill=(255, 255, 255), font=font)
+        x += tile.width + STRIP_GAP
+    return canvas
+
+
 def _font(size: int):
     if size in _FONT_CACHE:
         return _FONT_CACHE[size]

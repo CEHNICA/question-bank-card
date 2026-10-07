@@ -1789,6 +1789,123 @@ def locate_missing(
     return notes
 
 
+# 「如图」却没有配图的题：配图印在题目文字正上方，整张落在上一题的纵向地盘里，
+# 于是上一张卡把它认领走了，本题只剩一句「如图」。产品自己的配图策略本来会把这种
+# 卡判成 blocked_missing 拦下来等人补图，这里在切题之后把那张被认领错的图改回本题。
+# 纯几何判定，不额外调用模型：改回来的图照样走读题的候选图标注和判定那条老路。
+#
+# 两种形状：
+#   1. 图整个落在本题上边缘之上、离得不远 —— 它是被上一题的范围盖住的；
+#   2. 图的上端落在本题的文字带里、垂到范围之外（教材例 1 的图 1-29）——
+#      图心因此落在裁剪范围外，从来没被认领过。
+# 距离带不能放宽。放到 180 试过：多救回 0 张，却让 lingxing 第 13/14 题盯上了
+# **第 3 题**的图（中间隔着好几题）。60 刚好把它们挡在外面。
+FIGURE_RECLAIM_BAND = 60.0
+FIGURE_OVERHANG = 150.0
+
+
+def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]:
+    """把「被上一张卡认领走、本题又确实缺图」的那张图改回本题。"""
+    notes: list[str] = []
+    visuals = [b for b in blocks or []
+               if b.get("bbox") and b.get("type") in segment.FIGURE_TYPES]
+    by_seq = {b["seq"]: b for b in visuals if isinstance(b.get("seq"), int)}
+
+    def owns_inside(item: dict) -> bool:
+        """本题范围之内是否已经有一张图。"""
+        for candidate in item.get("figure_candidates") or []:
+            block = by_seq.get(candidate.get("seq"))
+            if block is not None and segment.center_in_regions(
+                    int(block["page_idx"]), block["bbox"], item.get("regions") or []):
+                return True
+        return False
+
+    def holds(item: dict, sequence) -> bool:
+        return any(c.get("seq") == sequence for c in item.get("figure_candidates") or [])
+
+    for item in items:
+        regions = item.get("regions") or []
+        if not regions or owns_inside(item):
+            # 本题范围里已经有图就不是这一类，别去动一张已经拿对的卡。
+            continue
+        cue_regions = [
+            region for region in regions
+            if has_figure_cue(segment._text_in_regions(blocks, [region]))
+        ]
+        if not cue_regions:
+            continue
+        for region in cue_regions:
+            page_idx = int(region["page_idx"])
+            top = float(region["bbox"][1])
+            stranded = [
+                block for block in visuals
+                if int(block["page_idx"]) == page_idx
+                and float(block["bbox"][3]) <= top
+                and top - float(block["bbox"][3]) <= FIGURE_RECLAIM_BAND
+            ]
+            if not stranded:
+                continue
+            block = max(stranded, key=lambda b: float(b["bbox"][3]))
+            sequence = block.get("seq")
+            if sequence is None:
+                continue
+            holder = next((other for other in items
+                           if other is not item and holds(other, sequence)), None)
+            if holder is not None and len(holder.get("figure_candidates") or []) <= 1:
+                # 上一张卡可能就靠这一张图。别的题还指着图的时候不抢。
+                continue
+            if holder is not None:
+                holder["figure_candidates"] = [
+                    c for c in holder["figure_candidates"] if c.get("seq") != sequence
+                ]
+            entry = {"seq": sequence, "page_idx": page_idx, "bbox": list(block["bbox"]),
+                     "recovered_input": True}
+            item["figure_candidates"] = [*(item.get("figure_candidates") or []), entry]
+            item["regions"] = [*regions, {"page_idx": page_idx, "bbox": list(block["bbox"])}]
+            regions = item["regions"]
+            notes.append(
+                f"第 {item.get('number')} 题说「如图」，但它的配图印在题目上方、被"
+                f"第 {holder.get('number') if holder else '上一'} 题的范围盖住了；"
+                f"已把这张图改回本题。"
+            )
+            break
+        # 第二种形状：图从本题的文字带里开始、垂到范围之外。这种图谁的图心都不在，
+        # 所以谁都没认领它（图心若落在别的卡里，那就是别的卡的图，不碰）。
+        for region in cue_regions:
+            page_idx = int(region["page_idx"])
+            top, bottom = float(region["bbox"][1]), float(region["bbox"][3])
+            hanging = [
+                block for block in visuals
+                if int(block["page_idx"]) == page_idx
+                and top <= float(block["bbox"][1]) <= bottom
+                and float(block["bbox"][3]) - bottom <= FIGURE_OVERHANG
+                and not holds(item, block.get("seq"))
+                and not any(other is not item and holds(other, block.get("seq"))
+                            for other in items)
+                # 图心若落在别的卡的范围内，那是那道卡的图：起点碰巧压在本卡的
+                # 文字带里而已，不碰。
+                and not any(other is not item
+                            and segment.center_in_regions(page_idx, block["bbox"],
+                                                          other.get("regions") or [])
+                            for other in items)
+            ]
+            if not hanging:
+                continue
+            block = min(hanging,
+                        key=lambda b: abs((float(b["bbox"][1]) + float(b["bbox"][3])) / 2 - bottom))
+            entry = {"seq": block.get("seq"), "page_idx": page_idx,
+                     "bbox": list(block["bbox"]), "recovered_input": True}
+            item["figure_candidates"] = [*(item.get("figure_candidates") or []), entry]
+            item["regions"] = [*regions, {"page_idx": page_idx, "bbox": list(block["bbox"])}]
+            regions = item["regions"]
+            notes.append(
+                f"第 {item.get('number')} 题说「如图」，但它的配图有一半垂在题目范围之外，"
+                f"没有被任何一张卡认领；已把这张图接回本题。"
+            )
+            break
+    return notes
+
+
 # The one cut failure that is still reported, and the sentence every place that
 # has to recognise it starts with.  “The automatic cut produced no questions”
 # counts the cards that exist; it never compares them against a number the paper
@@ -2239,6 +2356,8 @@ def _collect_segmentation_items(
         # typed scopes below are used only to assign each full-book result.
         layout, starts = segment.analyse_book(paper.pages, blocks)
         items = segment.build_book_questions(layout, starts, blocks)
+        # 教材里「如图」的例子同样可能把配图让给上一张卡（例 1 的图 1-29）。
+        notes.extend(reclaim_stranded_figures(items, blocks))
         seen_anchors: set[int] = set()
         for item in items:
             anchor = _source_anchor(item)
@@ -2291,6 +2410,12 @@ def _collect_segmentation_items(
             continue
         layout, starts = segment.analyse(group_pages, group_blocks)
         starts, leading = segment.repair_leading_question(layout, starts, group_blocks)
+        # 一份讲义或课堂笔记，行首的印刷编号全是小节标题。把小节当题切出来，
+        # 用户只会拿到一批看不懂的“题卡”，而且没有任何地方说明这份材料没有题。
+        # 判据只在整组编号都不像题时才动手，试卷不会命中。
+        verdict = segment.classify_numbering(group_blocks, starts)
+        if verdict.verdict == "topics":
+            raise RuntimeError(verdict.message)
         if leading.message:
             notes.append(f"{group.title}：{leading.message}" if len(groups) > 1 else leading.message)
         missing = segment.missing_numbers(starts)
@@ -2310,9 +2435,24 @@ def _collect_segmentation_items(
         items = segment.build_questions(layout, starts, group_blocks)
         # 切线压在字上（照片里 MinerU 的框偏大）时，挪到两题之间的空白行。
         cuts.snap_cuts(items, page_store.load, layout)
+        # 配图印在题目上方、被上一题的范围盖住时，把它改回本题（纯几何，不调模型）。
+        notes.extend(reclaim_stranded_figures(items, group_blocks))
         for item in items:
             notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
                           for note in item.get("segmentation_notes") or []])
+        # 切出来的题比页还少，几乎总是这份材料本来就没几道题（讲义、答案页、
+        # 知识点总结），或者有一大半页没被认出来。这不是错误，只是不能默默
+        # 交付：题卡数量低于页数时至少说一声，让用户自己判断。
+        # 实测 13 份材料，最稀疏的一份真卷是 3.12 张/页（8 页 25 题的济南中考），
+        # 所以“少于页数”这个门槛有三倍余量，正常的试卷不会被打扰。它是兜底：
+        # 整份讲义在前面已经被拒绝了，能走到这里的都是只认出了一部分题的材料，
+        # 例如把教材错当成试卷提交。
+        if items and len(items) < len(group_pages):
+            notes.append(
+                f"这份材料 {len(group_pages)} 页只切出 {len(items)} 道题，"
+                f"题数少于页数。它可能是讲义、答案或知识点总结，而不是试卷；"
+                f"如果里面有遗漏的题，请对照原卷检查。"
+            )
         for number, previous_number in unresolved:
             holder = next((item for item in items if item.get("number") == previous_number), None)
             if holder is not None:
@@ -4312,6 +4452,10 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     assign_foreign_figures(paper, foreign)
     distribute_figure_rows(paper)
     audit_figure_claims(paper, revision=revision)
+    if verify_geometric_figures(paper, revision=revision):
+        # 撤掉一张图会解开也可能改写归属，冲突清单必须按剩下的图重算，
+        # 否则这一轮留给用户看的还是撤图之前那份。
+        audit_figure_claims(paper, revision=revision)
     if quota_error is not None:
         for snapshot in snapshots:
             if snapshot["body_mode"] == "source_image":
@@ -4504,8 +4648,57 @@ def _figure_decision_protected(question: Question) -> bool:
                 or any(item.get("source") == "manual" for item in question.figures or []))
 
 
+def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> list[Question]:
+    """Give every contested source frame to a single card.
+
+    When the same printed picture ends up on two cards, both cards show it and a
+    person has to delete one by hand.  The card that says 如图 keeps it; the other one
+    loses the crop and its own review re-runs, so a card that really needs a picture
+    falls back to 缺图并等人工 and a card that never wanted one simply loses it.  A frame
+    that is only shared on purpose (原卷注明多题共用) or that the text cannot separate is
+    left exactly as it was: a wrong guess moves a correct picture onto the wrong card.
+    """
+    by_pk = {question.pk: question for question in questions}
+    changed: list[Question] = []
+    # ledger["conflicts"] is {str(question_id): [frame_key, ...]}, so it is read the
+    # other way round to report one line per contested picture.
+    contested: dict[str, list[int]] = {}
+    for owner_id, keys in (ledger.get("conflicts") or {}).items():
+        for key in keys:
+            contested.setdefault(key, []).append(int(owner_id))
+    for key, owners in sorted(contested.items()):
+        claimants = [by_pk.get(int(pk)) for pk in owners]
+        if any(card is None or _figure_decision_protected(card) for card in claimants):
+            continue
+        winner = figure_policy.contest_winner([
+            {"id": card.pk, "stem": card.stem, "options": card.options} for card in claimants
+        ])
+        if winner is None:
+            continue
+        for loser in claimants:
+            if loser.pk == winner:
+                continue
+            kept = [
+                figure for figure in loser.figures or []
+                if all(figure_claims.frame_key(piece) != key
+                       for piece in figure_claims.figure_frames(figure))
+            ]
+            if len(kept) == len(loser.figures or []):
+                continue
+            loser.figures = kept
+            loser.figure_review = recheck_automatic_review(
+                stem=loser.stem, options=loser.options, figures=kept,
+                previous=loser.figure_review,
+            )
+            loser.flags = _flags_after_figure_review(loser.flags, loser.figure_review, kept)
+            _invalidate_approval(loser)
+            loser.save()
+            changed.append(loser)
+    return changed
+
+
 def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
-    """Apply explicit shared captions and flag competing claims without choosing a winner."""
+    """Apply explicit shared captions, settle competing claims, and flag the rest."""
     blocks_by_page = defaultdict(list)
     for block in _block_dicts(paper):
         blocks_by_page[int(block["page_idx"])].append(block)
@@ -4565,6 +4758,13 @@ def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
             "candidates": question.figure_candidates, "figures": question.figures,
             "protected": _figure_decision_protected(question) or question.pk in continued,
         } for question in questions], all_blocks)
+        if _resolve_figure_claim_winner(questions, ledger):
+            # 一张图改判给别的题之后，冲突清单要重算，否则刚解开的还会被标黄。
+            ledger = figure_claims.build_ledger([{
+                "id": question.pk, "group_id": question.group_id, "number": question.number,
+                "candidates": question.figure_candidates, "figures": question.figures,
+                "protected": _figure_decision_protected(question) or question.pk in continued,
+            } for question in questions], all_blocks)
         for question in questions:
             if question.pk in continued or _figure_decision_protected(question):
                 continue
@@ -4584,6 +4784,131 @@ def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
         current.save(update_fields=["processing_plan", "updated_at"])
         paper.processing_plan = plan
     return ledger
+
+
+GEOMETRIC_SOURCES = ("other", "row", "shared")
+GEOMETRIC_FLAG_BY_SOURCE = {
+    "other": figure_policy.FLAG_FOREIGN_FIGURE,
+    "row": figure_policy.FLAG_ROW_FIGURE,
+    "shared": figure_policy.FLAG_SHARED_FIGURE,
+}
+
+
+def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> int:
+    """Put every geometrically attached figure back in front of the reader.
+
+    ``assign_foreign_figures``, ``distribute_figure_rows`` and the shared-caption
+    pass all run after the last card was read, so no vision call ever looked at
+    the picture they attached: a scribbled answer, a header photo or show-through
+    can land on a card, and only the flag they raise asks a person to spot it.
+
+    Each flagged card is shown to the same reader twice over: first "is this
+    printed on the sheet", and, for whatever that call left out, a harder second
+    question with a hard standard - "not one printed mark anywhere in it".  One
+    call flips (the same strip came back all-``none`` after a single word was
+    added to the prompt), which is why the removal decision needs two.
+
+    What both calls agree on comes off.  Two rounds on 134 real cards agreed on
+    "handwritten from edge to edge" for 7 candidates, and reading those 7 by eye
+    found a printed rhombus among them - a fuzzy scan the reader took for
+    handwriting.  The owner asked for removal anyway: a mistaken removal costs one
+    hand-drawn replacement, while shipping every card with a doubtful picture
+    costs trust on every run.  The second call is what makes that trade safe
+    enough to make automatically.
+
+    An unreadable answer, a request error, or a candidate that cannot be cropped
+    leaves the card exactly as it was.  Returns the number of cards changed.
+    """
+    engine = readers.primary_engine()
+    if engine is None:
+        return 0
+    if revision is None:
+        revision = int((paper.processing_plan or {}).get("revision", 0))
+    targets = []
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text") \
+            .exclude(pk__in=_continued_existing_ids(paper)).order_by("group_id", "number", "id"):
+        if _figure_decision_protected(question):
+            continue
+        flags = set(question.flags or [])
+        pending = [figure for figure in question.figures or []
+                   if figure.get("source") in GEOMETRIC_SOURCES
+                   and GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] in flags]
+        if pending:
+            targets.append((question, pending))
+    if not targets:
+        return 0
+
+    store = PageStore(paper)
+    changed = 0
+    for question, pending in targets:
+        if not _run_current(paper.pk, revision):
+            break
+        keys = {figure_claims.frame_key(item): item for item in question.figure_candidates or []}
+        paired = [(figure, keys.get(figure_claims.frame_key(figure)))
+                  for figure in pending]
+        if not any(candidate is not None for _, candidate in paired):
+            continue
+        # 编号跟着候选框的顺序走，模型点到的号才能对回这张几何配的图。
+        candidates = [item for item in question.figure_candidates or []
+                      if figure_claims.frame_key(item) is not None]
+        try:
+            strip = imaging.figure_strip(store.load, [{"page_idx": item["page_idx"],
+                                                       "bbox": list(item["bbox"])}
+                                                      for item in candidates])
+        except (ValueError, OSError):
+            continue
+        if strip is None:
+            continue
+        positions = {figure_claims.frame_key(item): index
+                     for index, item in enumerate(candidates, 1)}
+        indexed = [(figure, positions[figure_claims.frame_key(candidate)])
+                   for figure, candidate in paired if candidate is not None]
+        try:
+            answer = readers.verify_figure_ownership(
+                engine, imaging.jpeg_data_url(strip), question.stem, len(candidates))
+        except readers.ReaderError:
+            answer = None
+        if answer is None:
+            continue
+        doubtful = [position for _, position in indexed if position not in answer]
+        if not doubtful:
+            continue
+        # 一次判定会翻转，而撤图是破坏性的，所以只对判否的那几幅再问一次，
+        # 而且换成一条硬标准：有没有一笔印刷的内容。问不出来就当没问。
+        try:
+            confirmed = readers.confirm_all_handwritten(
+                engine, imaging.jpeg_data_url(strip), doubtful)
+        except readers.ReaderError:
+            confirmed = None
+        if not confirmed:
+            continue
+        unprinted = [figure for figure, position in indexed if position in confirmed]
+        if not unprinted:
+            continue
+        # 两问都指向「整幅手写」就撤掉。实测 134 张真卡这一步会命中 7 张，逐张
+        # 看下来至少有一张是印刷的菱形图（扫描件发糊，模型看成了手写）——按用户的
+        # 要求仍然撤：撤错了手工再框一次，比让每次都带着一张可疑的图交付便宜。
+        # 两步判定在这里就是为这个服务的：单次会翻转，两次都否才算。
+        dropped = {figure_claims.frame_key(figure) for figure in unprinted}
+        figures = [figure for figure in question.figures or []
+                   if figure_claims.frame_key(figure) not in dropped]
+        previous_review = stored_or_derived_review(question)
+        review = recheck_automatic_review(
+            stem=question.stem, options=question.options, figures=figures,
+            previous=previous_review)
+        # 「已按顺序分配」在图被撤走之后就是假话，先摘掉再让复判重选旗标。
+        stale = {GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] for figure in unprinted}
+        flags = _flags_after_figure_review(
+            [flag for flag in question.flags or [] if flag not in stale], review, figures)
+        question.figures = figures
+        question.figure_review = review
+        question.flags = flags
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW if flags else Question.State.GREEN
+        _invalidate_approval(question)
+        question.save()
+        changed += 1
+    return changed
 
 
 # ---------------------------------------------------------------- 总控

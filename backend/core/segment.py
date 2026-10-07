@@ -1475,6 +1475,99 @@ def missing_numbers(starts: list[Start]) -> list[tuple[int, Start]]:
     return result
 
 
+# --------------------------------------------------------------------- 讲义
+# 讲义、课堂笔记和试卷在切题算法眼里是同一种东西：行首一个印刷编号。
+# “1. 下列各组数中，是勾股数的是” 和 “1、棱柱的结构特征” 长得一样，
+# 但前者是一道题，后者只是一个小节的标题。把小节当题切出来，用户拿到的是
+# 一堆看不懂的“题卡”，却没有任何地方告诉他这份材料里根本没有题。
+#
+# 区分靠的是句子的样子，不是关键词：题干以动词开头（化简、计算、解方程、
+# 求证、写出），或者带答题括号、问号、逗号；小节标题是名词短语
+# （“棱柱的结构特征”“常见平面图形面积计算”），两样都没有。
+#
+# 关键词单独用不行——“面积计算”里的“计算”和“计算下列各式的值”里的“计算”
+# 长得一样，所以动词必须出现在**行首**才算数；而“化简 $\sqrt{8}$”这种连逗号
+# 都没有的短句填空题，也必须仍然算作一道题，否则整卷真题会被当成讲义丢掉。
+# 误判的代价不对称：把讲义当成试卷，用户看到的是一批不像题的题卡，还能自己
+# 看出来；把试卷当成讲义，用户那一卷的题就全没了。所以判据偏向宁可放过。
+_STEM_PUNCTUATION_RE = re.compile(r"[？?（(]\s*[）)]|_{2,}|，|,|、")
+_IMPERATIVE_START_RE = re.compile(
+    r"^\s*(?:求证|求值|求解|求|证明|计算|化简|解方程|解|写出|作出|画出|判断|"
+    r"选择|填空|填表|回答|说明|比较|指出|估计|列举|举出|列出|试求|探讨|"
+    r"观察|阅读|查找|判断并说明|试计算)"
+)
+#
+# 判据只在整份材料的层面生效：只要有一道题像题，就照常切。实测 13 份材料，
+# 11 份真卷里“像小节的编号”占比一律是 0%，两份纯讲义分别是 100% 和 33%，
+# 所以这条判据碰不到任何一份真卷。
+_STEM_PUNCTUATION_RE = re.compile(r"[？?（(]\s*[）)]|_{2,}|，|,|、")
+_TOPIC_TITLE_RE = re.compile(
+    r"(?:结构特征|的定义|的性质|的分类|的判定|的证明|公式|小结|知识|要点|"
+    r"复习|讲解|方法总结|概念|定理|公理|推导|知识点|面积计算|体积计算|"
+    r"表面积|其他性质|存在意义|常用结论|易错点|分类讨论)"
+)
+MIN_TOPIC_NUMBERED_LINES = 3   # 少于三个编号谈不上“整份都是小节”
+TOPIC_TITLE_SHARE = 0.30       # 像小节标题的编号占比达到这个数才动手
+QUESTION_STEM_SHARE = 0.40     # 像题的编号占比高于这个数就一律不动
+
+
+@dataclass(frozen=True)
+class NumberingVerdict:
+    """这些印刷编号开的是题目，还是只是小节标题。"""
+
+    verdict: str = "exam"        # exam | topics
+    numbered: int = 0
+    topic_like: int = 0
+    stem_like: int = 0
+    samples: tuple[str, ...] = ()
+
+    @property
+    def message(self) -> str:
+        shown = "、".join(self.samples[:3])
+        return (
+            f"这份材料里找到的是 {self.numbered} 个编号小节（如 {shown}），"
+            f"没有找到题目。它可能是知识点讲义或课堂笔记，不是试卷，因此没有切题；"
+            f"原页已保留。如果里面确实有题，请改用“书籍”类型重新处理，或手工框题。"
+        )
+
+
+def _stem_after_number(text: str) -> str:
+    """题号之后、同一行里的正文（小节标题和题干各取这一行）。"""
+    plain = _plain_block_text(text)
+    for line in plain.split("\n"):
+        if NUMBER_RE.match(line):
+            return NUMBER_RE.sub("", line, count=1).strip()
+    return plain.strip()
+
+
+def _looks_like_sentence(stem: str) -> bool:
+    """Is this numbered line a question rather than a topic title?"""
+    return bool(_STEM_PUNCTUATION_RE.search(stem) or _IMPERATIVE_START_RE.match(stem))
+
+
+def classify_numbering(blocks: list[dict], starts: list[Start]) -> NumberingVerdict:
+    """判断一串印刷编号开的是题目还是小节标题。"""
+    by_seq = {block.get("seq"): block for block in blocks
+              if isinstance(block.get("seq"), int)}
+    stems: list[str] = []
+    for start in starts:
+        block = by_seq.get(start.seq)
+        stems.append(_stem_after_number(str((block or {}).get("text") or "")))
+    if len(stems) < MIN_TOPIC_NUMBERED_LINES:
+        return NumberingVerdict(numbered=len(stems))
+    topic_like = [stem for stem in stems
+                  if _TOPIC_TITLE_RE.search(stem) and not _looks_like_sentence(stem)]
+    stem_like = [stem for stem in stems if _looks_like_sentence(stem)]
+    if (len(topic_like) / len(stems) >= TOPIC_TITLE_SHARE
+            and len(stem_like) / len(stems) <= QUESTION_STEM_SHARE):
+        return NumberingVerdict(
+            verdict="topics", numbered=len(stems), topic_like=len(topic_like),
+            stem_like=len(stem_like), samples=tuple(topic_like[:4]),
+        )
+    return NumberingVerdict(numbered=len(stems), topic_like=len(topic_like),
+                            stem_like=len(stem_like))
+
+
 def _slot_index(layout: Layout, page: int, col: int) -> int | None:
     for index, slot in enumerate(layout.slots):
         if slot["page"] == page and slot["col"] == col:

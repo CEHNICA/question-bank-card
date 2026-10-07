@@ -205,6 +205,24 @@ def has_figure_cue(stem: str, options: dict | None = None) -> bool:
     return bool(cue_matches(stem, options))
 
 
+def contest_winner(claimants: list[dict]) -> int | None:
+    """Pick the one card that keeps a source frame two or more cards both claimed.
+
+    The reader judges each card from that card's own text, so a picture printed
+    between two questions can be marked as this card's picture on both.  Outside the
+    picture itself the printed question text is the only evidence: the card that says
+    如图 needs its picture, the card that never mentions one does not.  When the text
+    cannot separate them — both mention a picture, or neither does — no winner is
+    returned and the conflict stays for a person, because moving a correct figure onto
+    the wrong question is worse than asking.
+    """
+    cued = [
+        card for card in claimants
+        if has_figure_cue(str(card.get("stem") or ""), card.get("options") or {})
+    ]
+    return cued[0]["id"] if len(cued) == 1 else None
+
+
 def asks_student_to_draw(stem: str, options: dict | None = None) -> bool:
     """Return whether the task asks the student to create the visual.
 

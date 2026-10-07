@@ -1166,5 +1166,96 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
     return result
 
 
+def verify_figure_ownership_prompt(stem: str, count: int) -> str:
+    """Ask which numbered candidates on one card are printed on the sheet.
+
+    这是反向核验，跟 ``classify_figures`` 正相反：后者在一道题的候选框里给
+    每幅图派角色，前者要回答「题目已经配上的这张，是卷面印的还是别的东西」。
+    三种几何配图（同行分配、别题转赠、共用图注）都发生在识读之后，那条路上
+    没有任何模型看过图，所以手写草稿、试卷标题、背面透过来的字也会被贴上去。
+
+    只问「印的还是不是印的」，不问「是不是这道题的」。实测过问归属：134 张
+    真卡里判准很差——菱形图、坐标系、数轴这类配图没有点名，模型对不上就整张
+    否掉（shengliesans 第 9 题就是这样被误否的）。归属另有 ``contest_winner``
+    和题干提示词在管，闸门不必替它们冒险。
+
+    提示里必须写明「印刷图上被学生写了答案仍算印刷插图」：MinerU 会把印刷图和
+    它上面的铅笔答案框成同一块（实测 陈毅初三第 22 题的平行四边形被写满答案），
+    不说清楚模型会因为图脏而否掉整幅——判断没错，但撤掉一张脏的印刷图只会让
+    题目从「看得见图」变成「要重新框图」，比留着更麻烦。
+    """
+    listed = "、".join(str(index) for index in range(1, count + 1))
+    return (
+        "这是一道题和它范围内的几幅图，每幅图左上角用蓝框和编号标出了编号。\n\n"
+        f"题目原文（只作参考，判断的是图本身）：\n{str(stem or '').strip()[:300]}\n\n"
+        f"只看编号 {listed} 这几幅，逐幅判断它是不是原卷正式印刷的插图。\n"
+        "是印刷插图：试卷上排版好的题目配图，比如几何图、函数图象、坐标系、数轴、"
+        "实验装置、示意图、照片、统计图。\n"
+        "重要：印刷的图上被学生用铅笔写了答案、画了辅助线、加了批注，"
+        "它仍然是印刷插图，照样算——原卷就是这样的。\n"
+        "不是印刷插图：整幅图都是学生手写的草稿或答案、试卷标题和姓名栏、页眉页脚、"
+        "背面透过来的字、涂画、装饰线条、表格线框。\n"
+        f"只回答属于印刷插图的编号，多个用逗号分隔；{count} 幅一幅都不是就回答 none。"
+        "不要解释。"
+    )
+
+
+def verify_figure_ownership(engine: Engine, image_url: str, stem: str, count: int) -> set[int] | None:
+    """Indices the reader calls printed; ``set()`` for an explicit ``none``.
+
+    ``None`` means the answer could not be read as a decision (an error, an empty
+    or off-list reply).  Callers must leave the card untouched in that case: a
+    dropped figure is a wrong figure, while keeping it only costs one flag.
+    """
+    if count < 1:
+        return None
+    raw = chat(engine, verify_figure_ownership_prompt(stem, count), [image_url], max_tokens=60)
+    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S).strip()
+    first = raw.split("\n")[0] if raw else ""
+    if re.search(r"\bnone\b|没有|都不是", first, re.I):
+        return set()
+    picked = {int(token) for token in re.findall(r"\d{1,3}", first)}
+    picked = {index for index in picked if 1 <= index <= count}
+    # An off-list number means the model answered about something we never
+    # showed it; that is not a decision either.
+    return picked or None
+
+
+def confirm_all_handwritten_prompt(indices: list[int]) -> str:
+    """The harder follow-up, asked only about the ones just called unprinted.
+
+    第一问（是不是印刷插图）实测会翻转：同一批图、同样的问法，加一句话就从不
+    认变成全否。撤图是破坏性的动作，判一次不够，所以只对第一问否掉的编号再问
+    一次，而且用一条硬标准——「有没有一笔印刷的内容」。带铅笔答案的印刷图里有
+    印上去的字母和线条，这一问会答「不是」；整幅手写草稿才会答「是」。
+    """
+    listed = "、".join(str(index) for index in indices)
+    return (
+        f"还是刚才这几幅图。只回答一个更窄的问题，关于编号 {listed}：\n\n"
+        "有没有哪一幅是【整幅从头到尾都是手写的草稿或涂画，或者是试卷标题、姓名栏】，"
+        "一笔印刷的内容都没有？\n\n"
+        "判断标准很硬：只要图里有任何一个印刷出来的元素——印上去的线条、"
+        "标注字母 A B C D、数字、刻度、表格边框、照片——就不算，哪怕上面还压着"
+        "学生用铅笔写的答案和辅助线。\n\n"
+        "只回答「整幅手写或标题」的编号；一幅都没有就回答 none。不要解释。"
+    )
+
+
+def confirm_all_handwritten(engine: Engine, image_url: str, indices: list[int]) -> set[int] | None:
+    """Which of ``indices`` are handwritten from edge to edge; ``set()`` for ``none``.
+
+    ``None`` again means "no decision": the caller keeps the picture.
+    """
+    if not indices:
+        return set()
+    raw = chat(engine, confirm_all_handwritten_prompt(indices), [image_url], max_tokens=60)
+    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S).strip()
+    first = raw.split("\n")[0] if raw else ""
+    if re.search(r"\bnone\b|没有|都不是", first, re.I):
+        return set()
+    picked = {int(token) for token in re.findall(r"\d{1,3}", first)}
+    return {index for index in picked if index in set(indices)} or None
+
+
 def locate_band(engine: Engine, image_url: str, number: int) -> int | None:
     return parse_band(chat(engine, locate_prompt(number), [image_url], max_tokens=200))
