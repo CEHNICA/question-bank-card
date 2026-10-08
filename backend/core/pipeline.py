@@ -1718,6 +1718,22 @@ def _inside_previous_opening(blocks: list[dict] | None, previous: segment.Start,
     return y < bottom - 2
 
 
+def _located_before_previous(previous: segment.Start, page_idx: int, col: int, y: float) -> bool:
+    """A located number that lands before the previous question's own start.
+
+    ``_inside_previous_opening`` gives up the moment ``y < previous.y``: it only
+    guards the previous question's first printed line.  Question numbers run
+    upward, so the start of question N always follows the start of question N-1
+    — a location in front of it is a misread, not a position (口镇第 5 题: the AI
+    put it at y660 on the left column while question 4 starts at y687).  Accepting
+    it forces question 4's range to spill into the next column and swallow
+    question 5 whole, with question 5's own text ending up inside question 4's
+    screenshot.  Rejecting it hands the case to ``unresolved``, whose note on the
+    swallowing card is exactly what that failure needs.
+    """
+    return (page_idx, col, y) <= previous.key()
+
+
 MERGED_QUESTION_FLAG_PREFIX = "这张卡里可能还有第 "
 
 
@@ -1775,6 +1791,17 @@ def locate_missing(
             continue
         x = region["bbox"][0] + 5
         col = segment.column_of(layout.splits.get(page_idx, []), x + 1)
+        if _located_before_previous(previous, page_idx, col, y):
+            # 口镇第 5 题：题号被红笔批干扰，MinerU 没读出来，AI 把它定位到左栏 y660——
+            # 比第 4 题的起点 y687 还靠前。起点一倒退，第 4 题的范围就被迫跨栏，把右栏
+            # 顶部的真第 5 题整块吃掉（那道题的题干会混进第 4 题的原图截图），同时留下
+            # 一张题干只有 [?] 的空壳。题号递增时第 N 题总在第 N-1 题之后，定位到它前面
+            # 就是定位错了：退回 unresolved，让上一题自己说「可能吞了它」——那条通路本来
+            # 就是为这件事准备的，只是以前错位定位会绕过所有警告分支直接当成成功。
+            notes.append(f"AI 给出的第 {number} 题位置比第 {previous.number} 题的起点还靠前，没有采用；"
+                         f"它可能和第 {previous.number} 题在同一张卡里。")
+            unresolved.append((number, previous.number))
+            continue
         if _inside_previous_opening(blocks, previous, page_idx, col, y):
             notes.append(f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
                          f"它暂时和第 {previous.number} 题在同一张卡里。")
@@ -3242,6 +3269,10 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
 
 
 FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目开头可能被切掉了，请点“调整范围”检查"
+# 看图识读交了一张白卷：题干一个字都没有，而卡会是绿的，谁都看不出来少了这道题。
+# 与 FLAG_MINERU_DRAFT_EMPTY 是两回事——那条只管“不用看图模型、题面全用 MinerU 初稿”
+# 的路径，这里管的是模型看过图却什么都没读出来的情形。
+FLAG_EMPTY_STEM = "这道题的题干一个字都没有读出来，请对照原卷截图把题目录进去"
 # AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
 FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
 FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
@@ -4013,6 +4044,13 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # in the crop: the opening line is probably above it (口镇第 8 题只剩
         # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
         flags.append(FLAG_LOCATED_WITHOUT_NUMBER)
+    if not str(final.get("stem") or "").strip() and snapshot.get("body_mode") != "source_image":
+        # 看图识读交了白卷。上面那条只拦“题号由 AI 定位”的卡，轮到 MinerU 正常切
+        # 出来的题，识读一个字都没读出来时没有任何检查会问——胜利初一第 11 题就是
+        # 这样绿的：原页上「车轮旋转时看起来像个圆面，这说明 ___」完整存在，切题
+        # 范围也确实罩住了那一行（不是切错，是识读交白卷而系统照收）。
+        # 正文保留原图的卡题干本来就是空的，那条路不适用，所以排除掉。
+        flags.append(FLAG_EMPTY_STEM)
     switches = features.load()
     for name in ("read_a", "read_b", "read_c"):
         update[name] = prose.tidy_reading(update.get(name), switches=switches)
