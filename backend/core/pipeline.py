@@ -3748,6 +3748,10 @@ def _unclassified_below_solution(blocks: list[dict] | None, candidates: list[dic
 
 
 _SECTION_KIND_COMPARE = ("fill_blank", "free_response")
+# 坐标缺一格：左边空着而右边有数，或左边有数而右边直接是右括号。
+# 两边都空（待填的答案括号）不算，所以逗号两边各要求一个数。
+_COORDINATE_EMPTY_LEFT = re.compile(r"[(（]\s*(?:\\[ ,]*)?[,，]\s*[-+−]?\s*\d")
+_COORDINATE_EMPTY_RIGHT = re.compile(r"[-+−]?\s*\d\s*(?:\\[ ,]*)?[,，]\s*(?:\\[ ,]*)?[)）]")
 # 只认「二、填空题」「三、解答题」这种大题标题开头的写法：括号里顺带提一句
 # 「含填空」不算，否则一道解答题只要提到填空二字就会被判成冲突。
 _HEADING_KIND = re.compile(r"^[一二三四五六七八九十]+\s*[、.．]\s*"
@@ -3774,8 +3778,27 @@ def _section_kind_conflict(section: str | None, kind: str | None) -> tuple[str, 
     return None
 
 
+def _broken_coordinate(text: str) -> str:
+    """题干里那个只读到一半的坐标，返回它本身；没有就返回空串。
+
+    坐标的两个数必须都在，缺一格就说明识读在那儿掉了一笔。
+    202510 胜利初四月考第 23 题：原卷上清清楚楚印着「(-1,0)」，MinerU 也读对了，
+    识读却写成 ``$( \\ ,-1.0)$``——左边那格空了、右边多了个小数点。这张卡已经有
+    「AI 与 MinerU 有差异」的提示，但那四处说的是「得/到」「抛物线 r/V」，坐标不在
+    里面，照样会被原样印进组卷卷面。
+
+    右边那格空（``,)``）同样算，但两格都空（``（  ，  ）``）是待填的答案括号，不算：
+    所以要求逗号后面紧跟着一个数。全库 241 张卡只命中这一张。
+    """
+    body = str(text or "")
+    for pattern in (_COORDINATE_EMPTY_LEFT, _COORDINATE_EMPTY_RIGHT):
+        if hit := pattern.search(body):
+            return hit.group(0)
+    return ""
+
+
 def _identical_options(options: dict) -> list[str]:
-    """The first pair of options with the same text (B and C both “-1/2024”).
+    """The first pair of options with the same text (B and C both "-1/2024").
 
     A printed paper does not repeat an option; one of the two was misread
     (the printed B was “-2024”), and both readers made the same slip.
@@ -4237,6 +4260,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # 题型是题型待核对之外的一类：模型判了、也定了案，可卷面标题说的不一样。
         flags.append(f"卷面的大题标题写着这一段是{conflict[0]}，卡上却是{conflict[1]}；"
                      "请在题卡上选一下题型")
+    if broken := _broken_coordinate(str(final.get("stem") or "")):
+        flags.append(f"题干里这个坐标只读到一半（{broken.strip()}），缺的那一格没读出来；"
+                     "请对照原卷补上再入库")
     choice_missing_slots = missing_choice_figure_slots(
         kind=kind,
         options=final.get("options") or {},
