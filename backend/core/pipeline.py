@@ -3634,6 +3634,36 @@ def _section_choice_without_options(section: str, options: dict, figures: list[d
     return not letters
 
 
+# 卷面自己印的答案/解析标记。带这类标记的卷子（答案版）每一题后面都紧跟答案，
+# 题卡的范围一路罩到解析，解析里印的图就会被当成题图挂上去。
+_SOLUTION_MARK = re.compile(r"【答案】|【解析】|【详解】|【点睛】")
+
+
+def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> int:
+    """Figures printed below the paper's own 【答案】/【解析】 marker.
+
+    答案版本卷子上，题目本身印几张图，解析里还会再印几张。切题范围罩到解析，
+    那些图就被当成题图挂上去：202510胜利初四数学答案版本第 25 题原卷只有图1、图2，
+    卡上挂了 4 张（多出的两张出自详解），而且是绿的，没有任何提示。
+
+    只数印在标记**下方**的图：题目自己的图在标记上方。同一个卷子上的正常试卷不含
+    这些标记，一道题自己也不该有图落在自己的解析后面，所以这条判据很窄——
+    10 份正常试卷 0 命中，答案版那份咬到 6 张，其中 4 张原本是绿的。
+
+    ``witness_blocks`` 只收 type 为 text/title/list 且中心在卡范围内的块，
+    【答案】这类标记印成正文块，实测确实在里面（判据恒不命中是最常见的假绿）。
+    """
+    marks = [block for block in blocks or []
+             if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")]
+    if not marks or not figures:
+        return 0
+    first = min(marks, key=lambda block: (int(block["page_idx"]), float(block["bbox"][1])))
+    top = float(first["bbox"][1]) + 1
+    return sum(1 for figure in figures or []
+               if int(figure.get("page_idx", -1)) == int(first["page_idx"])
+               and float((figure.get("bbox") or [0, 0, 0, 0])[1]) > top)
+
+
 def _identical_options(options: dict) -> list[str]:
     """The first pair of options with the same text (B and C both “-1/2024”).
 
@@ -4016,6 +4046,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                                        final.get("options") or {}, figures):
         flags.append("卷面的大题标题写着这一段是选择题，可这道题一个选项都没有读出来（也没有选项配图）；"
                      "请对照原卷补上 A、B、C、D")
+    if solution_figures := _figures_below_solution(snapshot.get("witness_blocks"), figures):
+        flags.append(f"这道题的范围里还印着答案和解析，其中 {solution_figures} 张配图印在【解析】之后，"
+                     f"可能来自解析部分而不是题目；请对照原卷核对，确实不要就在“配图”里删掉")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
