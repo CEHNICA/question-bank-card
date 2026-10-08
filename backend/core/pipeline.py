@@ -3742,6 +3742,51 @@ def _tidy_final(final: dict) -> tuple[dict, str]:
     return result, tidied["origin"]
 
 
+def _exclude_handwritten_candidates(engine, store, labels: dict, figure_source: dict) -> dict:
+    """Candidates nobody claimed are asked once whether they are handwriting at all.
+
+    A picture box the reader never mentions leaves the card in conflict, and the
+    card then says 原卷可能有图没有被找到，请点“配图”框出 for the rest of its life.
+    That is right when the box really holds a printed picture nobody bound.  It is
+    wrong when the box holds the student's own scratch: 202510胜利初四月考第 9 题's
+    two crossed-out sums, its 第 21 题's line of working, and the 凤城高一 photo
+    paper's 第 4 题 all sit inside their question's crop and all told the teacher to
+    go and frame a picture that was never printed.  Nothing else looks at these
+    boxes: ``verify_geometric_figures`` only inspects figures already on a card, and
+    the reader itself has nothing to say about a box it ignored.
+
+    The follow-up above (``classify_figures``) cannot cover it — it runs only when
+    two readings disagree, and the reading path has been single-reader since 1.12.5,
+    so on a normal paper it never fires.
+
+    The question asked here is the same hard one the handwritten gate asks: is there
+    not one printed mark anywhere in it.  Measured against the nine unclassified
+    candidates in the real library, it agreed with a by-eye reading on eight; the
+    ninth disagreed in the model's favour — that box mixed the student's sketches
+    with a printed 「4/8」, so refusing to call it all-handwriting is correct.  A box
+    with any printing in it keeps the prompt, which is the safe direction: a printed
+    figure dropped without a word is the expensive mistake.
+    """
+    unclaimed = sorted(set(labels) - set((figure_source.get("figures") or {})),
+                       key=lambda value: int(value))
+    if not unclaimed or engine is None:
+        return {}
+    found = {}
+    for label in unclaimed:
+        item = labels[label]
+        crop = _figure_alone(store, {"page_idx": item.get("page_idx"),
+                                     "bbox": list(item.get("bbox") or [])})
+        if crop is None:
+            continue
+        try:
+            verdict = readers.confirm_all_handwritten(engine, imaging.jpeg_data_url(crop), [1])
+        except readers.ReaderError:
+            continue
+        if verdict == {1}:
+            found[label] = "none"
+    return found
+
+
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
     if "draft" in snapshot:
@@ -4001,6 +4046,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             figure_source = {**figure_source, "figures": {**(figure_source.get("figures") or {}), **extra}}
             if isinstance(update.get("read_a"), dict):
                 update["read_a"] = {**update["read_a"], "figures_followup": extra}
+    scratch = _exclude_handwritten_candidates(primary, store, labels, figure_source)
+    if scratch:
+        figure_source = {**figure_source,
+                         "figures": {**(figure_source.get("figures") or {}), **scratch}}
+        if isinstance(update.get("read_a"), dict):
+            update["read_a"] = {**update["read_a"], "figures_handwritten": scratch}
     provisional_kind = final.get("type") or snapshot["question_type"] or "unknown"
     option_result = figure_assignment.option_evidence(
         stem=final.get("stem", ""), options=final.get("options") or {},
