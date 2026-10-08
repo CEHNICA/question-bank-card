@@ -362,7 +362,65 @@ class GeometricOwnershipGateTests(TestCase):
             self.assertEqual(item.figures, [])
             self.assertIn(figure_policy.FLAG_NO_FIGURE, item.flags)
 
-    def test_a_row_of_figures_survives_when_each_one_alone_is_readable(self):
+    def test_a_card_with_no_candidate_of_its_own_is_still_looked_at(self):
+        # 凤城高一第 14 题：三张图都是别的题的识读认过来的（source=other），本卡
+        # 一个候选框都没有——条图那一套要给模型编号、再和候选配对，根本搭不起来，
+        # 以前在这里直接 continue，整张卡一次都没看过。里面混了一张学生的铅笔
+        # 草稿，闸门连问都没问就把它留在了题上。
+        question = self.question(
+            figure_candidates=[], flags=[figure_policy.FLAG_FOREIGN_FIGURE],
+            figures=[dict(owned([300, 200, 500, 400]), source="other"),
+                     dict(owned([826, 387, 865, 449]), source="other"),
+                     dict(owned([600, 450, 800, 600]), source="other")])
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        alone = mock.Mock(side_effect=[set(), {1}, set()])
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership") as strip, \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten", alone):
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        # 没有候选框就不该走条图那一套：编号和配对都无从谈起。
+        self.assertEqual(strip.call_count, 0)
+        # 三张各单独裁一次问一遍，只有中间那张判手写。
+        self.assertEqual(alone.call_count, 3)
+        self.assertEqual(changed, 1)
+        self.assertEqual([figure["bbox"] for figure in question.figures],
+                         [[300, 200, 500, 400], [600, 450, 800, 600]])
+        self.assertNotIn(figure_policy.FLAG_FOREIGN_FIGURE, question.flags)
+
+    def test_a_foreign_gift_that_is_printed_stays(self):
+        question = self.question(
+            figure_candidates=[], flags=[figure_policy.FLAG_FOREIGN_FIGURE],
+            figures=[dict(owned([826, 387, 865, 449]), source="other")])
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten", return_value=set()):
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 0)
+        self.assertEqual(len(question.figures), 1)
+        self.assertIn(figure_policy.FLAG_FOREIGN_FIGURE, question.flags)
+
+    def test_a_foreign_gift_that_cannot_be_cropped_is_left_alone(self):
+        question = self.question(
+            figure_candidates=[], flags=[figure_policy.FLAG_FOREIGN_FIGURE],
+            figures=[dict(owned([826, 387, 865, 449]), source="other")])
+        store = mock.Mock()
+        store.load.side_effect = [OSError("缓存坏了")]
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten") as asked:
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        question.refresh_from_db()
+        self.assertEqual(changed, 0)
+        self.assertEqual(asked.call_count, 0)
+        self.assertEqual(len(question.figures), 1)
+
+    def test_a_row_figure_survives_when_each_one_alone_is_readable(self):
         # 四道选择题的图横排在一起：并排放大本来就难分清，在同一张糊图上问两遍
         # 会得到同一个错答案，两遍都指向手写，四张图就这么全没了。单独裁一张、
         # 放到最大再看，答案才作数。
@@ -442,3 +500,105 @@ class GeometricOwnershipGateTests(TestCase):
         question.refresh_from_db()
         self.assertEqual(changed, 0)
         self.assertEqual(asked.call_count, 0)
+
+class AutomaticFigureGateTests(TestCase):
+    """识读自己认的配图也得过一次手写核验。
+
+    几何闸门原来只看 other/row/shared，auto 里的图一次都没被看过。真卷实测五份、
+    93 张配图：挂在 auto 上的手写有六张（胜利初一第 12、21、25 题，胜利初二第 8、
+    24 题，凤城高一第 5、15 题）。其中胜利初一第 21 题是本地兜底干的——题干写了
+    「如图」、识读说找不到图，剩下那一个候选框就被直接算成题图，整条 726×95 的铅笔
+    演算贴到了一个三角形题上，中间没有一次模型判断。
+    """
+
+    def setUp(self):
+        self.paper = Paper.objects.create(filename="fixture.pdf", kind="pdf", sha256="f" * 64,
+                                          pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+                                          status="ready", processing_plan={"revision": 1})
+        self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
+
+    def question(self, **extra):
+        values = dict(paper=self.paper, group=self.group, number=21, stem=CUED,
+                      question_type="free_response", state="yellow", regions=[REGION],
+                      figure_candidates=[candidate(1)],
+                      figures=[{"page_idx": 0, "bbox": list(BOX), "slot": "stem", "source": "auto"}],
+                      figure_review={"status": "ok", "source": "automatic"}, flags=[])
+        values.update(extra)
+        return Question.objects.create(**values)
+
+    def run_gate(self, answer, confirm, question=None):
+        store = mock.Mock()
+        store.load.return_value = Image.new("RGB", (1000, 1000), "white")
+        with mock.patch.object(pipeline, "PageStore", return_value=store), \
+             mock.patch.object(pipeline.readers, "primary_engine", return_value=ENGINE), \
+             mock.patch.object(pipeline.readers, "verify_figure_ownership", return_value=answer), \
+             mock.patch.object(pipeline.readers, "confirm_all_handwritten",
+                               return_value=confirm) as asked:
+            changed = pipeline.verify_geometric_figures(self.paper, revision=1)
+        if question is not None:
+            question.refresh_from_db()
+        return changed, asked
+
+    def test_the_readers_own_picture_is_put_to_the_reader_too(self):
+        # 识读直接认的图没有「请核对」的旗标，以前这道闸门根本走不到它。
+        question = self.question()
+        changed, asked = self.run_gate({1}, set(), question)
+        self.assertEqual(changed, 0)
+        self.assertEqual(asked.call_count, 0)
+        self.assertEqual(len(question.figures), 1)
+
+    def test_two_calls_agreeing_point_at_a_readers_own_scribble(self):
+        # 胜利初一第 21 题那条铅笔演算：两问都指向整幅手写。这条路线的准确率
+        # 实测 14 次命中 11 真 3 误，撑不起撤图这种破坏性动作，所以只标不动。
+        question = self.question()
+        changed, asked = self.run_gate(set(), {1}, question)
+        self.assertEqual(changed, 1)
+        self.assertEqual(asked.call_count, 2)
+        self.assertEqual(len(question.figures), 1)
+        self.assertIn(figure_policy.FLAG_DOUBTFUL_FIGURE, question.flags)
+        self.assertEqual(question.state, Question.State.YELLOW)
+
+    def test_a_printed_picture_the_reader_named_is_never_removed(self):
+        # 撤错了得靠旗标捞回来这条规矩，是 auto 只标不撤的全部理由：一旦这张图
+        # 其实是印好的，题上不能少东西，只能多一句提醒。
+        question = self.question()
+        self.run_gate(set(), {1}, question)
+        self.assertNotIn(figure_policy.FLAG_WITHDRAWN_FIGURE, question.flags)
+        self.assertNotIn(figure_policy.FLAG_NO_FIGURE, question.flags)
+        self.assertEqual(len(question.figures), 1)
+
+    def test_the_suspicion_is_not_stamped_twice_on_one_card(self):
+        question = self.question()
+        self.run_gate(set(), {1}, question)
+        first = list(question.flags)
+        self.run_gate(set(), {1}, question)
+        self.assertEqual(question.flags, first)
+        self.assertEqual(
+            list(question.flags).count(figure_policy.FLAG_DOUBTFUL_FIGURE), 1)
+
+    def test_an_option_picture_is_looked_at_but_never_taken_off(self):
+        # 凤城高一第 10 题那两张手写草稿是识读自己认成选项 B、D 的。撤错了整道选择题
+        # 就做不出来，所以选项图只说一声、不动——但要说，否则这两张就一直混在题里。
+        question = self.question(
+            question_type="single_choice", stem="下列函数中，图象经过点 A 的是（ ）",
+            options={"A": "y=x", "B": "y=x^2"},
+            figures=[{"page_idx": 0, "bbox": list(BOX), "slot": "B", "source": "auto"}])
+        changed, asked = self.run_gate(set(), {1}, question)
+        self.assertEqual(changed, 1)
+        self.assertGreaterEqual(asked.call_count, 1)
+        self.assertEqual(len(question.figures), 1)
+        self.assertIn(figure_policy.FLAG_DOUBTFUL_FIGURE, question.flags)
+        self.assertNotIn(figure_policy.FLAG_WITHDRAWN_FIGURE, question.flags)
+
+    def test_switching_to_auto_withdrawal_still_spares_the_option_slot(self):
+        # 开关翻到自动撤那一侧，题干图会撤，选项图照样只标——选择题做不出来是硬伤。
+        question = self.question(
+            question_type="single_choice", stem="下列函数中，图象经过点 A 的是（ ）",
+            options={"A": "y=x", "B": "y=x^2"},
+            figures=[{"page_idx": 0, "bbox": list(BOX), "slot": "B", "source": "auto"}])
+        with mock.patch.object(pipeline, "AUTO_FIGURES_ARE_WITHDRAWN", True):
+            changed, _asked = self.run_gate(set(), {1}, question)
+        self.assertEqual(changed, 1)
+        self.assertEqual(len(question.figures), 1)
+        self.assertIn(figure_policy.FLAG_DOUBTFUL_FIGURE, question.flags)
+        self.assertNotIn(figure_policy.FLAG_WITHDRAWN_FIGURE, question.flags)

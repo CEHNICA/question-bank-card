@@ -87,7 +87,10 @@ class FigureLedgerTests(SimpleTestCase):
                     "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 900]}],
                     "candidates": [candidate], "witness_blocks": [
                         {"page_idx": 0, "bbox": [100, 100, 120, 120], "text": "A.", "type": "text"}]}
-        reading = {"stem": "请选择正确的选项。", "options": {slot: slot + "选项" for slot in "ABCD"},
+        # Picture options are the ones the reader leaves without text — that is
+        # what real papers look like, and it is what lets the printed "A." claim
+        # the picture next to it.
+        reading = {"stem": "请选择正确的选项。", "options": {},
                    "type": "single_choice", "figures": {"9": "stem"}, "missing_figure": False}
         image = Image.new("RGB", (500, 500), "white")
         with mock.patch.object(pipeline.readers, "primary_engine", return_value=mock.Mock()), \
@@ -98,6 +101,33 @@ class FigureLedgerTests(SimpleTestCase):
         self.assertEqual(result["figures"][0]["slot"], "A")
         self.assertEqual(result["read_a"]["figures"], {"9": "stem"})
         self.assertEqual(result["read_a"]["figure_layout"]["evidence"]["9"]["slot"], "A")
+
+    def test_a_printed_option_label_cannot_take_the_stem_diagram(self):
+        """胜利初四月考第 5 题：四个文字选项，网格图印在「A. √2/2」正上方。
+
+        The marker is genuine and it is genuinely the nearest picture — but it
+        labels a line of text, so it has no business claiming the stem diagram.
+        """
+        candidates = [{"label": "1", "page_idx": 0, "bbox": [80, 612, 151, 730]}]
+        blocks = [{"page_idx": 0, "bbox": [82, 734, 200, 748], "text": "A. $\\dfrac{\\sqrt{2}}{2}$",
+                   "type": "text"}]
+        resolved = pipeline._resolve_automatic_figure_assignments(
+            stem="如图所示，$\\triangle ABC$的顶点在正方形网格的格点上，则$\\tan C$的值为（ ）",
+            options={"A": "$\\dfrac{\\sqrt{2}}{2}$", "B": "$\\dfrac{1}{2}$",
+                     "C": "$\\dfrac{1}{3}$", "D": "3"},
+            kind="single_choice", candidates=candidates,
+            assignments={"1": "stem"}, blocks=blocks)
+        self.assertEqual(resolved, {"1": "stem"})
+
+    def test_a_picture_option_label_still_claims_its_own_picture(self):
+        """同一段版式，选项是图的时候不能误伤：印出来的 A. 仍然认领它旁边的图。"""
+        candidates = [{"label": "1", "page_idx": 0, "bbox": [80, 612, 151, 730]}]
+        blocks = [{"page_idx": 0, "bbox": [82, 734, 110, 748], "text": "A.", "type": "text"}]
+        resolved = pipeline._resolve_automatic_figure_assignments(
+            stem="下列图形中，不是柱体的是（ ）",
+            options={}, kind="single_choice", candidates=candidates,
+            assignments={"1": "stem"}, blocks=blocks)
+        self.assertEqual(resolved, {"1": "A"})
 
     def test_conflicting_marker_requires_review_and_retains_the_model_candidate(self):
         candidates = [{"label": "9", "page_idx": 0, "bbox": [130, 100, 260, 210]}]

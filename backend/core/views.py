@@ -2928,7 +2928,12 @@ def question_figure(request, question_id, index: int):
     question = _question(question_id)
     if not 0 <= index < len(question.figures):
         raise Http404()
-    return _file(library.figure_file(question, index), "image/png")
+    # 存下来的坐标裁不出图（框太小、页面被换过、缓存坏了）时，回一句能照着做的话，
+    # 而不是让用户看着一张 500 白页。隔壁的 question_image 早就是这个做法。
+    try:
+        return _file(library.figure_file(question, index), "image/png")
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return _error("原卷裁片无法生成，请检查原文件和范围", 409)
 
 
 def question_image(request, question_id, index: int):
@@ -2952,7 +2957,11 @@ def question_ocr_figure(request, question_id, index: int):
     if suggestion.get("revision") != question.content_revision or not 0 <= index < len(figures):
         raise Http404()
     question.figures = figures
-    return _file(library.figure_file(question, index), "image/png")
+    # 这些坐标是模型给的，没有经过 _valid_bbox。裁不出来就回 409，不给 500。
+    try:
+        return _file(library.figure_file(question, index), "image/png")
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return _error("原卷裁片无法生成，请检查原文件和范围", 409)
 
 
 @csrf_exempt

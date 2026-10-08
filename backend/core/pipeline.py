@@ -1802,6 +1802,10 @@ def locate_missing(
 # **第 3 题**的图（中间隔着好几题）。60 刚好把它们挡在外面。
 FIGURE_RECLAIM_BAND = 60.0
 FIGURE_OVERHANG = 150.0
+# 两张图底边差多少以内就算「齐平」。齐平又横向不重叠 = 并排印在同一排，几何上
+# 分不出哪张是本题的。叠着放的两张图底边必然差一截，不受这个限制（教材例 1 那条
+# 正是靠这一点才敢「近的赢」：行程图底边 305、折正方形 308，差 3）。
+FIGURE_RECLAIM_TIE = 2.0
 
 
 def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]:
@@ -1822,6 +1826,16 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
 
     def holds(item: dict, sequence) -> bool:
         return any(c.get("seq") == sequence for c in item.get("figure_candidates") or [])
+
+    def side_by_side(first: dict, second: dict) -> bool:
+        """两张图并排印在同一排——几何上分不出哪一张是本题的。
+
+        判据是「底边齐平且横向不重叠」：叠着放的两张图底边必然一高一低，下面那张
+        确实更靠近题目，「近的赢」照旧成立；只有同一排里的两张才分不出来。
+        """
+        left, right = first["bbox"], second["bbox"]
+        return (abs(float(left[3]) - float(right[3])) <= FIGURE_RECLAIM_TIE
+                and (float(left[2]) <= float(right[0]) or float(right[2]) <= float(left[0])))
 
     for item in items:
         regions = item.get("regions") or []
@@ -1845,7 +1859,16 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
             ]
             if not stranded:
                 continue
-            block = max(stranded, key=lambda b: float(b["bbox"][3]))
+            nearest = sorted(stranded, key=lambda b: float(b["bbox"][3]), reverse=True)
+            if len(nearest) > 1 and side_by_side(nearest[0], nearest[1]):
+                # 并排印在两题之间的两张图，谁是本题的靠几何分不出来，这时候抢一张
+                # 就等于把一道本来正确的题改坏：胜利初二第 15、16 题，月牙图和公路图
+                # 并排印在两题之间，抢过去正好抢反——第 15 题拿到了公路图，第 16 题
+                # 拿到了月牙图，而且一路绿灯不报错。补图之前第 15 题两张候选框都在，
+                # 识读已经判对了（公路图不是它的），所以这里不动才是对的：分不出来的
+                # 那道题照旧标「题干说有图，但还没有配图」等人补。
+                continue
+            block = nearest[0]
             sequence = block.get("seq")
             if sequence is None:
                 continue
@@ -4811,6 +4834,33 @@ GEOMETRIC_FLAG_BY_SOURCE = {
     "row": figure_policy.FLAG_ROW_FIGURE,
     "shared": figure_policy.FLAG_SHARED_FIGURE,
 }
+AUTO_FIGURE_SOURCE = "auto"
+# ``auto`` 配图判为手写之后，是真的撤下来，还是只在卡上说一声。见
+# ``_flag_doubtful_figures`` 里的实测数据：这条路线的准确率还撑不起破坏性的动作。
+AUTO_FIGURES_ARE_WITHDRAWN = False
+
+
+def _wants_handwritten_check(figure: dict, flags: set[str]) -> bool:
+    """Which pictures on a card still owe the reader a look at the ink.
+
+    几何配图（同行分配、别题转赠、共用图注）自带一个「请核对」的旗标，所以原来只要
+    「来源在表里且旗标在卡上」就能选中。``auto`` 没有这样的旗标——它是识读自己认的，
+    或者本地兜底塞上去的——以前一次都没被看过。
+
+    真卷实测（5 份、93 张配图）挂在 auto 上的手写有 8 张：胜利初一第 12、21、25 题，
+    胜利初二第 8、24 题，凤城高一第 5、10、15 题。其中两处还是本地兜底干的：题干写了
+    「如图」、识读又说找不到图时，剩下那一个候选框被直接算成题图，一次模型都没问
+    （胜利初一第 21 题，整条 726×95 的铅笔演算被贴到一个三角形题上）。
+
+    选项槽也收进来了——早先排除它们是因为「撤错选项图整道选择题就做不出来」，
+    而现在 auto 这一路只标不撤，这个顾虑不成立了：多一句提醒的代价是零，漏掉两张
+    学生草稿的代价是选择题里混进涂鸦（凤城高一第 10 题，识读自己认成选项 B、D）。
+    要真撤的时候选项槽仍然不撤，见 ``_settle_doubtful_figures``。
+    """
+    source = figure.get("source")
+    if source in GEOMETRIC_SOURCES:
+        return GEOMETRIC_FLAG_BY_SOURCE[source] in flags
+    return source == AUTO_FIGURE_SOURCE
 
 
 def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> int:
@@ -4841,6 +4891,15 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
     hand-drawn replacement, while shipping every card with a doubtful picture
     costs trust on every run.
 
+    The same two questions now also cover ``auto`` pictures - the ones a reading
+    named itself, and the ones the local fallback bound because the stem said
+    "如图" while the reader said it could not find the figure.  Measured on five
+    real papers, 93 figures in all: seven ``auto`` stem figures came back
+    "handwritten edge to edge", six of them read by eye were genuinely the
+    student's own drawing and one was a printed solid printed over with working.
+    Every withdrawal therefore also raises a flag naming what happened, so that
+    last case is one click from being put back rather than silently gone.
+
     An unreadable answer, a request error, or a candidate that cannot be cropped
     leaves the card exactly as it was.  Returns the number of cards changed.
     """
@@ -4856,8 +4915,7 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
             continue
         flags = set(question.flags or [])
         pending = [figure for figure in question.figures or []
-                   if figure.get("source") in GEOMETRIC_SOURCES
-                   and GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] in flags]
+                   if _wants_handwritten_check(figure, flags)]
         if pending:
             targets.append((question, pending))
     if not targets:
@@ -4873,12 +4931,34 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
         # 留着会让下面按它配对时直接崩。
         candidates = [item for item in question.figure_candidates or []
                       if figure_claims.frame_key(item) is not None]
-        if not candidates:
-            continue
         keys = {figure_claims.frame_key(item): item for item in candidates}
         paired = [(figure, keys.get(figure_claims.frame_key(figure)))
                   for figure in pending]
-        if not any(candidate is not None for _, candidate in paired):
+        indexed = [(figure, candidate) for figure, candidate in paired
+                   if candidate is not None]
+        unnumbered = [figure for figure, candidate in paired if candidate is None]
+        # 别题转赠过来的图，本卡一个候选框都没有——它本来就属于别人的范围。条图
+        # 那一套（要给模型编号、再和候选配对）在这里根本搭不起来，以前正是直接
+        # continue：整张卡一次都没看过。实测凤城高一第 14 题就是这么过的——三张
+        # 别题转赠的图里混了一张学生的铅笔草稿，闸门连问都没问。
+        # 没有编号可用的图走另一条不需要编号的路：单独裁、放到最大，问一次。
+        dropped: set[str] = set()
+        for figure in unnumbered:
+            one = _figure_alone(store, figure)
+            if one is None:
+                continue
+            try:
+                verdict = readers.confirm_all_handwritten(
+                    engine, imaging.jpeg_data_url(one), [1])
+            except readers.ReaderError:
+                verdict = None
+            if verdict == {1}:
+                dropped.add(figure_claims.frame_key(figure))
+        if not indexed:
+            if not dropped:
+                continue
+            if _settle_doubtful_figures(question, dropped):
+                changed += 1
             continue
         try:
             strip = imaging.figure_strip(store.load, [{"page_idx": item["page_idx"],
@@ -4897,64 +4977,131 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
                 engine, imaging.jpeg_data_url(strip), question.stem, len(candidates))
         except readers.ReaderError:
             answer = None
-        if answer is None:
+        if answer is not None:
+            doubtful = [position for _, position in indexed if position not in answer]
+            if doubtful:
+                # 一次判定会翻转，而撤图是破坏性的，所以只对判否的那几幅再问一次，
+                # 而且换成一条硬标准：有没有一笔印刷的内容。问不出来就当没问。
+                try:
+                    confirmed = readers.confirm_all_handwritten(
+                        engine, imaging.jpeg_data_url(strip), doubtful)
+                except readers.ReaderError:
+                    confirmed = None
+                for figure, position in indexed:
+                    if position in (confirmed or set()):
+                        key = figure_claims.frame_key(figure)
+                        if _figure_alone_says_handwritten(engine, store, figure):
+                            dropped.add(key)
+        if not dropped:
             continue
-        doubtful = [position for _, position in indexed if position not in answer]
-        if not doubtful:
-            continue
-        # 一次判定会翻转，而撤图是破坏性的，所以只对判否的那几幅再问一次，
-        # 而且换成一条硬标准：有没有一笔印刷的内容。问不出来就当没问。
-        try:
-            confirmed = readers.confirm_all_handwritten(
-                engine, imaging.jpeg_data_url(strip), doubtful)
-        except readers.ReaderError:
-            confirmed = None
-        if not confirmed:
-            continue
-        # 第二问必须单独裁、放到最大再看一次。用同一张条图再问一遍等于用同样糊的
-        # 证据问两次：四道选择题的图横排在一起时每张本来就小，放大后并排更认不
-        # 出，两问会一起指向「都是手写」，四张图就这么没了。单独一张看清楚了，
-        # 答案才作数。
-        alone = {}
-        for figure, position in indexed:
-            if position not in confirmed:
-                continue
-            one = imaging.figure_strip(store.load,
-                                       [{"page_idx": figure["page_idx"], "bbox": list(figure["bbox"])}])
-            if one is None:
-                continue
-            try:
-                verdict = readers.confirm_all_handwritten(
-                    engine, imaging.jpeg_data_url(one), [1])
-            except readers.ReaderError:
-                verdict = None
-            if verdict == {1}:
-                alone[figure_claims.frame_key(figure)] = figure
-        if not alone:
-            continue
-        unprinted = list(alone.values())
-        # 两问都指向「整幅手写」就撤掉。实测 134 张真卡这一步会命中 7 张，逐张
-        # 看下来至少有一张是印刷的菱形图（扫描件发糊，模型看成了手写）——按用户的
-        # 要求仍然撤：撤错了手工再框一次，比让每次都带着一张可疑的图交付便宜。
-        dropped = set(alone)
-        figures = [figure for figure in question.figures or []
-                   if figure_claims.frame_key(figure) not in dropped]
-        previous_review = stored_or_derived_review(question)
-        review = recheck_automatic_review(
-            stem=question.stem, options=question.options, figures=figures,
-            previous=previous_review)
-        # 「已按顺序分配」在图被撤走之后就是假话，先摘掉再让复判重选旗标。
-        stale = {GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] for figure in unprinted}
-        flags = _flags_after_figure_review(
-            [flag for flag in question.flags or [] if flag not in stale], review, figures)
-        question.figures = figures
-        question.figure_review = review
-        question.flags = flags
-        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
-            question.state = Question.State.YELLOW if flags else Question.State.GREEN
-        _invalidate_approval(question)
-        question.save()
-        changed += 1
+        if _settle_doubtful_figures(question, dropped):
+            changed += 1
+    return changed
+
+
+def _figure_alone(store, figure: dict):
+    """One figure cropped on its own and blown up — the framing that decides."""
+    try:
+        return imaging.figure_strip(
+            store.load, [{"page_idx": figure["page_idx"], "bbox": list(figure["bbox"])}])
+    except (ValueError, OSError, KeyError, TypeError):
+        return None
+
+
+def _figure_alone_says_handwritten(engine, store, figure: dict) -> bool:
+    """第二问必须单独裁、放到最大再看一次。
+
+    用同一张条图再问一遍等于用同样糊的证据问两次：四道选择题的图横排在一起时每张
+    本来就小，放大后并排更认不出，两问会一起指向「都是手写」，四张图就这么没了。
+    单独一张看清楚了，答案才作数。
+    """
+    one = _figure_alone(store, figure)
+    if one is None:
+        return False
+    try:
+        return readers.confirm_all_handwritten(engine, imaging.jpeg_data_url(one), [1]) == {1}
+    except readers.ReaderError:
+        return False
+
+
+def _withdraw_figures(question: Question, dropped: set[str]) -> bool:
+    """Take the named frames off the card and let the review pick new flags."""
+    unprinted = [figure for figure in question.figures or []
+                 if figure_claims.frame_key(figure) in dropped]
+    figures = [figure for figure in question.figures or []
+               if figure_claims.frame_key(figure) not in dropped]
+    if len(figures) == len(question.figures or []):
+        return False
+    previous_review = stored_or_derived_review(question)
+    review = recheck_automatic_review(
+        stem=question.stem, options=question.options, figures=figures,
+        previous=previous_review)
+    # 「已按顺序分配」在图被撤走之后就是假话，先摘掉再让复判重选旗标。
+    stale = {GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] for figure in unprinted
+             if figure.get("source") in GEOMETRIC_FLAG_BY_SOURCE}
+    flags = _flags_after_figure_review(
+        [flag for flag in question.flags or [] if flag not in stale], review, figures)
+    question.figures = figures
+    question.figure_review = review
+    # 撤图是机器替人做的决定，撤错了得让人看得见、点得回来——实测 7 次里有 1 次
+    # 把印好的图连同学生演算一起当成手写撤了。
+    flags = [flag for flag in flags if flag != figure_policy.FLAG_WITHDRAWN_FIGURE]
+    flags.append(figure_policy.FLAG_WITHDRAWN_FIGURE)
+    question.flags = flags
+    if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+        question.state = Question.State.YELLOW
+    _invalidate_approval(question)
+    question.save()
+    return True
+
+
+def _flag_doubtful_figures(question: Question, dropped: set[str]) -> bool:
+    """把「看着像手写」的 auto 配图指出来，但不把它从题上拿掉。
+
+    几何配图照旧撤：那是 1.14.5 就发出去的行为，134 张真卡量过两轮都同意，撤错了
+    手工再框一次。``auto`` 不一样——实测五份真卷 86 张图，三轮跑下来 14 次撤回里
+    11 次是真手写、3 次是印好的图（口镇第 14 题那个印好的三棱柱、凤城第 7 题左边印
+    着「D. m≤2」），而且两次单跑只有 3 张重合。撤图是破坏性的，在这个准确率上
+    拿印刷图去换，只能改成让卡自己说「这张像手写，请确认」。
+
+    ``AUTO_FIGURES_ARE_WITHDRAWN`` 是这条取舍的唯一开关，换回自动撤改它一个值。
+    """
+    if not any(figure_claims.frame_key(figure) in dropped
+               for figure in question.figures or []):
+        return False
+    flags = [flag for flag in question.flags or []
+             if flag != figure_policy.FLAG_DOUBTFUL_FIGURE]
+    flags.append(figure_policy.FLAG_DOUBTFUL_FIGURE)
+    question.flags = flags
+    if question.state == Question.State.GREEN:
+        question.state = Question.State.YELLOW
+    question.save()
+    return True
+
+
+def _settle_doubtful_figures(question: Question, dropped: set[str]) -> bool:
+    """Split the withdrawal: geometric gifts go, the reader's own pictures only speak up."""
+    sources: dict[str, set[str]] = {}
+    for figure in question.figures or []:
+        key = figure_claims.frame_key(figure)
+        if key in dropped:
+            sources.setdefault(key, set()).add(str(figure.get("source")))
+    geometric = {key for key, seen in sources.items() if seen & set(GEOMETRIC_SOURCES)}
+    automatic = dropped - geometric
+    # 选项槽永远不撤：撤错了这道选择题就做不出来，题干图撤错还能重框。要撤的只有
+    # 题干图，其余一律只在卡上说一声。
+    safe = set()
+    for figure in question.figures or []:
+        key = figure_claims.frame_key(figure)
+        if key in automatic and str(figure.get("slot")) in readers.OPTION_KEYS:
+            safe.add(key)
+    changed = False
+    if geometric:
+        changed = _withdraw_figures(question, geometric) or changed
+    if AUTO_FIGURES_ARE_WITHDRAWN and (automatic - safe):
+        changed = _withdraw_figures(question, automatic - safe) or changed
+    if (automatic & safe) or (not AUTO_FIGURES_ARE_WITHDRAWN and automatic):
+        changed = _flag_doubtful_figures(question, automatic) or changed
     return changed
 
 

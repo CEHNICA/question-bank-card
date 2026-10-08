@@ -10,6 +10,8 @@ import math
 import re
 import unicodedata
 
+from .figure_policy import has_figure_cue
+
 
 OPTION_SLOTS = frozenset("ABCDE")
 CHOICE_KINDS = frozenset({"single_choice", "multiple_choice"})
@@ -159,6 +161,27 @@ def option_evidence(
         if key not in seen_markers:
             markers.append(marker)
             seen_markers.add(key)
+
+    # A printed "A." in front of a line of text labels that line; it is not a
+    # claim on whatever picture happens to sit next to it.  It only loses the
+    # claim when the stem itself already points at a figure — then that picture
+    # is the stem's and a text option cannot also own it.
+    #
+    # 胜利初四月考第 5 题：题干「如图所示，△ABC 的顶点在正方形网格的格点上」，
+    # 四个文字选项，网格图正好印在「A. √2/2」那一行正上方，被当成了选项 A 的图，
+    # 题干于是只剩一个空壳。
+    #
+    # The cue is what separates that from the legitimate text-plus-image option
+    # ("A. 向右平移" with its own graph under it): there the stem never mentions a
+    # picture, so nothing is being stolen and the marker still wins.  Across nine
+    # real papers the pure-picture cards (options dict left empty by the reader)
+    # were untouched by this.
+    if has_figure_cue(stem, options):
+        written = {str(slot) for slot, value in (options or {}).items()
+                   if str(value or "").strip()}
+        if written:
+            markers = [marker for marker in markers if marker["slot"] not in written]
+
     if len(markers) > MAX_MARKERS:
         return result
 

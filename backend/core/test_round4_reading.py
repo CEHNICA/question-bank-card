@@ -189,7 +189,9 @@ class ReadingPipelineTests(TestCase):
         chat = self.run_card(question, {("a", 1): tagged(stem, figures="1=题干"),
                                         ("classify", 1): "2=无关"})
         self.assertEqual(question.state, Question.State.YELLOW, question.flags)
-        self.assertEqual([call[0] for call in chat.calls], ["a"])
+        # 只钉住「没有为漏判的框单独再问一次」。手写闸门那两问是另一回事，它问的是
+        # 图上有没有印刷内容，编号候选框，落在 calls 里是 ownership/handwritten。
+        self.assertNotIn("classify", [call[0] for call in chat.calls])
         question.stem = stem + "（改一个字）"
         question.figure_review = {}
         review = figure_policy.stored_or_derived_review(question)

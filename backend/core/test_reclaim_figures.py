@@ -114,6 +114,8 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
         self.assertEqual(items[1]["figure_candidates"], [])
 
     def test_the_closest_chart_wins_when_several_sit_above(self):
+        # 两张图上下叠着放（横向范围相同），下面那张确实更靠近第 15 题上边缘，
+        # 「近的赢」是对的——这和并排的两张不是一回事，见下面那条。
         items, blocks = default_fixture()
         nearer = [365.0, 240.0, 535.0, 312.0]     # 更靠近第 15 题上边缘
         blocks.append(image(4, nearer))
@@ -122,6 +124,36 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
         pipeline.reclaim_stranded_figures(items, blocks)
 
         self.assertEqual([c["seq"] for c in items[1]["figure_candidates"]], [4])
+
+    def test_two_charts_side_by_side_are_not_guessed_between(self):
+        """胜利初二第 15、16 题：月牙图和公路图并排印在两题之间。
+
+        两条题都写了「如图」，第 15 题的范围把两张图都盖住了，第 16 题一张也没有。
+        几何上分不出哪一张是第 16 题的——抢过去只会把第 15 题改坏，而补图之前
+        第 15 题两张候选框都在，识读本来就能分对。
+        """
+        moon = [121.0, 168.0, 216.0, 251.0]       # 希波克拉底月牙，第 15 题自己的
+        road = [275.0, 156.0, 384.0, 251.0]      # 两条公路，第 16 题自己的
+        items = [
+            {"number": 15,
+             "regions": [{"page_idx": 1, "bbox": [53.0, 93.0, 490.0, 275.0]}],
+             "figure_candidates": [candidate(37, moon), candidate(38, road)]},
+            {"number": 16,
+             "regions": [{"page_idx": 1, "bbox": [53.0, 268.0, 492.0, 420.0]}],
+             "figure_candidates": []},
+        ]
+        blocks = [
+            image(37, moon, page_idx=1),
+            image(38, road, page_idx=1),
+            text(39, CUE_TEXT, [80.0, 275.0, 900.0, 300.0], page_idx=1),
+        ]
+
+        notes = pipeline.reclaim_stranded_figures(items, blocks)
+
+        self.assertEqual(notes, [])
+        # 两张候选框原封不动留给识读去分
+        self.assertEqual([c["seq"] for c in items[0]["figure_candidates"]], [37, 38])
+        self.assertEqual(items[1]["figure_candidates"], [])
 
     def test_a_page_without_any_chart_changes_nothing(self):
         blocks = [text(3, CUE_TEXT, [80.0, 320.0, 900.0, 380.0])]

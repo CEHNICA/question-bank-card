@@ -368,7 +368,9 @@ class WitnessPipelineTests(TestCase):
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
-        self.assertEqual([call[0] for call in chat.calls], ["a"])
+        # 只钉住「没有为漏判的框单独再问一次」。手写闸门那两问问的是图上有没有印刷
+        # 内容，编号候选框，落在 calls 里是 ownership/handwritten，不是复读。
+        self.assertNotIn("classify", [call[0] for call in chat.calls])
         self.assertEqual((question.state, len(question.figures)), (Question.State.YELLOW, 1), question.flags)
         self.assertNotIn("figures_followup", question.read_a)
 

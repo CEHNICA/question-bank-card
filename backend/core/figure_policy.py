@@ -1064,8 +1064,11 @@ FLAG_FOREIGN_FIGURE = "别的题识读时认为有一张图属于本题，已加
 FLAG_FIGURE_CLAIM_CONFLICT = "同一原卷配图被多道题或多个选项认领，请核对归属或确认共用关系"
 FLAG_SHARED_FIGURE = "原卷注明多道题共用配图，已补入对应题卡，请核对共用范围"
 FLAG_OPTION_ASSIGNMENT_CONFLICT = "印刷选项标签与识读的配图归属不一致，请核对对应选项"
+FLAG_WITHDRAWN_FIGURE = "自动撤下了疑似手写的配图（整幅没有一笔印刷内容）；若原卷确实印了这张图，请点“配图”框回来"
+FLAG_DOUBTFUL_FIGURE = "这张配图整幅没有一笔印刷内容，像是学生写上去的；请确认要不要删掉"
 DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE, FLAG_FIGURE_CLAIM_CONFLICT,
-                            FLAG_SHARED_FIGURE, FLAG_OPTION_ASSIGNMENT_CONFLICT})
+                            FLAG_SHARED_FIGURE, FLAG_OPTION_ASSIGNMENT_CONFLICT,
+                            FLAG_WITHDRAWN_FIGURE, FLAG_DOUBTFUL_FIGURE})
 
 
 def figure_flag(flag: str) -> bool:

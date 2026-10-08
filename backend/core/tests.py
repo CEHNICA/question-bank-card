@@ -679,9 +679,15 @@ class ScriptedChat:
             match = re.search(r"第\s*(\d+)\s*题", prompt)
         # The spot check names no card; scripts key it by the first card number.
         number = int(match.group(1)) if match else 1
+        # 手写闸门的两问必须排在兜底的 "b" 前面：它们不是第二读者，只是提示词里
+        # 没有「蓝色框」，落到兜底会被记成一次复读，于是「没有用过 b」那条断言
+        # 会被闸门自己的提问顶红。判定错了看起来像产品回归，其实是这个分类器老了。
         kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
             "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
-            "classify" if "上次没有判断编号" in prompt else "a" if "蓝色框" in prompt else "b"
+            "classify" if "上次没有判断编号" in prompt else \
+            "handwritten" if "整幅从头到尾都是手写" in prompt else \
+            "ownership" if "是不是原卷正式印刷的插图" in prompt else \
+            "a" if "蓝色框" in prompt else "b"
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
