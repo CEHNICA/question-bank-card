@@ -64,6 +64,17 @@ class SolutionTrimTests(SimpleTestCase):
         blocks = [{"page_idx": 0, "bbox": [87.0, 60.0, 912.0, 90.0], "text": "16. （6分）小毅设计了包装盒"}]
         self.assertEqual(self.trim(regions, blocks), regions)
 
+    def test_a_marker_inside_a_merged_block_never_cuts(self):
+        # MinerU merged the question line and the answer line into one block on
+        # 202510 答案版 page 15: “(3)将 ΔABD… 判断点 E_i 是否在该双曲线上【答案】(1)…”.
+        # Cutting at that block's top deleted sub-question (3) from the reading,
+        # and the card stayed green.  A marker in the middle is not a section start.
+        regions = [{"page_idx": 14, "bbox": [60.0, 658.0, 932.0, 920.0]}]
+        blocks = [{"page_idx": 14, "bbox": [80.0, 898.0, 700.0, 916.0],
+                   "text": "(3)将 $\\Delta ABD$ 顺时针旋转 $90^\\circ$，判断点 $E_i$ 是否在该双曲线上"
+                           "【答案】(1)直线l的函数解析式为 $y=x+1$;"}]
+        self.assertEqual(self.trim(regions, blocks), regions)
+
     def test_every_segment_dropped_falls_back_to_the_stored_range(self):
         regions = [{"page_idx": 0, "bbox": [60.0, 40.0, 930.0, 60.0]}]
         blocks = [{"page_idx": 0, "bbox": [87.0, 45.0, 912.0, 55.0], "text": "【答案】C"}]

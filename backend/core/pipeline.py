@@ -3643,6 +3643,12 @@ def _section_choice_without_options(section: str, options: dict, figures: list[d
 # 卷面自己印的答案/解析标记。带这类标记的卷子（答案版）每一题后面都紧跟答案，
 # 题卡的范围一路罩到解析，解析里印的图就会被当成题图挂上去。
 _SOLUTION_MARK = re.compile(r"【答案】|【分析】|【解析】|【详解】|【点睛】")
+# 只认打印在块**开头**的解析标记。MinerU 会把上一行正文和【答案】并进同一个块
+# （202510 答案版第 15 页：「(3)将 ΔABD… 判断点 E_i 是否在该双曲线上【答案】(1)…」，
+# 标记在偏移 125 处）。按块顶裁会把上面那行题目连同它一起切掉——第 24 题的第 (3)
+# 小问就是这么丢的，而卡是绿的。全库这种并块只有两处，两处都在并块的中间。
+_SOLUTION_MARK_AT_START = re.compile(
+    r"^\s*(?:【答案】|【分析】|【解析】|【详解】|【点睛】)")
 
 
 def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> int:
@@ -3704,7 +3710,7 @@ def _reading_regions(snapshot: dict) -> list[dict]:
             if int(block.get("page_idx", -1)) != int(region["page_idx"]):
                 continue
             box = block.get("bbox")
-            if not _SOLUTION_MARK.search(str(block.get("text") or "").strip()) or not box:
+            if not _SOLUTION_MARK_AT_START.match(str(block.get("text") or "")) or not box:
                 continue
             bx0, by0, bx1, by1 = (float(value) for value in box)
             if not (rx0 < bx1 and bx0 < rx1 and ry0 < by1 and by0 < ry1):
