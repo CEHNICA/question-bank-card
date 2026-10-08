@@ -1696,6 +1696,41 @@ def overlaps_regions(page_idx: int, bbox: list[float], regions: list[dict], shar
     return False
 
 
+def figure_in_regions(page_idx: int, bbox: list[float], regions: list[dict]) -> bool:
+    """Whether a figure block belongs to a question whose range it was compared with.
+
+    ``overlaps_regions`` is deliberately generous — a printed picture routinely hangs
+    below its own text line and reaches into the next question's band.  Both
+    directions of that spill need to be told apart, because they are not the same
+    thing:
+
+    * hanging **below** the text is normal.  胜利初一第 3 题 the cube net is printed at
+      y 416–489 while its question line ends at y 445, so the centre falls outside the
+      range and a plain ``center_in_regions`` test would throw a real printed figure away;
+    * reaching in **from above** is not.  The figure then belongs to whatever was cut
+      just before this question started.  202510口镇高中数学第 10 题 starts at y 68.6;
+      the crossed-out matrix a student left in the previous question's working sits at
+      y 29–82, a quarter of it dips under the line, and the reader was handed it as a
+      candidate — it transferred it to question 12 and the card then complained that a
+      picture was missing.  胜利初二第 13 题 was offered question 12's reed photograph
+      the same way.
+
+    So: keep the overlap test, and additionally reject a figure whose centre lies above
+    the top of *every* range it overlaps — that one is wholly in the previous question's
+    territory.  Measured on 282 real candidate figures across eleven papers this removes
+    7, and none of the seven was bound to a card; read by eye, three are the student's
+    own scratch and four are the previous question's printed picture (a number line, a
+    framed diagram, the reed photo, a hand-drawn coordinate box).
+    """
+    if not overlaps_regions(page_idx, bbox, regions):
+        return False
+    cy = _center(bbox)[1]
+    touching = [region for region in regions
+                if region["page_idx"] == page_idx
+                and overlaps_regions(page_idx, bbox, [region])]
+    return not touching or not all(cy < float(region["bbox"][1]) for region in touching)
+
+
 def center_in_regions(page_idx: int, bbox: list[float], regions: list[dict]) -> bool:
     """Whether the centre of a source box lies inside one of the crop regions."""
 
@@ -1991,7 +2026,8 @@ def build_questions(
             if (heading["page"], heading["col"], heading["y"]) < here:
                 section = heading["text"]
         figure_blocks = [{"seq": block.get("seq"), "page_idx": int(block["page_idx"]), "bbox": list(block["bbox"])}
-                         for block in figures if overlaps_regions(int(block["page_idx"]), block["bbox"], regions)]
+                         for block in figures
+                         if figure_in_regions(int(block["page_idx"]), block["bbox"], regions)]
         if solution_trimmed:
             # The general 20%-overlap rule is intentionally generous around a
             # next-question boundary.  At an explicit ``分析/解`` boundary it

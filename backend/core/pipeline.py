@@ -3175,7 +3175,7 @@ def _label_candidates(candidates: list[dict]) -> list[dict]:
 def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
     found = [{"seq": block.seq, "page_idx": block.page_idx, "bbox": block.bbox}
              for block in paper.blocks.filter(type__in=segment.FIGURE_TYPES)
-             if block.bbox and segment.overlaps_regions(block.page_idx, block.bbox, regions)]
+             if block.bbox and segment.figure_in_regions(block.page_idx, block.bbox, regions)]
     return _label_candidates(found)
 
 
