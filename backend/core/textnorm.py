@@ -520,6 +520,15 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
 # as insertions, not these. The comparison is local and deterministic; it does
 # not trigger another model request.
 _OBJECTION_CHARS = re.compile(r"^[0-9A-Za-z\u4e00-\u9fffα-ωΑ-Ω△∠⊥∥≤≥≠±×÷°π∞]+$")
+# How many characters a spot may hold on each side. The merge below consults it
+# too, so joining two stretches never costs a spot the cap would have allowed.
+_OBJECTION_MAX = 3
+# A word read as a different word often shares one character with the original
+# (“树根” → “根据” both contain 根), and that alone is enough for the diff to
+# shred a single mistake into an insertion plus a substitution whose contexts
+# then differ from the paper's. So two stretches separated by no more than this
+# many matching characters are still one disagreement.
+_OBJECTION_GAP = 1
 # MinerU's usual confusions: a disagreement between these proves nothing
 # (in testing MinerU was wrong at every α/a and △/V spot).
 _OCR_LOOKALIKES = (
@@ -532,6 +541,105 @@ _OCR_LOOKALIKES = (
 )
 
 
+def _clean_key(key: str) -> tuple[str, list[int]]:
+    """The key's letters, digits, Chinese and maths symbols, and where each
+    kept character sat in the key.
+
+    Punctuation and fillers (``,``。``,``_``) are what a reading and MinerU
+    disagree about for free, and they are never evidence. Keeping them in the
+    comparison lets one stray comma split a disagreement in two, and each half
+    then fails the identical-context test — the real mistake goes unreported.
+    """
+    chars, index = [], []
+    for position, char in enumerate(key):
+        if _OBJECTION_CHARS.match(char):
+            chars.append(char)
+            index.append(position)
+    return "".join(chars), index
+
+
+def _trimmed(ka: str, kw: str, i1: int, i2: int, j1: int, j2: int):
+    """A disagreement span, pulled back off everything the two sides agree on.
+
+    Punctuation goes first: a comma where the paper has a period is not a
+    difference.  Then the characters both sides already spell the same way —
+    joining two stretches carries the matching characters between them into
+    the span, and those must not be reported as part of the difference.  What
+    is left empty was never a disagreement at all.
+    """
+    while i1 < i2 and not _OBJECTION_CHARS.match(ka[i1]):
+        i1 += 1
+    while i2 > i1 and not _OBJECTION_CHARS.match(ka[i2 - 1]):
+        i2 -= 1
+    while j1 < j2 and not _OBJECTION_CHARS.match(kw[j1]):
+        j1 += 1
+    while j2 > j1 and not _OBJECTION_CHARS.match(kw[j2 - 1]):
+        j2 -= 1
+    while i1 < i2 and j1 < j2 and ka[i1] == kw[j1]:
+        i1, j1 = i1 + 1, j1 + 1
+    while i2 > i1 and j2 > j1 and ka[i2 - 1] == kw[j2 - 1]:
+        i2, j2 = i2 - 1, j2 - 1
+    if i1 >= i2 or j1 >= j2:
+        return None
+    return (i1, i2, j1, j2)
+
+
+def _clean_before(key: str, index: int, count: int) -> str:
+    """The ``count`` characters before ``index``, skipping punctuation."""
+    out = []
+    for position in range(index - 1, -1, -1):
+        if not _OBJECTION_CHARS.match(key[position]):
+            continue
+        out.append(key[position])
+        if len(out) == count:
+            break
+    return "".join(reversed(out))
+
+
+def _clean_after(key: str, index: int, count: int) -> str:
+    out = []
+    for position in range(index, len(key)):
+        if not _OBJECTION_CHARS.match(key[position]):
+            continue
+        out.append(key[position])
+        if len(out) == count:
+            break
+    return "".join(out)
+
+
+def _disagreement_spans(reading_key: str, paper_key: str) -> list[tuple[int, int, int, int]]:
+    """The stretches where the two keys differ, one pair per disagreement.
+
+    Matching characters up to ``_OBJECTION_GAP`` long inside a disagreement do
+    not end it (see ``_OBJECTION_GAP``); a longer run of them does.  Two
+    stretches join only while the joined pair still fits ``_OBJECTION_MAX``:
+    a punctuation slip just before the real mistake must not drag it out of
+    range and lose it altogether.  A joined stretch is trimmed back to its
+    letters, digits, Chinese and maths symbols, so the punctuation that made
+    them neighbours is not part of the reported difference either.
+    """
+    spans: list[tuple[int, int, int, int]] = []
+    run: tuple[int, int, int, int] | None = None
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, reading_key, paper_key,
+                                               autojunk=False).get_opcodes():
+        if tag == "equal":
+            if run and (i2 - i1) > _OBJECTION_GAP:
+                spans.append(run)
+                run = None
+            continue
+        if run is not None:
+            joined = _trimmed(reading_key, paper_key, run[0], i2, run[2], j2)
+            if (joined and joined[1] - joined[0] <= _OBJECTION_MAX
+                    and joined[3] - joined[2] <= _OBJECTION_MAX):
+                run = joined
+                continue
+            spans.append(run)
+        run = _trimmed(reading_key, paper_key, i1, i2, j1, j2) or (i1, i2, j1, j2)
+    if run:
+        spans.append(run)
+    return spans
+
+
 def witness_objections(reading: dict | None, witness: str, *, context: int = 3) -> list[dict]:
     if not reading or not reading.get("stem") or not witness:
         return []
@@ -539,23 +647,41 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
     kw = witness_key(witness)
     if len(kw) < WITNESS_MIN_LENGTH:
         return []
+    # Each replacement on its own, then the joined stretches: joining is there to
+    # catch the mistake the diff shredded, not to replace the rule that has been
+    # reporting single substitutions all along.
+    spans = [(i1, i2, j1, j2) for tag, i1, i2, j1, j2
+             in SequenceMatcher(None, ka, kw, autojunk=False).get_opcodes() if tag == "replace"]
+    for span in _disagreement_spans(ka, kw):
+        if span not in spans:
+            spans.append(span)
     spots = []
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kw, autojunk=False).get_opcodes():
-        if tag != "replace":
-            continue
+    for i1, i2, j1, j2 in spans:
         read, seen = ka[i1:i2], kw[j1:j2]
-        if len(read) > 3 or len(seen) > 3 or {read, seen} in _OCR_LOOKALIKES:
+        if len(read) > _OBJECTION_MAX or len(seen) > _OBJECTION_MAX or {read, seen} in _OCR_LOOKALIKES:
             continue
         if not _OBJECTION_CHARS.match(read) or not _OBJECTION_CHARS.match(seen):
             continue
-        left, right = ka[i1 - context:i1] if i1 >= context else "", ka[i2:i2 + context]
-        if len(left) < context or len(right) < context:
+        left = ka[i1 - context:i1] if i1 >= context else ""
+        right = ka[i2:i2 + context]
+        # Either spelling of the context anchors the spot.  The raw one is what
+        # this has always used; the clean one sees past a comma or a bracket a
+        # neighbour disagreement left behind.  Reporting is for a person, so
+        # either way of being sure is good enough.
+        raw = (len(left) >= context and len(right) >= context
+               and kw[j1 - context:j1] == left and kw[j2:j2 + context] == right)
+        clean_left, clean_right = _clean_before(ka, i1, context), _clean_after(ka, i2, context)
+        clean = (len(clean_left) >= context and len(clean_right) >= context
+                 and _clean_before(kw, j1, context) == clean_left
+                 and _clean_after(kw, j2, context) == clean_right)
+        if not (raw or clean):
             continue
-        if kw[j1 - context:j1] != left or kw[j2:j2 + context] != right:
-            continue
-        # “at”: where the reading's side starts in the reading's key, so the
-        # card can mark the right one when the same context occurs twice.
-        spots.append({"reading": read, "mineru": seen, "before": left, "after": right, "at": i1})
+        # Report the context that anchored the spot, raw whenever it could:
+        # that is the text the card searches to mark the spot, and the clean
+        # spelling exists only to decide.
+        spots.append({"reading": read, "mineru": seen,
+                      "before": left if raw else clean_left,
+                      "after": right if raw else clean_right, "at": i1})
     return spots
 
 
