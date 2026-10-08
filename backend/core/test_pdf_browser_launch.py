@@ -76,13 +76,10 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
                 value = client.call("Runtime.evaluate", {"expression": "6 * 7", "returnByValue": True})
                 self.assertEqual(value["result"]["value"], 42)
                 self.assertIsNone(process.poll(), "CDP must belong to the process returned by launch")
-                try:
-                    client.call("Browser.close")
-                except ConnectionError:
-                    # Browser.close may close its transport before sending its reply.
-                    pass
-                self.assertEqual(process.wait(timeout=5), 0)
-                client.close()
+                # Exercise production's bounded close/force-stop policy. CDP
+                # promises a graceful close, not exit code 0 within five seconds.
+                pdf._cleanup_browser(client, process)
+                self.assertIsNotNone(process.poll(), "Production cleanup must stop the owned browser")
                 client = None
             finally:
                 pdf._cleanup_browser(client, process)
@@ -105,17 +102,20 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
                      "selected": {}, "ai": False, "solution_images": [],
                      "images": [{"slot": "stem", "bytes": stream.getvalue(), "size": image.size}]}]
         document = pdf._html_document(captured, "浏览器导出回归", pdf._print_options({"student_info": False}))
-        profiles = []
+        profiles, processes = [], []
         original_launch = pdf._launch_browser
 
         def launch(binary, profile):
             profiles.append(profile)
-            return original_launch(binary, profile)
+            process = original_launch(binary, profile)
+            processes.append(process)
+            return process
 
         try:
             with mock.patch.dict(os.environ, {"__COMPAT_LAYER": "DetectorsAppHealth"}), \
                     mock.patch.object(pdf, "_browser_path", return_value=executable), \
-                    mock.patch.object(pdf, "_launch_browser", side_effect=launch):
+                    mock.patch.object(pdf, "_launch_browser", side_effect=launch), \
+                    mock.patch.object(pdf._logger, "warning", wraps=pdf._logger.warning) as warnings:
                 data, page_count = pdf._render(document)
             self.assertEqual(page_count, 1)
             self.assertEqual(len(profiles), 1, "One export must render exactly once")
@@ -139,8 +139,15 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
                 coloured = sum(1 for red, green, blue in zip(rgb.samples[0::3], rgb.samples[1::3], rgb.samples[2::3])
                                if blue > red + 40)
                 self.assertGreater(coloured, 100, "The exported image must retain its coloured triangle")
-            self.assertTrue(all(not profile.parent.exists() for profile in profiles),
-                            "Successful export must release and remove every temporary profile")
+            self.assertTrue(all(process.poll() is not None for process in processes),
+                            "Production cleanup must stop the owned browser before returning PDF bytes")
+            if any(profile.parent.exists() for profile in profiles):
+                # Windows may still hold a file after process exit. The existing
+                # cleanup contract logs this and preserves the validated PDF;
+                # PdfCleanupTests separately covers persistent deletion failures.
+                self.assertTrue(any(call.args[1:2] == ("temporary_directory",)
+                                    for call in warnings.call_args_list),
+                                "An unremoved temporary directory must have a cleanup warning")
         finally:
             for profile in profiles:
                 self.cleanup_profile(profile)
