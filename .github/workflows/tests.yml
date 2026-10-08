@@ -27,6 +27,8 @@ jobs:
         run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
       - name: Test backend
         working-directory: backend
+        env:
+          QB_EXPORT_BROWSER_TEST: "1"
         run: python manage.py test core
       - name: Test frontend
         run: node --test frontend/test_*.js

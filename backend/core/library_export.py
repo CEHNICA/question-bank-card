@@ -722,16 +722,7 @@ def _render_formula_pictures(requests, font_size):
                 if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith("tiyouju-pdf-"):
                     raise ValueError("temporary directory")
                 profile = root / "profile"
-                flags = [str(executable), "--headless=new", "--disable-gpu", "--no-first-run",
-                         "--no-default-browser-check", "--disable-background-networking",
-                         "--disable-component-update", "--disable-sync", "--disable-extensions", "--no-proxy-server",
-                         "--host-resolver-rules=MAP * ~NOTFOUND", "--remote-debugging-port=0",
-                         "--remote-debugging-address=127.0.0.1", "--window-size=1280,1000",
-                         "--user-data-dir=" + str(profile), "about:blank"]
-                kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "shell": False}
-                if os.name == "nt":
-                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-                process = subprocess.Popen(flags, **kwargs)
+                process = pdf._launch_browser(executable, profile)
                 port = pdf._wait_debug_port(profile, process, deadline)
                 opener = pdf.build_opener(pdf.ProxyHandler({}))
                 target = pdf._wait_page_target(opener, port, process, deadline)

@@ -58,6 +58,25 @@ def _browser_path():
     raise word.ExportError("导出 PDF 需要本机 Microsoft Edge 或 Google Chrome；仍可导出 Word。", 503)
 
 
+def _launch_browser(executable, profile):
+    """Keep ownership of the headless process used by PDF and Word pictures."""
+    flags = [str(executable), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions",
+             "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND", "--remote-debugging-port=0",
+             "--remote-debugging-address=127.0.0.1", "--window-size=1280,1000", "--user-data-dir=" + str(profile)]
+    if os.name == "nt" and executable.name.lower() == "msedge.exe":
+        # Edge's compatibility-layer relaunch exits this Popen with code 0 and
+        # leaves another browser using the profile. Waiting and cleanup must own
+        # the real browser, not that launcher. Playwright uses the same switch:
+        # https://github.com/microsoft/playwright/blob/main/packages/playwright-core/src/server/chromium/chromiumSwitches.ts
+        flags.append("--edge-skip-compat-layer-relaunch")
+    flags.append("about:blank")
+    kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "shell": False}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return subprocess.Popen(flags, **kwargs)
+
+
 def _remaining(deadline):
     seconds = deadline - time.monotonic()
     if seconds <= 0:
@@ -435,14 +454,7 @@ def _render(document):
             if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith("tiyouju-pdf-"):
                 raise word.ExportError("PDF 临时目录未能建立，请重试。", 503)
             profile = root / "profile"
-            flags = [str(executable), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-                     "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions",
-                     "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND", "--remote-debugging-port=0",
-                     "--remote-debugging-address=127.0.0.1", "--window-size=1280,1000", "--user-data-dir=" + str(profile), "about:blank"]
-            kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "shell": False}
-            if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            process = subprocess.Popen(flags, **kwargs)
+            process = _launch_browser(executable, profile)
             try:
                 port = _wait_debug_port(profile, process, deadline)
                 opener = build_opener(ProxyHandler({}))
