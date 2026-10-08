@@ -3586,6 +3586,21 @@ def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
     return [letter for letter in _OPTION_LETTERS[:last] if letter not in letters]
 
 
+def _surplus_options(options: dict, figures: list[dict]) -> list[str]:
+    """Letters past D: a reader turned a student's scribble into an option.
+
+    Chinese maths multiple-choice papers carry four options.  When a card shows
+    A/B/C/D and an E as well, the gap check finds nothing missing, so the card
+    went out silently — 胜利初四月考第 8 题 read the handwritten “8/√3” beside the
+    options as E, turning a four-option question into a five-option one nobody
+    can answer correctly.  Option images count as present, like ``_option_gaps``.
+    """
+    letters = {key for key, value in (options or {}).items()
+               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    return sorted(letter for letter in letters if letter > "D")
+
+
 def _identical_options(options: dict) -> list[str]:
     """The first pair of options with the same text (B and C both “-1/2024”).
 
@@ -3961,6 +3976,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
     if twins := _identical_options(final.get("options") or {}):
         flags.append(f"选项 {'和'.join(twins)} 读成了一模一样的内容，请对照原卷核对")
+    if surplus := _surplus_options(final.get("options") or {}, figures):
+        flags.append(f"这张卡读出了 {'、'.join(surplus)} 这样的第 5 个及以后的选项；"
+                     f"数学选择题通常只有四个，请对照原卷核对是不是把旁边的演算读成了选项")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
