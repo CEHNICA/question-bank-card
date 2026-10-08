@@ -328,6 +328,11 @@ def clean_stem(stem: str, number: int | None = None) -> str:
         if bare and number is not None and int(bare.group(1)) == number:
             text = text[bare.end():]
     text = re.sub(rf"^\s*{_SCORE_MARK}\s*", "", text)
+    # 誊录规则明写「分值不要写进题干」，可原来只去题首那一个。识读把整句抄
+    # 进来时（「计算（7分）：」），题首根本没有分值，这条就漏了——汶源第 16 题
+    # 是全库唯一一处，照原样进了组卷卷面。数学题干里括号包着的「N分」不会是
+    # 内容，整段连同两侧空格一起去掉。
+    text = re.sub(rf"\s*{_SCORE_MARK}\s*", "", text)
     # A reader that dropped “本题满分10分” sometimes leaves its opening bracket:
     # “（（1）如图1…”.
     text = re.sub(r"^\s*[(（]\s*(?=[(（]\s*\d{1,2}\s*[)）])", "", text)
