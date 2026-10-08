@@ -3569,6 +3569,9 @@ def _record_unverified_witness_differences(final: dict, update: dict, flags: lis
 
 
 _OPTION_LETTERS = "ABCDEFGH"
+# 卷面自己印的大题标题里带这三个词的，那一段就是选择题。这是纸面上写着的事实，
+# 不依赖识读模型说什么，所以能当“本来该有选项”的判据。
+_CHOICE_SECTION = re.compile(r"选择题|单选题|多选题")
 
 
 def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
@@ -3599,6 +3602,36 @@ def _surplus_options(options: dict, figures: list[dict]) -> list[str]:
                if key in _OPTION_LETTERS and str(value or "").strip()}
     letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
     return sorted(letter for letter in letters if letter > "D")
+
+
+def _section_choice_without_options(section: str, options: dict, figures: list[dict]) -> bool:
+    """The printed section heading says choice, the card carries no option at all.
+
+    Every Chinese maths paper labels its own parts: “一、单选题（本小题共10个小题…）”.
+    That heading is on the page, so a card inside it that ends up with no A–D text
+    and no option image contradicts the paper itself.  胜利初四月考第 8 题 is the
+    live case: the four printed options (A.2m B.2.6m C.3.2m D.3.6m) are all inside
+    the crop, but the student crossed out all four letters and the reader called the
+    card a fill-in-blank — 0 options, green, no flag, an unanswerable question.
+
+    Two candidate fixes were measured on the real engine and did not work, so they are
+    recorded here rather than retried: telling the model the section heading changed
+    nothing (3 reads, still 0 options), and adding a rule about crossed-out options
+    changed nothing either (1 of 3 reads recovered the four, and that one also invented
+    an E).  The gap and surplus checks cannot see this case either — both ask which
+    letters the reader expected, and this reader expected none.
+
+    Only the section heading makes “options should exist” knowable without a second
+    read, so only that is checked here.  Option images count as options, like
+    ``_option_gaps`` and ``_surplus_options``: real pure-image option cards keep an
+    empty options dict on purpose and must not be flagged.
+    """
+    if not _CHOICE_SECTION.search(section or ""):
+        return False
+    letters = {key for key, value in (options or {}).items()
+               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    return not letters
 
 
 def _identical_options(options: dict) -> list[str]:
@@ -3979,6 +4012,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if surplus := _surplus_options(final.get("options") or {}, figures):
         flags.append(f"这张卡读出了 {'、'.join(surplus)} 这样的第 5 个及以后的选项；"
                      f"数学选择题通常只有四个，请对照原卷核对是不是把旁边的演算读成了选项")
+    if _section_choice_without_options(str(snapshot.get("section") or ""),
+                                       final.get("options") or {}, figures):
+        flags.append("卷面的大题标题写着这一段是选择题，可这道题一个选项都没有读出来（也没有选项配图）；"
+                     "请对照原卷补上 A、B、C、D")
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
