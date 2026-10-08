@@ -3273,6 +3273,12 @@ FLAG_LOCATED_WITHOUT_NUMBER = "截图里没有看到这道题的题号，题目�
 # 与 FLAG_MINERU_DRAFT_EMPTY 是两回事——那条只管“不用看图模型、题面全用 MinerU 初稿”
 # 的路径，这里管的是模型看过图却什么都没读出来的情形。
 FLAG_EMPTY_STEM = "这道题的题干一个字都没有读出来，请对照原卷截图把题目录进去"
+# 识读对着正常的截图回了一句「（无法识别图片内容）」。它自己说了「题型未知 +
+# 内容类型未知」，卡上留下的却是这句话，而卡是绿的——用户会以为这题没内容。
+# 202510 答案版第 18 题：范围里 1857 字印刷正文完整存在，题干只有 10 个字。
+# 判据是【题型】和【内容类型】同时为「未知」；只看内容类型会误伤 48周第 12、21
+# 题（那两张题面读得好好的，只是内容类型判成未知）。
+FLAG_UNREADABLE_STEM = "识读没能读出这道题的内容，卡上留下的是它「无法识别」的原话，请对照原卷截图把题目录进去"
 # AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
 FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
 FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
@@ -4190,6 +4196,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # 范围也确实罩住了那一行（不是切错，是识读交白卷而系统照收）。
         # 正文保留原图的卡题干本来就是空的，那条路不适用，所以排除掉。
         flags.append(FLAG_EMPTY_STEM)
+    if final.get("unreadable"):
+        # 不是空，是识读认了输。同一张图重读一次就能读出来（readers.read_question
+        # 已经为它重发过一次），两次都这样才落到这里，所以只能靠提示告诉人。
+        flags.append(FLAG_UNREADABLE_STEM)
     switches = features.load()
     for name in ("read_a", "read_b", "read_c"):
         update[name] = prose.tidy_reading(update.get(name), switches=switches)

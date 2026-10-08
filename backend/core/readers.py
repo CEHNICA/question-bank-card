@@ -681,6 +681,12 @@ def parse_reading(text: str, number: int) -> dict:
         "options": options,
         "type": kind,
         "content_kind": content_kind,
+        # 题型与内容类型同时是“未知”，是识读自己在说「我没读出来」：它会照着
+        # 这种截图回一句「（无法识别图片内容）」加上“请提供清晰的题目图片”。
+        # 只有 content_kind 未知是不够的——48周第 12、21 题都是 content_kind
+        # 未知但题面读得好好的；两个都未知时，全库 241 张卡只命中真出问题的
+        # 那一张（202510 答案版第 18 题：同一张图隔一会儿重读就对）。
+        "unreadable": kind == "unknown" and content_kind == "unknown",
         "figures": figures,
         "missing_figure": "缺图" in figure_text,
         "number_seen": int(seen[0]) if seen else None,
@@ -1101,7 +1107,7 @@ def read_question(
 ) -> dict:
     prompt = transcribe_prompt(number, with_figures, source_kind)
     last_error = ""
-    for _ in range(2):
+    for attempt in range(2):
         raw = chat(engine, prompt if not last_error else prompt + f"\n\n（上次输出不合格式：{last_error}。请严格按格式重写。）",
                    [image_url])
         try:
@@ -1109,8 +1115,19 @@ def read_question(
         except ValueError as error:
             last_error = str(error)
             continue
+        if reading["unreadable"] and attempt == 0:
+            # 识读偶尔对着完全正常的截图回一句「（无法识别图片内容）」（202510
+            # 答案版第 18 题）。这张图本身没问题：把它原样重发一次，两次都读对
+            # 了，范围里 1857 字的印刷正文一字不差。所以重发一次比标黄管用，
+            # 而且只在它自己说「读不出来」时才重发，正常题不多花调用。
+            last_error = "没能读出这道题的内容，只回了「无法识别」之类的话"
+            continue
         reading["engine"] = answered_by(engine).label
         reading["raw"] = raw[:6000]
+        # 留下来是为了日后能查「重试到底有没有触发」：真卷上重跑一次，分不清
+        # 是重发救回来的还是它这次自己读对了，没有这个标记就只能靠猜。
+        if attempt:
+            reading["retried_after_refusal"] = True
         return reading
     raise ReaderError(f"{engine.label} 两次输出都不合格式")
 
