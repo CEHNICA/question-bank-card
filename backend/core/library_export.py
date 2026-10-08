@@ -32,7 +32,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import features, library
+from . import features, library, tables
 from .library_browse import BrowseError, normalize_ids
 from .library_drafts import DraftError, _print_options, _title
 from .models import PublishedQuestion
@@ -297,6 +297,11 @@ def _segments(source, segments, start, end, where, offsets=None, *, word_math=Tr
         if kind == "text" and re.search(r"\$[^$\n]+\$|\\[([]|\\[A-Za-z]{2,}", raw):
             _fail(where, "公式尚未转换，不能把 LaTeX 源码当作成功结果")
         if kind == "text" and re.search(r"<(?:table|tr|td|th)\b", raw, re.I):
+            _fail(where, "表格尚未转换，不能把表格源码当作成功结果")
+        if kind == "text" and tables.markdown_tables(raw):
+            # 管道表和 HTML 表一样：送回来时必须已经是排好版的表格块。混在普通
+            # 文字里就意味着成品卷上会印出一排竖线，而表格源码是识读提示词
+            # 规定的写法，不会被上面那条 HTML 检查挡住。
             _fail(where, "表格尚未转换，不能把表格源码当作成功结果")
         omml = _math(segment, where, word_math=word_math) if kind == "math" else None
         entry = {**segment, "raw": raw, "omml": None if omml is _UNSUPPORTED else omml}
