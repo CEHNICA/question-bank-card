@@ -117,6 +117,10 @@ BOOK_NON_CARD_NUMBERED_RE = re.compile(
     r"对此研究的评价(?:\s*[（(].*?[)）])?\s*$)"
 )
 BOOK_INSTRUCTION_SECTION_RE = re.compile(r"信息技术应用")
+# ``第六章 特殊平行四边形``（章首页）and the bare running head ``第六章``（每页页眉）。
+BOOK_CHAPTER_RE = re.compile(
+    r"^\s*第\s*([0-9]{1,3}|[〇零一二三四五六七八九十]{1,3})\s*([章篇])\s*[　\s]*(.{0,24}?)\s*$"
+)
 BOOK_STRONG_NUMBERED_QUESTION_RE = re.compile(
     r"[？?]|[（(]\s*[）)]|_{2,}|"
     r"(?:求|求证|证明|计算|判断|填空|填表|回答|为什么|为何)"
@@ -1111,6 +1115,83 @@ def analyse_book(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[St
     """Find textbook examples/exercises using only existing MinerU text blocks."""
     layout, _markers = _book_marker_stream(pages, blocks)
     return layout, sorted(layout.candidates, key=Start.key)
+
+
+_CHAPTER_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+                   "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _chapter_number(text: str) -> int | None:
+    """章号：``六`` 和 ``6`` 都要读成同一个 6，否则同一章会被当成两章。"""
+    if text.isdigit():
+        value = int(text)
+        return value if 0 < value < 100 else None
+    if not text or any(char not in _CHAPTER_DIGITS and char != "十" for char in text):
+        return None
+    if "十" not in text:
+        return _CHAPTER_DIGITS[text] if len(text) == 1 else None
+    head, _, tail = text.partition("十")
+    if head and len(head) != 1:
+        return None
+    tens = _CHAPTER_DIGITS[head] if head else 1
+    ones = _CHAPTER_DIGITS[tail] if tail else 0
+    return tens * 10 + ones
+
+
+def _block_order(seq) -> int:
+    """版面块序号一律是整数，但历史数据里混过字符串；排序不能被它带崩。"""
+    return seq if type(seq) is int else -1
+
+
+def chapter_index(blocks: list[dict]) -> dict:
+    """按版面顺序整理书里的章标题，并记住每一章最完整的名字。
+
+    教材每页页眉都印「第六章」，只有章首页才写全「第六章 特殊平行四边形」。
+    只认页眉会把整章的名字丢掉，所以同一个章号取全书出现过的最长名字。
+    """
+    headers: list[dict] = []
+    fullest: dict[str, str] = {}
+    for block in sorted(blocks, key=lambda item: (int(item.get("page_idx", 0) or 0),
+                                                  _block_order(item.get("seq")))):
+        seq = block.get("seq")
+        if type(seq) is not int:
+            continue
+        matched = BOOK_CHAPTER_RE.match((block.get("text") or "").strip())
+        if not matched:
+            continue
+        number = _chapter_number(matched.group(1))
+        if number is None:
+            continue
+        unit = matched.group(2)
+        name = re.sub(r"\s+", " ", matched.group(3)).strip(" 　·-—:：、")
+        headers.append({"seq": seq, "page_idx": int(block.get("page_idx", 0)),
+                        "number": number, "unit": unit, "name": name})
+        key = f"{number}{unit}"
+        if len(name) > len(fullest.get(key, "")):
+            fullest[key] = name
+    headers.sort(key=lambda item: item["seq"])
+    return {"headers": headers, "names": fullest}
+
+
+def chapter_label(index: dict, seq: int | None) -> str | None:
+    """某个版面块往上最近的一章，写成「第六章 特殊平行四边形」。
+
+    找不到就是None —— 调用方要留原来的组名，不要拿这个当判题的依据。
+    """
+    if type(seq) is not int:
+        return None
+    headers = index.get("headers") or []
+    found = None
+    for header in headers:
+        if header["seq"] > seq:
+            break
+        found = header
+    if found is None:
+        return None
+    key = f"{found['number']}{found['unit']}"
+    name = (index.get("names") or {}).get(key) or found["name"]
+    label = f"第{found['number']}{found['unit']}"
+    return f"{label} {name}" if name else label
 
 
 def _block_key(layout: Layout, block: dict) -> tuple[int, int, float] | None:

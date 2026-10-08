@@ -1098,14 +1098,55 @@ def _plan_structure(paper: Paper, blocks: list[dict]) -> tuple[dict, bool]:
     return structure, needs_confirmation
 
 
-def _question_group_specs(paper: Paper, structure: dict | None = None) -> list[dict]:
+BOOK_GROUP_KIND = {"example": "例题", "exercise": "习题"}
+
+
+def _book_group_names(source_groups: list, paper: Paper,
+                       blocks: list[dict] | None = None) -> dict[int, str]:
+    """教材题组用书上真实的章节名，不再是「第 N 组」。
+
+    只读版面块，不调模型。同一个章、同一种题源会有很多组，重名比「第 N 组」
+    更难认，所以重复的名字才补序号。书上认不出章节就交回空，调用方留原名。
+    """
+    if blocks is None:
+        blocks = _block_dicts(paper)
+    index = segment.chapter_index(blocks)
+    labels: list[str | None] = []
+    for scope in source_groups:
+        anchor = scope.get("scope_anchor_seq") if isinstance(scope, dict) else None
+        label = segment.chapter_label(index, anchor) if type(anchor) is int else None
+        name = BOOK_GROUP_KIND.get(scope.get("source_kind") if isinstance(scope, dict) else None)
+        if label and name:
+            label = f"{label} · {name}"
+        labels.append(label)
+    counts: dict[str, int] = {}
+    for label in labels:
+        if label:
+            counts[label] = counts.get(label, 0) + 1
+    seen: dict[str, int] = {}
+    result: dict[int, str] = {}
+    for position, label in enumerate(labels):
+        if not label:
+            continue
+        if counts[label] > 1:
+            seen[label] = seen.get(label, 0) + 1
+            result[position] = f"{label} {seen[label]}"
+        else:
+            result[position] = label
+    return result
+
+
+def _question_group_specs(paper: Paper, structure: dict | None = None,
+                          blocks: list[dict] | None = None) -> list[dict]:
     """Return the current confirmed/suggested scopes in a model-ready form."""
     structure = structure if structure is not None else (paper.structure or {})
     scopes = structure.get("confirmed_scopes") or structure.get("suggested_scopes") or []
     page_groups = structure.get("confirmed_groups") or \
         structure.get("suggested_groups") or [list(range(len(paper.pages)))]
+    is_book = paper.material_type == Paper.MaterialType.BOOK
     specs: list[dict] = []
     source_groups = scopes if scopes else [{"pages": pages} for pages in page_groups]
+    names = _book_group_names(source_groups, paper, blocks) if is_book else {}
     for sequence, scope in enumerate(source_groups):
         pages = scope.get("pages") if isinstance(scope, dict) else None
         if not isinstance(pages, list):
@@ -1113,8 +1154,10 @@ def _question_group_specs(paper: Paper, structure: dict | None = None) -> list[d
         valid = sorted({int(page) for page in pages if type(page) is int and 0 <= page < len(paper.pages)})
         if not valid:
             continue
-        title = ("第 %d 组" % (sequence + 1)) if paper.material_type == Paper.MaterialType.BOOK \
+        title = ("第 %d 组" % (sequence + 1)) if is_book \
             else (paper.display_name if sequence == 0 else f"{paper.display_name}（{sequence + 1}）")
+        if is_book:
+            title = names.get(sequence, title)
         specs.append({
             "title": title[:255],
             "kind": (QuestionGroup.Kind.CHAPTER if paper.material_type == Paper.MaterialType.BOOK
@@ -1167,7 +1210,7 @@ def _prospective_book_groups(paper: Paper, blocks: list[dict]) -> tuple[list[Que
     structure = _planned_book_resegment_structure(paper, blocks)
     groups = [
         QuestionGroup(id=-(index + 1), paper=paper, **spec)
-        for index, spec in enumerate(_question_group_specs(paper, structure))
+        for index, spec in enumerate(_question_group_specs(paper, structure, blocks))
     ]
     return groups, structure
 
