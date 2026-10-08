@@ -3670,6 +3670,77 @@ def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> i
                and float((figure.get("bbox") or [0, 0, 0, 0])[1]) > top)
 
 
+# 解析标记上方至少留这么多版面单位（0–1000，约 9mm）才算这段里还有正文；
+# 留不下就说明整段都是解析（例如答案版第 18 题跨页那一段：第 9 页第 4 个单位
+# 就是【答案】），整段丢掉，别把整版解答塞进给模型的那张图。
+_SOLUTION_CUT_MIN = 30.0
+
+
+def _reading_regions(snapshot: dict) -> list[dict]:
+    """送给识读的那张图，只留到卷面自己的【答案】/【解析】标记之前。
+
+    答案版卷子（和练习册）每一题后面都紧跟着答案，切题范围一路罩到下一道题，
+    于是发进模型的图八成是解答文字。202510 答案版第 18 题那张 1862x1614 里
+    80% 是【答案】【解析】，识读对着它回了「（无法识别图片内容）」——那张图
+    原样重发两次都读对了，所以问题出在图太大，不是图看不清。
+
+    真卷实测（答案版 6 道，含第 18 题和范围最短、最长的两道）：裁完之后 6 张卡
+    的识读结果与卡上现有题干逐字一致，而图的高度少了 2.9–14.8 倍，字节数
+    170K→41K、200K→21K、399K→81K。
+
+    只有卡上存的范围内、中心落在里面的文字块算数（``witness_blocks``），普通
+    试卷上没有这些标记，这一步就是原样返回。裁的只是给模型看的那张图：卡上存的
+    范围、配图候选、旗标判据全都按原范围走。
+    """
+    regions = snapshot.get("regions") or []
+    blocks = snapshot.get("witness_blocks") or []
+    if not regions or not blocks:
+        return regions
+    trimmed = []
+    for region in regions:
+        rx0, ry0, rx1, ry1 = (float(value) for value in region["bbox"])
+        cut = None
+        for block in blocks:
+            if int(block.get("page_idx", -1)) != int(region["page_idx"]):
+                continue
+            box = block.get("bbox")
+            if not _SOLUTION_MARK.search(str(block.get("text") or "").strip()) or not box:
+                continue
+            bx0, by0, bx1, by1 = (float(value) for value in box)
+            if not (rx0 < bx1 and bx0 < rx1 and ry0 < by1 and by0 < ry1):
+                continue
+            if cut is None or by0 < cut:
+                cut = by0
+        if cut is None:
+            trimmed.append({"page_idx": region["page_idx"], "bbox": [rx0, ry0, rx1, ry1]})
+        elif cut - ry0 >= _SOLUTION_CUT_MIN:
+            trimmed.append({"page_idx": region["page_idx"], "bbox": [rx0, ry0, rx1, cut - 2.0]})
+    return trimmed or regions
+
+
+def _unclassified_below_solution(blocks: list[dict] | None, candidates: list[dict] | None,
+                                 assignments: dict) -> tuple[int, int]:
+    """还没归类的候选图里，有几个印在卷面自己的【答案】/【解析】之后。返回（其中，合计）。
+
+    答案版卷子上切题范围一路罩到下一道题，解析里印的图也成了候选框。给识读的图
+    裁到解析之前之后（``_reading_regions``），模型再看不见这些框，它们就一直
+    「没归类」，卡上挂的那句「原卷可能有图没有被找到」会让人以为题目缺图——
+    其实那张图印在答案里，本来就不该并进来（202510 答案版第 5、11、13、25 题）。
+    """
+    marks = [block for block in blocks or []
+             if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")]
+    known = {str(label) for label in (assignments or {})}
+    pending = [c for c in candidates or []
+               if isinstance(c, dict) and str(c.get("label")) not in known and c.get("bbox")]
+    if not marks or not pending:
+        return 0, len(pending)
+    tops = [(int(m["page_idx"]), float(m["bbox"][1])) for m in marks]
+    below = sum(1 for c in pending
+                if any(page == int(c.get("page_idx", -1)) and float(c["bbox"][1]) > top
+                       for page, top in tops))
+    return below, len(pending)
+
+
 def _identical_options(options: dict) -> list[str]:
     """The first pair of options with the same text (B and C both “-1/2024”).
 
@@ -3823,9 +3894,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if not snapshot["regions"]:
         return {"state": Question.State.RED, "flags": [],
                 "error": "没有切出这道题的原卷范围，请点“调整范围”在原卷上框出来"}
-    clean, _ = imaging.stack_regions(snapshot["regions"], store.load)
+    reading_regions = _reading_regions(snapshot)
+    clean, _ = imaging.stack_regions(reading_regions, store.load)
     marks = [{"label": c["label"], "page_idx": c["page_idx"], "bbox": c["bbox"]} for c in snapshot["candidates"]]
-    marked = imaging.stack_regions(snapshot["regions"], store.load, marks)[0] if marks else clean
+    marked = imaging.stack_regions(reading_regions, store.load, marks)[0] if marks else clean
     clean_url, marked_url = imaging.jpeg_data_url(clean), imaging.jpeg_data_url(marked)
 
     results: dict[str, dict] = {}
@@ -4172,8 +4244,16 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         else:
             flags.append(FLAG_UNFOUND_FIGURE)
     elif review["status"] == CONFLICT:
-        flags.append(FLAG_UNFOUND_FIGURE if "candidate_unclassified" in review.get("signals", [])
-                     else FLAG_UNCUED_FIGURE)
+        if "candidate_unclassified" in review.get("signals", []):
+            below, total = _unclassified_below_solution(
+                snapshot.get("witness_blocks"), snapshot.get("candidates"),
+                figure_assignments)
+            flags.append(
+                f"原卷有 {total} 张图印在这道题范围里的【答案】/【解析】之后，没有并进本题"
+                f"（可能来自解析）；确实属于题目的话，请对照原卷点“配图”框进来"
+                if below and below == total else figure_policy.FLAG_UNFOUND_FIGURE)
+        else:
+            flags.append(figure_policy.FLAG_UNCUED_FIGURE)
     if final.get("unclear"):
         flags.append("有看不清的字（[?]），请对照原卷补上")
     # 1.12.5：删掉"截图里还露出了第 N 题"。这条实际上从没成立过——双读被
