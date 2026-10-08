@@ -3642,7 +3642,7 @@ def _section_choice_without_options(section: str, options: dict, figures: list[d
 
 # 卷面自己印的答案/解析标记。带这类标记的卷子（答案版）每一题后面都紧跟答案，
 # 题卡的范围一路罩到解析，解析里印的图就会被当成题图挂上去。
-_SOLUTION_MARK = re.compile(r"【答案】|【解析】|【详解】|【点睛】")
+_SOLUTION_MARK = re.compile(r"【答案】|【分析】|【解析】|【详解】|【点睛】")
 
 
 def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> int:
@@ -3739,6 +3739,33 @@ def _unclassified_below_solution(blocks: list[dict] | None, candidates: list[dic
                 if any(page == int(c.get("page_idx", -1)) and float(c["bbox"][1]) > top
                        for page, top in tops))
     return below, len(pending)
+
+
+_SECTION_KIND_COMPARE = ("fill_blank", "free_response")
+# 只认「二、填空题」「三、解答题」这种大题标题开头的写法：括号里顺带提一句
+# 「含填空」不算，否则一道解答题只要提到填空二字就会被判成冲突。
+_HEADING_KIND = re.compile(r"^[一二三四五六七八九十]+\s*[、.．]\s*"
+                          r"(填空题|解答题|计算题|证明题|应用题|判断题|综合题|作图题)")
+
+
+def _section_kind_conflict(section: str | None, kind: str | None) -> tuple[str, str] | None:
+    """卷面的大题标题说这一段是填空题，卡上却是解答题（或反过来）。返回（应有，卡上）。
+
+    ``qtypes.with_section`` 只在选择题内部按标题定单选/多选，非选择题之间它按设计
+    不动：标题是硬证据，但把一张判对的卡改错同样麻烦，所以只提示、不擅自改。
+
+    真卷量过（11 份卷子）：标题写着填空题或解答题的 133 张卡里只有 3 张对不上——
+    胜利初四月考第 13 题（题干末尾是「等于____米」，是填空却判成解答）、
+    第 16 题（「计算：…」判成填空）、胜利初一第 17 题（「把下列各数填入它所属的
+    集合内，(1)(2)(3)」判成填空）。三张都是绿的，没有任何提示。
+    """
+    match = _HEADING_KIND.match(str(section or "").strip())
+    printed = qtypes.from_words(match.group(1)) if match else "unknown"
+    current = str(kind or "unknown")
+    if printed in _SECTION_KIND_COMPARE and current in _SECTION_KIND_COMPARE \
+            and printed != current:
+        return qtypes.label(printed), qtypes.label(current)
+    return None
 
 
 def _identical_options(options: dict) -> list[str]:
@@ -4200,6 +4227,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     )
     kind = qtypes.with_section(qtypes.infer(kind, final.get("stem"), final.get("options")),
                                snapshot.get("section"))
+    if conflict := _section_kind_conflict(snapshot.get("section"), kind):
+        # 题型是题型待核对之外的一类：模型判了、也定了案，可卷面标题说的不一样。
+        flags.append(f"卷面的大题标题写着这一段是{conflict[0]}，卡上却是{conflict[1]}；"
+                     "请在题卡上选一下题型")
     choice_missing_slots = missing_choice_figure_slots(
         kind=kind,
         options=final.get("options") or {},
