@@ -10,6 +10,7 @@ urlpatterns = [
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
     path("settings", views.index_page),
     path("app.js", views.app_script),
+    path("original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")),
     path("browser-interactions.js", views.browser_interactions_script),
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),
@@ -65,6 +66,8 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>/approve-green", views.approve_green),
     path("api/papers/<uuid:paper_id>/publish", views.publish_paper),
     path("api/papers/<uuid:paper_id>/questions", views.add_question),
+    path("api/papers/<uuid:paper_id>/question-layout", views.paper_question_layout),
+    path("api/papers/<uuid:paper_id>/question-layout/<uuid:operation_id>/undo", views.paper_question_layout_undo),
     path("api/papers/<uuid:paper_id>/questions/delete", views.paper_questions_delete),
     path("api/papers/<uuid:paper_id>/question-trash", views.paper_question_trash),
     path(

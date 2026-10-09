@@ -267,7 +267,8 @@ class TypeGateApiTests(TempDataMixin, TestCase):
                              {"regions": [{"page_idx": 0, "bbox": [50, 100, 480, 320]}]})
         self.assertEqual(response.status_code, 200, response.content)
         self.q.refresh_from_db()
-        self.assertFalse(self.q.type_locked)
+        self.assertTrue(self.q.type_locked)
+        self.assertFalse(self.q.approved)
 
     def test_type_action_rejects_undecided_or_unknown_values_and_cards_still_reading(self):
         for value in ("unknown", "essay", None):

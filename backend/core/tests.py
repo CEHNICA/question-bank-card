@@ -7,6 +7,7 @@ import json
 import shutil
 import tempfile
 import threading
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -1748,14 +1749,16 @@ class ApiTests(TestCase):
         self.assertEqual(data["analysis"], "由 ▱ABCD 可知")
         self.assertFalse(data["approved"])
 
-    def test_regions_change_requests_reread(self):
+    def test_regions_change_saves_only_and_preserves_figures(self):
+        old_figures = deepcopy(self.q.figures)
         data = self.post(f"/api/questions/{self.q.id}/regions",
                          {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]}).json()
         q = data["question"]
-        self.assertEqual(q["state"], "waiting")
+        self.assertEqual(q["state"], "yellow")
         self.assertTrue(q["regions_changed"])
-        self.assertEqual(q["figures"], [])
-        self.assertTrue(Question.objects.get(pk=self.q.id).reread_requested)
+        saved = Question.objects.get(pk=self.q.id)
+        self.assertEqual(saved.figures, old_figures)
+        self.assertFalse(saved.reread_requested or saved.ocr_pending)
         bad = self.post(f"/api/questions/{self.q.id}/regions", {"regions": [{"page_idx": 3, "bbox": [0, 0, 10, 10]}]})
         self.assertEqual(bad.status_code, 400)
 
@@ -1909,7 +1912,7 @@ class ApiTests(TestCase):
         self.assertEqual(self.q.figure_review["status"], "ok")
         self.assertFalse(self.q.approved)
 
-    def test_text_and_region_changes_invalidate_old_no_figure_confirmation(self):
+    def test_text_changes_invalidate_no_figure_but_range_save_preserves_manual_review(self):
         confirmed = {
             "status": "confirmed_no_figure",
             "reason": "人工确认本题确实无图",
@@ -1943,7 +1946,8 @@ class ApiTests(TestCase):
         })
         self.assertEqual(moved.status_code, 200, moved.content)
         self.q2.refresh_from_db()
-        self.assertNotEqual(self.q2.figure_review.get("status"), "confirmed_no_figure")
+        self.assertEqual(self.q2.figure_review.get("status"), "confirmed_no_figure")
+        self.assertFalse(self.q2.approved)
 
     def test_published_figure_review_is_immutable_and_new_version_records_new_review(self):
         Question.objects.filter(pk=self.q2.pk).update(
@@ -2121,9 +2125,10 @@ class ApiTests(TestCase):
                          {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]})
         self.assertEqual(data.status_code, 201)
         new_id = data.json()["question"]["id"]
-        self.assertTrue(Question.objects.get(pk=new_id).reread_requested)
+        self.assertFalse(Question.objects.get(pk=new_id).reread_requested)
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/questions",
-                                   {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]}).status_code, 400)
+                                   {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]}).status_code, 409)
+        Question.objects.filter(pk=new_id).update(reread_requested=True, state=Question.State.WAITING)
         response = self.client.delete(f"/api/questions/{new_id}", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 409)  # 尚在重读队列，不能和工作者竞态
         Question.objects.filter(pk=new_id).update(

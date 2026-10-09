@@ -365,6 +365,8 @@ class BookScopeDetectionTests(TestCase):
         # Both scopes share page 0, so page membership alone must not guess where
         # a manually recovered question belongs. The API requires and records an
         # explicit group choice in this ambiguous case.
+        paper.status = Paper.Status.READY
+        paper.save(update_fields=["status"])
         client = Client()
         payload = {
             "number": 3,

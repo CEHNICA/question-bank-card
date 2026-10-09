@@ -242,7 +242,7 @@ class QuestionRecycleBinApiTests(TestCase):
             "group_id": self.group.pk,
             "regions": [{"page_idx": 0, "bbox": [20, 100, 900, 260]}],
         })
-        self.assertEqual(add.status_code, 400, add.content)
+        self.assertEqual(add.status_code, 409, add.content)
         self.assertIn("回收站", add.json()["error"])
 
         delete_paper = self.client.delete(

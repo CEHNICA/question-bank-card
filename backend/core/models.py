@@ -53,6 +53,9 @@ class Paper(models.Model):
     # Local intake is independent of cloud recognition. Per-page decisions and
     # warnings stay with the original document; an empty plan is legacy MinerU.
     processing_plan = models.JSONField(default=dict, blank=True)
+    # One compare-and-swap token for original-page layout topology.
+    layout_revision = models.PositiveIntegerField(default=0)
+    layout_page_epoch = models.PositiveIntegerField(default=0)
     # 手机照片（一张或几张合成一份卷）：
     # {"files": [{"name", "file", "taken", "straightened"}]（选择顺序）, "enhance": 是否做扫描件效果,
     #  "order": 当前第 i 页是 files[order[i]], "mineru_order": 交给 MinerU 时的页序,
@@ -63,6 +66,15 @@ class Paper(models.Model):
     archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # Older pipeline callers hold a Paper loaded before later question
+        # saves. A full save must never overwrite the shared CAS counters with
+        # that object's stale values. Counter changes use explicit updates.
+        if not self._state.adding and kwargs.get("update_fields") is None:
+            kwargs["update_fields"] = [field.name for field in self._meta.concrete_fields
+                if not field.primary_key and field.name not in {"layout_revision", "layout_page_epoch"}]
+        return super().save(*args, **kwargs)
 
     class Meta:
         ordering = ["-created_at"]
@@ -188,6 +200,8 @@ class Question(models.Model):
         QuestionGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name="questions",
     )
     source_key = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    # Presentation only: never part of OCR, approval or publication identity.
+    color_index = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     number = models.PositiveIntegerField()
     section = models.CharField(max_length=120, blank=True)
     question_type = models.CharField(max_length=24, default="unknown")
@@ -254,6 +268,23 @@ class Question(models.Model):
     # Cascades, migrations and the recycle-bin API need an unfiltered manager.
     all_objects = models.Manager()
 
+    def save(self, *args, **kwargs):
+        old = None
+        topology = ("regions", "group_id", "number", "deleted_at")
+        if self.pk and not self._state.adding:
+            old = type(self).all_objects.filter(pk=self.pk).values(*topology).first()
+        if self._state.adding and self.color_index is None:
+            from .question_layout import choose_color
+            self.color_index = choose_color(self.paper_id, self.regions)
+        super().save(*args, **kwargs)
+        written = kwargs.get("update_fields")
+        changed = old is None or any(
+            (written is None or name in written or name.removesuffix("_id") in written)
+            and old[name] != getattr(self, name) for name in topology
+        )
+        if changed:
+            Paper.objects.filter(pk=self.paper_id).update(layout_revision=models.F("layout_revision") + 1)
+
     class Meta:
         ordering = ["number", "id"]
         default_manager_name = "objects"
@@ -273,6 +304,7 @@ class QuestionDeletionBatch(models.Model):
     class Origin(models.TextChoices):
         USER = "user", "人工删除"
         RESEGMENT = "resegment", "重新切题自动排除"
+        LAYOUT = "layout", "原卷布局历史"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="question_deletion_batches")
@@ -285,6 +317,32 @@ class QuestionDeletionBatch(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class QuestionLayoutOperation(models.Model):
+    """A durable, atomic original-page edit and its guarded inverse."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="layout_operations")
+    client_request_id = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    kind = models.CharField(max_length=16)
+    source_ids = models.JSONField(default=list)
+    target_ids = models.JSONField(default=list)
+    before_snapshot = models.JSONField(default=dict)
+    after_snapshot = models.JSONField(default=dict)
+    after_fingerprints = models.JSONField(default=dict)
+    after_layout_revision = models.PositiveIntegerField(default=0)
+    page_epoch = models.PositiveIntegerField(default=0)
+    source_epoch = models.CharField(max_length=64, blank=True)
+    deletion_batch = models.ForeignKey(QuestionDeletionBatch, on_delete=models.SET_NULL, null=True, blank=True)
+    blocked_reason = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    undone_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [models.UniqueConstraint(fields=["paper", "client_request_id"], name="unique_layout_request")]
 
 
 class PublishedQuestion(models.Model):

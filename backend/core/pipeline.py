@@ -1276,6 +1276,8 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
                 changed_questions.append(question)
         if changed_questions:
             Question.all_objects.bulk_update(changed_questions, ["group"])
+            from .question_layout import bump
+            bump(paper.pk)
 
         structure["groups_need_rebuild"] = False
         structure["groups_applied_at"] = structure.get("confirmed_at") or timezone.now().isoformat()
@@ -1552,6 +1554,8 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
                      *[note for note in info.get("notes", []) if not note.startswith(PAGE_NOTE)]]
     _store_ranges(info, ranges)
     with transaction.atomic():
+        from .question_layout import invalidate_page_epoch
+        invalidate_page_epoch(paper)
         changed = list(paper.blocks.all())
         # Two-phase renumbering avoids a transient collision on the
         # (paper, seq) unique constraint when seq values exchange places.
@@ -2828,6 +2832,8 @@ def segment_paper(paper: Paper) -> None:
             Question.all_objects.filter(pk__in=system_deleted_ids).update(
                 deleted_at=timezone.now(), deletion_batch=batch,
             )
+            from .question_layout import bump
+            bump(paper.pk)
             excluded = len(system_deleted_ids)
         desired_group_ids = [group.pk for group in groups]
         if not preserve_existing:

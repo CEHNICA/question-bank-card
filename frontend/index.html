@@ -514,11 +514,13 @@
           <span id="pageCropGuideText"></span>
         </div>
       </div>
+      <aside id="pageLayoutPanel" class="original-layout-panel" aria-label="原卷题目与范围编辑" hidden></aside>
       <div id="pageStage" class="page-stage" tabindex="0" aria-label="整页原卷画布"></div>
       <aside id="pageCropPreview" class="page-crop-preview" aria-label="保存后的题目预览" hidden>
         <details id="pageCropPreviewDetails"><summary>保存效果 · 按片段顺序拼接</summary><div id="pageCropPreviewBody"></div></details>
       </aside>
     </div>
+    <div id="pageLayoutOverlap" class="layout-overlap" role="region" aria-label="选择重叠的题目范围" hidden></div>
     <div id="figureSlotMenu" class="figure-slot-menu" popover="manual" role="menu" aria-label="选择配图归属" hidden>
       <div class="figure-slot-head">
         <strong>这张图属于</strong>
@@ -847,6 +849,7 @@
   <script src="/browser-interactions.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
   <script src="/site-drawer.js" defer></script>
+  <script src="/original-paper-layout.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

@@ -30,14 +30,14 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", dem
     readTargetSelect: { value: "auto" }, pageDialogClose: {}
     , pageStage: { focus() {} }
   };
-  const question = { id: 7, number: 1, regions: [{ page_idx: 0, bbox: [10, 10, 300, 100] }] };
-  const state = { paperId: "qa-paper", paper: { demo },
+  const question = { id: 7, number: 1, content_revision: 3, layout_fingerprint: "a".repeat(64), regions: [{ page_idx: 0, bbox: [10, 10, 300, 100] }] };
+  const state = { paperId: "qa-paper", paper: { demo, layout_revision: 7 },
     questions: Array.from({ length: count }, (_, i) => ({ id: i + 1, number: i + 1 })) };
   const dialog = { mode, boxes, paperId: state.paperId, session: 1, saving: false, cutQuestionIds: [],
     question: mode === "new" ? null : question, page: 2, zoom: 1.2 };
   const context = vm.createContext({
     $, state, dialog, teaching: { active: teachingActive, paper: state.paperId }, QBManualCrop: App, QBUpload: App, CROP_EDIT_KEY: "crop",
-    document: { querySelector: () => null }, menuIsOpen: () => false,
+    document: { querySelector: () => null }, menuIsOpen: () => false, crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000001" },
     editGuard: { release(key) { releases.push(key); } },
     showCropResult(text) { messages.push(text); }, toast(text, kind) { toasts.push({ text, kind }); }, teach() {},
     setCropSaving(value) { dialog.saving = value; },
@@ -102,6 +102,8 @@ function harness({ count = 25, number = count + 1, boxes = [], mode = "new", dem
   assert.equal(last.requests.length, 1, "Saving 25 and then finishing 26 creates exactly one real question");
   assert.equal(last.requests[0].body.processing_mode, "manual");
   assert.equal(last.requests[0].body.body_mode, "source_image");
+  assert.equal(last.requests[0].body.layout_revision, 7, "Legacy manual cutting binds to the current layout revision");
+  assert.equal(last.requests[0].body.client_request_id, "00000000-0000-4000-8000-000000000001", "Legacy creation also carries an idempotency request identity");
   assert.deepEqual(last.requests[0].body.regions.map((r) => r.page_idx), [1, 2]);
   assert.deepEqual(last.stages, [{ paperId: "qa-paper", count: 25, questionIds: [25] }], "Completion reads only this batch's saved IDs");
 

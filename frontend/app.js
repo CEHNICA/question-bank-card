@@ -1042,7 +1042,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const response = await fetch(path, options);
     let data = {};
     try { data = await response.json(); } catch { /* 空响应 */ }
-    if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+    if (!response.ok) {
+      const error = new Error(data.error || `请求失败（${response.status}）`);
+      error.status = response.status; error.data = data;
+      throw error;
+    }
     return data;
   }
 
@@ -6094,6 +6098,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     saving: false, closing: false, active: false, reopenIntent: null,
     paperId: null, lastPage: null, session: 0, cutQuestionIds: []
   };
+  const originalLayout = window.QBOriginalLayout?.createController({
+    dialog, state, $, el, button, api, toast, cropView, renderStage, renderPageTabs, goToDialogPage,
+    pointFrom, placeBox, setCropSaving, trackCropDraft, confirmDialog, TYPE_NAMES, questionCompare, rereadQuestion, isApproved,
+    ensureSourcesReady: (ids) => discardEdits(ids.filter((id) => state.editing.has(id))),
+    applyCanonical(data) {
+      if (data.paper) updatePaperFromResponse(data.paper);
+      if (Array.isArray(data.questions)) {
+        state.questions = data.questions.map(normalizeRegionRead);
+        state.rendered.clear();
+        const ids = new Set(state.questions.map((q) => q.id));
+        for (const id of state.editing.keys()) if (!ids.has(id)) state.editing.delete(id);
+        if (state.current !== null && !ids.has(state.current)) state.current = state.questions[0]?.id ?? null;
+      }
+      renderPaper();
+    },
+    async reloadCanonical() {
+      const id = state.paperId;
+      const data = await api(`/api/papers/${id}`);
+      if (state.paperId !== id) throw new Error("已切换试卷");
+      originalLayoutHostApply(data);
+    }
+  });
+  function originalLayoutHostApply(data) {
+    if (data.paper) updatePaperFromResponse(data.paper);
+    if (Array.isArray(data.questions)) { state.questions = data.questions.map(normalizeRegionRead); state.rendered.clear(); }
+    renderPaper();
+  }
   let pageOpenIntent = 0;
   const CROP_EDIT_KEY = "original-crop";
   const CROP_GUIDANCE_PREF = "qb-crop-guidance";
@@ -6101,6 +6132,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   let cropGuidanceText = "";
 
   function cropSnapshot() {
+    if (dialog.layoutWorkspace) return originalLayout.snapshot();
     return { ...QBManualCrop.cropDraftSnapshot(dialog.boxes, dialog.mode === "new" ? $("numberInput").value : "",
       dialog.mode === "new" ? $("groupSelect").value : "", dialog.ignoredCandidates),
       question_type: dialog.mode === "new" ? $("cropTypeSelect").value : "" };
@@ -6108,9 +6140,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function trackCropDraft() {
     dialog.cropBaseline = JSON.stringify(cropSnapshot());
-    freezeCropDraftClassification();
+    if (!dialog.layoutWorkspace) freezeCropDraftClassification();
     editGuard.release(CROP_EDIT_KEY);
-    if (dialog.mode === "view") return;
+    if (dialog.mode === "view" && !dialog.layoutWorkspace) return;
     editGuard.track(CROP_EDIT_KEY, cropSnapshot, () => {
       editGuard.release(CROP_EDIT_KEY);
       closePageDialog({ preserveIntent: dialog.reopenIntent === pageOpenIntent });
@@ -6174,6 +6206,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function releasePageDialog() {
     if (!dialog.active || $("pageDialog").open) return;
+    if (dialog.layoutWorkspace) originalLayout.close();
     dialog.active = false;
     dialog.session += 1;
     dialog.lastPage = dialog.page;
@@ -6215,6 +6248,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function requestPageDialogClose({ reopenIntent = null } = {}) {
+    if (dialog.layoutWorkspace && originalLayout.hasUnknownSave()) {
+      toast("保存结果尚未核实，请先重试查询，避免丢失本次调整", "error"); return false;
+    }
     cancelFigureSketch();
     if (dialog.saving) {
       if (dialog.question && hasRegionReadSubmission(dialog.question.id)) {
@@ -6269,6 +6305,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
 
   function configureCropActions() {
+    if (dialog.layoutWorkspace) { originalLayout.configure(); return; }
     $("pageDialogSaveNext").hidden = dialog.mode !== "new";
     $("pageDialogComplete").hidden = dialog.mode !== "new";
     $("pageDialogSave").hidden = ["view", "new"].includes(dialog.mode) || dialog.practiceRead;
@@ -6321,6 +6358,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.session += 1;
     dialog.active = true;
     dialog.paperId = state.paperId;
+    dialog.layoutWorkspace = false;
     dialog.mode = mode;
     dialog.cropFilter = state.filter;
     dialog.cropBaseline = null;
@@ -6426,6 +6464,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("allPagesPicker").open = false;
     $("pageSearchInput").value = "";
     lens.classList.remove("on");
+    if (window.QBOriginalLayout && ["view", "regions"].includes(mode)) originalLayout.open(mode, q);
     renderPageTabs();
     renderStage();
     $("pageDialog").showModal();
@@ -6504,12 +6543,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderStage();
   });
   const stopPageCanvasPan = bindCanvasPan($("pageStage"), (event) => !dialog.drag && dialog.imageReady
-    && (event.button === 1 || (event.button === 0 && (dialog.mode === "view" || dialog.tool === "pan" || dialog.spacePan))), $("pageDialog"));
+    && (event.button === 2 || event.button === 1 || (event.button === 0 && ((!dialog.layoutWorkspace && dialog.mode === "view") || dialog.tool === "pan" || dialog.spacePan))), $("pageDialog"));
   const clearPagePanKey = () => {
     dialog.spacePan = false;
     $("pageStage").classList.toggle("pan-ready", dialog.tool === "pan");
   };
   function updatePageCanvasHint() {
+    if (dialog.layoutWorkspace) { originalLayout.configure(); return; }
     $("pageCanvasHint").textContent = dialog.mode === "view"
       ? "Ctrl+滚轮缩放 · 按住鼠标左键拖动画布"
       : dialog.tool === "pan" ? "左键拖动画布 · Ctrl+滚轮缩放"
@@ -6535,6 +6575,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("pageToolPan").addEventListener("click", () => selectPageTool("pan"));
   $("pageToolDraw").addEventListener("click", () => selectPageTool("draw"));
   $("pageManualCut").addEventListener("click", () => {
+    if (dialog.layoutWorkspace) { void originalLayout.begin("add"); return; }
     if (manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId)) return;
     const page = dialog.page;
     if (state.paper?.status === "ready") {
@@ -6549,6 +6590,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.future = [];
   }
   function restoreDialogBoxes(redo) {
+    if (dialog.layoutWorkspace) { originalLayout.restore(redo); return; }
     if (dialog.saving) return;
     if (dialog.sketch) { cancelFigureSketch(); return; }
     if (dialog.drag) dialog.drag();
@@ -6567,6 +6609,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.addEventListener("blur", clearPagePanKey);
 
   function removeBox(index) {
+    if (dialog.layoutWorkspace) { originalLayout.remove(index); return; }
     if (dialog.saving) return;
     if (index === null || index === undefined || !dialog.boxes[index]) return;
     closeFigureSlotMenu({ cancelPending: false, rerender: false });
@@ -6578,6 +6621,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function renderRegionPieces() {
+    if (dialog.layoutWorkspace) { originalLayout.renderParts(); return; }
     const panel = $("regionPieces");
     panel.hidden = !["new", "regions"].includes(dialog.mode);
     panel.replaceChildren();
@@ -7106,6 +7150,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       applyPageZoom();
     }, { once: true });
     surface.append(image);
+    if (dialog.layoutWorkspace) {
+      originalLayout.renderSurface(surface);
+      stage.append(surface);
+      applyPageZoom();
+      stage.scrollTo(scroll);
+      return;
+    }
     const q = dialog.question;
 
     // 参照：其他题的范围（淡灰），配图模式下还有本题范围和候选图。
@@ -7555,6 +7606,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function savePageCrop({ next = false, complete = false } = {}) {
+    if (dialog.layoutWorkspace) { originalLayout.preview(); return; }
     if (dialog.saving || !$("pageDialog").open) return;
     if (dialog.mode === "view" || dialog.practiceRead) return;
     if (state.paper?.demo && dialog.mode === "read") {
@@ -7595,7 +7647,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const manual = true;
         const regions = readingOrder(dialog.boxes);
         const data = JSON.stringify(regions) === JSON.stringify(q.regions) ? { question: q }
-          : await api(`/api/questions/${q.id}/regions`, { method: "POST", body: { regions, processing_mode: "manual" } });
+          : await api(`/api/questions/${q.id}/regions`, { method: "POST", body: { regions, processing_mode: "manual",
+            revision: q.content_revision, fingerprint: q.layout_fingerprint, layout_revision: state.paper.layout_revision,
+            client_request_id: crypto.randomUUID() } });
         dialog.cropBaseline = JSON.stringify(cropSnapshot());
         clearCropDraftAttention();
         applyQuestion(data);
@@ -7644,6 +7698,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (!dialog.boxes.length) { toast("请先在原卷上框出这道题的范围", "error"); return; }
         const selectedGroup = $("groupSelect").value;
         const body = { number, regions: readingOrder(dialog.boxes), body_mode: "source_image", processing_mode: "manual",
+          layout_revision: state.paper.layout_revision, client_request_id: crypto.randomUUID(),
           question_type: $("cropTypeSelect").value || "unknown" };
         if (selectedGroup) body.group_id = Number(selectedGroup);
         const data = await api(`/api/papers/${state.paperId}/questions`, { method: "POST", body });
@@ -7686,6 +7741,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("pageDialogSaveNext").addEventListener("click", () => savePageCrop({ next: true }));
   $("pageDialogComplete").addEventListener("click", () => savePageCrop({ complete: true }));
   $("pageDialog").addEventListener("keydown", (event) => {
+    if (dialog.layoutWorkspace && originalLayout.keydown(event)) return;
     const shortcutContext = {
       open: $("pageDialog").open, mode: dialog.mode, practiceRead: dialog.practiceRead,
       saving: dialog.saving, closing: dialog.closing,

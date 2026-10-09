@@ -42,6 +42,7 @@ class PracticeIsolationTests(TransactionTestCase):
         self.question.edited = True
         self.question.save()
         previous = (self.question.stem, self.question.figures)
+        previous_mode = self.question.processing_mode
         for body in ({"regions": self.question.regions},
                      {"regions": self.question.regions, "processing_mode": "auto"}):
             response = self.post(f"/api/questions/{self.question.pk}/regions", body)
@@ -49,7 +50,7 @@ class PracticeIsolationTests(TransactionTestCase):
             self.question.refresh_from_db()
             self.assertEqual((self.question.stem, self.question.figures), previous)
             self.assertTrue(self.question.edited)
-            self.assertEqual(self.question.processing_mode, "manual")
+            self.assertEqual(self.question.processing_mode, previous_mode)
             self.assertFalse(self.question.reread_requested)
 
     def test_publishing_rejects_demo_even_through_shared_library_function(self):

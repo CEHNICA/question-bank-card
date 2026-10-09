@@ -13,4 +13,7 @@ https://github.com/CEHNICA/question-bank-card/releases/tag/v{{VERSION}}
 - third-party-licenses-{{VERSION}}.zip
 - SHA256SUMS.txt
 
+如果这是尚未公开发布的本地验收包，上述源码与许可证文件随包一起提供；
+请先查看安装包所在文件夹，公开发布后再使用 Releases 链接。
+
 项目许可证全文见 LICENSE，第三方许可证见 THIRD_PARTY_LICENSES。
