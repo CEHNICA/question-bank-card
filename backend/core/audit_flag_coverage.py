@@ -14,6 +14,12 @@
 占全库 720 张绿卡零旗标的 5.1%。新增的三条贡献了其中大部分：填空题无可填
 空格 30 张、印刷解答混入题干 6 张。其余六条在这份题库上是 0–3 张，属于
 「有守卫、无现实缺陷」的状态，不是死代码（逐条把该抓的形状喂进去都能咬到）。
+
+2026-10-11 加入「配图被题目范围切掉」后重量的结果：十条守卫共咬到 95 张，其中
+65 张是绿卡零旗标，占全库 720 张绿卡零旗标的 9.0%。新增那条贡献 38 张（其中 28
+张绿卡零旗标）——识读点名了某张候选图，可本题范围只框到它一半，成品卷上那张图是
+残的，而卡是绿的。八下第 1 题「求 BD 的长」是最直观的一例：老师看到的是只有上
+半截的三角形，菱形的 B、D 两个顶点整个不见了。
 """
 import io
 import os
@@ -28,7 +34,7 @@ import django  # noqa: E402
 
 django.setup()
 
-from core import pipeline, qtypes, textnorm  # noqa: E402
+from core import figure_policy, pipeline, qtypes, textnorm  # noqa: E402
 from core.models import Paper, Question  # noqa: E402
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -56,6 +62,11 @@ GUARDS = {
             str(c.section or ""), c.options or {}, c.figures or []),
     "坐标只读到一半":
         lambda c: bool(pipeline._broken_coordinate(str(c.stem or ""))),
+    "配图被题目范围切掉":
+        lambda c: bool(figure_policy.candidates_cut_by_own_range(
+            c.regions or [], c.figure_candidates or [],
+            ((c.read_a or {}).get("figures") or {}).keys(),
+            [figure.get("label") for figure in (c.figures or [])])),
 }
 
 

@@ -4277,6 +4277,15 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if solution_figures := _figures_below_solution(snapshot.get("witness_blocks"), figures):
         flags.append(f"这道题的范围里还印着答案和解析，其中 {solution_figures} 张配图印在【解析】之后，"
                      f"可能来自解析部分而不是题目；请对照原卷核对，确实不要就在“配图”里删掉")
+    if figure_policy.candidates_cut_by_own_range(
+            snapshot.get("regions") or [], snapshot.get("candidates") or [],
+            (final.get("figures") or {}).keys(),
+            [figure.get("label") for figure in figures]):
+        # 识读点名要这张图，候选池里也有，可题目范围只截到它一半——成品卷上这张图
+        # 是残的。八下第 1 题 id=777 问「求 BD 的长」，菱形只剩上半截，B、D 不见了。
+        # 这条以前一声不吭：FLAG_UNFOUND_FIGURE 只在「识读说缺图」或「点的标签不在
+        # 候选池」时报，而这里标签就在候选池里，只是没被挂上。
+        flags.append(figure_policy.FLAG_FIGURE_CUT_BY_RANGE)
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])

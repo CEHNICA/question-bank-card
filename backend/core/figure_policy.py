@@ -41,10 +41,21 @@ FLAG_UNCUED_FIGURE = "题目文字没有发现图像提示词，但识读判断�
 FLAG_FIGURE_OUTSIDE_RANGE = (
     "这张配图落在本题范围外面，可能是范围没圈住它、也可能挂错了题；"
     "请对照原书确认范围和这张图")
+FLAG_FIGURE_CUT_BY_RANGE = (
+    "这道题的配图有一大半落在题目范围外面，成品卷上这张图会被切掉；"
+    "请点“调整范围”把整张图框进来，或在“配图”里手动框出来")
 LEGACY_FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“配图”框出"
 
 # 判定「图落在自己范围外」时给浮点抖动留的余量（MinerU 的 bbox 是 0–1000 归一化）。
 _RANGE_TOLERANCE = 1.0
+
+# 一张候选图要有这么高比例落在题目范围内，才算「范围截图里已经完完整整有它」。
+# 阈值不是拍的：全库落在范围外的候选图按占比排序，逐档裁图看过——82% 往上的全都
+# 完整（多出来的是页边留白和学生写在旁边的字），79% 那张（九上 id=1398 两棵树的
+# 影子）只少了地砖的一角边。这一档里只有两张能分辨：八下 id=999 占 80.2%，△ABC
+# 的 B、C 两个顶点被切掉；初二 id=230 占 81.6%，池子和树完整。所以阈值取在两者
+# 之间。宁可漏掉只切掉一小条边的，也不要拿一片虚报去教老师忽略提示。
+_RANGE_COVERS_FIGURE = 0.81
 
 
 def _box_inside_regions(regions: list[dict], page_idx: int, bbox) -> bool:
@@ -84,6 +95,78 @@ def figures_outside_own_range(regions: list[dict], figures: list[dict]) -> list[
         and not _box_inside_regions(regions, int(figure.get("page_idx") or 0),
                                     figure["bbox"])
     ]
+
+
+def _box_area(bbox) -> float:
+    try:
+        x0, y0, x1, y1 = (float(value) for value in bbox)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
+
+
+def candidates_cut_by_own_range(regions: list[dict], candidates: list[dict],
+                                 named, attached=()) -> list[dict]:
+    """识读点名要、候选池里也有，可题目范围只罩住一小半的候选图。
+
+    这和 ``figures_outside_own_range`` 是两件事：那边是「图已经挂到卡上、却落在
+    范围外」，这边是「图压根没挂、而范围又只截到它一部分」。后者没有提示，于是卡
+    变黄也说不清为什么——八下第 1 题 id=777 问「求 BD 的长」，成品卷上的菱形只剩
+    上半截，B、D 两个顶点不见了；九上 id=797 求 BD 与 AD，矩形也只剩上半截。
+    学生没法做题，审核页上却是一张看上去正常的卡。
+
+    ``FLAG_UNFOUND_FIGURE`` 救不了这条：它只在「识读说缺图」或「点的标签压根不在
+    候选池」时报。标签是在候选池里的，所以这条路一声不吭。
+
+    只看识读点过名、且没有单独裁出来挂在卡上的候选图——单独裁出来的那张不受范围
+    影响。判据是「候选图有多少面积落在本题范围内」，取各段范围与它的交集之和，
+    免得一道题跨两段范围时每一段都只盖住一半被误报。范围压根没覆盖这张图所在的
+    那一页时不报：那多半是跨页题，归属由别的守卫管。
+    """
+    attached_labels = {str(label) for label in (attached or [])}
+    by_label = {}
+    for candidate in candidates or []:
+        if isinstance(candidate, dict) and candidate.get("label") is not None:
+            by_label.setdefault(str(candidate["label"]), candidate)
+
+    cut = []
+    for label in (named or []):
+        key = str(label)
+        if key in attached_labels:
+            continue
+        candidate = by_label.get(key)
+        if not isinstance(candidate, dict) or not candidate.get("bbox"):
+            continue
+        try:
+            page_idx = int(candidate.get("page_idx") or 0)
+        except (TypeError, ValueError):
+            continue
+        area = _box_area(candidate["bbox"])
+        if area <= 0:
+            continue
+        on_page = []
+        for region in regions or []:
+            if not isinstance(region, dict):
+                continue
+            try:
+                same_page = int(region.get("page_idx") or 0) == page_idx
+                box = region["bbox"]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if same_page:
+                on_page.append(box)
+        if not on_page:
+            continue
+        covered = 0.0
+        for box in on_page:
+            x0 = max(float(candidate["bbox"][0]), float(box[0]))
+            y0 = max(float(candidate["bbox"][1]), float(box[1]))
+            x1 = min(float(candidate["bbox"][2]), float(box[2]))
+            y1 = min(float(candidate["bbox"][3]), float(box[3]))
+            covered += max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        if covered / area < _RANGE_COVERS_FIGURE:
+            cut.append(candidate)
+    return cut
 
 
 # Only phrases that refer to an existing visual are included.  Bare words such
