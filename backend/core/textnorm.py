@@ -359,6 +359,44 @@ def printed_question_numbers(witness: str, number: int | None = None) -> list[in
     return found
 
 
+# 判「读出来的题是不是另一道」用的取样：只认连续 6 个以上的汉字，公式和标点不算。
+_ANCHOR_HAN = re.compile(r"[一-鿿]{6,}")
+_ANCHOR_PROSE = re.compile(r"如图所示|求证|计算下列|已知如图|如图，|试求|求下列|下列各式")
+_ANCHOR_TAIL_NUMBER = re.compile(r"\d{1,3}\s*[.．、]")
+_ANCHOR_WINDOW = 4
+
+
+def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
+    """卡上题号那一行印的话，读出来的内容里一点都认不出时，返回那句话。
+
+    教材最后一道题的范围常常一路罩到下一节正文，识读就可能把正文读成题干 ——
+    八下第 4 题印着「4. 如果一个三角形两边的长分别等于一元二次方程…」，卡上写的
+    却是「在一块长 16 m、宽 12 m 的矩形土地上，要建造一个花园…」。这类卡看上去
+    很正常、旗标也是空的，老师根本看不出来。
+
+    判据两边都只用文字：纸上印的那一行，和识读写出来的题干/选项/解析。不依赖
+    切题结果，也不依赖模型的自述。
+
+    比对必须容得下**改写**：模型会把「化去根号内的分母」读成「化简下列各式根号
+    内的分母」。所以取一段最长的实词，再看有没有任何 4 个字原样出现在读出来的
+    内容里；一个都没有，才是读成了别的东西。
+    """
+    body = _ANCHOR_PROSE.sub("", str(printed or "").strip())
+    body = _OTHER_QUESTION_NUMBER.sub("", body, count=1)
+    # 一个版面块里可能塞进了下一道题（八下第 2 题那块就带着「3. 分别说说…」）。
+    # 只看本题题号之后、下一道题号之前的那一段，否则取样取的是别人的话。
+    body = _ANCHOR_TAIL_NUMBER.split(body, maxsplit=1)[0]
+    runs = _ANCHOR_HAN.findall(body)
+    if not runs:
+        return None
+    probe = max(runs, key=len)[:10]
+    squeezed = re.sub(r"\s+", "", str(reading or ""))
+    for index in range(len(probe) - _ANCHOR_WINDOW + 1):
+        if probe[index:index + _ANCHOR_WINDOW] in squeezed:
+            return None
+    return probe
+
+
 def clean_stem(stem: str, number: int | None = None) -> str:
     """去掉模型偶尔带上的题号、例题标号和分值。"""
     text = strip_example_label(str(stem or "").strip()).strip()

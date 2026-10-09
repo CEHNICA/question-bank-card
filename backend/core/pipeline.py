@@ -4369,6 +4369,23 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if number_flag := _number_seen_flag(
             number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
+    # The printed line this card is anchored to must still be recognisable in what
+    # the reader wrote.  When a run of textbook prose ends inside the next
+    # section's body the reader sometimes hands back that prose as the stem, and
+    # nothing else on the card notices（八下第 4 题印着三角形两边与一元二次方程，
+    # 卡上却是矩形土地建花园）。
+    printed = next((str(block.get("text") or "")
+                    for block in snapshot.get("witness_blocks") or []
+                    if block.get("seq") == snapshot.get("source_anchor_seq")), None)
+    if printed and (probe := textnorm.anchor_reading_mismatch(
+            printed, "".join([
+                final.get("stem") or "",
+                *(final.get("options") or {}).values(),
+                final.get("analysis") or "",
+            ]))):
+        flags.append(
+            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
+            f"卡上可能是另一道题；请对照原书确认这张卡的范围和内容")
     if (merged := textnorm.merged_question_number(final.get("stem"), number)) is not None:
         # 两道题并成一张卡时，卡上只有一道题号、却是绿的。只提示，不替用户拆。
         flags.append(
