@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.test import SimpleTestCase, TestCase
 
 from . import pipeline
+from . import figure_policy
 from .figure_policy import automatic_review
 from .models import Paper, Question
 
@@ -96,7 +97,13 @@ class FigureRowTests(TestCase):
         self.assertEqual(q3.state, Question.State.YELLOW)
         # “如图” without a figure: the other card's “第 9 题图” is what it needs.
         self.assertNotIn(pipeline.FLAG_FOREIGN_FIGURE, q9.flags)
-        self.assertEqual(q9.state, Question.State.GREEN)
+        # 但这张图落在第 9 题的范围外面（此处 row 在 y=800 上，范围只到 y=709）。
+        # 真实数据就是这个形状：汶源月考第 9 题 id=664 的范围从 y=774 开始，
+        # 而它的图（超然楼测高）印在 y=635–757，在范围上方。图挂对了，但范围
+        # 没圈住它——重新切题会让它消失，而且这张卡的候选图池本来就是空的。
+        # 所以自动挂上去不等于可信：额外交一条范围提示。
+        self.assertIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, q9.flags)
+        self.assertEqual(q9.state, Question.State.YELLOW)
 
     def test_owner_agreement_confirms_only_its_own_pairing(self):
         row = _row()

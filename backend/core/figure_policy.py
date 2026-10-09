@@ -38,7 +38,52 @@ FOREIGN_QUESTION_ROLE = re.compile(r"^q\d+$")
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
 FLAG_UNCUED_FIGURE = "题目文字没有发现图像提示词，但识读判断有印刷配图，请确认配图或确认本题确实无图"
+FLAG_FIGURE_OUTSIDE_RANGE = (
+    "这张配图落在本题范围外面，可能是范围没圈住它、也可能挂错了题；"
+    "请对照原书确认范围和这张图")
 LEGACY_FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“配图”框出"
+
+# 判定「图落在自己范围外」时给浮点抖动留的余量（MinerU 的 bbox 是 0–1000 归一化）。
+_RANGE_TOLERANCE = 1.0
+
+
+def _box_inside_regions(regions: list[dict], page_idx: int, bbox) -> bool:
+    try:
+        cx = (float(bbox[0]) + float(bbox[2])) / 2
+        cy = (float(bbox[1]) + float(bbox[3])) / 2
+    except (TypeError, ValueError, IndexError):
+        return True  # 形状不对就不当成越界，那属于另一条守卫的事
+    for region in regions or []:
+        if not isinstance(region, dict) or int(region.get("page_idx") or 0) != page_idx:
+            continue
+        try:
+            lo, top, hi, bot = (float(value) for value in region["bbox"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (lo - _RANGE_TOLERANCE <= cx <= hi + _RANGE_TOLERANCE
+                and top - _RANGE_TOLERANCE <= cy <= bot + _RANGE_TOLERANCE):
+            return True
+    return False
+
+
+def figures_outside_own_range(regions: list[dict], figures: list[dict]) -> list[dict]:
+    """卡上挂着落在本题范围外面的那些图。
+
+    卡的范围就是这道题在纸上的位置，切题的候选图正是从范围里圈的 —— 全库
+    64 张 ``auto`` 图里只有 1 张在范围外。所以落在外面只有两种可能：范围切
+    少了，或者图挂错了题，两种都得有人看一眼。
+
+    真实案例（八下 p136 第 4 题 id=1083，范围 y=505–535 只有一行字，图在
+    y=368–474）：这道图的 ``source`` 是 ``other`` —— 别的题的识读说「这张图属
+    于第 4 题」，`assign_foreign_figures` 信了就自动挂上。那条通道刻意不提示，
+    因为同行排图时它通常是对的；可一旦范围没罩住，重新识读时这个指认未必还在。
+    """
+    return [
+        figure for figure in (figures or [])
+        if isinstance(figure, dict) and figure.get("bbox")
+        and not _box_inside_regions(regions, int(figure.get("page_idx") or 0),
+                                    figure["bbox"])
+    ]
 
 
 # Only phrases that refer to an existing visual are included.  Bare words such

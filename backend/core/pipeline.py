@@ -5070,6 +5070,14 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
         # guess may be a mislabel, so a person confirms it.
         if had_own_figures or not target.figure_review.get("cue_matches"):
             target.flags = [flag for flag in target.flags if flag != FLAG_FOREIGN_FIGURE] + [FLAG_FOREIGN_FIGURE]
+        elif figure_policy.figures_outside_own_range(target.regions, target.figures):
+            # 上面那条通道刻意不提示，因为同行排图时它通常是对的。可这张图要是
+            # 落在本题范围外面，说明本题的范围根本没圈住它 —— 重新识读时那个
+            # 指认未必还在，范围少了图也会让这道题在成品卷上没法做。
+            # 真实案例：八下 p136 第 4 题 id=1083，范围只有一行字高，图在范围外。
+            target.flags = [flag for flag in target.flags
+                            if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
+            target.flags = [*target.flags, figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
         if target.state in {Question.State.GREEN, Question.State.YELLOW}:
             target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
         _invalidate_approval(target)
