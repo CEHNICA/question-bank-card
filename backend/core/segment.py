@@ -59,7 +59,12 @@ BOOK_EXAMPLE_RE = re.compile(
 BOOK_EXAMPLE_REFERENCE_RE = re.compile(
     r"^(?:中(?:的|命题)?|的(?:结果|证明|解法|结论)|参见|见上?例)"
 )
-BOOK_NUMBERED_RE = re.compile(r"^\s*(\d{1,3})\s*[.．、]\s*(.*)$", re.S)
+# 行首的印刷题号。教材把难题、拓展题印成 `※3.` `*5.`，那个 N 就是这道习题里
+# 真正的序号 —— 两本教材 27 个带标记的题号，逐个回看前一个印刷题号，27/27 都刚好
+# 是 N-1，没有一个重新编号。不认这些标记，这些题就永远不会被切成卡：既没有卡，
+# 还把上一道题的范围一路罩了过去（八下第 41 页习题 7.1 的 `2. 计算` 就是这样没的）。
+# `**` 是 MinerU 的粗体，由调用处剥掉，不在这里处理。
+BOOK_NUMBERED_RE = re.compile(r"^\s*[*※＊▲]?\s*(\d{1,3})\s*[.．、]\s*(.*)$", re.S)
 BOOK_PARENTHESIZED_RE = re.compile(r"^\s*[（(]\s*(\d{1,2})\s*[)）]\s*(.*)$", re.S)
 BOOK_EMBEDDED_NUMBERED_RE = re.compile(
     # ``在 4.2.1 的问题 1 中`` contains dots but no new printed question.
