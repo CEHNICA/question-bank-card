@@ -100,3 +100,18 @@ class SourceImageExportTests(TestCase):
         self.assertIn("原卷截图", chat.call_args.args[0])
         self.assertEqual(len(chat.call_args.args[1]), 2)
         self.assertTrue(all(image.startswith("data:image/jpeg;base64,") for image in chat.call_args.args[1]))
+
+    def test_run_answer_refuses_unpaired_dollar_and_truncation_never_cuts_a_formula(self):
+        pub, _ = self.image_question()
+        library_assistant._images(pub)
+        with mock.patch.object(library_jobs.library_ai_settings, "chat",
+                               return_value=("【答案】$S=1$d_1$、$d_2$ 为对角线）\n【解析】测试", "test")):
+            with self.assertRaises(library_jobs.JobError) as caught:
+                library_jobs.run_answer(pub)
+        self.assertIn("配对", str(caught.exception))
+        with mock.patch.object(library_jobs.library_ai_settings, "chat",
+                               return_value=("【答案】$x=1$\n【解析】" + "$a+b$" * 30, "test")):
+            result = library_jobs.run_answer(pub)
+        self.assertFalse(library_jobs.unpaired_dollar(result["answer"]))
+        self.assertFalse(library_jobs.unpaired_dollar(result["analysis"]))
+        self.assertLessEqual(len(result["analysis"]), 6000)

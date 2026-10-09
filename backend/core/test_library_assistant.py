@@ -191,6 +191,31 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(self.publication.extras["tags_publication_id"], str(self.publication.pk))
         self.network.assert_not_called()
 
+    def test_unpaired_dollar_in_answer_is_refused_instead_of_printing_a_stray_dollar(self):
+        job = self.prepare()["jobs"][0]
+        # 少一个 $ 时排版层不报错，只会把一个落单的 $ 连同后面的中文印到答案卷上。
+        with self.assertRaises(assistant.AssistantError) as caught:
+            assistant.complete(self.result(job, answer="$S=\\dfrac{1}{2}d_1d_2$d_1$、$d_2$ 为两条对角线的长）"))
+        self.assertIn("配对的", str(caught.exception))
+        self.publication.refresh_from_db()
+        self.assertEqual(self.publication.extras, {})
+        self.assertEqual(self.prepare()["jobs"][0]["id"], job["id"])  # 任务没被消耗，还能改后重交
+        self.network.assert_not_called()
+
+    def test_unpaired_dollar_in_analysis_is_refused_and_paired_formulas_still_pass(self):
+        job = self.prepare()["jobs"][0]
+        with self.assertRaises(assistant.AssistantError):
+            assistant.complete(self.result(job, answer="2", analysis="由 $a+b 可得"))
+        self.publication.refresh_from_db()
+        self.assertEqual(self.publication.extras, {})
+        again = self.prepare()["jobs"][0]
+        self.assertEqual(again["id"], job["id"])
+        done = assistant.complete(self.result(again, answer="$x=1$（其中 $x$ 为正数）", analysis="由 $a+b$ 可得 $x=1$。"))
+        self.assertEqual(done["job"]["status"], "done")
+        self.publication.refresh_from_db()
+        self.assertEqual(self.publication.extras["ai_answer"]["answer"], "$x=1$（其中 $x$ 为正数）")
+        self.network.assert_not_called()
+
     def test_same_assistant_reuses_queue_other_agent_and_duplicate_result_are_refused(self):
         job = self.prepare()["jobs"][0]
         self.assertEqual(self.prepare()["jobs"][0]["id"], job["id"])

@@ -233,6 +233,10 @@ def complete(payload):
             raise AssistantError("答案任务只提交 answer 与可选 analysis。", 400)
         result = {"answer": _text(payload["answer"], "参考答案", 2000),
                   "analysis": _text(payload.get("analysis", ""), "参考解析", 6000, empty=True)}
+        # 提示词已经要求公式写成配对的 $...$，这里兑现它：少一个 $ 时排版层不会报错，
+        # 只会把一个落单的 $ 印到答案卷上，而助手就在旁边，改一次比事后发现便宜。
+        if library_jobs.unpaired_dollar(result["answer"]) or library_jobs.unpaired_dollar(result["analysis"]):
+            raise AssistantError("公式要用配对的 $...$，请检查后重新提交。", 400)
     with transaction.atomic():
         if original.publication.question_id:
             Question.all_objects.select_for_update().filter(pk=original.publication.question_id).first()

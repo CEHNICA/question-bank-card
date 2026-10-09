@@ -238,6 +238,28 @@ def _figure_urls(publication: PublishedQuestion) -> list[str]:
 
 # ---------------------------------------------------------------- 后台执行
 
+# 生成结果的公式约定是配对的 $...$（见 answer_prompt）。少一个 $ 时排版层不会报错，
+# 只会把后面本该是中文的内容连同一个落单的 $ 原样印到答案卷上——错在几十页之前，
+# 所以必须在这里挡住，而不是等打印时才发现。
+DOLLAR = re.compile(r"(?<!\\)\$")
+
+
+def unpaired_dollar(text: str) -> bool:
+    return len(DOLLAR.findall(text or "")) % 2 == 1
+
+
+def trim_answer(text: str, limit: int) -> str:
+    """按长度截断，但不让公式从中间被切断：切断后 $ 落单就退回最后一个 $ 之前。"""
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    value = value[:limit]
+    marks = [match.start() for match in DOLLAR.finditer(value)]
+    if len(marks) % 2 == 0:
+        return value
+    return value[:marks[-1]].rstrip()
+
+
 def run_answer(publication: PublishedQuestion, *, explicit_once=False, force_api=False) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)
@@ -246,12 +268,15 @@ def run_answer(publication: PublishedQuestion, *, explicit_once=False, force_api
         options["explicit_api"] = True
     raw, engine = library_ai_settings.chat(answer_prompt(content, bool(figures), detailed=explicit_once), figures, **options)
     tags = split_answer_tags(raw)
-    answer = str(tags.get("答案") or "").strip()
+    answer = trim_answer(str(tags.get("答案") or ""), 2000)
+    analysis = trim_answer(str(tags.get("解析") or ""), 6000)
     if not answer:
         raise JobError("模型没有按格式给出答案，请稍后再试")
+    if unpaired_dollar(answer) or unpaired_dollar(analysis):
+        raise JobError("模型给出的 $...$ 没有配对，答案未保存；请重新生成。")
     return {
-        "answer": answer[:2000],
-        "analysis": str(tags.get("解析") or "").strip()[:6000],
+        "answer": answer,
+        "analysis": analysis,
         "engine": engine,
         "at": timezone.now().isoformat(),
         "publication_id": str(publication.id),
