@@ -4418,6 +4418,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(
             f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；"
             f"请对照原书确认那几道题是不是漏进来了")
+    if headings := textnorm.section_headings_after_anchor(
+            snapshot.get("witness_blocks"), snapshot.get("source_anchor_seq"),
+            "".join([final.get("stem") or "",
+                     *(final.get("options") or {}).values()]),
+    ):
+        # 范围一路罩到这道题后面去了：教材的栏目（数学理解/读一读/做一做…）或新章节，
+        # 有时还连着后面几道题。成品卷上这张卡就带着一整块不相干的内容——八下第 1 题
+        # id=811 罩住了第 1、2、3、※4 四道题外加「数学理解」整栏。上面那条只在教材上
+        # 用、且只认题号；范围越界到下一节而没罩住别的题号时，它一声不吭。
+        listed = "、".join(f"「{value}」" for value in headings)
+        flags.append(
+            f"这道题的范围往后罩住了 {listed}，成品卷上会带着一整块和本题无关的内容"
+            f"（有的还罩住了后面几道题）；请点“调整范围”缩短本题的范围")
     elif snapshot.get("start_source") == "located" and not any(
             isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
         # The start came from the AI locator and nobody saw the printed number

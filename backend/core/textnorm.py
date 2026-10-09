@@ -359,6 +359,78 @@ def printed_question_numbers(witness: str, number: int | None = None) -> list[in
     return found
 
 
+# 教材的栏目名和章节名。范围一旦把它们罩进去，成品卷上这张卡就带着一整块不相干的
+# 内容——八下 id=811 第 1 题罩住了第 1、2、3、※4 四道题外加「数学理解」整栏；九上
+# id=1386 第 23 题罩住两道题外加「用公式法解一元二次方程」「二次根式的乘除」两节新课。
+# 名单是从两本教材的块里量出来的（短、不含数字标点、全书反复出现），逐个裁图看过：
+# 「即」「所以」「山东教育出版社」「I」那几类同形状的短块不是标题，没有收进来。
+SECTION_HEADINGS = frozenset({
+    "数学理解", "问题解决", "联系拓广", "议一议", "做一做", "想一想", "读一读",
+    "回顾与思考", "综合与实践", "直觉的误导", "随堂练习", "知识技能", "学习目标",
+    "复习题", "总复习题", "习题",
+    # 这两本书的章节名。MinerU 常把「第X章」和标题拆成两块分开印，
+    # 所以只靠 ``_SECTION_HEADING`` 的「第X章…」会漏掉单独印的那一半。
+    "特殊平行四边形", "图形的相似", "一元二次方程", "二次函数", "二次根式的乘除",
+    "菱形的性质与判定", "矩形的性质与判定", "相似三角形的性质",
+    "二次函数的应用", "一元二次方程的应用",
+})
+
+# 卷面自己印的大题/部分标题：一、选择题、二、填空题、第X部分/第X章。
+_SECTION_HEADING = re.compile(r"^(?:第[一二三四五六七八九十]+(?:部分|章)|[一二三四五六七八九十]+、)")
+
+
+def _heading_text(block: dict) -> str:
+    return re.sub(r"\s+", "", str(block.get("text") or "")).strip("　 ")
+
+
+def _block_position(block: dict) -> tuple[int, float] | None:
+    try:
+        return (int(block.get("page_idx") or 0), float((block.get("bbox") or [0, 0])[1]))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def section_headings_after_anchor(blocks, anchor_seq, text: str = "") -> list[str]:
+    """这道题的范围往后罩住了哪些栏目名/章节名。
+
+    判据只读纸上印着的形状：块文字**恰好**是一个栏目标题，或印成「第X章」「一、」
+    这种大题标题，而题干里没有这句话。
+
+    只看印在这道题**之后**的那些块。范围上方印着的小节标题是正常的——八下「知识技能」
+    就正好压在第 1 题范围的上边界外，第一版没做这个区分，六张样本里四张是这么虚报的。
+
+    「知识技能」「随堂练习」「学习目标」这些是给习题当小节标题的，本该在题的上方；
+    印在题**下方**只有一个解释：范围罩过了下一节。
+
+    锚点块不在范围内时（人工补的卡）整张放弃这条判据——宁可漏报，也不要把整页标题
+    都算成越界。
+    """
+    body = re.sub(r"\s+", "", str(text or ""))
+    anchor = None
+    prepared = []
+    for block in blocks or []:
+        if not isinstance(block, dict):
+            continue
+        position = _block_position(block)
+        if position is None:
+            continue
+        if anchor_seq is not None and block.get("seq") == anchor_seq:
+            anchor = position
+        heading = _heading_text(block)
+        if not heading or heading in body:
+            continue
+        if heading not in SECTION_HEADINGS and not _SECTION_HEADING.match(heading):
+            continue
+        prepared.append((position, heading))
+    if anchor is None:
+        return []
+    found = []
+    for position, heading in sorted(prepared):
+        if position > anchor and heading not in found:
+            found.append(heading)
+    return found
+
+
 # 判「读出来的题是不是另一道」用的取样：只认连续 6 个以上的汉字，公式和标点不算。
 _ANCHOR_HAN = re.compile(r"[一-鿿]{6,}")
 _ANCHOR_PROSE = re.compile(r"如图所示|求证|计算下列|已知如图|如图，|试求|求下列|下列各式")
