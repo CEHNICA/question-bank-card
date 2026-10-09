@@ -84,3 +84,22 @@ console.log("english prose checks: OK");
 assert.match(QB.runToLatex("18°C"), /\\mathrm\{C\}$/);
 assert.doesNotMatch(QB.runToLatex("∠ACB"), /mathrm/);
 console.log("temperature unit checks: OK");
+
+// 「图 6-2」这类编号是连字符，不是减法：排成公式会显示成 6 − 2。
+{
+  const runs = (text) => QB.detectRuns(text).map((run) => run.text);
+  assert.deepEqual(runs("如图 6-2，在菱形中"), []);
+  assert.deepEqual(runs("如图6-23，在正方形中"), []);
+  assert.deepEqual(runs("图 9－33 是模型房"), []);
+  assert.deepEqual(runs("图 1－10 所示"), []);
+  assert.deepEqual(runs("图 9−33 所示"), []);
+  assert.deepEqual(runs("观察图9-5和图9-6，回答下列问题"), []);
+  const kept = QB.typesetSegments("如图 6-2，在菱形 $ABCD$ 中");
+  assert.deepEqual(kept.map((segment) => segment.type), ["text", "math", "text"]);
+  assert.equal(kept[1].latex, "ABCD");
+  // 显式公式照排：$5-3$ 仍然是减法。
+  assert.deepEqual(QB.typesetSegments("计算 $5-3$ 的值").map((segment) => segment.latex).filter(Boolean), ["5-3"]);
+  assert.deepEqual(QB.typesetSegments("求 $2x-3$ 的值").map((segment) => segment.latex).filter(Boolean), ["2x-3"]);
+  assert.deepEqual(QB.typesetSegments("计算 $-3$ 的值").map((segment) => segment.latex).filter(Boolean), ["-3"]);
+}
+console.log("figure number checks: OK");

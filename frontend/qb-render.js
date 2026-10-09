@@ -332,12 +332,17 @@
     return /[A-Za-z0-9Ａ-Ｚａ-ｚ０-９()[\]{}]/.test(character) || RUN_SYMBOLS.includes(character);
   }
 
+  // 「图 6-2」「表 2-1」这类编号：整段只有数字和连字符。当成公式会被排成
+  // 6 − 2，减号两侧还空出一段，看着像一道减法。纸上印的是连字符，
+  // 留在文字里才是原样。显式写成 $6-2$ 的公式不走这里，仍然照排。
+  const NUMBERED_REFERENCE = /^\d+(?:[-−－]\d+)+$/;
+
   function qualifiesAsMath(segment) {
     const qualifies = segment && (/[A-Za-zＡ-Ｚａ-ｚα-ωΔΩ]/.test(segment) ||
       Array.from(segment).some((c) => OPERATOR_SET.has(c) && c !== "/" && c !== ":" && c !== "!" && c !== "%" && c !== "'"));
     const plainWord = /^[a-z]{3,}$/.test(segment) && !FUNCTIONS.has(segment);
     const subLabel = /^\(\d+\)$/.test(segment);
-    return Boolean(qualifies && !plainWord && !subLabel);
+    return Boolean(qualifies && !plainWord && !subLabel && !NUMBERED_REFERENCE.test(segment));
   }
 
   // 英文句子里的单词（The、graph、temperature，以及 at、of、if 这些常用短词）。
