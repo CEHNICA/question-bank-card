@@ -4374,6 +4374,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(
             f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；"
             f"请对照原卷确认，必要时在这里把它拆成两道")
+    elif snapshot.get("is_book") and (extra := textnorm.printed_question_numbers(
+            snapshot.get("witness") or "", number)):
+        # 另一种形状：卡上只有一道题，题号也对得上，范围却罩住了后面几道题 ——
+        # 书上印着，库里却没有它们的卡（八下习题 7.1 的第 2 题就是这样没的）。
+        listed = "、".join(str(value) for value in extra)
+        flags.append(
+            f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；"
+            f"请对照原书确认那几道题是不是漏进来了")
     elif snapshot.get("start_source") == "located" and not any(
             isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
         # The start came from the AI locator and nobody saw the printed number
@@ -4680,6 +4688,9 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     table_html = {item["seq"]: item["html"] for item in table_list}
     for snapshot in snapshots:
         regions = snapshot.get("regions") or []
+        # 教材的题号是全书连续/按习题重排的，卷面印的号和卡号对得上；试卷分大题
+        # 各自从 1 重新编号，对不上，所以范围里多出来的题号只在教材上当成问题。
+        snapshot["is_book"] = paper.material_type == Paper.MaterialType.BOOK
         # Only the pages this card touches: a long book has thousands of blocks.
         nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
                   for block in blocks_by_page.get(page, [])]

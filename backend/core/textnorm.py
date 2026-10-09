@@ -335,6 +335,30 @@ def merged_question_number(stem: str, number: int | None = None) -> int | None:
     return None
 
 
+def printed_question_numbers(witness: str, number: int | None = None) -> list[int]:
+    """这张卡的范围里印着哪几道别的题。
+
+    切题把每道题的范围切出来，最后一道常常一路罩到本页末尾、下一页开头，后面
+    那几道题就跟着进了它的范围 —— 书上印着，卡上没有，而这几道题在库里也没有
+    别的卡（八下习题 7.1 的第 2 题、九上第 63 页的 ※16～※18 都是这样没的）。
+    判据只读纸上印着的形状，不依赖切题结果。
+
+    只在教材上用。一张试卷分几道大题、各自从 1 重新编号，卷内第 23 题面上印的
+    是「3.」，照这个判据会把整张卷都报一遍。
+    """
+    found: list[int] = []
+    for line in str(witness or "").splitlines():
+        matched = _OTHER_QUESTION_NUMBER.match(line)
+        if not matched:
+            continue
+        if _is_own_number(matched.group(1), number):
+            continue
+        value = int(matched.group(1))
+        if value not in found:
+            found.append(value)
+    return found
+
+
 def clean_stem(stem: str, number: int | None = None) -> str:
     """去掉模型偶尔带上的题号、例题标号和分值。"""
     text = strip_example_label(str(stem or "").strip()).strip()
