@@ -14,6 +14,36 @@ PREVIEW_LONG_SIDE = 2000    # 网页显示用
 SEGMENT_GAP = 18
 
 
+class NotAPdfFile(ValueError):
+    """内容不是 PDF，只是文件名叫 .pdf。
+
+    PyMuPDF 不只认 PDF：改名为 .pdf 的网页、PNG、SVG 都能打开，还会被赋予一个
+    **假的页面尺寸**（HTML 恒为 400×600，图片按像素数当磅）。所以「能不能打开」
+    不能证明它是 PDF。以前只判「能不能打开」，这样的文件会被当成一份正常卷子
+    收下：库里记着 1 页，预览是一片空白（渲染出来只有一个灰阶），失败原因还说
+    「本地文字层没有可靠题卡」——老师看到的是「切题坏了」，真实原因是文件根本
+    不是 PDF。
+
+    现实里最常见的一种是下载链接失效存下了 404 页面：内容是
+    ``<!DOCTYPE html><html><body>404</body></html>``。
+    """
+
+
+# PyMuPDF 自报的实际格式 -> 老师看得懂的一句话。
+_WRONG_PDF_FORMATS = {
+    "HTML5": "这其实是一个网页",
+    "Image": "这其实是一张图片",
+    "SVG": "这其实是一张矢量图",
+}
+
+
+def _not_pdf_message(pdf) -> str:
+    actual = (pdf.metadata or {}).get("format") or "别的格式"
+    what = _WRONG_PDF_FORMATS.get(actual, "这不是 PDF")
+    return (f"{what}，只是文件名叫 .pdf。"
+            "请把原文件另存为真正的 PDF 再传；如果是试卷照片，直接上传照片即可。")
+
+
 def render_source_page(source: Path, kind: str, page_idx: int, long_side: int = PAGE_LONG_SIDE) -> Image.Image:
     if kind == "image":
         if page_idx != 0:
@@ -42,6 +72,8 @@ def page_sizes(source: Path, kind: str) -> list[dict]:
     import pymupdf as fitz
 
     with fitz.open(source) as pdf:
+        if not pdf.is_pdf:
+            raise NotAPdfFile(_not_pdf_message(pdf))
         return [{"page_idx": i, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}
                 for i, p in enumerate(pdf)]
 

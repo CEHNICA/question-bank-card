@@ -26,6 +26,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "Asia/Shanghai"
 USE_TZ = True
 DATA_ROOT = Path(os.environ.get("QB_DATA_ROOT", BASE_DIR / "data")).resolve()
+# 测试一律用临时数据目录：默认的 backend/data 是老师真正的卷子文件夹，
+# 测试往那儿写会攒下大量没人认领的目录（实测一轮全量测试攒了 300 MB）。
+TEST_RUNNER = "qb_server.test_runner.IsolatedDataRootRunner"
 FRONTEND_ROOT = Path(os.environ.get("QB_FRONTEND_ROOT", BASE_DIR.parent / "frontend")).resolve()
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # 长 PDF 会在本机流式保存后按页切片；源文件大小仍遵守 MinerU 当前的 200 MB 上限。

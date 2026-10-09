@@ -1003,11 +1003,15 @@ def papers(request):
             pages = imaging.page_sizes(target, "pdf")
             if not pages:
                 raise ValueError("empty pdf")
-        except Exception:
+        except Exception as exc:
             try:
                 shutil.rmtree(staged)
             except OSError:
                 pass  # 下次启动会按 .uploading-* 规则继续清理。
+            # 改名为 .pdf 的网页/图片 PyMuPDF 照样打得开，还给一个假页面尺寸；
+            # 这种要说清「文件不对」，说「无法打开」老师只会再原样传一次。
+            if isinstance(exc, imaging.NotAPdfFile):
+                return _error(str(exc))
             return _error("这份 PDF 无法打开或没有有效页面，请检查文件后重试")
         paper.pages = pages
     try:
