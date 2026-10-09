@@ -4369,6 +4369,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if number_flag := _number_seen_flag(
             number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
+    if (merged := textnorm.merged_question_number(final.get("stem"), number)) is not None:
+        # 两道题并成一张卡时，卡上只有一道题号、却是绿的。只提示，不替用户拆。
+        flags.append(
+            f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；"
+            f"请对照原卷确认，必要时在这里把它拆成两道")
     elif snapshot.get("start_source") == "located" and not any(
             isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
         # The start came from the AI locator and nobody saw the printed number

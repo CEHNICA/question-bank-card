@@ -310,6 +310,31 @@ def _is_own_number(value: str, number: int | None) -> bool:
     return int(value) == number or (len(value) < len(str(number)) and str(number).endswith(value))
 
 
+# 行首的印刷题号：``2.`` ``3．`` ``*5.`` ``※3.``。教材用星号和 ※ 标难题与拓展题，
+# 那些也是独立的一道题。
+_OTHER_QUESTION_NUMBER = re.compile(r"^\s*[*※＊▲]?\s*(\d{1,3})\s*[.．、]")
+
+
+def merged_question_number(stem: str, number: int | None = None) -> int | None:
+    """题干里印着另一道题的题号时返回那个号，否则 None。
+
+    两道题挨得太近时 MinerU 会把它们并成同一个版面块，第二道题的题号就不在
+    块开头，切题认不出来，它的正文被并进上一张卡 —— 这张卡看上去只有一道题，
+    却是绿的。判据只看纸上印着的形状，不依赖切题结果。
+
+    （1）这种小问不需要单独豁免：小问以括号开头，本来就匹配不上题号。
+    但一道题里若用「1. 2.」列小项，那些项会被当成另一道题报出来。真实题库
+    （14 份资料、700 多张带数学写法的卡）里这种写法一次都没出现。
+    """
+    for index, line in enumerate(str(stem or "").splitlines()):
+        if index == 0:
+            continue
+        matched = _OTHER_QUESTION_NUMBER.match(line)
+        if matched and not _is_own_number(matched.group(1), number):
+            return int(matched.group(1))
+    return None
+
+
 def clean_stem(stem: str, number: int | None = None) -> str:
     """去掉模型偶尔带上的题号、例题标号和分值。"""
     text = strip_example_label(str(stem or "").strip()).strip()
