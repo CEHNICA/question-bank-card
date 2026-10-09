@@ -36,6 +36,16 @@ assert.deepEqual(Object.keys(body.targets[0]), ["regions"], "region-only payload
 assert.equal(body.sources[0].fingerprint, a.layout_fingerprint);
 assert.equal(body.layout_revision, 9);
 assert.equal(JSON.stringify(body).includes("人工文字"), false);
+const renumber = L.createDraft("renumber", [a], questions);
+renumber.targets[0].number = 14;
+assert.deepEqual(L.payload(renumber, 9, "renumber").targets, [{ number: 14 }], "renumber submits only the new number, never ranges or text");
+assert.equal(L.validate(renumber, questions, pages), "");
+renumber.targets[0].number = 2;
+assert.match(L.validate(renumber, questions, pages), /已存在该题号/);
+renumber.targets[0].number = 0;
+assert.match(L.validate(renumber, questions, pages), /1–999/);
+renumber.targets[0].number = 1;
+assert.equal(L.validate(renumber, questions, pages), "", "same number on the source or another group is allowed");
 assert.equal(L.movedEnough({ clientX: 10, clientY: 10 }, { clientX: 13, clientY: 13 }), false, "three-pixel diagonal jitter is harmless");
 assert.equal(L.movedEnough({ clientX: 10, clientY: 10 }, { clientX: 14, clientY: 10 }), true);
 assert.deepEqual(L.moveBox([800, 850, 999, 998], 20, 20), [801, 852, 1000, 1000]);
@@ -76,24 +86,25 @@ async function run() {
   const nodes = new Map(); const $ = (id) => { if (!nodes.has(id)) { const node = new Node(); node.id = id; nodes.set(id, node); } return nodes.get(id); };
   const dialog = { mode: "view", page: 0, imageReady: true, saving: false, tool: "select", spacePan: false };
   const state = { paperId: 7, paper: { id: 7, layout_revision: 9, pages, question_groups: [{ id: 10, title: "组10" }, { id: 20, title: "组20" }] }, questions: JSON.parse(JSON.stringify(questions)) };
-  const writes = [], messages = []; let controller, serverConflict = false, serverLoseResponse = false, lookupError = false, receipt = null, surface;
-  let historyData = { operations: [], latest_operation: null };
+  const writes = [], messages = []; let controller, serverConflict = false, serverOccupiedNumber = false, serverLoseResponse = false, lookupError = false, receipt = null, surface;
+  let historyData = { operations: [], latest_operation: null }, delayedHistory = null;
   const host = { dialog, state, $, el: (tag, cls, text) => new Node(tag, cls, text),
     button: (text, cls, fn) => { const n = new Node("button", cls, text); n.addEventListener("click", fn); return n; },
     api: async (path, options = {}) => {
       if (options.method === "POST") {
         writes.push({ path, body: options.body });
+        if (serverOccupiedNumber) { const e = new Error("结果题号已被当前题卡或普通回收站题目占用。"); e.status = 409; throw e; }
         if (serverConflict) { const e = new Error("版本冲突"); e.status = 409; throw e; }
         const request = options.body;
-        const updated = state.questions.map((item) => item.id === request.sources[0]?.id ? { ...item, regions: request.targets[0].regions, content_revision: item.content_revision + 1 } : item);
+        const updated = state.questions.map((item) => item.id === request.sources[0]?.id ? { ...item, ...(request.kind === "renumber" ? { number: request.targets[0].number } : { regions: request.targets[0].regions }), content_revision: item.content_revision + 1 } : item);
         const result = { paper: { ...state.paper, layout_revision: state.paper.layout_revision + 1 }, questions: updated, operation: { id: 50, target_ids: [1], kind: request.kind } };
         if (serverLoseResponse) { receipt = result; throw new TypeError("connection lost after commit"); }
         return result;
       }
       if (path.includes("client_request_id=")) { if (lookupError) throw new TypeError("lookup disconnected"); return receipt || { operation: null }; }
-      return { ...historyData, operation: null, layout_revision: state.paper.layout_revision };
+      return delayedHistory || { ...historyData, operation: null, layout_revision: state.paper.layout_revision };
     },
-    toast: (message) => messages.push(message), cropView: () => new Node(), renderStage: () => { surface = new Node("div", "stage-surface"); controller?.renderSurface(surface); }, renderPageTabs() {},
+    toast: (message) => messages.push(message), cropView: () => new Node(), renderStage: () => { controller?.renderParts(); surface = new Node("div", "stage-surface"); controller?.renderSurface(surface); }, renderPageTabs() {},
     goToDialogPage: (page) => { dialog.page = page; }, pointFrom: (e) => [e.clientX, e.clientY], placeBox: (node, bbox) => { node.bbox = [...bbox]; },
     setCropSaving: (saving) => { dialog.saving = saving; }, trackCropDraft() {}, confirmDialog: async () => true,
     TYPE_NAMES: { unknown: "未定", free_response: "解答题" }, questionCompare: (x, y) => x.id - y.id, rereadQuestion: () => { throw Error("Layout must never call recognition"); },
@@ -165,14 +176,59 @@ async function run() {
   await $("pageLayoutPanel").querySelector('[data-layout-question-id="3"]').emit("click");
   assert.equal(dialog.page, 0, "question-list selection locates the question's first page");
   await $("pageLayoutPanel").querySelector('[data-layout-question-id="1"]').emit("click");
+  serverLoseResponse = false;
+  const beforeRenumber = JSON.parse(JSON.stringify(state.questions[0]));
+  await $("pageLayoutPanel").querySelector("#pageLayoutRenumber").emit("click");
+  assert.equal(snapshot().kind, "renumber");
+  assert.equal($("pageDialogSave").textContent, "保存题号");
+  assert.equal(surface.querySelector("[data-layout-handle]"), null);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDraw"), null);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutSplitCount"), null);
+  controller.remove(0);
+  assert.deepEqual(snapshot().targets[0].regions, beforeRenumber.regions, "Delete cannot change a range during renumber");
+  const beforeNumberWrites = writes.length;
+  await $("pageLayoutPanel").querySelector("#pageLayoutSaveNumber").emit("click");
+  assert.equal(writes.length, beforeNumberWrites, "unchanged number is not saved");
+  const numberInput = $("pageLayoutPanel").querySelector("#pageLayoutNumber");
+  numberInput.value = "2"; await numberInput.emit("input");
+  await $("pageLayoutPanel").querySelector("#pageLayoutSaveNumber").emit("click");
+  assert.equal(writes.length, beforeNumberWrites, "duplicate number keeps draft without a request");
+  numberInput.value = "14"; await numberInput.emit("input");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutNumber"), numberInput, "typing keeps the field and save button mounted");
+  serverOccupiedNumber = true;
+  await $("pageLayoutPanel").querySelector("#pageLayoutSaveNumber").emit("click");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutNumber").value, 14, "server-side trash conflict keeps the entered number");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutConflict"), null, "an occupied number is not a stale-layout conflict");
+  serverOccupiedNumber = false;
+  await $("pageLayoutPanel").querySelector("#pageLayoutSaveNumber").emit("click");
+  assert.equal(writes.length, beforeNumberWrites + 2, "renumber saves directly without a second confirmation after resolving occupation");
+  assert.notEqual(writes.at(-1).body.client_request_id, writes.at(-2).body.client_request_id, "rejected occupation releases its request ID for a fresh save");
+  assert.deepEqual(writes.at(-1).body.targets, [{ number: 14 }]);
+  assert.equal(state.questions[0].number, 14);
+  assert.deepEqual(state.questions[0].regions, beforeRenumber.regions);
+  assert.equal(state.questions[0].color_index, beforeRenumber.color_index);
+  assert.equal(state.questions[0].edited_stem, beforeRenumber.edited_stem);
+  assert.equal(controller.snapshot().layout, "");
   await $("pageLayoutPanel").querySelector("#pageLayoutAdd").emit("click");
   assert.equal(snapshot().kind, "add");
   assert.deepEqual(snapshot().sources, [], "clicking supplement after selecting a question submits no source rows");
   assert.equal(snapshot().targets[0].group_id, 10, "supplement starts in the previously selected question group");
+  controller.close();
+  let releaseHistory;
+  delayedHistory = new Promise((resolve) => { releaseHistory = resolve; });
+  controller.open("view", state.questions[0]);
+  await controller.begin("renumber");
+  const focusedNumber = $("pageLayoutPanel").querySelector("#pageLayoutNumber");
+  focusedNumber.value = "15"; await focusedNumber.emit("input");
+  releaseHistory({ ...historyData, layout_revision: state.paper.layout_revision });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutNumber"), focusedNumber, "late history response never remounts the renumber input");
+  assert.equal(focusedNumber.value, "15");
+  delayedHistory = null;
   controller.close(); state.paper.archived = true;
   controller.open("regions", state.questions[0]);
   assert.equal(controller.snapshot().layout, "", "archived originals open for inspection without an editable draft");
-  for (const id of ["pageLayoutAdd", "pageLayoutEdit", "pageLayoutSplit", "pageLayoutMerge", "pageLayoutUndoSaved", "pageLayoutReread"]) {
+  for (const id of ["pageLayoutAdd", "pageLayoutEdit", "pageLayoutRenumber", "pageLayoutSplit", "pageLayoutMerge", "pageLayoutUndoSaved", "pageLayoutReread"]) {
     assert.equal($("pageLayoutPanel").querySelector(`#${id}`).disabled, true, `${id} remains read-only while archived`);
   }
   await controller.begin("add");

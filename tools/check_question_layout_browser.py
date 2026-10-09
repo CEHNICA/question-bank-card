@@ -296,14 +296,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
             page.locator("#confirmOk").click()
         expect(page.locator("#pageLayoutEdit")).to_be_visible()
 
+    def reopen_workspace():
+        page.locator("#pageDialogClose").click()
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.locator("#paperMenu > summary").click()
+        page.locator("#viewOriginalPaper").click()
+        expect(page.locator("#pageLayoutPanel")).to_be_visible()
+        page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+
     def undo(reopen=False):
         if reopen:
-            page.locator("#pageDialogClose").click()
-            page.reload()
-            page.wait_for_load_state("networkidle")
-            page.locator("#paperMenu > summary").click()
-            page.locator("#viewOriginalPaper").click()
-            expect(page.locator("#pageLayoutPanel")).to_be_visible()
+            reopen_workspace()
         history = page.locator("#pageLayoutHistory")
         if history.get_attribute("open") is None:
             history.locator("summary").first.click()
@@ -536,11 +540,149 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     undo(reopen=True)
     assert len(paper_data()["questions"]) == 4
     report["passed"].append("lost successful merge response recovers the same durable receipt without a duplicate write or duplicate question")
+
+    # Correct the number of one existing question, preserving its identity and
+    # source material. This is deliberately a distinct workflow from geometry.
+    select("first")
+    fit()
+    page.mouse.click(*point(500, 140))
+    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_have_attribute("aria-pressed", "true")
+    before_renumber = question("first")
+    before_data = paper_data()
+    before_writes = len(report["writes"])
+    page.wait_for_load_state("networkidle")
+    delayed_history = []
+
+    def hold_history_response(route):
+        if route.request.method == "GET":
+            delayed_history.append(route)
+        else:
+            route.fallback()
+
+    page.route(endpoint, hold_history_response)
+    history = page.locator("#pageLayoutHistory")
+    if history.get_attribute("open") is None:
+        history.locator("summary").first.click()
+    history.get_by_role("button", name="刷新记录", exact=True).click()
+    assert len(delayed_history) == 1
+    page.locator("#pageLayoutRenumber").click()
+    expect(page.locator("#pageLayoutNumber")).to_have_value(str(before_renumber["number"]))
+    expect(page.locator("#pageDialogSave")).to_have_text("保存题号")
+    expect(page.locator("#pageLayoutSaveNumber")).to_have_text("保存题号")
+    assert page.locator("[data-layout-handle]").count() == 0
+    assert page.locator("[data-layout-drag-label]").count() == 0
+    expect(page.locator("#pageLayoutDraw")).to_have_count(0)
+    expect(page.locator("#pageLayoutGroup")).to_have_count(0)
+    expect(page.locator("#pageLayoutType")).to_have_count(0)
+
+    # Merely entering this editor and saving the unchanged value cannot create
+    # a layout version or a durable history record.
+    if page.locator("#pageDialogSave").is_enabled():
+        page.locator("#pageDialogSave").click()
+    assert len(report["writes"]) == before_writes
+    assert paper_data() == before_data
+    expect(page.locator("#pageLayoutNumber")).to_have_value(str(before_renumber["number"]))
+
+    page.locator("#pageLayoutNumber").fill("")
+    number_input = page.locator("#pageLayoutNumber").element_handle()
+    page.locator("#pageLayoutNumber").press_sequentially("1")
+    assert number_input.evaluate("node => node.isConnected && node === document.activeElement")
+    delayed_history[0].fulfill(response=delayed_history[0].fetch())
+    page.unroute(endpoint, hold_history_response)
+    page.wait_for_load_state("networkidle")
+    assert number_input.evaluate("node => node.isConnected && node === document.activeElement")
+    expect(page.locator("#pageLayoutNumber")).to_have_value("1")
+    page.locator("#pageLayoutNumber").press_sequentially("9")
+    assert number_input.evaluate("node => node.isConnected && node === document.activeElement")
+    expect(page.locator("#pageLayoutNumber")).to_have_value("19")
+    page.locator("#pageLayoutNumber").press("Tab")
+    expect(page.locator("#pageDialogSave")).to_be_enabled()
+    expect(page.locator("#pageLayoutSaveNumber")).to_be_enabled()
+    expect(page.locator("#toast")).not_to_be_visible(timeout=8000)
+    page.screenshot(path=str(output / "renumber-draft.png"))
+    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+        page.locator("#pageLayoutSaveNumber").click()
+    response = waiting.value
+    assert response.ok, response.text()
+    saved = response.json()
+    assert saved["operation"]["kind"] == "renumber"
+    assert saved["operation"]["source_ids"] == [fixture["first"]]
+    assert saved["operation"]["target_ids"] == [fixture["first"]]
+    expect(page.locator("#pageLayoutEdit")).to_be_visible()
+    after_renumber = question("first")
+    assert after_renumber["number"] == 19
+    assert after_renumber["content_revision"] > before_renumber["content_revision"]
+    assert len(paper_data()["questions"]) == len(before_data["questions"])
+    for key in ("id", "regions", "regions_auto", "stem", "edited_stem", "ai_stem", "options", "edited_options",
+                "answer", "edited_answer", "analysis", "edited_analysis", "body_mode", "processing_mode", "question_type",
+                "color_index", "group", "figures", "manual_figures"):
+        assert after_renumber.get(key) == before_renumber.get(key), key
+    row = page.locator(f'[data-layout-question-id="{fixture["first"]}"]')
+    expect(row).to_contain_text("第 19 题")
+    expect(row).to_have_attribute("aria-pressed", "true")
+    expect(page.locator(f'[data-layout-coverage-id="{fixture["first"]}"] .layout-coverage-label')).to_have_text("19")
+    assert len(report["writes"]) == before_writes + 1
+    page.screenshot(path=str(output / "renumber-saved.png"))
+
+    # Reopening must display the persisted number before performing the saved
+    # undo; a refresh cannot turn this into a second question or lose colour.
+    reopen_workspace()
+    select("first")
+    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_contain_text("第 19 题")
+    expect(page.locator(f'[data-layout-coverage-id="{fixture["first"]}"] .layout-coverage-label')).to_have_text("19")
+    assert question("first")["color_index"] == before_renumber["color_index"]
+    undo()
+    restored = question("first")
+    assert restored["number"] == before_renumber["number"]
+    assert restored["regions"] == before_renumber["regions"]
+    assert restored["stem"] == before_renumber["stem"]
+    assert restored["content_revision"] > after_renumber["content_revision"]
+    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_contain_text("第 1 题")
+    report["renumber_verification"] = {"question_id": fixture["first"], "operation_id": saved["operation"]["id"],
+        "old_number": before_renumber["number"], "saved_number": after_renumber["number"], "undone_number": restored["number"],
+        "source_button": "pageLayoutSaveNumber", "question_identity_preserved": True,
+        "regions_preserved": True, "manual_content_preserved": True, "colour_preserved": True,
+        "single_mutation": True, "reopened_before_undo": True, "multi_digit_typing_preserves_focus": True,
+        "late_history_response_preserves_input": True}
+    report["passed"].append("existing question renumber is one direct save, persists across reopen, preserves identity/content/ranges/colour, and supports saved undo")
+
+    # A duplicate in the same group and an invalid number are rejected while
+    # preserving the user's draft. No mutation is sent for either case.
+    select("first")
+    page.locator("#pageLayoutRenumber").click()
+    rejection_data = paper_data()
+    rejection_writes = len(report["writes"])
+    for value in ("2", "0"):
+        page.locator("#pageLayoutNumber").fill(value)
+        page.locator("#pageLayoutNumber").press("Tab")
+        if page.locator("#pageDialogSave").is_enabled():
+            page.locator("#pageDialogSave").click()
+        expect(page.locator("#pageLayoutNumber")).to_have_value(value)
+        assert len(report["writes"]) == rejection_writes
+        assert paper_data() == rejection_data
+    page.screenshot(path=str(output / "renumber-invalid-retains-draft.png"))
+    cancel_draft()
+    report["passed"].append("renumber unchanged value, same-group duplicate and invalid number leave coordinates and versions unchanged; rejected drafts are retained")
+
+    for value, shortcut in (("8", "Enter"), ("9", "Control+s")):
+        select("first")
+        page.locator("#pageLayoutRenumber").click()
+        page.locator("#pageLayoutNumber").fill(value)
+        with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+            page.locator("#pageLayoutNumber").press(shortcut)
+        assert waiting.value.ok, waiting.value.text()
+        expect(page.locator("#pageLayoutEdit")).to_be_visible()
+        assert question("first")["number"] == int(value)
+        assert question("first")["regions"] == before_renumber["regions"]
+        undo()
+        assert question("first")["number"] == before_renumber["number"]
+    report["passed"].append("renumber Enter and Ctrl+S each save exactly the selected question without a preview step and remain undoable")
+
     assert all(not q["ocr_pending"] for q in paper_data()["questions"])
     db = database_rows()
     assert not db["core_regionread"] and not db["core_libraryjob"]
     assert not report["forbidden_requests"], report["forbidden_requests"]
-    report["passed"].append("all saves, supplement, split, merge and undo run without an implicit AI request or background job")
+    report["passed"].append("all saves, renumber, supplement, split, merge and undo run without an implicit AI request or background job")
 
 
 def run(args):

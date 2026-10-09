@@ -26,7 +26,9 @@ PALETTE_SIZE = 6
 ACTIVE_JOBS = (LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING)
 ACTIVE_READS = (RegionRead.Status.QUEUED, RegionRead.Status.RUNNING)
 NO_CHANGE = "范围未变化，无需撤销。"
-CANCELLED = "原卷范围或题目结构已改变，本轮结果不再采用。"
+NUMBER_NO_CHANGE = "题号未变化，无需撤销。"
+NO_CHANGE_REASONS = (NO_CHANGE, NUMBER_NO_CHANGE)
+CANCELLED = "原卷范围、题号或题目结构已改变，本轮结果不再采用。"
 
 
 class LayoutError(ValueError):
@@ -216,7 +218,7 @@ def _withdraw(question_ids):
 
 
 def _latest(paper):
-    return paper.layout_operations.exclude(blocked_reason=NO_CHANGE).order_by("-created_at", "-id").first()
+    return paper.layout_operations.exclude(blocked_reason__in=NO_CHANGE_REASONS).order_by("-created_at", "-id").first()
 
 
 def undo_reason(operation, paper=None):
@@ -308,7 +310,7 @@ def _claim(paper_id, revision):
 
 def _sources(paper, payload, kind):
     entries = payload.get("sources")
-    limits = {"regions": (1, 1), "add": (0, 0), "split": (1, 1), "merge": (2, 12)}
+    limits = {"regions": (1, 1), "renumber": (1, 1), "add": (0, 0), "split": (1, 1), "merge": (2, 12)}
     low, high = limits[kind]
     if not isinstance(entries, list) or not low <= len(entries) <= high:
         raise LayoutError("所选源题数量不正确。")
@@ -347,6 +349,12 @@ def _targets(paper, payload, kind, sources):
     for entry in entries:
         if not isinstance(entry, dict):
             raise LayoutError("结果题目格式不正确。")
+        if kind == "renumber":
+            number = entry.get("number")
+            if type(number) is not int or not 1 <= number <= 999:
+                raise LayoutError("请提供题号（1–999）。")
+            result.append({"number": number, "group": sources[0].group})
+            continue
         regions = _regions(paper, entry.get("regions"))
         if kind == "regions":
             result.append({"regions": regions})
@@ -366,6 +374,8 @@ def _targets(paper, payload, kind, sources):
         occupied = Question.all_objects.filter(paper=paper).exclude(pk__in=[row.pk for row in sources])
         occupied = occupied.exclude(deleted_at__isnull=False, deletion_batch__origin=QuestionDeletionBatch.Origin.LAYOUT)
         for group, number in keys:
+            if kind == "renumber" and number == sources[0].number:
+                continue
             if occupied.filter(group_id=group, number=number).exists():
                 raise LayoutError("结果题号已被当前题卡或普通回收站题目占用。", 409)
     return result
@@ -387,8 +397,8 @@ def mutate(paper_id, payload, *, request_payload=None):
         return existing, True
     revision = _revision(payload)
     kind = payload.get("kind")
-    if kind not in {"regions", "add", "split", "merge"}:
-        raise LayoutError("请选择保存范围、补题、拆题或合题。")
+    if kind not in {"regions", "renumber", "add", "split", "merge"}:
+        raise LayoutError("请选择保存范围、修改题号、补题、拆题或合题。")
     try:
         with transaction.atomic():
             paper = _claim(paper_id, revision)
@@ -404,19 +414,22 @@ def mutate(paper_id, payload, *, request_payload=None):
                 kind=kind, source_ids=ids, before_snapshot=before, page_epoch=paper.layout_page_epoch,
                 source_epoch=source_epoch(paper))
             changed_rows = list(sources)
-            if kind == "regions":
+            if kind in {"regions", "renumber"}:
                 question = sources[0]
-                if question.regions == targets[0]["regions"]:
-                    operation.blocked_reason = NO_CHANGE
+                field = "number" if kind == "renumber" else "regions"
+                if getattr(question, field) == targets[0][field]:
+                    operation.blocked_reason = NUMBER_NO_CHANGE if kind == "renumber" else NO_CHANGE
                 else:
-                    from .pipeline import candidates_in
-                    question.regions = targets[0]["regions"]
-                    question.figure_candidates = candidates_in(paper, question.regions)
+                    setattr(question, field, targets[0][field])
+                    if kind == "regions":
+                        from .pipeline import candidates_in
+                        question.figure_candidates = candidates_in(paper, question.regions)
                     question.content_revision += 1
                     question.ocr_pending = question.reread_requested = False
                     question.ocr_suggestion = {}
                     question.state, question.error = Question.State.YELLOW, ""
-                    question.flags = list(dict.fromkeys([*(question.flags or []), "原卷范围已修改，请重新对照确认。"] ))
+                    warning = "题号已修改，请重新对照原卷确认。" if kind == "renumber" else "原卷范围已修改，请重新对照确认。"
+                    question.flags = list(dict.fromkeys([*(question.flags or []), warning]))
                     _clear_approval(question)
                     _cancel_reads(ids)
                     question.save()
@@ -452,7 +465,7 @@ def mutate(paper_id, payload, *, request_payload=None):
             paper.refresh_from_db()
             operation.after_layout_revision = paper.layout_revision
             operation.after_snapshot = {"questions": [snapshot(row) for row in changed_rows],
-                                        "no_change": operation.blocked_reason == NO_CHANGE}
+                                        "no_change": operation.blocked_reason in NO_CHANGE_REASONS}
             operation.after_fingerprints = {str(row.pk): fingerprint(row) for row in changed_rows}
             operation.save()
             return operation, False
@@ -486,7 +499,7 @@ def undo(paper_id, operation_id, payload):
             before = {item["id"]: item for item in operation.before_snapshot.get("questions", [])}
             _cancel_reads([row.pk for row in rows])
             batch = None
-            if operation.kind != "regions":
+            if operation.kind not in {"regions", "renumber"}:
                 batch = QuestionDeletionBatch.objects.create(paper=paper, question_ids=operation.target_ids,
                     origin=QuestionDeletionBatch.Origin.LAYOUT, reason="已撤销补题或拆合后的结果历史")
             excluded = {"id", "paper_id", "source_key", "content_revision", "approved", "approved_at",
@@ -524,5 +537,5 @@ def undo(paper_id, operation_id, payload):
 def invalidate_page_epoch(paper):
     Paper.objects.filter(pk=paper.pk).update(layout_page_epoch=F("layout_page_epoch") + 1,
                                            layout_revision=F("layout_revision") + 1)
-    paper.layout_operations.filter(undone_at__isnull=True).exclude(blocked_reason=NO_CHANGE).update(
+    paper.layout_operations.filter(undone_at__isnull=True).exclude(blocked_reason__in=NO_CHANGE_REASONS).update(
         blocked_reason="原卷页序或页面来源已变化，旧布局不能覆盖当前原卷。")
