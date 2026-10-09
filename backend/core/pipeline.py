@@ -4303,6 +4303,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # 题型是题型待核对之外的一类：模型判了、也定了案，可卷面标题说的不一样。
         flags.append(f"卷面的大题标题写着这一段是{conflict[0]}，卡上却是{conflict[1]}；"
                      "请在题卡上选一下题型")
+    if qtypes.fill_blank_without_slot(kind, final.get("stem")):
+        # 上面那条靠卷面标题对照，教材卡没有大题标题，所以要看题干：标成填空题
+        # 却没有任何可填的位置，那是把计算题、解答题判成了填空题（两本书 37 张）。
+        flags.append(qtypes.FLAG_FILL_NO_SLOT)
     if broken := _broken_coordinate(str(final.get("stem") or "")):
         flags.append(f"题干里这个坐标只读到一半（{broken.strip()}），缺的那一格没读出来；"
                      "请对照原卷补上再入库")
