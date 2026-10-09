@@ -193,7 +193,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertNotIn("题干不应印", text)
 
     def test_split_zip_contains_two_full_documents_without_enabling_ai(self):
-        pub = self.publication(answer="答案", extras={"ai_answer": {"answer": "不同AI答案"}})
+        # 答案与解析用一句不会出现在题干里的长句：分卷靠 _document 按 document 分流，
+        # 题目卷和答案卷读的是同一份 captured，只有一处改错答案就上学生卷了。
+        # 原来的断言只查「参考答案与解析」这个标题，答案串又短到两个字，漏了也测不出来。
+        pub = self.publication(stem="离线合成题干甲乙丙", answer="原卷标准答案甲乙丙",
+                               analysis="原卷解析步骤甲乙丙",
+                               extras={"ai_answer": {"answer": "不同AI答案甲乙丙"}})
         response = self.post(self.payload([pub], output_format="split", print_options={"document": "questions"}))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
@@ -202,8 +207,15 @@ class LibraryExportTests(ExportFixture, TestCase):
             questions = "".join(document_xml(archive.read("单元练习-题目卷.docx")).itertext())
             answers = "".join(document_xml(archive.read("单元练习-答案解析卷.docx")).itertext())
         self.assertNotIn("参考答案与解析", questions)
-        self.assertIn("答案", answers)
-        self.assertNotIn("不同AI答案", answers)
+        # 学生卷上只有题干：答案、解析、AI 参考，一个字都不能有。
+        self.assertIn("离线合成题干甲乙丙", questions)
+        self.assertNotIn("原卷标准答案甲乙丙", questions)
+        self.assertNotIn("原卷解析步骤甲乙丙", questions)
+        self.assertNotIn("不同AI答案甲乙丙", questions)
+        # 答案卷上三样都要在，题干不该重复印一遍。
+        self.assertIn("原卷标准答案甲乙丙", answers)
+        self.assertIn("原卷解析步骤甲乙丙", answers)
+        self.assertNotIn("离线合成题干甲乙丙", answers)
         self.assertFalse(features.enabled("ai_answer"))
 
     def test_empty_answers_or_split_is_an_explicit_error(self):
