@@ -27,7 +27,7 @@ assert.match(html, /id="welcomeLearn"[^>]*>开始手工练习<\/button>/);
 assert.match(html, /id="welcomeTour"[^>]*>自动切题入门<\/button>/);
 assert.match(js, /requestAnimationFrame\(\(\) => \$\("welcomeTour"\)\.focus\(\)\)/,
   "keyboard focus starts on the primary automatic-cutting guide");
-assert.match(js, /以后需要云处理或主动识读时，再到设置中的服务与密钥里填写密钥/);
+assert.match(js, /以后需要云处理或主动识读时，再到设置 → API 配置里填写密钥/);
 assert.match(js, /if \(readPref\("qb-welcome-seen", ""\) !== "1"\) openWelcome\(\);/);
 assert.match(js, /writePref\("qb-welcome-seen", "1"\)/);
 const steps = js.match(/const TOUR_STEPS = \[([\s\S]*?)\n  \];/)[1];

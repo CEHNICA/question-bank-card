@@ -1900,7 +1900,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         // 和题卡上的「AI 识读这题」同一套做法：不让你点进一次注定失败的请求，
         // 直接把原因写进这块面板自己的红条，并放出去配置的链接。
         cutReadingErrors.set(state.paperId, readerUnavailableSentence(notReady));
-        read.title = "先在“设置 → 服务与密钥”里填好密钥，再回来识读。";
+        read.title = "先在“设置 → API 配置”里填好密钥，再回来识读。";
       }
       if (cutReadingRequests.has(paper.id)) read.textContent = "正在提交识读……";
       actions.append(read);
@@ -1978,7 +1978,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const ids = QBCutReading.cutReadingSummary(state.questions).eligibleIds;
     if (!ids.length) return;
     if (!state.status?.reader || state.status.assistant_mode) {
-      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → 服务与密钥里配置；也可改字或直接原图审核。");
+      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → API 配置里配置；也可改字或直接原图审核。");
       renderCutReadingStage();
       return;
     }
@@ -3643,7 +3643,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.append(el("p", "hint", `${service ? `“${service}”` : "看图读题服务"}还没有 API Key，所以这次识读没有发出请求。`
       + "原卷、已切好的题目和人工改过的内容都保留着：配好密钥后可以直接重新识读，"
       + "也可以先对照原图审核或改字，不影响这一份资料。"));
-    box.append(button("打开密钥窗口", "small primary", () => openCredentialSettings("reading"),
+    box.append(button("配置 API", "small primary", () => openCredentialSettings("reading"),
       "在本机填写这家的 API Key；填好后回到题卡点“重新 AI 识读”即可"));
     return box;
   }
@@ -3897,7 +3897,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const notReady = readerUnavailable();
       read.disabled = Boolean(q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
         || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready") || Boolean(notReady);
-      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → 服务与密钥”里填好；原图和已切好的题目都保留着。`;
+      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
       else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
       actions.append(read);
     }
@@ -4606,14 +4606,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 「已填写」和「共保存 0 个」都是真的，凑在一起就成了两个答案。
   // 判定只有这一处，设置页和密钥窗口都用它；只说明「生效的是哪一份」，
   // 不动后台判定、不迁移、不碰环境变量。
-  const LEGACY_KEY_NOTE = "这台电脑上还留着一份旧的 Windows 环境变量密钥，密钥窗口里看不到它。点“打开密钥窗口”重新填一次就能统一。";
-
-  function credentialStoreFresh() {
-    // 只读、no-store、响应里没有任何密钥明文，缓存到内存里不存在泄露风险。
-    return api("/api/settings/credentials")
-      .then((payload) => { state.credentialStore = payload?.services || {}; return state.credentialStore; })
-      .catch(() => null);
-  }
+  const LEGACY_KEY_NOTE = "这台电脑上还留着一份旧的 Windows 环境变量密钥。请在 API 配置里重新填一次，统一保存在这里；留空仍可沿用旧配置。";
 
   function credentialSourceNote(service) {
     const stored = state.credentialStore?.[service];
@@ -4622,18 +4615,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const live = service === "mineru"
       ? Boolean(state.status?.mineru || configured.mineru) : Boolean(configured[service]);
     return live ? LEGACY_KEY_NOTE : "";
-  }
-
-  function setApiState(id, configured, note = "") {
-    const node = $(id);
-    node.textContent = configured ? (note ? "已填写（旧环境变量）" : "已填写") : "未填写";
-    node.className = `api-state ${configured ? "ready" : "missing"}`;
-    const row = node.parentElement;
-    let hint = row?.querySelector?.(".api-source-note");
-    if (note) {
-      if (!hint) { hint = el("p", "api-source-note"); row?.append?.(hint); }
-      hint.textContent = note;
-    } else if (hint) hint.remove();
   }
 
   function selectedEngine(engines, role, fallback) {
@@ -4693,30 +4674,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function renderSettingsModels() {
-    const status = state.status;
-    if (!status) return;
-    const engines = status.engines || {};
-    const configured = status.configured || engines.configured || {};
-    setApiState("settingsMineruState", Boolean(status.mineru || configured.mineru), credentialSourceNote("mineru"));
-    setApiState("settingsMinimaxState", Boolean(configured.minimax), credentialSourceNote("minimax"));
-    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow), credentialSourceNote("siliconflow"));
-    setApiState("settingsModelscopeState", Boolean(configured.modelscope), credentialSourceNote("modelscope"));
-    renderSettingsModelsTail();
-    // 密钥库那一份要单独拉一次才判得出「两个来源不一致」。慢一拍没关系：
-    // 第一次先按 /api/status 画，拉回来再改文案，不会闪出错的话。
-    if (!state.credentialStorePromise) state.credentialStorePromise = credentialStoreFresh();
-    state.credentialStorePromise.then(() => {
-      if (state.status === status) renderApiSourceNotes();
-    });
-  }
-
-  function renderApiSourceNotes() {
     if (!state.status) return;
-    const configured = state.status.configured || state.status.engines?.configured || {};
-    setApiState("settingsMineruState", Boolean(state.status.mineru || configured.mineru), credentialSourceNote("mineru"));
-    setApiState("settingsMinimaxState", Boolean(configured.minimax), credentialSourceNote("minimax"));
-    setApiState("settingsSiliconflowState", Boolean(configured.siliconflow), credentialSourceNote("siliconflow"));
-    setApiState("settingsModelscopeState", Boolean(configured.modelscope), credentialSourceNote("modelscope"));
+    renderSettingsModelsTail();
   }
 
   function renderSettingsModelsTail() {
@@ -4729,7 +4688,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const choices = settingsEngineChoices(engines);
     const modelEntries = choices.map((choice) => ({
       value: choice.key,
-      label: `${choice.provider} · ${choice.model}${choice.free ? "（免费）" : ""}${choice.available === false ? "（未填密钥）" : ""}`
+      label: `${choice.provider} · ${choice.model}${choice.available === false ? "（未填密钥）" : ""}`
     }));
     const defaultPrimary = modelEntries[0]?.value || "";
     // 所选那家没有密钥时，后台会换用有密钥的那家读题；这里直接显示实际读题的那家。
@@ -4738,7 +4697,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (chosen && chosen.available === false && engines.primary) primary = engines.primary;
     fillModelSelect($("settingsPrimaryModel"), [
       ...modelEntries,
-      { value: "assistant", label: "AI 助手读题（只要 MinerU，不用看图密钥）" }
+      { value: "assistant", label: "原图审核或 AI 助手（不使用看图 API）" }
     ], primary);
     renderProviderModelSetting(engines, choices, "minimax", "settingsMinimaxModel",
       "settingsMinimaxModels", "settingsMinimaxModelState");
@@ -4754,7 +4713,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsModelSummary").textContent = status.assistant_mode
       ? "现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU。未切出的题可手工框选；再由 AI 助手或你对照原卷整理、核对。"
       : summary ? `当前读题：${summary}。` : "请先配置一家读题服务，或选择 AI 助手读题。";
+    syncCredentialVisionPanel();
     renderMinimaxPlan(engines);
+  }
+
+  function selectedReadingProvider() {
+    const engines = state.status?.engines || {};
+    const key = $("settingsPrimaryModel").value || engines.primary;
+    if (key === "assistant") return "assistant";
+    return settingsEngineChoices(engines).find((choice) => choice.key === key)?.provider_key || "modelscope";
+  }
+
+  function syncCredentialVisionPanel({ followSelection = true } = {}) {
+    const select = $("credentialVisionProvider");
+    if (!select) return;
+    if (followSelection) {
+      const engines = state.status?.engines || {};
+      const configured = state.status?.configured || engines.configured || {};
+      const hasSavedReader = Boolean(engines.saved?.primary || ["modelscope", "minimax", "siliconflow"].some((provider) => configured[provider]));
+      select.value = hasSavedReader ? selectedReadingProvider() : "modelscope";
+    }
+    for (const [provider, id] of [["modelscope", "credentialModelscopeSection"], ["minimax", "credentialMinimaxSection"], ["siliconflow", "credentialSiliconflowSection"]]) {
+      $(id).hidden = select.value !== provider;
+    }
+    window.LibraryAISettings?.setReadingService?.({
+      provider: selectedReadingProvider(),
+      models: state.status?.engines?.saved?.models || state.status?.engines?.models || {}
+    });
   }
 
   // MiniMax 的并发跟会员档位走：档位给出起步和上限，中间按实际限流自动调。
@@ -4981,10 +4966,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       button.tabIndex = tab === name ? 0 : -1;
     }
     if (tab !== "answers" || !window.LibraryAISettings?.mount) return;
-    // The answers panel offers “共用读题的 MiniMax 密钥”, which needs to know
-    // whether the reading side holds one.  It must not read that store itself,
+    // The optional answers panel can reuse a configured visual service.
+    // It must not read the reading credential store itself,
     // so the status this dialog already loaded is handed over instead.
     window.LibraryAISettings.setReadingKeys?.(credentialServices);
+    syncCredentialVisionPanel();
     if (!credentialAnswersMounted) {
       credentialAnswersMounted = true;
       await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true, confirm: confirmDialog });
@@ -5009,6 +4995,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (busy) hideCredentialKeys();
     credentialSavedRows.forEach((row) => { row.button.disabled = busy; });
     $("credentialSave").disabled = busy;
+    $("credentialVisionProvider").disabled = busy;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       $(field.input).disabled = busy;
       $(field.remove).disabled = busy || !credentialServices[service]?.configured;
@@ -5023,6 +5010,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     credentialServices = services;
     // 密钥窗口的判据也存进同一个地方：设置页那边要靠它说「生效的是哪一份」。
     state.credentialStore = services;
+    window.LibraryAISettings?.setReadingKeys?.(services);
     let total = 0;
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       const status = services[service] || {};
@@ -5467,6 +5455,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const modelSettingFields = ["settingsPrimaryModel", "settingsMinimaxModel",
     "settingsSiliconflowModel", "settingsModelscopeModel"];
+  $("credentialVisionProvider").addEventListener("change", () => {
+    if (credentialBusy || credentialMutationPending()) { syncCredentialVisionPanel(); return; }
+    hideAPISecrets();
+    const provider = $("credentialVisionProvider").value;
+    const key = provider === "assistant" ? "assistant" : settingsEngineChoices(state.status?.engines || {})
+      .find((choice) => choice.provider_key === provider)?.key;
+    if (!key) { toast("服务列表尚未加载，请稍后重试。", "warn"); syncCredentialVisionPanel(); return; }
+    $("settingsPrimaryModel").value = key;
+    syncCredentialVisionPanel({ followSelection: false });
+    void saveModelSettings();
+  });
   modelSettingFields.forEach((id) => $(id).addEventListener("input", () => {
     modelFormDirty = true;
     showModelSaveResult("有改动待保存；离开输入框后会自动保存。", { retry: Boolean(lastModelSave?.failed) });
@@ -8771,7 +8770,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     node.className = `settings-ready ${automaticParseReady() ? "ready" : "missing"}`;
     node.textContent = automaticParseReady() ? "可以直接导入，程序先在本机切题。云处理已配置，使用前会说明发送范围；实际可用性以处理结果为准。"
-      : "现在就能导入资料、从原卷选题，不需要密钥。以后需要云处理或主动识读时，再到设置中的服务与密钥里填写密钥。";
+      : "现在就能导入资料、从原卷选题，不需要密钥。以后需要云处理或主动识读时，再到设置 → API 配置里填写密钥。";
   }
 
   function openWelcome() {

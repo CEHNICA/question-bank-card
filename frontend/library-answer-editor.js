@@ -228,7 +228,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       // API 配好了的时候，这句话是一句解释，挂在 AI 按钮上；没配好的时候它是唯一
       // 告诉你「要去设置里做点什么」的地方，必须留在明面上。
       if (ready) { controls.ai.title = "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。"; controls.apiNote.textContent = ""; controls.apiNote.hidden = true; }
-      else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → 服务与密钥”配置并测试；可先手工编辑，返回后点“刷新生成结果”。"; }
+      else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → API 配置”配置并测试；可先手工编辑，返回后点“刷新生成结果”。"; }
       for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
     }
@@ -492,7 +492,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         if (session !== epoch || !dialog.open) return false;
         apiSettings = value; apiSettingsError = ""; return value.api_ready === true;
       } catch (error) {
-        if (session === epoch && dialog.open) { apiSettings = null; apiSettingsError = "未能读取答题 API 设置，请到“设置 → 服务与密钥”检查配置，再刷新生成结果。"; }
+        if (session === epoch && dialog.open) { apiSettings = null; apiSettingsError = "未能读取答题 API 设置，请到“设置 → API 配置”检查配置，再刷新生成结果。"; }
         return false;
       } finally { if (session === epoch) { checkingApi = false; setBusy(); } }
     }
@@ -511,7 +511,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         // Revalidate API availability immediately before this explicit batch.
         // The scoped executor never changes the shared tag/answer settings.
         if (!await readApiSettings()) {
-          if (requestEpoch === epoch && dialog.open) controls.aiStatus.textContent = "请到“设置 → 服务与密钥”配置并测试答题 API，再生成所选题。当前编辑与已保存解析保留。";
+          if (requestEpoch === epoch && dialog.open) controls.aiStatus.textContent = "请到“设置 → API 配置”配置并测试答题 API，再生成所选题。当前编辑与已保存解析保留。";
           return;
         }
         if (requestEpoch !== epoch || !dialog.open) return;
@@ -525,7 +525,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         controls.aiStatus.textContent = `已提交所选 ${ids.length} 题给答题 API，初稿完成后显示在编辑区。保存后才用于出卷。`;
         renderList();
         void pollJobs();
-      } catch (error) { if (requestEpoch === epoch && dialog.open) { const message = `${error.message} 请到“设置 → 服务与密钥”检查服务商、密钥和模型，再重试。`; notify(message, "error"); controls.aiStatus.textContent = message; } }
+      } catch (error) { if (requestEpoch === epoch && dialog.open) { const message = `${error.message} 请到“设置 → API 配置”检查服务商、密钥和模型，再重试。`; notify(message, "error"); controls.aiStatus.textContent = message; } }
       finally { if (requestEpoch === epoch) { queueing = false; setBusy(); } }
     }
     async function cancelSelected() {
@@ -557,7 +557,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       if (saved) messages.push(`${saved} 题初稿已保存，可用于出卷`);
       if (retained) messages.push(`${retained} 题另有 AI 初稿可对照，已保存解析保留`);
       if (failed.length) messages.push(`${failed.length} 题未完成，勾选可重试${failed[0].error ? `：${failed[0].error}` : ""}`);
-      if (failed.some(job => job.status === "failed" && !job.cancelled && !job.timed_out && !["cancelled", "timed_out"].includes(job.terminal_reason))) messages.push("请到“设置 → 服务与密钥”检查服务商、密钥和模型，再重试");
+      if (failed.some(job => job.status === "failed" && !job.cancelled && !job.timed_out && !["cancelled", "timed_out"].includes(job.terminal_reason))) messages.push("请到“设置 → API 配置”检查服务商、密钥和模型，再重试");
       // 顶部那条状态行现在只在真有话要说时才占地方，空着就空着。
       controls.aiStatus.textContent = [messages.join("；") + "。", queueNote].filter(Boolean).join(" ");
     }

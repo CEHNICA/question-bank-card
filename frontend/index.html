@@ -57,31 +57,16 @@
     </header>
     <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
       <div class="settings-nav" role="tablist" aria-label="设置分区">
-        <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">服务与密钥</button>
+        <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">API 配置</button>
         <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">显示与导出</button>
         <button type="button" role="tab" data-settings-tab="settingsReview" aria-selected="false">帮助</button>
         <button type="button" role="tab" data-settings-tab="settingsAbout" aria-selected="false">关于</button>
       </div>
       <div class="settings-scroll">
         <div id="settingsGeneral" class="settings-page" role="tabpanel">
-          <section class="settings-section" aria-labelledby="settingsServicesTitle">
-            <h3 id="settingsServicesTitle">读题与看图服务</h3>
-            <div class="api-status-list" aria-label="读题服务的密钥">
-              <div><span><strong>MinerU</strong><small>新资料的文字识别与切题</small></span><strong id="settingsMineruState" class="api-state">正在读取…</strong></div>
-              <div><span><strong>魔搭</strong><small>可选的看图读题服务</small></span><strong id="settingsModelscopeState" class="api-state">正在读取…</strong></div>
-              <div><span><strong>MiniMax</strong><small>可选的看图读题服务</small></span><strong id="settingsMinimaxState" class="api-state">正在读取…</strong></div>
-              <div><span><strong>硅基流动</strong><small>可选的看图读题服务</small></span><strong id="settingsSiliconflowState" class="api-state">正在读取…</strong></div>
-            </div>
-            <details id="settingsFreePlan" class="free-plan">
-              <summary>如何配置读题服务</summary>
-              <p>导入资料无需密钥，会先在本机尝试切题；无法自动切出的题，可从原卷框选保存。需要云端自动切题时，再配置 MinerU 与看图服务，或选择 AI 助手读题。</p>
-              <p><a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">获取 MinerU Token</a> · <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">获取魔搭令牌</a></p>
-              <p>MinerU 单文件最多 200 页、200 MB；超过页数会自动分片。服务额度、费用和有效期以官网为准。</p>
-            </details>
-            <div class="api-settings-actions">
-              <p class="settings-footnote">读题、标签与答案的 API 密钥和模型统一在这里配置。</p>
-              <button id="settingsCredentialOpen" class="button" type="button" title="填写或更换 API 密钥">打开密钥窗口</button>
-            </div>
+          <section class="settings-section api-setup-entry" aria-labelledby="settingsServicesTitle">
+            <div><h3 id="settingsServicesTitle">配置切题、读题和答题服务</h3><p class="settings-description">按步骤填写 MinerU 和一家看图服务。标签与答案需要时再配置。</p></div>
+            <button id="settingsCredentialOpen" class="button primary" type="button">配置 API</button>
           </section>
         </div>
         <div id="settingsDisplay" class="settings-page" role="tabpanel" hidden>
@@ -323,16 +308,16 @@
   <dialog id="credentialDialog" class="credential-dialog" aria-labelledby="credentialTitle">
       <header class="dialog-head">
         <div>
-          <p class="settings-eyebrow">共用设置</p>
+          <p class="settings-eyebrow">切题、读题与答题</p>
           <h3 id="credentialTitle">API 配置</h3>
-          <p class="hint">读题和标签、答案的服务与密钥都在这里配置；同一家 MiniMax 的密钥只填一次。模型和角色仍按各自需要单独选。</p>
+          <p class="hint">先完成下面两步，即可使用云端切题与看图读题。标签与答案是可选功能。</p>
           <p id="credentialSavedTotal" class="credential-saved-total" aria-label="读题服务的已保存密钥总数" role="status">正在读取已保存的密钥…</p>
         </div>
         <button class="button quiet" type="button" data-close>关闭</button>
       </header>
     <div class="credential-tabs" role="tablist" aria-label="API 配置分区">
-      <button id="credentialReadingTab" type="button" role="tab" aria-selected="true" aria-controls="credentialReadingPanel">读题与切题</button>
-      <button id="credentialAnswerTab" type="button" role="tab" aria-selected="false" aria-controls="credentialAnswerPanel" tabindex="-1">标签与答案</button>
+      <button id="credentialReadingTab" type="button" role="tab" aria-selected="true" aria-controls="credentialReadingPanel">切题与读题</button>
+      <button id="credentialAnswerTab" type="button" role="tab" aria-selected="false" aria-controls="credentialAnswerPanel" tabindex="-1">标签与答案 · 可选</button>
     </div>
     <div id="credentialReadingPanel" class="credential-panel" role="tabpanel" aria-labelledby="credentialReadingTab">
     <form id="credentialForm" class="credential-form" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
@@ -340,59 +325,60 @@
       <div class="credential-body">
         <p class="credential-storage-note">已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下方只填写新密钥；留空就保留原来的配置。</p>
         <section class="credential-service" data-service="mineru">
-          <div class="credential-service-head"><strong>MinerU Token <small>可选 · 云端识别与切题</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
+          <div class="credential-service-head"><strong><span class="credential-step-number">1</span> MinerU <small class="credential-required">云端自动切题必填</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
+          <p class="credential-purpose">负责识别整份试卷并划分题目。先到官网生成 Token，再粘贴到下面。</p>
           <ul id="credentialMineruSaved" class="credential-saved-list" aria-label="已保存的 MinerU 密钥"></ul>
           <label for="credentialMineruInput">新的 Token（留空就不改）· <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">生成 Token</a>（到期日见管理页）</label>
           <input id="credentialMineruInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
           <div class="credential-service-actions"><button id="credentialMineruDelete" class="button small credential-delete" type="button" aria-label="删除 MinerU 密钥" hidden>删除密钥</button></div>
         </section>
-        <section class="credential-service" data-service="modelscope">
-          <div class="credential-service-head"><strong>魔搭访问令牌 <small>看图读题 · 免费，每天几百次（推荐）</small></strong><span id="credentialModelscopeState" class="api-state">正在读取…</span></div>
+        <section class="credential-vision-step" aria-labelledby="credentialVisionTitle">
+          <h4 id="credentialVisionTitle"><span class="credential-step-number">2</span> 选择一家看图读题服务</h4>
+          <p class="credential-purpose">负责把题目截图转成可编辑文字。推荐魔搭；已有其他服务的密钥，可以直接换用，只需填写一家。</p>
+          <label for="credentialVisionProvider">看图服务</label>
+          <select id="credentialVisionProvider"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
+          <p id="settingsModelSummary" class="settings-footnote"></p>
+          <div class="settings-form-actions"><span id="settingsModelResult" class="settings-save-result" role="status"></span></div>
+        <section id="credentialModelscopeSection" class="credential-service" data-service="modelscope">
+          <div class="credential-service-head"><strong>魔搭访问令牌 <small>填写 Access Token</small></strong><span id="credentialModelscopeState" class="api-state">正在读取…</span></div>
           <ul id="credentialModelscopeSaved" class="credential-saved-list" aria-label="已保存的魔搭密钥"></ul>
-          <label for="credentialModelscopeInput">新的令牌（留空就不改）· <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">免费申请</a></label>
+          <label for="credentialModelscopeInput">新的令牌（留空就不改）· <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">获取魔搭令牌</a></label>
           <input id="credentialModelscopeInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴魔搭“访问令牌”页里复制的 Access Token">
           <div class="credential-service-actions"><button id="credentialModelscopeDelete" class="button small credential-delete" type="button" aria-label="删除魔搭密钥" hidden>删除密钥</button></div>
         </section>
-        <section class="credential-service" data-service="minimax">
-          <div class="credential-service-head"><strong>MiniMax API Key <small>看图读题 · 付费会员</small></strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
+        <section id="credentialMinimaxSection" class="credential-service" data-service="minimax" hidden>
+          <div class="credential-service-head"><strong>MiniMax API Key <small>填写可用于视觉模型的 Key</small></strong><span id="credentialMinimaxState" class="api-state">正在读取…</span></div>
           <ul id="credentialMinimaxSaved" class="credential-saved-list" aria-label="已保存的 MiniMax 密钥"></ul>
           <label for="credentialMinimaxInput">新的 Key（留空就不改）</label>
           <input id="credentialMinimaxInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MiniMax 开放平台里复制的 API Key">
           <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
-        <section class="credential-service" data-service="siliconflow">
-          <div class="credential-service-head"><strong>硅基流动 API Key <small>可选 · 付费，可作为读题备用</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
+        <section id="credentialSiliconflowSection" class="credential-service" data-service="siliconflow" hidden>
+          <div class="credential-service-head"><strong>硅基流动 API Key <small>填写可用于视觉模型的 Key</small></strong><span id="credentialSiliconflowState" class="api-state">正在读取…</span></div>
           <ul id="credentialSiliconflowSaved" class="credential-saved-list" aria-label="已保存的硅基流动密钥"></ul>
           <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
           <input id="credentialSiliconflowInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴硅基流动里复制的 API Key">
           <div class="credential-service-actions"><button id="credentialSiliconflowDelete" class="button small credential-delete" type="button" aria-label="删除硅基流动密钥" hidden>删除密钥</button></div>
         </section>
+        </section>
+        <p class="credential-storage-note">只手工框题或直接审核原图时，可以跳过这两步。额度、费用及 Token 有效期以服务商账户为准。</p>
         <p class="credential-storage-note">密钥只加密保存在这台电脑上。查看不会重新保存；关闭窗口后立即隐藏。</p>
         <details class="credential-more">
           <summary>有多个账号？密钥存在哪里？</summary>
           <p>同一家有多个账号时，把需要保留的全部新密钥一起粘贴，用英文分号 ; 隔开（每家最多 8 个）。保存会替换这家服务原来的密钥列表；留空则保持原样。读题时会轮流使用，一个账号额度用完会换下一个。</p>
           <p class="credential-security-note">密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。保存时只检查填写格式，不上传文件、不消耗识读额度。MinerU 当前未公开无需解析任务的 Token 验证接口；保存成功表示已配置，实际可用性以识读任务返回为准。</p>
         </details>
-      </div>
-      <footer class="credential-actions">
-        <span id="credentialResult" class="settings-save-result" role="status"></span>
-        <button id="credentialSave" class="button primary" type="submit">保存密钥</button>
-        <button class="button" type="button" data-close>取消</button>
-      </footer>
-    </form>
           <details id="settingsModels" class="settings-section settings-models">
-            <summary>读题模型（可选）</summary>
+            <summary>模型细节（一般不用改）</summary>
           <section class="settings-models-body" aria-labelledby="settingsModelsTitle">
             <h3 id="settingsModelsTitle">读题模型</h3>
             <p class="settings-description">改动自动保存，从下一份资料或重新识读开始生效。</p>
-            <form id="modelSettingsForm" class="model-settings-form">
-              <p class="model-role-heading">谁来读题</p>
-              <label class="field" for="settingsPrimaryModel"><span>主读</span><select id="settingsPrimaryModel" name="primary"></select></label>
-              <p id="settingsModelSummary" class="settings-footnote"></p>
+            <div class="model-settings-form">
+              <label class="field" for="settingsPrimaryModel" hidden><span>主读</span><select id="settingsPrimaryModel" form="modelSettingsForm" name="primary" aria-label="读题模型"></select></label>
               <details class="model-id-details">
                 <summary>各家使用的具体模型（高级）</summary>
                 <fieldset class="model-id-settings">
@@ -400,30 +386,35 @@
                   <p class="settings-footnote">请选择服务商支持的视觉模型 ID。</p>
                   <label class="model-id-field" for="settingsMinimaxModel">
                     <span><strong>MiniMax</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsMinimaxModel" name="minimax_model" type="text" list="settingsMinimaxModels"
+                    <input id="settingsMinimaxModel" form="modelSettingsForm" name="minimax_model" type="text" list="settingsMinimaxModels"
                            autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState">
                     <datalist id="settingsMinimaxModels"></datalist>
                   </label>
                   <label class="model-id-field" for="settingsModelscopeModel">
                     <span><strong>魔搭</strong><small id="settingsModelscopeModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsModelscopeModel" name="modelscope_model" type="text" list="settingsModelscopeModels"
+                    <input id="settingsModelscopeModel" form="modelSettingsForm" name="modelscope_model" type="text" list="settingsModelscopeModels"
                            autocomplete="off" spellcheck="false" aria-describedby="settingsModelscopeModelState">
                     <datalist id="settingsModelscopeModels"></datalist>
                   </label>
                   <label class="model-id-field" for="settingsSiliconflowModel">
                     <span><strong>硅基流动</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsSiliconflowModel" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
+                    <input id="settingsSiliconflowModel" form="modelSettingsForm" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
                            autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState">
                     <datalist id="settingsSiliconflowModels"></datalist>
                   </label>
                 </fieldset>
               </details>
-              <div class="settings-form-actions">
-                <span id="settingsModelResult" class="settings-save-result" role="status"></span>
-              </div>
-            </form>
+            </div>
           </section>
           </details>
+      </div>
+      <footer class="credential-actions">
+        <span id="credentialResult" class="settings-save-result" role="status"></span>
+        <button id="credentialSave" class="button primary" type="submit">保存密钥</button>
+        <button class="button" type="button" data-close>取消</button>
+      </footer>
+    </form>
+    <form id="modelSettingsForm" class="model-settings-form" hidden></form>
     </div>
     <div id="credentialAnswerPanel" class="credential-panel" role="tabpanel" aria-labelledby="credentialAnswerTab" hidden>
       <div id="libraryAIAPISettingsMount" class="library-ai-mount"></div>

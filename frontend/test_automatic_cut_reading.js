@@ -77,7 +77,7 @@ function harness({ reader = "Selected vision service", failure = false, question
     noReader.context.newUploadReadContinuations.add("new-paper");
     await noReader.context.readNewlyCutUpload("new-paper");
     assert.equal(noReader.requests.length, 0);
-    assert.match(noReader.context.cutReadingErrors.get("new-paper"), /设置 → 服务与密钥/);
+    assert.match(noReader.context.cutReadingErrors.get("new-paper"), /设置 → API 配置/);
     assert.equal(noReader.context.state.questions[0].body_mode, "source_image");
   }
 

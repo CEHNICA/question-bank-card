@@ -102,11 +102,13 @@ class IndependentAISettingsTests(TestCase):
         before = {path.name: path.read_bytes() for path in self.root.iterdir() if path.is_file()}
         self.transform.reset_mock()
         result = self.client.get("/api/settings/library-ai").json()
-        self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom"])
+        self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom", "modelscope", "siliconflow"])
         self.assertEqual(result["keys"], {"deepseek": {"configured": True, "count": 1, "shared_with_reading": False},
             "minimax": {"configured": True, "count": 1, "shared_with_reading": False},
             "doubao": {"configured": False, "count": 0, "shared_with_reading": False},
-            "custom": {"configured": False, "count": 0, "shared_with_reading": False}})
+            "custom": {"configured": False, "count": 0, "shared_with_reading": False},
+            "modelscope": {"configured": False, "count": 0, "shared_with_reading": False},
+            "siliconflow": {"configured": False, "count": 0, "shared_with_reading": False}})
         self.assertEqual(result["provider"], "minimax")
         self.assertEqual(result["key_count"], 1)
         self.assertNotIn("synthetic-deepseek", json.dumps(result))
@@ -190,6 +192,249 @@ class IndependentAISettingsTests(TestCase):
         self.assertEqual(ocr.read_bytes(), b"preexisting opaque OCR key")
         self.assertFalse(service.key_path("minimax").exists())
         self.transform.assert_not_called()
+        self.network.assert_not_called()
+
+    def test_new_vision_service_presets_do_not_import_keys_enable_features_or_contact_cloud(self):
+        ocr = self.root / "ocr-credentials.dat"
+        ocr.write_bytes(b"opaque synthetic reader credentials")
+        for provider, base, model, thinking in (
+            ("modelscope", readers.MODELSCOPE_URL.removesuffix("/chat/completions"), readers.preferences.DEFAULT_MODELS["modelscope"], True),
+            ("siliconflow", readers.SILICONFLOW_URL.removesuffix("/chat/completions"), readers.preferences.DEFAULT_MODELS["siliconflow"], False),
+        ):
+            with self.subTest(provider=provider):
+                result = service.save({"provider": provider})
+                self.assertEqual(result["provider"], provider)
+                self.assertEqual(result["base_url"], base)
+                self.assertEqual(result["model"], model)
+                self.assertIs(result["thinking"], thinking)
+                self.assertTrue(result["supports_images"])
+                self.assertEqual(result["mode"], "assistant")
+                self.assertFalse(result["configured"])
+                self.assertFalse(result["api_ready"])
+                self.assertEqual(result["features"], {"ai_answer": False, "knowledge_tags": False})
+                self.assertEqual(result["on_intake"], {"tags": False, "answer": False})
+                self.assertFalse(service.key_path(provider).exists())
+        self.assertEqual(ocr.read_bytes(), b"opaque synthetic reader credentials")
+        self.transform.assert_not_called()
+        self.network.assert_not_called()
+
+    def test_new_vision_providers_only_accept_their_official_base_urls(self):
+        self.configure()
+        original = service.path().read_bytes()
+        for provider in ("modelscope", "siliconflow"):
+            for address in ("https://other-service.invalid/v1", "https://api-inference.modelscope.cn/v1/extra", "http://localhost/v1"):
+                with self.subTest(provider=provider, address=address), self.assertRaises(service.SettingsError):
+                    service.save({"provider": provider, "base_url": address,
+                                  "key": {"action": "replace", "value": "offline-key"}})
+                self.assertEqual(service.path().read_bytes(), original)
+                self.assertFalse(service.key_path(provider).exists())
+            base = service.DEFAULTS[provider]["base_url"]
+            result = service.save({"provider": provider, "base_url": base + "/chat/completions"})
+            self.assertEqual(result["base_url"], base)
+            service.save({"provider": "doubao"})
+            original = service.path().read_bytes()
+        self.network.assert_not_called()
+
+    def test_vision_gateway_probes_and_generation_send_boolean_thinking_controls(self):
+        self.network.side_effect = None
+        for provider in ("modelscope", "siliconflow"):
+            for thinking in (True, False):
+                with self.subTest(provider=provider, thinking=thinking):
+                    self.network.reset_mock()
+                    self.network.return_value = answer_response(model="offline-vision-model", thinking=thinking)
+                    service.save({"mode": "api", "provider": provider, "thinking": thinking,
+                                  "features": {"ai_answer": True},
+                                  "key": {"action": "replace", "value": "synthetic-independent-key"}})
+                    self.network.assert_not_called()
+                    self.assertTrue(service.test_connection({"confirm": True})["verified"])
+                    args, kwargs = self.network.call_args
+                    self.assertEqual(args, (service.DEFAULTS[provider]["base_url"] + "/chat/completions",))
+                    sent = kwargs["json"]
+                    self.assertIs(sent["enable_thinking"], thinking)
+                    for unsupported in ("thinking", "reasoning_effort", "max_completion_tokens"):
+                        self.assertNotIn(unsupported, sent)
+                    self.assertEqual(sent["max_tokens"], 12000)
+                    self.assertFalse(kwargs["allow_redirects"])
+                    image = next(part["image_url"]["url"] for part in sent["messages"][0]["content"] if part["type"] == "image_url")
+                    with Image.open(io.BytesIO(base64.b64decode(image.split(",", 1)[1]))) as rendered:
+                        self.assertEqual(rendered.size, (120, 70))
+                    service.chat("synthetic answer question", [], kind="answer")
+                    self.assertIs(self.network.call_args.kwargs["json"]["enable_thinking"], thinking)
+
+    def test_per_provider_profiles_preserve_existing_independent_models_and_keys(self):
+        service.save({"mode": "api", "provider": "custom", "base_url": "https://synthetic-custom.invalid/v1",
+                      "model": "existing-custom-math", "supports_images": True, "thinking": False,
+                      "key": {"action": "replace", "value": "offline-custom-profile-key"}})
+        original_custom = service.key_path("custom").read_bytes()
+        service.save({"provider": "modelscope", "model": "Qwen/explicit-custom-vision", "thinking": False,
+                      "key": {"action": "replace", "value": "offline-modelscope-profile-key"}})
+        result = service.save({"provider": "custom"})
+        self.assertEqual(result["model"], "existing-custom-math")
+        self.assertEqual(result["base_url"], "https://synthetic-custom.invalid/v1")
+        self.assertFalse(result["thinking"])
+        self.assertTrue(result["supports_images"])
+        self.assertEqual(service.key_path("custom").read_bytes(), original_custom)
+        result = service.save({"provider": "modelscope"})
+        self.assertEqual(result["model"], "Qwen/explicit-custom-vision")
+        self.assertFalse(result["thinking"])
+        self.assertEqual(set(result["provider_profiles"]["custom"]), set(service.API_FIELDS) - {"provider"})
+        self.network.assert_not_called()
+
+    def test_provider_profile_status_exposes_only_supported_nonsecret_fields(self):
+        self.configure()
+        config = service._load()
+        config["provider_profiles"]["modelscope"] = {**service.DEFAULTS["modelscope"],
+            "key": "synthetic-should-never-be-exposed", "accounts": ["synthetic-account"]}
+        config["provider_profiles"]["unknown"] = {"key": "synthetic-unknown-secret"}
+        service._write_settings(config)
+        self.transform.reset_mock()
+        result = service.public_status()
+        self.assertEqual(set(result["provider_profiles"]["modelscope"]), set(service.DEFAULTS["modelscope"]))
+        self.assertNotIn("unknown", result["provider_profiles"])
+        self.assertNotIn("synthetic-should-never-be-exposed", json.dumps(result))
+        self.assertNotIn("synthetic-account", json.dumps(result))
+        self.transform.assert_not_called()
+        self.network.assert_not_called()
+
+    def test_inactive_profile_drafts_are_saved_without_changing_the_verified_active_service(self):
+        self.configure_minimax()
+        self.verify()
+        before = service.execution_snapshot()
+        key = service.key_path("minimax").read_bytes()
+        result = service.save({"provider_profiles": {
+            "modelscope": {"model": "Qwen/synthetic-inactive-profile", "thinking": False},
+            "custom": {"base_url": "https://synthetic-inactive.invalid/v1", "model": "inactive-math-model", "supports_images": True}}})
+        self.assertTrue(result["verified"])
+        self.assertEqual(service.execution_snapshot(), before)
+        self.assertEqual(service.key_path("minimax").read_bytes(), key)
+        self.assertFalse(service.key_path("modelscope").exists())
+        self.assertEqual(result["provider_profiles"]["modelscope"]["model"], "Qwen/synthetic-inactive-profile")
+        self.assertFalse(result["provider_profiles"]["modelscope"]["thinking"])
+        switched = service.save({"provider": "modelscope"})
+        self.assertEqual(switched["model"], "Qwen/synthetic-inactive-profile")
+        self.assertFalse(switched["verified"])
+        self.assertFalse(switched["thinking"])
+        self.network.assert_not_called()
+
+    def test_invalid_inactive_profiles_are_rejected_before_any_file_is_modified(self):
+        self.configure_minimax()
+        before = {target.name: target.read_bytes() for target in self.root.iterdir() if target.is_file()}
+        for profiles in (
+            {"minimax": {"model": "cannot-edit-active-here"}},
+            {"unknown": {}}, {"modelscope": {"key": "never-an-accepted-field"}},
+            {"modelscope": {"base_url": "https://other-provider.invalid/v1"}},
+            {"modelscope": {"model": "contains whitespace"}},
+            {"siliconflow": {"thinking": "true"}}, {"custom": {"reasoning_effort": "low"}},
+            {"doubao": {"model": "bad-endpoint"}}, ["not-a-mapping"], {"custom": "bad-profile"},
+        ):
+            with self.subTest(profiles=profiles), self.assertRaises(service.SettingsError):
+                service.save({"provider_profiles": profiles})
+            self.assertEqual({target.name: target.read_bytes() for target in self.root.iterdir() if target.is_file()}, before)
+        self.network.assert_not_called()
+
+    def assert_failed_storage_preserved(self, config, key_bytes, snapshot):
+        after = service._load()
+        for field in ("provider", "mode", "base_url", "model", "supports_images", "thinking", "key_revision", "on_intake", "provider_profiles"):
+            self.assertEqual(after[field], config[field], field)
+        self.assertFalse(after["verified"])
+        self.assertNotEqual(after["revision"], config["revision"])
+        for provider, original in key_bytes.items():
+            self.assertEqual(service.key_path(provider).read_bytes(), original)
+        with self.assertRaises(service.ServiceError):
+            service.require_snapshot(snapshot)
+        self.assertFalse(service._recovery_path().exists())
+
+    def test_key_write_followed_by_settings_failure_restores_old_key_and_rejects_late_results(self):
+        self.configure_minimax()
+        self.verify()
+        config = service._load()
+        snapshot = service.execution_snapshot()
+        old_key = service.key_path("minimax").read_bytes()
+        write = service._write_settings
+        count = 0
+        def fail_final(value):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise OSError("synthetic storage failure must be redacted")
+            return write(value)
+        with mock.patch.object(service, "_write_settings", side_effect=fail_final):
+            with self.assertRaisesRegex(service.SettingsError, "原密钥和设置已保留.*重新测试连接"):
+                service.save({"key": {"action": "replace", "value": "synthetic-replacement-key"},
+                              "provider_profiles": {"modelscope": {"model": "Qwen/unsaved-draft"}}})
+        self.assert_failed_storage_preserved(config, {"minimax": old_key}, snapshot)
+        self.assertFalse(any(self.root.glob(".library-ai-rollback-*")))
+        self.network.assert_not_called()
+
+    def test_partial_multi_provider_key_write_failure_restores_every_touched_key(self):
+        self.configure_minimax()
+        service.save({"keys": {"deepseek": {"action": "replace", "value": "synthetic-old-deepseek"}}})
+        self.verify()
+        config = service._load()
+        snapshot = service.execution_snapshot()
+        old_keys = {provider: service.key_path(provider).read_bytes() for provider in ("minimax", "deepseek")}
+        write = service._write_provider_key
+        def fail_second(provider, action, key):
+            if provider == "modelscope":
+                raise OSError("synthetic second provider failure")
+            return write(provider, action, key)
+        with mock.patch.object(service, "_write_provider_key", side_effect=fail_second):
+            with self.assertRaises(service.SettingsError):
+                service.save({"key": {"action": "replace", "value": "synthetic-new-minimax"}, "keys": {
+                    "deepseek": {"action": "replace", "value": "synthetic-new-deepseek"},
+                    "modelscope": {"action": "replace", "value": "synthetic-new-modelscope"}}})
+        self.assert_failed_storage_preserved(config, old_keys, snapshot)
+        self.assertFalse(service.key_path("modelscope").exists())
+        self.network.assert_not_called()
+
+    def test_feature_write_failure_restores_keys_switches_and_intake_timing(self):
+        self.configure_minimax(features={"ai_answer": True, "knowledge_tags": True}, on_intake={"answer": True, "tags": True})
+        self.verify()
+        config = service._load()
+        snapshot = service.execution_snapshot()
+        old_key = service.key_path("minimax").read_bytes()
+        old_switches = features.path().read_bytes()
+        save_features = features.save
+        def fail_after_feature_write(changes):
+            save_features(changes)
+            raise OSError("synthetic failure after feature write")
+        with mock.patch.object(features, "save", side_effect=fail_after_feature_write):
+            with self.assertRaises(service.SettingsError):
+                service.save({"key": {"action": "replace", "value": "synthetic-new-key"},
+                              "features": {"ai_answer": False, "knowledge_tags": False},
+                              "on_intake": {"answer": False, "tags": False}})
+        self.assert_failed_storage_preserved(config, {"minimax": old_key}, snapshot)
+        self.assertEqual(features.path().read_bytes(), old_switches)
+        self.assertTrue(features.enabled("ai_answer"))
+        self.assertTrue(features.enabled("knowledge_tags"))
+        self.network.assert_not_called()
+
+    def test_failed_recovery_is_redacted_and_marker_prevents_api_readiness_until_saved_again(self):
+        self.configure_minimax()
+        self.verify()
+        snapshot = service.execution_snapshot()
+        original_replace = service.os.replace
+        def fail_settings_restore(source, target):
+            if Path(source).name.startswith(".library-ai-rollback-") and Path(target) == service.path():
+                raise OSError("synthetic-sensitive-value-in-storage-error")
+            return original_replace(source, target)
+        with mock.patch.object(service, "_write_settings", side_effect=OSError("synthetic-secret-storage-message")), \
+             mock.patch.object(service.os, "replace", side_effect=fail_settings_restore):
+            with self.assertRaises(service.SettingsError) as caught:
+                service.save({"key": {"action": "replace", "value": "synthetic-new-key"}})
+        self.assertIn("未能全部恢复", str(caught.exception))
+        self.assertNotIn("synthetic", str(caught.exception))
+        self.assertNotIn("原密钥和设置已保留", str(caught.exception))
+        self.assertTrue(service._recovery_path().exists())
+        self.assertFalse(service.public_status()["verified"])
+        self.assertFalse(service.public_status()["api_ready"])
+        with self.assertRaises(service.ServiceError):
+            service.require_snapshot(snapshot)
+        with self.assertRaises(service.ServiceError):
+            service.ensure_api_ready()
+        result = service.save({"key": {"action": "keep"}})
+        self.assertFalse(service._recovery_path().exists())
+        self.assertFalse(result["api_ready"])
         self.network.assert_not_called()
 
     def test_minimax_key_is_independent_and_provider_switch_or_clear_never_reuses_other_keys(self):
@@ -343,7 +588,7 @@ class IndependentAISettingsTests(TestCase):
         self.configure(features={"ai_answer": True})
         with mock.patch.dict(os.environ, {"QB_PRIMARY_ENGINE": "assistant", "MINIMAX_API_KEY": "offline-ocr-key"}), \
                 mock.patch.object(readers, "chat", side_effect=AssertionError("OCR fallback")):
-            with self.assertRaisesRegex(service.ServiceError, "DeepSeek Pro"):
+            with self.assertRaisesRegex(service.ServiceError, "通过显式测试"):
                 service.chat("fake maths", [], kind="answer")
         self.network.assert_not_called()
 
@@ -448,7 +693,7 @@ class IndependentAISettingsTests(TestCase):
         self.assertEqual(response.status_code, 400)
         response = client.post("/api/settings/library-ai/test", data='{"confirm": true}', content_type="application/json", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 409)
-        self.assertIn("DeepSeek Pro", response.json()["error"])
+        self.assertIn("通过显式测试", response.json()["error"])
         self.network.assert_not_called()
 
     def test_explicit_probe_api_returns_only_public_capability_state(self):
@@ -683,11 +928,120 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
         with self.assertRaises(service.SettingsError):
             service.share_reading_key("minimax")
 
-    def test_only_minimax_can_be_shared(self):
+    def test_only_supported_reading_providers_can_be_shared(self):
         self.configure()  # doubao: answers only
-        self.assertEqual(service.public_status()["shareable_from_reading"], [])
+        self.assertEqual(service.public_status()["shareable_from_reading"], ["minimax", "modelscope", "siliconflow"])
         with self.assertRaises(service.SettingsError):
             service.share_reading_key("deepseek")
+
+    def test_explicit_reuse_selects_each_reading_service_but_keeps_independent_keys_and_switches(self):
+        for provider in ("minimax", "modelscope", "siliconflow"):
+            with self.subTest(provider=provider):
+                service.save({"mode": "api", "provider": "deepseek", "model": "deepseek-existing-math",
+                              "key": {"action": "replace", "value": "synthetic-existing-deepseek-key"}})
+                independent_key = service.key_path("deepseek").read_bytes()
+                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": [
+                    f"synthetic-{provider}-first", f"synthetic-{provider}-second"]}})
+                result = service.share_reading_key(provider)
+                self.assertEqual(result["provider"], provider)
+                self.assertEqual(result["mode"], "api")
+                self.assertEqual(result["model"], service.DEFAULTS[provider]["model"])
+                self.assertEqual(result["base_url"], service.DEFAULTS[provider]["base_url"])
+                self.assertTrue(result["supports_images"])
+                self.assertEqual(result["thinking"], service.DEFAULTS[provider]["thinking"])
+                self.assertTrue(result["keys"][provider]["shared_with_reading"])
+                self.assertEqual(service._key(service._load()), f"synthetic-{provider}-first")
+                self.assertFalse(result["verified"])
+                self.assertFalse(result["api_ready"])
+                self.assertEqual(result["features"], {"ai_answer": False, "knowledge_tags": False})
+                self.assertEqual(result["on_intake"], {"tags": False, "answer": False})
+                self.assertEqual(service.key_path("deepseek").read_bytes(), independent_key)
+                self.assertEqual(result["provider_profiles"]["deepseek"]["model"], "deepseek-existing-math")
+                rendered = json.dumps(result) + service.path().read_text(encoding="utf-8")
+                self.assertNotIn("synthetic-existing-deepseek-key", rendered)
+                self.assertNotIn(f"synthetic-{provider}-first", rendered)
+        self.network.assert_not_called()
+
+    def test_reuse_retains_the_saved_target_profile_and_invalidates_its_probe(self):
+        for provider in ("modelscope", "siliconflow"):
+            with self.subTest(provider=provider):
+                service.save({"mode": "api", "provider": provider, "model": "Qwen/synthetic-saved-model",
+                              "thinking": False, "supports_images": False,
+                              "key": {"action": "replace", "value": "synthetic-target-independent-key"},
+                              "features": {"knowledge_tags": True, "ai_answer": True},
+                              "on_intake": {"tags": False, "answer": True}})
+                self.network.side_effect = None
+                self.network.return_value = answer_response(text="【答案】2", thinking=False)
+                self.assertTrue(service.test_connection({"confirm": True})["verified"])
+                self.network.reset_mock()
+                self.network.side_effect = AssertionError("unexpected paid request")
+                service.save({"provider": "deepseek"})
+                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-shared-key"]}})
+                result = service.share_reading_key(provider)
+                self.assertEqual(result["model"], "Qwen/synthetic-saved-model")
+                self.assertFalse(result["thinking"])
+                self.assertFalse(result["supports_images"])
+                self.assertFalse(result["verified"])
+                self.assertEqual(result["features"], {"ai_answer": True, "knowledge_tags": True})
+                self.assertEqual(result["on_intake"], {"tags": False, "answer": True})
+                self.network.assert_not_called()
+
+    def test_shared_copy_never_follows_changes_and_keep_does_not_erase_its_source_mark(self):
+        for provider in ("minimax", "modelscope", "siliconflow"):
+            with self.subTest(provider=provider):
+                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-source-old"]}})
+                service.share_reading_key(provider)
+                initial_revision = service._load()["key_revision"]
+                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-source-new"]}})
+                result = service.save({"key": {"action": "keep"}})
+                self.assertEqual(service._key(service._load()), "synthetic-source-old")
+                self.assertEqual(service._load()["key_revision"], initial_revision)
+                self.assertTrue(result["keys"][provider]["shared_with_reading"])
+                service.credential_settings.save_actions({provider: {"action": "clear"}})
+                self.assertEqual(service._key(service._load()), "synthetic-source-old")
+                self.assertTrue(service.public_status()["key_configured"])
+        self.network.assert_not_called()
+
+    def test_failed_explicit_reuse_does_not_switch_or_overwrite_any_configuration(self):
+        self.configure()
+        before_settings = service.path().read_bytes()
+        before_key = service.key_path("doubao").read_bytes()
+        for provider in ("minimax", "modelscope", "siliconflow", "deepseek", "custom", "unknown"):
+            with self.subTest(provider=provider), self.assertRaises(service.SettingsError):
+                service.share_reading_key(provider)
+            self.assertEqual(service.path().read_bytes(), before_settings)
+            self.assertEqual(service.key_path("doubao").read_bytes(), before_key)
+        self.network.assert_not_called()
+
+    def test_http_reuse_selects_modelscope_from_an_independent_answer_service_without_secret_response(self):
+        self.configure()
+        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-http-reused-key"]}})
+        response = self.client.post("/api/settings/library-ai/share-reading-key", data=json.dumps({"provider": "modelscope"}),
+            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(response.status_code, 200, response.content)
+        result = response.json()
+        self.assertEqual(result["provider"], "modelscope")
+        self.assertFalse(result["verified"])
+        self.assertTrue(result["keys"]["doubao"]["configured"])
+        self.assertNotIn("synthetic-http-reused-key", json.dumps(result))
+        self.network.assert_not_called()
+
+    def test_failed_share_restores_target_key_and_active_service_without_reviving_old_snapshot(self):
+        self.configure_minimax()
+        service.save({"provider": "modelscope", "model": "Qwen/synthetic-original-profile",
+                      "key": {"action": "replace", "value": "synthetic-independent-modelscope"}})
+        service.save({"provider": "minimax"})
+        self.verify()
+        config = service._load()
+        snapshot = service.execution_snapshot()
+        old_keys = {provider: service.key_path(provider).read_bytes() for provider in ("modelscope", "minimax")}
+        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-shared-copy"]}})
+        with mock.patch.object(service, "_write_settings", side_effect=OSError("synthetic-private-storage-error")):
+            with self.assertRaisesRegex(service.SettingsError, "原密钥和设置已保留.*重新测试连接"):
+                service.share_reading_key("modelscope")
+        self.assert_failed_storage_preserved(config, old_keys, snapshot)
+        self.assertEqual(service.credential_settings.reveal_saved_key("modelscope", 0), "synthetic-shared-copy")
+        self.network.assert_not_called()
 
     def test_the_endpoint_is_local_only_and_never_returns_a_secret(self):
         self.save_reading_key("reading-minimax-key-one")

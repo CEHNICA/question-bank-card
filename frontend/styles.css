@@ -1177,12 +1177,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-dialog { width: min(690px, 94vw); max-height: 92vh; padding: 0; overflow: hidden; }
 .credential-dialog[open] { display: flex; flex-direction: column; }
 .credential-dialog::backdrop { backdrop-filter: none; }
-.credential-form { min-height: 0; display: flex; flex-direction: column; }
+.credential-form { min-height: 0; display: flex; flex-direction: column; flex: 1; }
 .credential-dialog > .dialog-head { flex: none; }
 .credential-tabs { flex: none; display: flex; gap: 5px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .credential-tabs button { padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 650; cursor: pointer; }
 .credential-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
 .credential-panel { min-height: 0; overflow-y: auto; background: var(--bg); }
+#credentialReadingPanel { display: flex; flex-direction: column; overflow: hidden; }
 /* 「标签与答案」挂在这一页里。外面这层是滚动容器，挂在里面的面板必须自己撑满、
    自己滚，否则面板按内容长高，「保存 API 设置」会被顶到 1366×768 这类屏幕的视口外面。 */
 #credentialAnswerPanel { display: flex; flex-direction: column; }
@@ -1190,8 +1191,21 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-panel[hidden] { display: none; }
 .credential-panel > .settings-models { margin: 0 20px 20px; background: var(--surface); }
 #credentialAnswerPanel { padding: 16px 20px; }
-.credential-body { min-height: 0; display: grid; gap: 11px; padding: 16px 20px; background: var(--bg); }
+.credential-body { min-height: 0; flex: 1; overflow-y: auto; display: grid; align-content: start; gap: 14px; padding: 16px 20px; background: var(--bg); }
 .credential-service { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.credential-service[hidden] { display: none; }
+.api-setup-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.api-setup-entry .settings-description { margin-bottom: 0; }
+.api-setup-entry > .button { flex: none; }
+.credential-step-number { display: inline-grid; place-items: center; width: 25px; height: 25px; margin-right: 5px; border-radius: 50%; color: #fff; background: var(--accent); font-size: 13px; }
+.credential-required { color: var(--accent); }
+.credential-purpose { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.credential-vision-step { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.credential-vision-step h4 { margin: 0; font-size: 16px; }
+.credential-vision-step > label { font-size: 13px; font-weight: 650; }
+.credential-vision-step > select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.credential-vision-step .credential-service { border: 0; padding: 0; }
+.credential-body > .settings-models { margin: 0; background: var(--surface); }
 .credential-service-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .credential-saved-total { margin: 8px 0 0; color: var(--accent); font-size: 13px; font-weight: 650; }
 .credential-saved-list { display: grid; gap: 5px; padding: 0; margin: 2px 0 5px; list-style: none; }
@@ -1212,6 +1226,17 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-security-note { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
 .credential-actions { position: sticky; bottom: 0; z-index: 1; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .credential-actions .settings-save-result { flex: 1; }
+@media (max-width: 480px) {
+  .api-setup-entry { align-items: flex-start; flex-direction: column; }
+  .credential-dialog { width: 96vw; max-height: 94dvh; }
+  .credential-dialog > .dialog-head { padding: 14px; }
+  .credential-tabs { padding: 0 10px; }
+  .credential-tabs button { padding: 10px 8px; font-size: 13px; }
+  .credential-body { padding: 12px; }
+  .credential-service-head { align-items: flex-start; flex-wrap: wrap; gap: 6px; }
+  .credential-actions { padding: 10px 12px; flex-wrap: wrap; }
+  .credential-actions .settings-save-result:not(:empty) { flex-basis: 100%; }
+}
 
 /* 粘贴/照片上传确认、调整页序 */
 .photo-dialog, .paste-dialog, .order-dialog, .split-dialog { width: min(980px, 96vw); max-height: 94vh; }
@@ -1329,7 +1354,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .settings-head { padding: 14px; }
   .settings-scroll { padding: 10px 10px 30px; }
   .settings-section { padding: 15px; }
-  .credential-dialog { width: 100vw; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
+  .credential-dialog { width: 100vw; max-width: none; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
   .resegment-preview-dialog { width: 100vw; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
   .resegment-preview-scroll { padding-inline: 14px; }
   .resegment-preview-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

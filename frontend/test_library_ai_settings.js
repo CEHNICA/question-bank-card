@@ -38,6 +38,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     replaceChildren(...children) { this.children = [...children]; }
     showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
+    focus() { this.focused = true; }
     trigger(name, detail = {}) { for (const fn of this.listeners.get(name) || []) fn({ preventDefault() {}, ...detail }); }
   }
   const document = { head: new Element(), body: new Element(), listeners: new Map(), events: [],
@@ -162,7 +163,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAITagsTiming").hidden, true);
   assert.equal(s.get("libraryAIAnswerTiming").hidden, true);
   assert.equal(s.get("libraryAIMode").value, "api");
-  assert.equal(s.get("libraryAIAdvanced").open, true, "answer API setup is directly visible");
+  assert.equal(s.get("libraryAIAdvanced").open, false, "Saved address/model details stay collapsed while service and active key are visible");
   assert.equal(s.get("libraryAIAPIFields").hidden, false);
   assert.equal(s.get("libraryAIAssistantHelp").hidden, true);
   assert.equal(s.get("libraryAIKey-deepseek").value, "");
@@ -173,6 +174,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAITest").disabled, true);
   assert.equal(s.settingsCalls().length, 1, "opening only reads non-secret settings");
   assert.equal(s.window.LibraryAISettings.hasUnsavedChanges(), false, "Showing the legacy assistant config as API-only does not manufacture a change");
+  assert.equal(s.get("libraryAIProvider").value, "deepseek", "Opening a legacy profile never silently switches to the recommended visual service");
+  for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
+    assert.equal(s.get(`libraryAIKeyBlock-${provider}`).hidden, provider !== "deepseek", "The active provider is the only visible credential card");
+  }
 
   const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
   for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
@@ -216,6 +221,46 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(restoredProvider.window.LibraryAISettings.hasUnsavedChanges(), false, "Returning to the saved provider restores its real profile instead of an unsaved default");
   restoredProvider.consentClose(false); restoredProvider.window.APISettings.close();
   assert.equal(restoredProvider.get("apiSettingsDialog").open, false, "A clean close does not ask for discard confirmation");
+
+  const providerDraft = setup(); Object.assign(providerDraft.current, { mode: "api", configured: true, key_configured: true,
+    ready: true, api_ready: true, verified: true });
+  await providerDraft.window.LibraryAISettings.open();
+  assert.equal(providerDraft.get("libraryAIActiveState").textContent, "已测通");
+  providerDraft.get("libraryAIBaseURL").value = "https://offline-edited-provider.example/v1"; providerDraft.get("libraryAIBaseURL").trigger("input");
+  providerDraft.get("libraryAIModel").value = "offline-unsaved-provider-model"; providerDraft.get("libraryAIModel").trigger("input");
+  providerDraft.get("libraryAIThinking").checked = false; providerDraft.get("libraryAIThinking").trigger("input");
+  providerDraft.get("libraryAIKey-deepseek").value = "offline-provider-retained-key"; providerDraft.get("libraryAIKey-deepseek").trigger("input");
+  providerDraft.get("libraryAIProvider").value = "modelscope"; providerDraft.get("libraryAIProvider").trigger("change");
+  assert.equal(providerDraft.get("libraryAIActiveState").textContent, "未保存选择", "The next provider must not inherit the previous provider's successful test state");
+  assert.equal(providerDraft.get("libraryAIKeyBlock-modelscope").hidden, false); assert.equal(providerDraft.get("libraryAIKeyBlock-deepseek").hidden, true);
+  providerDraft.get("libraryAIProvider").value = "deepseek"; providerDraft.get("libraryAIProvider").trigger("change");
+  assert.equal(providerDraft.get("libraryAIBaseURL").value, "https://offline-edited-provider.example/v1", "Returning to a service preserves its unsaved address draft");
+  assert.equal(providerDraft.get("libraryAIModel").value, "offline-unsaved-provider-model", "Returning to a service preserves its unsaved model draft");
+  assert.equal(providerDraft.get("libraryAIThinking").checked, false); assert.equal(providerDraft.get("libraryAIKey-deepseek").value, "offline-provider-retained-key");
+  assert.equal(providerDraft.window.LibraryAISettings.hasUnsavedChanges(), true);
+  assert.equal(providerDraft.calls.length, 1, "Switching providers retains local drafts without a secret read or implicit save/test");
+  providerDraft.window.LibraryAISettings.discard();
+  assert.equal(providerDraft.get("libraryAIModel").value, providerDraft.current.model, "Discard restores the saved model rather than a cached unsaved provider draft");
+  assert.equal(providerDraft.get("libraryAIKey-deepseek").value, "");
+
+  const inactiveProfile = setup(); inactiveProfile.current.mode = "api";
+  await inactiveProfile.window.LibraryAISettings.open();
+  inactiveProfile.get("libraryAIBaseURL").value = "https://offline-inactive.example/v1"; inactiveProfile.get("libraryAIBaseURL").trigger("input");
+  inactiveProfile.get("libraryAIModel").value = "offline-inactive-model"; inactiveProfile.get("libraryAIModel").trigger("input");
+  inactiveProfile.get("libraryAIThinking").checked = false; inactiveProfile.get("libraryAIThinking").trigger("input");
+  inactiveProfile.get("libraryAIProvider").value = "modelscope"; inactiveProfile.get("libraryAIProvider").trigger("change");
+  inactiveProfile.get("libraryAIKey-modelscope").value = "offline-new-selected-key"; inactiveProfile.get("libraryAIKey-modelscope").trigger("input");
+  inactiveProfile.response((_url, payload) => ({ ...inactiveProfile.current, ...payload }));
+  inactiveProfile.get("libraryAISettingsForm").trigger("submit"); await flush();
+  const inactiveSave = inactiveProfile.calls.at(-1).payload;
+  assert.equal(inactiveSave.provider, "modelscope");
+  assert.deepEqual(inactiveSave.provider_profiles, { deepseek: { base_url: "https://offline-inactive.example/v1", model: "offline-inactive-model",
+    supports_images: false, thinking: false, reasoning_effort: "high" } }, "Saving another selected service persists real inactive profile edits in the same request");
+  assert.deepEqual(inactiveSave.key, { action: "replace", value: "offline-new-selected-key" });
+  assert.equal(Object.hasOwn(inactiveSave.provider_profiles, "minimax"), false, "An untouched service profile is not overwritten by defaults");
+  inactiveProfile.get("libraryAIProvider").value = "deepseek"; inactiveProfile.get("libraryAIProvider").trigger("change");
+  assert.equal(inactiveProfile.get("libraryAIBaseURL").value, "https://offline-inactive.example/v1");
+  assert.equal(inactiveProfile.get("libraryAIModel").value, "offline-inactive-model", "The server-confirmed inactive profile remains available after the local draft cache is reset");
 
   const switchStyle = unchanged.document.head.children[0].textContent, switchMarkup = unchanged.get("libraryAISettingsDialog").html;
   assert.match(switchStyle, /\.library-ai-switch\{[^}]*display:inline-flex;[^}]*width:fit-content;[^}]*max-width:100%;[^}]*justify-self:start;/);
@@ -308,6 +353,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   s.get("libraryAIProvider").trigger("change");
   assert.equal(s.get("libraryAIKey-custom").value, "", "a newly typed key stays in the service it was typed for");
   assert.equal(s.get("libraryAIKey-deepseek").value, "previous-provider-unsaved-key", "switching service does not throw away another service's pending key");
+  assert.equal(s.get("libraryAIKeyBlock-custom").hidden, false); assert.equal(s.get("libraryAIKeyBlock-deepseek").hidden, true);
   assert.equal(s.get("libraryAIKeyState-custom").textContent, "当前使用 · 未保存");
   assert.equal(s.get("libraryAIKeyState-deepseek").textContent, "未保存", "the service that is no longer in use is still reported on its own");
   s.get("libraryAIBaseURL").value = "https://offline.example/v1";
@@ -325,6 +371,8 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "a failed save also drops the other service's pending replacement");
   assert.match(s.get("libraryAIResult").textContent, /格式无效.*新密钥未保存.*重新填写/);
   assert.equal(s.get("libraryAISave").disabled, true, "a failed replacement cannot become a silent keep on retry");
+  assert.equal(s.get("libraryAIKey-custom").disabled, false, "An unconfirmed replacement must remain re-enterable instead of trapping the user");
+  assert.equal(s.get("libraryAIKey-deepseek").disabled, false, "Hidden providers' failed replacements remain re-enterable after selection");
   const failedSaveCount = s.calls.length;
   s.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.equal(s.calls.length, failedSaveCount, "retry without re-entering a failed replacement never posts keep");
@@ -348,7 +396,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   legacy.response((_url, payload) => ({ ...legacy.current, configured: true, key_configured: true, key_count: 1, provider: "doubao",
     base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "ep-existing-offline", features: payload?.features || legacy.current.features }));
   await legacy.window.LibraryAISettings.open();
-  assert.equal(legacy.get("libraryAIAdvanced").open, true, "existing API settings are directly visible without rewriting storage");
+  assert.equal(legacy.get("libraryAIAdvanced").open, false, "Existing API address/model remain available in optional details without rewriting storage");
   assert.equal(legacy.get("libraryAIModel").value, "ep-existing-offline");
   legacy.get("libraryAITags").checked = true;legacy.get("libraryAITags").trigger("input");
   legacy.get("libraryAISettingsForm").trigger("submit");await flush();

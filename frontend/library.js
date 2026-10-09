@@ -364,7 +364,7 @@
     box.hidden = !tools.length;
     if (tools.length) {
       if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，每道题一次调用，会用到服务额度："), ...tools);
-      else box.append(node("span", "helper", "请到“设置 → 服务与密钥”配置并测试答题 API。"));
+      else box.append(node("span", "helper", "请到“设置 → API 配置”配置并测试答题 API。"));
     }
   }
 
@@ -372,7 +372,7 @@
     try {
       const configurationResponse = await fetch("/api/settings/library-ai", { cache: "no-store" });
       const configuration = await configurationResponse.json();
-      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请到“设置 → 服务与密钥”配置并测试答题 API 后再生成。");
+      if (!configurationResponse.ok || configuration.mode !== "api" || configuration.api_ready !== true) throw new Error("请到“设置 → API 配置”配置并测试答题 API 后再生成。");
       const response = await fetch("/api/library/jobs", {
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
         body: JSON.stringify({ kind, ...target, api_only: true })
@@ -385,7 +385,7 @@
         : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
       load({ quiet: true });
     } catch (error) {
-      toast(`${error.message || "没能排上队"} 请到“设置 → 服务与密钥”检查服务商、密钥和模型。`, "error");
+      toast(`${error.message || "没能排上队"} 请到“设置 → API 配置”检查服务商、密钥和模型。`, "error");
     }
   }
 
@@ -884,7 +884,7 @@
     Object.entries(item.job_errors || {})
       .filter(([kind]) => (kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer))
       .forEach(([kind, message]) => box.append(node("p", "library-job-error",
-        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → 服务与密钥”检查服务商、密钥和模型。`)));
+        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → API 配置”检查服务商、密钥和模型。`)));
     return box.childNodes.length ? box : null;
   }
 

@@ -9,7 +9,7 @@ const dom = require("./credential-test-dom.js");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
-assert.match(html, /id="settingsCredentialOpen"[^>]*>打开密钥窗口<\/button>/);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>配置 API<\/button>/);
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
 
@@ -29,7 +29,7 @@ for (const provider of ["deepseek", "minimax", "doubao", "custom"]) {
   assert.match(aiSettings, new RegExp(`id="libraryAIDelete-\\$\\{provider\\}" class="button small credential-delete" type="button" aria-label="删除 \\$\\{providerNames\\[provider\\]\\} 密钥" hidden>删除密钥</button>`));
   assert.match(aiSettings, new RegExp(`id="libraryAIKeyState-\\$\\{provider\\}" class="api-state missing">未保存</span>`));
 }
-assert.match(aiSettings, /class="credential-service library-ai-key-block" data-library-service="\$\{provider\}"/);
+assert.match(aiSettings, /id="libraryAIKeyBlock-\$\{provider\}" class="credential-service library-ai-key-block" data-library-service="\$\{provider\}" hidden/);
 assert.match(aiSettings, /const KEY_NOTE = "已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下面只填写新密钥；留空就保留原来的配置。"/);
 assert.match(aiSettings, /<p id="libraryAIKeyNote" class="credential-storage-note" role="status" aria-live="polite">\$\{KEY_NOTE\}<\/p>/);
 assert.doesNotMatch(aiSettings, /id="libraryAIClearKey"/, "删除改成每家自己的按钮，不再用一个勾来清除正在用的那一家");

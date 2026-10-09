@@ -19,8 +19,8 @@ assert.doesNotMatch(panelJs, /if \(isAPI\(\)\) \$?\("libraryAIAdvanced"\)\.open 
 assert.doesNotMatch(panelJs, /libraryAIAdvanced"\)\.open = body\.mode === "api" \|\|/,
   "也不再看 mode 强行展开");
 assert.match(panelJs, /function syncAdvanced\(apiReady\)/, "改成按需展开");
-assert.match(panelJs, /if \(!apiReady && !state\.advancedTouched\) \$?\("libraryAIAdvanced"\)\.open = true/,
-  "只有 API 没配好时才替用户展开");
+assert.match(panelJs, /if \(!apiReady && !state\.advancedTouched && \(!state\.current\?\.model \|\| !state\.current\?\.base_url\)\) \$?\("libraryAIAdvanced"\)\.open = true/,
+  "未配好且地址或模型缺失时才替用户展开；未测试但已有配置继续保持简洁");
 assert.match(panelJs, /ontoggle = \(event\) => \{ state\.advancedTouched = event\.isTrusted; \}/,
   "用户自己开合过就不再插手，并且要分清是他点的还是代码设的");
 
@@ -28,7 +28,7 @@ assert.match(panelJs, /ontoggle = \(event\) => \{ state\.advancedTouched = event
 // 1366×768 上「保存 API 设置」会掉到 941px 处，用户看不到。
 assert.match(panelJs, /\.library-ai-panel\{min-width:0;display:flex;flex-direction:column;height:100%;min-height:0\}/,
   "挂载在设置页里的面板要自己撑满、自己滚");
-assert.match(panelJs, /\.library-ai-panel \.library-ai-body\{padding:0;background:none;gap:24px;overflow:auto;min-height:0\}/,
+assert.match(panelJs, /\.library-ai-panel \.library-ai-body\{padding:0;background:none;gap:\d+px;overflow:auto;min-height:0\}/,
   "正文区在挂载模式下也得保留 auto，不能被改回 visible");
 assert.match(panelJs, /\.library-ai-form\{display:flex;flex-direction:column;min-height:0;flex:1\}/,
   "表单要占满面板，底栏才有理由钉在原地");
