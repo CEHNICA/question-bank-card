@@ -1817,12 +1817,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 处理记录集中放在设置中；需要立即处理的失败和结构问题仍保留主界面提示。
     $("notesBox").hidden = true;
     $("notesList").replaceChildren(...notes.map((note) => el("li", "", note)));
-    $("manualProcessing").hidden = structureBlocked || !paper.pages?.length;
     $("resegment").hidden = !["ready", "failed"].includes(paper.status);
     const canReorder = Boolean(paper.photos) && (paper.pages || []).length > 1 && ["ready", "failed", "needs_grouping"].includes(paper.status);
     $("pageOrder").hidden = !canReorder;
     syncTrashControls();
-    $("toolsMenu").hidden = $("manualProcessing").hidden && $("resegment").hidden && $("pageOrder").hidden && $("questionTrash").hidden;
     const check = $("orderCheck");
     const hasConflict = Boolean(paper.structure_conflict);
     check.hidden = !(hasConflict || (paper.photos && paper.photos.check));
@@ -2871,12 +2869,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   $("lensToggle").addEventListener("click", (event) => { setLens(!state.lens); releaseToggleFocus(event); });
 
-  // 「工具」这个折叠菜单同理：用鼠标点开再点收，焦点会留在它的 summary 上，
-  // 下一按 Enter 就变成「把菜单重新拉开」而不是通过这道题。关掉时交回题卡。
-  $("toolsMenu").addEventListener("toggle", (event) => {
-    if ($("toolsMenu").open) return;
+  // 试卷操作菜单关闭后把键盘焦点交回当前题卡，避免连续审核时焦点停在菜单按钮上。
+  $("paperMenu").addEventListener("toggle", () => {
+    if ($("paperMenu").open) { renderSettingsTask(); return; }
     const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
-    if (card && document.activeElement === $("toolsMenu").querySelector("summary")) card.focus({ preventScroll: true });
+    if (card && document.activeElement === $("paperMenu").querySelector("summary")) card.focus({ preventScroll: true });
   });
 
   document.addEventListener("pointermove", (event) => {
@@ -4130,7 +4127,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else setCurrent(q.id);
   }
 
-  // 1.12.5：工具菜单里的「一键通过所有题目」。语义是"把能通过的题一次入库，
+  // 1.12.5：试卷操作里的批量审核。只把符合条件的题入库，
   // 过不了的逐条说明原因"——不静默跳过，也不谎称全做完。
   function showApproveResult({ approved, problems, skipped }) {
     const list = $("approveResultList");
@@ -4155,11 +4152,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const waiting = state.questions.filter((question) => !isDone(question)).length;
     if (!waiting) { toast("这一卷没有待通过的题", "error"); return; }
     if (!(await confirmDialog({
-      title: "一键通过所有题目？",
+      title: "批量审核这份试卷？",
       text: `把这一卷里能通过的题一次入库，还有 ${waiting} 道要看。过不了的题不会被硬标通过，会在结果里逐条说明原因。`,
-      ok: "通过能通过的"
+      ok: "通过能通过的题"
     }))) return;
-    $("toolsMenu").open = false;
+    $("paperMenu").open = false;
     state.approveAllBusy = true;
     syncTrashControls();
     try {
@@ -4390,7 +4387,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function openQuestionTrash() {
     if (!state.paperId) return;
-    $("toolsMenu").open = false;
+    $("paperMenu").open = false;
     if ($("settingsDialog").open) $("settingsDialog").close();
     $("trashTitle").textContent = `${paperDisplayName(state.paper)} · 题卡回收站`;
     $("trashDialog").showModal();
@@ -5129,9 +5126,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     syncTrashControls();
     if (!paper) return;
-    $("viewOriginalPaper").disabled = !paper.pages?.length;
-    $("viewOriginalPaper").title = paper.pages?.length ? "查看完整原卷，支持缩放和拖动"
-      : "原卷页面尚未生成，处理完成后即可查看";
     $("settingsTaskStatus").textContent = paper.status_label || paperSummary(paper);
     const active = ACTIVE_STATUS.has(paper.status);
     const hasTrash = (Number(paper.trash_count) || 0) > 0;
@@ -5148,7 +5142,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsManualFallback").textContent = switchingManual ? "正在停止并准备原卷…" : "停止 MinerU，打开切题与校正";
     $("settingsStop").disabled = changingCutMode;
     $("settingsReparse").disabled = changingCutMode;
-    $("manualProcessing").disabled = $("pageManualCut").disabled = changingCutMode;
+    $("viewOriginalPaper").disabled = !paper.pages?.length || changingCutMode;
+    $("viewOriginalPaper").title = changingCutMode ? "正在准备原卷…"
+      : paper.pages?.length ? "打开原卷，查看题框、补题或调整范围"
+        : "原卷页面尚未生成，处理完成后即可查看";
+    $("pageManualCut").disabled = changingCutMode;
     // 1.12.6: the manual switch lives only in 试卷操作. A prominent button beside
     // the status invited clicks, but the action abandons AI cutting and restarts
     // by hand, so the menu is the honest place for it.
@@ -5318,7 +5316,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.autoExpand = event.target.checked;
     writePref("qb-auto-expand", state.autoExpand ? "1" : "0");
   });
-  $("paperMenu").addEventListener("toggle", () => { if ($("paperMenu").open) renderSettingsTask(); });
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
   $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
   $("settingsStop").addEventListener("click", () => closeSettingsThen(stopPaper));
@@ -6714,7 +6711,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     anchorCanvasZoom($("pageStage"), $("pageStage").querySelector(".stage-surface"), applyPageZoom, pointer);
   }
 
-  $("viewOriginalPaper").addEventListener("click", () => closeSettingsThen(() => openPageDialog("view")));
+  $("viewOriginalPaper").addEventListener("click", () => {
+    $("paperMenu").open = false;
+    closeSettingsThen(openManualCut);
+  });
   $("pageZoomFit").addEventListener("click", () => { if (requestPageZoom("fit")) $("pageStage").focus({ preventScroll: true }); });
   $("pageZoomWidth").addEventListener("click", () => { if (requestPageZoom("width")) $("pageStage").focus({ preventScroll: true }); });
   $("pageZoomIn").addEventListener("click", () => { zoomPageBy(1.25); $("pageStage").focus({ preventScroll: true }); });
@@ -7942,11 +7942,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else if (action === "delete" && !dialog.sketch && dialog.selected !== null && dialog.selected !== undefined) removeBox(dialog.selected);
   }, true);
 
-  $("manualProcessing").addEventListener("click", () => {
-    $("toolsMenu").open = false;
-    openManualCut();
-  });
-
   const manualSwitches = new Set();
   const manualSwitchRequests = new Map();
 
@@ -8163,7 +8158,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function resegmentPaper() {
-    $("toolsMenu").open = false;
+    $("paperMenu").open = false;
     const paperId = state.paperId;
     if (!paperId) return;
     resetResegmentPreview(paperId);
@@ -8591,7 +8586,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("回收站里还有题卡；请先恢复这些题卡，再调整页序", "error");
       return;
     }
-    $("toolsMenu").open = false;
+    $("paperMenu").open = false;
     pageOrder.order = state.paper.pages.map((page) => page.page_idx);
     renderOrderList();
     $("orderDialog").showModal();

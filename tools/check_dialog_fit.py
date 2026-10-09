@@ -128,9 +128,9 @@ def close_all(page) -> None:
     page.wait_for_timeout(200)
 
 
-def open_tools(page) -> None:
-    summary = page.locator("#toolsMenu > summary")
-    if summary.count() and not page.evaluate("!!document.querySelector('#toolsMenu[open]')"):
+def open_paper_operations(page) -> None:
+    summary = page.locator("#paperMenu > summary")
+    if summary.count() and not page.evaluate("!!document.querySelector('#paperMenu[open]')"):
         summary.first.click()
         page.wait_for_timeout(200)
 
@@ -142,7 +142,7 @@ def triggers(page) -> list[tuple[str, str]]:
     out.append(("快捷键说明", "KEY:?"))
     if page.locator("#archivedPapersButton").is_visible():
         out.append(("已归档的试卷", "#archivedPapersButton"))
-    open_tools(page)
+    open_paper_operations(page)
     if page.locator("#questionTrash").is_visible():
         out.append(("题卡回收站", "#questionTrash"))
     close_all(page)
@@ -178,7 +178,7 @@ def run_review(page, width: int, height: int) -> None:
             page.locator("body").click(position={"x": 5, "y": 5})   # 先把焦点还给页面
             page.keyboard.press(how.split(":", 1)[1])
         else:
-            open_tools(page)
+            open_paper_operations(page)
             target = page.locator(how).first
             target.scroll_into_view_if_needed()
             page.wait_for_timeout(150)

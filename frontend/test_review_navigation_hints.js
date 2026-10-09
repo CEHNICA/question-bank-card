@@ -112,7 +112,7 @@ const menu = html.slice(html.indexOf('id="paperMenu"'), html.indexOf('id="paperS
 assert.match(menu, /id="paperContinueAi"/);
 assert.match(menu, /id="settingsManualFallback"/);
 assert.equal((html.match(/id="paperContinueAi"/g) || []).length, 1, "The existing guarded AI continuation has one menu entry");
-// 1.12.5：approve-green 有了入口，但只有工具菜单里一个「一键通过所有题目」，
+// 1.12.5：approve-green 只有一个「试卷操作」入口，
 // 而且它必须把过不去的题逐条说出来——不许出现第二个"全部通过"的按钮。
 const approveEntries = (html.match(/approve-green/g) || []).length;
 assert.equal(approveEntries, 0, "approve-green 只经脚本调用，不出现在静态标记里");

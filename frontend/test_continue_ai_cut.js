@@ -85,7 +85,7 @@ test("confirmation and submission lock repeat clicks and conflicting manual/stop
   const h = harness({ confirm: () => confirmGate.promise, api: async () => { await requestGate.promise; return { paper: paper({ parse_mode: "mineru", status: "queued" }), action: "queued_mineru", changed: true }; } });
   const first = h.context.continueAiCut(); await settle();
   assert.equal(h.confirmations.length, 1); assert.equal(await h.context.continueAiCut(), false);
-  for (const id of ["paperContinueAi", "settingsStop", "settingsReparse", "manualProcessing", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
+  for (const id of ["paperContinueAi", "settingsStop", "settingsReparse", "viewOriginalPaper", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
   assert.deepEqual(h.stageEntryStates, [true], "Existing cutting-stage actions must be redrawn while confirmation is pending");
   confirmGate.resolve(true); await settle(); assert.equal(h.requests.length, 1); assert.equal(await h.context.continueAiCut(), false);
   requestGate.resolve(); await first; assert.equal(h.requests.length, 1); assert.equal(h.context.aiBusy.size, 0);

@@ -96,7 +96,7 @@ function harness(options = {}) {
   const pending = harness({ api: () => new Promise((resolve) => { release = resolve; }) });
   const first = pending.context.switchToManual(null, { stopMinerU: true });
   assert.equal(pending.$("settingsManualFallback").disabled, true);
-  for (const id of ["settingsStop", "settingsReparse", "manualProcessing", "pageManualCut"]) assert.equal(pending.$(id).disabled, true);
+  for (const id of ["settingsStop", "settingsReparse", "viewOriginalPaper", "pageManualCut"]) assert.equal(pending.$(id).disabled, true);
   assert.equal(pending.$("paperMenu").open, true, "The in-progress switch is shown by reopening 试卷操作");
   assert.match(pending.$("settingsManualFallback").textContent, /正在停止并准备/);
   assert.equal(await pending.context.switchToManual(null, { stopMinerU: true }), false);

@@ -217,6 +217,21 @@ def browser_check(output, port):
                 page.wait_for_load_state("networkidle")
 
         try:
+            # Whole-paper actions are grouped in one menu, without restoring
+            # the removed duplicate toolbar menu.
+            page.goto(base + "/?paper=" + fixture["paper"])
+            page.wait_for_load_state("networkidle")
+            page.locator("#paperMenu > summary").click()
+            for selector in ("#viewOriginalPaper", "#resegment", "#pageOrder", "#questionTrash", "#approveAllGreen"):
+                expect(page.locator(selector)).to_be_attached()
+            expect(page.locator("#paperMenu")).to_contain_text("原卷与题卡")
+            expect(page.locator("#paperMenu")).to_contain_text("批量审核")
+            expect(page.locator("#approveAllGreen")).to_contain_text("批量通过可入库题目")
+            assert page.locator("#toolsMenu").count() == 0
+            page.screenshot(path=str(output / "paper-operations-menu.png"))
+            page.locator("#paperMenu > summary").click()
+            report["passed"].append("paper actions are grouped in the title menu with no duplicate toolbar menu")
+
             # Search is an overlay over the loaded paper, not a card sort or
             # recognition request. The fixture includes equivalent sin forms,
             # repeated question numbers across groups and a blank original-image question.
@@ -1013,7 +1028,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert fixture["first"] not in {q["id"] for q in paper_data()["questions"]}
     assert len(report["writes"]) == delete_writes + 3
     page.locator("#pageDialogClose").click()
-    page.locator("#toolsMenu > summary").click()
+    page.locator("#paperMenu > summary").click()
     page.locator("#questionTrash").click()
     expect(page.locator("#trashDialog")).to_be_visible()
     batch = page.locator("#trashList .trash-batch:not(.restored)").filter(has_text=delete_question_before["stem"])

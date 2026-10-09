@@ -45,7 +45,7 @@ assert.match(js, /\/api\/papers\/\$\{paperId\}\/read-cut-questions/);
 assert.match(js, /body: \{ revision: q\.content_revision \}, signal/);
 assert.doesNotMatch(js, /if \(q\.body_mode === "source_image"\) openPageDialog\("regions", q\); else rereadQuestion/);
 assert.doesNotMatch(html, /id="addQuestion"|漏了一题？手动框出|从原卷补题<\/button>/);
-assert.match(html, /id="manualProcessing"[^>]*>切题与校正<\/button>/);
+assert.match(html, /id="viewOriginalPaper"[^>]*>切题与校正<\/button>/);
 assert.match(html, /id="cutReadingStage"/);
 assert.match(html, /id="cutReadingSettings" href="\/settings#services"/);
 assert.match(js, /settingsGeneral: "services"/);

@@ -236,9 +236,9 @@ def run(pg):
     after = where()
     check("退出全屏后按 Enter 不会又全屏", not after["fs"], after)
     check("按 Enter 换到了下一道题（等于通过）", after["id"] != before["id"], (before, after))
-    for tid, name in [("#focusToggle", "专注"), ("#lensToggle", "放大镜"), ("#toolsMenu summary", "工具")]:
+    for tid, name in [("#focusToggle", "专注"), ("#lensToggle", "放大镜"), ("#paperMenu summary", "试卷操作")]:
         pg.click(tid); pg.wait_for_timeout(500)
-        if tid == "#toolsMenu summary":
+        if tid == "#paperMenu summary":
             pg.click(tid); pg.wait_for_timeout(500)
         mid = where()
         pg.keyboard.press("Enter"); pg.wait_for_timeout(1400)

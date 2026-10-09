@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const App = require("./app.js");
 const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
 const start = source.indexOf('  $("pageDialog").addEventListener("keydown", (event) => {');
-const end = source.indexOf('  $("manualProcessing").addEventListener', start);
+const end = source.indexOf('  const manualSwitches = new Set();', start);
 assert.ok(start > 0 && end > start);
 const listeners = new Map(), calls = [];
 const stage = { classList: { add: (value) => calls.push(["class", value]) } };

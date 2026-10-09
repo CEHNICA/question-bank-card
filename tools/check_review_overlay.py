@@ -183,9 +183,9 @@ def run(page) -> None:
             page.wait_for_timeout(300)
             where = "顶部" if fraction == 0 else ("中段" if fraction == 0.5 else "最底")
 
-            for selector, name in (("#paperMenu > summary", "试卷操作"), ("#toolsMenu > summary", "工具")):
-                if page.locator(selector).count():
-                    check_menu(page, page.locator(selector).first, f"{name} @ {where}")
+            selector = "#paperMenu > summary"
+            if page.locator(selector).count():
+                check_menu(page, page.locator(selector).first, f"试卷操作 @ {where}")
 
             bad_total = 0
             for index in range(cards):

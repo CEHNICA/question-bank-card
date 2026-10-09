@@ -1095,7 +1095,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .paper-menu { position: relative; }
 .paper-menu > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; }
 .paper-menu > summary::-webkit-details-marker { display: none; }
-.paper-menu-panel { left: 0; right: auto; min-width: 260px; max-width: min(380px, 90vw); }
+.paper-menu-panel { left: 0; right: auto; min-width: 260px; max-width: min(380px, 90vw); max-height: min(72vh, 680px); overflow-y: auto; overscroll-behavior: contain; }
 .paper-menu-panel .menu-note { margin: 0; }
 .paper-menu-panel .link-button.danger { color: var(--red); }
 .paper-menu-panel .link-button:disabled { color: var(--faint); cursor: not-allowed; background: none; }
