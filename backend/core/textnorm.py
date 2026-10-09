@@ -397,6 +397,41 @@ def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
     return probe
 
 
+# 印刷解答的起点。全库量过：带冒号的是「解：」71 处、「证明：」11 处（只在八下）、
+# 「答：」4 处（只在胜利初四答案版本）。只认这三种。
+# 「解析」「解答」两种写法全库一次没出现过，不写进去。
+# ⚠️ 【】这层壳也不认：`【答案】`24 + `【详解】`16 + `【分析】`25 = 65 处全是印刷解答，
+# 但**一处都没进过任何卡的题干**（扫描 tmp/scan_bracket_two_families.py）；
+# 同一副壳还有 `【深入探究】`【问题背景】`【初步感知】`【运用】`【点睛】` 9 处小节标题，
+# 其中 4 处真的进了题干。认它就换来 0 收益 + 一批误报，不认。
+SOLUTION_LABEL_RE = re.compile(r"^\s*(?:解|证明|答)\s*[：:]")
+
+
+def printed_solution_in_stem(printed_anchor: str, stem: str) -> str | None:
+    """题干里混进了别处那道题的印刷解答时，返回那一行的开头，否则 None。
+
+    要分开两件长得一样的事：
+
+      * ``1.证明：对角线相等的菱形是正方形。`` —— 题干本身就是一道证明题，
+        「证明：」是它的动词，不是答案。八下有 5 张这样，守门放过它们。
+      * ``4. 如图，在菱形 ABCD 中…有多少个等腰三角形？`` 后面跟着
+        ``证明：∵ 四边形 ABCD 是平行四边形，∴ …`` —— 那是别的题的印刷解答，
+        成品卷上学生做这道题时答案就摆在题后面。
+
+    守门：锚点那一行本身带解答标签时，题干里出现的就不算混进。防的是答案版
+    把卡锚在解答上那种形状 —— 库里目前 0 样本（那 4 处「答：」都不是任何卡的锚点），
+    留着是为了它真出现时不误报，不是靠它现在挡住什么。
+    """
+    for line in str(printed_anchor or "").splitlines():
+        body = _OTHER_QUESTION_NUMBER.sub("", line, count=1)
+        if SOLUTION_LABEL_RE.match(body):
+            return None
+    for line in str(stem or "").splitlines():
+        if SOLUTION_LABEL_RE.match(line):
+            return line.strip()[:40]
+    return None
+
+
 def clean_stem(stem: str, number: int | None = None) -> str:
     """去掉模型偶尔带上的题号、例题标号和分值。"""
     text = strip_example_label(str(stem or "").strip()).strip()

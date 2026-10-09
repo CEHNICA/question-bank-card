@@ -4386,6 +4386,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(
             f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
             f"卡上可能是另一道题；请对照原书确认这张卡的范围和内容")
+    if printed and (solution := textnorm.printed_solution_in_stem(
+            printed, final.get("stem") or "")):
+        # 印刷解答跟在题后面，学生做卷子时答案就摆在眼前。
+        flags.append(
+            f"题干里混进了印刷的解答（{solution}…），它可能属于别的题；"
+            f"请对照原书确认该不该留在这里")
     if (merged := textnorm.merged_question_number(final.get("stem"), number)) is not None:
         # 两道题并成一张卡时，卡上只有一道题号、却是绿的。只提示，不替用户拆。
         flags.append(
