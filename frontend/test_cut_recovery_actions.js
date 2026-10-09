@@ -53,7 +53,7 @@ const quotaPause = { ...failedWithAParse, recoverable_pause: true, error: "识�
   assert.equal(recoverable.buttons[0].kind, "small primary");
   assert.ok(!recoverable.buttons.some((b) => b.label === "重试自动处理"),
     "re-uploading the original would spend cloud quota a second time for nothing");
-  assert.ok(recoverable.buttons.some((b) => b.label === "改为手工切题"), "manual cutting stays available");
+  assert.ok(recoverable.buttons.some((b) => b.label === "准备原卷并切题"), "manual cutting stays available");
 
   // 2. 错误行说的是“本地为什么没切出来”，不是把“处理失败”再抄一遍。
   assert.notEqual(recoverable.text, "自动切题没有切出任何题目。");

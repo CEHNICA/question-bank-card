@@ -37,16 +37,16 @@ function harness({ reader = "Selected vision service", failure = false, question
   const complete = harness();
   await complete.context.enterCutReadingStage("new-paper", [2]);
   assert.equal(complete.nodes.pageDialog.open, false);
-  assert.deepEqual(complete.requests, [{ url: "/api/papers/new-paper/read-cut-questions", method: "POST",
-    body: { question_ids: [2], revisions: { 2: 5 }, revision: 3 } }], "Completion reads only saved IDs and their current revisions");
+  assert.deepEqual(complete.requests, [], "Finishing manual cutting never submits AI reading");
   assert.equal(complete.context.cutReadingRequests.size, 0);
+  assert.equal(complete.context.newUploadReadContinuations.has("new-paper"), false, "Entering the explicit review stage cancels an unsubmitted upload continuation");
+  assert.match(complete.messages.join(" "), /主动选择 AI 识读/);
   assert.doesNotMatch(source, /采用此读法|\/apply-reading|查看待确认读法/);
 
   const missing = harness({ failure: true });
   const original = JSON.stringify(missing.context.state.questions);
   await missing.context.enterCutReadingStage("new-paper", [1, 2]);
-  assert.equal(missing.requests.length, 1);
-  assert.match(missing.context.cutReadingErrors.get("new-paper"), /设置 → 读题服务/);
+  assert.equal(missing.requests.length, 0, "A missing AI service is irrelevant until the user chooses reading");
   assert.equal(JSON.stringify(missing.context.state.questions), original, "A missing service must keep all saved crop evidence");
   assert.equal(missing.nodes.pageDialog.open, false);
 

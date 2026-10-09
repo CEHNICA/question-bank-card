@@ -33,16 +33,16 @@ for (const key of ["library", "basket", "export"]) {
     "the review guide cannot invent a completed bank/export action");
 }
 for (const lesson of TEACH_LESSONS) {
-  const restored = restoreTeaching({ paper: "demo", version: 3, lesson: lesson.key, completed: true });
+  const restored = restoreTeaching({ paper: "demo", version: 4, lesson: lesson.key, completed: true });
   assert.equal(TEACH_LESSONS[restored.index].key, lesson.key);
   assert.equal(restored.completed, lesson.key);
   assert.equal(restored.migrated, false);
   const progress = teachingProgress(restored.index);
   assert.ok(progress.current >= 1 && progress.current <= progress.total);
 }
-for (const legacy of [{ paper: "demo", version: 2, lesson: "library", completed: true }, { paper: "demo", index: 4 }]) {
+for (const legacy of [{ paper: "demo", version: 3, lesson: "library", completed: true }, { paper: "demo", index: 4 }]) {
   const restored = restoreTeaching(legacy);
-  assert.equal(TEACH_LESSONS[restored.index].key, "cut");
+  assert.equal(TEACH_LESSONS[restored.index].key, legacy.lesson || "cut", "valid lesson position survives wording/shortcut updates");
   assert.equal(restored.completed, null, "legacy explanations do not complete the new practical course");
   assert.equal(restored.migrated, true);
 }

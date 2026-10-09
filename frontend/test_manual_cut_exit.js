@@ -51,6 +51,7 @@ function harness(options = {}) {
     QBManualCrop: App, QBProgress: App, QBRegionWait: App, editGuard: App.createEditGuard(),
     newUploadReadContinuations: new Set(), TYPE_NAMES: { unknown: "题型未定" },
     window: { innerWidth: 1100 }, lens: new Node(), document: { createTextNode: text => text },
+    saveReviewState() {}, readReviewState: () => null,
     el: tag => { const node = new Node(); node.tag = tag; return node; },
     cancelFigureSketch() { dialog.sketch?.cancel(); },
     freezeCropDraftClassification() {}, updateCropDraftAttention() {}, clearCropDraftAttention: () => false,
@@ -93,7 +94,7 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); a
   assert.equal(clean.context.dialog.session, session + 1, "A queued native close event does not clean the same editor twice");
   assert.equal(clean.calls.length, 0, "Opening and leaving ready manual pages starts no processing/OCR task");
 
-  const dirty = harness({ confirm: false }); dirty.context.openPageDialog("new");
+  const dirty = harness({ confirm: false }); dirty.context.openPageDialog("regions", { id: 1, number: 1, regions: [] });
   dirty.context.dialog.boxes.push({ page_idx: 0, bbox: [10, 10, 100, 100] });
   assert.equal(await dirty.context.requestPageDialogClose(), false);
   assert.equal(dirty.$("pageDialog").open, true); assert.equal(dirty.context.dialog.boxes.length, 1);

@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+const layout = fs.readFileSync(path.join(__dirname, "original-paper-layout.js"), "utf8");
 
 // 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
 for (const page of [html, libraryHtml]) {
@@ -178,10 +179,11 @@ assert.match(js, /\/api\/papers\/\$\{paper\.id\}\/confirm-structure/);
 assert.match(js, /engines\.saved\?\.\[role\]\s*\|\|\s*engines\.selected/);
 assert.doesNotMatch(js, /AI 两次一致|AI 三读多数一致/);
 
-// 同一页存在多个题号作用域时，补录必须显式选择题组并把 group_id 交给后端。
-assert.match(html, /id="groupField"[\s\S]*?id="groupSelect"/);
-assert.match(js, /state\.paper\.question_groups/);
-assert.match(js, /body\.group_id\s*=\s*Number\(selectedGroup\)/);
+// 手工切题统一由原卷校正器保存；题组选择和 group_id 都在同一布局请求中。
+assert.match(layout, /groups\(\)\.forEach\(\(g\) => \{ const o = el\("option"/);
+assert.match(layout, /group_id: t\.group_id/);
+assert.match(js, /openPageDialog\("view"/);
+assert.doesNotMatch(js, /api\/papers\/\$\{state\.paperId\}\/questions/);
 
 // 真正的旧任务迁移后默认仍是“试卷”；失败的 PDF 必须给人明确的教材重试入口。
 assert.match(js, /按教材重试/);

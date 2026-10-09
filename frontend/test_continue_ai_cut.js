@@ -128,7 +128,7 @@ test("both first-step and later quiet manual stage buttons obey continuation bus
       $: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, document: { createTextNode: text => text }, el: node,
       button: label => ({ ...node(), label }), openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {} };
     vm.runInNewContext(stage, context); context.renderCutReadingStage();
-    const manualButton = () => nodes.get("cutReadingActions").children.find(button => /手工切题|正在准备原卷/.test(button.label));
+    const manualButton = () => nodes.get("cutReadingActions").children.find(button => /切题与校正|正在准备原卷/.test(button.label));
     assert.equal(manualButton().disabled, true, `Cutting stage ${stageNumber} must disable its manual button`);
     context.aiCutContinuations.clear(); context.renderCutReadingStage(); assert.equal(manualButton().disabled, false);
     context.manualSwitches.add("paper"); context.renderCutReadingStage(); assert.equal(manualButton().disabled, true);

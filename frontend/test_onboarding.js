@@ -37,8 +37,8 @@ for (const title of ["上传资料", "继续已有试卷", "核对后通过，�
 assert.equal((steps.match(/title:/g) || []).length, 5, "screen tour no longer repeats the approval/bank entry");
 assert.doesNotMatch(steps, /title: "入库"|只看新版功能/);
 assert.match(js, /tour\.steps = TOUR_STEPS\.filter\(\(step\) => tourVisible\(step\.target\(\)\)\);/);
-assert.match(js, /document\.addEventListener\("keydown", \(event\) => \{\s*if \(\$\("tour"\)\.hidden\) return;[\s\S]*?\}, true\);/);
-assert.match(js, /if \(\$\("tour"\)\.hidden\) return;[\s\S]*?if \(anyDialogOpen\(\)\) return;/,
+assert.match(js, /document\.addEventListener\("keydown", \(event\) => \{\s*const tourNode = \$\("tour"\);\s*if \(!tourNode \|\| tourNode\.hidden\) return;[\s\S]*?\}, true\);/);
+assert.match(js, /const tourNode = \$\("tour"\);\s*if \(!tourNode \|\| tourNode\.hidden\) return;[\s\S]*?if \(anyDialogOpen\(\)\) return;/,
   "optional tour cannot consume modal save shortcuts");
 assert.match(css, /\.teach-panel \{ position: static;/,
   "the practical guide reserves layout space instead of covering questions");

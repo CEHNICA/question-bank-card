@@ -510,12 +510,12 @@ const QBTableText = (() => {
 const QBTeach = (() => {
   "use strict";
 
-  const VERSION = 3;
+  const VERSION = 4;
   const LESSONS = [
     { key: "cut", section: "basic", title: "先切出第 1 题",
-      text: "点“开始框题”，在原卷第 1 题的左上角和右下角各点一下，再点“保存下一题”（S）。完整保留题干和选项。" },
+      text: "光标变成十字后，在原卷第 1 题的左上角和右下角各点一下。框出现后可直接调整，再点“保存”（S）。完整保留题干和选项。" },
     { key: "cutComplete", section: "basic", title: "完成这次切题",
-      text: "第 1 题已保存。点“完成切题”（Ctrl+S），回到题卡。本练习保留原图，不调用 AI 识读。" },
+      text: "第 1 题已保存。点“返回审核”（Ctrl+Enter），回到题卡。本练习保留原图，不调用 AI 识读。" },
     { key: "fix", section: "basic", title: "改好第 9 题的错字",
       text: "原卷写的是“向右移动 5 个单位”。点第 9 题的“改字”，把 3 改成 5，再保存。" },
     { key: "tick9", section: "basic", title: "核对并通过第 9 题",
@@ -537,10 +537,10 @@ const QBTeach = (() => {
 
   function restore(saved) {
     if (!saved || typeof saved !== "object" || typeof saved.paper !== "string" || !saved.paper) return null;
-    // The shorter course starts with a real crop. Legacy progress cannot claim
-    // completion of actions that were only described in the previous course.
+    // Keep the learner's current step when the wording and shortcuts change;
+    // never carry a completion claim across a course revision.
     const current = saved.version === VERSION;
-    const key = current && indexOf(saved.lesson) >= 0 ? saved.lesson : "cut";
+    const key = indexOf(saved.lesson) >= 0 ? saved.lesson : "cut";
     const lesson = LESSONS[indexOf(key)];
     const practiceUrl = typeof saved.practiceUrl === "string" && saved.practiceUrl === `/practice/${saved.paper}`
       ? saved.practiceUrl : `/practice/${saved.paper}`;
@@ -973,20 +973,41 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 用 sessionStorage 而不是 localStorage：换一台机器、隔一天回来，不该被旧现场劫持。
   const REVIEW_STATE_KEY = "qb-review-state";
 
-  function saveReviewState() {
+  function storedReviewContexts() {
     try {
-      window.sessionStorage.setItem(REVIEW_STATE_KEY, JSON.stringify({
-        paperId: state.paperId, filter: state.filter, current: state.current,
-        expanded: [...state.expanded], savedAt: Date.now()
-      }));
+      const value = JSON.parse(window.sessionStorage.getItem(REVIEW_STATE_KEY) || "null");
+      if (value?.papers && typeof value.papers === "object") return value;
+      // Upgrade the single-paper context written by earlier versions.
+      return value?.paperId ? { activePaperId: value.paperId, papers: { [value.paperId]: value } } : { activePaperId: null, papers: {} };
+    } catch { return { activePaperId: null, papers: {} }; }
+  }
+
+  function reviewViewportAnchor() {
+    const cards = cardNodes();
+    const line = viewTop() + 10;
+    const card = cards.find((item) => item.getBoundingClientRect().bottom > line)
+      || cards.find((item) => Number(item.dataset.id) === state.current);
+    if (!card) return { questionId: state.current, offset: 0 };
+    return { questionId: Number(card.dataset.id), offset: Math.round(card.getBoundingClientRect().top - viewTop()) };
+  }
+
+  function saveReviewState() {
+    if (!state.paperId) return;
+    try {
+      const saved = storedReviewContexts();
+      saved.activePaperId = state.paperId;
+      saved.papers[state.paperId] = {
+        filter: state.filter, current: state.current, expanded: [...state.expanded],
+        finderQuery: $("reviewFindInput")?.value || "", viewport: reviewViewportAnchor(), scrollY: Math.round(window.scrollY), savedAt: Date.now()
+      };
+      window.sessionStorage.setItem(REVIEW_STATE_KEY, JSON.stringify(saved));
     } catch { /* 浏览器禁止存储时只在本页有效 */ }
   }
 
-  function readReviewState() {
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(REVIEW_STATE_KEY) || "null");
-      return saved && typeof saved === "object" ? saved : null;
-    } catch { return null; }
+  function readReviewState(paperId = null) {
+    const saved = storedReviewContexts();
+    const id = paperId || saved.activePaperId;
+    return id ? (saved.papers?.[id] ? { ...saved.papers[id], paperId: id } : null) : null;
   }
 
   function restoreReviewState(saved) {
@@ -995,11 +1016,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       .filter((id) => questionById(id)).forEach((id) => state.expanded.add(id));
     if (FILTERS.some((filter) => filter.key === saved.filter)) state.filter = saved.filter;
     renderPaper();
+    if ($("reviewFindInput")) $("reviewFindInput").value = saved.finderQuery || "";
+    renderReviewFinder();
     const current = questionById(saved.current);
-    if (current && visible(current)) {
-      setCurrent(current.id, { focus: true });
-      document.querySelector(`.card[data-id="${current.id}"]`)?.scrollIntoView({ block: "start" });
+    const anchorId = saved.viewport?.questionId ?? saved.current;
+    const anchor = questionById(anchorId);
+    if ((saved.current != null && !current) || (anchorId != null && !anchor)) {
+      toast("上次定位的题目已不存在，可能已删除或拆合替代。请用“找题”重新定位。", "warning");
+      return;
     }
+    if (current && visible(current)) setCurrent(current.id, { focus: true });
+    if (anchor && visible(anchor)) requestAnimationFrame(() => {
+      const card = document.querySelector(`.card[data-id="${anchor.id}"]`);
+      if (!card) return;
+      card.scrollIntoView({ block: "start", behavior: "instant" });
+      const desired = viewTop() + Number(saved.viewport?.offset || 0);
+      window.scrollBy({ top: card.getBoundingClientRect().top - desired, behavior: "instant" });
+    });
   }
 
   function el(tag, className, text) {
@@ -1464,8 +1497,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function selectPaper(id) {
     if (state.paperId !== id && !(await discardEdits())) return;
+    const changedPaper = state.paperId !== id;
+    if (changedPaper) saveReviewState();
     if (finishedUnseen.delete(id)) document.title = QBNotify.title(BASE_TITLE, finishedUnseen.size);
-    if (state.paperId !== id) {
+    if (changedPaper) {
       cancelPendingPageOpening();
       if ($("pageDialog").open) closePageDialog();
       state.paperId = id;
@@ -1481,7 +1516,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       url.searchParams.delete("draft");
       history.replaceState(null, "", url);
       window.scrollTo({ top: 0 });
-      saveReviewState();
+      try {
+        const saved = storedReviewContexts();
+        saved.activePaperId = id;
+        window.sessionStorage.setItem(REVIEW_STATE_KEY, JSON.stringify(saved));
+      } catch { /* 浏览器禁止存储时只在本页有效 */ }
     }
     renderPaperList();
     // 旧题的卡先留在屏幕上（压暗、不接收点击），等新题到了再整批换掉。
@@ -1495,11 +1534,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       cards.classList.remove("is-loading");
       cards.removeAttribute("aria-busy");
     }
+    if (changedPaper) {
+      const saved = readReviewState(id);
+      if (saved) restoreReviewState(saved);
+    }
     if (teaching.active) renderTeach();
   }
 
   async function clearPaperSelection() {
     if (!(await discardEdits())) return false;
+    saveReviewState();
     cancelPendingPageOpening();
     if ($("pageDialog").open) closePageDialog();
     clearTimeout(state.pollTimer);
@@ -1747,7 +1791,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const recoverable = cutProducedNothing && QBProgress.canContinueAiCut(paper);
       if (recoverable) {
         actions.append(button("继续 AI 切题", "small primary", () => continueAiCut()));
-        actions.append(button("改为手工切题", "small", () => switchToManual()));
+        actions.append(button("准备原卷并切题", "small", () => switchToManual()));
       } else {
         actions.append(button("继续整理", "small primary", () => switchToManual()));
         if (cutProducedNothing && QBProgress.canContinueAiCut(paper)) {
@@ -1840,13 +1884,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("cutReadingDetail").textContent = stage === 1
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。识读成功后文字会显示在原图旁，接着核对配图并审核。"
-        : stage === 2 ? "结束切题后自动识读。失败或停止后，可点“识读未完成题目”主动重试；不会自动重新提交。原图也可以直接审核。"
+        : stage === 2 ? "题目范围已保存，尚未提交识读。你可以主动识读未完成题目，也可以直接原图审核或继续切题与校正。"
           : "检查文字是否完整、题型及配图是否正确。读错可改字或重读这题；标签与参考答案仍默认关闭。";
     const actions = $("cutReadingActions");
     actions.replaceChildren();
     if (stage === 1) {
-      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "手工切题", "primary", openManualCut,
-        "从原卷框出每道题，完成切题后自动识读，再核对文字和配图");
+      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "切题与校正", "primary", openManualCut,
+        "在同一原卷画布中补题、调框和改题号；完成后由你选择识读或直接审核");
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
     } else if (summary.eligibleIds.length) {
@@ -1873,7 +1917,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (stage === 3) actions.append(button("开始审核", "", () => focusCutReview()));
     if (stage !== 1) {
-      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "继续手工切题", "quiet", openManualCut);
+      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "继续切题与校正", "quiet", openManualCut);
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
     }
@@ -1889,7 +1933,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function openManualCut() {
     if (manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId)) return;
-    if (state.paper?.status === "ready") openPageDialog("new"); else void switchToManual();
+    if (state.paper?.status === "ready") {
+      newUploadReadContinuations.delete(state.paperId);
+      openPageDialog("view");
+    } else void switchToManual();
   }
 
   function focusCutReview(questionId = null) {
@@ -1903,6 +1950,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   async function enterCutReadingStage(paperId = state.paperId, questionIds = null) {
     if (!paperId || state.paperId !== paperId) return false;
     if ($("pageDialog").open) $("pageDialog").close();
+    newUploadReadContinuations.delete(paperId);
     directImageReview.delete(paperId);
     const refreshed = await refreshPaper();
     if (!refreshed || state.paperId !== paperId) return false;
@@ -1912,10 +1960,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("切题已完成，示例保留原图。对照后即可审核；本次练习未调用 AI。", "success");
       return true;
     }
-    await readCutQuestions(questionIds);
     if (state.paperId !== paperId) return false;
     $("cutReadingStage").scrollIntoView({ behavior: "smooth", block: "center" });
     $("cutReadingTitle").focus({ preventScroll: true });
+    toast("切题已完成；现在可以主动选择 AI 识读或直接原图审核。", "success");
     return true;
   }
 
@@ -2179,11 +2227,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
-        empty.append(el("strong", "", "原卷已保存"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。完成切题后自动识读已保存的题目。"));
+        empty.append(el("strong", "", "原卷已保存"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。完成后可主动选择 AI 识读或直接原图审核。"));
         // The cutting panel owns the main entry. The empty state is a fallback
         // only when the panel is absent, independent of the previous render.
         if (!QBCutReading.showCutReadingStage(state.paper, QBCutReading.cutReadingSummary(state.questions))) {
-          const cut = button("手工切题", "primary", openManualCut);
+          const cut = button("切题与校正", "primary", openManualCut);
           cut.id = "emptyManualCut";
           cut.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
           empty.append(cut);
@@ -2209,6 +2257,84 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function questionById(id) {
     return state.questions.find((q) => q.id === id) || null;
   }
+
+  function renderReviewFinder() {
+    const panel = $("reviewFinderPanel"), results = $("reviewFindResults"), input = $("reviewFindInput");
+    if (!panel || !results || !input) return;
+    const query = input.value.trim();
+    results.replaceChildren();
+    if (!query || !state.paperId) { results.hidden = true; return; }
+    const matches = window.QBReviewFinder?.search(state.questions, query) || [];
+    if (!matches.length) {
+      const note = el("p", "review-finder-empty", "没有匹配的题目。原图题没有可搜索的文字，请按题号、题组或页码查找。");
+      results.append(note); results.hidden = false; return;
+    }
+    const fragment = document.createDocumentFragment();
+    matches.slice(0, 100).forEach((q) => {
+      const group = typeof q.group === "object" ? q.group?.title : q.section;
+      const pages = [...new Set((q.regions || []).map((r) => Number(r.page_idx) + 1))].sort((a, b) => a - b);
+      const row = button("", "review-finder-result", async () => {
+        const current = questionById(q.id);
+        if (!current) { toast("这道题已被删除或拆合替代，请刷新找题结果。", "warning"); renderReviewFinder(); return; }
+        if (!(await discardEdits())) return;
+        const hiddenByFilter = !visible(current);
+        if (hiddenByFilter) {
+          state.filter = "all";
+          renderPaper();
+          toast("这道题原本被当前审核筛选隐藏，已切换到“全部”。", "success");
+        }
+        state.expanded.add(current.id);
+        state.autoExpanded.delete(current.id);
+        renderCards();
+        setCurrent(current.id, { focus: true });
+        requestAnimationFrame(() => document.querySelector(`.card[data-id="${current.id}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+        saveReviewState();
+      });
+      row.setAttribute("role", "option");
+      row.dataset.questionId = String(q.id);
+      row.append(el("span", "review-finder-result-title", `${group ? `${group} · ` : ""}第 ${q.number} 题`));
+      row.append(el("span", "review-finder-result-meta", pages.length ? `第 ${pages.join("、")} 页` : "原图题"));
+      row.append(el("span", "review-finder-result-snippet", window.QBReviewFinder?.snippet(q) || "原图题 · 暂无已保存文字"));
+      fragment.append(row);
+    });
+    if (matches.length > 100) fragment.append(el("p", "hint", `显示前 100 道，共找到 ${matches.length} 道；请增加关键词缩小范围。`));
+    results.append(fragment); results.hidden = false;
+  }
+
+  function openReviewFinder() {
+    const panel = $("reviewFinderPanel"), toggle = $("reviewFindToggle");
+    if (!panel || !toggle) return;
+    panel.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    renderReviewFinder();
+    requestAnimationFrame(() => $("reviewFindInput")?.focus({ preventScroll: true }));
+  }
+
+  function closeReviewFinder(restoreFocus = true) {
+    $("reviewFinderPanel").hidden = true;
+    $("reviewFindToggle").setAttribute("aria-expanded", "false");
+    if (restoreFocus) $("reviewFindToggle").focus({ preventScroll: true });
+  }
+
+  $("reviewFindToggle")?.addEventListener("click", () => {
+    if ($("reviewFinderPanel").hidden) openReviewFinder(); else closeReviewFinder(false);
+  });
+  $("reviewFindClose")?.addEventListener("click", () => closeReviewFinder());
+  $("reviewFindInput")?.addEventListener("input", () => { renderReviewFinder(); saveReviewState(); });
+  $("reviewFindInput")?.addEventListener("keydown", (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Escape") { event.preventDefault(); closeReviewFinder(); }
+    if (event.key === "Enter") { const first = $("reviewFindResults").querySelector("button[data-question-id]"); if (first) { event.preventDefault(); first.click(); } }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "f"
+      || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+    const target = event.target;
+    if (target.closest?.("input, textarea, select, [contenteditable=true], [role=dialog]")
+      || document.querySelector("dialog[open]") || !state.paperId) return;
+    event.preventDefault();
+    openReviewFinder();
+  });
 
   function setCurrent(id, { scroll = false, focus = false, hold = scroll } = {}) {
     state.current = id;
@@ -2340,6 +2466,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
 
   let followFrame = 0;
+  let reviewStateSaveTimer = 0;
+  window.addEventListener("scroll", () => {
+    if (!state.paperId || reviewStateSaveTimer) return;
+    reviewStateSaveTimer = window.setTimeout(() => { reviewStateSaveTimer = 0; saveReviewState(); }, 180);
+  }, { passive: true });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveReviewState(); });
   window.addEventListener("scroll", () => {
     if (!state.focus || followFrame) return;
     followFrame = requestAnimationFrame(() => { followFrame = 0; followReading(); });
@@ -4087,9 +4219,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function softDeleteQuestions(questionIds, { singleQuestion = null } = {}) {
     const ids = [...new Set(questionIds.map(Number))].filter((id) => questionById(id));
-    if (!ids.length || state.deleteBusy) return;
+    if (!ids.length || state.deleteBusy) return false;
     const blocked = ids.map(questionById).map((q) => ({ q, reason: questionDeleteBlockReason(q) })).find((item) => item.reason);
-    if (blocked) { toast(`第 ${blocked.q.number} 题：${blocked.reason}`, "error"); return; }
+    if (blocked) { toast(`第 ${blocked.q.number} 题：${blocked.reason}`, "error"); return false; }
     const count = ids.length;
     const title = `把第 ${singleQuestion.number} 题移到回收站？`;
     const ok = await confirmDialog({
@@ -4098,7 +4230,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ok: "移到回收站",
       danger: true
     });
-    if (!ok) return;
+    if (!ok) return false;
 
     const paperId = state.paperId;
     state.deleteBusy = true;
@@ -4118,19 +4250,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       const deleted = Number(data.deleted) || count;
       const batchId = data.undo_batch?.id;
-      toast(`${deleted} 道题已移到回收站`, "success", batchId ? {
+      toast(`${deleted} 道题已移到回收站`, "success", batchId && !dialog.layoutWorkspace ? {
         label: "撤销",
         onClick: () => restoreDeletedBatch(paperId, batchId)
       } : null);
+      return data;
     } catch (error) {
       toast(error.message, "error");
+      return false;
     } finally {
       state.deleteBusy = false;
     }
   }
 
   async function deleteQuestion(q) {
-    await softDeleteQuestions([q.id], { singleQuestion: q });
+    return await softDeleteQuestions([q.id], { singleQuestion: q });
   }
 
   function mergeRestoredQuestions(questions) {
@@ -4140,7 +4274,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function restoreDeletedBatch(paperId, batchId) {
-    if (state.trashBusy) return;
+    if (state.trashBusy) return false;
     state.trashBusy = true;
     renderTrashBusy();
     try {
@@ -4155,8 +4289,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const restored = Number(data.restored) || data.questions?.length || 0;
       toast(data.already_restored ? "这批题卡之前已经恢复" : `已恢复 ${restored} 道题`, "success");
       if ($("trashDialog").open && state.paperId === paperId) await loadQuestionTrash();
+      if (dialog.layoutWorkspace && dialog.paperId === paperId && !dialog.saving) originalLayout.refresh();
+      return true;
     } catch (error) {
       toast(error.message, "error");
+      return false;
     } finally {
       state.trashBusy = false;
       renderTrashBusy();
@@ -5008,7 +5145,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const continuingAi = aiCutContinuations.has(paper.id), changingCutMode = switchingManual || continuingAi;
     $("settingsManualFallback").hidden = !switchingManual && !QBProgress.canSwitchMinerUToManual(paper);
     $("settingsManualFallback").disabled = changingCutMode;
-    $("settingsManualFallback").textContent = switchingManual ? "正在停止并准备手工切题…" : "停止 MinerU，改为手工切题";
+    $("settingsManualFallback").textContent = switchingManual ? "正在停止并准备原卷…" : "停止 MinerU，打开切题与校正";
     $("settingsStop").disabled = changingCutMode;
     $("settingsReparse").disabled = changingCutMode;
     $("manualProcessing").disabled = $("pageManualCut").disabled = changingCutMode;
@@ -6096,11 +6233,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     zoom: 1, zoomMode: "width", zoomFrame: 0, spacePan: false, imageReady: false,
     slotTarget: null, slotAnchor: null, pendingFigure: null, ignoredCandidates: new Set(),
     saving: false, closing: false, active: false, reopenIntent: null,
-    paperId: null, lastPage: null, session: 0, cutQuestionIds: []
+    paperId: null, lastPage: null, session: 0, layoutFocus: null, layoutCenterMargins: false, layoutReturnContext: null
   };
   const originalLayout = window.QBOriginalLayout?.createController({
     dialog, state, $, el, button, api, toast, cropView, renderStage, renderPageTabs, goToDialogPage,
     pointFrom, placeBox, setCropSaving, trackCropDraft, confirmDialog, TYPE_NAMES, questionCompare, rereadQuestion, isApproved,
+    deleteQuestion, questionDeleteBlockReason, restoreDeletedBatch,
+    returnReview: (questionId) => returnFromOriginalLayout(questionId, false),
+    reviewQuestion: (questionId) => returnFromOriginalLayout(questionId, true),
+    closeWorkspace: () => closePageDialog(),
+    onCutSaved: (number) => { if (state.paper?.demo) teach({ type: "cut", number }); },
     ensureSourcesReady: (ids) => discardEdits(ids.filter((id) => state.editing.has(id))),
     applyCanonical(data) {
       if (data.paper) updatePaperFromResponse(data.paper);
@@ -6124,6 +6266,25 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (data.paper) updatePaperFromResponse(data.paper);
     if (Array.isArray(data.questions)) { state.questions = data.questions.map(normalizeRegionRead); state.rendered.clear(); }
     renderPaper();
+  }
+  async function returnFromOriginalLayout(questionId = null, explicitTarget = false) {
+    const paperId = state.paperId;
+    const context = dialog.layoutReturnContext;
+    if ($("pageDialog").open) closePageDialog();
+    if (state.paperId !== paperId) return false;
+    if (state.paper?.demo && !explicitTarget) teach({ type: "cutComplete" });
+    if (explicitTarget && questionById(questionId)) {
+      focusCutReview(questionId);
+      return true;
+    }
+    if (context && (context.current != null || context.viewport?.questionId != null)) {
+      restoreReviewState(context);
+      return true;
+    }
+    const fallback = questionById(questionId) || questionById(state.current);
+    if (fallback || state.questions.length) focusCutReview(fallback?.id ?? null);
+    else $("cutReadingStage").scrollIntoView({ behavior: "smooth", block: "center" });
+    return true;
   }
   let pageOpenIntent = 0;
   const CROP_EDIT_KEY = "original-crop";
@@ -6207,6 +6368,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function releasePageDialog() {
     if (!dialog.active || $("pageDialog").open) return;
     if (dialog.layoutWorkspace) originalLayout.close();
+    dialog.layoutReturnContext = null;
     dialog.active = false;
     dialog.session += 1;
     dialog.lastPage = dialog.page;
@@ -6260,6 +6422,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } else { toast("正在保存，请等保存完成", "error"); return false; }
     }
     if (reopenIntent === null) cancelPendingPageOpening();
+    if (dialog.layoutWorkspace) {
+      if (dialog.closing) return false;
+      dialog.closing = true;
+      try {
+        const leave = await originalLayout.requestClose();
+        if (leave) closePageDialog({ preserveIntent: reopenIntent === pageOpenIntent });
+        return leave;
+      } finally { dialog.closing = false; }
+    }
     if (dialog.closing) return false;
     // No changes means no asynchronous leave flow or card rebuilding before
     // closing. Opening and immediately returning must respond at once.
@@ -6312,12 +6483,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogSave").classList.toggle("primary", dialog.mode !== "new");
     $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : "保存";
     $("pageDialogSave").title = "保存当前改动（Ctrl+Enter）";
-    $("pageDialogSaveNext").replaceChildren(document.createTextNode("保存下一题"), el("span", "kbd-hint", "S"));
-    $("pageDialogSaveNext").title = "保存下一题（S，也支持 Enter；仅画布中生效）";
-    $("pageDialogComplete").replaceChildren(document.createTextNode("完成切题"), el("span", "kbd-hint", "Ctrl+S"));
+    $("pageDialogSaveNext").replaceChildren(document.createTextNode("保存并框下一题"), el("span", "kbd-hint", "Shift+Enter"));
+    $("pageDialogSaveNext").title = "保存后立即开始框下一题（Shift+Enter；仅画布中生效）";
+    $("pageDialogComplete").replaceChildren(document.createTextNode("返回审核"), el("span", "kbd-hint", "Ctrl+Enter"));
     $("pageDialogClose").textContent = dialog.mode === "view" ? "关闭" : dialog.mode === "new" ? "返回" : "取消";
-    $("pageDialogComplete").title = state.paper?.demo ? "完成切题（Ctrl+S）；练习只保留原图，不调用 AI"
-      : "完成切题（Ctrl+S，也支持 Ctrl+Enter），自动识读已保存的题目；空白下一题不会新建题目";
+    $("pageDialogComplete").title = "返回审核（Ctrl+Enter）；保存与 AI 识读分开进行";
     $("readTargetField").hidden = dialog.mode !== "read";
     $("numberField").hidden = dialog.mode !== "new";
     $("cropTypeField").hidden = dialog.mode !== "new";
@@ -6340,15 +6510,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestPageDialogClose();
   });
 
-  function openPageDialog(mode, q = null, { page: requestedPage = null } = {}) {
+  function openPageDialog(mode, q = null, { page: requestedPage = null, initialNumber = null, questionType = null, autoAdd = false, focusRegionIndex = null } = {}) {
+    if (mode === "new") mode = "view";
     if (!state.paper?.pages?.length) { toast("原卷页面尚未生成", "error"); return; }
     if (dialog.saving || dialog.closing) { toast("请先完成当前操作", "error"); return; }
+    if (["view", "regions"].includes(mode) && !dialog.active) {
+      saveReviewState();
+      dialog.layoutReturnContext = readReviewState(state.paperId);
+    }
     if (manualSwitchRequests.size) cancelPendingPageOpening();
     const intent = ++pageOpenIntent, paperId = state.paperId;
     if ($("pageDialog").open) {
       requestPageDialogClose({ reopenIntent: intent }).then((closed) => {
         if (closed && pageOpenIntent === intent && state.paperId === paperId && !$("pageDialog").open) {
-          openPageDialog(mode, q, { page: requestedPage });
+          openPageDialog(mode, q, { page: requestedPage, initialNumber, questionType, autoAdd, focusRegionIndex });
         }
       });
       return;
@@ -6362,7 +6537,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.mode = mode;
     dialog.cropFilter = state.filter;
     dialog.cropBaseline = null;
-    dialog.cutQuestionIds = [];
     dialog.tool = mode === "view" ? "pan" : "draw";
     dialog.history = [];
     dialog.future = [];
@@ -6406,6 +6580,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.page = Number.isInteger(requestedPage)
       && state.paper.pages.some((page) => page.page_idx === requestedPage) ? requestedPage
       : mode === "new" && Number.isInteger(previousPage) && state.paper.pages.some((page) => page.page_idx === previousPage) ? previousPage : firstPage;
+    if (q && ["view", "regions"].includes(mode)) {
+      const index = Number.isInteger(focusRegionIndex) ? focusRegionIndex
+        : q.regions.findIndex((region) => region.page_idx === dialog.page);
+      focusRegionIndex = index >= 0 ? index : 0;
+      dialog.layoutFocus = { questionId: q.id, index: focusRegionIndex };
+      dialog.layoutCenterMargins = false;
+    } else {
+      dialog.layoutFocus = null;
+      dialog.layoutCenterMargins = false;
+    }
     dialog.scrolled = false;
     dialog.selected = null;
     $("pageStage").scrollTo({ top: 0, left: 0 });
@@ -6413,18 +6597,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? q.figure_review.ignored_candidates.filter((key) => hasFigureCandidateKey(q, key)) : []);
     $("pageDialogTitle").textContent = mode === "regions" ? `第 ${q.number} 题 · 调整题目范围`
       : mode === "figures" ? `第 ${q.number} 题的配图` : mode === "read" ? `第 ${q.number} 题 · 框选识读`
-        : mode === "view" ? "查看整份原卷" : "手工切题";
+        : mode === "view" ? "切题与校正" : "手工切题";
     $("pageDialogHint").textContent = mode === "regions"
       ? "拖边角改大小、拖框内部移动；可跨页添加片段、调整顺序。这里只调整题目范围，保存后关闭窗口。"
       : mode === "figures"
         ? "点蓝色候选图，或单击一个角、移动鼠标、再单击另一个角固定新框；无需按住鼠标。双击下一张图的左上角可复制附近框的尺寸，适合四个同样大小的选项图。再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）。Esc 取消未完成的新框；已有框仍可拖动和缩放。点标签改归属，拖标签只挪标签；保存后需重新审核。"
         : mode === "read"
           ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
-          : mode === "view" ? "查看完整原卷；这里不会修改题卡或重新识读。"
-            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段。点两次固定范围，按 S 保存下一题，Ctrl+S 完成切题；Enter / Ctrl+Enter 也可使用。完成后自动识读已保存的题目。空白下一题可以直接完成。";
+          : mode === "view" ? "在原卷上查看题框、补题、调整范围或修改题号。完成切题后，你可以主动选择 AI 识读或直接原图审核。"
+            : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段。保存只保留原图，不会自动识读。";
     // The offline practice can demonstrate drawing and the real target picker,
     // but must not dispatch recognition or invent an AI recommendation.
-    if (state.paper.demo && mode === "new") $("pageDialogHint").textContent = "离线练习：点两角框出完整题目，S 保存下一题，Ctrl+S 完成切题。保存的原图可直接核对；本次不调用 AI。";
+    if (state.paper.demo && mode === "new") $("pageDialogHint").textContent = "离线练习：十字光标下点两角框出完整题目，再点保存；需要继续时可选择保存并框下一题。保存的原图可直接核对；本次不调用 AI。";
     dialog.practiceRead = mode === "read" && Boolean(state.paper.demo);
     $("pageDialogSave").disabled = dialog.practiceRead;
     $("pageDialogSave").title = dialog.practiceRead ? "示例只练画框；真实识读需要可用的读题服务" : "";
@@ -6464,7 +6648,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("allPagesPicker").open = false;
     $("pageSearchInput").value = "";
     lens.classList.remove("on");
-    if (window.QBOriginalLayout && ["view", "regions"].includes(mode)) originalLayout.open(mode, q);
+    if (window.QBOriginalLayout && ["view", "regions"].includes(mode)) {
+      if (mode === "view") newUploadReadContinuations.delete(state.paperId);
+      originalLayout.open(mode, q, { page: dialog.page, initialNumber, questionType, autoAdd, focusRegionIndex });
+    }
     renderPageTabs();
     renderStage();
     $("pageDialog").showModal();
@@ -6556,7 +6743,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         : dialog.mode === "figures"
           ? "单击两角画框 · 双击下一图左上角复制框尺寸 · Esc 取消新框 · Ctrl+滚轮缩放"
           : dialog.mode === "new"
-            ? "单击两角画框 · S 保存下一题 · Ctrl+S 完成切题 · 空格+拖动平移"
+            ? "十字光标下点两角画框 · S 保存 · Shift+Enter 保存并框下一题 · Ctrl+Enter 返回审核 · 空格+拖动平移"
             : dialog.mode === "regions" ? "单击两角画框 · Ctrl+Enter 保存 · 空格+拖动平移"
             : "左键画框 · 空格+左键或中键拖画布 · Ctrl+滚轮缩放";
   }
@@ -6575,11 +6762,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("pageToolPan").addEventListener("click", () => selectPageTool("pan"));
   $("pageToolDraw").addEventListener("click", () => selectPageTool("draw"));
   $("pageManualCut").addEventListener("click", () => {
-    if (dialog.layoutWorkspace) { void originalLayout.begin("add"); return; }
+    if (dialog.layoutWorkspace) { void originalLayout.begin("add", null, { continuous: true, page: dialog.page }); return; }
     if (manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId)) return;
     const page = dialog.page;
     if (state.paper?.status === "ready") {
-      openPageDialog("new", null, { page });
+      openPageDialog("view", null, { page });
     } else switchToManual(page);
   });
   const copyDialogBoxes = () => dialog.boxes.map((box) => ({ ...box, bbox: [...box.bbox] }));
@@ -7139,6 +7326,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       dialog.imageReady = true;
       $("pageImageState").hidden = true;
       applyPageZoom();
+      if (dialog.layoutWorkspace) centerLayoutFocus(surface);
     }, { once: true });
     image.addEventListener("error", () => {
       if (!currentImage()) return;
@@ -7152,6 +7340,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     surface.append(image);
     if (dialog.layoutWorkspace) {
       originalLayout.renderSurface(surface);
+      if (dialog.layoutCenterMargins) applyLayoutCenterMargins(surface);
       stage.append(surface);
       applyPageZoom();
       stage.scrollTo(scroll);
@@ -7339,6 +7528,35 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         surface.querySelector(".edit-box, .ghost.own")?.scrollIntoView({ block: "center" });
       }, { once: true });
     }
+  }
+
+  function applyLayoutCenterMargins(surface) {
+    const stage = $("pageStage");
+    const vertical = Math.max(24, Math.round(stage.clientHeight * 0.46));
+    const horizontal = Math.max(24, Math.round(stage.clientWidth * 0.46));
+    surface.style.margin = `${vertical}px ${horizontal}px`;
+  }
+
+  function centerLayoutFocus(surface) {
+    const focus = dialog.layoutFocus;
+    if (!focus || !dialog.layoutWorkspace) return;
+    const stage = $("pageStage");
+    dialog.layoutCenterMargins = true;
+    applyLayoutCenterMargins(surface);
+    requestAnimationFrame(() => {
+      if (!surface.isConnected || !dialog.layoutWorkspace) return;
+      const target = [...surface.querySelectorAll("[data-layout-source-question-id]")].find((node) =>
+        Number(node.dataset.layoutSourceQuestionId) === Number(focus.questionId)
+        && Number(node.dataset.layoutCoveragePiece) === Number(focus.index));
+      if (!target) { dialog.layoutFocus = null; return; }
+      const frame = target.getBoundingClientRect(), bounds = stage.getBoundingClientRect();
+      stage.scrollTo({
+        left: Math.max(0, stage.scrollLeft + frame.left + frame.width / 2 - (bounds.left + stage.clientWidth / 2)),
+        top: Math.max(0, stage.scrollTop + frame.top + frame.height / 2 - (bounds.top + stage.clientHeight / 2)),
+        behavior: "instant"
+      });
+      dialog.layoutFocus = null;
+    });
   }
 
   function pointFrom(event, surface) {
@@ -7586,27 +7804,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
-  function continueManualCut(number, savedQuestion) {
-    dialog.question = null;
-    dialog.mode = "new";
-    dialog.boxes = [];
-    dialog.selected = null;
-    dialog.history = [];
-    dialog.future = [];
-    dialog.scrolled = true;
-    if (!$("groupSelect").value && savedQuestion?.group?.id) $("groupSelect").value = String(savedQuestion.group.id);
-    $("numberInput").value = QBManualCrop.nextCropNumber(state.questions, number + 1, $("groupSelect").value || null) ?? "";
-    trackCropDraft();
-    renderPageTabs();
-    renderStage();
-    $("pageStage").focus({ preventScroll: true });
-    if (teaching.active && teaching.paper === state.paperId) showCropResult("");
-    else showCropResult(state.paper?.demo ? `第 ${number} 题已保存。点“完成切题”回到题卡；示例只保留原图，不调用 AI。`
-      : `第 ${number} 题已保存，尚未识读。可以继续框下一题；全部切完点“完成切题”，自动识读已保存的题目。`);
-  }
-
   async function savePageCrop({ next = false, complete = false } = {}) {
-    if (dialog.layoutWorkspace) { originalLayout.preview(); return; }
+    if (dialog.layoutWorkspace) { void originalLayout.preview({ next, complete }); return; }
     if (dialog.saving || !$("pageDialog").open) return;
     if (dialog.mode === "view" || dialog.practiceRead) return;
     if (state.paper?.demo && dialog.mode === "read") {
@@ -7620,24 +7819,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (dialog.drag) dialog.drag();
     const q = dialog.question;
     const session = dialog.session;
-    let savedQuestion = null;
     let saved = false;
-    if (complete && dialog.mode === "new" && !dialog.boxes.length) {
-      // Saving the last real question opens an empty next draft. Finishing
-      // that draft must not demand another box or create an extra question.
-      const paperId = dialog.paperId;
-      const ids = dialog.cutQuestionIds?.length ? [...dialog.cutQuestionIds] : null;
-      closeFigureSlotMenu({ cancelPending: true, rerender: false });
-      editGuard.release(CROP_EDIT_KEY);
-      $("pageDialog").close();
-      await enterCutReadingStage(paperId, ids);
-      return;
-    }
-    if (["new", "regions"].includes(dialog.mode) && !dialog.boxes.length) {
+    if (dialog.mode === "regions" && !dialog.boxes.length) {
       showCropResult("请先框出题目范围", true); return;
-    }
-    if (dialog.mode === "new" && (!Number.isInteger(Number($("numberInput").value)) || Number($("numberInput").value) < 1 || Number($("numberInput").value) > 999)) {
-      showCropResult("请填写题号（1–999）", true); $("numberInput").focus(); return;
     }
     setCropSaving(true);
     showCropResult(dialog.mode === "read" ? "正在提交选中片段…" : "正在保存…");
@@ -7653,7 +7837,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         dialog.cropBaseline = JSON.stringify(cropSnapshot());
         clearCropDraftAttention();
         applyQuestion(data);
-        savedQuestion = data.question || q;
         saved = true;
         toast(manual ? `第 ${q.number} 题范围已保存，请核对原图；未调用 AI` : `第 ${q.number} 题范围已更新，请重新核对`);
         refreshPaper();
@@ -7692,39 +7875,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (dialog.session !== session) return;
         toast(`AI 正在读框里的字，读完显示在第 ${q.number} 题的题卡上`);
         refreshPaper();
-      } else {
-        const number = Number($("numberInput").value);
-        if (!Number.isInteger(number) || number < 1) { toast("请填写题号", "error"); return; }
-        if (!dialog.boxes.length) { toast("请先在原卷上框出这道题的范围", "error"); return; }
-        const selectedGroup = $("groupSelect").value;
-        const body = { number, regions: readingOrder(dialog.boxes), body_mode: "source_image", processing_mode: "manual",
-          layout_revision: state.paper.layout_revision, client_request_id: crypto.randomUUID(),
-          question_type: $("cropTypeSelect").value || "unknown" };
-        if (selectedGroup) body.group_id = Number(selectedGroup);
-        const data = await api(`/api/papers/${state.paperId}/questions`, { method: "POST", body });
-        applyQuestion(data);
-        savedQuestion = data.question;
-        if (savedQuestion?.id && !dialog.cutQuestionIds?.includes(savedQuestion.id)) {
-          dialog.cutQuestionIds = [...(dialog.cutQuestionIds || []), savedQuestion.id];
-        }
-        saved = true;
-        if (!(teaching.active && teaching.paper === state.paperId)) {
-          toast(state.paper?.demo ? `第 ${number} 题已保存；练习只保留原图，不调用 AI` : `第 ${number} 题已保存；结束切题后自动 AI 识读`);
-        }
-        teach({ type: "cut", number });
-        refreshPaper();
-      }
-      if (next && savedQuestion) {
-        continueManualCut(savedQuestion.number, savedQuestion);
-        return;
-      }
+      } else { showCropResult("请使用“切题与校正”窗口补题，题目范围已保留。", true); return; }
       closeFigureSlotMenu({ cancelPending: true, rerender: false });
       editGuard.release(CROP_EDIT_KEY);
       $("pageDialog").close();
-      if (complete && savedQuestion) {
-        setCropSaving(false);
-        await enterCutReadingStage(dialog.paperId, dialog.cutQuestionIds?.length ? [...dialog.cutQuestionIds] : null);
-      }
     } catch (error) {
       if (dialog.session !== session || !$("pageDialog").open) return;
       if (saved) trackCropDraft();
@@ -7749,6 +7903,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       editing: QBUpload.isEditingTarget(event.target), onControl: Boolean(event.target.closest?.("button, a, summary")),
       canvasFocused: Boolean(event.target.closest?.("#pageStage"))
     };
+    // In the unified editor a save shortcut only acts from the canvas (or the
+    // explicit renumber input). Suppress the browser's Save Page command when
+    // another editor control has focus instead of running any crop action.
+    if (dialog.layoutWorkspace && shortcutContext.open && !shortcutContext.otherDialog
+      && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229
+      && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
+      event.preventDefault(); event.stopPropagation?.(); return;
+    }
     const action = QBManualCrop.cropShortcutAction(event, shortcutContext);
     if (!action) {
       // Ctrl+S is an app operation in the cutting window. A blocked save
@@ -7794,7 +7956,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const emptyEntry = $("emptyManualCut");
     if (emptyEntry) {
       emptyEntry.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
-      emptyEntry.textContent = manualSwitches.has(state.paperId) ? "正在准备原卷…" : "手工切题";
+      emptyEntry.textContent = manualSwitches.has(state.paperId) ? "正在准备原卷…" : "切题与校正";
     }
   }
 
@@ -7892,7 +8054,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       if ($("pageDialog").open) closePageDialog({ preserveIntent: true });
       toast(data.message || "已转为手工切题，原卷、已有题目和修改已保留；先框题，尚未开始 AI 识读。", "success");
-      openPageDialog("new", null, { page });
+      openPageDialog("view", null, { page });
       return true;
     } catch (error) {
       if (!current() || error.name === "AbortError") return false;
@@ -8758,7 +8920,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function placeTour() {
-    if ($("tour").hidden || !tour.target) return;
+    const tourNode = $("tour");
+    if (!tourNode || tourNode.hidden || !tour.target) return;
     const pad = 6;
     const rect = tour.target.getBoundingClientRect();
     const spot = $("tourSpot");
@@ -8800,7 +8963,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.addEventListener("scroll", () => requestAnimationFrame(placeTour), { passive: true });
   // While the tour is open its keys come first and the review shortcuts wait.
   document.addEventListener("keydown", (event) => {
-    if ($("tour").hidden) return;
+    const tourNode = $("tour");
+    if (!tourNode || tourNode.hidden) return;
     // Modal controls own their shortcuts, including save combinations. The
     // optional screen tour must not consume keys before the cutting dialog.
     if (anyDialogOpen()) return;
@@ -9058,18 +9222,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     };
     switch (lesson.key) {
       case "cut": {
-        if (!$("pageDialog").open) openPageDialog("new", null, { page: 0 });
-        $("numberInput").value = "1";
-        $("cropTypeSelect").value = "single_choice";
+        if (!$("pageDialog").open) openPageDialog("view", null, { page: 0, initialNumber: 1, questionType: "single_choice", autoAdd: true });
         // Only the example's type is suggested; the user's range is drawn and
         // saved through the same controls as a real paper.
         trackCropDraft();
-        later(() => $("pageStage"), "框完整的第 1 题", "先点左上角，再点右下角，固定范围后点“保存下一题”。");
+        later(() => $("pageStage"), "框完整的第 1 题", "十字光标下先点左上角，再点右下角固定范围。框出现后可直接调整，核对左侧裁片后点“保存”。");
         break;
       }
       case "cutComplete":
-        if (!$("pageDialog").open) openPageDialog("new");
-        later(() => $("pageDialogComplete"), "点这里结束切题", "空白下一题可以直接完成。本练习只保留原图，不调用 AI。");
+        if (!$("pageDialog").open) openPageDialog("view");
+        later(() => $("pageDialogComplete"), "点这里返回审核", "保存好的原图题会留在题卡中；返回审核不会调用 AI。");
         break;
       case "tick":
       case "tick9": {
@@ -9104,12 +9266,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // because the browser top layer makes the review sidebar inert.
   const openDialogs = [];
   function liftGuides() {
+    const tourNode = $("tour"), teachPanel = $("teachPanel");
+    if (!tourNode || !teachPanel) return;
     for (let index = openDialogs.length - 1; index >= 0; index -= 1) {
       if (!openDialogs[index].open) openDialogs.splice(index, 1);
     }
     document.querySelectorAll("dialog[open]").forEach((node) => { if (!openDialogs.includes(node)) openDialogs.push(node); });
     const host = openDialogs[openDialogs.length - 1] || document.body;
-    if ($("tour").parentNode !== host) host.append($("tour"));
+    if (tourNode.parentNode !== host) host.append(tourNode);
     let mount;
     if (host === $("pageDialog")) mount = $("pageTeachMount");
     else if (host === $("viewerDialog")) mount = $("viewerTeachMount");
@@ -9125,8 +9289,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const fallback = document.documentElement.classList.contains("review-fullscreen") || window.matchMedia("(max-width: 760px)").matches;
       mount = $(fallback ? "reviewTeachFallback" : "reviewTeachMount");
     }
-    if ($("teachPanel").parentNode !== mount) mount.append($("teachPanel"));
-    if (!$("tour").hidden) requestAnimationFrame(placeTour);
+    if (teachPanel.parentNode !== mount) mount.append(teachPanel);
+    if (!tourNode.hidden) requestAnimationFrame(placeTour);
   }
   new MutationObserver(liftGuides).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
   new MutationObserver(liftGuides).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
@@ -9247,7 +9411,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
             if (!data.paper.archived) state.papers.push(data.paper);
           }
           await selectPaper(saved.paperId);
-          restoreReviewState(saved);
           opened = true;
         } catch (error) {
           // 卷被删了或打不开：退回第一份，不能卡在空白页。

@@ -90,9 +90,21 @@
     const { dialog, state, $, el, button, api, toast, cropView, renderStage, renderPageTabs, goToDialogPage, pointFrom, placeBox, setCropSaving, trackCropDraft, confirmDialog } = host;
     let draft = null, baseline = "", history = [], future = [], selectedId = null, operations = [], latestOperation = null, request = null;
     let pageOnly = false, groupFilter = "", selectedPart = null, confirmOpen = false, conflict = false, lookupFailed = false, previewOpen = true;
-    let generation = 0, closing = false, draftRevision = null;
+    let manualSession = false, continuousAdd = false, saveDisposition = null;
+    let generation = 0, closing = false, draftRevision = null, pendingAfterSave = null, lastFrameTap = null, lastDeleted = null;
     const kindNames = { regions: "调整范围", renumber: "修改题号", add: "补题", split: "拆题", merge: "合题" };
     const panel = $("pageLayoutPanel"), overlap = $("pageLayoutOverlap");
+    $("pageStage").addEventListener("dblclick", async (event) => {
+      if (!dialog.layoutWorkspace || dialog.tool === "draw" || dialog.drag || dialog.sketch || dialog.saving || lookupFailed) return;
+      const node = event.target.closest?.("[data-layout-coverage-id]");
+      if (!node) return;
+      let id = Number(node.dataset.layoutCoverageId);
+      if (id < 0 && draft?.kind === "regions") id = selectedId;
+      const q = state.questions.find((item) => item.id === id);
+      if (!q) return;
+      event.preventDefault(); event.stopPropagation();
+      await reviewQuestion(q.id);
+    });
     const current = () => draft?.targets[draft.active];
     const selectedQuestion = () => state.questions.find((q) => q.id === selectedId);
     const readOnly = () => Boolean(state.paper?.archived) || Boolean(state.paper?.status && state.paper.status !== "ready");
@@ -100,7 +112,10 @@
     const label = (q) => `${q.group?.title || groups().find((g) => g.id === groupId(q))?.title || "未分组"} · 第 ${q.number} 题`;
     const status = (q) => host.isApproved(q) ? "已核对" : q.ocr_pending ? "识读中 · 待核对" : "待核对";
     const snap = () => draft ? JSON.stringify({ kind: draft.kind, sources: draft.sources, targets: draft.targets }) : "";
-    const dirty = () => snap() !== baseline;
+    // A merge changes the visible question set even when the user keeps the
+    // default combined ranges and number. Treat choosing that operation as a
+    // real change so Save always reaches its impact confirmation.
+    const dirty = () => draft?.kind === "merge" || snap() !== baseline;
     function snapshot() { return { layout: snap() }; }
     function sync() {
       dialog.mode = draft ? "regions" : "view";
@@ -113,7 +128,7 @@
     function markBefore(before = copy(draft)) {
       if (!draft) return;
       history.push(before); if (history.length > 50) history.shift(); future = [];
-      request = null; confirmOpen = false; conflict = false; lookupFailed = false;
+      request = null; saveDisposition = null; confirmOpen = false; conflict = false; lookupFailed = false;
       sync();
     }
     function change(action) {
@@ -124,59 +139,112 @@
     function configure() {
       $("pageDialog").classList.toggle("layout-editing", Boolean(draft));
       $("pageDialogSave").hidden = !draft;
-      $("pageDialogSave").textContent = draft?.kind === "renumber" ? "保存题号" : "预览并保存";
-      $("pageDialogSave").disabled = dialog.saving || lookupFailed;
-      $("pageDialogSaveNext").hidden = true; $("pageDialogComplete").hidden = true;
+      $("pageDialogSave").textContent = draft?.kind === "split" || draft?.kind === "merge" ? "预览并确认" : "保存";
+      const missingRange = draft && draft.kind !== "renumber" && draft.targets.some((t) => !t.regions.length);
+      $("pageDialogSave").disabled = dialog.saving || lookupFailed || Boolean(missingRange);
+      $("pageDialogSave").title = missingRange ? "请先画出题目范围；删除整题请使用“删除这题”" : "保存当前修改";
+      $("pageDialogSaveNext").hidden = !(draft?.kind === "add" && continuousAdd);
+      $("pageDialogComplete").hidden = !manualSession || readOnly();
+      $("pageDialogComplete").disabled = dialog.saving || lookupFailed || readOnly();
+      $("pageDialogComplete").replaceChildren(el("span", "", "返回审核"), el("span", "kbd-hint", "Ctrl+Enter"));
+      $("pageDialogComplete").title = "保存当前改动后返回审核；不会自动识读";
       $("pageDialogClose").textContent = "关闭";
-      ["numberField", "cropTypeField", "groupField", "readTargetField", "pageToolControls", "pageManualCut"].forEach((id) => { $(id).hidden = true; });
-      $("pageHistoryControls").hidden = !draft;
+      ["numberField", "cropTypeField", "groupField", "readTargetField", "pageToolControls"].forEach((id) => { $(id).hidden = true; });
+      $("pageManualCut").hidden = readOnly();
+      $("pageManualCut").textContent = "从这页补题";
+      $("pageHistoryControls").hidden = !draft && !lastDeleted;
       $("pageUndo").disabled = !history.length || dialog.saving || lookupFailed;
       $("pageRedo").disabled = !future.length || dialog.saving || lookupFailed;
       if (draft?.kind === "renumber") {
-        for (const id of ["pageLayoutNumber", "pageLayoutSaveNumber"]) { const control = panel.querySelector(`#${id}`); if (control) control.disabled = dialog.saving || lookupFailed; }
+        const control = panel.querySelector("#pageLayoutNumber"); if (control) control.disabled = dialog.saving || lookupFailed;
       }
-      $("pageDialogTitle").textContent = "查看整份原卷";
-      $("pageDialogHint").textContent = "浅色表示已归入题目的范围，同一题跨页同色。左键选择，重叠时先选具体题目；右键、中键或空格拖动浏览。进入调整后，只拖选中片段的标签或边角。保存范围保留原有人工文字；补题、拆题和合题保存原图，识读须另外点击。";
-      $("pageCanvasHint").textContent = draft?.kind === "renumber" ? "在左侧输入新题号并保存 · 右键拖动浏览" : draft && dialog.tool === "draw" ? "点两角添加片段 · Esc 取消新框 · 右键拖动浏览" : "左键选题 / 片段 · 右键拖动浏览 · Ctrl+滚轮缩放";
+      $("pageDialogTitle").textContent = "切题与校正";
+      $("pageDialogHint").textContent = "悬停查看题框，单击选中后直接拖边角调整；拖题号标签移动片段。重叠区域会先让你选题。补题时点两角固定范围；跨栏或跨页可再加一块。双击已保存题框可回到这道题的审核卡。右键、中键或空格拖动浏览。";
+      $("pageCanvasHint").textContent = draft?.kind === "renumber" ? "在左侧输入新题号并保存 · 右键拖动浏览" : draft && dialog.tool === "draw" ? "十字光标：点两角固定范围 · Esc 取消框选" : "单击题框直接调整 · 双击返回审核 · 右键拖动浏览";
       $("pageStage").classList.remove("read-only", "pan-ready");
+      $("pageStage").classList.toggle("layout-drawing", Boolean(draft && dialog.tool === "draw"));
     }
-    async function guard() {
+    function askDirtyAction() {
+      return new Promise((resolve) => {
+        const prompt = el("dialog", "layout-leave-dialog");
+        const canSave = !validate(draft, state.questions, state.paper.pages) && !dialog.sketch;
+        prompt.append(el("strong", "", "这道题的调整还没保存"), el("p", "", canSave ? "你可以先保存再继续，也可以放弃本次改动。" : "当前范围还不完整。继续修改可恢复或重新画框；放弃修改会保留原来的题目和范围。"));
+        const actions = el("div", "layout-actions");
+        const finish = (choice) => { prompt.close(); prompt.remove(); resolve(choice); };
+        if (canSave) actions.append(button("保存后继续", "small primary", () => finish("save")));
+        actions.append(button("继续修改", canSave ? "small quiet" : "small primary", () => finish("stay")),
+          button("放弃修改", "small", () => finish("discard")));
+        prompt.append(actions);
+        prompt.addEventListener("cancel", (event) => { event.preventDefault(); finish("stay"); }, { once: true });
+        document.body.append(prompt);
+        prompt.showModal();
+        prompt.querySelector("button")?.focus();
+      });
+    }
+    async function guard(afterSave = null) {
       if (dialog.saving || closing) return false;
       if (lookupFailed) { toast("保存结果尚未核实，请先重试查询，避免重复提交", "error"); return false; }
       if (!dirty()) return true;
       closing = true;
-      try { return await confirmDialog({ title: "本次原卷调整还没保存", text: "题号、范围和片段顺序仍是草稿。丢弃后再切换操作？", ok: "丢弃草稿", cancel: "继续调整", danger: true, focusCancel: true }); }
+      try {
+        const choice = await askDirtyAction();
+        if (choice === "stay") return false;
+        if (choice === "discard") return true;
+        if (["split", "merge"].includes(draft?.kind)) {
+          pendingAfterSave = afterSave;
+          confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" });
+          toast("拆题或合题需要先查看替换题目的影响，再确认保存。", "success");
+          return false;
+        }
+        return await preview({ direct: true });
+      }
       finally { closing = false; }
     }
     function clearDraft() {
       draft = null; baseline = ""; history = []; future = []; selectedPart = null;
-      request = null; confirmOpen = false; conflict = false; lookupFailed = false;
+      request = null; saveDisposition = null; continuousAdd = false; confirmOpen = false; conflict = false; lookupFailed = false; pendingAfterSave = null;
       dialog.tool = "select"; sync(); trackCropDraft();
     }
     async function selectQuestion(id, index = null) {
-      if (id !== selectedId && draft && !(await guard())) return;
+      if (id !== selectedId && draft && !(await guard(() => { void selectQuestion(id, index); }))) return;
       if (draft && id !== selectedId) clearDraft();
       selectedId = id; selectedPart = index; overlap.hidden = true;
+      const q = selectedQuestion();
+      if (q && !readOnly() && !draft) beginSelectedRegionDraft(q, index);
       if (index === null) {
-        const first = selectedQuestion()?.regions?.[0];
+        const first = q?.regions?.[0];
         if (first && first.page_idx !== dialog.page) goToDialogPage(first.page_idx);
       }
       redraw();
     }
-    async function begin(kind, sources = null) {
+    function beginSelectedRegionDraft(q, index = null) {
+      draft = createDraft("regions", [q], state.questions);
+      baseline = snap(); history = []; future = []; selectedPart = index ?? (q.regions.length ? 0 : null);
+      request = null; saveDisposition = "stay"; confirmOpen = false; conflict = false; lookupFailed = false;
+      continuousAdd = false; draftRevision = state.paper.layout_revision; dialog.tool = "select"; sync(); trackCropDraft();
+    }
+    async function begin(kind, sources = null, options = {}) {
       if (readOnly()) { toast("请先恢复资料并完成原卷处理，再调整题目范围", "error"); return; }
-      if (!(await guard())) return;
+      if (!(await guard(() => { void begin(kind, sources, options); }))) return;
       if (dialog.drag) dialog.drag(); if (dialog.sketch) dialog.sketch.cancel();
       const selected = selectedQuestion();
       const qs = kind === "add" ? [] : sources || (selected ? [selected] : []);
       if (host.ensureSourcesReady && !(await host.ensureSourcesReady(qs.map((q) => q.id)))) return;
-      const defaultGroup = selected ? groupId(selected) : groups()[0]?.id ?? null;
+      const defaultGroup = options.groupId !== undefined ? options.groupId : selected ? groupId(selected) : groups()[0]?.id ?? null;
       try { draft = createDraft(kind, qs, state.questions, defaultGroup); }
       catch (error) { toast(error.message, "error"); return; }
+      continuousAdd = kind === "add" && options.continuous !== false;
+      saveDisposition = null;
+      if (kind === "add") {
+        if (options.number !== undefined) draft.targets[0].number = options.number;
+        if (options.questionType) draft.targets[0].question_type = options.questionType;
+      }
       baseline = snap(); history = []; future = []; request = null; conflict = false; lookupFailed = false; confirmOpen = false;
       draftRevision = state.paper.layout_revision;
-      selectedId = qs[0]?.id ?? null; selectedPart = kind === "regions" && draft.targets[0].regions.length ? 0 : null;
-      dialog.tool = "select"; sync(); trackCropDraft(); redraw();
+      if (qs[0]) selectedId = qs[0].id;
+      selectedPart = kind === "regions" && draft.targets[0].regions.length ? 0 : null;
+      if (Number.isInteger(options.page) && state.paper.pages.some((page) => page.page_idx === options.page)) dialog.page = options.page;
+      dialog.tool = continuousAdd ? "draw" : "select"; sync(); trackCropDraft(); redraw();
       if (kind === "renumber") { const input = panel.querySelector("#pageLayoutNumber"); input?.focus(); input?.select?.(); }
     }
     function restore(redo) {
@@ -187,72 +255,121 @@
       to.push(copy(draft)); draft = from.pop(); selectedPart = null; request = null; confirmOpen = false; conflict = false;
       redraw();
     }
-    function remove(index) { if (draft?.kind !== "renumber" && current()?.regions[index]) change(() => { current().regions.splice(index, 1); selectedPart = null; }); }
+    function remove(index) {
+      if (dialog.saving || lookupFailed || draft?.kind === "renumber" || !current()?.regions[index]) return;
+      if (dialog.sketch) dialog.sketch.cancel(); if (dialog.drag) dialog.drag();
+      change(() => { current().regions.splice(index, 1); selectedPart = null; dialog.tool = "select"; });
+    }
+    function toggleDrawing() {
+      if (dialog.saving || lookupFailed) return;
+      const wasDrawing = dialog.tool === "draw";
+      if (dialog.sketch) dialog.sketch.cancel();
+      dialog.tool = wasDrawing ? "select" : "draw";
+      lastFrameTap = null; configure(); render();
+    }
+    async function deleteSelectedQuestion() {
+      const q = selectedQuestion();
+      if (!q || !host.deleteQuestion || dialog.saving || lookupFailed || readOnly() || draft?.kind !== "regions") return;
+      const reason = host.questionDeleteBlockReason?.(q);
+      if (reason) { toast(reason, "error"); return; }
+      if (dialog.sketch) dialog.sketch.cancel(); if (dialog.drag) dialog.drag();
+      const token = generation, paperId = state.paperId;
+      setCropSaving(true);
+      try {
+        const deleted = await host.deleteQuestion(q);
+        if (token !== generation || paperId !== state.paperId || !deleted) return;
+        lastDeleted = deleted.undo_batch?.id ? { batchId: deleted.undo_batch.id, questionId: q.id, number: q.number } : null;
+        clearDraft(); selectedId = null; redraw(); void loadHistory();
+      } catch (error) {
+        if (token === generation) toast(`删除失败，当前修改仍保留：${error.message}`, "error");
+      } finally {
+        if (token === generation) { setCropSaving(false); configure(); }
+      }
+    }
+    async function restoreLastDeletedQuestion() {
+      if (!lastDeleted || !host.restoreDeletedBatch || dialog.saving || lookupFailed || draft) return;
+      const token = generation, paperId = state.paperId, removed = lastDeleted;
+      setCropSaving(true);
+      try {
+        if (!(await host.restoreDeletedBatch(paperId, removed.batchId)) || token !== generation || paperId !== state.paperId) return;
+        lastDeleted = null;
+        const q = state.questions.find((item) => item.id === removed.questionId);
+        selectedId = q?.id ?? null;
+        if (q && !draft && !readOnly()) beginSelectedRegionDraft(q, 0);
+        redraw(); void loadHistory();
+      } catch (error) {
+        if (token === generation) toast(`恢复失败，可以重试：${error.message}`, "error");
+      } finally {
+        if (token === generation) { setCropSaving(false); configure(); }
+      }
+    }
+    function refresh() {
+      if (!dialog.layoutWorkspace) return;
+      if (lastDeleted && state.questions.some((q) => q.id === lastDeleted.questionId)) lastDeleted = null;
+      redraw(); void loadHistory();
+    }
     function close() {
       generation += 1; clearDraft(); operations = []; latestOperation = null; overlap.hidden = true;
+      lastDeleted = null;
       panel.hidden = true; panel.replaceChildren(); $("pageDialog").classList.remove("layout-workspace", "layout-editing");
       dialog.layoutWorkspace = false;
     }
-    function open(mode, q) {
+    function open(mode, q, options = {}) {
       generation += 1; dialog.layoutWorkspace = true; selectedId = q?.id ?? null;
+      lastDeleted = null;
       draft = null; baseline = ""; history = []; future = []; request = null; operations = []; latestOperation = null; selectedPart = null;
-      confirmOpen = false; conflict = false; lookupFailed = false; pageOnly = false; groupFilter = "";
-      if (mode === "regions" && q && !readOnly()) { draft = createDraft("regions", [q], state.questions); baseline = snap(); selectedPart = 0; }
+      confirmOpen = false; conflict = false; lookupFailed = false; pageOnly = false; groupFilter = ""; manualSession = true; continuousAdd = false; saveDisposition = null;
+      if (mode === "regions" && q && !readOnly()) { draft = createDraft("regions", [q], state.questions); baseline = snap(); selectedPart = Number.isInteger(options.focusRegionIndex) ? options.focusRegionIndex : 0; }
       draftRevision = state.paper.layout_revision;
       dialog.tool = "select"; dialog.scrolled = true;
+      dialog.layoutFocus = q?.id != null ? { questionId: q.id, index: Number.isInteger(options.focusRegionIndex) ? options.focusRegionIndex : 0 } : null;
+      dialog.layoutCenterMargins = false;
       panel.hidden = false; $("pageDialog").classList.add("layout-workspace");
       sync(); configure(); render(); void loadHistory();
+      if (!q && (options.autoAdd || !state.questions.length) && !readOnly()) void begin("add", null, { continuous: true, number: options.initialNumber, questionType: options.questionType, page: options.page });
     }
     const labeledField = (text, control) => { const node = el("label", "layout-field"); node.append(el("span", "", text), control); return node; };
     function render() {
       if (!dialog.layoutWorkspace) return;
       panel.replaceChildren();
-      const title = el("strong", "", draft ? `${kindNames[draft.kind]} · 未保存草稿` : "原卷题目");
-      const counts = el("p", "hint", `共 ${state.questions.length} 题 · 待核对 ${state.questions.filter((q) => !host.isApproved(q)).length} 题 · 本页 ${state.questions.filter((q) => q.regions.some((r) => r.page_idx === dialog.page)).length} 题。白底可用来查找漏题；六色循环使用，题组和题号用于辨认。`);
-      counts.id = "pageLayoutCounts";
-      panel.append(title, counts);
+      const selected = selectedQuestion();
+      const titleText = draft?.kind === "add" ? `补一题 · 第 ${current().number ?? "?"} 题${dirty() ? " · 未保存" : ""}`
+        : draft?.kind === "regions" ? `${label(selected || { number: "?" })}${dirty() ? " · 未保存" : ""}`
+          : draft ? `${kindNames[draft.kind]} · 未保存` : selected ? label(selected) : "切题与校正";
+      panel.append(el("strong", "", titleText));
       if (readOnly()) panel.append(el("p", "hint", state.paper?.archived ? "原卷已归档，可查看题框和保存记录；恢复资料后才能调整。" : "原卷处理期间只能查看题框和保存记录。"));
       if (draft) renderDraft(); else renderOverview();
       renderHistory();
       configure();
     }
     function renderOverview() {
-      const filters = el("div", "layout-filters");
-      const checkbox = el("input"); checkbox.type = "checkbox"; checkbox.id = "pageLayoutPageOnly"; checkbox.checked = pageOnly;
-      checkbox.addEventListener("change", () => { pageOnly = checkbox.checked; render(); });
-      filters.append(labeledField("只看本页", checkbox));
-      const select = el("select"); select.id = "pageLayoutGroupFilter";
-      const all = el("option", "", "全部题组"); all.value = ""; select.append(all);
-      groups().forEach((g) => { const o = el("option", "", g.title || `第 ${g.sequence + 1} 组`); o.value = String(g.id); select.append(o); });
-      select.value = groupFilter; select.addEventListener("change", () => { groupFilter = select.value; render(); }); filters.append(select); panel.append(filters);
+      if (lastDeleted && host.restoreDeletedBatch) {
+        const removed = el("section", "layout-empty-range");
+        removed.append(el("strong", "", `第 ${lastDeleted.number} 题已移到回收站`));
+        const restoreQuestion = button("恢复这题", "small primary", restoreLastDeletedQuestion);
+        restoreQuestion.id = "pageLayoutRestoreDeleted"; restoreQuestion.disabled = dialog.saving || lookupFailed;
+        removed.append(restoreQuestion); panel.append(removed);
+      }
       const actions = el("div", "layout-actions");
-      const add = button("补一道题", "small", () => begin("add")); add.id = "pageLayoutAdd"; add.disabled = readOnly(); actions.append(add);
+      const add = button("补一题", "small primary", () => begin("add", null, { continuous: true })); add.id = "pageLayoutAdd"; add.disabled = readOnly(); actions.append(add);
       const q = selectedQuestion();
-      const edit = button("调整当前题", "small primary", () => begin("regions")); edit.id = "pageLayoutEdit"; edit.disabled = !q || readOnly();
       const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; renumber.disabled = !q || readOnly();
       const split = button("拆题", "small", () => begin("split")); split.id = "pageLayoutSplit"; split.disabled = !q || readOnly();
       const merge = button("合题…", "small", () => renderMergePicker()); merge.id = "pageLayoutMerge"; merge.disabled = !q || readOnly();
-      actions.append(edit, renumber, split, merge); panel.append(actions);
+      if (q) actions.append(renumber);
+      const more = el("details", "layout-more-actions"); more.append(el("summary", "", "更多操作"));
+      const advanced = el("div", "layout-actions"); advanced.append(split, merge); more.append(advanced);
+      if (q) actions.append(more); panel.append(actions);
       if (q) {
-        panel.append(el("p", "layout-current", `已选：${label(q)} · ${q.regions.length} 段`));
-        const locate = button("定位当前题", "small quiet", () => { const r = q.regions[0]; if (r) goToDialogPage(r.page_idx); }); panel.append(locate);
-        const reread = button("重新识读当前题…", "small quiet", async () => {
-          if (await confirmDialog({ title: "重新识读这道题？", text: "这会另外提交 AI 识读任务。已有人工文字会按识读流程保护，并需要重新核对。", ok: "进入识读流程", cancel: "返回原卷" })) {
-            await host.rereadQuestion(selectedQuestion());
-          }
-        }); reread.id = "pageLayoutReread"; reread.disabled = Boolean(state.paper.demo) || readOnly(); panel.append(reread);
-      }
-      const list = el("div", "layout-question-list"); list.id = "pageLayoutQuestionList"; list.setAttribute("role", "list");
-      state.questions.filter((q) => (!pageOnly || q.regions.some((r) => r.page_idx === dialog.page)) && (!groupFilter || String(groupId(q)) === groupFilter)).sort(host.questionCompare).forEach((q, i) => {
-        const row = button(`${label(q)} · ${status(q)} · ${q.regions.length} 段 · 页 ${[...new Set(q.regions.map((r) => r.page_idx + 1))].join("、")}`, "layout-question", () => selectQuestion(q.id));
-        row.dataset.layoutQuestionId = String(q.id); row.setAttribute("aria-pressed", String(q.id === selectedId)); row.style.setProperty("--layout-color", colorOf(q, i));
-        list.append(row);
-      });
-      if (!list.children.length) list.append(el("p", "hint", "当前筛选没有题目。"));
-      panel.append(list);
+        const pages = [...new Set(q.regions.map((r) => r.page_idx + 1))];
+        panel.append(el("p", "layout-current", `${q.regions.length} 段 · ${pages.length ? `第 ${pages.join("、")} 页` : "尚无范围"} · ${status(q)}`));
+        panel.append(button("查看这题", "small quiet", () => { void reviewQuestion(q.id); }, "返回审核并定位到这道题"));
+      } else panel.append(el("p", "hint", "单击原卷题框即可选中并调整；双击已保存题框返回审核。白底区域可以直接补题。"));
     }
-    function renderMergePicker() {
-      const q = selectedQuestion(); if (!q || draft || dialog.saving) return;
+    async function renderMergePicker() {
+      const q = selectedQuestion(); if (!q || dialog.saving) return;
+      if (draft && !(await guard(() => { void renderMergePicker(); }))) return;
+      if (draft) clearDraft();
       const chooser = el("section", "layout-merge-picker"); chooser.id = "pageLayoutMergePicker"; chooser.append(el("strong", "", "选择同组题目，按下面顺序合成一道题"));
       const chosen = [q.id], list = el("div");
       state.questions.filter((item) => groupId(item) === groupId(q)).sort(host.questionCompare).forEach((item) => {
@@ -262,10 +379,28 @@
       });
       const summary = el("p", "hint", `合题顺序：${label(q)}`);
       const start = button("编辑合题结果", "small primary", () => begin("merge", chosen.map((id) => state.questions.find((x) => x.id === id)))); start.id = "pageLayoutMergeBegin";
-      chooser.append(list, summary, start, button("返回", "small quiet", render)); panel.querySelector(".layout-merge-picker")?.remove(); panel.prepend(chooser);
+      chooser.append(list, summary, start, button("返回", "small quiet", render)); panel.replaceChildren(chooser);
     }
     function renderDraft() {
-      const cancel = button(draft.kind === "renumber" ? "取消修改" : "返回选题", "small quiet", async () => { if (await guard()) { clearDraft(); redraw(); } }); cancel.id = "pageLayoutCancelDraft"; panel.append(cancel);
+      const cancelLabel = draft.kind === "renumber" ? "返回题框" : draft.kind === "add" && continuousAdd ? "取消本题" : draft.kind === "regions" ? "返回总览" : "取消这次操作";
+      const cancel = button(cancelLabel, "small quiet", async () => { if (await guard(() => { void render(); })) { clearDraft(); redraw(); } }); cancel.id = "pageLayoutCancelDraft"; panel.append(cancel);
+      if (draft.kind === "regions" && selectedQuestion() && !current().regions.length) {
+        renderEmptyRange(); renderSaveIssue(); return;
+      }
+      if (draft.kind === "regions" && selectedQuestion()) {
+        const q = selectedQuestion(), t = current(), pages = [...new Set(t.regions.map((r) => r.page_idx + 1))];
+        panel.append(el("p", "layout-current", `${t.regions.length} 个框 · 第 ${pages.join("、")} 页 · ${status(q)}`));
+        const actions = el("div", "layout-actions");
+        actions.append(button("查看这题", "small quiet", () => { void reviewQuestion(q.id); }, "返回审核并定位到这道题"));
+        const add = button("补一题", "small primary", () => { void begin("add", null, { continuous: true }); }); add.id = "pageLayoutAdd"; actions.append(add);
+        const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; actions.append(renumber);
+        const more = el("details", "layout-more-actions"); more.append(el("summary", "", "更多操作"));
+        const advanced = el("div", "layout-actions");
+        const split = button("拆题", "small", () => begin("split")); split.id = "pageLayoutSplit";
+        const merge = button("合题…", "small", () => { void renderMergePicker(); }); merge.id = "pageLayoutMerge";
+        advanced.append(split, merge);
+        more.append(advanced); actions.append(more); panel.append(actions);
+      }
       if (draft.kind === "renumber") {
         const q = selectedQuestion(), t = current();
         panel.append(el("p", "layout-current", `当前：${label(q)}`));
@@ -285,43 +420,49 @@
           if (event.key === "Enter" && !event.isComposing && !event.repeat) { event.preventDefault(); event.stopPropagation(); preview(); }
         });
         panel.append(labeledField("新题号", num));
-        const save = button("保存题号", "small primary", preview); save.id = "pageLayoutSaveNumber"; save.disabled = dialog.saving || lookupFailed; panel.append(save);
-        panel.append(el("p", "hint", "保存后请重新核对。原框、颜色和题文保留，已入库的历史版本保持原题号；不会自动识读。"));
+        panel.append(el("p", "hint", "输入后按 Enter 或点击上方“保存”。原框、颜色和题文保留；本次不会调用 AI。"));
         renderSaveIssue();
         return;
       }
-      if (draft.kind === "regions") panel.append(el("p", "hint", "只保存范围与顺序，保留人工文字。选中片段后拖标签移动，拖边角调整；框内部只选中。"));
+      if (draft.kind === "regions") panel.append(el("p", "hint", "直接拖边角改大小、拖题号标签移动；保存后留在原卷。"));
+      else if (draft.kind === "add" && continuousAdd) panel.append(el("p", "hint", "十字光标下点两角固定题框；保存只保留原图，不会识读。"));
       else panel.append(el("p", "hint", "结果作为原图题保存，不自动识读。请逐题核对题号、题组、题型和完整范围。"));
       if (draft.kind === "split") {
         const count = el("input"); count.id = "pageLayoutSplitCount"; count.type = "number"; count.min = "2"; count.max = "12"; count.value = draft.targets.length;
         count.addEventListener("change", () => { try { const resized = resizeSplit(draft, Number(count.value), state.questions); change(() => { draft = resized; }); } catch (error) { toast(error.message, "error"); count.value = draft.targets.length; } });
         panel.append(labeledField("拆成几题", count));
       }
-      const tabs = el("div", "layout-targets");
-      draft.targets.forEach((t, index) => {
-        const tab = button(`结果 ${index + 1} · 第 ${t.number ?? "?"} 题 · ${t.regions.length} 段`, "small", () => { if (dialog.drag) dialog.drag(); if (dialog.sketch) dialog.sketch.cancel(); draft.active = index; selectedPart = null; dialog.tool = "select"; redraw(); });
-        tab.dataset.layoutTargetIndex = index; tab.setAttribute("aria-pressed", String(index === draft.active)); tabs.append(tab);
-      }); panel.append(tabs);
+      if (draft.kind === "split" || draft.kind === "merge") {
+        const tabs = el("div", "layout-targets");
+        draft.targets.forEach((t, index) => {
+          const tab = button(`结果 ${index + 1} · 第 ${t.number ?? "?"} 题 · ${t.regions.length} 段`, "small", () => { if (dialog.drag) dialog.drag(); if (dialog.sketch) dialog.sketch.cancel(); draft.active = index; selectedPart = null; dialog.tool = "select"; redraw(); });
+          tab.dataset.layoutTargetIndex = index; tab.setAttribute("aria-pressed", String(index === draft.active)); tabs.append(tab);
+        }); panel.append(tabs);
+      }
       const t = current();
       if (draft.kind !== "regions") {
         const num = el("input"); num.id = "pageLayoutNumber"; num.type = "number"; num.min = "1"; num.max = "999"; num.value = t.number ?? "";
         num.addEventListener("change", () => change(() => { t.number = Number(num.value); })); panel.append(labeledField("题号", num));
-        const group = el("select"); group.id = "pageLayoutGroup";
-        if (!groups().length) { const o = el("option", "", "未分组"); o.value = ""; group.append(o); }
-        groups().forEach((g) => { const o = el("option", "", g.title || `第 ${g.sequence + 1} 组`); o.value = g.id; group.append(o); }); group.value = t.group_id ?? "";
-        // Splitting and merging remain inside their original group.
-        group.disabled = draft.kind !== "add"; group.addEventListener("change", () => change(() => { t.group_id = group.value ? Number(group.value) : null; })); panel.append(labeledField("题组", group));
+        if (draft.kind !== "add" || groups().length > 1) {
+          const group = el("select"); group.id = "pageLayoutGroup";
+          if (!groups().length) { const o = el("option", "", "未分组"); o.value = ""; group.append(o); }
+          groups().forEach((g) => { const o = el("option", "", g.title || `第 ${g.sequence + 1} 组`); o.value = g.id; group.append(o); }); group.value = t.group_id ?? "";
+          // Splitting and merging remain inside their original group.
+          group.disabled = draft.kind !== "add"; group.addEventListener("change", () => change(() => { t.group_id = group.value ? Number(group.value) : null; })); panel.append(labeledField("题组", group));
+        }
         const type = el("select"); type.id = "pageLayoutType";
         Object.entries(host.TYPE_NAMES).forEach(([value, name]) => { const o = el("option", "", name); o.value = value; type.append(o); }); type.value = t.question_type;
         type.addEventListener("change", () => change(() => { t.question_type = type.value; })); panel.append(labeledField("题型", type));
       }
-      const draw = button(dialog.tool === "draw" ? "结束添加片段" : "添加范围片段", "small", () => {
-        if (dialog.sketch) dialog.sketch.cancel(); dialog.tool = dialog.tool === "draw" ? "select" : "draw"; configure(); render();
-      }); draw.id = "pageLayoutDraw"; draw.setAttribute("aria-pressed", String(dialog.tool === "draw")); panel.append(draw);
+      const draw = button(dialog.tool === "draw" ? "取消框选" : t.regions.length ? "再加一块" : "画题框", "small", toggleDrawing);
+      draw.id = "pageLayoutDraw"; draw.setAttribute("aria-pressed", String(dialog.tool === "draw")); panel.append(draw);
       const parts = el("ol", "layout-parts"); parts.id = "pageLayoutParts";
       t.regions.forEach((r, index) => {
         const row = el("li", selectedPart === index ? "selected" : ""); row.dataset.layoutPartIndex = index;
-        const locate = button(`${index + 1} · 第 ${r.page_idx + 1} 页`, "small quiet", () => { selectedPart = index; goToDialogPage(r.page_idx); redraw(); }); row.append(locate);
+        const locate = button(`${index + 1} · 第 ${r.page_idx + 1} 页`, "small quiet", () => {
+          selectedPart = index; dialog.layoutFocus = { questionId: selectedId, index };
+          if (r.page_idx !== dialog.page) goToDialogPage(r.page_idx); else redraw();
+        }); row.append(locate);
         for (const offset of [-1, 1]) { const move = button(offset < 0 ? "前移" : "后移", "small quiet", () => change(() => { const n = index + offset; [t.regions[index], t.regions[n]] = [t.regions[n], t.regions[index]]; selectedPart = n; })); move.disabled = index + offset < 0 || index + offset >= t.regions.length; row.append(move); }
         row.append(button("移除", "small quiet", () => remove(index)));
         if (draft.targets.length > 1) {
@@ -332,13 +473,43 @@
         }
         parts.append(row);
       }); panel.append(parts);
-      if (!t.regions.length) panel.append(el("p", "hint", "这道题尚无范围；点击“添加范围片段”，再点原卷的两个角。"));
-      const cropPreview = el("details", "layout-draft-preview"); cropPreview.id = "pageLayoutTargetPreview"; cropPreview.open = previewOpen;
-      cropPreview.append(el("summary", "", "当前题保存效果 · 按片段顺序拼接"));
-      if (t.regions.length) cropPreview.append(cropView(t.regions));
-      cropPreview.addEventListener("toggle", () => { previewOpen = cropPreview.open; }); panel.append(cropPreview);
-      if (confirmOpen) renderConfirmation();
+      if (!t.regions.length) panel.append(el("p", "hint", dialog.tool === "draw" ? "请在原卷上点题目范围的两个角。" : "点击“画题框”，再在原卷上点题目范围的两个角。"));
+      if (draft.kind === "add" && continuousAdd) {
+        const cropPreview = el("section", "layout-draft-preview layout-draft-preview-fixed"); cropPreview.id = "pageLayoutTargetPreview";
+        cropPreview.append(el("strong", "", "裁片预览"));
+        if (t.regions.length) cropPreview.append(cropView(t.regions));
+        else cropPreview.append(el("p", "hint", "固定第一个框后，这里会显示题目裁片。"));
+        panel.append(cropPreview);
+      } else {
+        const cropPreview = el("details", "layout-draft-preview"); cropPreview.id = "pageLayoutTargetPreview"; cropPreview.open = previewOpen;
+        cropPreview.append(el("summary", "", "当前题保存效果 · 按片段顺序拼接"));
+        if (t.regions.length) cropPreview.append(cropView(t.regions));
+        cropPreview.addEventListener("toggle", () => { previewOpen = cropPreview.open; }); panel.append(cropPreview);
+      }
+        if (confirmOpen) renderConfirmation();
       renderSaveIssue();
+    }
+    function renderEmptyRange() {
+      const box = el("section", "layout-empty-range"); box.id = "pageLayoutEmptyRange";
+      box.setAttribute("role", "status");
+      box.append(el("strong", "", "这道题已经没有范围框"), el("p", "", "题目尚未删除。你可以恢复刚删的框、重新画框，或删除整道题。"));
+      const previous = history.at(-1)?.targets[draft.active]?.regions;
+      if (previous?.length) {
+        const restoreFrame = button("恢复刚删的框", "small primary", () => restore(false));
+        restoreFrame.id = "pageLayoutRestoreFrame"; restoreFrame.disabled = dialog.saving || lookupFailed; box.append(restoreFrame);
+      }
+      const draw = button(dialog.tool === "draw" ? "取消重画" : "重新画框", "small", toggleDrawing);
+      draw.id = "pageLayoutDraw"; draw.disabled = dialog.saving || lookupFailed;
+      draw.setAttribute("aria-pressed", String(dialog.tool === "draw")); box.append(draw);
+      if (host.deleteQuestion) {
+        const reason = host.questionDeleteBlockReason?.(selectedQuestion()) || "";
+        const removeQuestion = button("删除这题", "small quiet danger", deleteSelectedQuestion);
+        removeQuestion.id = "pageLayoutDeleteQuestion"; removeQuestion.disabled = dialog.saving || lookupFailed || Boolean(reason);
+        removeQuestion.title = reason || "移到回收站，可以撤销"; box.append(removeQuestion);
+        if (reason) box.append(el("p", "hint", reason));
+      }
+      if (dialog.tool === "draw") box.append(el("p", "hint", "请在原卷上点题目范围的两个角；Esc 取消当前新框。"));
+      panel.append(box);
     }
     function renderSaveIssue() {
       if (conflict) {
@@ -365,13 +536,11 @@
         const list = el("ul", "layout-withdrawals"); list.id = "pageLayoutWithdrawals";
         published.forEach((q) => list.append(el("li", "", `${label(q)} · 已入库 v${q.publication.version}（编号 ${q.publication.id}）`)));
         if (!published.length) list.append(el("li", "", "当前所选旧题没有有效的入库版本需要撤回。")); box.append(list);
-      } else if (draft.kind === "regions") {
-        box.append(el("p", "hint", "范围保存后，当前题卡需要重新核对。保留人工文字、已入库的历史版本和旧组卷。"));
       } else box.append(el("p", "hint", "补题保存为原图题；核对通过后才会入库。"));
       box.append(el("p", "hint", draft.kind === "regions" ? "保留原有人工文字；本次不提交 AI。" : "保存为原图题；旧题的人工文字保留在操作历史中，本次不提交 AI。"));
       draft.targets.forEach((t, i) => { box.append(el("strong", "", `结果 ${i + 1} · 第 ${t.number} 题 · ${host.TYPE_NAMES[t.question_type] || t.question_type} · ${t.regions.length} 段`), cropView(t.regions)); });
       const save = button("确认保存", "small primary", commit); save.id = "pageLayoutConfirmSave";
-      box.append(save, button("继续调整", "small quiet", () => { confirmOpen = false; render(); })); panel.append(box);
+      box.append(save, button("继续调整", "small quiet", () => { confirmOpen = false; pendingAfterSave = null; render(); })); panel.append(box);
     }
     async function loadHistory() {
       const token = generation, id = state.paperId;
@@ -392,7 +561,7 @@
     function renderHistory() {
       const details = el("details", "layout-history"); details.id = "pageLayoutHistory"; details.append(el("summary", "", "已保存的调整记录"));
       const latest = latestOperation;
-      const undo = button("撤销上次保存", "small", () => undoSaved(latest)); undo.id = "pageLayoutUndoSaved"; undo.disabled = !latest?.can_undo || Boolean(draft) || dialog.saving || readOnly();
+      const undo = button("撤销上次保存", "small", () => undoSaved(latest)); undo.id = "pageLayoutUndoSaved"; undo.disabled = !latest?.can_undo || dirty() || dialog.saving || readOnly();
       details.append(undo, button("刷新记录", "small quiet", loadHistory));
       if (latest?.blocked_reason) details.append(el("p", "hint", latest.blocked_reason));
       if (!operations.length) details.append(el("p", "hint", "尚无范围操作记录。"));
@@ -427,34 +596,119 @@
       }); panel.append(details);
     }
     async function undoSaved(op) {
-      if (!op?.can_undo || draft || dialog.saving) return;
+      if (!op?.can_undo || dirty() || dialog.saving) return;
       if (!(await confirmDialog({ title: "撤销上次保存？", text: "恢复保存前的题目、范围和人工内容。发生后续题面修改时会拒绝撤销，避免覆盖新内容。", ok: "撤销上次保存", cancel: "保留" }))) return;
       const token = generation, id = state.paperId; setCropSaving(true);
       try {
         const data = await api(`/api/papers/${id}/question-layout/${op.id}/undo`, { method: "POST", body: { layout_revision: state.paper.layout_revision } });
         if (token !== generation || id !== state.paperId) return;
+        clearDraft();
         host.applyCanonical(data); selectedId = data.questions.find((q) => op.source_ids?.includes(q.id))?.id ?? null;
         toast("上次保存已撤销", "success"); redraw(); await loadHistory();
       } catch (error) { toast(`撤销失败：${error.message}`, "error"); await loadHistory(); }
       finally { if (token === generation) { setCropSaving(false); configure(); } }
     }
-    function preview() {
-      if (!draft || dialog.saving || lookupFailed) return;
-      if (dialog.sketch) { toast("请先固定新框，或按 Esc 取消", "error"); return; }
-      if (dialog.drag) dialog.drag();
-      const error = validate(draft, state.questions, state.paper.pages); if (error) { toast(error, "error"); return; }
-      if (draft.kind === "regions" && !dirty()) { toast("范围没有变化"); return; }
-      if (draft.kind === "renumber") {
-        if (!dirty()) { toast("题号没有变化"); return; }
-        confirmOpen = true; return commit();
+    async function preview({ next = false, complete = false, direct = false } = {}) {
+      if (dialog.saving || lookupFailed) return false;
+      if (!draft) {
+        if (complete && manualSession) await host.returnReview?.(selectedId);
+        return Boolean(complete);
       }
-      confirmOpen = true; render(); $("pageLayoutConfirm").scrollIntoView({ block: "nearest" }); $("pageLayoutConfirmSave").focus();
+      if (dialog.sketch) { toast("请先固定新框，或按 Esc 取消", "error"); return false; }
+      if (dialog.drag) dialog.drag();
+      if (complete) return returnToReview();
+      if (draft.kind === "regions" && !current().regions.length) {
+        toast("请先恢复刚删的框或重新画框；想删除整题请点“删除这题”。", "error"); return false;
+      }
+      const error = validate(draft, state.questions, state.paper.pages); if (error) { toast(error, "error"); return; }
+      if (!dirty()) { toast("没有尚未保存的改动"); return true; }
+      saveDisposition = next ? "next" : "stay";
+      if (draft.kind === "add" && continuousAdd) {
+        confirmOpen = false;
+        return commit({ direct: true });
+      }
+      if (["split", "merge"].includes(draft.kind) && !direct) {
+        confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" }); $("pageLayoutConfirmSave")?.focus();
+        return false;
+      }
+      if (["split", "merge"].includes(draft.kind) && direct) {
+        confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" });
+        return false;
+      }
+      confirmOpen = false;
+      return commit({ direct: true });
     }
-    function accepted(data) {
-      const renumbered = draft?.kind === "renumber";
+    async function returnToReview() {
+      if (dialog.saving || lookupFailed) { toast("请先完成当前保存或核实保存结果", "error"); return false; }
+      if (dialog.sketch) { toast("请先固定新框，或按 Esc 取消", "error"); return false; }
+      if (dialog.drag) dialog.drag();
+      if (draft && dirty() && !(await guard(() => { void returnToReview(); }))) return false;
+      if (draft) clearDraft();
+      await host.returnReview?.(selectedId);
+      return true;
+    }
+    async function reviewQuestion(id) {
+      if (dialog.saving || lookupFailed || dialog.sketch || dialog.drag) return false;
+      if (draft && dirty() && !(await guard(() => { void reviewQuestion(id); }))) return false;
+      if (draft) clearDraft();
+      await host.reviewQuestion?.(id);
+      return true;
+    }
+    async function requestClose() {
+      if (dialog.saving || lookupFailed) { toast("请先完成当前保存或核实保存结果", "error"); return false; }
+      if (dialog.drag) dialog.drag();
+      if (draft && dirty() && !(await guard(async () => {
+        if (await requestClose()) host.closeWorkspace?.();
+      }))) return false;
+      if (draft) clearDraft();
+      return true;
+    }
+    function nextNumberAfter(question) {
+      if (!question) return null;
+      const group = groupId(question), used = new Set(state.questions.filter((q) => groupId(q) === group).map((q) => Number(q.number)));
+      let number = Number(question.number) + 1;
+      while (number <= 999 && used.has(number)) number += 1;
+      return number <= 999 ? number : null;
+    }
+    async function accepted(data, disposition = saveDisposition || "stay") {
+      const kind = draft?.kind, renumbered = kind === "renumber", wasContinuousAdd = kind === "add" && continuousAdd;
+      const afterSave = pendingAfterSave; pendingAfterSave = null;
       const first = data.operation?.target_ids?.[0];
       host.applyCanonical(data); selectedId = first ?? selectedId;
-      clearDraft(); redraw(); toast(renumbered ? "题号已保存，请重新核对" : "原卷调整已保存；未提交识读", "success"); void loadHistory();
+      if (wasContinuousAdd) {
+        const saved = state.questions.find((q) => q.id === first);
+        if (saved?.number != null) host.onCutSaved?.(saved.number);
+        if (dialog.saving) setCropSaving(false);
+        clearDraft();
+        if (disposition === "next") {
+          const page = dialog.page, zoom = dialog.zoom, zoomMode = dialog.zoomMode;
+          const stage = $("pageStage"), top = stage.scrollTop, left = stage.scrollLeft;
+          const number = nextNumberAfter(saved);
+          await begin("add", null, { continuous: true, groupId: saved ? groupId(saved) : null, number, questionType: saved?.question_type || "unknown", page: page });
+          dialog.page = page; dialog.zoom = zoom; dialog.zoomMode = zoomMode;
+          requestAnimationFrame(() => { if (dialog.layoutWorkspace) stage.scrollTo({ top, left }); });
+          toast(number === null ? "题目已保存。题号已到 999，请为下一题手动填写题号。" : "题目已保存；已准备下一题。", "success");
+          void loadHistory();
+          return true;
+        }
+        if (disposition === "return") {
+          toast("题目已保存，正在返回审核。", "success");
+          await host.returnReview?.(saved?.id ?? selectedId);
+          void loadHistory();
+          return true;
+        }
+        if (saved) beginSelectedRegionDraft(saved, 0);
+        redraw(); toast("题目已保存为原图题；可以继续校正或主动识读。", "success"); void loadHistory();
+        if (afterSave) await afterSave();
+        return true;
+      }
+      const part = selectedPart;
+      clearDraft();
+      const selected = selectedQuestion();
+      if (selected && !readOnly()) beginSelectedRegionDraft(selected, part);
+      redraw(); toast(renumbered ? "题号已保存，请重新核对" : "原卷调整已保存；未提交识读", "success"); void loadHistory();
+      if (afterSave) await afterSave();
+      return true;
     }
     async function recoverRequest() {
       if (!request || dialog.saving) return;
@@ -463,30 +717,32 @@
         const data = await api(`/api/papers/${id}/question-layout?client_request_id=${encodeURIComponent(request.client_request_id)}`);
         if (token !== generation || id !== state.paperId) return;
         if (data.operation || data.already_applied) {
-          // Lookup can return history only; reload canonical before leaving the draft.
-          if (data.questions && data.paper) accepted(data);
-          else { await host.reloadCanonical(); selectedId = data.operation?.target_ids?.[0] ?? selectedId; clearDraft(); redraw(); void loadHistory(); toast("已核实本次调整保存成功", "success"); }
+          // Normal responses and receipt lookup share one canonical success path.
+          if (!(data.questions && data.paper)) await host.reloadCanonical();
+          if (data.operation?.target_ids?.[0] != null) selectedId = data.operation.target_ids[0];
+          await accepted({ paper: data.paper || state.paper, questions: data.questions || state.questions, operation: data.operation }, saveDisposition);
         } else { lookupFailed = false; render(); toast("本次请求尚未保存，可再次确认保存"); }
       } catch (error) { lookupFailed = true; render(); toast(`保存结果仍无法核实：${error.message}`, "error"); }
       finally { if (token === generation) { setCropSaving(false); configure(); } }
     }
-    async function commit() {
-      if (!draft || !confirmOpen || dialog.saving || lookupFailed) return;
+    async function commit({ direct = false } = {}) {
+      if (!draft || (!confirmOpen && !direct) || (direct && ["split", "merge"].includes(draft.kind)) || dialog.saving || lookupFailed) return false;
       const error = validate(draft, state.questions, state.paper.pages); if (error) { toast(error, "error"); return; }
       const token = generation, id = state.paperId; setCropSaving(true);
       try {
         if (host.ensureSourcesReady && !(await host.ensureSourcesReady(draft.sources.map((s) => s.id)))) return;
         request ||= payload(draft, draftRevision, crypto.randomUUID());
         const data = await api(`/api/papers/${id}/question-layout`, { method: "POST", body: request });
-        if (token === generation && id === state.paperId) accepted(data);
+        if (token === generation && id === state.paperId) return await accepted(data, saveDisposition);
       } catch (error) {
         if (token !== generation || id !== state.paperId) return;
-        if (draft?.kind === "renumber" && /题号.*占用/.test(error.message)) { request = null; confirmOpen = false; toast(`保存被阻止：${error.message} 请改用其他题号。`, "error"); render(); }
+        if (["renumber", "add"].includes(draft?.kind) && /题号.*(?:占用|重复|存在)|(?:占用|重复|存在).*题号/.test(error.message)) { request = null; saveDisposition = null; confirmOpen = false; toast(`保存被阻止：${error.message} 请改用其他题号。草稿仍保留。`, "error"); render(); }
         else if (error.status === 409 || /版本|冲突|已被|revision|fingerprint/i.test(error.message)) { conflict = true; request = null; toast(`保存被阻止：${error.message}`, "error"); render(); }
         else if (error.status) { toast(`保存失败，草稿仍保留：${error.message}`, "error"); render(); }
         else { lookupFailed = true; toast("连接中断，正在核实保存结果", "error"); }
       } finally { if (token === generation) { setCropSaving(false); configure(); } }
-      if (lookupFailed) await recoverRequest();
+      if (lookupFailed) { await recoverRequest(); return false; }
+      return false;
     }
     function renderParts() {
       if (!dialog.layoutWorkspace) return;
@@ -496,7 +752,7 @@
     }
     function activeQuestions() {
       const result = state.questions.filter((q) => !draft?.sources.some((s) => s.id === q.id));
-      if (draft) draft.targets.forEach((t, i) => result.push({ ...t, id: -(i + 1), group: groups().find((g) => g.id === t.group_id), color_index: i === 0 && selectedQuestion() ? selectedQuestion().color_index : (i + (selectedQuestion()?.color_index ?? 0)) % 6 }));
+      if (draft) draft.targets.forEach((t, i) => result.push({ ...t, id: -(i + 1), group: groups().find((g) => g.id === t.group_id), color_index: i === 0 && selectedQuestion() ? (selectedQuestion().color_index + (continuousAdd ? 1 : 0)) % 6 : (i + (selectedQuestion()?.color_index ?? 0)) % 6 }));
       return result;
     }
     function selectPart(surface, index) {
@@ -506,8 +762,15 @@
     }
     function chooseHit(hit) {
       overlap.hidden = true;
-      if (draft && hit.question.id === -(draft.active + 1)) { selectedPart = hit.index; redraw(); return; }
-      if (draft && hit.question.id < 0) { draft.active = -hit.question.id - 1; selectedPart = hit.index; redraw(); return; }
+      if (draft && hit.question.id === -(draft.active + 1)) {
+        if (selectedPart !== hit.index) { selectedPart = hit.index; redraw(); }
+        return;
+      }
+      if (draft && hit.question.id < 0) {
+        const target = -hit.question.id - 1;
+        if (draft.active !== target || selectedPart !== hit.index) { draft.active = target; selectedPart = hit.index; redraw(); }
+        return;
+      }
       void selectQuestion(hit.question.id, hit.index);
     }
     function showHits(hits, event) {
@@ -519,15 +782,17 @@
       overlap.querySelector("button")?.focus();
     }
     function renderSurface(surface) {
+      surface.dataset.layoutTool = dialog.tool || "select";
       const qs = activeQuestions();
       qs.forEach((q, fallback) => q.regions.forEach((r, index) => {
         if (r.page_idx !== dialog.page) return;
         const target = draft && q.id === -(draft.active + 1), own = target && draft.kind !== "renumber";
-        const box = el("div", `layout-coverage${q.id === selectedId || (target && draft.kind === "renumber") ? " question-selected" : ""}${own ? " layout-edit-box" : ""}${own && selectedPart === index ? " selected" : ""}`);
+        const box = el("div", `layout-coverage${q.id === selectedId || (target && draft.kind === "renumber") ? " question-selected" : ""}${own ? " layout-edit-box" : ""}${own && selectedPart === index ? " selected" : ""}${target && continuousAdd ? " layout-new-draft" : ""}`);
         box.style.setProperty("--layout-color", colorOf(q, fallback)); placeBox(box, r.bbox); box.dataset.layoutCoverageId = q.id;
+        box.dataset.layoutSourceQuestionId = q.id > 0 ? q.id : (draft?.sources?.[0]?.id ?? "");
         box.dataset.layoutCoveragePiece = index;
         if (own) {
-          box.dataset.layoutBoxIndex = index; box.tabIndex = 0; box.setAttribute("role", "group"); box.setAttribute("aria-label", `第 ${index + 1} 段，先选中后拖标签或边角调整`);
+          box.dataset.layoutBoxIndex = index; box.tabIndex = 0; box.setAttribute("role", "group"); box.setAttribute("aria-label", `第 ${index + 1} 段，单击选中后拖题号标签或边角调整`);
           box.addEventListener("focus", () => selectPart(surface, index));
           const tab = el("span", "layout-box-label", `${current().number} · ${index + 1}`); tab.dataset.layoutDragLabel = index;
           tab.addEventListener("pointerdown", (event) => {
@@ -552,15 +817,38 @@
         }
         surface.append(box);
       }));
+      const updateHover = (event) => {
+        const hit = dialog.imageReady && dialog.tool !== "draw" ? hitTest(qs, dialog.page, pointFrom(event, surface))[0] : null;
+        surface.classList.toggle("layout-hit-hover", Boolean(hit));
+        surface.querySelectorAll(".layout-coverage[data-layout-coverage-id]").forEach((box) => {
+          const active = hit && Number(box.dataset.layoutCoverageId) === hit.question.id && Number(box.dataset.layoutCoveragePiece) === hit.index;
+          box.classList.toggle("question-hovered", Boolean(active));
+        });
+      };
+      surface.addEventListener("pointermove", updateHover);
+      surface.addEventListener("pointerleave", () => { surface.classList.remove("layout-hit-hover"); surface.querySelectorAll(".question-hovered").forEach((box) => box.classList.remove("question-hovered")); });
       surface.addEventListener("pointerdown", (event) => {
         if (event.button !== 0 || dialog.saving || dialog.spacePan || !dialog.imageReady) return;
-        if (event.target.closest?.("[data-layout-handle], [data-layout-drag-label]") && dialog.tool !== "draw") return;
+        if (event.target.closest?.("[data-layout-handle], [data-layout-drag-label]") && dialog.tool !== "draw") { lastFrameTap = null; return; }
         event.preventDefault(); event.stopPropagation(); overlap.hidden = true;
-        if (dialog.sketch) { dialog.sketch.complete(event); return; }
-        if (draft && dialog.tool === "draw") { sketch(event, surface); return; }
+        if (dialog.sketch) { lastFrameTap = null; dialog.sketch.complete(event); return; }
+        if (draft && dialog.tool === "draw") { lastFrameTap = null; sketch(event, surface); return; }
         const hits = hitTest(qs, dialog.page, pointFrom(event, surface));
-        if (hits.length > 1) showHits(hits, event); else if (hits.length) chooseHit(hits[0]);
-        else if (!draft) { selectedId = null; redraw(); }
+        if (hits.length > 1) { lastFrameTap = null; showHits(hits, event); }
+        else if (hits.length) {
+          const hit = hits[0], sourceId = hit.question.id > 0 ? hit.question.id : selectedId;
+          const eligible = Boolean(sourceId && (!draft || draft.kind === "regions"));
+          const now = performance.now(), previous = lastFrameTap;
+          if (eligible && previous?.id === sourceId && now - previous.time <= 450
+              && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 8) {
+            lastFrameTap = null;
+            void reviewQuestion(sourceId);
+            return;
+          }
+          lastFrameTap = eligible ? { id: sourceId, time: now, x: event.clientX, y: event.clientY } : null;
+          chooseHit(hit);
+        }
+        else { lastFrameTap = null; if (!draft) { selectedId = null; redraw(); } }
       }, { capture: true });
     }
     function drag(event, surface, node, index, handle) {
@@ -590,9 +878,11 @@
       const bboxAt = (e) => { const p = pointFrom(e, surface); return [Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.max(start[0], p[0]), Math.max(start[1], p[1])].map((v) => Math.round(v * 10) / 10); };
       const move = (e) => { if (e.pointerId === pointerId) placeBox(preview, bboxAt(e)); };
       const clean = () => { preview.remove(); dialog.sketch = null; window.removeEventListener("pointermove", move); window.removeEventListener("pointercancel", cancel); window.removeEventListener("blur", blur); };
-      const cancel = (e) => { if (e?.pointerId !== undefined && e.pointerId !== pointerId) return; clean(); };
+      const cancel = (e) => { if (e?.pointerId !== undefined && e.pointerId !== pointerId) return; clean(); dialog.tool = "select"; configure(); render(); };
       const blur = () => cancel();
-      dialog.sketch = { cancel, complete: (e) => { if (!draft || page !== dialog.page || target !== draft.active || e.pointerId !== pointerId) return; const b = bboxAt(e); clean(); if (b[2] - b[0] <= 8 || b[3] - b[1] <= 8) { toast("范围太小，请重新画框", "error"); return; } change(() => { current().regions.push({ page_idx: page, bbox: b }); selectedPart = current().regions.length - 1; }); } };
+      // The second corner is a separate click; it need not come from the same
+      // pointer id as the first click. The page and active draft stay locked.
+      dialog.sketch = { cancel: () => { clean(); dialog.tool = "select"; configure(); render(); }, complete: (e) => { if (!draft || page !== dialog.page || target !== draft.active) return; const b = bboxAt(e); clean(); if (b[2] - b[0] <= 8 || b[3] - b[1] <= 8) { dialog.tool = "select"; configure(); render(); renderStage(); toast("范围太小，请重新框选", "error"); return; } dialog.tool = "select"; change(() => { current().regions.push({ page_idx: page, bbox: b }); selectedPart = current().regions.length - 1; }); } };
       window.addEventListener("pointermove", move); window.addEventListener("pointercancel", cancel); window.addEventListener("blur", blur);
     }
     function keydown(event) {
@@ -605,17 +895,27 @@
       if (event.key === "Escape" && !overlap.hidden) { overlap.hidden = true; event.preventDefault(); event.stopPropagation(); return true; }
       if (event.key === "Escape" && confirmOpen) { confirmOpen = false; render(); event.preventDefault(); event.stopPropagation(); return true; }
       const editing = event.target.closest?.("input, select, textarea, [contenteditable=true]");
+      const otherDialog = typeof document !== "undefined" && document.querySelector('dialog[open]:not(#pageDialog)');
+      if (!editing && event.target.closest?.("#pageStage") && !otherDialog && !event.repeat && !event.altKey) {
+        const key = event.key.toLowerCase(), modified = event.ctrlKey || event.metaKey;
+        if (key === "enter" && modified) { event.preventDefault(); event.stopPropagation(); void preview({ complete: true }); return true; }
+        if (key === "enter" && event.shiftKey) { event.preventDefault(); event.stopPropagation(); void preview({ next: true }); return true; }
+        if (key === "s" || key === "enter") { event.preventDefault(); event.stopPropagation(); void preview(); return true; }
+      }
       if (editing && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault(); event.stopPropagation();
         if (draft?.kind === "renumber" && !event.repeat) preview();
         return true;
       }
       if (!editing && (event.ctrlKey || event.metaKey) && !event.altKey && ["s", "z"].includes(event.key.toLowerCase())) {
+        // Save and complete shortcuts are tied to the canvas. A focused guide,
+        // toolbar, or other control must never submit the current crop by accident.
+        if (event.key.toLowerCase() === "s" && (otherDialog || !event.target.closest?.("#pageStage"))) return false;
         event.preventDefault(); event.stopPropagation(); if (!event.repeat) { if (event.key.toLowerCase() === "s") preview(); else restore(event.shiftKey); } return true;
       }
       return false;
     }
-    return { open, close, configure, snapshot, render, renderParts, renderSurface, preview, restore, remove, keydown, begin, dirty, guard, hasUnknownSave: () => lookupFailed };
+    return { open, close, configure, snapshot, render, refresh, renderParts, renderSurface, preview, restore, remove, keydown, begin, selectQuestion, returnToReview, requestClose, dirty, guard, hasUnknownSave: () => lookupFailed };
   }
   function moveBox(bbox, dx, dy) {
     const w = bbox[2] - bbox[0], h = bbox[3] - bbox[1];

@@ -115,6 +115,8 @@ def demo_owner(kind, id):
 
 def allowed_write(path):
     if path == "/api/demo": return True
+    p = re.fullmatch(r"/api/papers/([0-9a-f-]+)/question-layout", path)
+    if p: return demo_owner("paper", p[1])
     q = re.fullmatch(r"/api/questions/(\d+)/(text|approve|type|figures)", path)
     if q: return demo_owner("question", q[1])
     p = re.fullmatch(r"/api/papers/([0-9a-f-]+)/questions", path)
@@ -259,6 +261,11 @@ def browser_check(modals_only=False):
             x1=image['x']+image['width']*.035; y1=image['y']+image['height']*.145
             x2=image['x']+image['width']*.88; y2=image['y']+image['height']*.255
             page.mouse.click(x1,y1); page.mouse.click(x2,y2)
+            before_shortcut_writes = len(REPORT['writes'])
+            page.locator("#teachFold").focus(); page.keyboard.press("Control+s"); page.wait_for_timeout(150)
+            assert len(REPORT['writes']) == before_shortcut_writes, 'Ctrl+S outside the canvas must not save a valid crop'
+            assert question(1) is None and not REPORT.get('downloads')
+            assert page.evaluate("JSON.parse(localStorage.getItem('qb-teach')).lesson") == "cut"
             page.locator("#pageStage").focus(); page.keyboard.press("s"); stage("cutComplete")
             guide_clear_of('#pageStage','pageTeachMount','desktop 2 of8 source guide')
             expect(page.locator('#pageCropResult')).not_to_be_visible()
@@ -279,11 +286,14 @@ def browser_check(modals_only=False):
             page.locator("#settingsLearn").click(); stage("cutComplete")
             page.locator("#teachShow").click()
             expect(page.locator("#pageDialog")).to_be_visible()
-            # Save must still belong to the crop dialog when a guide control
-            # owns focus. It must not open browser save-as or download a page.
-            page.locator("#teachFold").focus(); page.keyboard.press("Control+s"); stage("fix")
+            # Guide controls are outside the drawing canvas and must not own
+            # save/complete shortcuts; the canvas itself does.
+            page.locator("#teachFold").focus(); page.keyboard.press("Control+s")
+            page.wait_for_timeout(150)
+            assert page.evaluate("JSON.parse(localStorage.getItem('qb-teach')).lesson") == "cutComplete"
             assert not REPORT.get('downloads'), 'Ctrl+S from guide focus must not invoke browser page-save'
-            REPORT['passed'].append('CtrlS from a focused guide control completes cutting without browser save-as/download')
+            page.locator("#pageDialogComplete").click(); stage("fix")
+            REPORT['passed'].append('Guide focus does not invoke shortcuts; the visible complete action returns to review without AI')
             REPORT['passed'].append('closing the guide pauses the saved crop; refresh stays quiet and help resumes without duplicating question1')
             expect(page.locator("#pageDialog")).not_to_be_visible()
             page.locator('#fullscreenToggle').click()
@@ -307,68 +317,17 @@ def browser_check(modals_only=False):
             expect(page.locator('#tour')).not_to_be_visible()
             guide_clear_of('#cards','reviewTeachMount','desktop highlighted editor')
             field = editor.locator(".stem-input"); original=field.input_value(); assert "3 个单位" in original
-            # 「另一个改字面板没保存 → 挡住这一课的下一步」这段整块原来在这里，
-            # 后面 250 行全都建立在这个场景上。但 1.12.7 起点「改字」就占满整屏
-            # （body.qb-editing 把顶栏和左侧列表一起收起来），改字期间别的题根本
-            # 点不到 —— 同时开两个改字在界面上已经造不出来，不是不该测，是演不了。
-            # 要接着测得换一种摆法（比如直接写接口造第二个脏面板），不是改个选择器。
-            # 已经跑通的部分在上面 7 组里，如实记下，剩下的不假装测过。
             field.fill(original.replace("3 个单位", "5 个单位"))
             card(9).get_by_role("button", name="保存", exact=True).click()
             expect(page.locator('#teachDone')).to_be_visible()
             REPORT["passed"].append("guide opens the editor, highlights the field, and saving completes the step")
             verify_private_data()
-            raise Skipped("后面这一段要测「另一个改字面板没保存时挡住这一步」，但改字已经是整屏独占，"
-                          "同时开两个改字在界面上造不出来；前面 7 组已跑通并通过。")
-            # ---- 以下未执行：依赖上面那个已经造不出来的场景 ----
-            original_two = question(2)['stem']
-            card(2).get_by_role('button', name='改字', exact=True).click()
-            dirty = card(2).locator('.editor')
-            dirty.locator('.stem-input').fill(original_two + ' 尚未保存的练习文字')
-            field.fill(original.replace("3 个单位", "5 个单位"))
-            editor.get_by_role("button", name="保存", exact=True).click()
-            expect(page.locator('#teachDone')).to_be_visible()
-            expect(page.locator('#confirmDialog')).to_be_visible(timeout=6000)
-            guide_clear_of('#confirmDialog .confirm-actions','','desktop unsaved-confirm controls')
-            assert page.locator('#confirmOk').evaluate("n=>{const r=n.getBoundingClientRect();return n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}")
-            page.screenshot(path=str(OUTPUT/'guide-unsaved-confirm.png'),full_page=True)
-            guide_in_modal('confirmDialog',pause=modals_only)
-            page.locator('#confirmDialog').get_by_role('button', name='继续编辑', exact=True).click()
             if modals_only:
-                assert dirty.locator('.stem-input').input_value().endswith(' 尚未保存的练习文字')
-                assert question(2)['stem'] == original_two
-                # Leaving remains a real user decision. Pause must never
-                # dismiss the unsaved-change prompt or discard its text.
-                page.locator('#settingsButton').click()
-                expect(page.locator('#confirmDialog')).to_be_visible()
-                page.locator('#confirmDialog').get_by_role('button',name='丢弃改动',exact=True).click()
-                page.wait_for_url('**/settings*')
-                resume_from_help('fix')
-                expect(page.locator('#teachNext')).to_be_visible()
-                page.locator('#teachNext').click(); stage('tick9')
-                REPORT['passed'].append('after auxiliary windows close, review guide starts actual cutting and advances accepted edits; unsaved text requires explicit discard')
+                REPORT.setdefault("not_applicable", []).append("同时打开两张题卡的改字窗口来验证离开保护；改字窗口独占界面，当前真实操作无法形成该状态。")
                 verify_private_data()
                 return
-            stage('fix')
-            blocked_progress = page.evaluate("JSON.parse(localStorage.getItem('qb-teach'))")
-            assert blocked_progress['completed'] is True
-            expect(page.locator('#teachNext')).to_have_text('继续下一步')
-            assert dirty.locator('.stem-input').input_value().endswith(' 尚未保存的练习文字')
-            assert question(2)['stem'] == original_two
-            resumed = context.new_page()
-            resumed.goto(BASE + '/?paper=' + blocked_progress['paper']); resumed.wait_for_load_state('networkidle')
-            expect(resumed.locator('#teachNext')).to_have_text('继续下一步')
-            resumed.locator('#teachNext').click()
-            resumed.wait_for_function("JSON.parse(localStorage.getItem('qb-teach')).lesson==='tick9'")
-            resumed.close()
-            page.locator('#teachNext').click()
-            expect(page.locator('#confirmDialog')).to_be_visible()
-            page.locator('#confirmDialog').get_by_role('button', name='丢弃改动', exact=True).click()
-            stage('tick9')
-            assert question(2)['stem'] == original_two
-            expect(dirty).to_have_count(0)
-            REPORT['passed'].append('another dirty editor blocks completed fix transition; continue/discard and refreshed completed progress work without another save')
             assert "5 个单位" in question(9)["stem"]
+            page.locator('#teachNext').click(); stage('tick9')
             page.locator("#teachShow").click(); card(9).locator(".card-tick").click(); stage("tick")
             page.locator("#teachShow").click(); card(1).locator(".card-tick").click(); stage("library")
             assert question(1)["approved"] and question(9)["approved"]
@@ -457,14 +416,16 @@ def browser_check(modals_only=False):
             expect(page.locator('#toast')).not_to_be_visible()
             page.screenshot(path=str(OUTPUT/'guide-390-cut-complete.png'),full_page=True)
             before_downloads=len(REPORT.get('downloads',[]))
-            page.locator('#teachFold').focus();page.keyboard.press('Control+s');stage('fix')
+            page.locator('#teachFold').focus();page.keyboard.press('Control+s');page.wait_for_timeout(150)
+            assert page.evaluate("JSON.parse(localStorage.getItem('qb-teach')).lesson") == 'cutComplete'
+            page.locator('#pageDialogComplete').click();stage('fix')
             expect(page.locator('#pageDialog')).not_to_be_visible()
             assert len(REPORT.get('downloads',[])) == before_downloads
             page.set_viewport_size({'width':1440,'height':1050})
             page.locator('#teachShow').click()
             editor=card(9).locator('.editor');field=editor.locator('.stem-input')
             field.fill(field.input_value().replace('3 个单位','5 个单位'))
-            editor.get_by_role('button',name='保存',exact=True).click()
+            card(9).locator('.editor-bar').get_by_role('button',name='保存',exact=True).click()
             expect(page.locator('#teachDone')).to_be_visible()
             page.locator('#teachClose').click()
             expect(page.locator('#teachPanel')).not_to_be_visible()

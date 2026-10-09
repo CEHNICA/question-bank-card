@@ -57,12 +57,12 @@ function harness(options = {}) {
 }
 
 (async () => {
-  assert.match(html, /id="settingsManualFallback"[^>]*hidden[^>]*>停止 MinerU，改为手工切题<\/button>/);
+  assert.match(html, /id="settingsManualFallback"[^>]*hidden[^>]*>停止 MinerU，打开切题与校正<\/button>/);
   assert.ok(html.indexOf('id="settingsManualFallback"') < html.indexOf('id="settingsStop"'));
   for (const status of ["queued", "parsing", "segmenting"]) {
     const visible = harness({ paper: cloudPaper({ status }) }); visible.context.renderSettingsTask();
     assert.equal(visible.$("settingsManualFallback").hidden, false, `MinerU ${status} offers the direct switch`);
-    assert.equal(visible.$("settingsManualFallback").textContent, "停止 MinerU，改为手工切题");
+    assert.equal(visible.$("settingsManualFallback").textContent, "停止 MinerU，打开切题与校正");
     assert.match(visible.$("settingsManualFallback").title, /停止等待.*已保存的题目都会保留/);
   }
   assert.doesNotMatch(html, /paperManualEntry|paperManualFallback|paperManualHint/,
@@ -80,7 +80,7 @@ function harness(options = {}) {
   const success = harness(); const before = clone(success.context.state.questions);
   assert.equal(await success.context.switchToManual(null, { stopMinerU: true }), true);
   assert.deepEqual(success.calls, [{ url: "/api/papers/paper/processing", method: "POST", body: { mode: "manual" } }]);
-  assert.deepEqual(success.openings, [["new", null, { page: null }]], "Switching opens the cutting canvas directly without another user choice");
+  assert.deepEqual(success.openings, [["view", null, { page: null }]], "Switching opens the unified cutting and correction canvas directly");
   assert.deepEqual(success.order.filter(item => item !== "entries"), ["request", "update", "refresh", "open"]);
   assert.equal(success.order.filter(item => item === "entries").length, 2, "Ready papers release the cutting entry's busy state without waiting for another poll");
   assert.deepEqual(success.context.state.questions, before, "Existing edited/approved content and figures are kept");
@@ -151,7 +151,7 @@ function harness(options = {}) {
   const existing = harness({ paper: cloudPaper({ parse_mode: "manual", status: "failed" }) });
   assert.equal(await existing.context.switchToManual(3), true);
   assert.deepEqual(existing.calls[0].body, { mode: "manual" }, "A page number positions the UI and is never sent as an unsupported cloud page restriction");
-  assert.deepEqual(existing.openings, [["new", null, { page: 3 }]]);
+  assert.deepEqual(existing.openings, [["view", null, { page: 3 }]]);
 
   console.log("MinerU to manual: route/stage visibility, one-step canvas opening, preserved questions, no OCR, bounded failure/retry, click deduplication and stale navigation guards: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

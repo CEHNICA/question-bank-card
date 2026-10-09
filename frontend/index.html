@@ -109,7 +109,7 @@
             <h3 id="settingsReviewTitle">选择一种切题方式</h3>
             <div class="help-paths">
               <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后核对，通过即入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
-              <article class="help-path"><h4>手工切题</h4><p>从原卷框出题目。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
+              <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
             </div>
             <p class="help-secondary"><button id="settingsHelpFaq" class="link-button" type="button">常见问题</button><span aria-hidden="true">·</span><button id="settingsHelpKeys" class="link-button" type="button">快捷键</button></p>
           </section>
@@ -120,13 +120,13 @@
               <button class="button small" type="button" data-teach-task="figure">用示例练补图</button>
             </details>
             <details class="teaching-help"><summary>一道题跨栏或跨页</summary>
-              <p>为同一道题添加多个片段；翻到下一页继续框选，等题干、选项和图都完整后再保存。调整已有题可用“调整范围”。</p>
+              <p>为同一道题添加多个片段；翻到下一页后点“再加一块”。调整已有题时直接单击题框，拖边角改大小、拖题号标签移动；双击题框可回到对应审核卡。</p>
             </details>
             <details class="teaching-help"><summary>补充或修改答案</summary>
               <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → 服务与密钥”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
             </details>
             <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
-              <p>等待时可改为手工切题，原卷和已保存题目会保留。框好后完成切题；读题服务不可用时，仍可对照原图审核，也可配置服务后重试。</p>
+              <p>等待时可停止任务并打开“切题与校正”，原卷和已保存题目会保留。完成切题后，再由你选择 AI 识读或直接原图审核。</p>
               <p>重试不会替你通过题目。云处理发送范围和可能产生的费用，会在发起前说明。</p>
             </details>
           </section>
@@ -213,7 +213,7 @@
         </svg>
         <h2>把题目留下，也把出处留下</h2>
         <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
-        <div class="empty-learning"><button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button><button id="emptyLearn" class="button" type="button">手工切题练习（不用密钥）</button></div>
+        <div class="empty-learning"><button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button><button id="emptyLearn" class="button" type="button">切题与校正练习（不用密钥）</button></div>
         <ol class="empty-steps">
           <li><b>1</b>上传原卷，程序先尝试切题；未切出的题手工补齐</li>
           <li><b>2</b>用已保存的题目 AI 识读，也可直接保留原图</li>
@@ -235,11 +235,11 @@
                 <summary class="button quiet small">试卷操作<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
                 <div class="menu-panel paper-menu-panel">
                   <p id="settingsTaskStatus" class="menu-note"></p>
-                  <button id="viewOriginalPaper" class="link-button" type="button">查看整份原卷</button>
+                  <button id="viewOriginalPaper" class="link-button" type="button">切题与校正</button>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
                   <button id="paperContinueAi" class="link-button" type="button" hidden>继续 AI 切题</button>
-                  <button id="settingsManualFallback" class="link-button" type="button" hidden title="停止等待 MinerU，保留原卷和已有题卡，直接从原卷手工框题；这一步不调用 AI 识读">停止 MinerU，改为手工切题</button>
+                  <button id="settingsManualFallback" class="link-button" type="button" hidden title="停止等待 MinerU，保留原卷和已有题卡，打开切题与校正；这一步不调用 AI 识读">停止 MinerU，打开切题与校正</button>
                   <button id="settingsStop" class="link-button" type="button" hidden title="停止本机处理，保留原卷和已有题卡">停止处理</button>
                   <button id="settingsConfirmStructure" class="link-button" type="button" hidden>确认属于同一份资料并继续</button>
                   <button id="settingsSplit" class="link-button" type="button" hidden>拆分任务</button>
@@ -290,6 +290,7 @@
           <div id="filters" class="filters" role="tablist" aria-label="筛选题卡"></div>
           <span class="toolbar-spacer"></span>
           <div class="tool-group">
+            <button id="reviewFindToggle" class="toggle-pill" type="button" aria-expanded="false" aria-controls="reviewFinderPanel" title="在当前试卷中找题（Ctrl+F）">找题</button>
             <button id="fullscreenToggle" class="toggle-pill" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）"><svg class="icon"><use href="#i-expand"/></svg><span id="fullscreenLabel">全屏</span></button>
             <button id="focusToggle" class="toggle-pill" type="button" aria-pressed="true" title="专注：正在看的这道题正常显示，其余题暗下来；滚动时跟着换（Z）"><svg class="icon"><use href="#i-focus"/></svg>专注</button>
             <button id="lensToggle" class="toggle-pill" type="button" aria-pressed="true" title="鼠标停在原卷截图上时放大局部（L）"><svg class="icon"><use href="#i-lens"/></svg>放大镜</button>
@@ -300,7 +301,7 @@
             <details class="menu" id="toolsMenu">
               <summary class="toggle-pill"><svg class="icon"><use href="#i-tools"/></svg>工具<svg class="icon" style="width:13px;height:13px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
-                <button id="manualProcessing" class="link-button" type="button">手工切题</button>
+                <button id="manualProcessing" class="link-button" type="button">切题与校正</button>
                 <button id="resegment" class="link-button" type="button">切得不对？重新切题</button>
                 <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
                 <button id="approveAllGreen" class="link-button" type="button" hidden>一键通过所有题目</button>
@@ -309,6 +310,12 @@
             </details>
           </div>
         </div>
+        <section id="reviewFinderPanel" class="review-finder" role="search" aria-label="在当前试卷中找题" hidden>
+          <label for="reviewFindInput">找这份试卷里的题</label>
+          <div class="review-finder-input-row"><input id="reviewFindInput" type="search" autocomplete="off" placeholder="题号、页码、题干或选项关键词"><button id="reviewFindClose" class="button quiet" type="button">收起</button></div>
+          <p id="reviewFindHint" class="hint">按题号或页码查原图题；文字搜索只查已保存题文，不会自动识读。</p>
+          <div id="reviewFindResults" class="review-finder-results" role="listbox" aria-label="找题结果" hidden></div>
+        </section>
         <div id="cards" class="cards" role="tabpanel"></div>
       </section>
     </main>
@@ -448,8 +455,8 @@
           </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
-        <button id="pageDialogSaveNext" class="button primary" type="button" aria-keyshortcuts="S Enter" hidden>保存下一题<span class="kbd-hint">S</span></button>
-        <button id="pageDialogComplete" class="button" type="button" aria-keyshortcuts="Control+S Control+Enter" hidden>完成切题<span class="kbd-hint">Ctrl+S</span></button>
+        <button id="pageDialogSaveNext" class="button primary" type="button" aria-keyshortcuts="Shift+Enter" hidden>保存并框下一题<span class="kbd-hint">Shift+Enter</span></button>
+        <button id="pageDialogComplete" class="button" type="button" aria-keyshortcuts="Control+Enter" hidden>返回审核<span class="kbd-hint">Ctrl+Enter</span></button>
         <button id="pageDialogClose" class="button" type="button" data-close>取消</button>
       </div>
     </div>
@@ -474,8 +481,8 @@
       <details class="page-shortcuts">
         <summary>快捷键</summary>
         <div class="page-shortcuts-panel">
-          <p>手工切题：<kbd>S</kbd> 保存下一题 · <kbd>Ctrl+S</kbd> 完成切题</p>
-          <p><kbd>Enter</kbd> / <kbd>Ctrl+Enter</kbd> 仍可切下一题 / 完成切题；调整范围、配图和框选识读用 <kbd>Ctrl+Enter</kbd> 保存</p>
+          <p>画布聚焦时：<kbd>S</kbd> / <kbd>Enter</kbd> / <kbd>Ctrl+S</kbd> 保存当前修改；新增题用 <kbd>Shift+Enter</kbd> 保存并框下一题；<kbd>Ctrl+Enter</kbd> 返回审核</p>
+          <p>输入题号后按 <kbd>Enter</kbd> 保存。普通题框和题号直接保存；拆题、合题会先显示影响并让你确认。</p>
           <p><kbd>Ctrl+Z</kbd> 撤销 · <kbd>Ctrl+Shift+Z</kbd> 重做</p>
           <p><kbd>PageUp</kbd> 上一页 · <kbd>PageDown</kbd> 下一页</p>
           <p><kbd>Esc</kbd> 取消新框 / 返回 · <kbd>Delete</kbd> 删除选中框</p>
@@ -751,7 +758,7 @@
       </ol>
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
-        <strong>想自己框题？用示例练手工切题</strong>
+        <strong>想自己框题？用示例练习切题与校正</strong>
         <span>用三道离线示例实际练框题、改字、通过、选题和导出。不调用 AI，也不会改动正式题库。</span>
         <button id="welcomeLearn" class="button" type="button">开始手工练习</button>
       </div>
@@ -849,6 +856,7 @@
   <script src="/browser-interactions.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
   <script src="/site-drawer.js" defer></script>
+  <script src="/review-finder.js" defer></script>
   <script src="/original-paper-layout.js" defer></script>
   <script src="/app.js" defer></script>
 </body>

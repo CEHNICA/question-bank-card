@@ -146,7 +146,7 @@ function cutting(paper, questions = []) {
   vm.runInNewContext(stageCode, context);
   context.renderCutReadingStage();
   vm.runInNewContext(emptyCode, context);
-  const stageButtons = $("cutReadingStage").hidden ? [] : $("cutReadingActions").children.filter(item => /手工切题/.test(item.textContent));
+  const stageButtons = $("cutReadingStage").hidden ? [] : $("cutReadingActions").children.filter(item => /切题与校正/.test(item.textContent));
   const emptyButtons = container.children.flatMap(item => item.children).filter(item => item.id === "emptyManualCut");
   return { $, context, stageButtons, emptyButtons };
 }

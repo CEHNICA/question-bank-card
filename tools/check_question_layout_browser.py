@@ -3,7 +3,8 @@
 --run creates an unused child of checkout/tmp, builds a fictional old-schema
 database, upgrades it with the selected source/frozen program, and exercises
 the real loopback UI. No worker, installed service, credentials or cloud API
-is used. Writes are allowed only to this fixture's layout and undo endpoints.
+is used. Writes are allowed only to this fixture's layout, undo, question
+deletion and recycle-bin restore endpoints.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import sqlite3
 import subprocess
@@ -80,10 +82,13 @@ def seed_old(output):
     ]
     rows = []
     for i, parts in enumerate(regions):
+        stem = ("人工保存的虚构第 1 题：求 sin x 的值。" if i == 0 else
+                "人工保存的虚构第 2 题：求 \\sin x 的值。" if i == 1 else
+                "人工保存的虚构第 3 题：求 SIN x 的值。" if i == 2 else "")
         rows.append(Question.objects.create(paper=paper, group=groups[0 if i < 3 else 1],
             number=i + 1 if i < 3 else 1, regions=parts, regions_auto=parts,
-            question_type="free_response", state="yellow", stem=f"人工保存的虚构第 {i + 1} 题内容。",
-            processing_mode="auto" if i == 0 else "manual", body_mode="text", edited=True,
+            question_type="free_response", state="yellow", stem=stem,
+            processing_mode="auto" if i == 0 else "manual", body_mode="source_image" if i == 3 else "text", edited=i != 3,
             type_locked=True, text_source="human", start_source="manual"))
     folder = settings.DATA_ROOT / str(paper.pk)
     folder.mkdir(parents=True)
@@ -175,7 +180,12 @@ def browser_check(output, port):
             parsed = urlparse(request.url)
             allowed = parsed.scheme == "http" and parsed.netloc == urlparse(base).netloc
             if allowed and request.method not in ("GET", "HEAD"):
-                allowed = request.method == "POST" and parsed.path.startswith(f"/api/papers/{fixture['paper']}/question-layout")
+                paper_path = f"/api/papers/{fixture['paper']}"
+                allowed = request.method == "POST" and (
+                    parsed.path.startswith(paper_path + "/question-layout")
+                    or parsed.path == paper_path + "/questions/delete"
+                    or re.fullmatch(re.escape(paper_path) + r"/question-trash/[0-9a-fA-F-]{36}/restore", parsed.path) is not None
+                )
             if not allowed:
                 report["forbidden_requests"].append({"method": request.method, "path": parsed.path})
                 route.abort()
@@ -185,7 +195,7 @@ def browser_check(output, port):
                 route.continue_()
         context.route("**/*", guard)
         page = context.new_page()
-        page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        page.on("pageerror", lambda error: report["page_errors"].append({"message": str(error), "stack": error.stack}))
         page.on("dialog", lambda dialog: dialog.dismiss())
 
         def paper_data(paper_id=fixture["paper"]):
@@ -201,20 +211,74 @@ def browser_check(output, port):
             expect(page.locator("#pageDialog")).to_be_visible()
             page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
             expect(page.locator("#pageLayoutPanel")).to_be_visible()
+            if page.locator("#pageNumberInput").input_value() != "1":
+                page.locator("#pageNumberInput").fill("1")
+                page.locator("#pageNumberInput").press("Enter")
+                page.wait_for_load_state("networkidle")
 
         try:
+            # Search is an overlay over the loaded paper, not a card sort or
+            # recognition request. The fixture includes equivalent sin forms,
+            # repeated question numbers across groups and a blank original-image question.
+            page.goto(base + "/?paper=" + fixture["paper"])
+            page.wait_for_load_state("networkidle")
+            card_order = page.locator(".card").evaluate_all("nodes => nodes.map(node => node.dataset.id)")
+            page.keyboard.press("Control+f")
+            expect(page.locator("#reviewFinderPanel")).to_be_visible()
+            expect(page.locator("#reviewFindInput")).to_be_focused()
+            finder = page.locator("#reviewFindInput")
+            finder.fill("sin")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(3)
+            assert page.locator(".card").evaluate_all("nodes => nodes.map(node => node.dataset.id)") == card_order
+            finder.fill("SIN")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(3)
+            finder.fill("\\sin")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(3)
+            finder.fill("第 １ 题")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(2)
+            assert page.locator("#reviewFindResults").inner_text().count("虚构试卷") == 2
+            finder.fill("第 2 页")
+            page.wait_for_function("document.querySelectorAll('#reviewFindResults [data-question-id]').length === 2")
+            finder.fill("虚构试卷乙")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(1)
+            expect(page.locator("#reviewFindResults")).to_contain_text("原图题")
+            page.locator('#filters [data-filter="todo"]').click()
+            finder.fill("2")
+            expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(1)
+            page.locator('#reviewFindResults [data-question-id]').click()
+            expect(page.locator('#filters [data-filter="all"]')).to_have_attribute("aria-selected", "true")
+            expect(page.locator(f'.card[data-id="{fixture["nested"]}"]')).to_be_visible()
+            report["passed"].append("review finder handles sin/SIN/\\sin, repeated numbers, page and original-image lookup without reordering cards; hidden results open under All")
+            # Reload restores this paper's finder query, filter and reading context.
+            page.locator('#filters [data-filter="todo"]').click()
+            finder = page.locator("#reviewFindInput")
+            finder.fill("1")
+            page.reload()
+            page.wait_for_load_state("networkidle")
+            expect(page.locator('#filters [data-filter="todo"]')).to_have_attribute("aria-selected", "true")
+            expect(page.locator("#reviewFindInput")).to_have_value("1")
+            page.screenshot(path=str(output / "review-finder-desktop.png"))
             open_paper()
             original = paper_data()
-            expect(page.locator("[data-layout-question-id]")).to_have_count(4)
+            # The side panel no longer mirrors every question. The canvas shows
+            # only regions on the active page, while the complete question set
+            # remains available to the finder and the layout service.
+            expect(page.locator("[data-layout-coverage-id]:not([data-layout-coverage-id^='-'])")).to_have_count(3)
+            assert len(original["questions"]) == 4
+            expect(page.locator("#pageLayoutPanel .layout-question-list")).to_have_count(0)
+            page.locator("#pageNext").click()
+            expect(page.locator("[data-layout-coverage-id]:not([data-layout-coverage-id^='-'])")).to_have_count(2)
+            expect(page.locator(f'[data-layout-coverage-id="{fixture["crosspage"]}"]')).to_have_count(1)
+            page.locator("#pagePrevious").click()
             assert original["paper"]["layout_revision"] == 0
             assert len({q["color_index"] for q in original["questions"]}) >= 3
             page.screenshot(path=str(output / "overview-desktop.png"))
             report["passed"].append("old-schema upgrade, four distinct question identities, persistent palette and two question groups")
             run_ui_cases(page, expect, output, fixture, report, paper_data)
-            expect(page.locator("#pageDialogClose")).to_be_enabled()
-            page.locator("#pageDialogClose").click()
+            if page.locator("#pageDialog").is_visible():
+                page.locator("#pageDialogClose").click()
             open_paper(fixture["stress"])
-            expect(page.locator("[data-layout-question-id]")).to_have_count(100)
+            expect(page.locator("[data-layout-coverage-id]:not([data-layout-coverage-id^='-'])")).to_have_count(100)
             page.screenshot(path=str(output / "one-hundred-questions.png"))
             report["passed"].append("100-question overview and palette")
             page.set_viewport_size({"width": 650, "height": 1050})
@@ -241,11 +305,27 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         return next(q for q in (data or paper_data())["questions"] if q["id"] == fixture[key])
 
     def select(key):
-        page.locator(f'[data-layout-question-id="{fixture[key]}"]').click()
+        regions = question(key)["regions"]
+        active_page = int(page.locator("#pageNumberInput").input_value()) - 1
+        region = next((item for item in regions if item["page_idx"] == active_page), regions[0])
+        bbox = region["bbox"]
+        # Click near the frame's upper-left interior. Clicking the locator's
+        # center can land on a selected neighbour's resize grip when frames
+        # overlap, which tests a resize gesture instead of choosing a frame.
+        offset = min(12, (bbox[2] - bbox[0]) / 8, (bbox[3] - bbox[1]) / 8)
+        page.mouse.click(*point(bbox[0] + offset, bbox[1] + offset))
+        if page.locator("#pageLayoutOverlap").is_visible():
+            label = f"第 {question(key)['number']} 题"
+            candidates = page.locator("#pageLayoutOverlap [data-layout-hit]")
+            for i in range(candidates.count()):
+                if label in candidates.nth(i).inner_text():
+                    candidates.nth(i).click()
+                    break
 
     def fit():
         page.locator("#pageZoomFit").click()
         page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+        page.locator("#pageStage .stage-surface").scroll_into_view_if_needed()
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
 
     def point(x, y):
@@ -280,21 +360,28 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
 
     def save():
         revision = paper_data()["paper"]["layout_revision"]
-        page.locator("#pageDialogSave").click()
-        expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
-        report["before_last_save"] = paper_data()
-        with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
-            page.locator("#pageLayoutConfirmSave").click()
+        needs_confirmation = page.locator("#pageDialogSave").inner_text().startswith("预览并确认")
+        if needs_confirmation:
+            page.locator("#pageDialogSave").click()
+            expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
+            report["before_last_save"] = paper_data()
+            with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+                page.locator("#pageLayoutConfirmSave").click()
+        else:
+            with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+                page.locator("#pageDialogSave").click()
         response = waiting.value
         report["last_save_response"] = {"status": response.status, "body": response.json()}
-        expect(page.locator("#pageLayoutEdit")).to_be_visible()
+        if not needs_confirmation:
+            expect(page.locator("#pageLayoutConfirmSave")).to_have_count(0)
+        expect(page.locator("#pageLayoutPanel")).to_be_visible()
         assert paper_data()["paper"]["layout_revision"] > revision
 
     def cancel_draft():
         page.locator("#pageLayoutCancelDraft").click()
-        if page.locator("#confirmDialog").is_visible():
-            page.locator("#confirmOk").click()
-        expect(page.locator("#pageLayoutEdit")).to_be_visible()
+        if page.locator(".layout-leave-dialog").is_visible():
+            page.locator(".layout-leave-dialog").get_by_role("button", name="放弃修改").click()
+        expect(page.locator("#pageLayoutPanel")).to_be_visible()
 
     def reopen_workspace():
         page.locator("#pageDialogClose").click()
@@ -327,12 +414,34 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#pageLayoutOverlap")).to_be_visible()
     assert "第 2 题" in page.locator('[data-layout-hit="0"]').inner_text()
     page.locator('[data-layout-hit="0"]').click()
-    expect(page.locator(f'[data-layout-question-id="{fixture["nested"]}"]')).to_have_attribute("aria-pressed", "true")
+    # Selecting a saved frame immediately creates a clean editable draft,
+    # represented separately from the persisted frame as id -1.
+    expect(page.locator('[data-layout-coverage-id="-1"]').first).to_have_class(re.compile("selected"))
     assert paper_data() == original and not report["writes"]
     report["passed"].append("overlapping nested boxes choose the smaller question first without editing or OCR")
 
+    # This still-published fixture is deliberately checked before split/undo
+    # withdraws it. Removing its last range only changes the local draft;
+    # the existing publication protection must also apply inside this workspace.
+    publication_before = database_rows()["core_publishedquestion"]
+    page.locator('[data-layout-part-index="0"]').get_by_role("button", name="移除", exact=True).click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_contain_text("这道题已经没有范围框")
+    expect(page.locator("#pageLayoutDeleteQuestion")).to_be_disabled()
+    expect(page.locator("#pageLayoutEmptyRange")).to_contain_text("已经入库")
+    expect(page.locator("#pageDialogSave")).to_be_disabled()
+    expect(page.locator("#pageLayoutParts")).to_have_count(0)
+    expect(page.locator("#pageLayoutTargetPreview")).to_have_count(0)
+    expect(page.locator("[data-layout-target-index]")).to_have_count(0)
+    page.locator("#pageLayoutRestoreFrame").click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_have_count(0)
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    assert paper_data() == original and not report["writes"]
+    assert database_rows()["core_publishedquestion"] == publication_before
+    report["passed"].append("removing the last frame offers a direct restore without saving or OCR; published-question delete protection remains intact")
+
     select("first")
-    page.locator("#pageLayoutEdit").click()
+    expect(page.locator('[data-layout-box-index="0"] [data-layout-handle="e"]')).to_be_visible()
+    expect(page.locator("#pageDialogSave")).to_have_text("保存")
     fit()
     before = geometry()
     # The interior is never a drag handle, even for a large movement.
@@ -389,10 +498,14 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     report["passed"].append("latest saved operation survives reload and undo increases versions")
 
     select("crosspage")
-    page.locator("#pageLayoutEdit").click()
     page.locator('[data-layout-part-index="1"] button').first.click()
-    fit()
+    page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
     expect(page.locator('[data-layout-box-index="1"]')).to_be_visible()
+    frame = page.locator('[data-layout-box-index="1"]').bounding_box()
+    stage = page.locator("#pageStage").bounding_box()
+    assert abs(frame["x"] + frame["width"] / 2 - (stage["x"] + stage["width"] / 2)) < stage["width"] * .28
+    assert abs(frame["y"] + frame["height"] / 2 - (stage["y"] + stage["height"] / 2)) < stage["height"] * .28
     assert page.locator('[data-layout-box-index="0"] [data-layout-handle]').count() == 0
     page.locator('[data-layout-box-index="1"]').focus()
     page.keyboard.press("ArrowDown")
@@ -406,17 +519,31 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     report["passed"].append("cross-page draft and keyboard fine adjustment retain ordered pieces without saving")
 
     # Return to page one before supplementing the uncovered fictional question.
+    if page.locator("#pageNumberInput").input_value() != "1":
+        page.locator("#pageNumberInput").fill("1")
+        page.locator("#pageNumberInput").press("Enter")
     select("first")
-    page.locator("#pageLayoutPanel").get_by_role("button", name="定位当前题", exact=True).click()
     page.locator("#pageLayoutAdd").click()
+    assert page.locator("#pageStage .stage-surface").evaluate("node => getComputedStyle(node).cursor") == "crosshair"
     draw([70, 730, 930, 840])
+    expect(page.locator("#pageLayoutDraw")).to_have_attribute("aria-pressed", "false")
+    page.mouse.dblclick(*point(500, 785))
+    expect(page.locator("#pageDialog")).to_be_visible()
     page.locator("#pageLayoutNumber").fill("4")
     page.locator("#pageLayoutNumber").press("Tab")
-    save()
+    before_add = paper_data()["paper"]["layout_revision"]
+    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+        page.locator("#pageDialogSave").click()
+    response = waiting.value
+    report["last_add_response"] = {"status": response.status, "body": response.json()}
+    expect(page.locator("#pageLayoutPanel")).to_contain_text("第 4 题")
+    assert paper_data()["paper"]["layout_revision"] > before_add
     added = next(q for q in paper_data()["questions"] if q["id"] not in {r["id"] for r in original["questions"]})
     assert added["body_mode"] == "source_image" and added["processing_mode"] == "manual"
     assert not added["approved"] and not added["ocr_pending"]
     assert len(paper_data()["questions"]) == 5
+    page.locator("#pageLayoutCancelDraft").click()
+    expect(page.locator("#pageLayoutPanel")).to_be_visible()
     page.screenshot(path=str(output / "supplement-saved.png"))
     undo(reopen=True)
     assert len(paper_data()["questions"]) == 4
@@ -425,6 +552,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     select("nested")
     old_nested = question("nested")
     assert old_nested["approved"]
+    page.locator("#pageLayoutPanel .layout-more-actions > summary").click()
     page.locator("#pageLayoutSplit").click()
     expect(page.locator('[data-layout-target-index]')).to_have_count(2)
     fit()
@@ -444,9 +572,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.locator("#pageDialogSave").click()
     expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
     page.screenshot(path=str(output / "split-confirmation.png"))
-    page.locator("#pageLayoutConfirmSave").click()
-    expect(page.locator("#pageLayoutEdit")).to_be_visible()
+    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as split_waiting:
+        page.locator("#pageLayoutConfirmSave").click()
+    split_response = split_waiting.value
+    report["split_response"] = {"status": split_response.status, "body": split_response.json()}
+    assert split_response.ok, report["split_response"]
+    expect(page.locator("#pageLayoutPanel")).to_be_visible()
     split_data = paper_data()
+    report["split_response_snapshot"] = {
+        "count": len(split_data.get("questions", [])),
+        "ids": [q.get("id") for q in split_data.get("questions", [])],
+        "paper_id": split_data.get("id"),
+    }
     assert len(split_data["questions"]) == 5
     assert fixture["nested"] not in {q["id"] for q in split_data["questions"]}
     new = [q for q in split_data["questions"] if q["id"] not in {r["id"] for r in original["questions"]}]
@@ -463,6 +600,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     report["passed"].append("true two-question split withdraws the current publication; undo restores content without approval or publication")
 
     select("first")
+    page.locator("#pageLayoutPanel .layout-more-actions > summary").click()
     page.locator("#pageLayoutMerge").click()
     page.locator(f'[data-layout-merge-id="{fixture["crosspage"]}"]').check()
     page.locator("#pageLayoutMergeBegin").click()
@@ -480,7 +618,6 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
 
     # A second window changes the server state while this window holds its draft.
     select("first")
-    page.locator("#pageLayoutEdit").click()
     fit()
     drag(page.locator('[data-layout-box-index="0"] [data-layout-handle="e"]'), -10, 0)
     current = paper_data()
@@ -494,8 +631,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     result = page.request.post(f"{base}/api/papers/{fixture['paper']}/question-layout", data=payload,
                                headers={"X-QB-Request": "1"})
     assert result.ok, result.text()
-    page.locator("#pageDialogSave").click()
-    page.locator("#pageLayoutConfirmSave").click()
+    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+        page.locator("#pageDialogSave").click()
+    assert waiting.value.status == 409
     expect(page.locator("#pageLayoutConflict")).to_be_visible()
     expect(page.locator('[data-layout-box-index="0"]')).to_be_visible()
     page.screenshot(path=str(output / "conflict-retains-draft.png"))
@@ -507,9 +645,15 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     # The real server commits a merge; the browser loses its response, then
     # recovers the same receipt through GET without making another POST.
     select("first")
+    page.locator("#pageLayoutPanel .layout-more-actions > summary").click()
     page.locator("#pageLayoutMerge").click()
     page.locator(f'[data-layout-merge-id="{fixture["crosspage"]}"]').check()
     page.locator("#pageLayoutMergeBegin").click()
+    # begin() awaits source readiness before rendering the merge draft.
+    # Wait for that async transition before pressing Save or installing the
+    # lost-response interceptor, otherwise the click can hit the prior draft.
+    expect(page.locator('[data-layout-part-index]')).to_have_count(3)
+    expect(page.locator("#pageLayoutPanel")).to_contain_text("合题 · 未保存")
     endpoint = f"{base}/api/papers/{fixture['paper']}/question-layout"
     lost = []
 
@@ -529,8 +673,13 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.route(endpoint, drop_committed_response)
     try:
         page.locator("#pageDialogSave").click()
-        page.locator("#pageLayoutConfirmSave").click()
-        expect(page.locator("#pageLayoutEdit")).to_be_visible(timeout=15000)
+        expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
+        with page.expect_response(lambda response: response.request.method == "GET" and "client_request_id=" in response.url) as receipt_waiting:
+            page.locator("#pageLayoutConfirmSave").click()
+            # The panel stays visible during saves, so wait for the impact
+            # confirmation to disappear after receipt recovery instead.
+            expect(page.locator("#pageLayoutConfirmSave")).to_have_count(0, timeout=15000)
+        assert receipt_waiting.value.ok
     finally:
         page.unroute(endpoint, drop_committed_response)
     assert len(lost) == 1 and len(paper_data()["questions"]) == 3
@@ -546,7 +695,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     select("first")
     fit()
     page.mouse.click(*point(500, 140))
-    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_have_attribute("aria-pressed", "true")
+    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_have_class(re.compile("selected"))
     before_renumber = question("first")
     before_data = paper_data()
     before_writes = len(report["writes"])
@@ -567,8 +716,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert len(delayed_history) == 1
     page.locator("#pageLayoutRenumber").click()
     expect(page.locator("#pageLayoutNumber")).to_have_value(str(before_renumber["number"]))
-    expect(page.locator("#pageDialogSave")).to_have_text("保存题号")
-    expect(page.locator("#pageLayoutSaveNumber")).to_have_text("保存题号")
+    expect(page.locator("#pageDialogSave")).to_have_text("保存")
     assert page.locator("[data-layout-handle]").count() == 0
     assert page.locator("[data-layout-drag-label]").count() == 0
     expect(page.locator("#pageLayoutDraw")).to_have_count(0)
@@ -597,18 +745,17 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#pageLayoutNumber")).to_have_value("19")
     page.locator("#pageLayoutNumber").press("Tab")
     expect(page.locator("#pageDialogSave")).to_be_enabled()
-    expect(page.locator("#pageLayoutSaveNumber")).to_be_enabled()
     expect(page.locator("#toast")).not_to_be_visible(timeout=8000)
     page.screenshot(path=str(output / "renumber-draft.png"))
     with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
-        page.locator("#pageLayoutSaveNumber").click()
+        page.locator("#pageDialogSave").click()
     response = waiting.value
     assert response.ok, response.text()
     saved = response.json()
     assert saved["operation"]["kind"] == "renumber"
     assert saved["operation"]["source_ids"] == [fixture["first"]]
     assert saved["operation"]["target_ids"] == [fixture["first"]]
-    expect(page.locator("#pageLayoutEdit")).to_be_visible()
+    expect(page.locator("#pageLayoutPanel")).to_be_visible()
     after_renumber = question("first")
     assert after_renumber["number"] == 19
     assert after_renumber["content_revision"] > before_renumber["content_revision"]
@@ -617,10 +764,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
                 "answer", "edited_answer", "analysis", "edited_analysis", "body_mode", "processing_mode", "question_type",
                 "color_index", "group", "figures", "manual_figures"):
         assert after_renumber.get(key) == before_renumber.get(key), key
-    row = page.locator(f'[data-layout-question-id="{fixture["first"]}"]')
-    expect(row).to_contain_text("第 19 题")
-    expect(row).to_have_attribute("aria-pressed", "true")
-    expect(page.locator(f'[data-layout-coverage-id="{fixture["first"]}"] .layout-coverage-label')).to_have_text("19")
+    box = page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first
+    expect(box).to_contain_text("19")
+    expect(box).to_have_class(re.compile("selected"))
     assert len(report["writes"]) == before_writes + 1
     page.screenshot(path=str(output / "renumber-saved.png"))
 
@@ -628,8 +774,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     # undo; a refresh cannot turn this into a second question or lose colour.
     reopen_workspace()
     select("first")
-    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_contain_text("第 19 题")
-    expect(page.locator(f'[data-layout-coverage-id="{fixture["first"]}"] .layout-coverage-label')).to_have_text("19")
+    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_contain_text("19")
     assert question("first")["color_index"] == before_renumber["color_index"]
     undo()
     restored = question("first")
@@ -637,10 +782,10 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert restored["regions"] == before_renumber["regions"]
     assert restored["stem"] == before_renumber["stem"]
     assert restored["content_revision"] > after_renumber["content_revision"]
-    expect(page.locator(f'[data-layout-question-id="{fixture["first"]}"]')).to_contain_text("第 1 题")
+    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_contain_text("1")
     report["renumber_verification"] = {"question_id": fixture["first"], "operation_id": saved["operation"]["id"],
         "old_number": before_renumber["number"], "saved_number": after_renumber["number"], "undone_number": restored["number"],
-        "source_button": "pageLayoutSaveNumber", "question_identity_preserved": True,
+        "source_button": "pageDialogSave", "question_identity_preserved": True,
         "regions_preserved": True, "manual_content_preserved": True, "colour_preserved": True,
         "single_mutation": True, "reopened_before_undo": True, "multi_digit_typing_preserves_focus": True,
         "late_history_response_preserves_input": True}
@@ -671,18 +816,249 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
             page.locator("#pageLayoutNumber").press(shortcut)
         assert waiting.value.ok, waiting.value.text()
-        expect(page.locator("#pageLayoutEdit")).to_be_visible()
+        expect(page.locator("#pageLayoutPanel")).to_be_visible()
         assert question("first")["number"] == int(value)
         assert question("first")["regions"] == before_renumber["regions"]
         undo()
         assert question("first")["number"] == before_renumber["number"]
     report["passed"].append("renumber Enter and Ctrl+S each save exactly the selected question without a preview step and remain undoable")
 
+    # Last-frame removal is an explicit, recoverable local state. It is not a
+    # zero-range save, an implicit question deletion or a recognition request.
+    select("first")
+    fit()
+    empty_before = paper_data()
+    empty_writes = len(report["writes"])
+    page.locator('[data-layout-part-index="0"]').get_by_role("button", name="移除", exact=True).click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_contain_text("题目尚未删除")
+    expect(page.locator("#pageLayoutRestoreFrame")).to_have_text("恢复刚删的框")
+    expect(page.locator("#pageLayoutDraw")).to_have_text("重新画框")
+    expect(page.locator("#pageLayoutDeleteQuestion")).to_have_text("删除这题")
+    expect(page.locator("#pageLayoutDeleteQuestion")).to_be_enabled()
+    expect(page.locator("#pageDialogSave")).to_be_disabled()
+    expect(page.locator("#pageLayoutParts")).to_have_count(0)
+    expect(page.locator("#pageLayoutTargetPreview")).to_have_count(0)
+    expect(page.locator("[data-layout-target-index]")).to_have_count(0)
+    assert "结果 1" not in page.locator("#pageLayoutPanel").inner_text()
+    assert "1 段" not in page.locator("#pageLayoutPanel").inner_text()
+    assert paper_data() == empty_before and len(report["writes"]) == empty_writes
+    page.screenshot(path=str(output / "last-frame-clear-actions.png"))
+    page.locator("#pageLayoutRestoreFrame").click()
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    expect(page.locator("#pageUndo")).to_be_disabled()
+    assert paper_data() == empty_before and len(report["writes"]) == empty_writes
+
+    # Cancelling an unfinished redraw does not erase the removed-frame undo.
+    # Completing a redraw participates in ordinary draft undo/redo, and the
+    # explicit restore button can still return to the original saved range.
+    page.locator('[data-layout-part-index="0"]').get_by_role("button", name="移除", exact=True).click()
+    page.locator("#pageLayoutDraw").click()
+    expect(page.locator("#pageLayoutDraw")).to_have_attribute("aria-pressed", "true")
+    assert page.locator("#pageStage .stage-surface").evaluate("node => getComputedStyle(node).cursor") == "crosshair"
+    fit()
+    page.mouse.click(*point(90, 95))
+    page.keyboard.press("Escape")
+    expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+    expect(page.locator("#pageDialogSave")).to_be_disabled()
+    assert paper_data() == empty_before and len(report["writes"]) == empty_writes
+    draw([90, 95, 900, 400])
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    expect(page.locator("#pageDialogSave")).to_be_enabled()
+    page.locator("#pageUndo").click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+    page.locator("#pageRedo").click()
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    page.locator("#pageUndo").click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+    page.locator("#pageLayoutRestoreFrame").click()
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    assert paper_data() == empty_before and len(report["writes"]) == empty_writes
+    report["passed"].append("last-frame empty state has clear restore/redraw/delete actions; cancelled redraw and draft undo/redo keep saved content and versions unchanged")
+
+    # A multi-frame question remains valid after one piece is removed. Its
+    # sidebar must describe the draft's current range rather than stale data.
+    select("crosspage")
+    multi_before = question("crosspage")
+    expect(page.locator("[data-layout-part-index]")).to_have_count(2)
+    page.locator('[data-layout-part-index="1"]').get_by_role("button", name="移除", exact=True).click()
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    expect(page.locator("#pageLayoutPanel .layout-current")).to_contain_text("1 个框")
+    expect(page.locator("#pageLayoutEmptyRange")).to_have_count(0)
+    expect(page.locator("#pageDialogSave")).to_be_enabled()
+    assert question("crosspage") == multi_before
+    page.locator("#pageUndo").click()
+    expect(page.locator("[data-layout-part-index]")).to_have_count(2)
+    page.locator("#pageRedo").click()
+    save()
+    multi_saved = question("crosspage")
+    assert multi_saved["regions"] == multi_before["regions"][:1]
+    assert multi_saved["stem"] == multi_before["stem"] and not multi_saved["ocr_pending"]
+    undo()
+    assert question("crosspage")["regions"] == multi_before["regions"]
+    report["passed"].append("removing one of two pieces updates the draft frame count, remains directly saveable and supports draft plus persisted undo without OCR")
+
+    select("first")
+    fit()
+    delete_before = paper_data()
+    delete_question_before = question("first", delete_before)
+    delete_writes = len(report["writes"])
+    page.locator('[data-layout-part-index="0"]').get_by_role("button", name="移除", exact=True).click()
+    page.locator("#pageLayoutDeleteQuestion").click()
+    expect(page.locator("#confirmDialog")).to_be_visible()
+    expect(page.locator("#confirmTitle")).to_contain_text("回收站")
+    page.locator('#confirmDialog button[value="cancel"]').click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+    expect(page.locator("#pageLayoutDeleteQuestion")).to_be_enabled()
+    expect(page.locator("#pageDialogSave")).to_be_disabled()
+    assert paper_data() == delete_before and len(report["writes"]) == delete_writes
+
+    # Inject failures before reaching the real fixture server. Both the 400
+    # response and a failed connection must keep the empty-range draft and its
+    # restore/redraw choices, then allow the user to retry one real deletion.
+    delete_endpoint = f"{base}/api/papers/{fixture['paper']}/questions/delete"
+    injected_deletes = []
+
+    def reject_delete(route):
+        assert route.request.method == "POST"
+        assert route.request.post_data_json == {"question_ids": [fixture["first"]]}
+        injected_deletes.append("400")
+        route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "虚构删除失败：草稿应保留"}))
+
+    page.route(delete_endpoint, reject_delete)
+    try:
+        page.locator("#pageLayoutDeleteQuestion").click()
+        expect(page.locator("#confirmDialog")).to_be_visible()
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as failed_delete:
+            page.locator("#confirmOk").click()
+        assert failed_delete.value.status == 400
+        expect(page.locator("#toast")).to_contain_text("虚构删除失败")
+        expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+        expect(page.locator("#pageLayoutDeleteQuestion")).to_be_enabled()
+        expect(page.locator("#pageLayoutRestoreFrame")).to_be_enabled()
+    finally:
+        page.unroute(delete_endpoint, reject_delete)
+    assert paper_data() == delete_before and len(report["writes"]) == delete_writes
+
+    def disconnect_delete(route):
+        assert route.request.method == "POST"
+        assert route.request.post_data_json == {"question_ids": [fixture["first"]]}
+        injected_deletes.append("network")
+        route.abort("connectionreset")
+
+    page.route(delete_endpoint, disconnect_delete)
+    try:
+        page.locator("#pageLayoutDeleteQuestion").click()
+        expect(page.locator("#confirmDialog")).to_be_visible()
+        with page.expect_event("requestfailed", predicate=lambda request: request.method == "POST" and request.url == delete_endpoint):
+            page.locator("#confirmOk").click()
+        expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+        expect(page.locator("#pageLayoutDeleteQuestion")).to_be_enabled()
+        expect(page.locator("#pageLayoutRestoreFrame")).to_be_enabled()
+    finally:
+        page.unroute(delete_endpoint, disconnect_delete)
+    assert injected_deletes == ["400", "network"]
+    assert paper_data() == delete_before and len(report["writes"]) == delete_writes
+    report["passed"].append("whole-question delete cancellation, server rejection and network failure retain the local empty-frame draft and retry/restore choices")
+
+    zoom_before_delete = page.locator("#pageZoomLevel").inner_text()
+    page_before_delete = page.locator("#pageNumberInput").input_value()
+    scroll_before_delete = page.locator("#pageStage").evaluate("node => [node.scrollLeft, node.scrollTop]")
+    page.locator("#pageLayoutDeleteQuestion").click()
+    expect(page.locator("#confirmDialog")).to_be_visible()
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as successful_delete:
+        page.locator("#confirmOk").click()
+    assert successful_delete.value.ok, successful_delete.value.text()
+    deleted_receipt = successful_delete.value.json()
+    expect(page.locator("#pageLayoutEmptyRange")).to_have_count(0)
+    expect(page.locator("#pageDialog")).to_be_visible()
+    expect(page.locator("#pageDialogSave")).not_to_be_visible()
+    assert fixture["first"] not in {q["id"] for q in paper_data()["questions"]}
+    assert len(report["writes"]) == delete_writes + 1
+    assert page.locator("#pageZoomLevel").inner_text() == zoom_before_delete
+    assert page.locator("#pageNumberInput").input_value() == page_before_delete
+    assert page.locator("#pageStage").evaluate("node => [node.scrollLeft, node.scrollTop]") == scroll_before_delete
+    expect(page.locator("#pageLayoutRestoreDeleted")).to_have_text("恢复这题")
+    expect(page.locator("#pageLayoutRestoreDeleted")).to_be_enabled()
+    expect(page.locator("#toast .toast-action")).to_have_count(0)
+    page.screenshot(path=str(output / "question-deleted-overview.png"))
+    direct_restore_endpoint = f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url == direct_restore_endpoint) as direct_restore:
+        page.locator("#pageLayoutRestoreDeleted").click()
+    assert direct_restore.value.ok, direct_restore.value.text()
+    expect(page.locator("#pageLayoutRestoreDeleted")).to_have_count(0)
+    expect(page.locator("[data-layout-part-index]")).to_have_count(1)
+    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_be_visible()
+    direct_restored_question = question("first")
+    for field in ("id", "number", "regions", "stem", "edited_stem", "edited_options", "body_mode", "color_index", "group", "manual_figures"):
+        assert direct_restored_question.get(field) == delete_question_before.get(field), field
+    assert not direct_restored_question["ocr_pending"]
+    assert len(report["writes"]) == delete_writes + 2
+    assert page.locator("#pageZoomLevel").inner_text() == zoom_before_delete
+    assert page.locator("#pageNumberInput").input_value() == page_before_delete
+    assert page.locator("#pageStage").evaluate("node => [node.scrollLeft, node.scrollTop]") == scroll_before_delete
+    page.screenshot(path=str(output / "question-restored-sidebar.png"))
+    report["passed"].append("deleting a question exposes an actionable in-workspace Restore this question button; one real restore returns its saved frame/content without moving the canvas")
+
+    # Exercise the older recycle-bin route as well, using a second actual
+    # delete batch rather than restoring an already-restored batch again.
+    page.locator('[data-layout-part-index="0"]').get_by_role("button", name="移除", exact=True).click()
+    expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
+    page.locator("#pageLayoutDeleteQuestion").click()
+    expect(page.locator("#confirmDialog")).to_be_visible()
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as second_delete:
+        page.locator("#confirmOk").click()
+    assert second_delete.value.ok, second_delete.value.text()
+    deleted_receipt = second_delete.value.json()
+    expect(page.locator("#pageLayoutRestoreDeleted")).to_be_enabled()
+    assert fixture["first"] not in {q["id"] for q in paper_data()["questions"]}
+    assert len(report["writes"]) == delete_writes + 3
+    page.locator("#pageDialogClose").click()
+    page.locator("#toolsMenu > summary").click()
+    page.locator("#questionTrash").click()
+    expect(page.locator("#trashDialog")).to_be_visible()
+    batch = page.locator("#trashList .trash-batch:not(.restored)").filter(has_text=delete_question_before["stem"])
+    expect(batch).to_have_count(1)
+    restore_endpoint = f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url == restore_endpoint) as restore_response:
+        batch.get_by_role("button", name="恢复这一批", exact=True).click()
+    assert restore_response.value.ok, restore_response.value.text()
+    # The ordinary recycle-bin endpoint lists only un-restored batches.
+    # Successful restoration removes both batches from this live list.
+    expect(page.locator("#trashList .trash-batch")).to_have_count(0)
+    expect(page.locator("#trashList")).to_contain_text("回收站是空的")
+    assert paper_data()["paper"]["trash_count"] == 0
+    restored_question = question("first")
+    for field in ("id", "number", "regions", "stem", "edited_stem", "edited_options", "body_mode", "color_index", "group", "manual_figures"):
+        assert restored_question.get(field) == delete_question_before.get(field), field
+    assert not restored_question["ocr_pending"]
+    assert len(report["writes"]) == delete_writes + 4
+    page.screenshot(path=str(output / "question-restored-recycle-bin.png"))
+    page.locator("#trashDialog [data-close]").click()
+    page.locator("#paperMenu > summary").click()
+    page.locator("#viewOriginalPaper").click()
+    expect(page.locator("#pageDialog")).to_be_visible()
+    page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+    if page.locator("#pageNumberInput").input_value() != "1":
+        page.locator("#pageNumberInput").fill("1")
+        page.locator("#pageNumberInput").press("Enter")
+    fit()
+    report["passed"].append("explicit whole-question deletion makes one recoverable soft-delete, preserves canvas position and restores original identity/content/ranges through the real recycle-bin UI")
+
     assert all(not q["ocr_pending"] for q in paper_data()["questions"])
     db = database_rows()
     assert not db["core_regionread"] and not db["core_libraryjob"]
     assert not report["forbidden_requests"], report["forbidden_requests"]
     report["passed"].append("all saves, renumber, supplement, split, merge and undo run without an implicit AI request or background job")
+    # A saved box returns to its own review card; a normal return from the
+    # workspace restores the opening context instead of guessing by number.
+    select("first")
+    # The first region contains another question's smaller frame. Click a
+    # visible part of the larger range so Playwright doesn't target that box.
+    page.mouse.dblclick(*point(500, 140))
+    expect(page.locator("#pageDialog")).not_to_be_visible()
+    expect(page.locator(f'.card[data-id="{fixture["first"]}"]')).to_be_visible()
+    page.screenshot(path=str(output / "review-question-jump.png"))
+    report["passed"].append("double-clicking a saved range returns to the matching review card")
 
 
 def run(args):
