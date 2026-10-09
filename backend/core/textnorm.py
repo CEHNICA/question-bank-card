@@ -431,6 +431,62 @@ def section_headings_after_anchor(blocks, anchor_seq, text: str = "") -> list[st
     return found
 
 
+# 小问号：(1)(2)(3)。只认这个形状，「图（1）」「第 2 题」「（第 1 题）」不是小问，
+# 后者带汉字，直接被下面的正则排除。
+SUB_QUESTION_MARK = re.compile(r"[（(]\s*(\d{1,2})\s*[)）]")
+_SOLUTION_LABEL = re.compile(r"^\s*(?:解|答|分析|证明)\s*[:：]", re.M)
+_SUB_QUESTION_LIMIT = 12
+
+
+def missing_sub_questions(stem: str, blocks) -> list[int]:
+    """正文的小问编号在整段里跳号，而那些号在本题范围内确实印着内容时，返回缺的号。
+
+    九上 id=1152（第 1 题）就是这样丢了一道：纸上印着
+    「(1)…试比较 y1 与 y2；(2)…试比较 y3 与 y4；(3)…试比较 y5 与 y6」，
+    卡上只剩 (1) 和 (3)。切题吞掉一道小问，成品卷上就是 (1)(3)，学生一眼就看出来。
+
+    两道判据缺一不可，少一条都会教用户忽略这条提示：
+
+    1. **跳号且那个号整段正文里一次都没出现过**。只看相邻标记会把教材把「做一做」和
+       例题并成一张的卡误判成跳号（(1)(2)…(1)(3)，四张样本全是这种）。
+    2. **范围内印着这个号，而且后面跟着实打实的内容**。北师大版的例题与习题题面只印
+       单数小题（例 1 的题面就是「(1)…(3)」，(2)(4) 只出现在下面的「解」里），
+       这种不是丢题，是书上就这么印的；14 张跳号样本里有 13 张属于这一类。
+
+    「解：」之后的内容不算题面，所以先按它把块文字截断。
+    """
+    marks = [int(match.group(1)) for match in SUB_QUESTION_MARK.finditer(stem or "")]
+    if len(marks) < 2:
+        return []
+    present = set(marks)
+    missing: set[int] = set()
+    for before, after in zip(marks, marks[1:]):
+        if after > before + 1:
+            missing.update(n for n in range(before + 1, min(after, _SUB_QUESTION_LIMIT + 1))
+                           if n not in present)
+    if not missing:
+        return []
+
+    printed = []
+    for block in blocks or []:
+        if isinstance(block, dict):
+            position = _block_position(block)
+            text = str(block.get("text") or "")
+            if position is None:
+                continue
+            printed.append((position, text))
+    if not printed:
+        return []
+    # 按阅读顺序接起来，再从第一个「解：」处截断——答案区里的小问不算题面。
+    flat = "\n".join(text for _position, text in sorted(printed))
+    label = _SOLUTION_LABEL.search(flat)
+    if label is not None:
+        flat = flat[:label.start()]
+    return sorted(n for n in missing
+                  if any(match.group(1) and int(match.group(1)) == n
+                         and flat[match.end():match.end() + 40].strip() for match in SUB_QUESTION_MARK.finditer(flat)))
+
+
 # 判「读出来的题是不是另一道」用的取样：只认连续 6 个以上的汉字，公式和标点不算。
 _ANCHOR_HAN = re.compile(r"[一-鿿]{6,}")
 _ANCHOR_PROSE = re.compile(r"如图所示|求证|计算下列|已知如图|如图，|试求|求下列|下列各式")

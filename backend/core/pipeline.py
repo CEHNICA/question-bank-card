@@ -4418,6 +4418,16 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(
             f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；"
             f"请对照原书确认那几道题是不是漏进来了")
+    if missing := textnorm.missing_sub_questions(
+            final.get("stem") or "", snapshot.get("witness_blocks")):
+        # 小问在整段正文里跳号，而那些号在本题范围内确实印着内容：切题吞了一道小问。
+        # 九上 id=1152 就是这样，(2)整条没进卡，成品卷上印成 (1)(3)。判据的另一半
+        # （题面只印单数小题的那种不算）在 textnorm.missing_sub_questions 里。
+        # 不挂 elif：吞题和范围越界可能同时发生，两个提示都要给。
+        listed_subs = "、".join(f"（{n}）" for n in missing)
+        flags.append(
+            f"题干的小问编号跳过了 {listed_subs}，而本题范围内印着这些小问的内容；"
+            f"这道题可能少了一问，请对照原书确认")
     if headings := textnorm.section_headings_after_anchor(
             snapshot.get("witness_blocks"), snapshot.get("source_anchor_seq"),
             "".join([final.get("stem") or "",
