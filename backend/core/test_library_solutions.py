@@ -281,6 +281,26 @@ class LibrarySolutionTests(TransactionTestCase):
             if mode != "questions":
                 self.assertNotIn("原卷未提供答案", "".join(document_xml(data).xpath("//w:t/text()", namespaces=NS)))
 
+    def test_split_export_keeps_the_solution_image_out_of_the_student_paper(self):
+        # 分卷导出把同一份 captured 生成两个文件，两个图片测试原来都只跑
+        # combined/answers/questions，split 这一格没人验：解答配图漏进学生卷，
+        # 学生翻开就是现成的解题过程。split 的题目卷要像 questions 模式一样干净。
+        row = self.save(answer="C", analysis="第一段", figures=[{"id": self.asset()["id"], "display_width": 40}])
+        data, *_ = library_export.export(
+            self.payload(solutions={str(self.pub.pk): str(row.pk)}, mode="questions", output="split"))
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = archive.namelist()
+            self.assertEqual(len(names), 2)
+            question = next(name for name in names if name.endswith("题目卷.docx"))
+            answer = next(name for name in names if name.endswith("答案解析卷.docx"))
+            with zipfile.ZipFile(io.BytesIO(archive.read(question))) as student:
+                student_media = [n for n in student.namelist() if n.startswith("word/media/")]
+            with zipfile.ZipFile(io.BytesIO(archive.read(answer))) as teacher:
+                teacher_media = [n for n in teacher.namelist() if n.startswith("word/media/")]
+        self.assertEqual(student_media, [])
+        self.assertEqual(len(teacher_media), 1)
+
     def test_analysis_images_keep_order_width_and_paragraph_placement(self):
         figures = [self.asset(color=color) for color in ("red", "green", "blue")]
         row = self.save(figures=[{"id": figures[0]["id"], "display_width": 35, "position": "before"},
