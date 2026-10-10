@@ -531,6 +531,19 @@
     return new Set([...names].filter(([, count]) => count > 1).map(([name]) => name));
   }
 
+  // 卡上那句「原卷第 N 题」是老师回原卷核对时要用的定位。
+  // 试卷的题号就是原卷先后，光它就够；教材每一章的习题都从 1 重新编，
+  // 九年级上册里就有 94 个「第 1 题」，光这句话翻书根本找不到是哪一章。
+  // 章节名（习题 6.1、复习题）后端已经算好在 content.section 里，只有短标签
+  // 才显示——试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题…」），
+  // 放上去反而是噪音。
+  function cardLocator(item) {
+    const number = `原卷第 ${item.number} 题`;
+    const section = String(item.content?.section || "").trim();
+    if (!section || section.length > 12 || /[：:，,。;；]/.test(section)) return number;
+    return `${section} · ${number}`;
+  }
+
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}`);
     article.id = `q-${item.id}`;
@@ -547,7 +560,7 @@
     meta.append(select);
     meta.append(
       node("span", "library-source", item.source_filename),
-      node("span", "", `原卷第 ${item.number} 题`),
+      node("span", "", cardLocator(item)),
       typeChip(item)
     );
     // 1.12.6：同一份卷被录过两次时，两份来源在题库里同名，只看文件名分不出
