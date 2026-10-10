@@ -13,9 +13,16 @@ from .models import LibraryJob, PublishedQuestion
 
 MAX_BATCH_IDS = 500
 DEFAULT_LIMIT = 40
+# 「原卷顺序」承诺的是这份资料上印出来的先后。试卷的题号本身就是那个先后，
+# 教材不是：每章的习题都从 1 重新编，真库两本教材里「第 1 题」各有 94 / 82 张，
+# 按题号排等于把各章的「第 1 题」堆在一起（698 张里只有 14 张落在书上位置）。
+# source_anchor_seq 是题目起始所在的版面块序号，也就是原卷上的先后；14 份
+# 资料按它排 100% 等于原卷顺序，试卷按它排和按题号排一模一样。锚点为空
+# （人工框选、切题后没有版面块）时排到最后，不打乱其余题的顺序。
+_SOURCE_ANCHOR = models.F("question__source_anchor_seq").asc(nulls_last=True)
 SORTS = {
     "recent": ("-published_at", "-id"),
-    "source": ("source_filename", "number", "-version", "id"),
+    "source": ("source_filename", _SOURCE_ANCHOR, "number", "-version", "id"),
 }
 
 

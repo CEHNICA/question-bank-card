@@ -78,6 +78,41 @@ class LibraryBrowseDraftTests(TestCase):
         expected = sorted((first, second, third), key=lambda item: (item.source_filename, item.number))
         self.assertEqual([item["id"] for item in by_source["items"]], [str(item.id) for item in expected])
 
+    def test_a_book_is_ordered_by_where_it_prints_not_by_its_number(self):
+        # 「原卷顺序」承诺的是这份资料上印出来的先后。教材每章的习题都从 1 重新
+        # 编——真库两本教材里「第 1 题」各有 94 / 82 张，按题号排等于把各章的第
+        # 1 题堆在一起（698 张里只有 14 张落在书上位置）。版面锚点才是原卷顺序：
+        # 14 份资料按它排 100% 等于原卷顺序，试卷按它排和按题号排一模一样。
+        book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="b" * 64,
+                                    material_type=Paper.MaterialType.BOOK)
+        printed = []
+        for serial, anchor in enumerate((50, 10, 30, 20, 40), 1):
+            question = Question.objects.create(
+                paper=book, number=1, question_type="single_choice", state="green",
+                stem=f"第 {anchor} 页那一条", source_anchor_seq=anchor)
+            printed.append((anchor, self.publication(source="教材.pdf", paper=book,
+                                                     question=question, number=1)))
+        by_source = self.client.get("/api/library", {"sort": "source"}).json()
+        self.assertEqual([item["id"] for item in by_source["items"]],
+                         [str(item.id) for _anchor, item in sorted(printed)])
+
+    def test_a_card_without_a_layout_anchor_goes_last_without_moving_the_others(self):
+        book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="c" * 64)
+        with_anchor, without = [], None
+        for serial, anchor in enumerate((30, None, 10), 1):
+            question = Question.objects.create(
+                paper=book, number=1, question_type="single_choice", state="green",
+                stem=f"锚点 {anchor}", source_anchor_seq=anchor)
+            item = self.publication(source="教材.pdf", paper=book, question=question, number=1)
+            if anchor:
+                with_anchor.append((anchor, item))
+            else:
+                without = item
+        items = self.client.get("/api/library", {"sort": "source"}).json()["items"]
+        # 人工框选、切题后没有版面块的排在最后，不能把其余题的顺序顶乱。
+        self.assertEqual([item["id"] for item in items],
+                         [str(item.id) for _anchor, item in sorted(with_anchor)] + [str(without.id)])
+
     def test_default_page_has_forty_items(self):
         for _ in range(41):
             self.publication()
