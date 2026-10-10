@@ -281,9 +281,30 @@ def search_key(value: str) -> str:
     return text.lower()
 
 
+SECTION_LABEL_MAX = 12
+SECTION_LABEL_STOP = re.compile(r"[：:，,。;；]")
+
+
+def section_label(section) -> str:
+    """卡面上真的印出来的那段章节名，空串表示卡面不显示。
+
+    教材的「习题 6.1」「复习题」短到 12 字、也不带冒号逗号，会印在卡面上；
+    试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题，每小题5分…」），
+    那种一个字都不显示，也不该进搜索——它带着「本题共 N 小题」这类套话，
+    进了搜索会把一堆不相干的卷子都搜出来。
+    前端卡面用同一套规则切出章节名（frontend/library.js 的 cardLocator），
+    两边都拿同一份 fixture 断言，改一边就会红。
+    """
+    text = str(section or "").strip()
+    if not text or len(text) > SECTION_LABEL_MAX or SECTION_LABEL_STOP.search(text):
+        return ""
+    return text
+
+
 def _search_text(content: dict, extras: dict | None = None) -> str:
     parts = [content["stem"], *content["options"].values(), content["answer"], content["analysis"],
              content["source_filename"], (content.get("source_group") or {}).get("title", ""),
+             section_label(content.get("section")),
              str(content.get("origin") or ""), *tags_of(extras)]
     return search_key(" ".join(parts))
 

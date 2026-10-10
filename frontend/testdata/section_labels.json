@@ -1,0 +1,73 @@
+{
+  "_note": "章节名在卡面上到底显不显示。前端 cardLocator（frontend/library.js）和后端 section_label（backend/core/library.py）必须给出同一个答案，卡面上印着的东西才搜得到。两边的测试都读这一个文件。取值全部来自真库 112 种 content.section：77 种会显示（527 张卡），12 字是实测最长的会显示值，13 字是实测最短的不显示值。",
+  "cases": [
+    {
+      "section": "习题 6.1",
+      "label": "习题 6.1"
+    },
+    {
+      "section": "复习题",
+      "label": "复习题"
+    },
+    {
+      "section": "习题",
+      "label": "习题"
+    },
+    {
+      "section": "第二章",
+      "label": "第二章"
+    },
+    {
+      "section": "三、解答题",
+      "label": "三、解答题"
+    },
+    {
+      "section": "一、个人及小组活动",
+      "label": "一、个人及小组活动"
+    },
+    {
+      "section": "  习题 8.6  ",
+      "label": "习题 8.6"
+    },
+    {
+      "section": "习题 3.14",
+      "label": "习题 3.14"
+    },
+    {
+      "section": "二. 填空题（共6小题）",
+      "label": "二. 填空题（共6小题）"
+    },
+    {
+      "section": "三. 解答题（共5小题）",
+      "label": "三. 解答题（共5小题）"
+    },
+    {
+      "section": "一. 选择题（共10小题）",
+      "label": ""
+    },
+    {
+      "section": "1. 展示你所搜集的桥梁图片。",
+      "label": ""
+    },
+    {
+      "section": "三、解答题：（17-26题，共86分）",
+      "label": ""
+    },
+    {
+      "section": "一、选择题：本题共 12 小题，每小题 5 分，共 60 分，在每小题给出的四个选项中，只有一项是符合题目要求的",
+      "label": ""
+    },
+    {
+      "section": "",
+      "label": ""
+    },
+    {
+      "section": "   ",
+      "label": ""
+    },
+    {
+      "section": null,
+      "label": ""
+    }
+  ]
+}
