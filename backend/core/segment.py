@@ -113,6 +113,16 @@ BOOK_EMBEDDED_ANALYSIS_RE = re.compile(
     r"(?:Analysis|Solution|Proof)\s*(?:[.:：]|$))",
     re.I,
 )
+# The same printed label, but read by MinerU as part of a display formula
+# instead of a text line — 数学九上 p47 ``例1`` is one case:
+#   $$\begin{array}{r l} & {\text{解：在} \mathrm{Rt}\triangle ABC … $$
+# The marker stream below skips equation blocks, so without this the example
+# runs on to the next printed number and keeps its whole worked solution.
+BOOK_EMBEDDED_ANALYSIS_LATEX_RE = re.compile(
+    r"\\(?:text|textbf|mbox|textrm)\s*\{\s*"
+    r"(?:分析|解析|解答?|证明|答|(?:解法|证法)(?:\s*[一二三四五六七八九十0-9]+)?)"
+    r"\s*[：:]",
+)
 BOOK_DECIMAL_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){1,3}\s+\S")
 BOOK_NAMED_BOUNDARY_RE = re.compile(
     r"^\s*(?:第[一二三四五六七八九十0-9]+[章节篇单元]|"
@@ -670,8 +680,6 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             textual[index + 1] if index + 1 < len(textual) else None,
         )
     for block in blocks:
-        if block.get("type") in NON_CONTENT | FIGURE_TYPES | {"equation"}:
-            continue
         position = _book_block_position(block)
         text = str(block.get("text") or "").strip()
         if position is None or not text:
@@ -679,6 +687,26 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
         plain = text.replace("**", "").strip()
         page, x, y = position
         seq = block.get("seq") if type(block.get("seq")) is int else None
+
+        if block.get("type") == "equation":
+            # Same merged-label problem the text branch handles further down,
+            # but the label arrived inside a display formula.  Emit the boundary
+            # at the label's estimated line so the example above it stops there
+            # instead of at the next printed number.
+            embedded_solution = BOOK_EMBEDDED_ANALYSIS_LATEX_RE.search(plain)
+            if embedded_solution is not None:
+                bbox = block["bbox"]
+                solution_y = y + (float(bbox[3]) - float(bbox[1])) * (
+                    embedded_solution.start() / max(1, len(plain))
+                )
+                markers.append(BookMarker(
+                    kind="analysis_solution", page=page, x=x, y=solution_y,
+                    seq=seq, text=plain[embedded_solution.start():][:160],
+                ))
+            continue
+
+        if block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            continue
 
         # Chapter openings and ``思考`` panels often revisit “问题 1/2” from a
         # previous section and ask a new, explicit question.  The decimal

@@ -54,6 +54,48 @@ class BookTypedMarkerTests(SimpleTestCase):
         self.assertTrue(first["segmentation"]["solution_trimmed"])
         self.assertEqual(first["segmentation"]["solution_boundary_seq"], 3)
 
+    def test_example_stops_before_solution_merged_into_its_display_formula(self):
+        # 数学九上 p47 例1：书上印的「解：」被 MinerU 折进了 array 环境，
+        # 于是整段解答成了一个 equation 块，而不是一行文字。标记流跳过公式块，
+        # 例题只能一路吃到下一个印刷题号，解答就原样留在卡上、印到学生卷上。
+        blocks = [
+            block(0, 0, 100, "例1 如图 2-19，在 Rt△ABC 中，已知 ∠C=90°，a=4，c=8。"),
+            block(1, 0, 180,
+                  "$$\\begin{array}{r l} & {\\text {解：在} \\mathrm{Rt} \\triangle ABC ...}$$",
+                  kind="equation", height=300),
+            block(2, 0, 560, "例2 在 Rt△ABC 中，已知 ∠C=90°，a=3，c=5。"),
+            block(3, 0, 640, "解：在 Rt△ABC 中，"),
+        ]
+
+        result = segment.segment_book(PAGES[:1], blocks)
+
+        first, second = result["questions"][0], result["questions"][1]
+        self.assertTrue(first["segmentation"]["solution_trimmed"])
+        self.assertEqual(first["segmentation"]["solution_boundary_seq"], 1)
+        self.assertTrue(contains(first["regions"], 0, 140))
+        self.assertFalse(contains(first["regions"], 0, 320))
+        self.assertFalse(contains(first["regions"], 0, 480))
+        # The next example still stops at its own text-line 解： label.
+        self.assertEqual(second["segmentation"]["solution_boundary_seq"], 3)
+        self.assertFalse(contains(second["regions"], 0, 640))
+
+    def test_display_formula_without_a_solution_label_stays_one_example(self):
+        # A printed worked solution that never labels itself with 解：/证明：
+        # must not be mistaken for a boundary; the example keeps its full range.
+        blocks = [
+            block(0, 0, 100, "例1 计算下列各式的值。"),
+            block(1, 0, 180, "$$\\begin{array}{r l} & 2x + 3y = 7 \\end{array}$$",
+                  kind="equation", height=120),
+            block(2, 0, 560, "例2 比较下列各数大小。"),
+        ]
+
+        result = segment.segment_book(PAGES[:1], blocks)
+
+        first = result["questions"][0]
+        self.assertFalse(first["segmentation"]["solution_trimmed"])
+        self.assertTrue(contains(first["regions"], 0, 260))
+        self.assertTrue(contains(first["regions"], 0, 300))
+
     def test_solution_boundary_keeps_stem_figure_but_excludes_overlapping_answer_figure(self):
         blocks = [
             block(0, 0, 100, "例1 如图，求函数的最大值。"),
