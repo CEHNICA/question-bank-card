@@ -27,6 +27,18 @@ _GEOMETRY = r"""(()=>({pages:[...document.querySelectorAll('#printPaper .exam-pa
  answers:[...page.querySelectorAll('.print-answer-row')].map(n=>({text:n.textContent,rect:rect(n)}))};
 })}))()"""
 
+# 表格有没有长出滚动条：overflow-x 一旦是 auto，overflow-y 按 CSS 规范也算 auto，
+# 单元格里的 \dfrac 字体形盒比行框高两三个像素，就被算成纵向溢出，Chromium 于是给它
+# 画一条 15px 的纵向滚动条，而 printToPDF 把灰条和上箭头一起印到了纸上。
+# offsetWidth-clientWidth / offsetHeight-clientHeight 就是这条滚动条占掉的那 15px；
+# 再顺带看一眼计算样式，是为了让「换成别的实现方式」也照样抓得到。
+_TABLES = r"""(()=>[...document.querySelectorAll('#printPaper .qb-table-wrap')].map(node=>{
+ const row=node.querySelector('tr'),style=getComputedStyle(node);
+ return {columns:row?row.children.length:0,rows:node.querySelectorAll('tr').length,
+  overflow_x:node.offsetWidth-node.clientWidth,overflow_y:node.offsetHeight-node.clientHeight,
+  overflow:style.overflowX+'/'+style.overflowY,text:node.textContent.replace(/\s+/g,'').length};
+}))()"""
+
 
 def _preview_driver():
     # Exercise the actual preview renderer, not a second fixture implementation.
@@ -95,14 +107,14 @@ class SharedPdfPaginationTests(SimpleTestCase):
                       "student_info":True,"pagination":"compact","option_layout":"auto","answer_space":"large",
                       "answer_layout":"appendix","option_overrides":{},"answer_space_overrides":{},"question_breaks":[]}
 
-    def render(self, document, *, remote_fonts=False):
+    def render(self, document, *, remote_fonts=False, probe=_GEOMETRY):
         geometry=[]
         original = pdf._CDP.call
         def observe(client, method, params=None):
             if method=="Network.setBlockedURLs" and remote_fonts:
                 params={"urls":["https://*","ws://*","wss://*","ftp://*","file://*"]}
             if method=="Page.printToPDF":
-                geometry.append(original(client,"Runtime.evaluate",{"expression":_GEOMETRY,"returnByValue":True})["result"]["value"])
+                geometry.append(original(client,"Runtime.evaluate",{"expression":probe,"returnByValue":True})["result"]["value"])
             return original(client,method,params)
         original_popen=pdf.subprocess.Popen
         def start(args, **kwargs):
@@ -229,4 +241,36 @@ class SharedPdfPaginationTests(SimpleTestCase):
         self.assertEqual(preview_count,export_count)
         self.assert_geometry(preview_geometry,geometry)
         self.assertIn("2024 全国甲卷 第 1 题",geometry["pages"][0]["questions"][0]["text"])
+        self.assertEqual(self.items,before)
+
+    # 九上教材「下面是某同学的画法」那张列表：13 列 + 单元格里的 \dfrac，
+    # 正是它在真卷上把表格盒撑出了滚动条。合成自检不能换成 \frac —— 那个不溢出。
+    WIDE_TABLE = (
+        "下面是某同学的列表：\n"
+        "| $x$ | $-8$ | $-4$ | $-3$ | $-2$ | $-1$ | $-\\dfrac12$ | $\\dfrac12$ | $1$ | $2$ | $3$ | $4$ | $8$ |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| $y=\\dfrac4x$ | $-\\dfrac12$ | $-1$ | $-\\dfrac43$ | $-2$ | $-4$ | $-8$ | $8$ | $4$ | $2$ | $\\dfrac43$ | $1$ | $\\dfrac12$ |")
+
+    def test_a_wide_table_prints_without_a_browser_scrollbar(self):
+        """宽表格在卷面上长出一条浏览器滚动条。
+
+        .qb-table-wrap 的 overflow-x: auto 会按 CSS 规范把 overflow-y 也算成 auto，
+        单元格里的 \\dfrac 字体形盒比行框高几个像素，就被算成纵向溢出，Chromium
+        于是给它画一条 15px 的纵向滚动条；printToPDF 把灰条和上箭头一起画到纸上，
+        老师印出来就是表格右边一条竖杠。这里量的是几何（滚动条占掉的那 15px），
+        所以换成别的实现方式也照样抓得到。
+        """
+        before=deepcopy(self.items)
+        items=deepcopy(self.items)
+        items[0]["content"]["stem"]=self.WIDE_TABLE
+        exported=pdf._html_document(items,"宽表格卷",self.options)
+        _,pages,tables=self.render(exported,probe=_TABLES)
+        self.assertGreaterEqual(pages,1)
+        self.assertTrue(tables,"卷面上必须真的排出这张表格，否则这道测试是空跑")
+        self.assertEqual([(table["columns"],table["rows"]) for table in tables],[(13,2)])
+        for table in tables:
+            self.assertEqual((table["overflow_x"],table["overflow_y"]),(0,0),
+                "卷面上这张表格长出了滚动条，PDF 会把它印到纸上："+repr(table))
+            self.assertEqual(table["overflow"],"visible/visible",
+                "卷面上这张表格是滚动容器，PDF 会把它印到纸上："+repr(table))
         self.assertEqual(self.items,before)

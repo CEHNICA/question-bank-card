@@ -1345,6 +1345,11 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .rendered .qb-option .qb-figure img { max-height: 110px; }
 /* 表格：和试卷上一样的细线格子，字居中；空格子留出填写的高度。 */
 .qb-table-wrap { display: block; max-width: 100%; margin: .45em 0 .55em; overflow-x: auto; }
+/* 卷面里不滚：overflow-x 一旦是 auto，overflow-y 按规范也算 auto，宽表格就会在
+   Chromium 里长出一条 15px 的纵向滚动条，而 printToPDF 会把它连同灰条和上箭头
+   一起印到纸上（教材里 12 列的数列表右侧就印了一条）。纸面上没有「横向拖动」这回事，
+   溢出就让它按纸的宽度排；卡片预览仍保留 overflow-x: auto，窄屏上还能拖着看。 */
+.print-flow .qb-table-wrap, .exam-page-body .qb-table-wrap { overflow: visible; }
 .qb-table { border-collapse: collapse; margin: 0 auto; white-space: normal; line-height: 1.6; }
 .qb-table td, .qb-table th { min-width: 2.6em; height: 2.1em; padding: .2em .7em; border: 1px solid var(--paper-ink); text-align: center;
   vertical-align: middle; font-weight: 400; overflow-wrap: normal; word-break: keep-all; white-space: nowrap; }
