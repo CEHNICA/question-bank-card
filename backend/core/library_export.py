@@ -1532,6 +1532,18 @@ def export(payload, *, warnings=None):
             actual = _option_columns(item, options)
             if wanted > actual and (item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"])):
                 warnings.append(f"第 {number} 题选项较宽，Word 已使用{'两列' if actual == 2 else '竖排'}，内容和配图完整保留。")
+            # ``_write_question`` prints ``f"{letter}. "`` for every slot in
+            # ABCDE whatever the question type is, so pictures the reader filed
+            # under option slots make those letters appear on the paper even
+            # though the source never had them: 数学九上第 1 题 prints (1)(2)(3)(4)
+            # and 括号 under four objects, and its 12 pictures came back slotted
+            # A~D, so the student sheet invented A. B. C. D. and lost both the
+            # numbering and the place to write the answer.
+            if item["type"] not in {"single_choice", "multiple_choice"} \
+                    and any(image["slot"] in "ABCDE" for image in item["images"]):
+                warnings.append(
+                    f"{item['where']}：这不是选择题，但卷面上会出现 A. B. C. 等字母，"
+                    f"原卷印的可能是 (1)(2)(3)(4)。请核对配图分组，或把这道题改成选择题。")
     if output_format == "split":
         questions = _document(captured, title, options, "questions")
         answers = _document(captured, title, options, "answers")

@@ -711,6 +711,37 @@ class LibraryExportTests(ExportFixture, TestCase):
         for key in "ABCD":
             self.assertIn(key + ". " + "长选项" * 30, "".join(xml.itertext()))
 
+    def test_a_non_choice_question_warns_before_its_own_letters_reach_the_paper(self):
+        # 数学九上第 1 题：书上印的是 (1)(2)(3)(4) 和物体下面的括号，12 张图却被
+        # 分到了 A~D 槽。写出选项字母那段不看题型，卷面就凭空多出 A. B. C. D.，
+        # 序号和括号两样都没了。
+        pub = self.publication(stem="根据下列主视图和俯视图，将视图的序号填在相应物体下面的括号里：")
+        self.figure(pub, slot="A")
+        result = self.post(self.payload([pub]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        self.assertIn("A.", "".join(document_xml(result.content).itertext()))
+        warning = unquote(result.headers["X-QB-Layout-Warning"]) \
+            if "X-QB-Layout-Warning" in result.headers else ""
+        self.assertIn("第 1 题", warning, "非选择题印出 A. B. C. 时必须有一条能定位到它的提示")
+        self.assertIn("不是选择题", warning)
+        self.assertIn("(1)(2)(3)(4)", warning)
+
+    def test_a_choice_question_keeps_its_letters_without_a_warning(self):
+        pub = self.publication(stem="下列说法正确的是", kind="single_choice")
+        self.figure(pub, slot="A")
+        result = self.post(self.payload([pub]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        self.assertIn("A.", "".join(document_xml(result.content).itertext()))
+        self.assertFalse(result.has_header("X-QB-Layout-Warning"))
+
+    def test_a_question_whose_pictures_all_sit_on_the_stem_never_gets_option_letters(self):
+        pub = self.publication(stem="画出这个几何体的三视图")
+        self.figure(pub, slot="stem")
+        result = self.post(self.payload([pub]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        self.assertNotIn("A.", "".join(document_xml(result.content).itertext()))
+        self.assertFalse(result.has_header("X-QB-Layout-Warning"))
+
     def test_selected_page_breaks_bind_section_heading_and_do_not_repeat_in_answers(self):
         first = self.publication(kind="single_choice", answer="甲")
         second = self.publication(kind="single_choice", answer="乙")
