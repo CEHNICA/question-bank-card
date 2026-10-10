@@ -67,10 +67,19 @@ class ColumnHeaderBoundaryTests(SimpleTestCase):
 
         second = result["questions"][1]
         self.assertEqual(second["source_anchor_seq"], 3)
-        self.assertEqual(second["number"], 0)          # 纸上没有印刷题号
+        # 纸面上没有印刷题号，落库必须是 None 而不是 0：卡面和导出都按
+        # 「第 N 题」定位，印一个「第 0 题」是纸面上不存在的话。
+        self.assertIsNone(second["number"])
         self.assertEqual(second["start"]["source_kind"], "exercise")
         self.assertTrue(covers(second["regions"], 0, 380))
         self.assertFalse(covers(second["regions"], 0, 120))  # 不倒吃上一题
+
+    def test_printed_numbers_are_still_numbers(self):
+        """有印刷题号的题不受影响，仍然落真实题号。"""
+        result = segment.segment_book(PAGES[:1], practice_page("做一做"))
+
+        self.assertEqual(result["questions"][0]["number"], 1)
+        self.assertNotEqual(result["questions"][0]["number"], None)
 
     def test_practice_choice_works_too(self):
         result = segment.segment_book(PAGES[:1], practice_page("随堂练习"))

@@ -2257,7 +2257,11 @@ def build_questions(
                 })
                 figure_blocks.extend(recovered_input_figures)
         questions.append({
-            "number": start.number,
+            # 教材「做一做」「随堂练习」里的题在纸面上没有印刷题号，
+            # ``start.number`` 是 0（占位，让它能当起点参与切题）。落库时给
+            # None：卡面和导出都按「第 N 题」定位，印一个「第 0 题」是纸面上
+            # 不存在的话，而且 ``0`` 过了 ``??`` 这类空值判断。
+            "number": start.number or None,
             "start": {
                 "page": start.page,
                 "col": start.col,

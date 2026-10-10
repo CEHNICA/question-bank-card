@@ -1308,7 +1308,12 @@
     if (sourceImage) {
       if (opts.showNumber !== false) {
         const heading = make("div", "qb-stem");
-        heading.append(make("span", "qb-number", `${opts.number ?? content.number ?? "?"}.`));
+        const label = opts.number ?? content.number;
+        // 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 null。
+        // 印一个「?.」和印「第 0 题」一样是纸面上不存在的话，宁可不印。
+        if (label !== null && label !== undefined && label !== "") {
+          heading.append(make("span", "qb-number", `${label}.`));
+        }
         container.append(heading);
       }
       const pieces = Array.isArray(content.question_images) ? content.question_images : [];
@@ -1344,7 +1349,10 @@
     }
     const figures = Array.isArray(content.figures) ? content.figures : [];
     const stem = make("div", "qb-stem");
-    if (opts.showNumber !== false) stem.append(make("span", "qb-number", `${opts.number ?? content.number ?? "?"}.`));
+    const stemNumber = opts.number ?? content.number;
+    if (opts.showNumber !== false && stemNumber !== null && stemNumber !== undefined && stemNumber !== "") {
+      stem.append(make("span", "qb-number", `${stemNumber}.`));
+    }
     const stemBody = make("span", "qb-stem-body");
     const marks = opts.marks || {};
     if (opts.trackSource) stemBody.dataset.qbField = "stem";

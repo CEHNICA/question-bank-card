@@ -44,7 +44,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       if (root.requestAnimationFrame) root.requestAnimationFrame(() => root.requestAnimationFrame(() => root.setTimeout(callback, 0)));
       else root.setTimeout(callback, 0);
     }
-    const itemLabel = item => `第 ${item.exam_number || item.number} 题`;
+    const itemLabel = item => `第 ${item.exam_number ?? item.number ?? "?"} 题`;
     const endpoint = item => `/api/library/${encodeURIComponent(item.id)}/solution`;
     function init() {
       if (dialog) return;

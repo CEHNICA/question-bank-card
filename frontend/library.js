@@ -537,11 +537,24 @@
   // 章节名（习题 6.1、复习题）后端已经算好在 content.section 里，只有短标签
   // 才显示——试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题…」），
   // 放上去反而是噪音。
+  function shortSection(item) {
+    const section = String(item?.content?.section || "").trim();
+    if (!section || section.length > 12 || /[：:，,。;；]/.test(section)) return "";
+    return section;
+  }
+
+  // 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 null。
+  // 翻书时用得上的定位是栏目标题本身；印一个「第 0 题」只会让人翻不到。
+  function sourceLocator(item) {
+    if (item?.number) return `第 ${item.number} 题`;
+    return shortSection(item) || "栏目题";
+  }
+
   function cardLocator(item) {
+    const section = shortSection(item);
+    if (!item?.number) return section || "栏目题";
     const number = `原卷第 ${item.number} 题`;
-    const section = String(item.content?.section || "").trim();
-    if (!section || section.length > 12 || /[：:，,。;；]/.test(section)) return number;
-    return `${section} · ${number}`;
+    return section ? `${section} · ${number}` : number;
   }
 
   function card(item) {
@@ -551,7 +564,7 @@
     const select = node("input", "library-card-select");
     select.type = "checkbox";
     select.checked = state.selected.has(item.id);
-    select.setAttribute("aria-label", `勾选${item.source_filename}第 ${item.number} 题`);
+    select.setAttribute("aria-label", `勾选${item.source_filename}${sourceLocator(item)}`);
     select.addEventListener("change", () => {
       if (select.checked) state.selected.add(item.id); else state.selected.delete(item.id);
       article.classList.toggle("is-selected", select.checked);
@@ -839,7 +852,7 @@
       tagDialog.dataset.max = String(body.max || 3);
       tagPicked = [...(body.tags || [])];
       dialog.querySelector(".tag-editor-place").textContent =
-        `${item.source_filename} · 第 ${item.number} 题${body.source === "human" ? " · 当前是人工改过的" : body.source ? ` · 当前由 ${body.source} 自动生成` : ""}`;
+        `${item.source_filename} · ${sourceLocator(item)}${body.source === "human" ? " · 当前是人工改过的" : body.source ? ` · 当前由 ${body.source} 自动生成` : ""}`;
       renderTagPicked();
       renderTagList();
       if (!dialog.open) dialog.showModal();
@@ -1186,8 +1199,8 @@
       const open = node("button", "basket-item-open");
       open.type = "button";
       open.disabled = !item || missing.has(id);
-      const name = item ? `${item.source_filename} · 第 ${item.number} 题` : `选题 ${index + 1}`;
-      open.append(node("strong", "", item ? `第 ${item.number} 题 · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : `选题 ${index + 1}`), node("span", "", name));
+      const name = item ? `${item.source_filename} · ${sourceLocator(item)}` : `选题 ${index + 1}`;
+      open.append(node("strong", "", item ? `${sourceLocator(item)} · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : `选题 ${index + 1}`), node("span", "", name));
       // 1.13.6：这里原来直接印 reason，那是后端的状态枚举。老师看到的是
       // 「第 1 题: superseded」—— 一句英文，看不出自己该怎么办。
       if (missing.has(id)) open.append(node("span", "basket-item-error", missingReason(missing.get(id))));
@@ -1263,7 +1276,7 @@
     const dialog = $("questionDialog");
     const refreshing = dialog.open && state.questionReturnId === item.id;
     const scroll = refreshing ? dialog.scrollTop : 0;
-    $("questionTitle").textContent = `${item.source_filename} · 第 ${item.number} 题`;
+    $("questionTitle").textContent = `${item.source_filename} · ${sourceLocator(item)}`;
     $("questionVersion").textContent = `${QB.TYPE_NAMES[item.question_type] || item.question_type} · 第 ${item.version} 版 · ${formatDate(item.published_at)} 入库${item.review?.source === "ai" ? " · AI 审核，待人工核对" : ""}`;
     const paper = $("questionContent");
     QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
@@ -1301,7 +1314,7 @@
   async function withdrawItem(item) {
     const ok = await confirmDialog({
       title: "从正式题库撤回这道题？",
-      text: `“${item.source_filename} 第 ${item.number} 题”会从正式题库撤下。题卡会保留，可以重新入库。`,
+      text: `“${item.source_filename} ${sourceLocator(item)}”会从正式题库撤下。题卡会保留，可以重新入库。`,
       ok: "撤回", danger: true
     });
     if (!ok) return;
@@ -1315,7 +1328,7 @@
       state.selected.delete(item.id);
       state.catalog.delete(item.id);
       saveBasket();
-      toast(`已撤回“${item.source_filename} 第 ${item.number} 题”`, "success");
+      toast(`已撤回“${item.source_filename} ${sourceLocator(item)}”`, "success");
       load();
     } catch (error) {
       setStatus(error.message || "撤回失败。", "warn");
@@ -1496,7 +1509,7 @@
       items.forEach((item) => {
         const row = node("div", "related-source-row");
         const name = node("div", "related-source-name");
-        name.append(node("strong", "", `${item.source_filename} · 第 ${item.number} 题`));
+        name.append(node("strong", "", `${item.source_filename} · ${sourceLocator(item)}`));
         if (item.origin) name.append(node("span", "helper", `题源：${item.origin}`));
         name.append(node("span", "helper", `${item.version_count || 1} 个入库版本 · ${reviewLabel(item)}`));
         const source = node("button", "button button-small", "查看原卷");
@@ -1516,7 +1529,7 @@
     const item = sourceState.item;
     if (!item) return;
     stopSourcePan();
-    ui.sourceTitle.textContent = `${item.source_filename} · 第 ${item.number} 题`;
+    ui.sourceTitle.textContent = `${item.source_filename} · ${sourceLocator(item)}`;
     ui.sourceReviewLink.href = item.document_id ? `/?document=${encodeURIComponent(item.document_id)}${item.draft_id ? `&draft=${encodeURIComponent(item.draft_id)}` : ""}` : "/";
     ui.sourceReviewLink.hidden = !item.document_id;
     ui.sourcePages.replaceChildren();
@@ -1915,7 +1928,7 @@
     const ids = [...state.basket];
     ids.forEach((id) => {
       const known = state.catalog.get(id);
-      if (known) printNames.set(id, `${known.source_filename || "试卷"} · 第 ${known.number} 题`);
+      if (known) printNames.set(id, `${known.source_filename || "试卷"} · ${sourceLocator(known)}`);
     });
     try {
       // Revalidate every selected snapshot, including cards already displayed.
@@ -1924,7 +1937,7 @@
       const byId = new Map(body.items.map((item) => [item.id, item]));
       items = ids.map((id) => byId.get(id)).filter(Boolean).map(item => ({ ...item }));
       await resolvePrintSolutions(items);
-      items.forEach((item) => { state.catalog.set(item.id, byId.get(item.id)); printNames.set(item.id, `${item.source_filename || "试卷"} · 第 ${item.number} 题`); });
+      items.forEach((item) => { state.catalog.set(item.id, byId.get(item.id)); printNames.set(item.id, `${item.source_filename || "试卷"} · ${sourceLocator(item)}`); });
       missing = body.missing.map((item) => ({ ...item, label: printNames.get(item.id) || `未载入的第 ${ids.indexOf(item.id) + 1} 道选题` }));
     } catch (error) {
       missing = ids.map((id, index) => ({ id, label: printNames.get(id) || `未载入的第 ${index + 1} 道选题`, reason: error.message || "读取失败，请重试" }));

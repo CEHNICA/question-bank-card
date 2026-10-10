@@ -61,7 +61,9 @@
         const card = node("article", "practice-card"), label = node("label", "practice-select"), input = node("input", "");
         input.type = "checkbox"; input.checked = selected.has(item.id);
         input.addEventListener("change", () => { input.checked ? selected.add(item.id) : selected.delete(item.id); error(); invalidate(); });
-        label.append(input, node("span", "", `选入第 ${item.number} 题`));
+        label.append(input, node("span", "", `选入${item.number
+          ? `第 ${item.number} 题`
+          : String(item.content?.section || "").trim() || "栏目题"}`));
         const body = node("div", "practice-question");
         window.QBRender.renderQuestion(body, item.content, { number: item.number, showAnswer: "none", resolveUrl: x => x.url, resolveQuestionImageUrl: x => x.url });
         card.append(label, body); $("practiceList").append(card);
