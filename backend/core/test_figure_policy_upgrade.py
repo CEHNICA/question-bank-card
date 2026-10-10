@@ -378,6 +378,36 @@ class StoredFigureReviewUpgradeTests(TestCase):
         self.assertEqual(upgraded["policy_version"], figure_policy.FIGURE_REVIEW_POLICY_VERSION)
         self.assertEqual(upgraded["cue_matches"], ["如图是"])
 
+    def test_a_cue_hidden_in_brackets_clears_a_stale_no_cue_verdict(self):
+        """真库 #843、#1417 的处境：卡上挂着图，题干写着「（如图）」，
+        存的判读却是「没发现图像提示词」，旗标一直挂着。
+
+        版本号一升，存量库里这份判读会被重算，这两张卡自动摘掉那句自相矛盾
+        的提示——所以判据改了必须同时升 ``FIGURE_REVIEW_POLICY_VERSION``。
+        """
+        old = {
+            "status": figure_policy.CONFLICT,
+            "source": "automatic",
+            "policy_version": figure_policy.FIGURE_REVIEW_POLICY_VERSION - 1,
+            "reason": figure_policy.FLAG_UNCUED_FIGURE,
+            "signals": ["bound_figure_without_text_cue"],
+            "cue_matches": [],
+            "excluded_count": 0,
+        }
+        question = question_stub(
+            figure_review=old,
+            stem="把一个圆锥的上部截去一个小圆锥（如图），画出剩余部分的三种视图。",
+            figures=[{"slot": "stem", "page_idx": 0, "bbox": [10, 20, 80, 90], "source": "auto"}],
+        )
+
+        upgraded = figure_policy.stored_or_derived_review(question)
+
+        self.assertEqual(upgraded["status"], figure_policy.OK)
+        self.assertEqual(upgraded["cue_matches"], ["如图"])
+        self.assertNotIn(figure_policy.FLAG_UNCUED_FIGURE,
+                         pipeline._flags_after_figure_review(
+                             [figure_policy.FLAG_UNCUED_FIGURE], upgraded, question.figures))
+
     def test_source_less_legacy_review_is_also_recomputed(self):
         question = question_stub(
             figure_review={"status": figure_policy.CONFLICT, "reason": "legacy"},

@@ -29,7 +29,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 12
+FIGURE_REVIEW_POLICY_VERSION = 13
 
 # 「这张候选图印在别题里」的角色写法。严格匹配 q 后跟若干数字，避免把
 # q / qOtherQuestion / q1a 这种坏值也当合法 foreign。
@@ -175,7 +175,7 @@ def candidates_cut_by_own_range(regions: list[dict], candidates: list[dict],
 _CHINESE_CUE = re.compile(
     r"(?:"
     r"如\s*(?:下|上|左|右)?\s*图(?:\s*[甲乙丙丁①②③④⑤⑥⑦⑧⑨1-9A-Za-z])?"
-    r"(?:\s*(?:所示|显示|给出|为|是)|(?=$|[\s，,。．.、:：；;（(]|可知|可得))|"
+    r"(?:\s*(?:所示|显示|给出|为|是)|(?=$|[\s，,。．.、:：；;（()）]|可知|可得))|"
     r"(?:下|上|左|右)\s*图|"
     # “如图将△ABC放在……”“如图在菱形中……”：紧跟动词、介词或图形符号。
     r"(?<![例比譬诸假])如\s*图(?=\s*(?:将|把|在|中|的|点|直线|线段|已知|若|设|有|过|当|"

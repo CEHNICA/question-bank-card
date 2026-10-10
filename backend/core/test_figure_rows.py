@@ -256,6 +256,41 @@ class FigureCueWordingTests(SimpleTestCase):
             with self.subTest(stem=stem):
                 self.assertFalse(has_figure_cue(stem))
 
+    def test_a_cue_inside_brackets_is_still_a_cue(self):
+        """「（如图）」曾经认不出来，于是卡上明明挂着图，却被标成「没发现图像提示词」。
+
+        `_CHINESE_CUE` 第一条的收尾字符表里有「（」没有「）」。真库有 4 张卡的
+        题干写成括号里的「如图」：八下 id=843、#1386，九上 id=1404、#1417。
+        其中 #843 和 #1417 挂着的正是「题目文字没有发现图像提示词」——屏幕上
+        一句话就能看出矛盾：题干里就写着「如图」，系统说没看见。
+
+        改动前后全库对账：判据从「没提图」变「提图」4 张，反向 0 张，4 张卡上
+        都确实有图，所以没有一张会因此丢掉本来该有的提示。
+        """
+        from .figure_policy import cue_matches, has_figure_cue
+        for stem in (
+            "把一个圆锥的上部截去一个小圆锥（如图），画出剩余部分的三种视图。",
+            "老板将纱巾沿对角线对折，让小颖检验（如图）。",
+            "（如图）求这个三角形的面积。",
+            "已知，在 $\\triangle ABC$ 中截出一个矩形 $DEFG$（如图），设 $E$ 在 $AC$ 上。",
+        ):
+            with self.subTest(stem=stem[:16]):
+                self.assertTrue(has_figure_cue(stem))
+                self.assertIn("如图", cue_matches(stem))
+
+    def test_the_bracket_fix_does_not_invent_cues(self):
+        # 只放行了「如图）」这一种收尾写法。紧挨着的写法一个字都没多认：
+        # 「如图不成立」后面跟的是「不」，本来就不在收尾字符表里。
+        from .figure_policy import has_figure_cue
+        for stem in (
+            "例如图书馆里有 120 本书）",
+            "这本图书）很薄）",
+            "如图不成立",
+            "已知如图不是正方体",
+        ):
+            with self.subTest(stem=stem):
+                self.assertFalse(has_figure_cue(stem))
+
 
 class SketchBesideTextOptionTests(SimpleTestCase):
     def test_text_options_do_not_prove_a_diagram_is_a_students_sketch(self):
