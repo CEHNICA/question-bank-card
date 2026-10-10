@@ -4574,6 +4574,30 @@ def _set_backlog(paper_pk, value: int | None) -> None:
             _READ_BACKLOG[paper_pk] = value
 
 
+def _reading_regressed(question: Question, fields: dict) -> str:
+    """新识读是不是把一道原本完整的题读坏了；返回一句话理由，没坏返回空串。
+
+    真实重跑实测（2026-10-11，24 张抽检）里出现过三种退化：#1150 从 538 字掉到
+    61 字、三个小问全丢；#802 从 546 字掉到 91 字而且换成了另一道题；#1354 从
+    329 字掉到 86 字同样换成另一道题。守卫一句提示都没挂，成品卷上就印成了残题。
+
+    库上那份不是人写的（edited=False 走不到这里），但它是上一次识读的完整结果；
+    拿明显更差的新结果覆盖它没有好处。宁可留着旧的加提示，让人自己看一眼。
+    """
+    new_stem = fields.get("stem")
+    old_stem = question.stem or ""
+    if not isinstance(new_stem, str) or not new_stem.strip():
+        return ""
+    if len(old_stem.strip()) < 40 or len(new_stem.strip()) * 2 >= len(old_stem.strip()):
+        return ""
+    # 只是变短不算读坏：小问被吞掉才是。#1152 补上缺的小问是变长，本来就该收下。
+    lost = qtypes.subquestion_count(old_stem) - qtypes.subquestion_count(new_stem)
+    if lost <= 0:
+        return ""
+    return (f"这次重读把题干读短了（小问少了 {lost} 个），已保留上一次识读的内容；"
+            f"如果新读出来的才是对的，请对照原卷改一下")
+
+
 def _apply_reading_fields(question: Question, fields: dict) -> None:
     """Normal OCR writeback, including locked types and manual figure evidence."""
     # Figures handed over from another question's range survive a reread.
@@ -4607,6 +4631,11 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
             fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
     # 人选定的题型（题号旁的下拉、改字、tiyouju fix --type）重读也不变。
     kept = {"question_type"} if question.type_locked and qtypes.decided(question.question_type) else set()
+    regressed = _reading_regressed(question, fields)
+    if regressed and not question.edited:
+        kept |= {"stem", "options"}
+        fields["flags"] = [f for f in fields.get("flags", []) if "读短了" not in f]
+        fields["flags"].append(regressed)
     if question.edited:
         # 人工改过的文字（连同题源）不被覆盖，只更新识读记录与配图建议。人选定的题型也一样。
         kept |= {"stem", "options", "text_source", "origin"}
