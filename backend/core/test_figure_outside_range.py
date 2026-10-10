@@ -122,3 +122,99 @@ class ForeignFigureOutsideRangeTests(TestCase):
 
         self.assertIn(figure_policy.FLAG_FOREIGN_FIGURE, card.flags)
         self.assertNotIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, card.flags)
+
+
+class GeometricFigureFlagReconcileTests(TestCase):
+    """兜底：几何挂图挂在范围外面，卡上却一句「请核对」都没有。
+
+    真实案例（汶源初四月考第 10 题 id=665，逐层核过）：卡 ``green``、旗标为空，
+    题干写着「如图」、``cue_matches=['如图']``，挂的那张图 ``source=other`` 而且
+    **印在上一页**（图 page 0，卡范围 page 1）。老师看不出这张图不是识读认下的那道。
+
+    上一组测试守住的是 ``assign_foreign_figures`` 那一刻；真库这 19 张是别的次序
+    留下的——旗标挂上之后又被 ``_flags_after_figure_review`` 按 review 状态重选掉，
+    再没有一处补回来。这里补的是这个口子。
+    """
+
+    def setUp(self):
+        self.paper = Paper.objects.create(
+            filename="月考.pdf", kind="pdf", material_type=Paper.MaterialType.EXAM,
+            sha256="d" * 64, source_path="missing-source.pdf",
+            pages=[{"page_idx": 0, "width": 1000, "height": 1400},
+                   {"page_idx": 1, "width": 1000, "height": 1400}],
+            status=Paper.Status.READY,
+        )
+        self.group = QuestionGroup.objects.create(
+            paper=self.paper, title="第一章", sequence=1,
+            page_start=1, page_end=2, metadata={"pages": [0, 1]},
+        )
+        self.counter = 0
+
+    def card(self, **values):
+        self.counter += 1
+        base = dict(
+            paper=self.paper, group=self.group, number=self.counter,
+            stem="如图，△ABC 的三个顶点分别为 A（1，2），求函数 $y=\\dfrac{k}{x}$ 的图象。",
+            regions=[{"page_idx": 1, "bbox": [83, 505, 899, 535]}],
+            processing_mode="auto", body_mode="text",
+            state=Question.State.GREEN, flags=[], figures=[], figure_review={},
+        )
+        base.update(values)
+        return Question.objects.create(**base)
+
+    OUTSIDE = {"slot": "stem", "page_idx": 0, "bbox": [747, 628, 853, 756], "source": "other"}
+    INSIDE = {"slot": "stem", "page_idx": 1, "bbox": [500, 506, 700, 534], "source": "other"}
+
+    def test_a_foreign_figure_from_another_page_is_asked_about(self):
+        card = self.card(figures=[self.OUTSIDE])
+
+        self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 1)
+
+        card.refresh_from_db()
+        self.assertIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, card.flags)
+        self.assertEqual(card.state, Question.State.YELLOW)
+
+    def test_a_figure_the_reader_picked_up_itself_is_left_alone(self):
+        # 识读自己认下的图本来就落在范围里，不归这条兜底管。
+        card = self.card(figures=[{**self.OUTSIDE, "source": "auto"}])
+
+        self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 0)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [])
+        self.assertEqual(card.state, Question.State.GREEN)
+
+    def test_a_geometric_figure_inside_the_range_is_left_alone(self):
+        # 同行的图印在本页范围内是常态（教材里第 10、11 题的图并排），不提示。
+        card = self.card(figures=[self.INSIDE])
+
+        self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 0)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [])
+
+    def test_a_card_already_asked_about_its_figures_is_not_asked_twice(self):
+        card = self.card(figures=[self.OUTSIDE],
+                         flags=[figure_policy.FLAG_FOREIGN_FIGURE])
+
+        self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 0)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [figure_policy.FLAG_FOREIGN_FIGURE])
+
+    def test_a_person_boxed_figure_is_never_second_guessed(self):
+        # 人工框过的配图是人的决定，机器不该重新翻出来质疑。
+        card = self.card(figures=[{**self.OUTSIDE, "source": "manual"}])
+
+        self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 0)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [])
+
+    def test_only_the_flag_is_added_and_the_picture_is_left_where_it_is(self):
+        card = self.card(figures=[self.OUTSIDE])
+
+        pipeline.reconcile_geometric_figure_flags(self.paper)
+
+        card.refresh_from_db()
+        self.assertEqual(card.figures, [self.OUTSIDE])

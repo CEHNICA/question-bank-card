@@ -4954,6 +4954,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         # 撤掉一张图会解开也可能改写归属，冲突清单必须按剩下的图重算，
         # 否则这一轮留给用户看的还是撤图之前那份。
         audit_figure_claims(paper, revision=revision)
+    reconcile_geometric_figure_flags(paper)
     if quota_error is not None:
         for snapshot in snapshots:
             if snapshot["body_mode"] == "source_image":
@@ -5318,6 +5319,44 @@ GEOMETRIC_FLAG_BY_SOURCE = {
     "shared": figure_policy.FLAG_SHARED_FIGURE,
 }
 AUTO_FIGURE_SOURCE = "auto"
+
+
+def reconcile_geometric_figure_flags(paper: Paper) -> int:
+    """把「几何挂图必然带一句请核对」这条约定补回来。
+
+    row / other / shared 三种图都不是识读自己认下的，是同行排图或别的题的识读指过来
+    的。每一处挂图都顺手挂上对应的旗标，可 ``_flags_after_figure_review`` 只按 review
+    的状态重选旗标，会把别人挂的那句一并摘掉，之后再没有一处补回来。真库实测 959 张卡
+    里有 19 张因此一句提示都没有，其中 16 张还是绿的——卡是绿的、旗是空的，老师看不出
+    卡上这张图不是识读认下的那道（汶源初四月考第 10 题那张图甚至印在上一页）。
+
+    这里只加旗标，不动图，也不摘任何东西：人工框过、人工核对过、已经通过的卡一律
+    跳过（那是人的决定），已经挂着几何旗标的卡也跳过（已经有人在核对了），图本来
+    就落在本题范围里面的同样跳过——那种由识读自己认下，不归这条兜底管。
+    """
+
+    geometric = set(GEOMETRIC_FLAG_BY_SOURCE.values())
+    changed = 0
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        figures = question.figures or []
+        if not any(isinstance(figure, dict) and figure.get("source") in GEOMETRIC_SOURCES
+                   for figure in figures):
+            continue
+        if _figure_decision_protected(question) or set(question.flags or []) & geometric:
+            continue
+        if not figure_policy.figures_outside_own_range(question.regions, figures):
+            continue
+        question.flags = [*[flag for flag in question.flags or []
+                            if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE],
+                          figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW
+        _invalidate_approval(question)
+        question.save()
+        changed += 1
+    return changed
+
+
 # ``auto`` 配图判为手写之后，是真的撤下来，还是只在卡上说一声。见
 # ``_flag_doubtful_figures`` 里的实测数据：这条路线的准确率还撑不起破坏性的动作。
 AUTO_FIGURES_ARE_WITHDRAWN = False
