@@ -257,6 +257,12 @@ _LATEX_SYMBOLS = {
     "cup": "∪", "cap": "∩", "infty": "∞", "mid": "|", "pm": "±", "because": "∵", "therefore": "∴",
     "alpha": "α", "beta": "β", "gamma": "γ", "theta": "θ", "square": "□", "cong": "≅", "sim": "∽",
     "forall": "∀", "exists": "∃", "emptyset": "∅", "varnothing": "∅", "subset": "⊂", "subseteq": "⊆",
+    # 这几个是 KaTeX 排出来就长这样的正体英文函数名。表里没有它们，``replace``
+    # 会把命令整个删掉（``\\sin A`` 变成 ``a``），于是卡面上明明印着 sin 30°，
+    # 老师搜「sin」却一张都搜不到——不报错、不提示，只是静静地少一批题。
+    # 只收真库里真出现过的：``\\sec`` 之类一次都没用到，收了反而可能撞上英文单词
+    # （section 里有 sec）。正体函数名保持和屏幕上一致，搜到就是搜到。
+    "sin": "sin", "cos": "cos", "tan": "tan", "log": "log", "ln": "ln",
 }
 _LATEX_COMMAND = re.compile(r"\\([A-Za-z]+)|\\([{}|,;!% ])")
 

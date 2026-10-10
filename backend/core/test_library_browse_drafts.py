@@ -105,6 +105,30 @@ class LibraryBrowseDraftTests(TestCase):
         self.assertEqual([item["id"] for item in body["items"]], [str(tagged.id)])
         self.assertEqual(self.client.get("/api/library", {"document": "invalid"}).json()["total"], 0)
 
+    def test_the_operator_names_printed_on_the_card_are_searchable(self):
+        # 老师在卡面上看到的是「sin 30°」，他就会敲 sin。``search_key`` 以前把
+        # 没登记的命令整个删掉，``\sin A`` 变成 ``a``，于是这类题一张都搜不到，
+        # 而且不报错、不提示。真库 959 张里 \sin/\cos/\tan/\log/\ln 共 103 张。
+        self.assertEqual(library.search_key(r"$\sin 30°$"), "sin30°")
+        self.assertEqual(library.search_key(r"$\cos 60°$"), "cos60°")
+        self.assertEqual(library.search_key(r"$\tan 45°$"), "tan45°")
+        self.assertEqual(library.search_key(r"$\log_2 8$"), "log28")
+        self.assertEqual(library.search_key(r"$\ln e$"), "lne")
+
+        trig = self.publication(stem=r"虚构题：求 $\sin 30°$、$\cos 60°$、$\tan 45°$ 的值。")
+        logs = self.publication(stem=r"虚构题：求 $\log_2 8$ 与 $\ln e$ 的值。")
+        root = self.publication(stem=r"另一道题：化简 $\sqrt{8}$")
+
+        def found(term):
+            return [item["id"] for item in self.client.get("/api/library", {"q": term}).json()["items"]]
+
+        for term in ("sin", "cos", "tan"):
+            self.assertEqual(found(term), [str(trig.id)], f"搜 {term} 应当只找到那道三角函数题")
+        for term in ("log", "ln"):
+            self.assertEqual(found(term), [str(logs.id)], f"搜 {term} 应当只找到那道对数题")
+        # 早就登记过的符号不能被这次改动弄坏。
+        self.assertEqual(found("√"), [str(root.id)])
+
     def test_invalid_sort_and_paging_are_rejected(self):
         for params in ({"sort": "random"}, {"limit": "x"}, {"offset": "x"}):
             self.assertEqual(self.client.get("/api/library", params).status_code, 400)
