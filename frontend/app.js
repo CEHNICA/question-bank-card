@@ -366,7 +366,7 @@ const QBResegment = (() => {
     { key: "locally_trimmed", label: "例题去解", detail: "只去除分析/解答尾部，不调用识读模型", tone: "safe" },
     { key: "range_changed", label: "范围变化", detail: "撤销旧审批并重新识读", tone: "change" },
     { key: "suspected_excluded", label: "系统移入回收站", detail: "新规则未再命中的自动题卡，可恢复", tone: "danger" },
-    { key: "protected_unmatched", label: "受保护", detail: "含人工或入库记录，保留并标黄", tone: "warning" },
+    { key: "protected_unmatched", label: "受保护", detail: "你已通过或入库过，重新切题没有改动它，请对照原卷核对", tone: "warning" },
     { key: "too_long", label: "异常超长", detail: "范围触及安全上限，应用后需优先检查", tone: "warning" },
   ];
 

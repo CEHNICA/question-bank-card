@@ -52,7 +52,14 @@ _HEARTBEAT_WARNING_LOCK = threading.Lock()
 _HEARTBEAT_WARNING_AT: OrderedDict[tuple[str, int | None], float] = OrderedDict()
 FLAG_RESEGMENT_PRESERVED = "重新切题未再找到这张人工题卡，已保留；请核对题号与原卷范围"
 FLAG_RESEGMENT_EXCLUDED = "重新切题未再找到这张自动题卡，已移入回收站；恢复后请对照原书核对"
-FLAG_RESEGMENT_RANGE_PROTECTED = "新规则建议了不同原卷范围；这张题卡含人工修改、通过或入库记录，已保留原范围并标黄"
+FLAG_RESEGMENT_RANGE_PROTECTED = (
+    # 这条是待办，不是通知：下一次重切若范围与保留的原范围一致，它会被撤掉。
+    # 所以文案必须落在「请去核对」上。界面上用户看到的说法是「已入库」，
+    # 「入库记录」是内部词，老师不知道那是什么；也不写「标黄」——那是界面状态，
+    # 卡片自己会变黄，说出来只是噪音。
+    "重新切题发现这道题的取字范围和原来不同；你已通过或入库过它，系统保留原范围没有改动，"
+    "请对照原卷核对要不要改"
+)
 FLAG_MANUAL_FIGURE_OUTSIDE_RANGE = "重新切题后，原人工配图不在新的题目范围内；已保留记录并标黄，请重新确认配图"
 
 # A textbook example is a question source, not a worked-solution archive.  Old
