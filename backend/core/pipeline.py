@@ -25,7 +25,7 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, demo, features, figure_assignment, figure_claims, figure_policy, imaging, import_planning, mineru, photos, prose, qtypes, readers, segment, tables,
+    cuts, demo, features, figure_assignment, figure_claims, figure_policy, imaging, import_planning, mineru, photos, printed_answers, prose, qtypes, readers, segment, tables,
     textnorm, source_images,
 )
 from .account_pool import AccountPoolError, account_pool
@@ -3327,6 +3327,11 @@ FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；
 FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
 FLAG_READERS_DOWN = ("看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
                      "额度恢复后点“重新识读”，或者对照原卷直接改字")
+# 原卷在题后面印着答案，誊录提示词只读题面、根本没有答案这一栏，识读回来
+# 的卡上永远是空的，界面还照实写着「原卷未提供答案与解析。」——一句假话。
+# 整条就是一个字母的选择题会自动填上；其余只提示，不替人抄。
+FLAG_PRINTED_ANSWER = ("原卷在这道题后面印着答案，卡上还没有；请对照原卷把它抄进答案栏"
+                       "（原卷没印答案就不用管）")
 # Saving the text answers these; they must not survive an edit.
 TEXT_DRAFT_FLAGS = (FLAG_MINERU_DRAFT, FLAG_MINERU_DRAFT_EMPTY, FLAG_READERS_DOWN)
 _LEADING_NUMBER = r"^\s*(?:第\s*)?{number}\s*(?:题)?\s*[.．、,，:：)）]\s*"
@@ -4458,11 +4463,27 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # 不是空，是识读认了输。同一张图重读一次就能读出来（readers.read_question
         # 已经为它重发过一次），两次都这样才落到这里，所以只能靠提示告诉人。
         flags.append(FLAG_UNREADABLE_STEM)
+    # 原卷印在题后的答案。誊录提示词（readers.OUTPUT_FORMAT）只有题号、题型、
+    # 题干、选项和配图，没有答案这一栏，所以这道题在原页上明明印着【答案】A，
+    # 识读回来的卡上却是空的。出卷时答案卷上就印「（原卷未提供答案）」。
+    # witness_blocks 已经按 segment.center_in_regions 只留下本卡范围内的块，
+    # 一块答案文字因此只可能属于一道题。整条就是一个字母的选择题原样填上；
+    # 其余的答案是一段话，MinerU 自己就读错过（真卷第 11 题被读成
+    # 「$\frac{5\sqrt{34}}{34}=1\times\fra…」），照抄等于把乱码印上答案卷，
+    # 所以那里只提示，不替人抄。
+    printed_answer = ""
+    printed = printed_answers.marks(snapshot.get("witness_blocks") or [])
+    if printed and not str(snapshot.get("answer") or "").strip():
+        letter = printed_answers.choice_letter(printed, kind, qtypes.CHOICE_TYPES)
+        if letter:
+            printed_answer = letter
+        else:
+            flags.append(FLAG_PRINTED_ANSWER)
     switches = features.load()
     for name in ("read_a", "read_b", "read_c"):
         update[name] = prose.tidy_reading(update.get(name), switches=switches)
     _mark_spot_text(update, str(final.get("stem") or ""), final.get("options") or {})
-    return {
+    reading = {
         **update,
         "stem": final.get("stem", ""),
         "options": final.get("options") or {},
@@ -4476,6 +4497,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         "error": "",
         "state": Question.State.GREEN if not flags else Question.State.YELLOW,
     }
+    # Only when there is something to say: an absent key leaves whatever the
+    # teacher typed on the card alone.
+    if printed_answer:
+        reading["answer"] = printed_answer
+    return reading
 
 
 def _snapshot(question: Question) -> dict:
@@ -4486,6 +4512,7 @@ def _snapshot(question: Question) -> dict:
             "body_mode": question.body_mode, "processing_mode": question.processing_mode,
             "ocr_pending": question.ocr_pending,
             "stem": question.stem, "options": question.options, "edited": question.edited,
+            "answer": question.answer,
             "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
             "segmentation_flags": [
                 flag for flag in (question.flags or [])
