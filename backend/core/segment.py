@@ -85,6 +85,26 @@ BOOK_PRACTICE_RE = re.compile(
     r"^\s*(?:课后)?(?:练习|习题|巩固练习|综合练习|复习题|复习参考题)"
     r"(?:\s*\d+(?:\.\d+)*)?\s*[：:]?\s*$"
 )
+# 教材正文的栏目标题一律是上一道题的结束边界：它们的正文不属于任何习题，
+# 不设边界就会被上一道题的范围罩过去（真库 959 张卡里 25 张的题干混进了
+# 栏目内容）。
+# 只有「做一做」「随堂练习」额外再开一道新题：栏目标题里的题既没有印刷题号、
+# 编号也是「（1）①②③」这种形式，``NUMBER_RE``（数字后必须跟 .．、）和
+# ``BOOK_NUMBERED_RE`` 都不认，两本书里 314 个这样的栏目标题块一个都不会成为
+# 起点，页面上就没有卡。
+# 只给这两个栏目开新题，因为抽样看到它们的内容全部是可做的真题。把开题的范围
+# 放到全部栏目上不成立：「读一读」是科普文章、「议一议」「想一想」「问题解决」
+# 多为开放讨论、「综合与实践」是活动方案，实测同一套规则全开时 169 个起点里混进
+# 了「日晷与皮影」这类讲义正文和「例如，y=-5x²+100x+6000」这类举例。
+# 不带编号的「例」同理也不收：``BOOK_EXAMPLE_RE`` 要求「例」后跟数字，两本书
+# 里符合的只有 70 个，不带编号的 12 个里既有「例 计算：」也有「例如，…」。
+BOOK_COLUMN_BOUNDARY_RE = re.compile(
+    r"^\s*(?:\*\*)?(?:做一做|随堂练习|议一议|想一想|读一读|问题解决|"
+    r"回顾与思考|综合与实践)(?:\*\*)?\s*$"
+)
+BOOK_COLUMN_QUESTION_RE = re.compile(
+    r"^\s*(?:\*\*)?(?:做一做|随堂练习)(?:\*\*)?\s*$"
+)
 # A worked example ends before its printed solution.  Keep this deliberately
 # label-shaped: ``证明下列恒等式`` is part of a question, while ``证明：`` or a
 # standalone ``证明`` is a solution heading.  English textbook labels are
@@ -859,6 +879,55 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             ))
             break
     markers.extend(recovered_context)
+    return markers + _column_markers(blocks)
+
+
+def _column_markers(blocks: list[dict]) -> list[BookMarker]:
+    """Textbook column headers stop the exercise above them.
+
+    Every recognised header becomes a ``column_header`` boundary so no card
+    swallows the column's text.  ``做一做``/``随堂练习`` additionally emit a
+    ``column_question`` for the first content block after them, because those
+    columns hold real questions that carry no printed number.
+    ``number`` stays ``0``: there is no printed number to preserve, and
+    ``source_anchor_seq`` (the block sequence) is what identifies the card.
+    Only same-page headers are honoured — once the header is the last thing on a
+    page the next block is no longer reliably its question.
+    """
+    ordered = sorted(
+        (block for block in blocks
+         if block.get("type") not in NON_CONTENT | FIGURE_TYPES | {"equation"}
+         and str(block.get("text") or "").strip()
+         and _book_block_position(block) is not None
+         and isinstance(block.get("seq"), int)),
+        key=lambda item: int(item["seq"]),
+    )
+    markers: list[BookMarker] = []
+    for index, block in enumerate(ordered):
+        text = str(block.get("text") or "").strip()
+        plain = text.replace("**", "").strip()
+        if not BOOK_COLUMN_BOUNDARY_RE.match(plain):
+            continue
+        page, x, y = _book_block_position(block)
+        markers.append(BookMarker(
+            kind="column_header", page=page, x=x, y=y, seq=block["seq"], text=text,
+        ))
+        if not BOOK_COLUMN_QUESTION_RE.match(plain):
+            continue
+        for following in ordered[index + 1:]:
+            fpage, fx, fy = _book_block_position(following)
+            if fpage != page:
+                break
+            if following.get("type") in NON_CONTENT | FIGURE_TYPES | {"equation"}:
+                continue
+            ftext = str(following.get("text") or "").strip()
+            if not ftext:
+                continue
+            markers.append(BookMarker(
+                kind="column_question", page=fpage, x=fx, y=fy,
+                seq=following["seq"], text=ftext, number=0, question_shaped=True,
+            ))
+            break
     return markers
 
 
@@ -964,6 +1033,19 @@ def _book_marker_stream(
     for marker in ordered:
         if marker.kind == "practice_header":
             practice = True
+            choice_bundle = procedure = instruction_section = False
+            resolved.append(marker)
+            continue
+        if marker.kind == "column_header":
+            # A column header is a boundary only.  It never opens or closes an
+            # exercise area: textbooks print 「做一做」 both inside and outside
+            # 「习题 X.X」 blocks, and clearing ``practice`` here would turn the
+            # numbered items after it back into headings.
+            choice_bundle = procedure = instruction_section = False
+            resolved.append(marker)
+            continue
+        if marker.kind == "column_question":
+            marker.kind = "exercise_start"
             choice_bundle = procedure = instruction_section = False
             resolved.append(marker)
             continue
@@ -1078,7 +1160,7 @@ def _book_marker_stream(
             ))
         elif marker.kind in {
                 "practice_header", "section_heading", "analysis_solution",
-                "embedded_question_end"}:
+                "embedded_question_end", "column_header"}:
             boundary = {
                 "page": marker.page, "col": marker.col, "y": marker.y,
                 "text": marker.text[:160], "seq": marker.seq, "kind": marker.kind,
