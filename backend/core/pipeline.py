@@ -3108,6 +3108,13 @@ def segment_paper(paper: Paper) -> None:
                 "原卷和已保存的题卡都保留；可以在“试卷操作 → 继续 AI 切题”重试，或直接在原卷上手工框题。"
             )
         _set(paper, status=Paper.Status.READING, notes=notes, progress=0, total=paper.questions.count())
+        # 几何挂图（同行排图、别的题的识读指过来的）必然带一句「请核对」。那条兜底
+        # 原先只挂在整份重读末尾，于是老师点一次「重新切题」——几分钟、零模型调用
+        # ——之后，这批卡既没有新的提示、又要等着一次 287 张的全量重读才补得上。
+        # 真实数据：真库 959 张里 22 张的图落在本题范围外（九上 12、八下 7、
+        # 汶源初四 3），其中 18 张显示为绿；八下第 4 题 id=1083 和汶源初四第 9 题
+        # id=664 的图在纸上分别印着「第 4 题」「（9）」——图是对的，是范围切小了。
+        reconcile_geometric_figure_flags(paper)
 
 
 def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:

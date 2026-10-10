@@ -16,10 +16,12 @@ r"""卡上挂着一张落在本题范围外面的图，而这张卡看上去很�
 全库 959 张卡里 50 张挂图的卡有越界图，其中 **19 张是绿卡、零图旗标**，
 它们的图全部来自 ``other`` 这条通道。
 """
+from unittest import mock
+
 from django.test import SimpleTestCase, TestCase
 
-from . import figure_policy, pipeline
-from .models import Paper, Question, QuestionGroup
+from . import figure_policy, pipeline, segment
+from .models import Block, Paper, Question, QuestionGroup
 
 # 纸上这一行的形状就是「如图」，图提示词必须认得出。
 REGIONS = [{"page_idx": 0, "bbox": [83, 505, 899, 535]}]
@@ -218,3 +220,86 @@ class GeometricFigureFlagReconcileTests(TestCase):
 
         card.refresh_from_db()
         self.assertEqual(card.figures, [self.OUTSIDE])
+
+
+class ResegmentAlsoAsksAboutGeometricFiguresTests(TestCase):
+    """接线：老师点「重新切题」之后，这句提示要跟着出现。
+
+    这条兜底原先只挂在整份重读末尾（`read_questions`）。可老师手上最短的那条
+    路是「重新切题」——几分钟、零模型调用；挂在那条路的另一头，就得先跑一次
+    287 张的全量重读（约 48 分钟）才补得上一句提示。
+
+    真实数据：真库 959 张里 22 张的几何挂图落在本题范围外（九上 12、八下 7、
+    汶源初四 3），18 张显示为绿；九上第 8 题 id=1443 更极端——它自己一张图都
+    没有，卡上五张全是邻题借来的，而纸上第 8 题的图明明白白印着「第 8 题」。
+
+    ⚠️ 范围一变，切题自己就会把非人工图摘掉（``pipeline.py:3003``），那一刻卡上
+    是零张图、而「题干说有图但还没有配图」要等识读回来才补。这里没有为此加守卫：
+    隔离库跑完整重切，「题干提图 + 卡上零图 + 无人提示」实测 **0 张**（仅有的两张
+    都已挂着提示）。真实数据里量不到的口子不写代码。
+    """
+
+    def setUp(self):
+        self.paper = Paper.objects.create(
+            filename="教材.pdf", kind="pdf", material_type=Paper.MaterialType.BOOK,
+            sha256="e" * 64, source_path="missing-source.pdf",
+            pages=[{"page_idx": 0, "width": 1000, "height": 1400}],
+            status=Paper.Status.SEGMENTING,
+        )
+        self.group = QuestionGroup.objects.create(
+            paper=self.paper, title="第一章", kind=QuestionGroup.Kind.CHAPTER,
+            sequence=0, page_start=1, page_end=1, metadata={"pages": [0]},
+        )
+        self.rows = [
+            {"seq": 10, "type": "text", "page_idx": 0, "bbox": [80, 500, 920, 545],
+             "text": "例1 如图，求函数的最大值。"},
+            {"seq": 20, "type": "text", "page_idx": 0, "bbox": [80, 800, 920, 845],
+             "text": "例2 求函数的最小值。"},
+        ]
+        Block.objects.bulk_create([Block(paper=self.paper, **row) for row in self.rows])
+        self.items = [{**item, "group": self.group}
+                      for item in segment.segment_book(self.paper.pages, self.rows)["questions"]]
+        # 版式照真实教材：图印在题目文字的**上方**（y 380–470），范围只罩住
+        # y 496 往下那一行。八下第 4 题 id=1083、汶源初四第 9 题 id=664 都是这样。
+        self.foreign = {"slot": "stem", "page_idx": 0, "bbox": [500, 380, 700, 470],
+                        "source": "other"}
+
+    def make_card(self, regions):
+        return Question.objects.create(
+            paper=self.paper, group=self.group, number=1,
+            stem="例1 如图，求函数的最大值。",
+            regions=regions, regions_auto=regions,
+            source_kind=Question.SourceKind.EXAMPLE, source_anchor_seq=10,
+            processing_mode="auto", body_mode="text", state=Question.State.GREEN,
+            flags=[], figures=[dict(self.foreign)], figure_review={},
+        )
+
+    def resegment(self):
+        with mock.patch.object(
+                pipeline, "_prospective_book_groups",
+                return_value=([self.group], dict(self.paper.structure or {}))), \
+                mock.patch.object(pipeline, "_ensure_question_groups",
+                                  return_value=[self.group]), \
+                mock.patch.object(
+                    pipeline, "_collect_segmentation_items",
+                    return_value=(self.rows, self.items, [], [])):
+            pipeline.segment_paper(self.paper)
+
+    def test_an_unchanged_card_keeps_its_picture_and_gains_the_warning(self):
+        card = self.make_card(list(self.items[0]["regions"]))
+
+        self.resegment()
+
+        card.refresh_from_db()
+        self.assertEqual(card.figures, [self.foreign])
+        self.assertIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, card.flags)
+        self.assertEqual(card.state, Question.State.YELLOW)
+
+    def test_resegment_does_not_ask_twice(self):
+        card = self.make_card(list(self.items[0]["regions"]))
+
+        self.resegment()
+        self.resegment()
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags.count(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE), 1)
