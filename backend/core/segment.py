@@ -88,22 +88,13 @@ BOOK_PRACTICE_RE = re.compile(
 # 教材正文的栏目标题一律是上一道题的结束边界：它们的正文不属于任何习题，
 # 不设边界就会被上一道题的范围罩过去（真库 959 张卡里 25 张的题干混进了
 # 栏目内容）。
-# 只有「做一做」「随堂练习」额外再开一道新题：栏目标题里的题既没有印刷题号、
-# 编号也是「（1）①②③」这种形式，``NUMBER_RE``（数字后必须跟 .．、）和
-# ``BOOK_NUMBERED_RE`` 都不认，两本书里 314 个这样的栏目标题块一个都不会成为
-# 起点，页面上就没有卡。
-# 只给这两个栏目开新题，因为抽样看到它们的内容全部是可做的真题。把开题的范围
-# 放到全部栏目上不成立：「读一读」是科普文章、「议一议」「想一想」「问题解决」
-# 多为开放讨论、「综合与实践」是活动方案，实测同一套规则全开时 169 个起点里混进
-# 了「日晷与皮影」这类讲义正文和「例如，y=-5x²+100x+6000」这类举例。
-# 不带编号的「例」同理也不收：``BOOK_EXAMPLE_RE`` 要求「例」后跟数字，两本书
+# 只有「做一做」「随堂练习」里的题不单独成卡，理由见 ``_column_markers`` 的
+# docstring：那些题在纸面上没有印刷题号，而 ``Question.number`` 是 NOT NULL。
+# 这里也不收不带编号的「例」：``BOOK_EXAMPLE_RE`` 要求「例」后跟数字，两本书
 # 里符合的只有 70 个，不带编号的 12 个里既有「例 计算：」也有「例如，…」。
 BOOK_COLUMN_BOUNDARY_RE = re.compile(
     r"^\s*(?:\*\*)?(?:做一做|随堂练习|议一议|想一想|读一读|问题解决|"
     r"回顾与思考|综合与实践)(?:\*\*)?\s*$"
-)
-BOOK_COLUMN_QUESTION_RE = re.compile(
-    r"^\s*(?:\*\*)?(?:做一做|随堂练习)(?:\*\*)?\s*$"
 )
 # A worked example ends before its printed solution.  Keep this deliberately
 # label-shaped: ``证明下列恒等式`` is part of a question, while ``证明：`` or a
@@ -885,58 +876,29 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
 def _column_markers(blocks: list[dict]) -> list[BookMarker]:
     """Textbook column headers stop the exercise above them.
 
-    Every recognised header becomes a ``column_header`` boundary so no card
-    swallows the column's text.  ``做一做``/``随堂练习`` additionally emit a
-    ``column_question`` for the first content block after them, because those
-    columns hold real questions that carry no printed number.
-    ``number`` stays ``0``: there is no printed number to preserve, and
-    ``source_anchor_seq`` (the block sequence) is what identifies the card.
-    Only same-page headers are honoured — once the header is the last thing on a
-    page the next block is no longer reliably its question.
+    Every recognised header becomes a ``column_header`` boundary, so no card
+    swallows the column's text.  Headers deliberately do NOT open a new card:
+    the questions inside 「做一做」「随堂练习」 carry no printed number, and
+    ``Question.number`` is NOT NULL (all 959 real cards are positive integers —
+    no ``0``, no empty).  Giving them a card means either inventing a number
+    that collides with the chapter's own exercise numbers — the review screen
+    would show two 「第 1 题」 — or making the column nullable, which reaches
+    dozens of downstream checks.  Both cost more than the questions are worth,
+    so the columns only stop the previous exercise.
     """
-    ordered = sorted(
-        (block for block in blocks
-         if block.get("type") not in NON_CONTENT | FIGURE_TYPES | {"equation"}
-         and str(block.get("text") or "").strip()
-         and _book_block_position(block) is not None
-         and isinstance(block.get("seq"), int)),
-        key=lambda item: int(item["seq"]),
-    )
     markers: list[BookMarker] = []
-    for index, block in enumerate(ordered):
+    for block in blocks:
+        if block.get("type") in NON_CONTENT | FIGURE_TYPES | {"equation"}:
+            continue
+        if not isinstance(block.get("seq"), int) or _book_block_position(block) is None:
+            continue
         text = str(block.get("text") or "").strip()
-        plain = text.replace("**", "").strip()
-        if not BOOK_COLUMN_BOUNDARY_RE.match(plain):
+        if not text or not BOOK_COLUMN_BOUNDARY_RE.match(text.replace("**", "").strip()):
             continue
         page, x, y = _book_block_position(block)
         markers.append(BookMarker(
             kind="column_header", page=page, x=x, y=y, seq=block["seq"], text=text,
         ))
-        if not BOOK_COLUMN_QUESTION_RE.match(plain):
-            continue
-        for following in ordered[index + 1:]:
-            fpage, fx, fy = _book_block_position(following)
-            if fpage != page:
-                break
-            if following.get("type") in NON_CONTENT | FIGURE_TYPES | {"equation"}:
-                continue
-            ftext = str(following.get("text") or "").strip()
-            if not ftext:
-                continue
-            # 栏目标题后的第一块常常自己就印着题号（教材里「随堂练习」里的题
-            # 大多从 1. 重新编），那一块已经是一个起点。再开一道就成了同一道
-            # 题切两遍，而 source_anchor_seq 是每张卡唯一的主键：
-            # pipeline._collect_segmentation_items 见到重复锚点会直接
-            # 「已停止重新切题」。有印刷题号的那一道才带得上原卷题号，保留它。
-            fplain = ftext.replace("**", "").strip()
-            if (BOOK_NUMBERED_RE.match(fplain) or BOOK_EXAMPLE_RE.match(fplain)
-                    or BOOK_CHOICE_BUNDLE_RE.match(fplain)):
-                break
-            markers.append(BookMarker(
-                kind="column_question", page=fpage, x=fx, y=fy,
-                seq=following["seq"], text=ftext, number=0, question_shaped=True,
-            ))
-            break
     return markers
 
 
@@ -1050,11 +1012,6 @@ def _book_marker_stream(
             # exercise area: textbooks print 「做一做」 both inside and outside
             # 「习题 X.X」 blocks, and clearing ``practice`` here would turn the
             # numbered items after it back into headings.
-            choice_bundle = procedure = instruction_section = False
-            resolved.append(marker)
-            continue
-        if marker.kind == "column_question":
-            marker.kind = "exercise_start"
             choice_bundle = procedure = instruction_section = False
             resolved.append(marker)
             continue
@@ -2266,11 +2223,7 @@ def build_questions(
                 })
                 figure_blocks.extend(recovered_input_figures)
         questions.append({
-            # 教材「做一做」「随堂练习」里的题在纸面上没有印刷题号，
-            # ``start.number`` 是 0（占位，让它能当起点参与切题）。落库时给
-            # None：卡面和导出都按「第 N 题」定位，印一个「第 0 题」是纸面上
-            # 不存在的话，而且 ``0`` 过了 ``??`` 这类空值判断。
-            "number": start.number or None,
+            "number": start.number,
             "start": {
                 "page": start.page,
                 "col": start.col,
