@@ -156,3 +156,46 @@ class ColumnHeaderBoundaryTests(SimpleTestCase):
 
         self.assertEqual(len(result["questions"]), 1)
         self.assertEqual(result["questions"][0]["source_anchor_seq"], 1)
+
+
+class ColumnAnchorTests(SimpleTestCase):
+    """每张卡的 source_anchor_seq 是主键。
+
+    pipeline._collect_segmentation_items 见到空锚点或重复锚点会直接
+    「已停止重新切题」，所以这不是美观问题而是能不能重切的问题。
+    """
+
+    def test_column_start_never_duplicates_a_printed_number_anchor(self):
+        """栏目标题后的第一块自己印着题号时，只切一道。
+
+        教材的「随堂练习」大多从 1. 重新编，那个块已经是一个起点；再开一道
+        就是同一道题切两遍，两张卡共用一个主键。
+        """
+        blocks = practice_page("随堂练习", "1. 这道题自己就印着题号 1。")
+
+        result = segment.segment_book(PAGES[:1], blocks)
+
+        anchors = [q["source_anchor_seq"] for q in result["questions"]]
+        self.assertEqual(len(anchors), len(set(anchors)), f"锚点重复：{anchors}")
+        self.assertEqual(len(result["questions"]), 2)
+        # 保留的是带印刷题号的那一道。
+        self.assertEqual(result["questions"][1]["number"], 1)
+
+    def test_column_start_skips_a_bundled_numbered_block(self):
+        blocks = practice_page("做一做", "1. 如图，在△ABC 中，∠C = 90°，求 ∠A 的度数。")
+
+        result = segment.segment_book(PAGES[:1], blocks)
+
+        anchors = [q["source_anchor_seq"] for q in result["questions"]]
+        self.assertEqual(len(anchors), len(set(anchors)), f"锚点重复：{anchors}")
+
+    def test_unnumbered_column_start_keeps_a_unique_anchor(self):
+        """没有印刷题号的栏目题照常成卡，锚点照样唯一。"""
+        blocks = practice_page("做一做", "在图中画出这个函数的图象，并写出它的解析式。")
+
+        result = segment.segment_book(PAGES[:1], blocks)
+
+        anchors = [q["source_anchor_seq"] for q in result["questions"]]
+        self.assertEqual(anchors, [1, 3])
+        self.assertNotIn(None, anchors)
+        self.assertIsNone(result["questions"][1]["number"])

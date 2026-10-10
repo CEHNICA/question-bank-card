@@ -923,6 +923,15 @@ def _column_markers(blocks: list[dict]) -> list[BookMarker]:
             ftext = str(following.get("text") or "").strip()
             if not ftext:
                 continue
+            # 栏目标题后的第一块常常自己就印着题号（教材里「随堂练习」里的题
+            # 大多从 1. 重新编），那一块已经是一个起点。再开一道就成了同一道
+            # 题切两遍，而 source_anchor_seq 是每张卡唯一的主键：
+            # pipeline._collect_segmentation_items 见到重复锚点会直接
+            # 「已停止重新切题」。有印刷题号的那一道才带得上原卷题号，保留它。
+            fplain = ftext.replace("**", "").strip()
+            if (BOOK_NUMBERED_RE.match(fplain) or BOOK_EXAMPLE_RE.match(fplain)
+                    or BOOK_CHOICE_BUNDLE_RE.match(fplain)):
+                break
             markers.append(BookMarker(
                 kind="column_question", page=fpage, x=fx, y=fy,
                 seq=following["seq"], text=ftext, number=0, question_shaped=True,
