@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 r"""`manage.py reconcile_flags` 这条独立入口的守门测试。
 
-「重新切题」跑完末尾会顺带补四条兜底提示（几何挂图落在范围外、卡号那一行认不出、
-题型标成填空题却没有空格、小问排成两栏只读到左栏）。这些判据只跟卡上已有的范围、
-题型、旗标有关，跟重切没有半点关系，却只能等一次全量重切才补得上——一次几分钟到十几分钟，
-还要重新读题。
+「重新切题」跑完末尾会顺带补几条兜底提示（几何挂图落在范围外、卡号那一行认不出、
+题型标成填空题却没有空格、小问排成两栏只读到左栏、题干点名的图号被切在配图框外）。
+这些判据只跟卡上已有的范围、题型、旗标有关，跟重切没有半点关系，却只能等一次全量
+重切才补得上——一次几分钟到十几分钟，还要重新读题。
 
-真库实测（2026-11-04，959 张）：三条一起跑 0.7 秒、零模型调用，84 张挂上新提示、
-绿卡 720 → 667，题干一个字没改、已通过的一张没掉。
+真库实测（2026-11-04，959 张）：五条一起跑 5.9 秒、零模型调用，135 处提示，
+题干一个字没改、已通过的一张没掉。
 
 这里守三件事：
 
@@ -15,8 +15,8 @@ r"""`manage.py reconcile_flags` 这条独立入口的守门测试。
 2. 清完再跑一次必须是 0，否则「命中 22 张」是在报一件没发生的事；
 3. ``--only`` 真的只跑指定那几条，未知名字要报错。
 
-第五条（caption）额外要一页真有文字层的原书 PDF：它得对着原书页面上那一行
-「图 4-1」核「编号被切在框外了没有」，光看卡上的框是判不出来的。
+后两条（subitem、caption）额外要一页真的印着两栏小问 / 图号的原书 PDF：
+它们得回原书页面上核对那一行印在哪、谁罩着它，光看卡上的框是判不出来的。
 """
 import tempfile
 from io import StringIO
@@ -24,6 +24,7 @@ from pathlib import Path
 
 from django.core.management import CommandError, call_command
 from django.test import TestCase
+import pymupdf
 
 from . import figure_policy, pipeline, qtypes
 from .models import Block, Paper, Question, QuestionGroup
@@ -39,21 +40,42 @@ def normalized_box(x0, y0, x1, y1):
 
 
 def caption_line_pdf(path: Path) -> None:
-    """一页真的印着「图 N-M」编号的原书页。
+    """一页真的印着「图 N-M」编号的原书页，外加一页真的排成两栏的习题。
 
     第 0 页印「图 4-1」，第 1 页左右各印一行「图 4-2」「图 4-3」——
     后者用来验「一题点名两张图，两个编号都被切在框外」。
     第 2 页印一句含编号的正文和一个离得很远的编号，是两个「不许报」的反例。
+    第 3 页是左栏（1）（3）（5）、右栏（2）（4）（6）的习题，
+    两条栏印在**同一个基线上**（真教材就是这样），按行取只能看见左栏。
     """
     import pymupdf as fitz
 
     with fitz.open() as pdf:
-        for index in range(3):
+        for index in range(4):
             page = pdf.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
             if index == 2:
                 page.insert_text((60, CAPTION_BASELINE_Y), "例 1  确定图 9-9 中路灯灯泡所在的位置。",
                                  fontname="china-s", fontsize=11)
                 page.insert_text((200, 660), "图 9-7", fontname="china-s", fontsize=11)
+                continue
+            if index == 3:
+                # 习题 A：左栏（1）（3）（5），右栏（2）（4）——右栏没人管，是真丢。
+                # 两条栏**印在同一行上**（真教材就是这样，#888 那页提取出来就是一整行），
+                # 靠 10 个全角空格把右栏推到 x≈280。按行取只能看见左栏。
+                page.insert_text((60, 470), "1. 解下列方程：", fontname="china-s", fontsize=11)
+                for row, baseline in enumerate((510, 550, 590)):
+                    left = f"（{row * 2 + 1}）求 x 的值；"
+                    right = f"（{row * 2 + 2}）求 y 的值；" if row < 2 else ""
+                    page.insert_textbox(
+                        fitz.Rect(60, baseline - 14, 500, baseline + 4),
+                        left + "　" * 10 + right, fontname="china-s", fontsize=11,
+                        align=0, lineheight=1.0)
+                # 习题 B：左栏（1）（3），右栏（2）——右栏被隔壁那张卡收下了。
+                page.insert_text((60, 660), "2. 解下列方程：", fontname="china-s", fontsize=11)
+                for row, baseline in enumerate((700, 740)):
+                    page.insert_text((60, baseline), f"（{row * 2 + 1}）求 z 的值；",
+                                      fontname="china-s", fontsize=11)
+                page.insert_text((300, 700), "（2）求 z 的值；", fontname="china-s", fontsize=11)
                 continue
             page.insert_text((200, CAPTION_BASELINE_Y), "图 4-1" if not index else "图 4-2",
                              fontname="china-s", fontsize=11)
@@ -75,7 +97,7 @@ class ReconcileFlagsCommandTests(TestCase):
             filename="月考.pdf", kind="pdf", material_type=Paper.MaterialType.EXAM,
             sha256="a" * 64, source_path=str(source),
             pages=[{"page_idx": index, "width": PAGE_WIDTH, "height": PAGE_HEIGHT}
-                   for index in range(3)],
+                   for index in range(4)],
             status=Paper.Status.READY)
         self.group = QuestionGroup.objects.create(
             paper=self.paper, title="第一章", sequence=1, page_start=1, page_end=2,
@@ -102,15 +124,24 @@ class ReconcileFlagsCommandTests(TestCase):
         self.real_blank = self.card(
             stem="已知 $x+1=2$，则 $x=$ ______。",
             regions=[{"page_idx": 1, "bbox": [40, 430, 490, 480]}], question_type="fill_blank")
-        # 教材把一道题的小问排成左右两栏，切题只罩到左栏，右栏那几条在成品卷上没了。
+        # 教材把一道题的小问排成左右两栏（左栏 1、3、5，右栏 2、4、6），
+        # 切题只罩到左栏，右栏那几条在成品卷上没了。第 3 页习题 A 就是这么排的。
         self.two_column = self.card(
-            stem="解下列方程：\n（1）$5(x^2-x)=3(x^2+x)$；\n（3）$(x-2)(x-3)=12$；\n（5）$2y^2+4y=y+2$。",
-            regions=[{"page_idx": 1, "bbox": [40, 500, 300, 820]}])
+            stem="解下列方程：\n（1）$x^2=1$；\n（3）$x^2=3$；\n（5）$x^2=5$。",
+            regions=[{"page_idx": 3, "bbox": normalized_box(55, 455, 260, 605)}])
         # 同样从（1）跳到（3），但范围是满宽的：#1152 是被切成了两张卡，
         # （2）在隔壁卡里，内容并没有丢。判据不许把它也挂上提示。
         self.wide_gap = self.card(
-            stem="解下列方程：\n（1）$x(x-14)=0$；\n（3）$x^2=x+56$。",
-            regions=[{"page_idx": 1, "bbox": [40, 850, 900, 960]}])
+            stem="解下列方程：\n（1）$x^2=1$；\n（3）$x^2=3$；\n（5）$x^2=5$。",
+            regions=[{"page_idx": 3, "bbox": normalized_box(55, 455, 470, 605)}])
+        # 第 3 页习题 B：右栏的（2）落在隔壁那张卡的框里，而隔壁卡题干里也写着（2）
+        # ——切题把一道题切成了两张，内容没丢完，只是没并进这一张。
+        self.taken = self.card(
+            stem="解下列方程：\n（1）$x^2=7$；\n（3）$x^2=9$。",
+            regions=[{"page_idx": 3, "bbox": normalized_box(55, 645, 260, 754)}])
+        self.neighbour = self.card(
+            stem="接着解：\n（2）$x^2=9$。",
+            regions=[{"page_idx": 3, "bbox": normalized_box(290, 645, 470, 754)}])
 
         # 教材在图的正下方印一行「图 4-1」，切图只圈了图形本身，编号落在框外 9pt。
         self.cut_caption = self.card(
@@ -293,6 +324,30 @@ class ReconcileFlagsCommandTests(TestCase):
 
         self.assertEqual(self.stored()[self.wide_gap.pk], (Question.State.GREEN, []))
 
+    def test_a_number_the_neighbouring_card_really_kept_is_not_reported(self):
+        """右栏那一行落在隔壁卡的框里，而隔壁卡题干里也写着（2）——没丢，不报。"""
+        self.run_command()
+
+        self.assertEqual(self.stored()[self.taken.pk], (Question.State.GREEN, []))
+
+    def test_two_columns_printed_on_one_line_are_both_found(self):
+        """教材两栏印在同一行上，按行取只看得到左栏。#888 就是这样丢的。"""
+        from pathlib import Path
+
+        path = Path(self.directory.name) / "教材.pdf"
+        with pymupdf.open(path) as doc:
+            marks = pipeline._page_subitem_marks(doc[3])
+            # 两栏必须真的在同一行上，否则这条测试等于没测——退回按行取也会通过
+            row = [line for block in doc[3].get_text("rawdict")["blocks"]
+                   for line in block.get("lines", [])
+                   if any(c["c"] == "（" for s in line["spans"] for c in s["chars"])
+                   and 495 < line["bbox"][1] < 505]
+
+        self.assertEqual(len(row), 1, "右栏应当和左栏印在同一行")
+        self.assertEqual([(value, round(x)) for value, x, _ in marks],
+                         [(1, 60), (2, 280), (3, 60), (4, 280), (5, 60),
+                          (1, 60), (3, 60), (2, 300)])
+
     def test_only_a_number_at_the_start_of_a_line_counts_as_a_subitem(self):
         """行中间的「（2）」不算小问编号——$y_1$、$y_2$ 这类下标满篇都是。"""
         self.assertEqual(
@@ -380,4 +435,4 @@ class ReconcileFlagsCommandTests(TestCase):
             self.run_command("--paper", "没有这份卷子.pdf")
 
     def test_a_real_run_reports_how_many_cards_were_recoloured(self):
-        self.assertIn("绿卡 13 → 8", self.run_command())
+        self.assertIn("绿卡 15 → 10", self.run_command())

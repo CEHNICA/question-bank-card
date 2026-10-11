@@ -3165,6 +3165,12 @@ def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
 # 用固定前缀而不是完整句文案，是为了让「跑第二遍必须是 0」这条守得住。
 SUBITEM_GAP_PREFIX = "这道题的小问从"
 _SUBITEM_MARK = re.compile(r"(?m)^\s*[（(]\s*(\d{1,2})\s*[）)]")
+# 原书页面上识别小问编号用的那一条：全文搜，不锚行首（两栏印在同一行上）。
+_PRINTED_SUBITEM_MARK = re.compile(r"[（(]\s*(\d{1,2})\s*[）)]")
+# 右栏离本卡右边多远还算「同一道题的另一栏」。实测九张卡都在 3~40pt 之间。
+_COLUMN_GAP_POINTS = 140.0
+# 纵向：本卡这一题的高度带上下各留一点余量（磅）。
+_COLUMN_BAND_PAD = 4.0
 
 
 def _missing_subitem_numbers(stem: str) -> list[int]:
@@ -3180,77 +3186,170 @@ def _missing_subitem_numbers(stem: str) -> list[int]:
     return sorted(set(range(1, max(marks) + 1)) - set(marks))
 
 
-def _page_median_range_width(paper: Paper) -> dict[int, float]:
-    """每一页上各题范围宽度的中位数——这一页「正常满宽」是多少。
+def _page_subitem_marks(page) -> list:
+    """这一页上每一个小问编号出现在哪（编号, x, y），单位磅。
 
-    单看一道题的范围窄不窄没有意义：原书本来就只占半栏的题，切窄了是对的。
-    拿同一页其它题的中位数当参照，窄出一大截才说明这题被切歪了。
+    **必须逐字符取**：教材的两栏常常印在同一行上——「（1）…；（2）…」，
+    按行判只看得到行首那个，（2）就漏了。#888 正是这样丢的：原书那一页提取出来
+    是 ``（1）（2 3 - 2）（3 6 + 2）；     （2）（3 2 + 48）（18 + 4 3）；`` 一整行。
+    ``get_text("dict")`` 只给行首的位置，要每个字的落点得用 ``rawdict``。
+
+    取的是**每个字自己的 bbox**，不是它那个 span 的——一个 span 里塞了左右两栏时，
+    span 的框是从左栏起算的，两个编号会拿到同一个 x，右栏那一栏就等于不存在。
+
+    全文搜括号在这里是安全的（跟题干那边相反）：原书页面上 $y_1$ 印成下标
+    y₁，不是带括号的；括号里只会是小问编号、题号和区间端点。
     """
-    widths: dict[int, list[float]] = {}
-    for question in paper.questions.all():
-        regions = question.regions
-        if not isinstance(regions, list) or not regions:
+    found = []
+    for block in page.get_text("rawdict").get("blocks", []):
+        if block.get("type") != 0:
             continue
-        bbox = regions[0].get("bbox")
-        if not bbox or len(bbox) < 4 or bbox[2] <= bbox[0]:
+        for line in block.get("lines", []):
+            chars = [(char.get("c", ""), char.get("bbox"))
+                     for span in line.get("spans", []) for char in span.get("chars", [])]
+            flat = "".join(char for char, _ in chars)
+            for match in _PRINTED_SUBITEM_MARK.finditer(flat):
+                value = int(match.group(1))
+                if not 1 <= value <= 20:
+                    continue
+                head, tail = chars[match.start()][1], chars[match.end() - 1][1]
+                if head is None or tail is None:
+                    continue
+                found.append((value, min(head[0], tail[0]), head[1]))
+    return found
+
+
+def _subitem_claimed_elsewhere(question, number, x, y, page_idx, size, others) -> bool:
+    """这个编号是不是其实在**同一份资料的另一张卡**里，只是没并进这一张。
+
+    #1152（九上第 18 页）就是这样：切题把它切成两张卡，（2）在隔壁卡里，
+    范围是满宽的，纸面上内容一点没少。这种不许报。
+
+    只看「范围罩没罩住」不够：#888 的（2）正好落在隔壁卡的框里，可隔壁卡是
+    另一道题，它题干里根本没有（2）。要连**别的卡题干里也写着这个编号**才算。
+    """
+    width, height = size
+    for other, stem, regions in others:
+        if other.pk == question.pk:
             continue
-        widths.setdefault(regions[0].get("page_idx"), []).append(bbox[2] - bbox[0])
-    return {page: sorted(box)[len(box) // 2] for page, box in widths.items() if box}
+        if number not in [int(value) for value in _SUBITEM_MARK.findall(stem or "")]:
+            continue
+        for region in regions:
+            if region.get("page_idx") != page_idx:
+                continue
+            bbox = region.get("bbox")
+            if not bbox or len(bbox) < 4:
+                continue
+            if bbox[0] * width / 1000 <= x <= bbox[2] * width / 1000 \
+                    and bbox[1] * height / 1000 <= y <= bbox[3] * height / 1000:
+                return True
+    return False
+
+
+def _column_lost_numbers(question, missing, printed, mine, page_idx, size, others) -> list[int]:
+    """缺掉的编号里，哪几个真的印在本卡范围的右边、而且没人收下。
+
+    判据量的是直接证据——那一行印在哪、谁罩着它：
+      · 印在**右边**同一栏排布的位置（紧挨着本卡的右边界，不超过一栏宽）；
+      · 纵向落在**本卡这一题的高度带**内（不然会认到下一题的（2））；
+      · 这份资料里**没有哪张卡的题干真的收下**它。
+
+    早先用「范围宽度 < 同页中位数 80%」当代理指标，那是间接证据：
+    #873 的范围宽 441、#874 只有 330，一模一样的两栏题，只因切题时多框了
+    100pt 就一个报一个不报，白漏三张（#873/#948/#949）。
+    """
+    if not mine:
+        return []
+    right = max(box[2] for box in mine)
+    top = min(box[1] for box in mine) - _COLUMN_BAND_PAD
+    bottom = max(box[3] for box in mine) + _COLUMN_BAND_PAD
+    lost = []
+    for number in missing:
+        for value, x, y in printed:
+            if value != number:
+                continue
+            if not right - 5.0 <= x <= right + _COLUMN_GAP_POINTS:
+                continue
+            if not top <= y <= bottom:
+                continue
+            if _subitem_claimed_elsewhere(question, number, x, y, page_idx, size, others):
+                continue
+            lost.append(number)
+            break
+    return lost
 
 
 def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
     """把「一题的小问排成两栏、只读到左栏」这条兜底补回存量卡。
 
-    这条不是靠猜：要求两条证据同时成立——
+    这条不是靠猜：先看题干里的小问编号有没有跳号（（1）后面直接是（3）），
+    再回原书那一页确认——缺掉的那一行是不是真的印在本卡范围的右边、
+    纵向落在本卡这一题的高度带内、而且这份资料里没有任何一张卡收下它。
+    两条都成立才是缺陷，缺一条都不报。
 
-      ① 题干里的小问编号跳号（（1）后面直接是（3））；
-      ② 这一题的范围宽度不到同页其它题中位数的 80%。
+    只有「跳号」一条会冤枉人：#1152（九上第 18 页）的小问也确实从（1）跳到（3），
+    但那是因为切题把它切成了两张卡，（2）在隔壁卡里，纸面上内容一点没少。
 
-    ① 单独用会冤枉人：#1152（九上第 18 页）的小问也确实从（1）跳到（3），
-    但那是因为切题把它切成了两张卡，（2）在隔壁卡里，范围是满宽的。
-    ② 单独用会冤枉真正只占半栏的题。两条一起，全库只命中 6 张，
-    全部在两本教材里，试卷一张都没有（试卷没有双栏习题）。
-
-    真库实测（2026-10-11）：#874、#888、#922、#954、#975、#1258。
-    抽 3 张回原书页面上核对（八下 76 页第 1、2 题，八下 86 页第 2 题），
-    确认都是左右两栏、右栏那几条确实印在框外。
+    真库实测（2026-11-04，959 张）：命中 9 张——八下 #873 #874 #888 #922 #948
+    #949 #954 #975，九上 #1258，全在两本教材里，试卷一张都没有。
+    抽 3 张回原书页面上核对（#948 八下第 77 页、#873 八下第 49 页、
+    #949 同页第 2 题），确认右栏那些小问确实印在框外。
 
     人工改过字、核对过、已经通过的卡一律跳过（那是人的决定）。
     只提示，不擅自改题干——补上右栏小问得靠重新识读或人工录入。
     """
-    median_width = _page_median_range_width(paper)
+    source = Path(paper.source_path or "")
+    questions = list(paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"))
+    gaps = [(question, _missing_subitem_numbers(question.stem)) for question in questions]
+    gaps = [(question, missing) for question, missing in gaps if missing]
+    if not source.is_file() or not gaps:
+        return 0
+
+    import pymupdf as fitz
+
+    others = [(question, question.stem, question.regions or []) for question in questions]
+    printed: dict[int, list] = {}
     changed = 0
-    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
-        if _figure_decision_protected(question):
-            continue
-        if any(str(flag).startswith(SUBITEM_GAP_PREFIX) for flag in (question.flags or [])):
-            continue
-        missing = _missing_subitem_numbers(question.stem)
-        if not missing:
-            continue
-        regions = question.regions
-        if not isinstance(regions, list) or not regions:
-            continue
-        bbox = regions[0].get("bbox")
-        if not bbox or len(bbox) < 4 or bbox[2] <= bbox[0]:
-            continue
-        width = bbox[2] - bbox[0]
-        median = median_width.get(regions[0].get("page_idx"), 0.0)
-        if not median or width >= median * 0.8:
-            continue
-        marks = _SUBITEM_MARK.findall(question.stem)
-        labels = "、".join(f"（{value}）" for value in missing)
-        question.flags = [
-            *(question.flags or []),
-            f"{SUBITEM_GAP_PREFIX}（{marks[0]}）跳到（{marks[-1]}），{labels}没有读出来；"
-            "原书把这一题排成左右两栏，请对照原卷把右栏的小问补上",
-        ]
-        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
-            question.state = Question.State.YELLOW
-        if not dry_run:
-            _invalidate_approval(question)
-            question.save()
-        changed += 1
+    with fitz.open(source) as pdf:
+        for question, missing in gaps:
+            if _figure_decision_protected(question):
+                continue
+            if any(str(flag).startswith(SUBITEM_GAP_PREFIX) for flag in (question.flags or [])):
+                continue
+            regions = question.regions
+            if not isinstance(regions, list) or not regions:
+                continue
+            page_idx = regions[0].get("page_idx")
+            if not isinstance(page_idx, int) or not 0 <= page_idx < len(pdf):
+                continue
+            page = pdf[page_idx]
+            width, height = page.rect.width, page.rect.height
+            # 框是**每张卡自己的**，不能按页缓存——同一页上左边那张和右边那张
+            # 各有各的范围。缓存的只有页面本身。
+            mine = [(region["bbox"][0] * width / 1000, region["bbox"][1] * height / 1000,
+                     region["bbox"][2] * width / 1000, region["bbox"][3] * height / 1000)
+                    for region in regions
+                    if region.get("page_idx") == page_idx
+                    and isinstance(region.get("bbox"), list) and len(region["bbox"]) >= 4]
+            if page_idx not in printed:
+                printed[page_idx] = _page_subitem_marks(page)
+            lost = _column_lost_numbers(question, missing, printed[page_idx], mine,
+                                        page_idx, (width, height), others)
+            if not lost:
+                continue
+            present = [value for value in _SUBITEM_MARK.findall(question.stem or "")][:len(lost)]
+            labels = "、".join(f"（{value}）" for value in lost)
+            question.flags = [
+                *(question.flags or []),
+                f"{SUBITEM_GAP_PREFIX}（{present[0]}）跳到（{present[-1]}），{labels}没有读出来；"
+                "原书把这一题排成左右两栏，请对照原卷把右栏的小问补上",
+            ]
+            if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW
+            if not dry_run:
+                _invalidate_approval(question)
+                question.save()
+            changed += 1
     return changed
 
 
