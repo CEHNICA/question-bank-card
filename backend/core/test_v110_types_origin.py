@@ -29,7 +29,7 @@ TIDY_STEM = (
     "已知集合 $A=\\{x \\mid -3 \\leqslant x \\leqslant 10\\}$，"
     "$B=\\{x \\mid 2m+1 \\leqslant x \\leqslant 3m-2\\}$，且 $B \\neq \\varnothing$.\n"
     "(1)若命题 $p$：“$\\forall x \\in B, x \\in A$”是真命题，求实数 $m$ 的取值范围；\n"
-    "(2)若命题 $q$：“$\\exists x \\in A, x \\in B$”是真命题，求实数 $m$ 的取值范围."
+    "(2)若命题 $q$：“$\\exists x \\in A, x \\in B$”是真命题，求实数 $m$ 的取值范围。"
 )
 
 
@@ -162,7 +162,8 @@ class ReadCardTypeTests(TempDataMixin, TestCase):
         self.assertTrue(stem)
 
     def test_switches_off_leave_the_text_as_read(self):
-        features.save({"origin_split": False, "chinese_quotes": False})
+        features.save({"origin_split": False, "chinese_quotes": False,
+                       "full_width_punctuation": False})
         result = self.read(f"【题型】解答题\n【题干】\n{USER_STEM}", f"【题型】解答题\n【题干】\n{USER_STEM}")
         self.assertEqual(result["stem"], USER_STEM)
         self.assertEqual(result["origin"], "")
@@ -389,7 +390,8 @@ class TidySavedCardsTests(TempDataMixin, TestCase):
         self.assertEqual(publication.content["stem"], "（2022·海淀期末）已知 $a>0$，求 $a$.")
 
     def test_switched_off_tidy_leaves_text_alone(self):
-        features.save({"origin_split": False, "chinese_quotes": False})
+        features.save({"origin_split": False, "chinese_quotes": False,
+                       "full_width_punctuation": False})
         question = self.card(self.paper, question_type="free_response")
         self.assertEqual(library.tidy_saved_cards(), {"questions": 0, "publications": 0})
         question.refresh_from_db()
@@ -453,6 +455,53 @@ class TextRuleTests(SimpleTestCase):
         # 普通题面一个字符也不能动：数学里的乘号是 \cdot 或 * ，不是 **
         for text in ("$a^2$", "$\\frac{1}{2}$", "求 $a*b$ 的值", "$x^{2}$"):
             self.assertEqual(prose.plain_markup(text), text)
+
+    def test_half_width_punctuation_in_chinese_prose_reaches_the_paper_full_width(self):
+        switches = {"origin_split": True, "chinese_quotes": True, "full_width_punctuation": True}
+        # 2024 全国甲卷第 17 题（#286）的真实题干：句号读成了半角点，
+        # 成品卷上印出来是「优级品率.如果」。抽样 60 条，零误报。
+        stem, _origin, _labelled = prose.tidy_stem(
+            "设 $\\bar{p}$ 为抽取的 $n$ 件产品的优级品率."
+            "如果 $\\bar{p}>p+1.65\\sqrt{\\dfrac{p(1-p)}{n}}$，则认为提高了。",
+            switches=switches)
+        self.assertEqual(
+            stem,
+            "设 $\\bar{p}$ 为抽取的 $n$ 件产品的优级品率。"
+            "如果 $\\bar{p}>p+1.65\\sqrt{\\dfrac{p(1-p)}{n}}$，则认为提高了。")
+
+        # 一条真实的 #129 题干：句号、冒号、分号、逗号四种都有。
+        self.assertEqual(
+            prose.tidy_value("给出如下结论:①EF⊥AC; ②四边形 ADFE 为菱形;", switches={"full_width_punctuation": True}),
+            "给出如下结论：①EF⊥AC; ②四边形 ADFE 为菱形；")
+
+        # 括号里的答题位后面跟着半角句号。
+        self.assertEqual(prose.tidy_stem("相反数是（ ）.", switches={"full_width_punctuation": True})[0], "相反数是（ ）。")
+
+        # 连着的半角点只算一个句号：OCR 经常在句尾留两个点。
+        self.assertEqual(prose.tidy_stem("(2) 求这个正数..", switches={"full_width_punctuation": True})[0], "(2) 求这个正数。")
+
+        # 数学里的半角标点一个都不能动：小数、函数、点坐标、比例、选项字母。
+        for text in ("面积为 $0.5$ 平方米", "$f(x,y)=x+y$", "点 $P(1,2)$", "$1:2$",
+                     "A. 平行四边形", "$p=1.65$", "$\\sqrt{150} \\approx 12.247$"):
+            self.assertEqual(prose.full_width_punctuation(text), text, text)
+
+        # 公式整段跳过：$1.$ 里的点是小数点，不是句号。
+        self.assertEqual(prose.full_width_punctuation("解得 $x=1.$ 再求 $y$。"), "解得 $x=1.$ 再求 $y$。")
+
+    def test_mineru_layout_placeholders_never_reach_the_paper(self):
+        # 数学九上第 2 题 #1301：MinerU 的配图占位和换行是版面指令，
+        # 没被渲染就原样印在学生卷上：“<! — — Image(268, 493, 650, 637) —>图 3-7”。
+        stem, _origin, _labelled = prose.tidy_stem(
+            "…的图象。\n<!-- Image (268, 493, 650, 637) -->\n图 3-7\n\n(1) 完成下表：",
+            switches={"origin_split": True, "chinese_quotes": True})
+        self.assertEqual(stem, "…的图象。\n\n图 3-7\n\n(1) 完成下表：")
+        self.assertNotIn("Image", stem)
+
+        # 表格单元里的换行留一个空格，读的顺序不变。
+        self.assertEqual(prose.plain_markup("| 性质<br>二次函数 |"), "| 性质 二次函数 |")
+
+        # 没闭合的注释不许吃掉后面的正文。
+        self.assertEqual(prose.plain_markup("看图 <!-- 之后没有收尾"), "看图 <!-- 之后没有收尾")
 
 
 # ---------------------------------------------------------------- 开关、题库筛选、知识点与 AI 答案

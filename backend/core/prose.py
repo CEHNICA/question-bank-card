@@ -1,7 +1,7 @@
 """题面的格式整理：拆出题源、中文引号。只挪格式、不改字。
 
 新读出来的题、人改字保存的题、老版本读过的题（启动时整理）都走这里，
-所以三条路的结果一样。两项都可以在设置的“功能开关”里关掉。
+所以三条路的结果一样。三项都可以在设置的“功能开关”里关掉。
 
 题源只在“存得下”的时候才从题干里拿掉：题卡还没有题源，或者题干开头那段
 就是已有的题源。否则（已有另一个题源）这段留在题干里，一个字也不丢；
@@ -26,10 +26,65 @@ _ORIGIN_KEY = re.compile(r"[\s·・.．,，、:：;；()（）\[\]【】]")
 # unwrapping them — the banner text itself is what the reader wrote.
 _MARKUP = re.compile(r"</?(?:sup|sub)>|\*\*")
 
+# The same paragraph also carries MinerU's picture placeholder as an HTML
+# comment and its line break as a lone ``<br>``.  Both are layout instructions
+# that were never rendered, so the student paper prints
+# “<! — — Image(268, 493, 650, 637) —>图 3-7”.  The figure the comment points at
+# is attached separately (or was honestly missed and flagged); the comment
+# itself carries nothing the reader wrote.  Bounded so an unclosed ``<!--``
+# cannot swallow the rest of the stem.
+_COMMENT = re.compile(r"<!--.{0,200}?-->", re.S)
+_BREAK = re.compile(r"<br\s*/?>", re.I)
+
+# Half-width punctuation in Chinese prose: “优级品率.如果”, “结论:”, “为菱形;”.
+# Only the punctuation that sits directly against a Chinese character counts,
+# so decimals (0.5, 1.65), LaTeX (f(x,y), \sqrt2), option letters (A.) and
+# ratios (1:2) are untouched by construction.  Formula spans are passed through
+# verbatim — see ``_outside_math``.
+_CJK = "\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"
+_HALF_TO_FULL = {",": "，", ";": "；", ":": "：", "?": "？", "!": "！", ".": "。"}
+_HALF_PUNCT = re.compile(
+    f"(?<=[{_CJK}])[{''.join(_HALF_TO_FULL)}]|[{''.join(_HALF_TO_FULL)}](?=[{_CJK}])"
+)
+_MATH = re.compile(r"(?<!\\)(\${1,2})(.*?)(?<!\\)\1|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
+# A run of half-width stops after Chinese is one sentence, not several: the OCR
+# often leaves “正数..”.  Collapsing keeps the paper from showing “正数。.”
+# — a full stop cannot appear inside LaTeX, so this one is safe to do globally.
+_DOUBLE_STOP = re.compile(r"。(?:\.|．)+")
+
+
+def _swap(match: re.Match) -> str:
+    return _HALF_TO_FULL[match.group(0)]
+
+
+def _outside_math(text: str, transform) -> str:
+    """Apply ``transform`` to everything that is not a formula span.
+
+    Same shape as ``textnorm.fix_symbols``: the math goes through untouched so
+    LaTeX keeps every character it needs.
+    """
+    result: list[str] = []
+    start = 0
+    for match in _MATH.finditer(text):
+        result.append(transform(text[start:match.start()]))
+        result.append(match.group(0))
+        start = match.end()
+    result.append(transform(text[start:]))
+    return "".join(result)
+
 
 def plain_markup(text: str) -> str:
-    """Drop markup that was never rendered: ``**`` and ``<sup>``/``<sub>``."""
-    return _MARKUP.sub("", str(text or ""))
+    """Drop markup that was never rendered: ``**``, ``<sup>``/``<sub>``, HTML comments."""
+    value = _MARKUP.sub("", str(text or ""))
+    value = _COMMENT.sub("", value)
+    return _BREAK.sub(" ", value)
+
+
+def full_width_punctuation(text: str) -> str:
+    """Half-width punctuation standing against Chinese becomes full-width."""
+    widened = _outside_math(str(text or ""),
+                            lambda part: _HALF_PUNCT.sub(_swap, part))
+    return _DOUBLE_STOP.sub("。", widened)
 
 
 def same_origin(first: str, second: str) -> bool:
@@ -56,12 +111,16 @@ def tidy_stem(stem: str, *, origin: str = "", switches: dict | None = None) -> t
                 text = rest.lstrip()
     if switches.get("chinese_quotes"):
         text = textnorm.chinese_quotes(text)
+    if switches.get("full_width_punctuation"):
+        text = full_width_punctuation(text)
     return plain_markup(text), kept, labelled
 
 
 def tidy_value(value: str, *, switches: dict | None = None) -> str:
     switches = switches if switches is not None else features.load()
     text = textnorm.chinese_quotes(value) if switches.get("chinese_quotes") else str(value or "")
+    if switches.get("full_width_punctuation"):
+        text = full_width_punctuation(text)
     return plain_markup(text)
 
 

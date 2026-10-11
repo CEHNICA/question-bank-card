@@ -94,7 +94,7 @@ class TidySavedCardsTests(TestCase):
         )
         self.assertEqual(library.tidy_saved_cards(), {"questions": 1, "publications": 0})
         question.refresh_from_db()
-        self.assertEqual(question.stem, "函数y=1+cos x的图象与直线y=t的交点可能有（ ）.")
+        self.assertEqual(question.stem, "函数y=1+cos x的图象与直线y=t的交点可能有（ ）。")
         self.assertEqual(question.options, {"A": "0个", "B": "1个", "C": "2个", "D": "3个", "E": "4个"})
         self.assertEqual(question.question_type, "multiple_choice")
         self.assertEqual(question.read_a["options"], {"D": "3个", "E": "4个"})

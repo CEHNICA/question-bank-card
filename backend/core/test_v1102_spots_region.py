@@ -14,7 +14,7 @@ from . import pipeline, readers, region_reads, textnorm
 from . import test_v110_types_origin as v110
 from .models import Block, Question, RegionRead
 
-STEM = "（1）当 $x>0$ 时，求 $y=2x+\\dfrac{1}{x^{3}}$ 最小值；\n（2）当 $0<x<1$ 时，求 $y=x(1-x)^{2}$ 最大值."
+STEM = "（1）当 $x>0$ 时，求 $y=2x+\\dfrac{1}{x^{3}}$ 最小值；\n（2）当 $0<x<1$ 时，求 $y=x(1-x)^{2}$ 最大值。"
 SPOT = {"reading": "3", "mineru": "2", "before": "1x^", "after": "最小值"}
 LINE = {"page_idx": 0, "bbox": [519.0, 762.0, 695.0, 800.0],
         "text": "(1) 当 x > 0 时，求 $y = 2x + \\frac{1}{x^{2}}$ 最小值："}

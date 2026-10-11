@@ -24,6 +24,11 @@ FEATURES = {
         "default": True, "label": "中文引号",
         "help": "中文句子里的英文双引号 \"…\" 换成 “…”。公式里的不动。",
     },
+    "full_width_punctuation": {
+        "default": True, "label": "中文标点",
+        "help": "中文句子里的半角 . , ; : ? ! 换成全角。，；：？！。"
+                "公式、坐标、比例、选项字母和数字里的半角标点不动。",
+    },
     # 默认关：要用的时候再打开。
     "subquestions": {
         "default": False, "label": "显示小问数",
