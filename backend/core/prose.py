@@ -19,6 +19,18 @@ from . import features, textnorm
 _LABEL_SETS_TYPE = {"unknown", "", "single_choice", "multiple_choice"}
 _ORIGIN_KEY = re.compile(r"[\s·・.．,，、:：;；()（）\[\]【】]")
 
+# MinerU sometimes writes a column banner as markdown bold, and a chapter
+# number as an HTML superscript.  Both are markup that should have been
+# rendered: they reach the card as literal characters, so the student paper
+# shows “**做一做**” and “<sup>2</sup> 矩形的性质与判定”.  Nothing is lost by
+# unwrapping them — the banner text itself is what the reader wrote.
+_MARKUP = re.compile(r"</?(?:sup|sub)>|\*\*")
+
+
+def plain_markup(text: str) -> str:
+    """Drop markup that was never rendered: ``**`` and ``<sup>``/``<sub>``."""
+    return _MARKUP.sub("", str(text or ""))
+
 
 def same_origin(first: str, second: str) -> bool:
     return _ORIGIN_KEY.sub("", str(first or "")) == _ORIGIN_KEY.sub("", str(second or ""))
@@ -44,12 +56,13 @@ def tidy_stem(stem: str, *, origin: str = "", switches: dict | None = None) -> t
                 text = rest.lstrip()
     if switches.get("chinese_quotes"):
         text = textnorm.chinese_quotes(text)
-    return text, kept, labelled
+    return plain_markup(text), kept, labelled
 
 
 def tidy_value(value: str, *, switches: dict | None = None) -> str:
     switches = switches if switches is not None else features.load()
-    return textnorm.chinese_quotes(value) if switches.get("chinese_quotes") else str(value or "")
+    text = textnorm.chinese_quotes(value) if switches.get("chinese_quotes") else str(value or "")
+    return plain_markup(text)
 
 
 def tidy_fields(fields: dict, *, origin: str = "", switches: dict | None = None) -> dict:

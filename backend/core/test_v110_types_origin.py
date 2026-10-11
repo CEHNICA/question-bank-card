@@ -428,6 +428,32 @@ class TextRuleTests(SimpleTestCase):
         self.assertEqual((stem, origin, labelled), ("下列说法正确的是", "2023·北京卷", "multiple_choice"))
         self.assertEqual(prose.clean_origin(" 【2026 滕州二中\n月考】 "), "2026 滕州二中 月考")
 
+    def test_markup_that_was_never_rendered_never_reaches_the_paper(self):
+        # 数学九上第 2 题 #1301 的真实题干：栏目名带 markdown 加粗，
+        # 印出来是 “**做一做**”，星号原样印在学生卷上。
+        stem, _origin, _labelled = prose.tidy_stem(
+            "…关系式为 $s = \\frac{1}{50}v^2$。  **做一做** 图 3-7 是二次函数…",
+            switches={"origin_split": True, "chinese_quotes": True})
+        self.assertNotIn("**", stem)
+        self.assertIn("做一做", stem)
+
+        # 重跑识读把章号读成上标 HTML，同样原样印在卷面上。
+        self.assertEqual(
+            prose.plain_markup("请用一张如图所示的三角形纸片 ABC 折出一个菱形。"
+                               "<sup>2</sup> 矩形的性质与判定"),
+            "请用一张如图所示的三角形纸片 ABC 折出一个菱形。2 矩形的性质与判定")
+        self.assertEqual(prose.plain_markup("$x_{i+1}$<sub>1</sub>"), "$x_{i+1}$1")
+
+        # 三条路（新读出来的题 / 人改字保存 / 选项与答案）结果一致。
+        switches = {"origin_split": True, "chinese_quotes": True}
+        self.assertEqual(prose.tidy_stem("**想做**", switches=switches)[0], "想做")
+        self.assertEqual(prose.tidy_value("A. **对**", switches=switches), "A. 对")
+        self.assertEqual(prose.tidy_fields({"stem": "**做一做**"}, switches=switches)["stem"], "做一做")
+
+        # 普通题面一个字符也不能动：数学里的乘号是 \cdot 或 * ，不是 **
+        for text in ("$a^2$", "$\\frac{1}{2}$", "求 $a*b$ 的值", "$x^{2}$"):
+            self.assertEqual(prose.plain_markup(text), text)
+
 
 # ---------------------------------------------------------------- 开关、题库筛选、知识点与 AI 答案
 
