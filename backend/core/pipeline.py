@@ -3254,6 +3254,166 @@ def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
     return changed
 
 
+_FIGURE_NUMBER = re.compile(r"图\s*(\d+)\s*[-—.．]\s*(\d+)")
+_FIGURE_CAPTION_LINE = re.compile(r"^\s*图\s*\d+\s*[-—.．]\s*\d+\s*$")
+# 编号一般离图框底几 pt。给到 30pt 是因为纸面上还留着行距，实测 41 处全在 2~11pt。
+_CAPTION_GAP_POINTS = 30.0
+
+
+def _page_figure_captions(page) -> dict:
+    """这一页上每一行「图 N-M」编号的位置，单位磅。
+
+    按**行**取，不是按块。PyMuPDF 会把挨得近的几行并进同一个块——
+    教材上并排印「图 4-2」「图 4-3」时就是一个块，照块判两条都会漏掉。
+
+    只认整行就是编号的行。「例 1 确定图 4-1 中路灯灯泡所在的位置。」那种
+    一整句正文里带编号的行不认——那是题干自己在指路，不是图的编号。
+    把正文当成编号，会把本来没问题的图也挂上提示。
+    """
+    found: dict[str, list] = {}
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            key = _figure_number_key("".join(span.get("text", "") for span in line.get("spans", [])))
+            if key and _FIGURE_CAPTION_LINE.match(
+                    "".join(span.get("text", "") for span in line.get("spans", []))):
+                x0, y0, x1, y1 = line["bbox"]
+                found.setdefault(key, []).append(
+                    (float(x0), float(y0), float(x1), float(y1)))
+    return found
+
+
+def _figure_number_key(text: str) -> str:
+    """一个文本块里那个「图 4-1」的编号；认不出就是空串。
+
+    连字符有半角、有一字线、还有句点，编号行上的又常常跟正文挤在同一个块里，
+    不归一就永远配不上对。
+    """
+    keys = _figure_number_keys(text)
+    return keys.pop() if len(keys) == 1 else ""
+
+
+def _figure_number_keys(text: str) -> set:
+    """题干里点名的所有图号。一道题可以点名好几张（九上 #1301 的图 3-7/3-8/3-9），
+    只认第一个会把另外两张的缺失漏掉。"""
+    return {f"{int(match.group(1))}-{int(match.group(2))}" for match in _FIGURE_NUMBER.finditer(text or "")}
+
+def reconcile_figure_caption_flags(paper: Paper, dry_run: bool = False) -> int:
+    """把「题干点名的图号被切在框外」这条兜底补回存量卡。
+
+    教材在图的正下方印一行「图 4-1」，题干照这个编号指路：九上第 127 页
+    「例 1 确定图 4-1 中路灯灯泡所在的位置。」识读给的图框只圈住照片本身，
+    编号是另一个文本块，于是差 2~11pt 落在框外。成品卷上那行字没了，
+    两条导出路线都一样——配图是入库时切好的，PDF 和 Word 用的都是同一张。
+
+    判定不看猜：① 题干里点名了具体图号（图 N-M，纯「如图」不算，那没有编号可丢）；
+    ② 原书同一页上、这张图的左右范围内、框底下方 30pt 以内，确实印着那一行编号；
+    ③ 这道题的所有配图里都没带上它。①②③ 都成立才是缺陷，缺一条都不报。
+
+    真库实测（2026-11-04，959 张）：42 张卡命中，全部在两本教材里，试卷一张都没有
+    （试卷不印这种编号）。编号落在框底下方 2~18pt，一条不多一条不少。抽 3 张回原书
+    页面上核对（#1395 图 4-1、#1050 图 9-35、#1146 图 1-5），确认编号都印在框外。
+
+    一题里点名两张以上图号时才把绿卡转黄：那种题印出来是两张没有编号的图，
+    学生分不清哪张是哪张。只有一张图的时候，编号只是少了个标签，图本身不糊，
+    挂一句提示就够了，不必把 40 张卡从绿转黄（真库里只有 #1145 一张因此转黄）。
+    """
+    source = Path(paper.source_path or "")
+    if not source.is_file():
+        return 0
+    if not any(_figure_number_key(question.stem or "")
+               for question in paper.questions.only("id", "stem")):
+        return 0
+
+    import pymupdf as fitz
+
+    changed = 0
+    with fitz.open(source) as pdf:
+        captions: dict[int, dict] = {}
+        sizes: dict[int, tuple] = {}
+        for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+            if _figure_decision_protected(question):
+                continue
+            if any(str(flag).startswith(figure_policy.FIGURE_CAPTION_PREFIX)
+                   for flag in (question.flags or [])):
+                continue
+            named = _figure_number_keys(question.stem or "")
+            figures = [figure for figure in (question.figures or []) if figure.get("bbox")]
+            if not named or not figures:
+                continue
+
+            cuts = []
+            for figure in figures:
+                page_idx = figure.get("page_idx")
+                if not isinstance(page_idx, int) or not 0 <= page_idx < len(pdf):
+                    continue
+                if page_idx not in captions:
+                    page = pdf[page_idx]
+                    captions[page_idx] = _page_figure_captions(page)
+                    sizes[page_idx] = page.rect.width, page.rect.height
+                width, height = sizes[page_idx]
+                x0, y0, x1, y1 = figure["bbox"]
+                cuts.append((page_idx, x0 * width / 1000, y0 * height / 1000,
+                             x1 * width / 1000, y1 * height / 1000))
+            if not cuts:
+                continue
+
+            missing = [number for number in sorted(named)
+                       if not _caption_is_cut_out(cuts, captions, number)
+                       and _caption_owner(cuts, captions, number) is not None]
+            if not missing:
+                continue
+
+            labels = "、".join(f"图 {number}" for number in missing)
+            question.flags = [
+                *(question.flags or []),
+                f"{figure_policy.FIGURE_CAPTION_PREFIX}（{labels}）；原书把它印在图下方，"
+                "被切在框外，请核对，或把配图的框往下拉一点",
+            ]
+            if len(missing) >= 2 and question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW
+            if not dry_run:
+                _invalidate_approval(question)
+                question.save()
+            changed += 1
+    return changed
+
+
+def _caption_inside(x0: float, y0: float, x1: float, y1: float, box) -> bool:
+    cx0, cy0, cx1, cy1 = box
+    return cx0 < x1 and x0 < cx1 and cy0 < y1 and y0 < cy1
+
+
+def _caption_is_cut_out(cuts, captions, number: str) -> bool:
+    """这道题已经有哪张配图把编号带上去了。
+
+    一个图号可能被同一题的下一张图框住（教材里两图共用一个编号的情况），
+    那样就不算丢。
+    """
+    for page_idx, x0, y0, x1, y1 in cuts:
+        for box in captions.get(page_idx, {}).get(number, []):
+            if _caption_inside(x0, y0, x1, y1, box):
+                return True
+    return False
+
+
+def _caption_owner(cuts, captions, number: str):
+    """这个编号该属于哪张图：同一页、左右对得上、且就印在框底下方不远处。"""
+    best = None
+    for page_idx, x0, y0, x1, y1 in cuts:
+        for box in captions.get(page_idx, {}).get(number, []):
+            cx0, cy0, cx1, cy1 = box
+            gap = cy0 - y1
+            if not -2.0 <= gap <= _CAPTION_GAP_POINTS:
+                continue
+            if cx1 < x0 - 40 or cx0 > x1 + 40:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, box)
+    return best[1] if best else None
+
+
 def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
     """Shorten already-read textbook examples without touching other cards.
 
