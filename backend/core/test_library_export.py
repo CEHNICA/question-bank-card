@@ -71,13 +71,13 @@ class ExportFixture:
         self.counter = 0
 
     def publication(self, *, stem="离线合成题", kind="free_response", answer="", analysis="", options=None,
-                    origin="虚构出处", status="published", extras=None):
+                    origin="虚构出处", status="published", extras=None, section=""):
         self.counter += 1
         paper = Paper.objects.create(filename="测试合成卷.pdf", kind="pdf", sha256="a" * 64)
         question = Question.objects.create(paper=paper, number=self.counter, question_type=kind, stem=stem,
                                            answer=answer, analysis=analysis, options=options or {}, state="green")
         content = {"stem": stem, "answer": answer, "analysis": analysis, "options": options or {},
-                   "question_type": kind, "origin": origin, "figures": [], "sources": [],
+                   "question_type": kind, "origin": origin, "figures": [], "sources": [], "section": section,
                    "document_id": str(paper.id), "source_filename": paper.filename}
         return PublishedQuestion.objects.create(paper=paper, question=question, number=self.counter,
             source_filename=paper.filename, question_type=kind, version=1, status=status,
@@ -137,6 +137,47 @@ class LibraryExportTests(ExportFixture, TestCase):
             self.assertEqual(len([name for name in archive.namelist() if name.startswith("word/media/")]), 1)
         self.assertEqual(list(PublishedQuestion.objects.values()), before)
         self.assertEqual(list(Question.objects.values()), questions)
+
+    def test_the_original_section_heading_is_printed_when_it_is_the_only_one(self):
+        # 2024 全国甲卷第 1 题 #270 的真实大题标题：分值和答题要求都在里面，
+        # 通用说法「一、选择题」两样都印不出来。
+        printed = "一、选择题：本题共 12 小题，每小题 5 分，共 60 分，在每小题给出的四个选项中，只有一项是符合题目要求的"
+        first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
+        second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
+        result = self.post(self.payload([first, second]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        text = "".join(document_xml(result.content).itertext())
+        self.assertIn(printed, text)
+        self.assertIn("共 60 分", text)
+        # 通用说法没有单独出现过（它本来是原标题的开头，所以只能比出现次数）。
+        self.assertEqual(text.count("一、选择题"), 1, text)
+
+        # 半角句号按中文标点整理（微信图片那份原标题就是这么读的）。
+        self.assertEqual(
+            export._section_heading([{"content": {"section": "三、解答题：共77分.解答应写出文字说明."}}], 0, "解答题"),
+            "三、解答题：共77分。解答应写出文字说明。")
+
+    def test_a_mixed_group_falls_back_to_the_generic_heading(self):
+        # 组卷可以凑好几份卷子的题，这时原标题互相矛盾，只能用通用说法。
+        first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"},
+                                 section="一、选择题（每小题4分共40分）")
+        second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"},
+                                  section="一、选择题（每小题5分共50分）")
+        third = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"})
+        result = self.post(self.payload([first, second, third]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        text = "".join(document_xml(result.content).itertext())
+        self.assertIn("一、选择题", text)
+        self.assertNotIn("共40分", text)
+        self.assertNotIn("共50分", text)
+
+        # 没有标题、过长的标题都退回通用说法。
+        self.assertEqual(export._section_heading([{"content": {"section": ""}}], 1, "填空题"), "二、填空题")
+        self.assertEqual(export._section_heading([{"content": {"section": "习" * 300}}], 2, "填空题"), "三、填空题")
+        # 「单选题」不会被说成「选择题」。
+        self.assertEqual(export._section_heading(
+            [{"content": {"section": "一、单选题（本小题共10个小题，每小题4分，共40分。）"}}], 0, "选择题"),
+            "一、单选题（本小题共10个小题，每小题4分，共40分。）")
 
     def test_questions_only_omits_answer_fields_and_answer_pages(self):
         pub = self.publication(answer="不要出现在题目卷")

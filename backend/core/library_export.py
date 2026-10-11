@@ -32,7 +32,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import features, library, tables
+from . import features, library, prose, tables
 from .library_browse import BrowseError, normalize_ids
 from .library_drafts import DraftError, _print_options, _title
 from .models import PublishedQuestion
@@ -1242,6 +1242,31 @@ def _ordered(captured):
     return [(name, group) for name, group in result if group]
 
 
+def _section_heading(group, index, name) -> str:
+    """组卷上印在每一组题前面的大题标题。
+
+    组建的卷子不一定是原卷：老师可能把好几份卷子的题凑在一起，这时候
+    「一、选择题」才是诚实的说法。但这一组里的题如果都来自同一个大题、
+    而那个大题的标题读下来了，就把原标题印出去——它带着通用说法丢掉的东西：
+    分值（「共 40 分」）和答题要求（「解答应写出文字说明、证明过程或演算步骤」），
+    而且不会把「单选题」说成「选择题」。
+
+    真库实测（2026-10-11，959 张）：13 份试卷共 47 个（资料 × 题型）分组里，
+    试卷的每一组标题都唯一；教材的分组标题是「习题 6.2」「复习题」这类章节名，
+    一组里常常好几种，那就照旧用通用说法。
+
+    印出来的题号是从 1 连续重排的，和原卷的「本题共 10 小题」未必对得上；
+    这是「删题组卷」本身就会有的差异，把分值留着比把它藏起来有用。
+    """
+    headings = {str((item.get("content") or {}).get("section") or "").strip() for item in group}
+    headings.discard("")
+    if len(headings) == 1:
+        printed = prose.full_width_punctuation(headings.pop()).strip()
+        if printed and len(printed) <= 200:
+            return printed
+    return f"{'一二三四五六'[index]}、{name}"
+
+
 def _keep_unit(document, start):
     """Keep a question together when it fits; Word may split an over-page item.
 
@@ -1416,7 +1441,7 @@ def _document(captured, title, options, mode):
         if mode != "answers":
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
-            _font(section_title.add_run(f"{'一二三四五六'[index]}、{name}"), size + 1, True)
+            _font(section_title.add_run(_section_heading(group, index, name)), size + 1, True)
         for item in group:
             number += 1
             numbered.append((number, item))

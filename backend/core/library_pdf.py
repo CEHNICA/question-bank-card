@@ -329,10 +329,11 @@ window.__qbPdfStatus = {ready:false};
   };
   const types=[['single_choice','选择题'],['multiple_choice','多选题'],['fill_blank','填空题'],['true_false','判断题'],['free_response','解答题']];
   const known=new Set(types.map(x=>x[0]));types.push(['other','其他']);
+  const printed=input.sectionHeadings||{};
   let section=0;
   for(const [key,name] of types){
     const items=input.items.filter(x=>key==='other'?!known.has(x.type):x.type===key);if(!items.length)continue;
-    if(o.document!=='answers')source.append(node('h3','print-section','一二三四五六'[section]+'、'+name));
+    if(o.document!=='answers')source.append(node('h3','print-section',printed[key]||('一二三四五六'[section]+'、'+name)));
     section++;
     for(const item of items){
       number++;numbered.push([number,item]);if(o.document==='answers')continue;
@@ -370,6 +371,24 @@ window.__qbPdfStatus = {ready:false};
 """
 
 
+def _section_headings(captured) -> dict:
+    """每组题印什么大题标题，在 Python 这边算好再交给页面。
+
+    PDF 在浏览器里分组，Word 在这里分组；标题的取舍只有一条规则
+    （见 word._section_heading），两处各写一遍迟早会对不上。
+    枚举方式和 word._ordered 完全一致，空组跳过，所以序号也一致。
+    """
+    known = {key for key, _ in word.GROUPS}
+    groups = [(key, name, [item for item in captured if item["type"] == key])
+              for key, name in word.GROUPS]
+    groups.append(("other", "其他", [item for item in captured if item["type"] not in known]))
+    # 先去掉空组再编号：Word 那边的序号是在过滤之后的列表上数的，
+    # 这里要是先编号，缺一个题型时 PDF 会印出「三、填空题」而 Word 印「二、」。
+    present = [(key, name, group) for key, name, group in groups if group]
+    return {key: word._section_heading(group, index, name)
+            for index, (key, name, group) in enumerate(present)}
+
+
 def _html_document(captured, title, options):
     mode = word._effective_document(captured, options["document"])
     options = {**options, "document": mode, "answers": mode != "questions"}
@@ -393,7 +412,9 @@ def _html_document(captured, title, options):
                           "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
                           for image in item.get("solution_images", [])] if options["document"] != "questions" else [],
                       "ai": item["ai"] if options["document"] != "questions" else False})
-    data = json.dumps({"items": items, "title": title, "options": options}, ensure_ascii=False)
+    data = json.dumps({"items": items, "title": title, "options": options,
+                       "sectionHeadings": _section_headings(captured)},
+                      ensure_ascii=False)
     data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     policy = f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
     script_tags = "".join(f'<script nonce="{nonce}" src="data:application/javascript;base64,{base64.b64encode(script.encode()).decode()}"></script>' for script in scripts)

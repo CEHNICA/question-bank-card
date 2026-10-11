@@ -157,6 +157,26 @@ class PdfExportTests(TestCase):
         self.assertIn("connect-src &#x27;none&#x27;", document)
         self.assertNotIn('<img src="https:', document)
 
+    def test_the_pdf_prints_the_same_section_heading_the_word_path_would(self):
+        # PDF 在浏览器里分组、Word 在 Python 里分组，标题只有一条规则；
+        # 两边各写一遍迟早对不上（这是真出过的：改完 Word 才发现 PDF 没跟上）。
+        printed = "一、选择题：本题共 12 小题，每小题 5 分，共 60 分"
+        first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
+        second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
+        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
+            response = self.post(self.payload([first, second], output_format="pdf"))
+        self.assertEqual(response.status_code, 200)
+        document = renderer.call_args.args[0]
+        self.assertIn("sectionHeadings", document)
+        self.assertIn("共 60 分", document)
+        self.assertEqual(
+            pdf._section_headings([
+                {"type": "single_choice", "content": {"section": printed}},
+                {"type": "single_choice", "content": {"section": printed}},
+                {"type": "fill_blank", "content": {"section": ""}},
+            ]),
+            {"single_choice": printed, "fill_blank": "二、填空题"})
+
     def test_request_guard_and_missing_answers(self):
         pub = self.publication()
         payload = self.payload([pub], output_format="pdf")
