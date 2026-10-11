@@ -15,6 +15,7 @@ from core import credential_settings, library_jobs, preferences, region_reads
 from core.account_pool import lease_priority, reset_account_pools
 from core.models import Paper, Question
 from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail
+from core.worker_lock import SingleInstance
 
 ACTIVE = [Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING]
 # One reread batch at a time, whichever lane runs it.
@@ -252,24 +253,6 @@ def apply_saved_model_preferences():
 
 def rereads_pending() -> bool:
     return Question.objects.filter(reread_requested=True).exists()
-
-
-class SingleInstance:
-    """同一个数据目录只允许一个工作者，避免两个进程抢同一份卷。"""
-
-    def __init__(self, path: Path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.handle = path.open("a+")
-        try:
-            if os.name == "nt":
-                import msvcrt
-                self.handle.seek(0)
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise SystemExit("已有一个题有据工作者在运行，本进程退出。")
 
 
 def clean_saved_example_labels(out=None) -> None:

@@ -3121,7 +3121,7 @@ def segment_paper(paper: Paper) -> None:
     reconcile_fill_blank_slot_flags(paper)
 
 
-def reconcile_fill_blank_slot_flags(paper: Paper) -> int:
+def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
     """把「题型标成填空题、题干里却没有可填位置」这条兜底补回存量卡。
 
     成品卷只给解答题留书写空间（`library_export._write_question` 里
@@ -3151,8 +3151,9 @@ def reconcile_fill_blank_slot_flags(paper: Paper) -> int:
         question.flags = [*(question.flags or []), qtypes.FLAG_FILL_NO_SLOT]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
-        _invalidate_approval(question)
-        question.save()
+        if not dry_run:
+            _invalidate_approval(question)
+            question.save()
         changed += 1
     return changed
 
@@ -5404,7 +5405,7 @@ GEOMETRIC_FLAG_BY_SOURCE = {
 AUTO_FIGURE_SOURCE = "auto"
 
 
-def reconcile_geometric_figure_flags(paper: Paper) -> int:
+def reconcile_geometric_figure_flags(paper: Paper, dry_run: bool = False) -> int:
     """把「几何挂图必然带一句请核对」这条约定补回来。
 
     row / other / shared 三种图都不是识读自己认下的，是同行排图或别的题的识读指过来
@@ -5416,16 +5417,21 @@ def reconcile_geometric_figure_flags(paper: Paper) -> int:
     这里只加旗标，不动图，也不摘任何东西：人工框过、人工核对过、已经通过的卡一律
     跳过（那是人的决定），已经挂着几何旗标的卡也跳过（已经有人在核对了），图本来
     就落在本题范围里面的同样跳过——那种由识读自己认下，不归这条兜底管。
+
+    ``FLAG_FIGURE_OUTSIDE_RANGE`` 本身也算「已经挂着」：这句和那三个几何旗是两回事，
+    早先漏了它自己，于是每跑一遍就把同一句原样重写一遍、再报一遍「命中」，跑第二遍
+    仍然是 22 张。清完的库再跑一次应当是 0，否则「命中 22 张」是在报一件没发生的事。
     """
 
-    geometric = set(GEOMETRIC_FLAG_BY_SOURCE.values())
+    already_flagged = {*GEOMETRIC_FLAG_BY_SOURCE.values(),
+                       figure_policy.FLAG_FIGURE_OUTSIDE_RANGE}
     changed = 0
     for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
         figures = question.figures or []
         if not any(isinstance(figure, dict) and figure.get("source") in GEOMETRIC_SOURCES
                    for figure in figures):
             continue
-        if _figure_decision_protected(question) or set(question.flags or []) & geometric:
+        if _figure_decision_protected(question) or set(question.flags or []) & already_flagged:
             continue
         if not figure_policy.figures_outside_own_range(question.regions, figures):
             continue
@@ -5434,8 +5440,9 @@ def reconcile_geometric_figure_flags(paper: Paper) -> int:
                           figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
-        _invalidate_approval(question)
-        question.save()
+        if not dry_run:
+            _invalidate_approval(question)
+            question.save()
         changed += 1
     return changed
 
@@ -5443,7 +5450,7 @@ def reconcile_geometric_figure_flags(paper: Paper) -> int:
 ANCHOR_MISMATCH_FLAG_PREFIX = "这张卡题号那一行印着「"
 
 
-def reconcile_anchor_reading_flags(paper: Paper) -> int:
+def reconcile_anchor_reading_flags(paper: Paper, dry_run: bool = False) -> int:
     """把「卡号那一行的话，识读出来的内容里认不出」这条兜底补回来。
 
     这条判据只在 ``read_card`` 里算，也就是只在识读那一刻。一张卡是在这条规则
@@ -5491,8 +5498,9 @@ def reconcile_anchor_reading_flags(paper: Paper) -> int:
             "卡上可能是另一道题；请对照原书确认这张卡的范围和内容")]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
-        _invalidate_approval(question)
-        question.save()
+        if not dry_run:
+            _invalidate_approval(question)
+            question.save()
         changed += 1
     return changed
 
