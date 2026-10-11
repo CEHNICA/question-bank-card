@@ -3118,6 +3118,43 @@ def segment_paper(paper: Paper) -> None:
     # 同一类兜底：「卡号那一行认不出」本来只在识读那一刻算，存量卡因此从来没有
     # 过这句话，而 25 张现在符合判据的卡一条都没挂（其中 5 张还是绿的）。
     reconcile_anchor_reading_flags(paper)
+    reconcile_fill_blank_slot_flags(paper)
+
+
+def reconcile_fill_blank_slot_flags(paper: Paper) -> int:
+    """把「题型标成填空题、题干里却没有可填位置」这条兜底补回存量卡。
+
+    成品卷只给解答题留书写空间（`library_export._write_question` 里
+    ``item["type"] == "free_response"`` 才加空白段），一道要写解题过程的题
+    被标成填空题，学生在卷上就只有一个字的落笔地方。
+
+    这条判据一直在识读那一刻算（`FLAG_FILL_NO_SLOT`），存量卡因此从来没有过
+    这句话。真库实测（2026-10-11，959 张）：符合判据的 37 张，**30 张一条旗都没有，
+    全是绿卡**：
+
+      八下第 2 题 #798  「对角线长为 15、夹角 60°，求矩形较短边的长」
+      八下第 2 题 #943  「方程 x²-ax+a+3=0 有两个相等的实数根，求 a 的值」
+      九上第 2 题 #1394 「加入个人的评语或心得，把自己满意的设计结果放入成长记录」
+      八下第 3 题 #891  「二次根式加减运算的实质是什么？」
+
+    人工改过字、人工核对过、已经通过的卡一律跳过（那是人的决定），已经挂着
+    这句话的也跳过。只提示，不擅自改题型。
+    """
+    changed = 0
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        if _figure_decision_protected(question):
+            continue
+        if qtypes.FLAG_FILL_NO_SLOT in (question.flags or []):
+            continue
+        if not qtypes.fill_blank_without_slot(question.question_type, question.stem):
+            continue
+        question.flags = [*(question.flags or []), qtypes.FLAG_FILL_NO_SLOT]
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW
+        _invalidate_approval(question)
+        question.save()
+        changed += 1
+    return changed
 
 
 def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
