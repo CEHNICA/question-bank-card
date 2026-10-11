@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 import tempfile
@@ -21,6 +22,8 @@ from django.utils import timezone
 from PIL import Image, ImageDraw
 
 from . import credential_settings, features, knowledge
+
+logger = logging.getLogger(__name__)
 
 ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_URL = ARK_BASE + "/chat/completions"
@@ -211,7 +214,8 @@ def share_reading_key(provider: str = "minimax") -> dict:
             protected = credential_settings.store._transform(json.dumps(
                 {"version": 1, "revision": config["key_revision"], "key": key}).encode(), protect=True)
             _write(key_path(provider), protected)
-        except (OSError, credential_settings.CredentialStoreError):
+        except (OSError, credential_settings.CredentialStoreError) as exc:
+            logger.warning("API 设置保存失败：%s: %s", type(exc).__name__, exc)
             raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None
         # A copied key is a brand new credential: the previous “已测通” verdict
         # was about the key that was just replaced.
@@ -371,7 +375,10 @@ def save(payload: dict) -> dict:
                     continue
                 config["key_states"][name] = _write_provider_key(name, extra_action, extra_key)
             _write_settings(config)
-        except (OSError, credential_settings.CredentialStoreError):
+        except (OSError, credential_settings.CredentialStoreError) as exc:
+            # 加密和落盘两种失败共用这一句提示，老师那边看不出是哪一种。记一笔原因，
+            # 下次真遇上时不必再从头猜（真库 1984 条全量跑里偶发过一次，没抓到现场）。
+            logger.warning("API 设置保存失败：%s: %s", type(exc).__name__, exc)
             raise SettingsError("API 设置加密保存失败；API 生成保持暂停，请重新保存。") from None
         if changes:
             features.save(changes)

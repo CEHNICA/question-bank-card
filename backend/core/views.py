@@ -1574,6 +1574,10 @@ def paper_detail(request, paper_id):
                     return _error("这项任务属于拆分资料，必须保留原稿与追溯关系；可以归档，但不能永久删除")
                 if folder.exists():
                     folder.replace(staged)
+                    # 改名不刷新时间戳（实测 mtime 和 ctime 都还是上传那天的），
+                    # 启动清理靠「多旧」分辨「上次没删干净」和「刚改名、事务还没提交」。
+                    # 不在这里盖一个时间戳，新规则会把刚改名的目录当陈旧目录扫掉。
+                    os.utime(staged, None)
                 paper.delete()
         except OSError:
             if staged.exists() and not folder.exists():

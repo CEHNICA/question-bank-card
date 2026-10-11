@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_STAGING_PREFIX = ".uploading-"
 UPLOAD_STAGING_MIN_AGE_SECONDS = 600
+# 删除任务时先把卷子目录改名成这个，再删数据库记录、最后删文件。
+DELETE_STAGING_PREFIX = ".deleting-"
+DELETE_STAGING_MIN_AGE_SECONDS = 600
 
 
 def discard_interrupted_uploads() -> list[str]:
@@ -48,6 +51,43 @@ def discard_interrupted_uploads() -> list[str]:
     return removed
 
 
+def discard_interrupted_deletes() -> list[str]:
+    """删掉上一次没删干净的「正在删除」目录。
+
+    删一项任务时先把它的卷子目录改名成 ``.deleting-<uuid>-<hex>``，再删数据库记录、
+    最后删文件。第三步在 Windows 上会因为文件正被打开而失败，界面于是告诉老师
+    「关闭程序并重新启动后会继续清理」——**那句话以前是假的**：启动清理只认
+    ``.uploading-``，``.deleting-`` 没有人管，那份原卷（PDF 上限 200 MB）就永远留在
+    磁盘上。现在这句话有兑现的地方了。
+
+    年龄判断比上传那条更要紧：目录是改**名**得来的，改名不刷新时间戳（实测 mtime 和
+    ctime 都还是上传那天的），一份三天前传的老卷子被改名后看起来就像陈旧目录。所以
+    ``views.paper`` 改完名会顺手 ``os.utime`` 一下，这里才有「刚改名」和「上次没删
+    干净」的分界。也因此同一个 10 分钟的门槛不能省：刚改完名、事务还没提交的目录要是
+    被这里扫掉，回滚时 ``staged.replace(folder)`` 就会失败，留下一条文件已经没了的
+    数据库记录。
+    """
+    removed: list[str] = []
+    root = Path(settings.DATA_ROOT)
+    if not root.is_dir():
+        return removed
+    now = time.time()
+    for entry in root.iterdir():
+        if not entry.name.startswith(DELETE_STAGING_PREFIX) or not entry.is_dir():
+            continue
+        try:
+            if now - _newest_mtime(entry) < DELETE_STAGING_MIN_AGE_SECONDS:
+                continue
+            shutil.rmtree(entry)
+        except OSError as exc:
+            logger.warning("清理残留的待删除目录 %s 失败：%s", entry, exc)
+            continue
+        removed.append(entry.name)
+    if removed:
+        logger.info("已清理 %d 个上次没删干净的任务目录：%s", len(removed), "、".join(removed))
+    return removed
+
+
 def _newest_mtime(folder: Path) -> float:
     """目录里最新的一个时间戳；空目录就是它自己的时间。"""
     newest = folder.stat().st_mtime
@@ -64,7 +104,8 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self):
-        try:
-            discard_interrupted_uploads()
-        except Exception as exc:  # 清理失败绝不能挡住软件启动。
-            logger.warning("启动时清理上传暂存目录未完成：%s", exc)
+        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes):
+            try:
+                sweep()
+            except Exception as exc:  # 清理失败绝不能挡住软件启动。
+                logger.warning("启动时清理残留目录未完成：%s", exc)

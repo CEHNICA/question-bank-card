@@ -7,8 +7,10 @@ or mutate the user's live database or uploaded papers.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -18,7 +20,8 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
-from . import photos, pipeline, segment
+from . import photos, pipeline, segment, views as core_views
+from .apps import discard_interrupted_deletes
 from .models import Block, Paper, PublishedQuestion, Question, QuestionGroup
 
 
@@ -434,6 +437,55 @@ class TaskLifecycleTests(TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertTrue(Paper.objects.filter(pk=paper.pk).exists())
         self.assertTrue(folder.exists())
+
+    def _staged_dirs(self) -> list[Path]:
+        return sorted(self.temp.glob(".deleting-*"))
+
+    def test_a_delete_whose_files_stay_locked_is_finished_on_the_next_startup(self):
+        # 界面上那句「关闭程序并重新启动后会继续清理」以前是假的：启动清理只认
+        # .uploading-，.deleting- 没人管，那份原卷就永远留在磁盘上。
+        paper, folder = self._paper(Paper.Status.READY)
+        real_rmtree = shutil.rmtree
+
+        def refuse_staged(path, *args, **kwargs):
+            if Path(path).name.startswith(".deleting-"):
+                raise OSError(5, "Access is denied")
+            return real_rmtree(path, *args, **kwargs)
+
+        with mock.patch.object(core_views.shutil, "rmtree", refuse_staged):
+            response = self._delete(paper)
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertIn("重新启动后会继续清理", response.json()["warning"])
+        self.assertFalse(Paper.objects.filter(pk=paper.pk).exists())
+        leftover = self._staged_dirs()
+        self.assertEqual(len(leftover), 1)
+        self.assertTrue((leftover[0] / "source.pdf").exists())
+
+        # 下次启动：目录已经很旧，启动清理把它收掉。
+        old = time.time() - 3600
+        for path in [leftover[0], *leftover[0].rglob("*")]:
+            os.utime(path, (old, old))
+        self.assertEqual(discard_interrupted_deletes(), [leftover[0].name])
+        self.assertFalse(leftover[0].exists())
+        self.assertFalse(folder.exists())
+
+    def test_a_delete_in_flight_is_never_mistaken_for_leftovers(self):
+        # 目录是改**名**得来的，改名不刷新时间戳：一份三天前传的老卷子，改完名看起来
+        # 就是陈旧目录。views 改完名要顺手盖一个时间戳，否则启动清理会把事务还没提交
+        # 的目录扫掉，回滚时就再也还原不回去（留下一条文件已经没了的数据库记录）。
+        paper, folder = self._paper(Paper.Status.READY)
+        old = time.time() - 3 * 86400
+        for path in [folder, *folder.rglob("*")]:
+            os.utime(path, (old, old))
+
+        with mock.patch.object(core_views.shutil, "rmtree", side_effect=OSError(5, "denied")):
+            response = self._delete(paper)
+            self.assertEqual(response.status_code, 200, response.content)
+
+        staged = self._staged_dirs()[0]
+        self.assertGreater(staged.stat().st_mtime, time.time() - 600)
+        self.assertEqual(discard_interrupted_deletes(), [])
+        self.assertTrue((staged / "source.pdf").exists())
 
     def test_publication_history_blocks_physical_delete_but_allows_archive(self):
         paper, folder = self._paper(Paper.Status.READY)
