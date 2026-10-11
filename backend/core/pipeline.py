@@ -3115,6 +3115,9 @@ def segment_paper(paper: Paper) -> None:
         # 汶源初四 3），其中 18 张显示为绿；八下第 4 题 id=1083 和汶源初四第 9 题
         # id=664 的图在纸上分别印着「第 4 题」「（9）」——图是对的，是范围切小了。
         reconcile_geometric_figure_flags(paper)
+    # 同一类兜底：「卡号那一行认不出」本来只在识读那一刻算，存量卡因此从来没有
+    # 过这句话，而 25 张现在符合判据的卡一条都没挂（其中 5 张还是绿的）。
+    reconcile_anchor_reading_flags(paper)
 
 
 def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
@@ -5392,6 +5395,63 @@ def reconcile_geometric_figure_flags(paper: Paper) -> int:
         question.flags = [*[flag for flag in question.flags or []
                             if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE],
                           figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW
+        _invalidate_approval(question)
+        question.save()
+        changed += 1
+    return changed
+
+
+ANCHOR_MISMATCH_FLAG_PREFIX = "这张卡题号那一行印着「"
+
+
+def reconcile_anchor_reading_flags(paper: Paper) -> int:
+    """把「卡号那一行的话，识读出来的内容里认不出」这条兜底补回来。
+
+    这条判据只在 ``read_card`` 里算，也就是只在识读那一刻。一张卡是在这条规则
+    存在之前读出来的，或者读完之后又被别处的改动动过，就永远没有这句话——
+    而卡上明明已经不符合判据了。
+
+    真库实测（2026-10-11，959 张）：25 张现在符合判据，**25 张全都没挂上**，
+    其中 5 张还是绿卡、旗是空的：
+
+      八下第 2 题 #965  纸上印的是农业合作社储藏农产品那道，卡上却是章末回顾
+      九上第 2 题 #1153 纸上印的是「下列函数的图象位于第一、三象限的有」，卡上
+                        却是整段「读一读 反比例函数与三等分角」
+      九上第 3 题 #1156 纸上印的是「矩形面积为9 试用图象表示两邻边关系」，卡上是
+                        「科技小组野外考察…压强 p」
+      八下第 4 题 #956  纸上印的是三角形第三边那道，卡上是矩形土地建花园
+      八下第 4 题 #1069 纸上印的是12 个直角三角形拼成的图形，卡上是四边形坐标
+
+    这 5 张印在学生卷上和正常题一模一样，界面上也看不出异常。这里只加旗标，
+    不动一个字：人工改过字、人工核对过、已经通过的卡一律跳过（那是人的决定），
+    已经挂着这句话的也跳过。只提示，不擅自改。
+    """
+    printed_by_seq = {
+        block.get("seq"): str(block.get("text") or "")
+        for block in _block_dicts(paper)
+        if block.get("seq") is not None
+    }
+    changed = 0
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        if _figure_decision_protected(question):
+            continue
+        if any(str(flag).startswith(ANCHOR_MISMATCH_FLAG_PREFIX) for flag in question.flags or []):
+            continue
+        printed = printed_by_seq.get(question.source_anchor_seq)
+        if not printed:
+            continue
+        probe = textnorm.anchor_reading_mismatch(printed, "".join([
+            question.stem or "",
+            *(question.options or {}).values(),
+            question.analysis or "",
+        ]))
+        if not probe:
+            continue
+        question.flags = [*(question.flags or []), (
+            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
+            "卡上可能是另一道题；请对照原书确认这张卡的范围和内容")]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
         _invalidate_approval(question)
