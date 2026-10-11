@@ -2,16 +2,18 @@
 """只补兜底提示，不重新切题、不重新识读。
 
 「重新切题」跑完末尾会顺带补三条兜底提示：几何挂图、卡号那一行认不出、
-填空题却没填空位置。这三条判据其实只跟卡上已有的范围、题型、旗标有关，
-跟重切没有半点关系——却只能等一次全量重切才补得上，一次几分钟到十几分钟，
+填空题却没填空位置、一题的小问排成两栏却只读到左栏。这四条判据其实只跟
+卡上已有的范围、题型、旗标有关，跟重切没有半点关系——却只能等一次全量重切才补得上，一次几分钟到十几分钟，
 还要重新读一遍题。
 
-    manage.py reconcile_flags                    # 三条都补（与重切时的行为一致）
+    manage.py reconcile_flags                    # 四条都补（与重切时的行为一致）
     manage.py reconcile_flags --only fill_blank,anchor
     manage.py reconcile_flags --paper 数学九年级上册.pdf
 
 真库实测（2026-11-04，959 张）：三条一起跑 0.6 秒、零模型调用，
 84 张卡挂上新提示、绿卡 720 → 667，**题干一个字没改，已通过的一张没掉**。
+2026-10-11 又加了第四条（subitem）：一题的小问排成左右两栏、切题只罩到左栏，
+右栏那几条在成品卷上直接消失。全库命中 6 张，两本教材里的双栏习题，试卷零命中。
 
 ⚠️ 「几何挂图」那条在存量卡上误报明显：22 张里 18 张原本是绿卡，
 抽 3 张（#786/#1083/#1121）导成品卷看纸面，图都紧跟题干、位置正确。
@@ -33,8 +35,9 @@ CHECKS = {
     "geometric": ("几何挂图落在本题范围外", pipeline.reconcile_geometric_figure_flags),
     "anchor": ("卡号那一行认不出", pipeline.reconcile_anchor_reading_flags),
     "fill_blank": ("题型标成填空题却没有空格", pipeline.reconcile_fill_blank_slot_flags),
+    "subitem": ("小问排成两栏、只读到了左栏", pipeline.reconcile_subitem_column_flags),
 }
-ORDER = ("geometric", "anchor", "fill_blank")
+ORDER = ("geometric", "anchor", "fill_blank", "subitem")
 
 
 class Command(BaseCommand):
@@ -43,7 +46,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--only", default="",
-            help="逗号分隔，只跑这几条：" + "、".join(ORDER) + "（默认三条都跑）")
+            help="逗号分隔，只跑这几条：" + "、".join(ORDER) + "（默认四条都跑）")
         parser.add_argument(
             "--paper", default="",
             help="只处理这一份资料的文件名（可重复用逗号分隔）；默认全部资料")

@@ -3158,6 +3158,102 @@ def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
     return changed
 
 
+# 教材习题常把同一道题的小问排成左右两栏（左栏 1、3、5，右栏 2、4、6）。
+# 切题范围只罩到左栏时，右栏那几条方程根本不在范围里，识读也就没读到，
+# 成品卷上这些小问直接消失，没有任何提示——八下第 2 题 #949 印出来只剩
+# （1）（3）（5），原书上的（2）（4）没了；#975 更狠，8 条方程只剩左栏 4 条。
+# 用固定前缀而不是完整句文案，是为了让「跑第二遍必须是 0」这条守得住。
+SUBITEM_GAP_PREFIX = "这道题的小问从"
+_SUBITEM_MARK = re.compile(r"(?m)^\s*[（(]\s*(\d{1,2})\s*[）)]")
+
+
+def _missing_subitem_numbers(stem: str) -> list[int]:
+    """题干里（1）（2）（3）这样的小问，缺了哪几个。只认行首的写法。
+
+    只认行首是有来由的：#1152 的题干通篇是 ``$y_1$``、``$y_2$`` 这种下标，
+    在全文里搜括号会把它们当成小问编号，凭空多出一堆「缺号」。
+    """
+    marks = [int(value) for value in _SUBITEM_MARK.findall(stem or "")]
+    marks = [mark for mark in marks if 1 <= mark <= 20]
+    if len(marks) < 2 or marks[0] != 1:
+        return []
+    return sorted(set(range(1, max(marks) + 1)) - set(marks))
+
+
+def _page_median_range_width(paper: Paper) -> dict[int, float]:
+    """每一页上各题范围宽度的中位数——这一页「正常满宽」是多少。
+
+    单看一道题的范围窄不窄没有意义：原书本来就只占半栏的题，切窄了是对的。
+    拿同一页其它题的中位数当参照，窄出一大截才说明这题被切歪了。
+    """
+    widths: dict[int, list[float]] = {}
+    for question in paper.questions.all():
+        regions = question.regions
+        if not isinstance(regions, list) or not regions:
+            continue
+        bbox = regions[0].get("bbox")
+        if not bbox or len(bbox) < 4 or bbox[2] <= bbox[0]:
+            continue
+        widths.setdefault(regions[0].get("page_idx"), []).append(bbox[2] - bbox[0])
+    return {page: sorted(box)[len(box) // 2] for page, box in widths.items() if box}
+
+
+def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
+    """把「一题的小问排成两栏、只读到左栏」这条兜底补回存量卡。
+
+    这条不是靠猜：要求两条证据同时成立——
+
+      ① 题干里的小问编号跳号（（1）后面直接是（3））；
+      ② 这一题的范围宽度不到同页其它题中位数的 80%。
+
+    ① 单独用会冤枉人：#1152（九上第 18 页）的小问也确实从（1）跳到（3），
+    但那是因为切题把它切成了两张卡，（2）在隔壁卡里，范围是满宽的。
+    ② 单独用会冤枉真正只占半栏的题。两条一起，全库只命中 6 张，
+    全部在两本教材里，试卷一张都没有（试卷没有双栏习题）。
+
+    真库实测（2026-10-11）：#874、#888、#922、#954、#975、#1258。
+    抽 3 张回原书页面上核对（八下 76 页第 1、2 题，八下 86 页第 2 题），
+    确认都是左右两栏、右栏那几条确实印在框外。
+
+    人工改过字、核对过、已经通过的卡一律跳过（那是人的决定）。
+    只提示，不擅自改题干——补上右栏小问得靠重新识读或人工录入。
+    """
+    median_width = _page_median_range_width(paper)
+    changed = 0
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        if _figure_decision_protected(question):
+            continue
+        if any(str(flag).startswith(SUBITEM_GAP_PREFIX) for flag in (question.flags or [])):
+            continue
+        missing = _missing_subitem_numbers(question.stem)
+        if not missing:
+            continue
+        regions = question.regions
+        if not isinstance(regions, list) or not regions:
+            continue
+        bbox = regions[0].get("bbox")
+        if not bbox or len(bbox) < 4 or bbox[2] <= bbox[0]:
+            continue
+        width = bbox[2] - bbox[0]
+        median = median_width.get(regions[0].get("page_idx"), 0.0)
+        if not median or width >= median * 0.8:
+            continue
+        marks = _SUBITEM_MARK.findall(question.stem)
+        labels = "、".join(f"（{value}）" for value in missing)
+        question.flags = [
+            *(question.flags or []),
+            f"{SUBITEM_GAP_PREFIX}（{marks[0]}）跳到（{marks[-1]}），{labels}没有读出来；"
+            "原书把这一题排成左右两栏，请对照原卷把右栏的小问补上",
+        ]
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW
+        if not dry_run:
+            _invalidate_approval(question)
+            question.save()
+        changed += 1
+    return changed
+
+
 def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
     """Shorten already-read textbook examples without touching other cards.
 

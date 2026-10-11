@@ -58,6 +58,15 @@ class ReconcileFlagsCommandTests(TestCase):
         self.real_blank = self.card(
             stem="已知 $x+1=2$，则 $x=$ ______。",
             regions=[{"page_idx": 1, "bbox": [40, 430, 490, 480]}], question_type="fill_blank")
+        # 教材把一道题的小问排成左右两栏，切题只罩到左栏，右栏那几条在成品卷上没了。
+        self.two_column = self.card(
+            stem="解下列方程：\n（1）$5(x^2-x)=3(x^2+x)$；\n（3）$(x-2)(x-3)=12$；\n（5）$2y^2+4y=y+2$。",
+            regions=[{"page_idx": 1, "bbox": [40, 500, 300, 820]}])
+        # 同样从（1）跳到（3），但范围是满宽的：#1152 是被切成了两张卡，
+        # （2）在隔壁卡里，内容并没有丢。判据不许把它也挂上提示。
+        self.wide_gap = self.card(
+            stem="解下列方程：\n（1）$x(x-14)=0$；\n（3）$x^2=x+56$。",
+            regions=[{"page_idx": 1, "bbox": [40, 850, 900, 960]}])
 
     def card(self, **values):
         self.counter += 1
@@ -78,12 +87,13 @@ class ReconcileFlagsCommandTests(TestCase):
         return {q.pk: (q.state, list(q.flags or []))
                 for q in Question.objects.order_by("pk")}
 
-    # -- 三条判据的接线 ---------------------------------------------------
+    # -- 四条判据的接线 ---------------------------------------------------
 
-    def test_each_of_the_three_reaches_its_own_card(self):
+    def test_each_of_the_four_reaches_its_own_card(self):
         self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_fill_blank_slot_flags(self.paper), 1)
+        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 1)
 
         rows = self.stored()
         self.assertIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, rows[self.geometric.pk][1])
@@ -91,6 +101,27 @@ class ReconcileFlagsCommandTests(TestCase):
                             for f in rows[self.anchor.pk][1]),
                         rows[self.anchor.pk][1])
         self.assertIn(qtypes.FLAG_FILL_NO_SLOT, rows[self.no_slot.pk][1])
+        flag = next(f for f in rows[self.two_column.pk][1]
+                    if str(f).startswith(pipeline.SUBITEM_GAP_PREFIX))
+        self.assertIn("（2）、（4）没有读出来", flag)
+        self.assertIn("左右两栏", flag)
+
+    def test_a_full_width_gap_is_left_alone(self):
+        """小问跳号但范围是满宽的：#1152 那种被切成两张卡的情况，内容并没有丢。"""
+        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 1)
+
+        self.assertEqual(self.stored()[self.wide_gap.pk], (Question.State.GREEN, []))
+
+    def test_only_a_number_at_the_start_of_a_line_counts_as_a_subitem(self):
+        """行中间的「（2）」不算小问编号——$y_1$、$y_2$ 这类下标满篇都是。"""
+        self.assertEqual(
+            pipeline._missing_subitem_numbers(
+                "已知点（$-6$，$y_1$）在（1）号题里；（2）不算。\n（1）$x$；\n（3）$y$。"),
+            [2])
+        self.assertEqual(
+            pipeline._missing_subitem_numbers("（1）$x$；\n（2）$y$；\n（3）$z$。"), [])
+        # 只有一个子项时不判——没有「跳号」可言。
+        self.assertEqual(pipeline._missing_subitem_numbers("（1）$x$；"), [])
 
     def test_a_card_that_breaks_none_of_them_is_left_green(self):
         self.run_command()
@@ -113,6 +144,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertIn("几何挂图落在本题范围外：命中 1 张", preview)
         self.assertIn("卡号那一行认不出：命中 1 张", preview)
         self.assertIn("题型标成填空题却没有空格：命中 1 张", preview)
+        self.assertIn("小问排成两栏、只读到了左栏：命中 1 张", preview)
 
     def test_list_only_says_the_library_was_left_alone(self):
         self.assertIn("库没有改动", self.run_command("--list"))
@@ -127,6 +159,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertIn("几何挂图落在本题范围外：命中 0 张", second)
         self.assertIn("卡号那一行认不出：命中 0 张", second)
         self.assertIn("题型标成填空题却没有空格：命中 0 张", second)
+        self.assertIn("小问排成两栏、只读到了左栏：命中 0 张", second)
 
     def test_a_flag_is_never_written_twice(self):
         self.run_command()
@@ -134,6 +167,15 @@ class ReconcileFlagsCommandTests(TestCase):
 
         card = Question.objects.get(pk=self.geometric.pk)
         self.assertEqual(card.flags.count(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE), 1)
+
+    def test_the_two_column_hint_is_never_written_twice(self):
+        """它的文案里带着缺哪几个小问，每次算出来都不一样，只能靠前缀认。"""
+        self.run_command()
+        self.run_command()
+
+        card = Question.objects.get(pk=self.two_column.pk)
+        self.assertEqual(
+            len([f for f in card.flags if str(f).startswith(pipeline.SUBITEM_GAP_PREFIX)]), 1)
 
     # -- 3) --only / --paper / 报错 ---------------------------------------
 
@@ -155,4 +197,4 @@ class ReconcileFlagsCommandTests(TestCase):
             self.run_command("--paper", "没有这份卷子.pdf")
 
     def test_a_real_run_reports_how_many_cards_were_recoloured(self):
-        self.assertIn("绿卡 4 → 1", self.run_command())
+        self.assertIn("绿卡 6 → 2", self.run_command())
