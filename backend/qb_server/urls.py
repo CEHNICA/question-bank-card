@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, api_key_reveal, export_preferences, practice
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice
 
 urlpatterns = [
     path("", views.index_page),
@@ -16,6 +16,8 @@ urlpatterns = [
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),
     path("library.js", views.library_script),
+    path("library-tag-manager.js", views.library_tag_manager_script),
+    path("library-tag-manager.css", views.library_tag_manager_styles),
     path("library-workspace.js", views.library_workspace_script),
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),
@@ -27,6 +29,7 @@ urlpatterns = [
     path("static/export-settings.js", views.export_settings_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
+    path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),
     path("vendor/katex/<path:asset>", views.katex_asset),
     path("api/health", views.health),
@@ -93,13 +96,24 @@ urlpatterns = [
     path("api/library/drafts", library_drafts.drafts_view),
     path("api/library/drafts/<uuid:draft_id>", library_drafts.draft_detail),
     path("api/library/jobs", views.library_jobs_view),
+    path("api/library/tags", library_tagging.catalogue_view),
+    path("api/library/tags/templates", library_tagging.templates_view),
+    path("api/library/tags/impact", library_tagging.impact_view),
+    path("api/library/tags/migration-report", library_tagging.migration_report_view),
+    path("api/library/tags/undo", library_tagging.undo_view),
+    path("api/library/tags/suggestions", library_tagging.suggestions_view),
+    path("api/library/tags/operations", library_tagging.operations_view),
+    path("api/library/tags/assignments/batch", library_tagging.batch_assignments_view),
+    path("api/library/tags/<uuid:tag_id>/relations", library_tagging.relations_view),
     path("api/library/jobs/cancel", views.library_jobs_cancel),
     path("api/library/assistant/tasks", views.library_assistant_tasks),
     path("api/library/assistant/prepare", views.library_assistant_prepare),
     path("api/library/assistant/complete", views.library_assistant_complete),
     path("api/library/<uuid:publication_id>/solution", library_solutions.solution_view),
     path("api/library/<uuid:publication_id>/question", library_question_editor.question_editor),
-    path("api/library/<uuid:publication_id>/tags", library_tags.tags_view),
+    path("api/library/<uuid:publication_id>/tags", library_tagging.legacy_tags_view),
+    path("api/library/<uuid:publication_id>/tags/assign", library_tagging.assignments_view),
+    path("api/library/tag-suggestions/<uuid:suggestion_id>/resolve", library_tagging.resolve_suggestion_view),
     path("api/library/<uuid:publication_id>/solution-images", library_solutions.image_upload),
     path("api/library/<uuid:publication_id>/solution-images/<uuid:asset_id>", library_solutions.image_view),
     path("api/library/<uuid:publication_id>", views.library_detail),

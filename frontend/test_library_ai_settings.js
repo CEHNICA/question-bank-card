@@ -156,11 +156,8 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(pendingMutation.window.APISettings.close(), true);
   assert.equal(s.get("libraryAITags").checked, false);
   assert.equal(s.get("libraryAIAnswer").checked, false);
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "intake generation is opt-in, separately from the feature");
   assert.equal(s.get("libraryAIAnswerIntake").checked, false);
-  assert.equal(s.get("libraryAITagsIntake").disabled, true);
   assert.equal(s.get("libraryAIAnswerIntake").disabled, true);
-  assert.equal(s.get("libraryAITagsTiming").hidden, true);
   assert.equal(s.get("libraryAIAnswerTiming").hidden, true);
   assert.equal(s.get("libraryAIMode").value, "api");
   assert.equal(s.get("libraryAIAdvanced").open, false, "Saved address/model details stay collapsed while service and active key are visible");
@@ -180,7 +177,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   }
 
   const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
     unchanged.get(id).trigger("focus"); unchanged.get(id).trigger("input"); unchanged.get(id).trigger("change");
     assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} without an effective change stays clean`);
   }
@@ -189,7 +186,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   unchanged.get("libraryAIKey-deepseek").value = " \n "; unchanged.get("libraryAIKey-deepseek").trigger("input");
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "An empty replacement after trimming keeps the stored key");
   unchanged.get("libraryAIKey-deepseek").value = ""; unchanged.get("libraryAIKey-deepseek").trigger("input");
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking"]) {
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking"]) {
     const field = unchanged.get(id), saved = field.checked;
     field.checked = !saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true, `${id} real changes remain protected`);
     field.checked = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} reverted to the snapshot is clean`);
@@ -269,34 +266,21 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   s.get("libraryAITags").checked = true;
   s.get("libraryAITags").trigger("input");
   assert.equal(s.get("libraryAIAnswer").checked, false, "enabling tags must not enable answers");
-  assert.equal(s.get("libraryAITagsIntake").disabled, false);
-  assert.equal(s.get("libraryAITagsTiming").hidden, false);
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "enabling a feature keeps manual timing by default");
   assert.equal(s.get("libraryAIAnswerIntake").disabled, true);
-  s.get("libraryAITagsIntake").checked = true;s.get("libraryAITagsIntake").trigger("input");
   s.get("libraryAITags").checked = false;s.get("libraryAITags").trigger("input");
-  // 功能一关，入库时生成跟着收掉。原来是「保留用户的偏好」—— 但那一行这时候是藏着的，
-  // 用户看不见自己留了开关；等他哪天把功能打开，每道新题入库就悄悄恢复调用一次服务。
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "turning a feature off closes its timing switch too");
-  assert.equal(s.get("libraryAITagsIntake").disabled, true);
-  assert.equal(s.get("libraryAITagsTiming").hidden, true);
   s.get("libraryAITags").checked = true;s.get("libraryAITags").trigger("input");
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "re-opening the feature does not resurrect it");
   s.response((_url, payload) => ({ ...s.current, mode: payload.mode, features: payload.features, on_intake: payload.on_intake }));
   s.get("libraryAISettingsForm").trigger("submit");
   await flush();
   assert.equal(s.calls.at(-1).payload.mode, "api", "only an explicit save changes legacy execution mode");
   assert.deepEqual(s.calls.at(-1).payload.features, { knowledge_tags: true, ai_answer: false });
-// 上一步已经断言过「功能重新打开也不会自己复活入库时生成」，所以这里发出去的
-// 必须是 tags:false —— 旧断言写的是 true，等于把「偷偷恢复调用」当成正确行为。
 assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false });
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "keep" });
   assert.equal(s.calls.at(-1).headers["X-QB-Request"], "1");
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "assistant saves clear local password input without changing the stored key");
   assert.doesNotMatch(s.get("libraryAIResult").textContent, /当前助手/);
   assert.equal(s.document.events.at(-1).type, "library-ai-settings-saved");
-  // 「助手模式不探 API」要看的是这一次点击有没有发出请求，不是面板一共发了几条：
-// 打开「生成知识点标签」现在会自己去问一次目录大小，那条跟 API 探测无关。
+  // API tests only happen after an explicit click; settings never load the old text catalogue.
   const beforeProbe = s.calls.length;
   s.get("libraryAITestConsent").checked = true;
   s.get("libraryAITest").trigger("click");
@@ -718,31 +702,11 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1, "A bounded explicit test never automatically performs another test");
   assert.match(testTimeout.get("libraryAIResult").textContent, /结果.*未确认/); assert.equal(testTimeout.timers.size, 0);
   finishTimedTest({ ...testTimeout.current }); await flush(); assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1);
-  // 服务端在标签功能关着时故意不读目录文件（读一次就会替用户把这个文件建出来），
-  // 那一档回的 0 是「还没读」，不是「目录是空的」。可用户当场打开开关时这一段就显示出来了，
-  // 面板必须自己去问一次，不能让他先看见一句永远不兑现的「正在读取…」或者「目录是空的」。
-  const catalogue = setup();
-  catalogue.response(url => (url.includes("/knowledge")
-    ? { file: "C:/data/knowledge-points.txt", points: [{ point: "集合", chapter: "第一章" }], total: 1, chapters: 1 }
-    : { ...catalogue.current, knowledge: { total: 0, chapters: 0, file: "" } }));
-  await catalogue.window.LibraryAISettings.mount(catalogue.document.createElement("div"));
-  assert.equal(catalogue.get("libraryAIKnowledge").hidden, true, "the catalogue section stays hidden while tagging is off");
-  catalogue.get("libraryAITags").checked = true; catalogue.get("libraryAITags").trigger("input");
-  await flush();
-  assert.equal(catalogue.get("libraryAIKnowledge").hidden, false);
-  assert.equal(catalogue.get("libraryAIKnowledgeCount").textContent, "1 个知识点，分 1 章",
-    "revealing the section must read the real count, not leave a promise that never settles");
-  assert.equal(catalogue.get("libraryAIKnowledgeFile").textContent, "C:/data/knowledge-points.txt",
-    "the note tells the user to open the file below, so the path has to be there");
-
-  const unreadable = setup();
-  unreadable.response(url => (url.includes("/knowledge")
-    ? { file: "C:/data/knowledge-points.txt", points: [], total: 0, chapters: 0 }
-    : { ...unreadable.current, features: { knowledge_tags: true, ai_answer: false },
-        knowledge: { total: 0, chapters: 0, file: "C:/data/knowledge-points.txt" } }));
-  await unreadable.window.LibraryAISettings.mount(unreadable.document.createElement("div"));
-  assert.match(unreadable.get("libraryAIKnowledgeCount").textContent, /读不出/,
-    "a known file that yields no points is reported as unreadable, not as an empty catalogue");
+  const noLegacyCatalogue = setup();
+  noLegacyCatalogue.response(() => ({ ...noLegacyCatalogue.current }));
+  await noLegacyCatalogue.window.LibraryAISettings.mount(noLegacyCatalogue.document.createElement("div"));
+  assert.equal(noLegacyCatalogue.calls.some(call => call.url.includes("/api/settings/knowledge")), false,
+    "API settings no longer load the legacy text catalogue; tags use the formal library catalogue");
 
   console.log("API settings, explicit eye reveal and secret lifecycle: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

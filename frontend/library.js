@@ -8,13 +8,14 @@
   const ui = {
     search: $("searchInput"), source: $("sourceSelect"), types: $("typeFilters"),
     status: $("libraryStatus"), list: $("libraryList"), more: $("moreButton"),
+    inspector: $("questionInspector"), inspectorContent: $("questionInspectorContent"), inspectorToggle: $("inspectorToggle"),
     basketButton: $("basketButton"), basketCount: $("basketCount"),
     sourceDialog: $("sourceDialog"), sourceTitle: $("sourceTitle"), sourcePages: $("sourcePages"), sourceReviewLink: $("sourceReviewLink"),
     sourceQuestion: $("sourceQuestion"), sourceWholePage: $("sourceWholePage"), sourceZoomOut: $("sourceZoomOut"),
     sourceZoomIn: $("sourceZoomIn"), sourceZoom: $("sourceZoom"), sourceFit: $("sourceFit"), sourceRelated: $("sourceRelated"),
     sheet: $("printSheet"), paper: $("printPaper"), printTitle: $("printTitle"), printAnswers: $("printAnswers"),
     printOrigin: $("printOrigin"), printAi: $("printAiAnswers"), printAiBox: $("printAiBox"),
-    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("extraTools")
+    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("tagQuickTools"), batchTools: $("aiBatchTools")
   };
   const params = new URL(window.location.href).searchParams;
   // 筛选栏里题型固定的排列顺序。题库里没有的也要占一个位置（数字 0、置灰），
@@ -28,6 +29,12 @@
     review: ["human", "ai"].includes(params.get("review")) ? params.get("review") : "",
     answer: ["yes", "no"].includes(params.get("answer")) ? params.get("answer") : "",
     tag: params.get("tag") || "",
+    tagAll: params.get("tag_all") || "",
+    tagAny: params.get("tag_any") || "",
+    tagNot: params.get("tag_not") || "",
+    tagMode: ["all", "any", "not"].includes(params.get("tag_mode")) ? params.get("tag_mode") : "all",
+    untaggedKnowledge: params.get("untagged_knowledge") === "true",
+    tagReview: params.get("tag_review") === "true",
     sort: params.get("sort") === "source" ? "source" : "recent",
     view: "all",
     selected: new Set(),
@@ -47,13 +54,18 @@
     ai: { mode: "assistant" },
     poll: null,
     focus: params.get("focus") || "",
+    inspectorId: params.get("focus") || "",
     items: [],
+    retainedTagItems: new Map(),
     total: 0,
     facets: null,
+    tagWork: { untagged_knowledge: 0, pending_review: 0 },
     loading: false,
     token: 0,
     basket: loadBasket()
   };
+  // 筛选刷新会重建这个区域，但展开状态应在当前浏览过程中保留。
+  let aiBatchToolsOpen = false;
 
   function node(tag, className = "", text) {
     const element = document.createElement(tag);
@@ -151,7 +163,9 @@
   function syncUrl() {
     const url = new URL(window.location.href);
     for (const [key, value] of [["q", state.q], ["document", state.document], ["type", state.type], ["review", state.review],
-      ["answer", state.answer], ["tag", state.tag]]) {
+      ["answer", state.answer], ["tag", state.tag], ["tag_all", state.tagAll], ["tag_any", state.tagAny],
+      ["tag_not", state.tagNot], ["tag_mode", state.tagMode === "all" ? "" : state.tagMode],
+      ["untagged_knowledge", state.untaggedKnowledge ? "true" : ""], ["tag_review", state.tagReview ? "true" : ""]]) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
@@ -163,8 +177,10 @@
 
   function libraryQuery(filters = state, { limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset), sort: filters.sort || "recent" });
-    for (const key of ["q", "document", "type", "review", "answer", "tag"]) {
-      const value = key === "q" ? String(filters[key] || "").trim() : filters[key];
+    const aliases = { tag_all: "tagAll", tag_any: "tagAny", tag_not: "tagNot", tag_mode: "tagMode", untagged_knowledge: "untaggedKnowledge", tag_review: "tagReview" };
+    for (const key of ["q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not", "tag_mode", "untagged_knowledge", "tag_review"]) {
+      const raw = filters[key] ?? filters[aliases[key]];
+      const value = key === "q" ? String(raw || "").trim() : raw;
       if (value) query.set(key, value);
     }
     return query;
@@ -178,6 +194,7 @@
   }
 
   async function load({ append = false, quiet = false } = {}) {
+    if (!quiet && !append) { state.retainedTagItems.clear(); closeTagHover(); }
     if (state.view === "selected") {
       window.clearTimeout(state.poll);
       try {
@@ -216,9 +233,11 @@
       if (token !== state.token) return;
       state.total = body.total;
       state.facets = body.facets;
+      state.tagWork = body.tag_work || state.tagWork;
       state.features = body.features || {};
       state.ai = body.ai || { mode: "assistant" };
       state.items = append ? state.items.concat(body.items) : body.items;
+      body.items.forEach(item => state.retainedTagItems.delete(item.id));
       markLibraryResult(query);
       state.items.forEach((item) => state.catalog.set(item.id, item));
       render();
@@ -243,7 +262,7 @@
 
   function scheduleJobRefresh() {
     const pending = visibleItems().flatMap((item) => item.job_details || [])
-      .filter((job) => job.kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer);
+      .filter((job) => job.kind === "tags" ? true : state.features.ai_answer);
     if (pending.length) state.poll = window.setTimeout(() => load({ quiet: true }),
       pending.some((job) => job.executor === "api") ? 4000 : 10000);
   }
@@ -301,7 +320,7 @@
     renderTagFilter(facets.tags || []);
     renderExtraTools();
     // 四个分组全空时，「更多筛选」点开了也是一片空白 —— 那就不出现。
-    $("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox, ui.extraTools]
+    $("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox]
       .every((box) => box.hidden);
     const selectedView = state.view === "selected";
     // 「已选题」视图下所有筛选都要锁住。但上面刚刚标了「0 条」的那些不能一起解锁 ——
@@ -311,6 +330,10 @@
     // 用标记而不是 disabled 反推：从 disabled 反推读的是上一次渲染留下的值，
     // 「已选题」锁过的搜索框和来源就再也解不开了。
     for (const control of controls) control.disabled = selectedView || control.dataset.emptyFacet === "1";
+    for (const control of document.querySelectorAll(".library-extra-tools button")) control.disabled = selectedView;
+    for (const control of document.querySelectorAll("#aiBatchTools button")) {
+      control.disabled = selectedView || control.dataset.disabledInSelectedView === "true";
+    }
   }
 
   // 有没有答案：挑出原卷没给答案的题（补答案或做 AI 参考答案时用）。
@@ -338,34 +361,130 @@
   }
 
   function renderTagFilter(tags) {
-    ui.tagBox.hidden = !(state.features.knowledge_tags || tags.length || state.tag);
+    ui.tagBox.hidden = !(tags.length || state.tagAll || state.tagAny || state.tagNot || state.tag);
     if (ui.tagBox.hidden) return;
-    ui.tagSelect.replaceChildren(new Option(tags.length ? "全部知识点" : "还没有知识点标签", ""));
-    tags.forEach((item) => ui.tagSelect.append(new Option(`${item.tag}（${item.count}）`, item.tag)));
-    if (state.tag && !tags.some((item) => item.tag === state.tag)) ui.tagSelect.append(new Option(state.tag, state.tag));
-    ui.tagSelect.value = state.tag;
+    const selected = String(state.tagMode === "not" ? state.tagNot : state.tagMode === "any" ? state.tagAny : state.tagAll).split(",").filter(Boolean);
+    ui.tagSelect.replaceChildren();
+    tags.forEach((item) => { const option = new Option(`${item.tag}（${item.count}）`, item.id); option.selected = selected.includes(item.id); ui.tagSelect.append(option); });
+    selected.forEach((id) => { if (!Array.from(ui.tagSelect.options).some((option) => option.value === id)) ui.tagSelect.add(new Option("已选标签 · " + id.slice(0, 8), id, true, true)); });
+    if (state.tag) ui.tagSelect.append(new Option(state.tag, state.tag));
+    const mode = $("tagMatchMode"); if (mode) mode.value = state.tagMode;
+    renderSavedTagFilters();
   }
 
-  // 设置里打开了“知识点标签”“AI 参考答案”才出现：一次给所有缺的题排队。
+  function savedTagFilters() {
+    try { const values = JSON.parse(localStorage.getItem("qb-library-saved-tag-filters") || "[]"); return Array.isArray(values) ? values.filter((item) => item && typeof item.name === "string" && item.filter) : []; }
+    catch (_) { return []; }
+  }
+  function renderSavedTagFilters() {
+    const box = $("tagSavedFilterBox"), select = $("tagSavedFilterSelect"); if (!box || !select) return;
+    const saved = savedTagFilters(); box.hidden = ui.tagBox.hidden;
+    const current = select.value; select.replaceChildren(new Option("选择常用筛选", ""));
+    saved.forEach((item, index) => select.add(new Option(item.name, String(index))));
+    if (saved.some((_item, index) => String(index) === current)) select.value = current;
+    $("deleteTagFilter").disabled = !select.value;
+  }
+  function currentTagFilter() {
+    return { mode: state.tagMode, all: state.tagAll, any: state.tagAny, not: state.tagNot, legacy: state.tag };
+  }
+  function applySavedTagFilter(filter) {
+    state.tagMode = filter.mode || "all"; state.tagAll = filter.all || ""; state.tagAny = filter.any || "";
+    state.tagNot = filter.not || ""; state.tag = filter.legacy || "";
+    state.untaggedKnowledge = false; state.tagReview = false; syncUrl(); load();
+  }
+
+  // 普通待处理入口常驻显示；会调用 API 的批量任务放进单独折叠区。
   function renderExtraTools() {
     const box = ui.extraTools;
     box.replaceChildren();
-    const tools = [];
-    if (state.features.knowledge_tags) {
-      const tags = iconButton("button", "button button-quiet button-small", "给还没有知识点的题打标签", "plus");
+    const batchBox = ui.batchTools;
+    batchBox.replaceChildren();
+    const missingCount = Number(state.tagWork?.untagged_knowledge) || 0;
+    const pendingCount = Number(state.tagWork?.pending_review) || 0;
+    const apiReady = state.ai.mode === "api" && state.ai.api_ready === true;
+    const tagsEnabled = state.features.knowledge_tags === true;
+    const batchActions = [];
+    const quickActions = [];
+
+    if (pendingCount || state.tagReview) {
+      const pending = iconButton("button", `button button-quiet button-small library-tool-action${state.tagReview ? " active" : ""}`,
+        `AI 建议待核对 · ${pendingCount} 题`, "search");
+      pending.setAttribute("aria-pressed", String(state.tagReview));
+      pending.addEventListener("click", () => { state.tagReview = !state.tagReview; syncUrl(); load(); });
+      quickActions.push(pending);
+    }
+    if (missingCount || state.untaggedKnowledge) {
+      const untagged = iconButton("button", `button button-quiet button-small library-tool-action${state.untaggedKnowledge ? " active" : ""}`,
+        `未标知识点 · ${missingCount} 题`, "search");
+      untagged.setAttribute("aria-pressed", String(state.untaggedKnowledge));
+      untagged.addEventListener("click", () => { state.untaggedKnowledge = !state.untaggedKnowledge; syncUrl(); load(); });
+      quickActions.push(untagged);
+    }
+
+    if (tagsEnabled) {
+      const tags = iconButton("button", "button button-quiet button-small library-tool-action", `全库缺少知识点 · ${missingCount} 题`, "plus");
+      tags.dataset.disabledInSelectedView = String(!apiReady);
+      tags.title = apiReady ? "给全库缺少知识点的题生成待核对建议；每题一次 API 调用" : "需要先配置并测试 API";
       tags.addEventListener("click", () => queueJobs("tags", { missing: true }));
-      tools.push(tags);
+      batchActions.push(tags);
+      const current = iconButton("button", "button button-quiet button-small library-tool-action", `当前筛选全部 · ${Number(state.total) || 0} 题`, "plus");
+      current.title = "给当前全部筛选结果生成待核对建议，包括尚未加载到页面的题";
+      current.dataset.disabledInSelectedView = String(!apiReady || Number(state.total) === 0);
+      current.addEventListener("click", async () => {
+        const count = Number(state.total) || 0;
+        const filters = currentFilterPayload();
+        if (!count) { toast("当前筛选没有题目。", "error"); return; }
+        const confirmed = await confirmDialog({
+          title: "为当前筛选全部生成标签建议？",
+          text: `本次会固定处理全部 ${count} 道匹配题目，包括尚未加载到页面的题。每题会调用一次已配置的 API 并使用服务额度；结果只进入待核对，不会直接贴到题目。开始后再改变筛选不会扩大本次范围。`,
+          ok: "开始生成建议"
+        });
+        if (confirmed) queueJobs("tags", { scope: "current_filter", filters });
+      });
+      batchActions.push(current);
     }
     if (state.features.ai_answer) {
-      const answers = iconButton("button", "button button-quiet button-small", "给原卷没答案的题做 AI 参考答案", "plus");
+      const answers = iconButton("button", "button button-quiet button-small library-tool-action", "原卷无答案题 · 生成参考答案", "plus");
+      answers.dataset.disabledInSelectedView = String(!apiReady);
+      answers.title = apiReady ? "为原卷没有答案的题生成 AI 参考答案" : "需要先配置并测试 API";
       answers.addEventListener("click", () => queueJobs("answer", { missing: true }));
-      tools.push(answers);
+      batchActions.push(answers);
     }
-    box.hidden = !tools.length;
-    if (tools.length) {
-      if (state.ai.mode === "api" && state.ai.api_ready === true) box.append(node("span", "helper", "由已配置的 API 生成，每道题一次调用，会用到服务额度："), ...tools);
-      else box.append(node("span", "helper", "请到“设置 → API 配置”配置并测试答题 API。"));
+    box.hidden = !quickActions.length;
+    batchBox.hidden = !batchActions.length || state.view === "selected";
+
+    if (quickActions.length) {
+      const quick = node("section", "library-tool-group library-tool-quick");
+      quick.append(node("h3", "library-tool-heading", "快速查看"));
+      const actions = node("div", "library-tool-actions");
+      actions.append(...quickActions);
+      quick.append(actions);
+      box.append(quick);
     }
+    if (batchActions.length) {
+      const batch = node("details", "library-batch-ai");
+      batch.open = aiBatchToolsOpen;
+      const summary = node("summary", "", "AI 批量处理");
+      summary.append(node("span", "library-batch-count", `${batchActions.length} 项`));
+      batch.append(summary);
+      const body = node("div", "library-batch-ai-body");
+      body.append(node("p", "helper", apiReady
+        ? "会按题调用已配置的 API；标签任务只生成待核对建议，不会直接贴标。"
+        : "先到“设置 → API 配置”完成配置和测试，再使用这些批量操作。"));
+      const actions = node("div", "library-tool-actions");
+      actions.append(...batchActions);
+      body.append(actions);
+      batch.append(body);
+      batch.addEventListener("toggle", () => { aiBatchToolsOpen = batch.open; });
+      batchBox.append(batch);
+    }
+  }
+
+  function currentFilterPayload() {
+    return { q: state.q.trim(), document: state.document, type: state.type, review: state.review,
+      answer: state.answer, tag: state.tag, tag_all: state.tagAll, tag_any: state.tagAny, tag_not: state.tagNot,
+      tag_mode: state.tagMode, untagged_knowledge: state.untaggedKnowledge ? "true" : "",
+      tag_review: state.tagReview ? "true" : "" };
   }
 
   async function queueJobs(kind, target) {
@@ -379,7 +498,7 @@
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "没能排上队");
-      const what = kind === "tags" ? "打知识点标签" : "做 AI 参考答案";
+      const what = kind === "tags" ? "生成 AI 标签建议" : "做 AI 参考答案";
       const skipped = body.skipped ? `；${body.skipped} 道已有结果或当前不能生成` : "";
       toast(body.queued ? `已排队${what}：${body.queued} 道题，做好会自动显示${skipped}`
         : `没有需要${what}的题${skipped}`, body.queued ? "success" : "");
@@ -420,7 +539,7 @@
 
   let questionViewer = null;
   function questionViewerNavigation(item) {
-    const selected = state.view === "selected", items = visibleItems().slice();
+    const selected = state.view === "selected", items = (selected ? visibleItems() : state.items).slice();
     const index = items.findIndex(value => value.id === item.id);
     if (index < 0) return null;
     const query = new URLSearchParams(state.resultQuery || libraryQuery().toString());
@@ -532,8 +651,25 @@
   }
 
   function card(item) {
-    const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}`);
+    const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}${state.inspectorId === item.id ? " inspector-active" : ""}`);
     article.id = `q-${item.id}`;
+    article.tabIndex = 0;
+    article.setAttribute("aria-label", `第 ${item.number} 题，点击查看题目详情`);
+    if (state.inspectorId === item.id) article.setAttribute("aria-current", "true");
+    article.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea, summary, details, label, [contenteditable='true']")) return;
+      if (window.getSelection()?.toString()) return;
+      selectInspectorQuestion(item, article);
+    });
+    article.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229 || event.target !== article || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === "Enter") { event.preventDefault(); selectInspectorQuestion(item, article); setInspectorOpen(true); }
+      if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+        const cards = Array.from(document.querySelectorAll(".library-card")), index = cards.indexOf(article);
+        const next = cards[index + (event.key === "ArrowDown" ? 1 : -1)];
+        if (next) { event.preventDefault(); next.focus(); const target = state.catalog.get(next.id.slice(2)); if (target) selectInspectorQuestion(target, next); }
+      }
+    });
     const meta = node("header", "library-card-meta");
     const select = node("input", "library-card-select");
     select.type = "checkbox";
@@ -544,37 +680,37 @@
       article.classList.toggle("is-selected", select.checked);
       syncSelection();
     });
-    meta.append(select);
-    meta.append(
-      node("span", "library-source", item.source_filename),
-      node("span", "", `原卷第 ${item.number} 题`),
-      typeChip(item)
-    );
+    const heading = node("div", "library-card-heading");
+    heading.append(node("h3", "library-number", `第 ${item.number} 题`), typeChip(item));
+    const sourceName = node("span", "library-source", item.source_filename);
+    sourceName.title = item.source_filename || "试卷";
+    const provenance = node("div", "library-card-provenance");
+    meta.append(select, heading, sourceName, provenance);
     // 1.12.6：同一份卷被录过两次时，两份来源在题库里同名，只看文件名分不出
     // 哪份是哪份。补上录入时间，撤回一批时才不会撤错那一份。
     if (duplicateSourceNames().has(item.source_filename)) {
       const when = node("span", "library-note quiet", `录于 ${shortDate(sourceFirstSeen(item.document_id, item.published_at))}`);
       when.title = `这份来源的入库时间：${fullDate(sourceFirstSeen(item.document_id, item.published_at))}`;
-      meta.append(when);
+      provenance.append(when);
     }
-    if (item.content?.body_mode === "source_image") meta.append(node("span", "library-note", "原图题"));
+    if (item.content?.body_mode === "source_image") provenance.append(node("span", "library-note", "原图题"));
     if (item.origin) {
       const origin = node("span", "library-origin", `题源：${item.origin}`);
       origin.title = "题源：题干前印的出处。组卷打印时默认不印";
-      meta.append(origin);
+      provenance.append(origin);
     }
-    if (state.features.subquestions && item.subquestions >= 2) meta.append(node("span", "library-note", `含 ${item.subquestions} 小问`));
+    if (state.features.subquestions && item.subquestions >= 2) provenance.append(node("span", "library-note", `含 ${item.subquestions} 小问`));
     if (solutions.hasContent(item.solution)) {
-      meta.append(node("span", "library-note quiet", "已保存答案解析"));
+      provenance.append(node("span", "library-note quiet", "已保存答案解析"));
     } else if (!item.has_answer) {
       const missing = node("span", "library-note quiet", item.ai_answer && state.features.ai_answer ? "原卷无答案 · 有 AI 参考" : "无答案");
       missing.title = "原卷没有给答案";
-      meta.append(missing);
+      provenance.append(missing);
     }
     if (item.review?.source === "ai") {
       const badge = node("span", "library-review ai", `${item.review.agent || "AI"} 审核`);
       badge.title = "这道题是 AI 助手对照原卷后审核入库的，还没人工核对。回到题卡确认后会变成人工核对。";
-      meta.append(badge);
+      provenance.append(badge);
     }
     const paper = node("div", "paper");
     const summary = workspace.summaryStem(item.content?.stem, QB);
@@ -596,23 +732,24 @@
       if (notes.length) {
         const hintOff = hintHidden("preview-note");
         paper.append(node("p", "library-preview-note",
-          notes.join(" · ") + (hintOff ? "" : " · 点全屏看题查看")));
+          notes.join(" · ") + (hintOff ? "" : " · 预览")));
       }
     }
     const reveal = answerReveal(item);
     if (reveal) paper.append(reveal);
-    const extras = extrasNode(item);
-    if (extras) paper.append(extras);
+    const body = node("div", "library-card-body");
+    body.append(paper);
     const actions = node("footer", "library-card-actions");
     const origin = iconButton("button", "button button-quiet button-small", "查看出处", "source");
-    origin.addEventListener("click", () => openSource(item));
+    origin.addEventListener("click", () => { selectInspectorQuestion(item, article); openSource(item); });
     const full = node("button", "button button-small library-full-button", "全屏看题");
     full.type = "button";
-    full.addEventListener("click", () => openQuestionViewer(item, full));
+    full.addEventListener("click", () => { selectInspectorQuestion(item, article); openQuestionViewer(item, full); });
     const expand = node("button", "button button-quiet button-small", expanded ? "收起题面" : "展开题面");
     expand.type = "button";
     expand.setAttribute("aria-expanded", String(expanded));
     expand.addEventListener("click", () => {
+      selectInspectorQuestion(item, article);
       if (expanded) state.expanded.delete(item.id); else state.expanded.add(item.id);
       const replacement = card(item);
       article.replaceWith(replacement);
@@ -638,17 +775,158 @@
       render();
     });
     const editAnswer = iconButton("button", "button button-quiet button-small", "编辑答案解析", "plus");
-    editAnswer.addEventListener("click", () => { closeMenu(); openAnswerEditor([item], { scope: "library" }); });
+    editAnswer.addEventListener("click", () => { selectInspectorQuestion(item, article); closeMenu(); openAnswerEditor([item], { scope: "library" }); });
     const editQuestion = node("button", "button button-quiet button-small", "修改题目");
-    editQuestion.type = "button"; editQuestion.addEventListener("click", () => { closeMenu(); openQuestionEditor(item); });
+    editQuestion.type = "button"; editQuestion.addEventListener("click", () => { selectInspectorQuestion(item, article); closeMenu(); openQuestionEditor(item); });
     menu.append(editQuestion, editAnswer, review, withdraw, ...jobButtons(item));
     more.append(menu);
     // 原生 details 各开各的。开一个就把别的收起来，页面上不会同时挂好几个小窗口。
     more.addEventListener("toggle", () => { if (more.open) closeOtherCardMenus(more); });
-    actions.append(origin, full, expand, more, node("span", "actions-spacer"), basket);
-    article.append(meta, paper, actions);
+    const detailsButton = node("button", "button button-small library-card-details", "标签与详情"); detailsButton.type = "button";
+    detailsButton.addEventListener("click", () => { selectInspectorQuestion(item, article); setInspectorOpen(true); });
+    actions.append(origin, full, expand, detailsButton, more, node("span", "actions-spacer"), basket);
+    const context = cardTagContext(item);
+    if (context.childNodes.length) body.append(context);
+    article.append(meta, body, actions);
     if (state.focus === item.id) article.classList.add("focused");
     return article;
+  }
+
+  function selectInspectorQuestion(item, article = null) {
+    const previous = state.inspectorId;
+    if (previous && ui.inspectorContent) inspectorScrolls.set(previous, ui.inspectorContent.scrollTop);
+    state.inspectorId = item?.id || "";
+    if (previous && previous !== state.inspectorId) {
+      const oldCard = document.getElementById(`q-${previous}`);
+      oldCard?.classList.remove("inspector-active");
+      oldCard?.removeAttribute("aria-current");
+    }
+    const target = article || document.getElementById(`q-${state.inspectorId}`);
+    target?.classList.add("inspector-active");
+    target?.setAttribute("aria-current", "true");
+    renderInspector(item);
+    if (!window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(true);
+    else ui.inspectorToggle?.setAttribute("aria-expanded", String(document.body.classList.contains("library-inspector-open")));
+  }
+
+  function locateInspectorQuestion(item) {
+    const target = document.getElementById(`q-${item.id}`);
+    if (!target) { toast("这道题当前不在列表中，请先清除筛选。", "error"); return; }
+    if (window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(false);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.remove("inspector-focus-pulse");
+    void target.offsetWidth;
+    target.classList.add("inspector-focus-pulse");
+    window.setTimeout(() => target.classList.remove("inspector-focus-pulse"), 1900);
+  }
+
+  function captureLibraryViewport() {
+    const scroller = document.scrollingElement || document.documentElement;
+    const inView = element => {
+      const rect = element?.getBoundingClientRect(); return rect && rect.bottom > 0 && rect.top < window.innerHeight;
+    };
+    // Hover correction can belong to a different card than the inspector. An
+    // offscreen inspector card must never pull the reader back to that card.
+    const hovered = document.getElementById(`q-${tagHover?.publicationId || ""}`), inspected = document.getElementById(`q-${state.inspectorId}`);
+    const anchor = inView(hovered) ? hovered : inView(inspected) ? inspected
+      : Array.from(ui.list.querySelectorAll(".library-card")).find(inView);
+    return { scrollTop: scroller.scrollTop, scrollLeft: scroller.scrollLeft,
+      anchorId: anchor?.id || "", anchorTop: anchor?.getBoundingClientRect().top };
+  }
+
+  function restoreLibraryViewport(position) {
+    if (!position) return;
+    requestAnimationFrame(() => {
+      const scroller = document.scrollingElement || document.documentElement;
+      const anchor = position.anchorId ? document.getElementById(position.anchorId) : null;
+      if (anchor && Number.isFinite(position.anchorTop)) {
+        scroller.scrollTop += anchor.getBoundingClientRect().top - position.anchorTop;
+      } else {
+        scroller.scrollTop = position.scrollTop;
+        scroller.scrollLeft = position.scrollLeft;
+      }
+    });
+  }
+
+  function inspectorFact(facts, label, value) {
+    if (value === undefined || value === null || value === "") return;
+    const row = node("div", "question-inspector-fact");
+    row.append(node("dt", "", label), node("dd", "", value));
+    facts.append(row);
+  }
+
+  function renderInspector(item) {
+    if (!ui.inspectorContent) return;
+    const renderKey = item ? JSON.stringify([item, state.features]) : "empty";
+    if (renderKey === inspectorRenderedKey) return;
+    inspectorRenderedKey = renderKey;
+    const content = ui.inspectorContent;
+    if (item && content.dataset.questionId === item.id) inspectorScrolls.set(item.id, content.scrollTop);
+    content.dataset.questionId = item?.id || "";
+    content.replaceChildren();
+    if (!item) {
+      const empty = node("div", "question-inspector-empty");
+      empty.append(node("strong", "", "选择一道题"), node("p", "helper", "点击中间的题卡，这里会显示题目来源、标签和核对信息。"));
+      content.append(empty);
+      if (ui.inspectorToggle) ui.inspectorToggle.disabled = true;
+      return;
+    }
+    if (ui.inspectorToggle) ui.inspectorToggle.disabled = false;
+    const heading = node("div", "question-inspector-title");
+    heading.append(node("h3", "", `第 ${item.number} 题`), node("span", "library-type", QB.TYPE_NAMES[item.question_type] || item.question_type || "题目"));
+    content.append(heading, node("p", "question-inspector-source", item.source_filename || "试卷"));
+    const targetHint = node("div", "question-inspector-target");
+    const currentLabel = node("span", "", "当前选中");
+    currentLabel.title = "右侧信息对应绿色高亮题卡";
+    targetHint.append(currentLabel);
+    const locate = node("button", "button button-small question-inspector-locate", "定位题卡");
+    locate.type = "button"; locate.addEventListener("click", () => locateInspectorQuestion(item));
+    targetHint.append(locate); content.append(targetHint);
+
+    const extras = extrasNode(item);
+    if (extras) {
+      const section = node("section", "question-inspector-tags");
+      const sectionTitle = node("div", "question-inspector-section-title");
+      sectionTitle.append(node("h4", "", "标签"));
+      const history = extras.querySelector(".library-tag-history-link");
+      if (history) sectionTitle.append(history);
+      section.append(sectionTitle, extras);
+      content.append(section);
+    }
+
+    const info = node("details", "question-inspector-info");
+    info.append(node("summary", "", "题目信息"));
+    const facts = node("dl", "question-inspector-facts");
+    inspectorFact(facts, "来源", item.source_filename || "试卷");
+    inspectorFact(facts, "核对", item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对`
+      : item.review?.source === "human" ? "已人工核对" : "已入正式题库");
+    inspectorFact(facts, "答案解析", solutions.hasContent(item.solution) ? "已保存解析"
+      : item.has_answer ? "原卷提供答案" : item.ai_answer && state.features.ai_answer ? "有 AI 参考答案 · 未核对" : "暂无答案解析");
+    if (item.origin) inspectorFact(facts, "题源", item.origin);
+    if (state.features.subquestions && item.subquestions >= 2) inspectorFact(facts, "小问", `${item.subquestions} 问`);
+    info.append(facts);
+
+    const preview = node("div", "paper question-inspector-paper");
+    QB.renderQuestion(preview, item.content || {}, { showNumber: false, showAnswer: "none" });
+    const previewDetails = node("details", "question-inspector-preview");
+    previewDetails.append(node("summary", "", "查看当前题面"), preview);
+    content.append(previewDetails, info);
+    content.scrollTop = inspectorScrolls.get(item.id) || 0;
+    ui.inspectorToggle?.setAttribute("aria-expanded", String(window.matchMedia("(max-width: 979px)").matches
+      ? document.body.classList.contains("library-inspector-open") : !document.body.classList.contains("library-inspector-collapsed")));
+  }
+
+  function setInspectorOpen(open) {
+    const next = Boolean(open);
+    const mobile = window.matchMedia("(max-width: 979px)").matches;
+    if (next) {
+      if (document.body.classList.contains("rail-open")) setRail(false);
+      if (document.body.classList.contains("library-basket-open")) setBasketPanel(false);
+    }
+    document.body.classList.toggle("library-inspector-open", mobile && next);
+    if (!mobile) document.body.classList.toggle("library-inspector-collapsed", !next);
+    const scrim = $("inspectorScrim"); if (scrim) scrim.hidden = !mobile || !next;
+    ui.inspectorToggle?.setAttribute("aria-expanded", String(next));
   }
 
   function draftLink(item, extra = "") {
@@ -708,200 +986,1126 @@
     return box;
   }
 
-  // 改知识点标签。标签打错以前唯一的出路是撤回重录；标签只是筛选用的分类，
-  // 不是题面的一部分，所以这里只写 extras，不新建版本、不重新审核。
-  let tagDialog = null, tagTarget = null, tagCatalogue = [], tagPicked = [];
-
-  function tagEndpoint(item) { return `/api/library/${encodeURIComponent(item.id)}/tags`; }
-
+  // Stable tag identities are managed separately from immutable question text.
+  let tagDialog = null, tagManagerDialog = null, tagCatalogueEditorDialog = null, tagTemplateDialog = null, tagCatalogue = { revision: 1, groups: [], tags: [] };
+  let inspectorRenderedKey = null;
+  const inspectorScrolls = new Map(), inlineTagStates = new Map(), inlineTagLocks = new Set(), suggestionLocks = new Set(), suggestionAttempts = new Map();
+  let tagHover = null, tagHoverPanel = null, tagHoverOpenTimer = null, tagHoverCloseTimer = null, tagHoverSequence = 0, tagHoverSuppressFocus = false;
+  const suggestionDraftKey = "qb-library-tag-suggestion-drafts";
+  let suggestionDrafts = {};
+  try { suggestionDrafts = JSON.parse(sessionStorage.getItem(suggestionDraftKey) || "{}"); } catch (_) {}
+  try { Object.entries(JSON.parse(sessionStorage.getItem(suggestionDraftKey + ":requests") || "{}")).forEach(([id, attempt]) => suggestionAttempts.set(id, attempt)); } catch (_) {}
+  function suggestionDraft(item, suggestion) { return suggestionDrafts[item.id + ":" + suggestion.id] ||= {}; }
+  function saveSuggestionDrafts() { try { sessionStorage.setItem(suggestionDraftKey, JSON.stringify(suggestionDrafts)); sessionStorage.setItem(suggestionDraftKey + ":requests", JSON.stringify(Object.fromEntries(suggestionAttempts))); } catch (_) {} }
+  let tagManagerGroup = "all", tagManagerQuery = "";
+  let tagTargetIds = [], tagRevisions = {}, tagMemberships = {}, tagActiveGroup = "all", tagPickerView = "all", tagUndoId = "", tagOperationHistory = [];
+  const catalogueAttempts = new Map();
+  let catalogueUnknown = null;
+  let pickerAttempt = null;
+  const tagRequestId = () => crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16);
+  });
+  async function tagRequest(url, options) {
+    options = options || {};
+    const response = await fetch(url, { cache: "no-store", ...options, headers: {
+      "X-QB-Request": "1", ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {})
+    } });
+    const body = await response.json(); if (!response.ok) {
+      const error = new Error(body.error || "标签操作没有完成");
+      error.status = response.status; error.stale = body.stale === true; throw error;
+    }
+    return body;
+  }
+  async function loadTagCatalogue() { tagCatalogue = await tagRequest("/api/library/tags"); return tagCatalogue; }
+  function hierarchyTag(id) { return (tagCatalogue.tags || []).find(tag => tag.id === id); }
+  function tagHierarchyRows(id, direction) {
+    const tag = hierarchyTag(id);
+    const ids = tag?.[direction === "up" ? "parent_ids" : "child_ids"] || [];
+    return ids.map(hierarchyTag).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  }
+  function tagAncestorPaths(id, limit = 6, rows = tagCatalogue.tags || []) {
+    const byId = new Map(rows.map(tag => [tag.id, tag]));
+    const paths = [], stack = [{ id, path: [] }];
+    while (stack.length && paths.length < limit) {
+      const entry = stack.pop(), tag = byId.get(entry.id);
+      if (!tag || entry.path.some(value => value.id === tag.id)) continue;
+      const path = [tag, ...entry.path], parents = (tag.parent_ids || []).map(parent => byId.get(parent)).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+      if (!parents.length) paths.push(path);
+      else parents.slice().reverse().forEach(parent => stack.push({ id: parent.id, path }));
+    }
+    return { paths, hasMore: stack.length > 0 };
+  }
+  function cancelTagHoverClose() { window.clearTimeout(tagHoverCloseTimer); }
+  function scheduleTagHoverClose() {
+    cancelTagHoverClose();
+    if (tagHover?.pinned || inlineTagLocks.has(tagHover?.publicationId)) return;
+    tagHoverCloseTimer = window.setTimeout(() => {
+      if (tagHoverPanel?.matches(":hover") || tagHoverPanel?.contains(document.activeElement) || tagHover?.anchor?.matches(":hover") || document.activeElement === tagHover?.anchor) return;
+      closeTagHover();
+    }, 320);
+  }
+  function closeTagHover({ restoreFocus = false } = {}) {
+    window.clearTimeout(tagHoverOpenTimer); cancelTagHoverClose(); ++tagHoverSequence;
+    const anchor = tagHover?.anchor; tagHover = null;
+    if (tagHoverPanel) {
+      try { if (tagHoverPanel.matches(":popover-open")) tagHoverPanel.hidePopover(); } catch (_) {}
+      tagHoverPanel.hidden = true;
+    }
+    document.querySelectorAll('[data-tag-hover][aria-expanded="true"]').forEach(chip => chip.setAttribute("aria-expanded", "false"));
+    if (restoreFocus && anchor?.isConnected) {
+      tagHoverSuppressFocus = true; anchor.focus({ preventScroll: true }); queueMicrotask(() => { tagHoverSuppressFocus = false; });
+    }
+  }
+  function ensureTagHoverPanel() {
+    if (tagHoverPanel) return tagHoverPanel;
+    const panel = node("div", "library-tag-hover"); panel.id = "libraryTagHover"; panel.hidden = true;
+    panel.setAttribute("role", "dialog"); panel.setAttribute("aria-modal", "false"); panel.setAttribute("aria-label", "浏览层级并校正当前题标签");
+    if (typeof panel.showPopover === "function") panel.setAttribute("popover", "manual");
+    panel.addEventListener("pointerenter", cancelTagHoverClose); panel.addEventListener("pointerleave", scheduleTagHoverClose);
+    panel.addEventListener("focusin", cancelTagHoverClose); panel.addEventListener("focusout", scheduleTagHoverClose);
+    document.body.append(panel); tagHoverPanel = panel; return panel;
+  }
+  function positionTagHover() {
+    if (!tagHover || !tagHoverPanel || tagHoverPanel.hidden) return;
+    let anchor = tagHover.anchor;
+    if (!anchor?.isConnected) {
+      anchor = Array.from(document.querySelectorAll("[data-tag-hover]")).find(chip => chip.dataset.publicationId === tagHover.publicationId && chip.dataset.tagId === tagHover.sourceTagId);
+      if (anchor) tagHover.anchor = anchor;
+    }
+    const rect = anchor?.getBoundingClientRect() || tagHover.rect;
+    if (!rect) return;
+    const width = Math.min(400, window.innerWidth - 24), height = Math.min(tagHoverPanel.offsetHeight || 400, window.innerHeight - 24);
+    let left = rect.left, top = rect.bottom + 8;
+    if (left + width > window.innerWidth - 12) left = rect.right - width;
+    if (top + height > window.innerHeight - 12) top = Math.max(12, rect.top - height - 8);
+    tagHoverPanel.style.width = `${width}px`;
+    tagHoverPanel.style.left = `${Math.max(12, Math.min(left, window.innerWidth - width - 12))}px`;
+    tagHoverPanel.style.top = `${Math.max(12, Math.min(top, window.innerHeight - height - 12))}px`;
+  }
+  function tagHoverChip(item, link, className) {
+    const tag = link.tag, chip = node("button", className, tag.name + (tag.kind === "method" && link.scope?.subquestions ? " · 第" + link.scope.subquestions.join("、") + "问" : ""));
+    chip.type = "button"; chip.dataset.tagHover = "true"; chip.dataset.publicationId = item.id; chip.dataset.tagId = tag.id;
+    chip.setAttribute("aria-haspopup", "dialog"); chip.setAttribute("aria-controls", "libraryTagHover"); chip.setAttribute("aria-expanded", "false");
+    chip.title = "浏览上级、下级；点击名称校正当前题标签";
+    chip.addEventListener("pointerenter", event => {
+      if (event.pointerType === "touch") return;
+      cancelTagHoverClose(); window.clearTimeout(tagHoverOpenTimer);
+      tagHoverOpenTimer = window.setTimeout(() => openTagHover(item.id, link, chip), 220);
+    });
+    chip.addEventListener("pointerleave", () => { window.clearTimeout(tagHoverOpenTimer); scheduleTagHoverClose(); });
+    chip.addEventListener("focus", () => { if (tagHoverSuppressFocus) return; cancelTagHoverClose(); void openTagHover(item.id, link, chip); });
+    chip.addEventListener("blur", scheduleTagHoverClose);
+    chip.addEventListener("click", event => { event.stopPropagation(); window.clearTimeout(tagHoverOpenTimer); void openTagHover(item.id, link, chip, true); });
+    return chip;
+  }
+  async function openTagHover(publicationId, link, anchor, pinned = false) {
+    cancelTagHoverClose();
+    if (tagHover?.publicationId === publicationId && tagHover.sourceTagId === link.tag.id) {
+      tagHover.anchor = anchor; tagHover.pinned ||= pinned; anchor.setAttribute("aria-expanded", "true"); positionTagHover(); return;
+    }
+    if (tagHover && inlineTagLocks.has(tagHover.publicationId)) return;
+    closeTagHover();
+    const panel = ensureTagHoverPanel(), sequence = ++tagHoverSequence;
+    tagHover = { publicationId, sourceTagId: link.tag.id, viewTagId: link.tag.id, link, anchor, rect: anchor.getBoundingClientRect(), pinned, loading: true, up: new Set(), down: new Set() };
+    anchor.setAttribute("aria-expanded", "true"); panel.hidden = false;
+    renderTagHover();
+    try { if (typeof panel.showPopover === "function" && !panel.matches(":popover-open")) panel.showPopover(); } catch (_) {}
+    positionTagHover();
+    try {
+      const relations = await tagRequest("/api/library/tags/" + encodeURIComponent(link.tag.id) + "/relations");
+      if (tagCatalogue.revision !== relations.revision || !hierarchyTag(link.tag.id)) await loadTagCatalogue();
+      if (sequence !== tagHoverSequence || !tagHover) return;
+      tagHover.relations = relations; tagHover.loading = false; renderTagHover();
+    } catch (error) {
+      if (sequence !== tagHoverSequence || !tagHover) return;
+      tagHover.loading = false; tagHover.error = error.message; renderTagHover();
+    }
+  }
+  function renderTagHover() {
+    if (!tagHover || !tagHoverPanel) return;
+    const hover = tagHover, item = state.catalog.get(hover.publicationId), current = hierarchyTag(hover.sourceTagId) || hover.link.tag;
+    const link = item?.tag_assignments?.find(value => value.tag.id === hover.sourceTagId) || hover.link;
+    const busy = inlineTagLocks.has(hover.publicationId), attempt = inlineTagStates.get(hover.publicationId)?.attempt;
+    const scrollTop = tagHoverPanel.scrollTop; tagHoverPanel.replaceChildren();
+    const head = node("header", "library-tag-hover-head"), close = node("button", "library-tag-hover-close", "×");
+    close.type = "button"; close.setAttribute("aria-label", "关闭标签层级"); close.addEventListener("click", () => closeTagHover({ restoreFocus: true }));
+    head.append(node("strong", "", `第 ${item?.number || ""} 题 · ${current.name}`), close); tagHoverPanel.append(head);
+    if (item?.source_filename) tagHoverPanel.append(node("p", "library-tag-hover-source", item.source_filename));
+    tagHoverPanel.append(node("small", "library-tag-hover-scope", (current.kind === "method" ? "解题方法" : current.kind === "knowledge" ? "知识点" : "自定义标签")
+      + (link.scope?.subquestions ? ` · 第 ${link.scope.subquestions.join("、")} 问` : " · 整题")));
+    tagHoverPanel.append(node("p", "library-tag-hover-help", "箭头展开浏览；点击名称替换本题这一条标签。"));
+    if (hover.loading) { tagHoverPanel.append(node("p", "helper", "正在读取标签层级…")); positionTagHover(); return; }
+    if (hover.error) {
+      tagHoverPanel.append(node("p", "library-tag-hover-status", hover.error));
+      const retry = node("button", "button button-small", "重试读取"); retry.type = "button";
+      retry.addEventListener("click", () => { const saved = { ...hover }; closeTagHover(); void openTagHover(saved.publicationId, saved.link, saved.anchor, saved.pinned); }); tagHoverPanel.append(retry); return;
+    }
+    const paths = node("div", "library-tag-hover-paths"), ancestors = tagAncestorPaths(current.id);
+    for (const path of ancestors.paths) {
+      const row = node("div", "library-tag-hover-path");
+      path.forEach((tag, index) => {
+        if (index) row.append(node("span", "", "›"));
+        const button = node("button", "library-tag-hover-name" + (tag.id === current.id ? " current" : ""), tag.name);
+        button.type = "button"; button.disabled = busy || Boolean(attempt) || tag.id === current.id || !tag.active;
+        button.addEventListener("click", () => replaceInlineTag(hover.publicationId, hover.sourceTagId, tag)); row.append(button);
+      }); paths.append(row);
+    }
+    if (ancestors.hasMore) paths.append(node("small", "", "还有其他归属路径，可在上级中逐层展开。")); tagHoverPanel.append(paths);
+    const browseBranch = (id, direction, trail = []) => {
+      const list = node("div", "library-tag-hover-branch"), expanded = direction === "up" ? hover.up : hover.down;
+      for (const tag of tagHierarchyRows(id, direction)) {
+        if (trail.includes(tag.id)) continue;
+        const key = [...trail, tag.id].join("/"), children = tagHierarchyRows(tag.id, direction), open = expanded.has(key);
+        const row = node("div", "library-tag-hover-row"), arrow = node("button", "library-tag-hover-arrow", children.length ? (open ? "▾" : "▸") : "·");
+        arrow.type = "button"; arrow.disabled = !children.length; arrow.setAttribute("aria-label", `${open ? "收起" : "展开"}${tag.name}的${direction === "up" ? "上级" : "下级"}`); arrow.setAttribute("aria-expanded", String(open));
+        arrow.addEventListener("click", () => { if (open) expanded.delete(key); else expanded.add(key); renderTagHover(); });
+        const name = node("button", "library-tag-hover-name", tag.name); name.type = "button"; name.dataset.replaceTagId = tag.id;
+        name.disabled = busy || Boolean(attempt) || !tag.active; name.title = `将本题的「${current.name}」替换为「${tag.name}」`;
+        name.addEventListener("click", () => replaceInlineTag(hover.publicationId, hover.sourceTagId, tag));
+        row.append(arrow, name, node("small", "library-tag-hover-count", `${Number(tag.subtree_count ?? tag.count) || 0} 题`)); list.append(row);
+        if (open) list.append(browseBranch(tag.id, direction, [...trail, tag.id]));
+      }
+      return list;
+    };
+    for (const [direction, title] of [["up", "上级 · 可泛化"], ["down", "下级 · 可细化"]]) {
+      const section = node("section", "library-tag-hover-section"); section.append(node("h4", "", title));
+      const branch = browseBranch(current.id, direction, [current.id]);
+      section.append(branch.childNodes.length ? branch : node("p", "helper", direction === "up" ? "已是最上级" : "暂时没有下级")); tagHoverPanel.append(section);
+    }
+    const methods = (current.related_method_ids || []).map(hierarchyTag).filter(tag => tag?.active);
+    if (current.kind === "knowledge" && methods.length) {
+      const section = node("section", "library-tag-hover-section"); section.append(node("h4", "", "相关方法 · 添加到本题"));
+      for (const method of methods) {
+        const button = node("button", "button button-small library-tag-hover-method", `＋ ${method.name}`); button.type = "button"; button.disabled = busy || Boolean(attempt);
+        button.addEventListener("click", () => { closeTagHover(); void openTagEditor(state.catalog.get(hover.publicationId), { query: method.name }); }); section.append(button);
+      } tagHoverPanel.append(section);
+    }
+    if (link.rationale) tagHoverPanel.append(node("p", "library-tag-hover-rationale", link.rationale));
+    const saved = inlineTagStates.get(hover.publicationId), footer = node("footer", "library-tag-hover-footer");
+    if (saved?.message) footer.append(node("span", "library-tag-hover-status", saved.message));
+    if (saved?.operationId) { const undo = node("button", "button button-small", "撤销"); undo.type = "button"; undo.disabled = busy; undo.addEventListener("click", () => undoInlineTag(item)); footer.append(undo); }
+    if (attempt) { const retry = node("button", "button button-small", "核实上次操作"); retry.type = "button"; retry.disabled = busy; retry.addEventListener("click", () => submitInlineTagAttempt(item, attempt)); footer.append(retry); }
+    const find = node("button", "button button-quiet button-small", "查找同标签题目"); find.type = "button"; find.disabled = busy || Boolean(attempt); find.addEventListener("click", () => { closeTagHover(); browseTag(current); }); footer.append(find);
+    tagHoverPanel.append(footer); tagHoverPanel.scrollTop = scrollTop; positionTagHover();
+  }
+  async function replaceInlineTag(publicationId, fromTagId, toTag) {
+    const item = state.catalog.get(publicationId); if (!item || fromTagId === toTag.id || inlineTagLocks.has(publicationId)) return false;
+    const prior = inlineTagStates.get(publicationId); if (prior?.attempt) { toast("先核实上次标签操作，再继续替换。", "error"); return false; }
+    const fromTag = item.tag_assignments?.find(link => link.tag.id === fromTagId)?.tag;
+    if (!fromTag || fromTag.kind !== toTag.kind) { toast("只能校正同一类型的标签；相关方法请使用添加入口。", "error"); return false; }
+    if (tagHover) tagHover.pinned = true;
+    return submitInlineTagAttempt(item, { tagId: fromTagId, tag: fromTag, message: `已将「${fromTag.name}」改为「${toTag.name}」`, payload: {
+      publication_ids: [publicationId], replace: { from_tag_id: fromTagId, to_tag_id: toTag.id },
+      expected_revisions: { [publicationId]: item.tag_revision }, expected_catalogue_revision: tagCatalogue.revision, request_id: tagRequestId() } });
+  }
+  document.addEventListener("pointerdown", event => {
+    if (!tagHover || tagHoverPanel?.contains(event.target) || event.target.closest("[data-tag-hover]")) return;
+    closeTagHover();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || event.isComposing || !tagHover) return;
+    event.preventDefault(); event.stopImmediatePropagation(); closeTagHover({ restoreFocus: true });
+  }, true);
+  window.addEventListener("resize", positionTagHover);
+  window.addEventListener("scroll", positionTagHover, { passive: true, capture: true });
+  function tagTarget(item) { return item ? [item.id] : Array.from(state.selected); }
   function ensureTagDialog() {
     if (tagDialog) return tagDialog;
-    tagDialog = node("dialog", "tag-editor-dialog");
-    tagDialog.id = "tagEditorDialog";
-    tagDialog.setAttribute("aria-labelledby", "tagEditorTitle");
-    const bar = node("header", "tag-editor-bar");
-    const heading = node("div", "tag-editor-heading");
-    const title = node("h3", "", "知识点标签"); title.id = "tagEditorTitle";
-    const place = node("p", "tag-editor-place");
-    heading.append(title, place);
-    const close = node("button", "button button-quiet", "关闭");
-    close.type = "button";
-    close.addEventListener("click", () => tagDialog.close());
-    bar.append(heading, node("span", "tag-editor-spacer"), close);
-    const body = node("div", "tag-editor-body");
-    const search = node("input", "tag-editor-search");
-    search.type = "search";
-    search.placeholder = "搜知识点，例如 函数";
-    search.setAttribute("aria-label", "在知识点目录里搜索");
-    search.id = "tagEditorSearch";
-    search.addEventListener("input", renderTagList);
-    const picked = node("div", "tag-editor-picked");
-    picked.id = "tagEditorPicked";
-    const list = node("div", "tag-editor-list");
-    list.id = "tagEditorList";
-    list.setAttribute("aria-label", "知识点目录");
-    body.append(search, picked, list);
-    const note = node("p", "helper tag-editor-note", "标签只用于筛选和搜索，不改动题面。清空之后这道题可以重新自动生成标签。");
-    const foot = node("footer", "tag-editor-foot");
-    const clear = node("button", "button button-quiet", "清除全部标签");
-    clear.type = "button";
-    clear.id = "tagEditorClear";
-    clear.addEventListener("click", () => { tagPicked = []; renderTagPicked(); renderTagList(); });
-    const cancel = node("button", "button", "取消");
-    cancel.type = "button";
-    cancel.id = "tagEditorCancel";
-    cancel.addEventListener("click", () => tagDialog.close());
-    const save = node("button", "button button-primary", "保存标签");
-    save.type = "button";
-    save.id = "tagEditorSave";
-    save.addEventListener("click", saveTags);
-    foot.append(clear, node("span", "tag-editor-spacer"), cancel, save);
-    tagDialog.append(bar, body, note, foot);
-    document.body.append(tagDialog);
-    return tagDialog;
-  }
-
-  function renderTagPicked() {
-    const box = $("tagEditorPicked");
-    if (!box) return;
-    const limit = tagDialog?.dataset.max || "3";
-    box.replaceChildren(node("span", "tag-editor-picked-label", `已选 ${tagPicked.length} / ${limit}`));
-    // 按存下来的顺序显示，不是按目录顺序：自动打的标签是有先后的，
-    // 打开对话框又原样关掉，不该把顺序改掉。
-    tagPicked.forEach((point) => {
-      const chip = node("button", "library-tag active", point);
-      chip.type = "button";
-      chip.title = "去掉这个知识点";
-      chip.addEventListener("click", () => { tagPicked = tagPicked.filter((value) => value !== point); renderTagPicked(); renderTagList(); });
-      box.append(chip);
+    tagDialog = node("dialog", "tag-picker-dialog"); tagDialog.id = "tagPickerDialog";
+    const header = node("header", "tag-picker-head"), title = node("div");
+    const heading = node("h2", "", "添加标签"); heading.id = "tagPickerTitle";
+    title.append(heading, node("p", "tag-picker-subtitle", "点击标签立即保存；再次点击移除。"));
+    const close = node("button", "button", "关闭"); close.type = "button"; close.addEventListener("click", function() { tagDialog.close(); });
+    header.append(title, close);
+    const tools = node("div", "tag-picker-tools");
+    [["tagPickerCreateTag", "新建标签", () => openTagCatalogueEditor("tag", null, true)]].forEach(function(entry) {
+      const button = node("button", "button button-small", entry[1]); button.id = entry[0]; button.type = "button";
+      button.addEventListener("click", entry[2]); tools.append(button);
     });
-    if (!tagPicked.length) box.append(node("span", "tag-editor-empty", "还没有选。保存空的就等于清除标签。"));
+    const search = node("input", "tag-picker-search"); search.id = "tagPickerSearch"; search.type = "search"; search.placeholder = "搜索名称、别名或说明"; search.addEventListener("input", renderTagPicker);
+    const quick = node("nav", "tag-picker-quick"); quick.id = "tagPickerQuick";
+    const body = node("div", "tag-picker-body"), groups = node("nav", "tag-picker-groups"), list = node("div", "tag-picker-list");
+    groups.id = "tagPickerGroups"; list.id = "tagPickerList"; body.append(groups, list);
+    const footer = node("footer", "tag-picker-foot"), status = node("span", "tag-picker-save-state"), undo = node("button", "button button-small", "撤销上次修改");
+    status.id = "tagPickerStatus"; undo.id = "tagPickerUndo"; undo.type = "button"; undo.hidden = true; undo.addEventListener("click", undoTagOperation); footer.append(status, undo);
+    const retry = node("button", "button button-small", "核实上次操作"); retry.id = "tagPickerRetry"; retry.type = "button"; retry.hidden = true;
+    retry.addEventListener("click", () => { if (pickerAttempt) void toggleTag(pickerAttempt.tag, pickerAttempt.remove, { attempt: pickerAttempt }); }); footer.append(retry);
+    tagDialog.append(header, tools, search, quick, body, footer); document.body.append(tagDialog); return tagDialog;
   }
-
-  function renderTagList() {
-    const list = $("tagEditorList");
-    if (!list) return;
-    const keyword = String($("tagEditorSearch")?.value || "").trim();
-    // 章名也一起搜：目录里搜“圆锥”要能找到椭圆、双曲线、抛物线，
-    // 可这三个词本身都不含“圆锥”，只在它们所属的章名里。
-    const shown = keyword ? tagCatalogue.filter((item) => item.point.includes(keyword) || (item.chapter || "").includes(keyword)) : tagCatalogue;
-    list.replaceChildren();
-    if (!shown.length) {
-      list.append(node("p", "library-empty", keyword ? `目录里没有含“${keyword}”的知识点。` : "知识点目录是空的。"));
-      return;
+  async function openTagEditor(item, options = {}) {
+    if (item && inlineTagStates.get(item.id)?.attempt) { toast("先核实上次标签操作，再添加其他标签。", "error"); return; }
+    const dialog = ensureTagDialog(); tagTargetIds = tagTarget(item); if (!tagTargetIds.length) return;
+    if (pickerAttempt && JSON.stringify(tagTargetIds) !== JSON.stringify(pickerAttempt.payload.publication_ids)) {
+      tagTargetIds = pickerAttempt.payload.publication_ids;
+      toast("先核实上次标签操作，再切换操作范围。", "error");
     }
-    let chapter = null;
-    shown.forEach((item) => {
-      if (item.chapter && item.chapter !== chapter) {
-        chapter = item.chapter;
-        list.append(node("p", "tag-editor-chapter", chapter));
-      }
-      const on = tagPicked.includes(item.point);
-      const chip = node("button", `tag-editor-point${on ? " active" : ""}`, item.point);
-      chip.type = "button";
-      chip.setAttribute("aria-pressed", String(on));
-      chip.title = on ? "取消这个知识点" : "加上这个知识点";
-      chip.addEventListener("click", () => {
-        if (on) tagPicked = tagPicked.filter((value) => value !== item.point);
-        else if (tagPicked.length >= Number(tagDialog.dataset.max || 3)) { toast(`一道题最多 ${tagDialog.dataset.max} 个知识点`, "error"); return; }
-        else tagPicked = [...tagPicked, item.point];
-        renderTagPicked();
-        renderTagList();
-      });
-      list.append(chip);
-    });
-  }
-
-  async function openTagEditor(item) {
-    const dialog = ensureTagDialog();
-    tagTarget = item;
-    tagDialog.dataset.max = "3";
-    $("tagEditorSearch").value = "";
+    if (tagTargetIds.length > 500) { toast("一次最多整理 500 题，请减少勾选后重试。", "error"); return; }
+    $("tagPickerTitle").textContent = pickerAttempt ? `核实上次标签操作（${tagTargetIds.length} 题）` : item ? `第 ${item.number} 题的标签` : `整理勾选的 ${tagTargetIds.length} 题标签`;
     tagDialog.classList.add("loading");
     try {
-      const response = await fetch(tagEndpoint(item), { cache: "no-store" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "打不开知识点目录");
-      tagCatalogue = body.catalogue || [];
-      tagDialog.dataset.max = String(body.max || 3);
-      tagPicked = [...(body.tags || [])];
-      dialog.querySelector(".tag-editor-place").textContent =
-        `${item.source_filename} · 第 ${item.number} 题${body.source === "human" ? " · 当前是人工改过的" : body.source ? ` · 当前由 ${body.source} 自动生成` : ""}`;
-      renderTagPicked();
-      renderTagList();
-      if (!dialog.open) dialog.showModal();
-      $("tagEditorSearch").focus();
-    } catch (error) {
-      toast(`${error.message || "打不开知识点目录"} 稍后再试。`, "error");
-    } finally {
-      tagDialog.classList.remove("loading");
-    }
+      const ids = tagTargetIds.join(","), pair = await Promise.all([loadTagCatalogue(), tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(ids))]);
+      tagRevisions = {}; tagMemberships = {};
+      Object.entries(pair[1].items || {}).forEach(function(entry) {
+        tagRevisions[entry[0]] = entry[1].revision;
+        tagMemberships[entry[0]] = new Set(entry[1].assignments.filter(function(row) { return !row.needs_review; }).map(function(row) { return row.tag.id; }));
+      });
+      tagActiveGroup = "all"; tagPickerView = "all"; tagUndoId = ""; $("tagPickerSearch").value = options.query || "";
+      $("tagPickerStatus").textContent = tagTargetIds.length === 1 ? "单题" : "已选 " + tagTargetIds.length + " 题"; $("tagPickerUndo").hidden = true;
+      $("tagPickerRetry").hidden = !pickerAttempt;
+      renderTagPicker(); if (!dialog.open) dialog.showModal(); $("tagPickerSearch").focus();
+    } catch (error) { toast(error.message + " 请刷新后重试。", "error"); }
+    finally { tagDialog.classList.remove("loading"); }
   }
-
-  async function saveTags() {
-    if (!tagTarget) return;
-    const save = $("tagEditorSave");
-    save.disabled = true;
+  function renderTagPicker() {
+    if (!tagDialog) return;
+    const groupBox = $("tagPickerGroups"), list = $("tagPickerList"), quick = $("tagPickerQuick"); if (!groupBox || !list || !quick) return;
+    const groupScrollTop = groupBox.scrollTop, groupScrollLeft = groupBox.scrollLeft;
+    quick.replaceChildren();
+    [{ id: "all", name: "全部标签" }, { id: "favorite", name: "收藏" }, { id: "recent", name: "最近使用" }].forEach(function(view) {
+      const button = node("button", "tag-group-button" + (tagPickerView === view.id ? " active" : ""), view.name);
+      button.type = "button"; button.addEventListener("click", function() { tagPickerView = view.id; tagActiveGroup = "all"; renderTagPicker(); }); quick.append(button);
+    });
+    groupBox.replaceChildren();
+    [{ id: "all", name: "全部分组" }, ...(tagCatalogue.groups || [])].forEach(function(group) {
+      const button = node("button", "tag-group-button" + (tagActiveGroup === String(group.id) ? " active" : ""), group.name);
+      button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveGroup = String(group.id); renderTagPicker(); }); groupBox.append(button);
+    });
+    groupBox.scrollTop = groupScrollTop; groupBox.scrollLeft = groupScrollLeft;
+    const query = String($("tagPickerSearch").value || "").trim().normalize("NFKC").toLocaleLowerCase();
+    let recentIds = [];
+    try { recentIds = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]"); } catch (_) {}
+    const rows = (tagCatalogue.tags || []).filter(function(tag) {
+      if (!tag.active) return false;
+      if (tagPickerView === "favorite" && !tag.favorite) return false;
+      if (tagPickerView === "recent" && !recentIds.includes(tag.id)) return false;
+      if (!query && tagPickerView === "all" && tagActiveGroup !== "all" && !tag.groups.some(function(group) { return group.id === tagActiveGroup; })) return false;
+      const text = [tag.name, tag.description, tag.conditions, ...(tag.aliases || []), ...tag.groups.map(function(group) { return group.name; })].join(" ").normalize("NFKC").toLocaleLowerCase();
+      return !query || text.includes(query);
+    });
+    if (tagPickerView === "recent") rows.sort(function(left, right) { return recentIds.indexOf(right.id) - recentIds.indexOf(left.id); });
+    const scrollTop = list.scrollTop;
+    list.replaceChildren(); if (!rows.length) {
+      list.append(node("p", "library-empty", query ? "没有找到这个标签。" : "还没有可用标签。"));
+      const create = node("button", "button button-small", query ? `创建「${$("tagPickerSearch").value.trim()}」并添加` : "新建标签"); create.type = "button";
+      create.addEventListener("click", () => openTagCatalogueEditor("tag", null, true)); list.append(create);
+      list.scrollTop = scrollTop; return;
+    }
+    rows.forEach(function(tag) {
+      const count = tagTargetIds.reduce(function(total, id) { return total + (tagMemberships[id] && tagMemberships[id].has(tag.id) ? 1 : 0); }, 0);
+      const single = tagTargetIds.length === 1;
+      const text = single ? (count ? "✓ 已添加" : "添加") : count === tagTargetIds.length ? "全部都有" : count ? "部分有 " + count + "/" + tagTargetIds.length : "全部没有";
+      const button = node("button", "tag-picker-row" + (count === tagTargetIds.length ? " active" : count ? " mixed" : ""));
+      if (tag.color) button.style.setProperty("--tag-color", tag.color);
+      button.type = "button"; button.disabled = tagDialog.classList.contains("saving");
+      const title = node("span", "tag-picker-row-title");
+      title.append(node("strong", "", tag.name), node("small", "", (tag.kind === "knowledge" ? "知识点" : tag.kind === "method" ? "解题方法" : "自定义") + " · " + tag.groups.map(function(group) { return group.name; }).join("、")));
+      button.append(title, node("span", "tag-picker-row-detail", tag.description || tag.conditions || ""), node("span", "tag-picker-row-state", text));
+      button.addEventListener("click", function() { void toggleTag(tag, count === tagTargetIds.length); });
+      if (!single && count > 0 && count < tagTargetIds.length) {
+        const mixed = node("div", "tag-picker-mixed-row"), remove = node("button", "button button-small", "全部移除"); remove.type = "button";
+        button.querySelector(".tag-picker-row-state").textContent = text + " · 全部添加";
+        remove.disabled = tagDialog.classList.contains("saving"); remove.addEventListener("click", () => void toggleTag(tag, true)); mixed.append(button, remove); list.append(mixed);
+      } else list.append(button);
+    });
+    list.scrollTop = scrollTop;
+  }
+  async function toggleTag(tag, remove, options = {}) {
+    if (tagDialog.classList.contains("saving")) return false; tagDialog.classList.add("saving");
     try {
-      const response = await fetch(tagEndpoint(tagTarget), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
-        body: JSON.stringify({ tags: tagPicked.slice() })
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "这次保存没成功");
-      tagDialog.close();
-      toast(body.tags.length ? `已改成：${body.tags.join("、")}` : "标签已清空，这道题可以重新自动生成", "success");
-      load();
+      if (pickerAttempt && !options.attempt) { toast("上次保存结果尚未核实，请点“核实上次操作”。", "error"); return false; }
+      let scope = options.scope || { whole: true };
+      if (!remove && tag.kind === "method" && !options.scope && !options.attempt?.payload) {
+        const answer = window.prompt("这个方法用于整题，还是只用于某些小问？留空表示整题；例如输入 1,2 表示第 1、2 问。", "");
+        if (answer === null) return false;
+        if (answer.trim()) {
+          const parts = answer.split(/[，,、\s]+/).filter(Boolean);
+          if (parts.some(function(part) { return !/^[1-9][0-9]?$/.test(part); }) || new Set(parts).size !== parts.length) {
+            toast("请输入 1 到 99 的不重复小问编号。", "error"); return false;
+          }
+          scope = { subquestions: parts };
+        }
+      }
+      const payload = options.attempt?.payload || {
+        publication_ids: tagTargetIds, add: remove ? [] : [tag.id], remove: remove ? [tag.id] : [],
+        scopes: remove ? {} : { [tag.id]: scope }, expected_revisions: { ...tagRevisions }, request_id: tagRequestId()
+      };
+      if (options.attempt && !options.attempt.payload) options.attempt.payload = payload;
+      pickerAttempt = { tag, remove, payload }; $("tagPickerRetry").hidden = true;
+      const result = await tagRequest("/api/library/tags/assignments/batch", { method: "POST", body: JSON.stringify(payload) });
+      pickerAttempt = null;
+      payload.publication_ids.forEach(function(id) { tagRevisions[id] = result.revisions[id]; if (remove) tagMemberships[id]?.delete(tag.id); else tagMemberships[id]?.add(tag.id); });
+      let refreshFailed = false;
+      try {
+        const current = await tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(payload.publication_ids.join(",")));
+        Object.entries(current.items || {}).forEach(([id, row]) => { tagRevisions[id] = row.revision; tagMemberships[id] = new Set(row.assignments.filter(link => !link.needs_review).map(link => link.tag.id)); });
+      } catch (_) { refreshFailed = true; }
+      tagUndoId = result.operation_id; $("tagPickerUndo").hidden = false;
+      $("tagPickerStatus").textContent = remove ? "已从本次选题移除「" + tag.name + "」" : "已添加「" + tag.name + "」";
+      if (refreshFailed) $("tagPickerStatus").textContent += "；已保存，当前状态载入失败，请重新打开标签窗口";
+      try { let recent = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]").filter(function(id) { return id !== tag.id; }); recent.push(tag.id); localStorage.setItem("qb-library-recent-tags", JSON.stringify(recent.slice(-20))); } catch (_) {}
+      renderTagPicker(); await refreshTaggedPublications(payload.publication_ids, result);
+      return true;
     } catch (error) {
-      toast(`${error.message || "这次保存没成功"} 标签没有改动。`, "error");
+      if (error.status && error.status < 500) pickerAttempt = null;
+      $("tagPickerRetry").hidden = !pickerAttempt;
+      if (options.throwOnError) throw error;
+      toast(error.message + (pickerAttempt ? " 请核实上次操作，已保留原请求。" : " 请刷新标签后重试。"), "error"); return false;
+    }
+    finally { tagDialog.classList.remove("saving"); renderTagPicker(); }
+  }
+  async function undoTagOperation() {
+    if (!tagUndoId) return;
+    try { const result = await tagRequest("/api/library/tags/undo", { method: "POST", body: JSON.stringify({ operation_id: tagUndoId }) });
+      const ids = tagTargetIds.slice(); tagUndoId = ""; await refreshTaggedPublications(ids, result);
+      const first = ids.length === 1 ? state.catalog.get(ids[0]) : null; await openTagEditor(first);
+    } catch (error) { toast(error.message + " 请刷新后重试。", "error"); }
+  }
+  async function catalogueAction(action, fields) {
+    if (catalogueUnknown) throw new Error("上次目录操作结果尚未核实，请先点“核实上次目录操作”");
+    const signature = JSON.stringify({ action, ...fields, revision: tagCatalogue.revision });
+    const payload = catalogueAttempts.get(signature) || { action, ...fields, revision: tagCatalogue.revision, request_id: tagRequestId() };
+    catalogueAttempts.set(signature, payload);
+    let result;
+    try { result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify(payload) }); catalogueAttempts.delete(signature); }
+    catch (error) {
+      if (error.status && error.status < 500) catalogueAttempts.delete(signature);
+      else { catalogueUnknown = payload; if ($("tagCatalogueRetry")) $("tagCatalogueRetry").hidden = false; }
+      throw error;
+    }
+    tagCatalogue = result.catalogue || await loadTagCatalogue();
+    if (tagDialog?.open && result.operation_id) {
+      tagUndoId = result.operation_id; $("tagPickerUndo").hidden = false;
+      $("tagPickerStatus").textContent = "已保存，可撤销";
+    }
+    if (tagManagerDialog) void loadTagOperationHistory();
+    return result;
+  }
+  async function deleteCatalogueTag(tag) {
+    try {
+      const impact = await tagRequest("/api/library/tags/impact?action=delete_tag&tag_id=" + encodeURIComponent(tag.id));
+      if (impact.assignment_count && !window.confirm(`删除标签「${tag.name}」？这会从 ${impact.question_count} 道当前题和 ${impact.historical_count} 道历史版本中移除，共 ${impact.assignment_count} 条关联。题面和答案不变，操作可撤销。`)) return false;
+      const result = await catalogueAction("delete_tag", { tag_id: tag.id, impact_token: impact.token, confirmed: true });
+      await loadTagCatalogue(); renderTagManager(); await loadTagOperationHistory();
+      if (tagDialog?.open) renderTagPicker();
+      toast("标签已从目录和题目关联中删除，可在操作记录中撤销。", "success");
+      return result;
+    } catch (error) { toast(error.message + " 标签及题目内容没有被覆盖。", "error"); return false; }
+  }
+  async function startEmptyTagCatalogue() {
+    try {
+      const impact = await tagRequest("/api/library/tags/impact?action=reset_empty");
+      const details = impact.question_count || impact.historical_count
+        ? `\n将清除 ${impact.tag_count} 个标签、${impact.group_count} 个分组和 ${impact.question_count} 道当前题目的 ${impact.assignment_count} 条关联；另有 ${impact.historical_count} 道历史版本受影响。操作可撤销。`
+        : "\n当前目录为空。确认后会标记为已初始化，不会自动导入系统标签。";
+      if (!window.confirm((impact.tag_count || impact.group_count ? "清空标签目录？" : "从空白目录开始？") + details)) return false;
+      const result = await catalogueAction("reset_empty", { impact_token: impact.token, confirmed: true });
+      if (tagDialog?.open) { renderTagPicker(); }
+      if (tagManagerDialog?.open) { renderTagManager(); await loadTagOperationHistory(); }
+      toast("目录已清空，可从头建立；需要时可以撤销。", "success");
+      if (result.operation_id && tagDialog?.open) { tagUndoId = result.operation_id; $("tagPickerUndo").hidden = false; }
+      return result;
+    } catch (error) { toast(error.message + " 目录没有被覆盖。", "error"); return false; }
+  }
+  async function openTagTemplates() {
+    try {
+      const data = await tagRequest("/api/library/tags/templates");
+      const dialog = node("dialog", "tag-picker-dialog tag-template-dialog"); tagTemplateDialog = dialog;
+      const header = node("header", "tag-picker-head"), intro = node("div");
+      intro.append(node("h2", "", "系统模板"), node("p", "tag-picker-subtitle", "预览不会修改目录。导入会增补所选模板的层级关系，保留现有改名、分组和父级；需要的上级会一并导入。"));
+      const close = node("button", "button", "关闭"); close.type = "button"; header.append(intro, close);
+      const packages = node("nav", "tag-template-packages");
+      const groupChecks = new Map();
+      const blueprint = new Map((data.tags || []).map(tag => [tag.key, tag]));
+      const templatePaths = tag => {
+        const paths = [], todo = [{ tag, trail: [] }];
+        while (todo.length && paths.length < 6) {
+          const current = todo.pop(); if (current.trail.some(value => value.key === current.tag.key)) continue;
+          const path = [current.tag, ...current.trail], parents = (current.tag.parent_keys || []).map(key => blueprint.get(key)).filter(Boolean);
+          if (!parents.length) paths.push(path.map(value => value.name).join(" › "));
+          else parents.forEach(parent => todo.push({ tag: parent, trail: path }));
+        }
+        return paths;
+      };
+      const dependencies = node("section", "tag-template-dependencies"); dependencies.id = "tagTemplateDependencies";
+      const updateTemplatePreview = () => {
+        const groups = new Set(Array.from(groupChecks.entries()).filter(([, check]) => check.checked).map(([key]) => key));
+        const direct = new Set((data.tags || []).filter(tag => tag.group_keys.some(key => groups.has(key))).map(tag => tag.key));
+        const included = new Set(direct), todo = Array.from(direct);
+        while (todo.length) {
+          const tag = blueprint.get(todo.pop());
+          (tag?.parent_keys || []).forEach(key => { if (!included.has(key) && blueprint.has(key)) { included.add(key); todo.push(key); } });
+        }
+        const extra = Array.from(included).filter(key => !direct.has(key)).map(key => blueprint.get(key));
+        dependencies.replaceChildren();
+        if (!groups.size) { dependencies.append(node("p", "helper", "勾选分组后，这里会显示同时导入的必要上级。")); return; }
+        dependencies.append(node("h4", "", `所选分组 ${direct.size} 个标签；必要上级 ${extra.length} 个`));
+        if (extra.length) {
+          const names = node("div", "tag-template-parent-list");
+          extra.forEach(tag => { const chip = node("span", "", tag.name); chip.title = templatePaths(tag).join("\n"); names.append(chip); }); dependencies.append(names);
+          dependencies.append(node("p", "helper", "这些上级标签会一并导入；不会额外导入它们所在的未选分组。"));
+        }
+      };
+      (data.packages || []).forEach(function(pkg) {
+        const button = node("button", "button button-small", pkg.name + "（" + pkg.tag_count + " 个标签）"); button.type = "button";
+        button.addEventListener("click", function() { pkg.group_keys.forEach(function(key) { if (groupChecks.has(key)) groupChecks.get(key).checked = true; }); updateTemplatePreview(); }); packages.append(button);
+      });
+      const allRow = node("label", "tag-template-all"), all = node("input"); all.type = "checkbox";
+      all.addEventListener("change", function() { groupChecks.forEach(function(check) { check.checked = all.checked; }); updateTemplatePreview(); });
+      allRow.append(all, node("span", "", "全选所有分组"));
+      const list = node("div", "tag-template-list");
+      (data.groups || []).forEach(function(group) {
+        const detail = node("details", "tag-template-group"), summary = node("summary"), check = node("input"); check.type = "checkbox";
+        check.addEventListener("click", function(event) { event.stopPropagation(); });
+        check.addEventListener("change", updateTemplatePreview);
+        const groupTags = (data.tags || []).filter(function(tag) { return tag.group_keys.includes(group.key); });
+        summary.append(check, node("strong", "", group.name), node("small", "", groupTags.length + " 个标签"));
+        groupChecks.set(group.key, check);
+        const preview = node("div", "tag-template-preview");
+        groupTags.forEach(function(tag) {
+          const row = node("p"); row.append(node("b", "", tag.name), node("small", "tag-template-path", templatePaths(tag).join("；")), node("span", "", tag.description || ""));
+          const methods = (tag.related_method_keys || []).map(key => blueprint.get(key)?.name).filter(Boolean);
+          if (methods.length) row.append(node("small", "tag-template-related", "相关方法：" + methods.join("、") + "（只连接目录中已有或本次选中的方法）"));
+          preview.append(row);
+        });
+        detail.append(summary, preview); list.append(detail);
+      });
+      const body = node("div", "tag-template-body"); body.append(packages, allRow, dependencies, list); updateTemplatePreview();
+      const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "模板未勾选。"), cancel = node("button", "button", "取消"), apply = node("button", "button button-primary", "导入所选分组");
+      cancel.type = "button"; apply.type = "button"; footer.append(status, cancel, apply);
+      dialog.append(header, body, footer); document.body.append(dialog);
+      const closeDialog = function() { dialog.close(); };
+      close.addEventListener("click", closeDialog); cancel.addEventListener("click", closeDialog);
+      dialog.addEventListener("close", function() { dialog.remove(); if (tagTemplateDialog === dialog) tagTemplateDialog = null; });
+      apply.addEventListener("click", async function() {
+        const keys = Array.from(groupChecks.entries()).filter(([, input]) => input.checked).map(([key]) => key);
+        if (!keys.length) { status.textContent = "先选择一个或多个分组。"; return; }
+        apply.disabled = true; status.textContent = "正在导入所选模板…";
+        try {
+          await catalogueAction("apply_template", { group_keys: keys });
+          closeDialog(); await loadTagCatalogue(); renderTagPicker(); if (tagManagerDialog?.open) { renderTagManager(); await loadTagOperationHistory(); }
+          toast("已把所选模板加入当前目录。", "success");
+        } catch (error) { status.textContent = error.message + "；选择仍保留。"; apply.disabled = false; }
+      });
+      dialog.showModal();
+    } catch (error) { toast(error.message, "error"); }
+  }
+  function openTagCatalogueEditor(entity, record = null, fromPicker = false) {
+    const defaults = typeof fromPicker === "object" ? fromPicker : {};
+    fromPicker = fromPicker === true;
+    if (tagCatalogueEditorDialog?.open || tagDialog?.classList.contains("saving")) return;
+    const isTag = entity === "tag", editing = Boolean(record), label = isTag ? "标签" : "分组";
+    const dialog = node("dialog", "tag-catalogue-editor-dialog"); dialog.id = "tagCatalogueEditorDialog";
+    tagCatalogueEditorDialog = dialog;
+    const header = node("header", "tag-picker-head"), heading = node("div");
+    heading.append(node("h2", "", (editing ? "编辑" : "新建") + label), node("p", "tag-picker-subtitle",
+      isTag ? "自己建立标签，按分组整理；同一标签可以放进多个分组。" : "分组用于整理标签，不会改变题目已经贴上的标签。"));
+    const close = node("button", "button", "关闭"); close.type = "button"; header.append(heading, close);
+    const form = node("form", "tag-catalogue-editor-form"); form.id = "tagCatalogueEditorForm";
+    const body = node("div", "tag-catalogue-editor-body");
+    const field = function(title, id, control, wide = false) {
+      const row = node("label", "tag-catalogue-field" + (wide ? " tag-catalogue-wide" : ""));
+      control.id = id; row.append(node("span", "", title), control); body.append(row); return control;
+    };
+    const name = field(label + "名称", "tagCatalogueName", node("input"), true);
+    name.required = true; name.maxLength = 80; name.value = record?.name || (fromPicker ? $("tagPickerSearch")?.value.trim() : "") || "";
+    name.placeholder = isTag ? "例如：课堂例题、易错题" : "例如：我的教学标签";
+    let kind, description, aliases, conditions, scope, groupChoices, levelChoices, parentChoices, relatedChoices;
+    if (isTag) {
+      kind = field("标签类型", "tagCatalogueKind", node("select"));
+      [["custom", "自定义标签"], ["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(entry) { kind.add(new Option(entry[1], entry[0])); });
+      if (record?.kind === "legacy") kind.add(new Option("历史标签", "legacy"));
+      kind.value = record?.kind || defaults.kind || "custom"; kind.disabled = editing;
+    }
+    const color = field("颜色（可选）", "tagCatalogueColor", node("select"));
+    [["", "默认"], ["#bb575d", "红色"], ["#4f8278", "绿色"], ["#477a9e", "蓝色"], ["#8965a5", "紫色"], ["#bf8545", "橙色"], ["#438b94", "青色"]].forEach(function(entry) { color.add(new Option(entry[1], entry[0])); });
+    if (record?.color && !Array.from(color.options).some(function(option) { return option.value === record.color; })) color.add(new Option("当前颜色", record.color));
+    color.value = record?.color || "";
+    if (isTag) {
+      description = field("简短说明（可选）", "tagCatalogueDescription", node("textarea"), true);
+      description.rows = 2; description.maxLength = 300; description.value = record?.description || "";
+      const groupField = node("fieldset", "tag-catalogue-wide"); groupField.append(node("legend", "", "所属分组（可多选）"));
+      groupChoices = node("div", "tag-catalogue-group-choices"); groupChoices.id = "tagCatalogueGroups";
+      const activeGroup = fromPicker ? tagActiveGroup : tagManagerGroup;
+      const selectedGroups = record ? (record.groups || []).map(function(group) { return group.id; }) : defaults.group_id ? [defaults.group_id] : activeGroup !== "all" ? [activeGroup] : [];
+      (tagCatalogue.groups || []).forEach(function(group) {
+        const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = group.id;
+        check.checked = selectedGroups.includes(group.id); row.append(check, node("span", "", group.name)); groupChoices.append(row);
+      });
+      if (!groupChoices.childNodes.length) groupChoices.append(node("p", "helper", "尚无分组，可先创建标签，再新建分组整理。"));
+      groupField.append(groupChoices); body.append(groupField);
+      parentChoices = field("上级标签（可多选；留空作为顶级）", "tagCatalogueParents", node("select"), true); parentChoices.multiple = true; parentChoices.size = 5;
+      const chosenParents = record?.parent_ids || defaults.parent_ids || [];
+      const renderParents = () => {
+        const selected = parentChoices.options.length ? Array.from(parentChoices.selectedOptions).map(option => option.value) : chosenParents;
+        parentChoices.replaceChildren();
+        (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === kind.value && tag.id !== record?.id).forEach(tag => {
+          const option = new Option(tag.name, tag.id); option.selected = selected.includes(tag.id); parentChoices.append(option);
+        });
+      };
+      renderParents(); kind.addEventListener("change", renderParents);
+      relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
+      (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === "method").forEach(tag => {
+        const option = new Option(tag.name, tag.id); option.selected = (record?.related_method_ids || []).includes(tag.id); relatedChoices.append(option);
+      });
+      const syncRelated = () => { relatedChoices.parentElement.hidden = kind.value !== "knowledge"; };
+      kind.addEventListener("change", syncRelated); syncRelated();
+      scope = field("适用小问（留空表示整题）", "tagCatalogueScope", node("input"), true); scope.placeholder = "例如：1,2";
+      const syncScope = function() { scope.parentElement.hidden = !(fromPicker && !editing && kind.value === "method"); };
+      kind.addEventListener("change", syncScope); syncScope();
+      const advanced = node("details", "tag-catalogue-wide"); advanced.append(node("summary", "", "别名、学段与适用条件"));
+      const advancedFields = node("div", "tag-catalogue-editor-body");
+      const extra = function(title, control) { const row = node("label", "tag-catalogue-field tag-catalogue-wide"); row.append(node("span", "", title), control); advancedFields.append(row); return control; };
+      aliases = extra("别名（用逗号分隔）", node("input")); aliases.value = (record?.aliases || []).join("，");
+      conditions = extra("适用条件（可选）", node("textarea")); conditions.rows = 2; conditions.maxLength = 2000; conditions.value = record?.conditions || "";
+      levelChoices = node("fieldset", "tag-catalogue-wide"); levelChoices.append(node("legend", "", "适用学段"));
+      ["初中", "高中"].forEach(function(level) { const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = level; check.checked = (record?.levels || ["初中", "高中"]).includes(level); row.append(check, node("span", "", level)); levelChoices.append(row); });
+      advancedFields.append(levelChoices); advanced.append(advancedFields); body.append(advanced);
+    }
+    const status = node("p", "tag-catalogue-status"); status.id = "tagCatalogueStatus"; status.setAttribute("role", "status");
+    const footer = node("footer", "tag-picker-foot"), cancel = node("button", "button", "取消"), save = node("button", "button button-primary", editing ? "保存修改" : fromPicker && isTag ? "创建并添加" : "创建" + label);
+    cancel.type = "button"; save.type = "submit"; save.id = "tagCatalogueSave"; save.value = fromPicker && isTag && !editing ? "apply" : "save";
+    const createOnly = node("button", "button", "仅创建标签"); createOnly.type = "submit"; createOnly.id = "tagCatalogueCreateOnly"; createOnly.value = "save"; createOnly.hidden = !(fromPicker && isTag && !editing);
+    footer.append(cancel, save, createOnly); form.append(body, status, footer); dialog.append(header, form); document.body.append(dialog);
+    let saving = false, created = null, attempt = null, applyAttempt = {}, composing = false;
+    form.addEventListener("compositionstart", function() { composing = true; });
+    form.addEventListener("compositionend", function() { composing = false; });
+    form.addEventListener("keydown", function(event) { if (event.key === "Enter" && (composing || event.isComposing || event.keyCode === 229)) event.preventDefault(); });
+    const leave = function() { if (!saving) dialog.close(); }; close.addEventListener("click", leave); cancel.addEventListener("click", leave);
+    dialog.addEventListener("cancel", function(event) { if (saving) event.preventDefault(); });
+    dialog.addEventListener("close", function() { dialog.remove(); if (tagCatalogueEditorDialog === dialog) tagCatalogueEditorDialog = null; });
+    const finish = function(savedRecord) {
+      if (fromPicker) {
+        if (!isTag) { tagActiveGroup = savedRecord.id; tagPickerView = "all"; $("tagPickerSearch").value = ""; }
+        else { tagPickerView = "all"; $("tagPickerSearch").value = savedRecord.name; }
+        renderTagPicker();
+      }
+      if (tagManagerDialog?.open) { if (!isTag && !editing) tagManagerGroup = savedRecord.id; renderTagManager(); }
+      if (tagManagerDialog) void loadTagOperationHistory();
+      void load({ quiet: true }); dialog.close();
+    };
+    form.addEventListener("submit", async function(event) {
+      event.preventDefault(); if (saving || composing || event.isComposing) return;
+      const shouldApply = event.submitter?.value === "apply";
+      let methodScope = { whole: true };
+      if (shouldApply && kind?.value === "method" && scope.value.trim()) {
+        const parts = scope.value.split(/[，,、\s]+/).filter(Boolean);
+        if (parts.length > 12 || parts.some(function(part) { return !/^[1-9][0-9]?$/.test(part); }) || new Set(parts).size !== parts.length) { status.textContent = "请输入不重复的 1 到 99 小问编号，最多十二项。"; return; }
+        methodScope = { subquestions: parts };
+      }
+      const fields = isTag ? { name: name.value.trim(), color: color.value, description: description.value.trim(),
+        aliases: aliases.value.split(/[，,]/).map(function(value) { return value.trim(); }).filter(Boolean), conditions: conditions.value.trim(),
+        levels: Array.from(levelChoices.querySelectorAll("input:checked")).map(function(input) { return input.value; }),
+        group_ids: Array.from(groupChoices.querySelectorAll("input:checked")).map(function(input) { return input.value; }),
+        parent_ids: Array.from(parentChoices.selectedOptions).map(option => option.value),
+        related_method_ids: kind.value === "knowledge" ? Array.from(relatedChoices.selectedOptions).map(option => option.value) : [] }
+        : { name: name.value.trim(), color: color.value };
+      if (isTag && editing && fields.name.normalize("NFKC") !== record.name && !fields.aliases.includes(record.name)) fields.aliases.push(record.name);
+      if (editing) fields[isTag ? "tag_id" : "group_id"] = record.id; else if (isTag) fields.kind = kind.value;
+      const action = (editing ? "update_" : "create_") + entity;
+      const fingerprint = JSON.stringify([action, fields]);
+      if (!attempt || attempt.fingerprint !== fingerprint) attempt = { fingerprint, payload: { action, ...fields, revision: tagCatalogue.revision, request_id: tagRequestId() } };
+      saving = true; close.disabled = cancel.disabled = save.disabled = createOnly.disabled = true;
+      status.textContent = created ? "正在添加到题目…" : "正在保存…";
+      try {
+        if (!created) {
+          const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify(attempt.payload) });
+          tagCatalogue = result.catalogue || await loadTagCatalogue();
+          const normalizedName = fields.name.normalize("NFKC");
+          created = (isTag ? tagCatalogue.tags : tagCatalogue.groups).find(function(value) { return editing ? value.id === record.id : value.name === normalizedName && (!isTag || value.kind === fields.kind); });
+          if (!created) throw new Error("目录已保存，但结果尚未载入，请刷新后查看。");
+        }
+        if (shouldApply) {
+          Array.from(body.querySelectorAll("input, select, textarea")).forEach(function(input) { input.disabled = true; });
+          await toggleTag(created, false, { scope: methodScope, throwOnError: true, attempt: applyAttempt });
+        } else if (fromPicker) $("tagPickerStatus").textContent = "已创建" + label + "「" + created.name + "」";
+        finish(created);
+      } catch (error) {
+        status.textContent = created ? "标签已创建，添加到题目未完成：" + error.message + "。重试只添加，不会再建标签。" : error.message + "。填写内容已保留。";
+        if (created) { save.textContent = "重试添加"; createOnly.textContent = "返回标签列表"; }
+      } finally { saving = false; close.disabled = cancel.disabled = save.disabled = createOnly.disabled = false; }
+    });
+    dialog.showModal(); name.focus();
+  }
+  async function refreshOpenTagPicker() {
+    if (!tagDialog?.open || !tagTargetIds.length || tagDialog.classList.contains("saving")) return;
+    try {
+      const pair = await Promise.all([loadTagCatalogue(), tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(tagTargetIds.join(",")))]);
+      Object.entries(pair[1].items || {}).forEach(function(entry) {
+        tagRevisions[entry[0]] = entry[1].revision;
+        tagMemberships[entry[0]] = new Set(entry[1].assignments.filter(function(row) { return !row.needs_review; }).map(function(row) { return row.tag.id; }));
+      });
+      renderTagPicker();
+    } catch (error) { $("tagPickerStatus").textContent = "目录更新尚未载入：" + error.message; }
+  }
+  async function openTagManager() {
+    if (tagDialog?.classList.contains("saving")) return;
+    if (tagDialog?.open) tagDialog.close();
+    if (window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(false);
+    if (document.body.classList.contains("rail-open")) setRail(false);
+    try { await ensureTagManagerDialog().show(); } catch (error) { toast(error.message, "error"); }
+  }
+  function browseTag(tag) {
+    state.tag = ""; state.tagAll = ""; state.tagNot = ""; state.tagAny = tag.id; state.tagMode = "any";
+    state.tagReview = false; state.untaggedKnowledge = false;
+    syncUrl(); void load();
+  }
+  function ensureTagManagerDialog() {
+    if (tagManagerDialog) return tagManagerDialog;
+    tagManagerDialog = window.QBLibraryTagManager.create({
+      mount: document.querySelector(".library-main"), loadCatalogue: loadTagCatalogue, action: catalogueAction,
+      request: async (url, options) => { const result = await tagRequest(url, options); if (result.catalogue) tagCatalogue = result.catalogue; return result; }, editEntity: (entity, record, defaults = {}) => {
+        tagManagerGroup = defaults.group_id || tagManagerDialog.activeGroup;
+        return openTagCatalogueEditor(entity, record, defaults);
+      }, openTemplates: openTagTemplates, clearCatalogue: startEmptyTagCatalogue,
+      deleteTag: deleteCatalogueTag, browseTag,
+      onClose: () => { void load({ quiet: true }); void refreshOpenTagPicker(); }
+    });
+    const retry = node("button", "button button-small", "核实上次目录操作"); retry.id = "tagCatalogueRetry"; retry.type = "button"; retry.hidden = !catalogueUnknown;
+    retry.addEventListener("click", async () => {
+      if (!catalogueUnknown || retry.disabled) return; retry.disabled = true;
+      try {
+        const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify(catalogueUnknown) });
+        catalogueUnknown = null; catalogueAttempts.clear(); retry.hidden = true;
+        tagCatalogue = result.catalogue || await loadTagCatalogue(); renderTagManager(); await loadTagOperationHistory(); await load({ quiet: true }); toast("上次目录操作已核实，可继续整理。", "success");
+      } catch (error) {
+        if (error.status && error.status < 500) { catalogueUnknown = null; catalogueAttempts.clear(); retry.hidden = true; }
+        toast(error.message + " 选择和现有内容已保留。", "error");
+      } finally { retry.disabled = false; }
+    });
+    $("tagManagerWorkspace").querySelector(".tag-directory-toolbar").append(retry);
+    return tagManagerDialog;
+  }
+  function renderTagManager() { if (tagManagerDialog) { tagManagerDialog.render(tagCatalogue); tagManagerGroup = tagManagerDialog.activeGroup; } }
+  async function loadTagOperationHistory() {
+    if (!tagManagerDialog) return;
+    try { const result = await tagRequest("/api/library/tags/operations"); tagOperationHistory = result.operations || []; tagManagerDialog.renderHistory(tagOperationHistory); }
+    catch (error) { console.warn("标签操作记录暂时无法载入", error.message); }
+  }
+  async function resolveTagSuggestion(item, action, panel, indicesOverride = null, retryOriginal = false) {
+    const suggestion = item.tag_suggestion; if (!suggestion || suggestion.status !== "pending" || suggestionLocks.has(suggestion.id)) return;
+    const selected = indicesOverride || Array.from(panel.querySelectorAll("[data-tag-suggestion='" + suggestion.id + "']:checked")).map(input => Number(input.value));
+    if (!selected.length) { toast("先勾选要处理的建议。", "error"); return; }
+    const draft = suggestionDraft(item, suggestion), newTags = {};
+    if (action === "accept" && !retryOriginal && selected.some(index => suggestion.suggestions[index]?.new_name)) {
+      try { await loadTagCatalogue(); } catch (error) { toast(error.message + " 请先载入目录再采纳新标签。", "error"); return; }
+      for (const index of selected) {
+        const entry = suggestion.suggestions[index], fields = draft[index] || {};
+        const existing = tagCatalogue.tags.some(tag => tag.kind === (fields.kind || entry.kind)
+          && tag.name.normalize("NFKC") === String(fields.name ?? entry.new_name ?? "").trim().normalize("NFKC"));
+        if (entry.new_name && !existing && !(fields.parent_ids ?? entry.parent_ids ?? []).length && fields.top_level !== true && tagCatalogue.tags.length) {
+          const edit = panel.querySelector(`[data-suggestion-index="${index}"] .tag-suggestion-edit`); if (edit) edit.open = true;
+          toast("新标签请先选择上级，或明确勾选“作为顶级标签”。", "error"); return;
+        }
+      }
+    }
+    if (!retryOriginal) selected.forEach(index => {
+      const entry = suggestion.suggestions[index], fields = draft[index] || {};
+      if (entry.new_name) newTags[String(index)] = { name: String(fields.name ?? entry.new_name).trim() || entry.new_name,
+        kind: fields.kind || entry.kind, group_ids: fields.groups || entry.group_ids || [],
+        parent_ids: fields.parent_ids ?? entry.parent_ids ?? [], top_level: fields.top_level === true };
+    });
+    const previous = suggestionAttempts.get(suggestion.id);
+    const fields = retryOriginal && previous ? { action: previous.payload.action, indices: previous.payload.indices,
+      expected_revision: previous.payload.expected_revision, new_tags: previous.payload.new_tags }
+      : { action, indices: selected, expected_revision: item.tag_revision, new_tags: newTags };
+    const signature = JSON.stringify(fields);
+    if (previous && previous.signature !== signature) { toast("上次提交结果尚未核实，请先按原操作重试；核实后再修改。", "error"); return; }
+    const attempt = previous || { itemId: item.id, suggestionId: suggestion.id, signature, payload: { ...fields, request_id: tagRequestId() } };
+    suggestionAttempts.set(suggestion.id, attempt); suggestionLocks.add(suggestion.id);
+    saveSuggestionDrafts();
+    panel.setAttribute("aria-busy", "true");
+    const controls = Array.from(panel.querySelectorAll("button, input, select"));
+    controls.forEach(control => { control.dataset.wasDisabled = String(control.disabled); control.disabled = true; });
+    try {
+      const result = await tagRequest("/api/library/tag-suggestions/" + suggestion.id + "/resolve", { method: "POST", body: JSON.stringify(attempt.payload) });
+      suggestionAttempts.delete(suggestion.id); attempt.payload.indices.forEach(index => delete draft[index]); saveSuggestionDrafts();
+      toast((result.message || "上次提交已核实") + "。", "success"); await refreshTaggedPublications([item.id]);
+    } catch (error) {
+      if (error.status && error.status < 500) suggestionAttempts.delete(suggestion.id);
+      saveSuggestionDrafts();
+      if (error.stale) {
+        await refreshTaggedPublications([item.id]);
+        toast(error.message + " 旧建议已移入 AI 标签记录；正式标签未改变。", "error");
+      } else toast(error.message + " 已保留输入；重试会核实原请求，避免重复采纳。", "error");
     } finally {
-      save.disabled = false;
+      suggestionLocks.delete(suggestion.id); panel.removeAttribute("aria-busy");
+      controls.forEach(control => { control.disabled = control.dataset.wasDisabled === "true"; delete control.dataset.wasDisabled; });
+      panel.dispatchEvent(new Event("suggestion-unlocked"));
+      inspectorRenderedKey = null; renderInspector(state.catalog.get(state.inspectorId));
     }
   }
-
-  // 知识点标签：不属于题面快照，单独显示。
-  function extrasNode(item) {
+  async function openTagSuggestionHistory(item) {
+    let dialog = node("dialog", "tag-history-dialog");
+    const heading = node("header", "tag-picker-head"), title = node("h2", "", "AI 标签记录 · 第 " + item.number + " 题");
+    const close = node("button", "button", "关闭"); close.type = "button"; heading.append(title, close);
+    const list = node("div", "tag-history-list"), footer = node("footer", "tag-picker-foot"), status = node("span", "helper"), previous = node("button", "button button-small", "较新记录"), next = node("button", "button button-small", "更早记录");
+    previous.type = next.type = "button"; footer.append(status, previous, next); dialog.append(heading, list, footer); document.body.append(dialog);
+    let offset = 0, total = 0, loading = false;
+    const loadPage = async function() {
+      if (loading) return; loading = true; list.replaceChildren(node("p", "helper", "正在读取记录…"));
+      try {
+        const url = "/api/library/tags/suggestions?publication_id=" + encodeURIComponent(item.id) + "&status=all&limit=20&offset=" + offset;
+        const result = await tagRequest(url); total = result.total || 0; list.replaceChildren();
+        const statusNames = { queued: "排队中", running: "生成中", pending: "待核对", accepted: "已采纳", rejected: "已拒绝", no_match: "无合适标签", review: "暂不能判断", failed: "生成失败", stale: "依据已变化" };
+        (result.items || []).forEach(function(record) {
+          const article = node("article", "tag-history-record"), top = node("header"), stateText = statusNames[record.status] || record.status;
+          top.append(node("strong", "", stateText), node("small", "", new Date(record.created_at).toLocaleString() + (record.generation_source ? " · " + record.generation_source : "")));
+          article.append(top);
+          if (record.message) article.append(node("p", "", record.message));
+          const snapshot = record.catalogue_snapshot || {}, snapshotRows = snapshot.tags || [];
+          (record.suggestions || []).forEach(function(entry) {
+            const line = node("div", "tag-history-entry"), decision = entry.decision ? (entry.decision === "accepted" ? " · 已采纳" : " · 已拒绝") : " · 未处理";
+            const original = snapshotRows.find(tag => tag.id === entry.tag_id);
+            line.append(node("b", "", original?.name || entry.name || entry.new_name || "新标签建议"), node("span", "", decision));
+            const paths = original ? tagAncestorPaths(original.id, 6, snapshotRows).paths
+              : (entry.parent_ids || []).flatMap(id => tagAncestorPaths(id, 6, snapshotRows).paths.map(path => [...path, { name: entry.new_name || entry.name || "新标签" }]));
+            if (paths.length) {
+              const location = node("details", "tag-history-directory"); location.append(node("summary", "", "生成时的归属路径"));
+              paths.forEach(path => location.append(node("p", "", path.map(tag => tag.name).join(" › ")))); line.append(location);
+            }
+            if (entry.rationale) line.append(node("p", "", entry.rationale));
+            if (entry.evidence) line.append(node("small", "", "依据：" + entry.evidence));
+            article.append(line);
+          });
+          if (snapshotRows.length) {
+            const directory = node("details", "tag-history-directory");
+            directory.append(node("summary", "", `生成时的标签目录 · 版本 ${snapshot.revision ?? "未知"}`));
+            snapshotRows.forEach(tag => {
+              const row = node("p", ""), parents = (tag.parent_ids || []).map(id => snapshotRows.find(value => value.id === id)?.name).filter(Boolean);
+              row.append(node("b", "", tag.name), node("small", "", parents.length ? "上级：" + parents.join("、") : "顶级标签")); directory.append(row);
+            }); article.append(directory);
+          }
+          list.append(article);
+        });
+        if (!result.items?.length) list.append(node("p", "library-empty", "还没有 AI 标签记录。"));
+        status.textContent = total ? `${offset + 1}–${Math.min(offset + (result.items || []).length, total)} / ${total} 条` : "0 条记录";
+        previous.disabled = offset <= 0; next.disabled = offset + 20 >= total;
+      } catch (error) { list.replaceChildren(node("p", "helper", error.message)); }
+      finally { loading = false; }
+    };
+    previous.addEventListener("click", function() { offset = Math.max(0, offset - 20); void loadPage(); });
+    next.addEventListener("click", function() { if (offset + 20 < total) { offset += 20; void loadPage(); } });
+    close.addEventListener("click", function() { dialog.close(); });
+    dialog.addEventListener("close", function() { dialog.remove(); }); dialog.showModal(); void loadPage();
+  }
+  function tagSuggestionNode(item) {
+    const suggestion = item.tag_suggestion;
+    if (!suggestion || !["pending", "queued", "running", "review", "no_match", "failed", "stale", "accepted", "rejected"].includes(suggestion.status)) return null;
+    if (["accepted", "rejected"].includes(suggestion.status)) return null;
+    if (suggestion.status !== "pending") {
+      const compact = node("div", "tag-suggestion-compact");
+      const label = { queued: "AI 标签建议排队中", running: "AI 正在生成标签建议", review: "AI 暂不能判断", no_match: "AI 没有找到合适标签", failed: "AI 标签建议生成失败", stale: "AI 建议依据已变化" }[suggestion.status];
+      compact.append(node("span", "", label));
+      if (suggestion.message) compact.append(node("small", "", suggestion.message));
+      if (suggestion.status === "failed") {
+        const retry = node("button", "button button-small tag-suggestion-retry-inline", "重新建议");
+        retry.type = "button"; retry.addEventListener("click", () => queueJobs("tags", { ids: [item.id], retry: true }));
+        compact.append(retry);
+      }
+      return compact;
+    }
+    const draft = suggestionDraft(item, suggestion), busy = suggestionLocks.has(suggestion.id);
+    const panel = node("aside", "tag-suggestion-card");
+    panel.dataset.status = suggestion.status;
+    panel.setAttribute("aria-label", "AI 标签建议");
+    const heading = node("header", "tag-suggestion-heading");
+    const statusText = { pending: "待核对", queued: "排队中", running: "生成中", review: "暂不能判断", no_match: "无合适标签", failed: "生成失败", stale: "依据已变化", accepted: "已采纳", rejected: "已拒绝" }[suggestion.status];
+    heading.append(node("h3", "", "AI 标签建议"), node("span", "tag-suggestion-status", statusText));
+    panel.append(heading);
+    if (suggestion.message) panel.append(node("p", "tag-suggestion-message", suggestion.message));
+    const checks = [];
+    (suggestion.suggestions || []).forEach((entry, index) => {
+      if (entry.decision) return;
+      const block = node("div", "tag-suggestion-entry");
+      block.dataset.suggestionIndex = String(index);
+      const entryDraft = draft[index] ||= {};
+      const line = node("label", "tag-suggestion-line");
+      const check = node("input"); check.type = "checkbox"; check.value = String(index); check.dataset.tagSuggestion = suggestion.id; check.disabled = false;
+      check.checked = entryDraft.selected === true;
+      check.addEventListener("change", () => { entryDraft.selected = check.checked; saveSuggestionDrafts(); });
+      const label = entry.name || entry.new_name || "新标签建议";
+      const scope = entry.kind === "method" && !entry.scope?.whole ? "第 " + ((entry.scope?.subquestions || []).join("、") || "?") + " 问" : "整题";
+      const text = node("span", "tag-suggestion-label");
+      text.append(node("b", "tag-suggestion-name", label));
+      const meta = node("span", "tag-suggestion-meta");
+      meta.append(node("span", "", entry.kind === "method" ? "解题方法" : "知识点"), node("span", "", scope));
+      if (entry.new_name) meta.append(node("span", "tag-suggestion-new", "新标签"));
+      text.append(meta); line.append(check, text); block.append(line); checks.push(check);
+      if (entry.rationale) block.append(node("p", "tag-suggestion-rationale", entry.rationale));
+      if (entry.evidence) {
+        const evidence = node("details", "tag-suggestion-evidence");
+        evidence.open = entryDraft.evidence === true;
+        evidence.addEventListener("toggle", () => { entryDraft.evidence = evidence.open; saveSuggestionDrafts(); });
+        evidence.append(node("summary", "", "查看依据"), node("p", "", entry.evidence)); block.append(evidence);
+      }
+      if (entry.new_name) {
+        const edit = node("details", "tag-suggestion-edit"); edit.append(node("summary", "", "修改名称、上级或分组"));
+        edit.open = entryDraft.expanded === true;
+        const fields = node("div", "tag-suggestion-fields");
+        const nameLabel = node("label", "tag-suggestion-field"), input = node("input", "tag-suggestion-new-name");
+        input.value = entryDraft.name ?? entry.new_name; input.dataset.newTagName = suggestion.id + "-" + index;
+        input.addEventListener("input", () => { entryDraft.name = input.value; saveSuggestionDrafts(); });
+        nameLabel.append(node("span", "", "标签名称"), input);
+        const kindLabel = node("label", "tag-suggestion-field"), kind = node("select");
+        kind.dataset.newTagKind = suggestion.id + "-" + index;
+        [["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(option) { kind.add(new Option(option[1], option[0])); }); kind.value = entryDraft.kind || entry.kind;
+        kind.addEventListener("change", () => { entryDraft.kind = kind.value; entryDraft.parent_ids = []; renderParents(); saveSuggestionDrafts(); });
+        kindLabel.append(node("span", "", "标签类型"), kind);
+        const parentLabel = node("label", "tag-suggestion-field"), parents = node("select", "tag-suggestion-parents");
+        parents.multiple = true; parents.size = 4; parents.dataset.newTagParent = suggestion.id + "-" + index;
+        parentLabel.append(node("span", "", "上级标签（可多选）"), parents);
+        const topLabel = node("label", "tag-suggestion-top-level"), top = node("input"); top.type = "checkbox";
+        top.checked = entryDraft.top_level === true; topLabel.append(top, node("span", "", "作为顶级标签"));
+        const renderParents = () => {
+          parents.replaceChildren();
+          (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === kind.value).forEach(tag => {
+            const option = new Option(tag.name, tag.id); option.selected = (entryDraft.parent_ids ?? entry.parent_ids ?? []).includes(tag.id); parents.append(option);
+          }); parents.disabled = top.checked || suggestionLocks.has(suggestion.id);
+        };
+        parents.addEventListener("change", () => { entryDraft.parent_ids = Array.from(parents.selectedOptions).map(option => option.value); entryDraft.top_level = false; top.checked = false; saveSuggestionDrafts(); });
+        top.addEventListener("change", () => {
+          entryDraft.top_level = top.checked; if (top.checked) entryDraft.parent_ids = [];
+          renderParents(); saveSuggestionDrafts();
+        }); renderParents();
+        const groups = node("fieldset", "tag-suggestion-groups"); groups.append(node("legend", "", "所属分组（可多选）"));
+        const choices = node("div", "tag-suggestion-group-list"); groups.append(choices);
+        let loaded = false, loading = false;
+        const loadGroups = async function() {
+          if (loaded || loading || !edit.open) return;
+          loading = true; choices.replaceChildren(node("span", "helper", "正在载入分组…"));
+          try {
+            if (!(tagCatalogue.groups || []).length) await loadTagCatalogue();
+            renderParents();
+            choices.replaceChildren();
+            (tagCatalogue.groups || []).forEach(function(group) {
+              const row = node("label"), choice = node("input"); choice.type = "checkbox"; choice.value = group.id;
+              choice.dataset.newTagGroup = suggestion.id + "-" + index;
+              choice.checked = (entryDraft.groups || entry.group_ids || []).includes(group.id); choice.disabled = suggestionLocks.has(suggestion.id);
+              choice.addEventListener("change", () => { entryDraft.groups = Array.from(choices.querySelectorAll("input:checked")).map(option => option.value); saveSuggestionDrafts(); });
+              row.append(choice, node("span", "", group.name)); choices.append(row);
+            });
+            if (!choices.childNodes.length) choices.append(node("span", "helper", "尚无分组，可先创建标签，再到标签管理整理。"));
+            loaded = true;
+          } catch (error) {
+            const retry = node("button", "button button-small", "重试载入分组"); retry.type = "button";
+            retry.addEventListener("click", loadGroups); choices.replaceChildren(node("span", "helper", error.message), retry);
+          } finally { loading = false; }
+        };
+        edit.addEventListener("toggle", () => { entryDraft.expanded = edit.open; saveSuggestionDrafts(); void loadGroups(); });
+        fields.append(nameLabel, kindLabel, parentLabel, topLabel, groups); edit.append(fields); block.append(edit);
+      }
+      const entryActions = node("div", "tag-suggestion-entry-actions"), acceptOne = node("button", "button button-small tag-suggestion-accept", "采纳"), rejectOne = node("button", "button button-quiet button-small tag-suggestion-reject", "拒绝");
+      acceptOne.type = rejectOne.type = "button";
+      acceptOne.addEventListener("click", () => resolveTagSuggestion(item, "accept", panel, [index]));
+      rejectOne.addEventListener("click", () => resolveTagSuggestion(item, "reject", panel, [index]));
+      entryActions.append(acceptOne, rejectOne); block.append(entryActions);
+      panel.append(block);
+    });
+    if (!checks.length) return null;
+    if (suggestion.status === "pending") {
+      const actions = node("footer", "tag-suggestion-actions"), selection = node("p", "tag-suggestion-selection", "勾选要处理的建议");
+      const buttons = node("div", "tag-suggestion-buttons");
+      const accept = node("button", "button button-small button-primary", "采纳所选建议"); accept.type = "button"; accept.addEventListener("click", () => resolveTagSuggestion(item, "accept", panel));
+      const reject = node("button", "button button-small", "拒绝所选建议"); reject.type = "button"; reject.addEventListener("click", () => resolveTagSuggestion(item, "reject", panel));
+      const updateSelection = function() {
+        const count = checks.filter(function(check) { return check.checked && !check.disabled; }).length;
+        selection.textContent = count ? "已选 " + count + " 条建议" : "勾选要处理的建议";
+        accept.disabled = reject.disabled = count === 0;
+      };
+      checks.forEach(function(check) { check.addEventListener("change", updateSelection); }); updateSelection();
+      panel.addEventListener("suggestion-unlocked", updateSelection);
+      buttons.append(accept, reject); actions.append(selection, buttons); panel.append(actions);
+    }
+    if (busy) { panel.setAttribute("aria-busy", "true"); panel.querySelectorAll("button, input, select").forEach(control => { control.disabled = true; }); }
+    return panel;
+  }
+  function cardTagContext(item) {
+    const context = node("div", "library-card-context");
+    (item.tag_assignments || []).filter(link => !link.needs_review && link.tag.kind === "knowledge").slice(0, 2)
+      .forEach(link => context.append(tagHoverChip(item, link, "library-card-tag-glimpse")));
+    const pendingCount = item.tag_suggestion?.status === "pending" ? (item.tag_suggestion.suggestions || []).filter(entry => !entry.decision).length : 0;
+    if (pendingCount) context.append(node("span", "library-card-ai-glimpse", `AI 建议 ${pendingCount} 条待核对`));
+    if (state.retainedTagItems.has(item.id)) context.append(node("span", "library-tag-retained", "已不符合当前筛选，暂时保留；重新筛选后移出列表"));
+    return context;
+  }
+  function updateLibraryMatchStatus() {
+    if (state.view === "selected") return;
+    const retained = state.retainedTagItems.size;
+    setStatus(`已显示 ${state.items.length} / 共 ${state.total} 题${retained ? ` · 另保留 ${retained} 题供继续阅读` : ""} · 每题保留入库版本。`);
+    ui.more.hidden = state.items.length >= state.total;
+  }
+  function patchTagPresentation(ids) {
+    const viewport = captureLibraryViewport();
+    for (const id of ids) {
+      const item = state.catalog.get(id), article = document.getElementById(`q-${id}`);
+      if (!item || !article) continue;
+      const context = cardTagContext(item), old = article.querySelector(".library-card-context");
+      if (old) old.replaceWith(context); else article.querySelector(".library-card-body")?.append(context);
+      article.classList.toggle("tag-filter-retained", state.retainedTagItems.has(id));
+      const kept = state.cards?.get(id);
+      if (kept) kept.signature = JSON.stringify([item, state.basket.includes(id), state.features, state.ai.mode, state.selected.has(id), state.expanded.has(id), state.opened.has(id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
+    }
+    if (ids.includes(state.inspectorId)) { inspectorRenderedKey = null; renderInspector(state.catalog.get(state.inspectorId)); }
+    updateLibraryMatchStatus();
+    restoreLibraryViewport(viewport);
+    positionTagHover();
+  }
+  function applyInlineTagResult(item, result) {
+    if (result.revisions?.[item.id] !== undefined) item.tag_revision = result.revisions[item.id];
+    if (Array.isArray(result.assignments) && (!result.publication_id || result.publication_id === item.id)) {
+      item.tag_assignments = result.assignments;
+      item.tags = result.assignments.filter(link => !link.needs_review).map(link => link.tag.name);
+    }
+  }
+  // Only the tag fields are refreshed. The question body, answer disclosure,
+  // selection and currently inspected identity keep their existing DOM/state.
+  async function refreshTaggedPublications(ids, result = null) {
+    ids = Array.from(new Set(ids));
+    const positions = new Map(visibleItems().map((item, index) => [item.id, index]));
+    const filters = currentFilterPayload(), filterKey = JSON.stringify(filters), view = state.view;
+    if (result) ids.forEach(id => { const item = state.catalog.get(id); if (item) applyInlineTagResult(item, result); });
+    const body = await tagRequest("/api/library/batch", { method: "POST", body: JSON.stringify({ ids, ...(view === "all" ? { filters } : {}) }) });
+    for (const fresh of body.items || []) {
+      const item = state.catalog.get(fresh.id) || fresh;
+      for (const key of ["tag_revision", "tag_assignments", "tags", "tag_suggestion", "job_errors", "job_details", "jobs"]) {
+        if (key in fresh) item[key] = fresh[key];
+      }
+      state.catalog.set(item.id, item);
+      if (view === "all" && state.view === view && JSON.stringify(currentFilterPayload()) === filterKey && body.matches) {
+        const index = positions.get(item.id);
+        if (body.matches[item.id] === false && index !== undefined) {
+          state.retainedTagItems.set(item.id, { item, index });
+          state.items = state.items.filter(value => value.id !== item.id);
+        } else if (body.matches[item.id] === true && state.retainedTagItems.has(item.id)) {
+          const retained = state.retainedTagItems.get(item.id); state.retainedTagItems.delete(item.id);
+          if (!state.items.some(value => value.id === item.id)) state.items.splice(Math.min(retained.index, state.items.length), 0, item);
+        }
+      }
+    }
+    if (view === "all" && state.view === view && JSON.stringify(currentFilterPayload()) === filterKey && Number.isInteger(body.total)) {
+      state.total = body.total; state.facets = body.facets || state.facets; state.tagWork = body.tag_work || state.tagWork;
+      renderFacets(); renderActiveFilters();
+    }
+    patchTagPresentation(ids);
+    return body;
+  }
+  async function submitInlineTagAttempt(item, attempt) {
+    if (inlineTagLocks.has(item.id)) return false;
+    inlineTagLocks.add(item.id); inlineTagStates.set(item.id, { attempt, message: attempt.uncertain ? "正在核实上次操作…" : "正在保存标签…" });
+    patchTagPresentation([item.id]); renderTagHover();
+    try {
+      let result = null;
+      if (attempt.uncertain) {
+        const history = await tagRequest("/api/library/tags/operations?request_id=" + encodeURIComponent(attempt.payload.request_id));
+        const prior = (history.operations || []).find(operation => operation.request_id === attempt.payload.request_id);
+        if (prior) result = { operation_id: prior.id, revisions: prior.revisions || prior.after_snapshot?.revisions, undone: prior.undone };
+      }
+      if (!result) result = await tagRequest("/api/library/tags/assignments/batch", { method: "POST", body: JSON.stringify(attempt.payload) });
+      inlineTagStates.set(item.id, { ...(result.undone ? {} : { operationId: result.operation_id, undoSourceTagId: attempt.payload.replace?.from_tag_id }), message: result.undone ? "上次操作已撤销" : attempt.message });
+      applyInlineTagResult(item, result);
+      if (tagHover?.publicationId === item.id && attempt.payload.replace && !result.undone) {
+        tagHover.sourceTagId = attempt.payload.replace.to_tag_id; tagHover.viewTagId = tagHover.sourceTagId;
+        tagHover.up.clear(); tagHover.down.clear();
+      }
+      try { await refreshTaggedPublications([item.id], result); }
+      catch (_) { patchTagPresentation([item.id]); toast("标签已保存，筛选统计尚未更新；请稍后刷新。", "error"); }
+      return true;
+    } catch (error) {
+      const uncertain = !error.status || error.status >= 500; attempt.uncertain = uncertain;
+      inlineTagStates.set(item.id, { ...(uncertain ? { attempt } : {}), message: error.message });
+      toast(error.message + (uncertain ? " 请核实原操作，避免重复保存。" : " 本题标签已保留。"), "error");
+      return false;
+    } finally { inlineTagLocks.delete(item.id); patchTagPresentation([item.id]); renderTagHover(); }
+  }
+  async function removeInlineTag(item, tag) {
+    item = state.catalog.get(item.id) || item;
+    const prior = inlineTagStates.get(item.id);
+    if (prior?.attempt) { toast("先核实上次标签操作，再修改其他标签。", "error"); return; }
+    return submitInlineTagAttempt(item, { tagId: tag.id, tag, message: `已移除「${tag.name}」`, payload: {
+      publication_ids: [item.id], add: [], remove: [tag.id], scopes: {},
+      expected_revisions: { [item.id]: item.tag_revision }, request_id: tagRequestId() } });
+  }
+  async function undoInlineTag(item) {
+    const saved = inlineTagStates.get(item.id); if (!saved?.operationId || inlineTagLocks.has(item.id)) return;
+    inlineTagLocks.add(item.id); inspectorRenderedKey = null; renderInspector(state.catalog.get(state.inspectorId));
+    try { const result = await tagRequest("/api/library/tags/undo", { method: "POST", body: JSON.stringify({ operation_id: saved.operationId }) });
+      if (tagHover?.publicationId === item.id && saved.undoSourceTagId) {
+        tagHover.sourceTagId = saved.undoSourceTagId; tagHover.viewTagId = saved.undoSourceTagId; tagHover.up.clear(); tagHover.down.clear();
+      }
+      inlineTagStates.set(item.id, { message: "已撤销标签修改" }); await refreshTaggedPublications([item.id], result);
+    } catch (error) { toast(error.message + " 后续改动已保留。", "error"); }
+    finally { inlineTagLocks.delete(item.id); patchTagPresentation([item.id]); renderTagHover(); }
+  }
+  function extrasNode(item, { includeSuggestions = true } = {}) {
     const box = node("div", "library-extras");
-    if ((item.tags || []).length) {
-      const row = node("div", "library-tags");
-      row.append(node("span", "library-tags-label", "知识点"));
-      item.tags.forEach((tag) => {
-        const chip = node("button", `library-tag${state.tag === tag ? " active" : ""}`, tag);
-        chip.type = "button";
-        chip.title = state.tag === tag ? "取消按这个知识点筛选" : "只看这个知识点的题";
-        chip.addEventListener("click", () => { state.tag = state.tag === tag ? "" : tag; syncUrl(); load(); });
-        row.append(chip);
-      });
-      const edit = node("button", "library-tags-edit", "改");
-      edit.type = "button";
-      edit.id = "libraryTagEdit";
-      edit.title = "改这道题的知识点标签：换掉、去掉，或清空后重新自动生成";
-      edit.addEventListener("click", () => openTagEditor(item));
-      row.append(edit);
-      box.append(row);
+    const row = node("div", "library-tags");
+    (item.tag_assignments || []).filter((link) => !link.needs_review).forEach((link) => {
+      const tag = link.tag;
+      const wrapper = node("div", "library-tag-chip"), chip = tagHoverChip(item, link, "library-tag");
+      if (tag.color) wrapper.style.setProperty("--tag-color", tag.color);
+      const remove = node("button", "library-tags-remove", "×"); remove.type = "button"; remove.dataset.tagId = tag.id; remove.title = `从本题移除「${tag.name}」`; remove.setAttribute("aria-label", remove.title);
+      remove.disabled = inlineTagLocks.has(item.id); remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove); row.append(wrapper);
+    });
+    const edit = node("button", "library-tags-edit", "＋ 添加标签"); edit.type = "button";
+    edit.title = "为当前这道题添加标签"; edit.disabled = inlineTagLocks.has(item.id);
+    edit.addEventListener("click", () => openTagEditor(item)); row.append(edit); box.append(row);
+    const saved = inlineTagStates.get(item.id);
+    if (saved) {
+      const status = node("div", "library-tags-save-state"); status.setAttribute("role", "status"); status.append(node("small", "", saved.message));
+      if (saved.operationId) { const undo = node("button", "button button-quiet button-small library-tags-undo", "撤销"); undo.type = "button"; undo.disabled = inlineTagLocks.has(item.id); undo.addEventListener("click", () => undoInlineTag(item)); status.append(undo); }
+      if (saved.attempt) { const retry = node("button", "button button-small library-tags-retry", "核实上次操作"); retry.type = "button"; retry.disabled = inlineTagLocks.has(item.id); retry.addEventListener("click", () => submitInlineTagAttempt(state.catalog.get(item.id) || item, saved.attempt)); status.append(retry); }
+      box.append(status);
+    }
+    const unresolved = (item.tag_assignments || []).filter((link) => link.needs_review);
+    if (unresolved.length) {
+      const review = node("div", "library-tag-legacy-review");
+      review.append(node("span", "helper", "旧标签待核对：" + unresolved.map((link) => link.tag.name).join("、")));
+      const manage = node("button", "button button-quiet button-small", "整理旧标签"); manage.type = "button";
+      manage.addEventListener("click", openTagManager); review.append(manage); box.append(review);
+    }
+    if (includeSuggestions) {
+      const pending = Array.from(suggestionAttempts.values()).find(attempt => attempt.itemId === item.id);
+      if (pending && !suggestionLocks.has(pending.suggestionId)) {
+        const recovery = node("div", "tag-suggestion-recovery"); recovery.append(node("small", "", "上次 AI 建议处理结果尚未核实"));
+        const retry = node("button", "button button-small tag-suggestion-retry", "核实上次提交"); retry.type = "button";
+        retry.addEventListener("click", () => resolveTagSuggestion({ ...item, tag_suggestion: { id: pending.suggestionId, status: "pending", suggestions: [] } }, pending.payload.action, recovery, pending.payload.indices, true)); recovery.append(retry); box.append(recovery);
+      }
+      const panel = tagSuggestionNode(item); if (panel) box.append(panel);
+    }
+    if (item.tag_suggestion) {
+      const history = node("button", "button button-quiet button-small library-tag-history-link", "AI 标签记录"); history.type = "button";
+      history.addEventListener("click", () => openTagSuggestionHistory(item)); box.append(history);
     }
     Object.entries(item.job_errors || {})
-      .filter(([kind]) => (kind === "tags" ? state.features.knowledge_tags : state.features.ai_answer))
-      .forEach(([kind, message]) => box.append(node("p", "library-job-error",
-        `${kind === "tags" ? "打知识点标签" : "AI 解答"}没做成：${message}。请到“设置 → API 配置”检查服务商、密钥和模型。`)));
+      .filter(([kind, message]) => (kind === "tags" ? true : state.features.ai_answer)
+        && !(kind === "tags" && item.tag_suggestion?.status === "failed" && item.tag_suggestion.message === message))
+      .forEach(([kind, message]) => {
+        const error = node("p", "library-job-error");
+        error.append(node("span", "", `${kind === "tags" ? "知识点标签任务" : "AI 解答任务"}未完成：${message}`));
+        if (/API 配置|服务商配置|密钥配置|模型配置|请重新配置/.test(message)) {
+          error.append(node("span", "", " 请检查“设置 → API 配置”。"));
+        }
+        box.append(error);
+      });
     return box.childNodes.length ? box : null;
   }
 
   function jobButtons(item) {
     const buttons = [];
-    if (state.ai.mode !== "api" || state.ai.api_ready !== true) return buttons;
+    const tagReady = state.ai.mode === "assistant" ? state.ai.ready === true : state.ai.mode === "api" && state.ai.api_ready === true;
+    const answerReady = state.ai.mode === "api" && state.ai.api_ready === true;
+    if (!tagReady && !answerReady) return buttons;
     const details = item.job_details || [];
     const waiting = new Set(details.length ? details.filter((job) => job.executor === state.ai.mode).map((job) => job.kind) : item.jobs || []);
-    if (state.features.knowledge_tags && !(item.tags || []).length) {
+    if (tagReady && state.features.knowledge_tags && (!item.tag_suggestion || ["failed", "no_match", "review", "accepted", "rejected", "stale"].includes(item.tag_suggestion.status))) {
       const busy = waiting.has("tags");
-      const assistant = state.ai.mode === "assistant" && details.some((job) => job.kind === "tags" && job.executor === "assistant");
-      const button = iconButton("button", "button button-quiet button-small", busy ? (assistant ? "待助手生成标签" : "正在打知识点标签…") : "打知识点标签", busy ? "" : "plus");
+      const prior = item.tag_suggestion && ["failed", "no_match", "review", "stale", "accepted", "rejected"].includes(item.tag_suggestion.status);
+      const button = iconButton("button", "button button-quiet button-small", busy ? "正在生成标签建议…" : prior ? "重新建议" : state.ai.mode === "assistant" ? "交给助手建议标签" : "AI 建议标签", busy ? "" : "plus");
       button.disabled = busy;
-      button.addEventListener("click", () => queueJobs("tags", { ids: [item.id] }));
+      button.addEventListener("click", () => queueJobs("tags", { ids: [item.id], retry: Boolean(prior) }));
       buttons.push(button);
     }
-    if (state.features.ai_answer && !item.has_answer && !item.ai_answer) {
+    if (answerReady && state.features.ai_answer && !item.has_answer && !item.ai_answer) {
       const busy = waiting.has("answer");
       const assistant = state.ai.mode === "assistant" && details.some((job) => job.kind === "answer" && job.executor === "assistant");
       const button = iconButton("button", "button button-quiet button-small", busy ? (assistant ? "待助手解答" : "AI 正在解答…") : "AI 解答", busy ? "" : "plus");
@@ -914,6 +2118,7 @@
   }
 
   function render() {
+    const viewport = captureLibraryViewport();
     renderFacets();
     const notice = $("assistantTaskNotice");
     notice.hidden = true;
@@ -923,9 +2128,11 @@
     syncSelection();
     ui.list.replaceChildren();
     const shown = visibleItems();
+    if (!shown.some((item) => item.id === state.inspectorId)) state.inspectorId = shown[0]?.id || "";
     if (!shown.length) {
       const empty = node("div", "library-empty");
-      const filtered = Boolean(state.q.trim() || state.document || state.type || state.review || state.answer || state.tag);
+      const filtered = Boolean(state.q.trim() || state.document || state.type || state.review || state.answer || state.tag
+        || state.tagAll || state.tagAny || state.tagNot || state.untaggedKnowledge || state.tagReview);
       empty.append(node("p", "", state.view === "selected" ? (state.basket.length ? "选题尚未载入。" : "试题篮还是空的。") : filtered ? "没有找到符合条件的题目。" : "题库还是空的。"));
       if (state.view === "selected") empty.append(node("p", "helper", state.basket.length ? "在右侧重试，或移出已撤回的题目。" : "回到全部题目，选择需要的题加入试题篮。"));
       else if (filtered) {
@@ -948,19 +2155,23 @@
     const previous = state.cards || new Map();
     state.cards = new Map();
     shown.forEach((item) => {
-      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag]);
+      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
       const kept = previous.get(item.id);
       const node = kept && kept.signature === signature ? kept.node : card(item);
+      node.classList.toggle("inspector-active", state.inspectorId === item.id);
+      if (state.inspectorId === item.id) node.setAttribute("aria-current", "true"); else node.removeAttribute("aria-current");
       state.cards.set(item.id, { signature, node });
       ui.list.append(node);
     });
+    renderInspector(state.catalog.get(state.inspectorId) || shown.find((item) => item.id === state.inspectorId) || null);
     const currentQuestion = state.catalog.get(state.questionReturnId);
     if ($("questionDialog").open && currentQuestion && state.questionSignature !== questionSignature(currentQuestion)) openQuestion(currentQuestion);
     setStatus(state.view === "selected" ? `试题篮 ${state.basket.length} 题 · 已载入 ${shown.length} 题。已选题目不受搜索与筛选影响。`
       : state.total
-      ? `已显示 ${state.items.length} / 共 ${state.total} 题${state.q ? `，匹配“${state.q}”` : ""} · 每题保留入库版本。`
+      ? `共 ${state.total} 题 · 已显示 ${state.items.length} 题${state.q ? `，匹配“${state.q}”` : ""}`
       : "");
     ui.more.hidden = state.view === "selected" || state.items.length >= state.total;
+    if (state.view !== "selected" && state.retainedTagItems.size) updateLibraryMatchStatus();
     requestAnimationFrame(() => readingOverflowHints(ui.list));
     if (state.focus) {
       const target = document.getElementById(`q-${state.focus}`);
@@ -968,7 +2179,7 @@
         requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "center" }));
         state.focus = "";
       }
-    }
+    } else restoreLibraryViewport(viewport);
   }
 
   // Optional guidance is checked where it is produced, so a re-render, a
@@ -1000,7 +2211,13 @@
   }
 
   function visibleItems() {
-    if (state.view !== "selected") return state.items;
+    if (state.view !== "selected") {
+      const items = state.items.slice();
+      for (const retained of state.retainedTagItems.values()) {
+        if (!items.some(item => item.id === retained.item.id)) items.splice(Math.min(retained.index, items.length), 0, retained.item);
+      }
+      return items;
+    }
     const missing = new Set(state.basketMissing.map((item) => item.id));
     return state.basket.filter((id) => !missing.has(id)).map((id) => state.catalog.get(id)).filter(Boolean);
   }
@@ -1008,6 +2225,7 @@
   function clearFilters() {
     window.clearTimeout(searchTimer);
     state.q = state.document = state.type = state.review = state.answer = state.tag = "";
+    state.tagAll = state.tagAny = state.tagNot = ""; state.tagMode = "all"; state.untaggedKnowledge = state.tagReview = false;
     ui.search.value = "";
     syncUrl();
     void load();
@@ -1022,7 +2240,7 @@
       ["type", state.type ? `题型：${QB.TYPE_NAMES[state.type] || state.type}` : ""],
       ["review", state.review ? (state.review === "ai" ? "AI 审核" : "人工核对") : ""],
       ["answer", state.answer ? (state.answer === "yes" ? "有原卷答案" : "无原卷答案") : ""],
-      ["tag", state.tag ? `知识点：${state.tag}` : ""]];
+      ["tag", state.tag ? `知识点：${state.tag}` : (state.tagAll || state.tagAny || state.tagNot) ? "标签筛选已启用" : state.untaggedKnowledge ? "未标知识点" : state.tagReview ? "AI 建议待核对" : ""]];
     box.hidden = state.view === "selected" || !labels.some(([, label]) => label);
     if (box.hidden) return;
     labels.forEach(([key, label]) => {
@@ -1035,7 +2253,11 @@
       remove.title = label;
       remove.setAttribute("aria-label", `取消${label}`);
       remove.append(node("span", "label", label), node("span", "drop", "×"));
-      remove.addEventListener("click", () => { state[key] = ""; ui.search.value = state.q; syncUrl(); void load(); });
+      remove.addEventListener("click", () => {
+        if (key === "tag") { state.tag = ""; state.tagAll = state.tagAny = state.tagNot = ""; state.tagMode = "all"; state.untaggedKnowledge = state.tagReview = false; }
+        else state[key] = "";
+        ui.search.value = state.q; syncUrl(); void load();
+      });
       box.append(remove);
     });
     const clear = node("button", "button button-quiet button-small", "清除筛选");
@@ -1060,6 +2282,8 @@
     $("addSelected").disabled = !state.selected.size;
     $("withdrawSelected").disabled = !state.selected.size;
     $("clearSelection").disabled = !state.selected.size;
+    $("editSelectedTags").disabled = !state.selected.size;
+    $("editSelectedTags").textContent = state.selected.size ? `整理勾选题的标签（${state.selected.size}）` : "整理勾选题的标签";
   }
 
   async function batchItems(ids) {
@@ -1128,6 +2352,7 @@
   function setBasketPanel(open) {
     const next = Boolean(open);
     if (next === state.basketVisible) return;
+    if (next) setInspectorOpen(false);
     state.basketVisible = next;
     document.body.classList.toggle("library-basket-open", next);
     const handle = $("basketHandle");
@@ -2817,7 +4042,38 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("printSettings").addEventListener("toggle", () => requestAnimationFrame(rescalePrintPaper));
   window.addEventListener("beforeunload", protectLibraryBeforeUnload);
   document.addEventListener("click", handleLibraryNavigation);
-  ui.tagSelect.addEventListener("change", () => { state.tag = ui.tagSelect.value; syncUrl(); load(); });
+  ui.tagSelect.addEventListener("change", () => {
+    const ids = Array.from(ui.tagSelect.selectedOptions).map((option) => option.value).filter(Boolean).join(",");
+    state.tag = ""; state.tagAll = state.tagAny = state.tagNot = "";
+    if (state.tagMode === "not") state.tagNot = ids;
+    else if (state.tagMode === "any") state.tagAny = ids;
+    else state.tagAll = ids;
+    syncUrl(); load();
+  });
+  $("tagMatchMode")?.addEventListener("change", () => {
+    const selected = Array.from(ui.tagSelect.selectedOptions).map((option) => option.value).filter(Boolean).join(",");
+    state.tagMode = $("tagMatchMode").value; state.tag = ""; state.tagAll = state.tagAny = state.tagNot = "";
+    if (state.tagMode === "not") state.tagNot = selected; else if (state.tagMode === "any") state.tagAny = selected; else state.tagAll = selected;
+    syncUrl(); load();
+  });
+  $("saveTagFilter")?.addEventListener("click", () => {
+    const filter = currentTagFilter();
+    if (!filter.legacy && !filter.all && !filter.any && !filter.not) { toast("先选择一个或多个标签，再保存常用筛选。", "error"); return; }
+    const name = window.prompt("给这个标签筛选起个名字"); if (!name || !name.trim()) return;
+    const saved = savedTagFilters().filter((item) => item.name !== name.trim()); saved.push({ name: name.trim(), filter: filter });
+    try { localStorage.setItem("qb-library-saved-tag-filters", JSON.stringify(saved.slice(-30))); renderSavedTagFilters(); toast("常用筛选已保存。", "success"); }
+    catch (_) { toast("浏览器无法保存常用筛选。", "error"); }
+  });
+  $("tagSavedFilterSelect")?.addEventListener("change", () => {
+    const index = Number($("tagSavedFilterSelect").value), saved = savedTagFilters();
+    if (Number.isInteger(index) && saved[index]) applySavedTagFilter(saved[index].filter);
+    $("deleteTagFilter").disabled = !$("tagSavedFilterSelect").value;
+  });
+  $("deleteTagFilter")?.addEventListener("click", () => {
+    const index = Number($("tagSavedFilterSelect").value), saved = savedTagFilters();
+    if (!Number.isInteger(index) || !saved[index]) return;
+    saved.splice(index, 1); localStorage.setItem("qb-library-saved-tag-filters", JSON.stringify(saved)); renderSavedTagFilters();
+  });
   ui.sourceDialog.addEventListener("click", (event) => {
     if (event.target === ui.sourceDialog || event.target.closest("[data-close]")) ui.sourceDialog.close();
   });
@@ -2870,14 +4126,25 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       if (document.body.classList.contains("library-focus-mode")) focusToggle?.set(false);
       // 窄屏上右侧已经有筛选浮层了，篮抽屉要让位：两个浮层不同时开。
       if (document.body.classList.contains("library-basket-open")) setBasketPanel(false);
+      if (document.body.classList.contains("library-inspector-open")) setInspectorOpen(false);
     }
     document.body.classList.toggle("rail-open", open);
     railScrim.hidden = !open;
     railToggle.setAttribute("aria-expanded", String(open));
-    if (open) document.querySelector(".library-rail .library-search input")?.focus({ preventScroll: true });
+    if (open) ui.search?.focus({ preventScroll: true });
   };
   railToggle.addEventListener("click", () => setRail(!document.body.classList.contains("rail-open")));
   railScrim.addEventListener("click", () => setRail(false));
+  $("inspectorToggle").addEventListener("click", () => setInspectorOpen(window.matchMedia("(max-width: 979px)").matches
+    ? !document.body.classList.contains("library-inspector-open") : document.body.classList.contains("library-inspector-collapsed")));
+  $("closeInspector").addEventListener("click", () => setInspectorOpen(false));
+  $("inspectorScrim").addEventListener("click", () => setInspectorOpen(false));
+  window.matchMedia("(max-width: 979px)").addEventListener("change", () => {
+    document.body.classList.remove("library-inspector-open"); $("inspectorScrim").hidden = true;
+    ui.inspectorToggle?.setAttribute("aria-expanded", String(!window.matchMedia("(max-width: 979px)").matches && !document.body.classList.contains("library-inspector-collapsed")));
+  });
+  $("libraryTagManager").addEventListener("click", openTagManager);
+  $("editSelectedTags").addEventListener("click", () => openTagEditor(null));
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !document.body.classList.contains("rail-open")) return;
     // 和抽屉同一规矩：原生 <dialog> 在 top layer，永远盖住侧栏，Esc 先让给它。
@@ -2886,6 +4153,12 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     setRail(false);
     railToggle.focus({ preventScroll: true });
   });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !document.body.classList.contains("library-inspector-open") || document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    setInspectorOpen(false);
+    ui.inspectorToggle?.focus({ preventScroll: true });
+  });
   $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
   // 原来这里常驻两条提示条（题库快捷键、打印快捷键）外加一个「恢复操作提示」按钮。
   // 三样加起来是横在题目上方的一整条，眼睛得先扫过它才看得到题。提示内容都在
@@ -2893,6 +4166,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   // 没有被这里关掉的东西，就没有东西要恢复。
   document.addEventListener("keydown", (event) => {
     const editable = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+    if (tagManagerDialog?.open) return;
     const ordinary = !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat
       && !event.target?.closest?.(editable) && !document.activeElement?.closest?.(editable);
     if (ordinary && !event.shiftKey && event.key === "/" && ui.sheet.hidden && document.activeElement !== ui.search && !document.querySelector("dialog[open]") && !ui.search.disabled) {

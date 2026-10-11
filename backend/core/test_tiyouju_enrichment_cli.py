@@ -227,15 +227,14 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         code, switches = run_json("features", "--enable", "knowledge_tags", "ai_answer")
         self.assertEqual(code, 0, switches)
         with tempfile.TemporaryDirectory() as folder:
-            code, task = run_json("enrich", "prepare", str(self.publication.pk), "--out", folder, "--agent", "豆包工作版")
+            code, task = run_json("enrich", "prepare", str(self.publication.pk), "--kinds", "answer",
+                                  "--out", folder, "--agent", "豆包工作版")
             self.assertEqual(code, 0, task)
             self.assertTrue(Path(task["local_images"]["crop"]).is_file())
-            self.assertEqual(len(task["jobs"]), 2)
+            self.assertEqual([job["kind"] for job in task["jobs"]], ["answer"],
+                             "新建资料不再自动排队 AI 标签任务")
             for job in task["jobs"]:
-                if job["kind"] == "tags":
-                    args = ["--tags", task["knowledge"]["points"][0]["point"]]
-                else:
-                    args = ["--answer", "$2$", "--analysis", "$1+1=2$，代回检查。"]
+                args = ["--answer", "$2$", "--analysis", "$1+1=2$，代回检查。"]
                 code, result = run_json("enrich", "submit", job["id"], "--fingerprint", job["fingerprint"],
                                         "--agent", "豆包工作版", *args)
                 self.assertEqual(code, 0, result)
@@ -247,7 +246,8 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         self.assertTrue(self.question.approved)
         self.assertEqual(self.publication.extras["ai_answer"]["agent"], "豆包工作版")
         self.assertFalse(self.publication.extras["ai_answer"]["checked"])
-        self.assertFalse(self.publication.extras["tags_checked"])
+        self.assertNotIn("tags", self.publication.extras,
+                         "AI 标签只进入待核对建议，不写成正式标签")
         self.network.assert_not_called()
 
     def test_auto_changes_only_timing_and_disabled_task_cannot_write_back(self):
@@ -256,7 +256,7 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         self.assertEqual(current["on_intake"], {"tags": False, "answer": False})
         code, current = run_json("enrich", "auto", "--tags", "on")
         self.assertEqual(code, 0, current)
-        self.assertEqual(current["on_intake"], {"tags": True, "answer": False})
+        self.assertEqual(current["on_intake"], {"tags": False, "answer": False})
         self.assertFalse(current["features"]["knowledge_tags"])
         run_json("features", "--enable", "ai_answer")
         code, task = run_json("enrich", "prepare", str(self.publication.pk), "--kinds", "answer", "--no-images", "--agent", "豆包工作版")

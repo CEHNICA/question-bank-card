@@ -274,25 +274,30 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         checked = self.client.get("/api/settings/library-ai").json()
         self.assertEqual(checked["mode"], "api")
         self.assertTrue(checked["api_ready"])
-        # A second settings window/CLI changes execution after the UI checked.
+        # Explicit tag API work remains pinned to the tested API even after
+        # switching ordinary work to the desktop assistant.
         service.save({"mode": "assistant"})
         settings = self.config_bytes()
         questions = list(Question.all_objects.order_by("pk").values())
         publications = list(PublishedQuestion.objects.order_by("pk").values())
-        for kind in ("tags", "answer"):
-            with self.subTest(kind=kind):
-                response = self.normal_post(kind, api_only=True)
-                self.assertEqual(response.status_code, 409, response.content)
-                self.assertIn("未创建助手任务", response.json()["error"])
-                self.assertFalse(LibraryJob.objects.exists())
+        response = self.normal_post("tags", api_only=True)
+        self.assertEqual(response.status_code, 200, response.content)
+        tag_job = LibraryJob.objects.get(kind="tags")
+        self.assertTrue(tag_job.tag_scope)
+        self.assertEqual(tag_job.executor, "api")
+        response = self.normal_post("answer", api_only=True)
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertIn("未创建助手任务", response.json()["error"])
+        self.assertFalse(LibraryJob.objects.filter(kind="answer").exists())
         self.assertEqual(self.config_bytes(), settings)
         self.assertEqual(list(Question.all_objects.order_by("pk").values()), questions)
         self.assertEqual(list(PublishedQuestion.objects.order_by("pk").values()), publications)
         # Losing verification also refuses; it never queues an assistant as a fallback.
         service.save({"mode": "api", "endpoint_id": "ep-unverified-after-ui-get"})
         self.assertFalse(service.public_status()["api_ready"])
+        prior_tags = LibraryJob.objects.filter(kind="tags").count()
         self.assertEqual(self.normal_post("tags", api_only=True).status_code, 409)
-        self.assertFalse(LibraryJob.objects.exists())
+        self.assertEqual(LibraryJob.objects.filter(kind="tags").count(), prior_tags)
         self.transport.assert_not_called()
 
     def test_legacy_normal_queue_without_api_only_keeps_assistant_compatibility(self):
@@ -303,12 +308,17 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
                 with self.subTest(flag=flag, kind=kind):
                     response = self.normal_post(kind, **flag)
                     self.assertEqual(response.status_code, 200, response.content)
-                    self.assertEqual(response.json()["executor"], "assistant")
+                    executor = "assistant"
+                    self.assertEqual(response.json()["executor"], executor)
+                    if kind == "tags" and flag:
+                        self.assertEqual(response.json()["queued"], 0, "same active suggestion is skipped idempotently")
+                        self.assertEqual(response.json()["skipped"], 1)
+                        continue
                     job = LibraryJob.objects.get(pk=response.json()["jobs"][0]["id"])
-                    self.assertEqual(job.executor, "assistant")
+                    self.assertEqual(job.executor, executor)
                     self.assertFalse(job.solution_scope)
-                    self.assertEqual(job.api_snapshot, {})
-        self.assertEqual(LibraryJob.objects.count(), 2, "The false/omitted compatibility calls reuse existing identical waits")
+                    self.assertEqual(bool(job.api_snapshot), False)
+        self.assertEqual(LibraryJob.objects.count(), 2, "Identical tags suggestions are reused; answer work remains assistant-compatible")
         self.assertEqual(self.config_bytes(), settings)
         self.transport.assert_not_called()
 
@@ -331,7 +341,7 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
                 job = LibraryJob.objects.get(pk=response.json()["jobs"][0]["id"])
                 self.assertEqual(job.executor, "api")
                 self.assertFalse(job.solution_scope, "Ordinary UI work is not an explicit solution-scope bypass")
-                self.assertNotIn("explicit_api", job.api_snapshot)
+                self.assertEqual(job.api_snapshot.get("explicit_api") is True, kind == "tags")
                 self.assertEqual(job.api_snapshot["mode"], "api")
                 self.assertEqual(self.config_bytes(), settings)
         self.assertEqual(LibraryJob.objects.count(), 2)

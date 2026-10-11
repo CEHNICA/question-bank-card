@@ -399,6 +399,20 @@ def generation_backlog() -> dict:
 
 def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuestion:
     """Store tags / AI answer on a library entry: no new version, no re-approval."""
+    # The tag editor and answer editor are independent sidecar writes. Preserve
+    # the latest tag projection when an answer editor submitted an older copy
+    # of extras, and preserve the latest answer when a tag operation refreshes
+    # its projection.
+    current = PublishedQuestion.objects.filter(pk=publication.pk).values("extras").first()
+    saved = current.get("extras") if current and isinstance(current.get("extras"), dict) else {}
+    extras = deepcopy(extras) if isinstance(extras, dict) else {}
+    tag_keys = ("tags", "tags_source", "tags_at", "tags_fingerprint", "tags_publication_id",
+                "tags_agent", "tags_executor", "tags_checked", "tags_legacy_original")
+    for key in tag_keys:
+        if key in saved:
+            extras[key] = deepcopy(saved[key])
+        else:
+            extras.pop(key, None)
     publication.extras = extras
     publication.tags_text = tags_text(tags_of(extras))
     publication.search_text = _search_text(publication.content, extras)
@@ -627,7 +641,7 @@ def _content_with_figure_state(publication: PublishedQuestion) -> dict:
     return marked
 
 
-def publication_json(publication: PublishedQuestion) -> dict:
+def publication_json(publication: PublishedQuestion, *, include_tag_details: bool = True) -> dict:
     from . import library_solutions
     solution, solution_error = None, ""
     if (publication.extras or {}).get("solution_id"):
@@ -635,7 +649,7 @@ def publication_json(publication: PublishedQuestion) -> dict:
             solution = library_solutions.solution_json(library_solutions.selected(publication))
         except library_solutions.SolutionError as error:
             solution_error = str(error)
-    return {
+    data = {
         "id": str(publication.id),
         "draft_id": publication.question_id,
         "document_id": str(publication.paper_id) if publication.paper_id else None,
@@ -658,6 +672,11 @@ def publication_json(publication: PublishedQuestion) -> dict:
         "previous_solution_id": (publication.extras or {}).get("solution_needs_review_id"),
         "solution_error": solution_error,
     }
+    if not include_tag_details:
+        data.update(tags=[], tag_revision=publication.tag_revision, tag_assignments=[], tag_suggestion=None)
+        return data
+    from . import library_tagging
+    return library_tagging.attach_to_publication_json(publication, data)
 
 
 HISTORY_FIELDS = (
@@ -885,7 +904,8 @@ def related_publication_sources(publication: PublishedQuestion) -> dict:
             question_id__in=[row.question_id for row in matched_rows if row.question_id],
         ).values("question_id").annotate(total=Count("id")).values_list("question_id", "total"))
         for name, rows in matches.items():
-            result[name] = [publication_json(row) | {"version_count": counts.get(row.question_id, 1)} for row in rows]
+            result[name] = [publication_json(row, include_tag_details=False)
+                            | {"version_count": counts.get(row.question_id, 1)} for row in rows]
     return result
 
 

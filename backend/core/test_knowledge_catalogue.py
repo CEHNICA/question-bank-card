@@ -15,6 +15,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import path
 
 from core import knowledge
+from core.models import LibraryTag, LibraryTagGroup
 from core.views import knowledge_catalogue
 
 urlpatterns = [path("api/settings/knowledge", knowledge_catalogue)]
@@ -29,6 +30,9 @@ class KnowledgeCatalogueTests(TestCase):
         settings.enable()
         self.addCleanup(settings.disable)
         self.client = Client()
+        group = LibraryTagGroup.objects.create(name="正式数学目录")
+        tag = LibraryTag.objects.create(name="题库知识点", kind="knowledge", levels=["高中"])
+        tag.groups.add(group)
 
     def body(self):
         response = self.client.get("/api/settings/knowledge", headers={"x-qb-request": "1"})
@@ -37,26 +41,18 @@ class KnowledgeCatalogueTests(TestCase):
     def test_the_catalogue_is_the_one_tagging_picks_from(self):
         response, body = self.body()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(body["total"], len(knowledge.load()))
-        self.assertEqual(body["points"], knowledge.load())
-        self.assertEqual(body["chapters"], 18)
-        self.assertEqual(body["file"], str(knowledge.path()))
-        # 打标签时能选中的每一个词，在预览里都能看见。
-        for item in knowledge.load():
-            self.assertEqual(sorted(item), ["chapter", "point"])
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["points"][0]["point"], "题库知识点")
+        self.assertEqual(body["points"][0]["chapter"], "正式数学目录")
+        self.assertEqual(body["chapters"], 1)
+        self.assertEqual(body["source"], "正式题库标签目录")
 
-    def test_a_rewritten_file_shows_up_right_away(self):
+    def test_legacy_text_file_does_not_override_the_live_catalogue(self):
         knowledge.ensure_file().write_text(
             "# 第一章 自己的章\n甲\n乙\n\n# 第二章 另一个章\n丙\n", encoding="utf-8")
         _, body = self.body()
-        self.assertEqual([item["point"] for item in body["points"]], ["甲", "乙", "丙"])
-        self.assertEqual([item["chapter"] for item in body["points"]], ["第一章 自己的章", "第一章 自己的章", "第二章 另一个章"])
-        self.assertEqual((body["total"], body["chapters"]), (3, 2))
-
-    def test_duplicate_lines_and_the_files_own_explanations_do_not_become_points(self):
-        knowledge.ensure_file().write_text("# 说明行里有 · 也会被当章名\n甲\n甲\n乙\n", encoding="utf-8")
-        _, body = self.body()
-        self.assertEqual([item["point"] for item in body["points"]], ["甲", "乙"])
+        self.assertEqual([item["point"] for item in body["points"]], ["题库知识点"])
+        self.assertEqual((body["total"], body["chapters"]), (1, 1))
 
     def test_requests_without_the_local_page_header_are_refused(self):
         response = self.client.get("/api/settings/knowledge")

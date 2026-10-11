@@ -150,8 +150,9 @@ class LibrarySourceTests(TestCase):
         for _ in range(4):
             self.publication()
         with mock.patch("core.library.RELATED_SOURCE_LIMIT", 2):
-            # Source metadata uses one aggregate query, not one per match.
-            with self.assertNumQueries(4):
+            # Source metadata uses one aggregate query, not one per match;
+            # the current card's assignments and pending suggestion are batched separately.
+            with self.assertNumQueries(6):
                 body = self.detail().json()
             self.assertEqual(len(body["related_sources"]), 2)
             self.assertEqual(body["related_sources_count"], 4)

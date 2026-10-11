@@ -16,7 +16,8 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from . import knowledge, library
+from . import library
+from .library_tagging import knowledge_directory
 from .models import PublishedQuestion
 
 _TAG_KEYS = ("tags", "tags_source", "tags_at", "tags_fingerprint", "tags_publication_id",
@@ -30,11 +31,11 @@ class TagError(Exception):
 
 
 def _catalogue() -> list[str]:
-    return [item["point"] for item in knowledge.load()]
+    return [item["point"] for item in knowledge_directory()]
 
 
 def clean(raw) -> list[str]:
-    """Validate against the catalogue, dedupe in order, cap at ``knowledge.MAX_TAGS``."""
+    """Validate against the live formal catalogue and dedupe in order."""
     if raw is None:
         return []
     if not isinstance(raw, list):
@@ -50,8 +51,8 @@ def clean(raw) -> list[str]:
         if value in chosen:
             continue
         chosen.append(value)
-    if len(chosen) > knowledge.MAX_TAGS:
-        raise TagError(f"一道题最多 {knowledge.MAX_TAGS} 个知识点")
+    if len(chosen) > 200:
+        raise TagError("一道题最多 200 个知识点")
     return chosen
 
 
@@ -77,8 +78,8 @@ def data(publication: PublishedQuestion) -> dict:
     return {
         "publication": str(publication.id),
         "tags": library.tags_of(extras),
-        "catalogue": knowledge.load(),
-        "max": knowledge.MAX_TAGS,
+        "catalogue": knowledge_directory(),
+        "max": None,
         "source": str(extras.get("tags_source") or ""),
         "at": str(extras.get("tags_at") or ""),
     }

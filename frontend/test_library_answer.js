@@ -17,7 +17,7 @@ assert.doesNotMatch(html, /id="answerToggle"/);
 assert.doesNotMatch(js, /ui\.answers/);
 assert.match(js, /QB\.renderQuestion\(paper, item\.content, \{ showNumber: false, showAnswer: "none" \}\);/);
 // One toggle per question, holding the paper's answer and the AI's (when switched on).
-const reveal = js.slice(js.indexOf("function answerReveal(item)"), js.indexOf("function extrasNode(item)"));
+const reveal = js.slice(js.indexOf("function answerReveal(item)"), js.indexOf("// Stable tag identities"));
 assert.match(reveal, /if \(!original && !ai && !saved\) return null;/);
 assert.match(reveal, /node\("span", "when-closed", "看答案"\), node\("span", "when-open", "收起答案"\)/);
 assert.match(reveal, /QB\.answerRows\(document, content\)/);
@@ -29,7 +29,8 @@ const printRow = js.slice(js.indexOf("function printAnswerRow"), js.indexOf("fun
 assert.doesNotMatch(printRow, /subQuestions/, "the print/PDF path keeps its current pagination");
 // What is open stays open when the list redraws.
 assert.match(reveal, /box\.open = state\.opened\.has\(item\.id\);/);
-assert.match(js, /state\.opened\.has\(item\.id\), state\.tag\]\);/);
+assert.match(js, /const signature = JSON\.stringify\(\[item,[^\]]*state\.opened\.has\(item\.id\)/,
+  "The whole card projection, including saved tag suggestions, participates in quiet refresh identity");
 assert.match(css, /\.library-answer\[open\] \.when-open \{ display: inline; \}/);
 // The answer rows are shared with the review page's 答案与解析.
 assert.equal(typeof QB.answerRows, "function");

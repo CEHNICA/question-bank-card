@@ -28,7 +28,7 @@ from PIL import Image
 
 from .version import APP_VERSION
 from . import (
-    credential_settings, demo, features, imaging, import_planning, knowledge, library, library_jobs, m3import,
+    credential_settings, demo, features, imaging, import_planning, library, library_jobs, m3import,
     mineru, photos, preferences, prose, qtypes, readers, region_reads, tables, intake, source_images, continue_ai_cut,
     question_layout,
 )
@@ -726,6 +726,8 @@ library_page = _frontend("library.html", "text/html; charset=utf-8")
 app_script = _frontend("app.js", "application/javascript; charset=utf-8")
 render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
+library_tag_manager_script = _frontend("library-tag-manager.js", "application/javascript; charset=utf-8")
+library_tag_manager_styles = _frontend("library-tag-manager.css", "text/css; charset=utf-8")
 library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
 library_solutions_script = _frontend("library-solutions.js", "application/javascript; charset=utf-8")
 library_question_editor_script = _frontend("library-question-editor.js", "application/javascript; charset=utf-8")
@@ -739,6 +741,7 @@ exam_export_script = _frontend("exam-export.js", "application/javascript; charse
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
+library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")
 
 
@@ -3275,7 +3278,10 @@ def library_ai_test_view(request):
 def feature_settings(request):
     """GET 读、POST 改设置里的“功能开关”（没有密钥，网页和工作者共用）。"""
     if request.method == "GET":
-        return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path())})
+        from .library_tagging import knowledge_directory
+        points = knowledge_directory()
+        return JsonResponse({"features": features.describe(), "catalogue_source": "正式题库标签目录",
+                             "knowledge_total": len(points)})
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request)
@@ -3288,14 +3294,11 @@ def feature_settings(request):
         return _error(str(error))
     except OSError:
         return _error("开关没能保存，请检查数据目录是否可写", 500)
-    if features.enabled("knowledge_tags"):
-        try:
-            knowledge.ensure_file()
-        except OSError:
-            pass
     message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
-    return JsonResponse({"features": features.describe(), "knowledge_file": str(knowledge.path()),
-                         "message": message})
+    from .library_tagging import knowledge_directory
+    points = knowledge_directory()
+    return JsonResponse({"features": features.describe(), "catalogue_source": "正式题库标签目录",
+                         "knowledge_total": len(points), "message": message})
 
 
 @csrf_exempt
@@ -3306,8 +3309,9 @@ def knowledge_catalogue(request):
     rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
-    points = knowledge.load()
-    return JsonResponse({"file": str(knowledge.path()), "points": points, "total": len(points),
+    from .library_tagging import knowledge_directory
+    points = knowledge_directory()
+    return JsonResponse({"source": "正式题库标签目录", "points": points, "total": len(points),
                          "chapters": len({item["chapter"] for item in points if item["chapter"]})})
 
 
@@ -3324,8 +3328,10 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         scoped = request.GET.get("solution_scope") == "true"
+        tag_scoped = request.GET.get("tag_scope") == "true"
         library_job_control.expire_api_jobs()
-        rows = list(LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped).order_by("-created_at")[:1000])
+        rows = list(LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped,
+            tag_scope=tag_scoped).order_by("-created_at")[:1000])
         return JsonResponse({"jobs": [library_job_control.job_json(row) for row in rows],
                              "assistant_handoff": library_job_control.assistant_handoff(rows)})
     if request.method != "POST":
@@ -3338,17 +3344,39 @@ def library_jobs_view(request):
     if kind not in {LibraryJob.Kind.TAGS, LibraryJob.Kind.ANSWER}:
         return _error("kind 只能是 tags 或 answer")
     solution_scope = payload.get("solution_scope", False)
+    tag_scope = kind == LibraryJob.Kind.TAGS
     if type(solution_scope) is not bool or (solution_scope and (kind != "answer" or payload.get("missing") is True)):
         return _error("本次答案解析建议必须明确选择题目，只能用于 answer")
     if "executor" in payload and (payload["executor"] != "api" or not solution_scope):
         return _error("指定 API 执行只能用于明确选择的答案解析任务")
     if "api_only" in payload and type(payload["api_only"]) is not bool:
         return _error("api_only 应为 true 或 false")
+    if payload.get("api_only") is True:
+        from . import library_ai_settings
+        try:
+            library_ai_settings.ensure_api_ready()
+        except library_ai_settings.SettingsError as error:
+            return _error(str(error), 409)
+    if tag_scope and not features.enabled("knowledge_tags"):
+        return _error("AI 标签建议尚未开启；请到“标签与答案设置”明确开启后再请求。", 409)
     live = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-    if payload.get("missing") is True:
+    retry = payload.get("retry", False)
+    if type(retry) is not bool:
+        return _error("retry 应为 true 或 false")
+    if payload.get("scope") == "current_filter":
+        if kind != LibraryJob.Kind.TAGS or not isinstance(payload.get("filters"), dict):
+            return _error("当前筛选全部只支持标签建议，并需要完整筛选条件")
+        from . import library_browse
+        allowed = {"q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not",
+                   "tag_mode", "untagged_knowledge", "tag_review"}
+        filters = {key: value for key, value in payload["filters"].items() if key in allowed}
+        targets = list(library_browse.library_rows(filters).order_by("published_at", "id"))
+    elif payload.get("missing") is True:
         if kind == LibraryJob.Kind.TAGS:
-            targets = [item for item in live if not library.tags_of(item.extras)
-                       and not (item.extras or {}).get("tags_at")]
+            from .models import LibraryTagAssignment
+            targets = list(live.exclude(tag_assignments__tag__kind="knowledge",
+                tag_assignments__needs_review=False).exclude(tag_suggestions__status__in=[
+                    "queued", "running", "pending"]).order_by("published_at", "id").distinct())
         else:
             targets = [item for item in live if not str((item.content or {}).get("answer") or "").strip()
                        and not (item.extras or {}).get("ai_answer")]
@@ -3361,10 +3389,31 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         targets = list(live.filter(pk__in=wanted))
-        targets = targets if solution_scope else [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
+        targets = targets if solution_scope or tag_scope else [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
             item for item in targets if not str((item.content or {}).get("answer") or "").strip()
             and not (item.extras or {}).get("ai_answer")]
-    requested = len(set(str(value) for value in payload.get("ids", []))) if payload.get("missing") is not True else len(targets)
+    requested = len(targets)
+    if tag_scope:
+        from .models import LibraryTagCatalogue, LibraryTagSuggestion
+        from . import library_tagging
+        catalogue = library_tagging.catalogue_state()
+        eligible = []
+        for item in targets:
+            context = library_tagging.current_method_source(item)
+            method_snapshot = ({key: context[key] for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes") if key in context}
+                               if context else {})
+            fingerprint = library.generation_fingerprint(item.content or {}, item.pk)
+            latest = LibraryTagSuggestion.objects.filter(publication=item).order_by("-created_at", "-id").first()
+            active = LibraryJob.objects.filter(publication=item, kind="tags", tag_scope=True,
+                status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING]).exists()
+            already_handled = bool(latest and latest.question_fingerprint == fingerprint
+                and latest.taxonomy_revision == catalogue.revision and latest.method_source == method_snapshot
+                and latest.status in {LibraryTagSuggestion.Status.PENDING, LibraryTagSuggestion.Status.NO_MATCH,
+                    LibraryTagSuggestion.Status.REVIEW, LibraryTagSuggestion.Status.ACCEPTED, LibraryTagSuggestion.Status.REJECTED})
+            if active or (already_handled and not retry):
+                continue
+            eligible.append(item)
+        targets = eligible
     queued = 0
     executors = set()
     jobs = []
@@ -3372,6 +3421,9 @@ def library_jobs_view(request):
         with transaction.atomic():
             for publication in targets:
                 options = {"solution_scope": solution_scope}
+                if tag_scope:
+                    options["tag_scope"] = True
+                    options["retry"] = retry
                 if "executor" in payload:
                     options["executor"] = payload["executor"]
                 if payload.get("api_only") is True:
@@ -3385,7 +3437,7 @@ def library_jobs_view(request):
     from . import library_ai_settings
     mode = next(iter(executors)) if len(executors) == 1 else "mixed" if executors else library_ai_settings.public_status()["mode"]
     return JsonResponse({"queued": queued, "skipped": requested - queued, "executor": mode,
-                         "jobs": [library_job_control.job_json(job) for job in jobs],
+                         "jobs": [library_job_control.job_json(job) for job in jobs[:100]],
                          "assistant_handoff": library_job_control.assistant_handoff(jobs),
                          "message": "已加入待助手处理；请让正在操作软件的豆包或 AI 助手领取并写回。" if mode == "assistant"
                          else "已加入独立模型任务队列。"})

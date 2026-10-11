@@ -107,10 +107,14 @@ function libraryChecks() {
   const code = source.slice(start, source.indexOf("  if (state.document)", start));
   let handler, searches = 0, helps = 0, dialog = false; const search = { disabled: false, focus() { searches++; } };
   const context = { document: { activeElement: target(), addEventListener(type, callback) { handler = callback; }, querySelector() { return dialog ? {} : null; } },
-    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {} };
+    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {}, tagManagerDialog: null };
   vm.runInNewContext(code, context); handler(event("/")); assert.equal(searches, 1); handler(event("?", { shiftKey: true })); assert.equal(helps, 1);
   for (const extra of [{ defaultPrevented: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { target: target("input") }, { target: target("contenteditable") }, { target: target('role="textbox"') }]) handler(event("/", extra));
   dialog = true; handler(event("/")); assert.equal(searches, 1, "Search cannot steal input, IME, modified browser shortcuts or a modal's focus");
+  dialog = false; context.tagManagerDialog = { open: true };
+  handler(event("/")); handler(event("?", { shiftKey: true }));
+  assert.equal(searches, 1, "The independent tag manager keeps shortcuts from focusing the hidden question search");
+  assert.equal(helps, 1, "The manager handles its own keys rather than opening hidden question-list help");
   const editor = read("library-answer-editor.js"), marker = editor.indexOf('      dialog.addEventListener("keydown", event => {'); let saveHandler, saves = 0;
   vm.runInNewContext(editor.slice(marker, editor.indexOf('      cropSurface.addEventListener("click"', marker)), { dialog: { addEventListener: (_, callback) => saveHandler = callback }, saveCurrent: () => saves++ });
   saveHandler(event("s", { ctrlKey: true, target: target("textarea") })); assert.equal(saves, 1, "Answer saving remains available while typing");

@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
+from django.db.models import Count
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from . import features, library, library_jobs, library_ai_settings, qtypes
-from .models import LibraryJob, PublishedQuestion
+from .models import LibraryJob, PublishedQuestion, LibraryTagAssignment
 
 MAX_BATCH_IDS = 500
 DEFAULT_LIMIT = 40
@@ -60,9 +61,42 @@ def library_rows(params, *, omit: str = ""):
     if answer in {"yes", "no"} and omit != "answer":
         missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
         rows = rows.exclude(missing) if answer == "yes" else rows.filter(missing)
-    tag = params.get("tag", "").strip()
-    if tag and omit != "tag":
-        rows = rows.filter(tags_text__contains=library.tags_text([tag]))
+    def tag_ids(key):
+        raw = params.get(key, "")
+        values = raw if isinstance(raw, list) else str(raw or "").split(",")
+        result = []
+        for value in values:
+            try:
+                result.append(str(uuid.UUID(str(value))))
+            except (ValueError, TypeError, AttributeError):
+                continue
+        return list(dict.fromkeys(result))
+
+    if omit != "tag":
+        all_ids, any_ids, excluded = tag_ids("tag_all"), tag_ids("tag_any"), tag_ids("tag_not")
+        from .library_tagging import descendant_ids, relation_context
+        context = relation_context() if all_ids or any_ids or excluded else {}
+        if all_ids:
+            for tag_id in all_ids:
+                rows = rows.filter(tag_assignments__tag_id__in=descendant_ids([tag_id], context=context),
+                                   tag_assignments__needs_review=False)
+        if any_ids:
+            rows = rows.filter(tag_assignments__tag_id__in=descendant_ids(any_ids, context=context),
+                               tag_assignments__needs_review=False).distinct()
+        if excluded:
+            rows = rows.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
+                tag_id__in=descendant_ids(excluded, context=context), needs_review=False))
+        if all_ids:
+            rows = rows.distinct()
+        legacy = params.get("tag", "").strip()
+        if legacy:
+            rows = rows.filter(tags_text__contains=library.tags_text([legacy]))
+        if params.get("untagged_knowledge") == "true":
+            rows = rows.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
+                tag__kind="knowledge", needs_review=False))
+        if params.get("tag_review") == "true":
+            rows = rows.filter(models.Q(tag_suggestions__status="pending")
+                               | models.Q(tag_assignments__needs_review=True)).distinct()
     for term in params.get("q", "").split()[:8]:
         key = library.search_key(term)
         if key:
@@ -88,14 +122,24 @@ def facet_counts(params) -> dict:
         reviews[key] += 1
     for value in library_rows(params, omit="answer").values_list("content__answer", flat=True):
         answers["yes" if str(value or "").strip() else "no"] += 1
-    for text in library_rows(params, omit="tag").values_list("tags_text", flat=True):
-        for tag in set((text or "").strip("|").split("|")) - {""}:
-            tags[tag] = tags.get(tag, 0) + 1
+    from .models import LibraryTag
+    from .library_tagging import descendant_ids, relation_context
+    context = relation_context()
+    publications_by_tag = {}
+    for tag_id, publication_id in LibraryTagAssignment.objects.filter(
+            publication__in=library_rows(params, omit="tag"), needs_review=False).values_list("tag_id", "publication_id"):
+        publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
+    for tag in LibraryTag.objects.all():
+        key, matching = str(tag.pk), set()
+        for child in descendant_ids([key], context=context):
+            matching.update(publications_by_tag.get(child, set()))
+        if matching:
+            tags[key] = {"id": key, "tag": tag.name, "count": len(matching),
+                         "direct_count": len(publications_by_tag.get(key, set())), "subtree_count": len(matching)}
     return {
         "sources": sorted(sources.values(), key=lambda item: (item["filename"], item["document_id"] or "")),
         "types": types, "reviews": reviews, "answers": answers,
-        "tags": sorted(({"tag": key, "count": value} for key, value in tags.items()),
-                       key=lambda item: (-item["count"], item["tag"])),
+        "tags": sorted(tags.values(), key=lambda item: (-item["count"], item["tag"])),
     }
 
 def serialize_items(publications) -> list[dict]:
@@ -168,9 +212,18 @@ def library_list(request):
     items = serialize_items(rows[offset:offset + limit])
     next_offset = offset + len(items)
     ai_status = library_ai_settings.public_status()
+    from .models import LibraryTagAssignment, LibraryTagSuggestion
+    tag_work = {
+        "untagged_knowledge": PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+            .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)).distinct().count(),
+        "pending_review": LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
+            publication__status=PublishedQuestion.Status.PUBLISHED).count()
+            + LibraryTagAssignment.objects.filter(needs_review=True,
+                publication__status=PublishedQuestion.Status.PUBLISHED).values("publication_id").distinct().count(),
+    }
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
-        "features": features.load(), "type_names": qtypes.TYPE_LABELS,
+        "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
         "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready")},
         "sort": sort, "limit": limit, "offset": offset,
         "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
@@ -187,10 +240,29 @@ def library_batch(request):
     if rejected is not None:
         return rejected
     payload = _body(request)
-    if payload is None or set(payload) != {"ids"}:
-        return JsonResponse({"error": "请只提供 ids 题目编号列表"}, status=400)
+    if payload is None or "ids" not in payload or set(payload) - {"ids", "filters"}:
+        return JsonResponse({"error": "请提供 ids 题目编号列表和可选的 filters"}, status=400)
     try:
         ids = normalize_ids(payload["ids"])
     except BrowseError as error:
         return JsonResponse({"error": str(error)}, status=400)
-    return JsonResponse(resolve_ids(ids))
+    result = resolve_ids(ids)
+    if "filters" in payload:
+        filters = payload["filters"]
+        allowed = {"q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not",
+                   "tag_mode", "untagged_knowledge", "tag_review"}
+        if (not isinstance(filters, dict) or set(filters) - allowed
+                or any(not isinstance(value, str) and not (key in {"tag_all", "tag_any", "tag_not"} and isinstance(value, list))
+                       for key, value in filters.items())):
+            return JsonResponse({"error": "筛选条件格式不正确"}, status=400)
+        rows = library_rows(filters)
+        matching = set(map(str, rows.filter(pk__in=ids).values_list("id", flat=True)))
+        from .models import LibraryTagSuggestion, LibraryTagAssignment
+        result.update(matches={key: key in matching for key in ids}, total=rows.count(), facets=facet_counts(filters),
+            tag_work={"untagged_knowledge": PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+                .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)).distinct().count(),
+                "pending_review": LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
+                    publication__status=PublishedQuestion.Status.PUBLISHED).count()
+                    + LibraryTagAssignment.objects.filter(needs_review=True, publication__status=PublishedQuestion.Status.PUBLISHED)
+                      .values("publication_id").distinct().count()})
+    return JsonResponse(result)

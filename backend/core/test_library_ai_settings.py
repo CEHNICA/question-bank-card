@@ -143,14 +143,13 @@ class IndependentAISettingsTests(TestCase):
         self.transform.assert_not_called()
 
     def test_closing_a_feature_also_closes_its_on_intake_switch(self):
-        # 「入库时生成」开着、功能关着，是一种用户自己摆不出来、也说不清的状态：
-        # 眼下不会多花钱（生成本来就两个开关都看），可哪天把功能打开，每道新题
-        # 入库就悄悄恢复调用一次服务。保存时按实际生效的状态对齐。
+        # 标签 AI 只能由用户在正式题库主动发起；兼容字段不能重新启用自动贴标。
         service.save({"features": {"knowledge_tags": True, "ai_answer": True},
                       "on_intake": {"tags": True, "answer": True}})
-        self.assertEqual(service.public_status()["on_intake"], {"tags": True, "answer": True})
+        self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": True})
         saved = service.save({"features": {"knowledge_tags": False, "ai_answer": False}})
         self.assertEqual(saved["features"], {"knowledge_tags": False, "ai_answer": False})
+        self.assertFalse(saved["on_intake"]["tags"], "AI 标签只能由用户在正式题库主动发起")
         self.assertEqual(saved["on_intake"], {"tags": False, "answer": False},
                          "功能关掉时，入库时生成必须跟着关掉")
         self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": False})

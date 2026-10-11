@@ -374,6 +374,8 @@ class PublishedQuestion(models.Model):
     extras = models.JSONField(default=dict, blank=True)
     # “|集合间的基本关系|全称量词与存在量词|”：按知识点筛选用。
     tags_text = models.TextField(blank=True, default="")
+    # Compare-and-swap revision for tag assignments only.
+    tag_revision = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-published_at"]
@@ -407,6 +409,9 @@ class LibraryJob(models.Model):
     # Explicit one-off exam suggestions never change the global AI switches or
     # overwrite an existing library answer. The user saves the suggestion later.
     solution_scope = models.BooleanField(default=False)
+    # User initiated tag proposals are separate from the legacy global feature
+    # switch and from automatic-on-intake tasks.
+    tag_scope = models.BooleanField(default=False)
     result = models.JSONField(default=dict, blank=True)
     agent = models.CharField(max_length=120, blank=True, default="")
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
@@ -416,6 +421,167 @@ class LibraryJob(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class LibraryTagGroup(models.Model):
+    """A user-facing collection of tags; groups do not imply question tags."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    color = models.CharField(max_length=16, blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    system_key = models.CharField(max_length=64, null=True, blank=True, default=None, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "name", "id"]
+
+
+class LibraryTag(models.Model):
+    """Stable identity for knowledge, method and user-defined tags."""
+
+    class Kind(models.TextChoices):
+        KNOWLEDGE = "knowledge", "知识点"
+        METHOD = "method", "解题方法"
+        CUSTOM = "custom", "自定义"
+        LEGACY = "legacy", "历史标签"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.KNOWLEDGE)
+    description = models.CharField(max_length=300, blank=True, default="")
+    color = models.CharField(max_length=16, blank=True, default="")
+    aliases = models.JSONField(default=list, blank=True)
+    levels = models.JSONField(default=list, blank=True)
+    conditions = models.TextField(blank=True, default="")
+    active = models.BooleanField(default=True, db_index=True)
+    favorite = models.BooleanField(default=False)
+    system_key = models.CharField(max_length=100, null=True, blank=True, default=None, unique=True)
+    groups = models.ManyToManyField(LibraryTagGroup, related_name="tags", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "name"], name="unique_library_tag_name_kind"),
+        ]
+        indexes = [models.Index(fields=["kind", "active", "name"], name="library_tag_kind_name")]
+
+
+class LibraryTagRelation(models.Model):
+    """Knowledge/method ancestry, distinct from personal tag collections."""
+
+    class Type(models.TextChoices):
+        HIERARCHY = "hierarchy", "上下级"
+        RELATED_METHOD = "related_method", "相关解题方法"
+
+    parent = models.ForeignKey(LibraryTag, on_delete=models.CASCADE, related_name="outgoing_relations")
+    child = models.ForeignKey(LibraryTag, on_delete=models.CASCADE, related_name="incoming_relations")
+    relation_type = models.CharField(max_length=20, choices=Type.choices, default=Type.HIERARCHY)
+
+    class Meta:
+        ordering = ["relation_type", "parent_id", "child_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "child", "relation_type"], name="unique_library_tag_relation"),
+            models.CheckConstraint(condition=~models.Q(parent=models.F("child")), name="library_tag_relation_not_self"),
+        ]
+        indexes = [models.Index(fields=["relation_type", "parent"], name="tag_relation_type_parent")]
+
+
+class LibraryTagCatalogue(models.Model):
+    """Compare-and-swap counter for catalogue edits and AI task snapshots."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    revision = models.PositiveIntegerField(default=1)
+    initialized = models.BooleanField(default=False)
+
+
+class LibraryTagAssignment(models.Model):
+    """A formal tag attached to one immutable publication, with its provenance."""
+
+    class Source(models.TextChoices):
+        HUMAN = "human", "人工添加"
+        AI_ACCEPTED = "ai_accepted", "人工采纳 AI 建议"
+        LEGACY_HUMAN = "legacy_human", "旧版人工编辑"
+        LEGACY_UNKNOWN = "legacy_unknown", "旧标签待核对"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="tag_assignments")
+    tag = models.ForeignKey(LibraryTag, on_delete=models.PROTECT, related_name="assignments")
+    # {"whole": true} or {"subquestions": ["1", "2"]} for method tags.
+    scope = models.JSONField(default=dict, blank=True)
+    source = models.CharField(max_length=24, choices=Source.choices, default=Source.HUMAN)
+    generation_source = models.CharField(max_length=80, blank=True, default="")
+    rationale = models.CharField(max_length=500, blank=True, default="")
+    evidence = models.CharField(max_length=500, blank=True, default="")
+    needs_review = models.BooleanField(default=False, db_index=True)
+    source_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["publication", "tag"], name="unique_publication_tag_assignment"),
+        ]
+        indexes = [models.Index(fields=["publication", "needs_review"], name="tag_assignment_review")]
+
+
+class LibraryTagSuggestion(models.Model):
+    """A saved AI proposal. Completion never makes its tags formal by itself."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "排队中"
+        RUNNING = "running", "生成中"
+        PENDING = "pending", "待核对"
+        ACCEPTED = "accepted", "已采纳"
+        REJECTED = "rejected", "已拒绝"
+        NO_MATCH = "no_match", "无合适标签"
+        REVIEW = "review", "暂不能判断"
+        FAILED = "failed", "生成失败"
+        STALE = "stale", "依据已变化"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job = models.OneToOneField(LibraryJob, null=True, blank=True, on_delete=models.SET_NULL, related_name="tag_suggestion")
+    publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="tag_suggestions")
+    question_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    taxonomy_revision = models.PositiveIntegerField(default=1)
+    catalogue_snapshot = models.JSONField(default=dict, blank=True)
+    assignment_revision = models.PositiveIntegerField(default=0)
+    prompt_version = models.CharField(max_length=32, default="tags-v2")
+    method_source = models.JSONField(default=dict, blank=True)
+    suggestions = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    message = models.CharField(max_length=500, blank=True, default="")
+    generation_source = models.CharField(max_length=80, blank=True, default="")
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["publication", "status", "created_at"], name="tag_suggest_pub_state")]
+
+
+class LibraryTagOperation(models.Model):
+    """Auditable tag edit with a guarded inverse for Undo."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client_request_id = models.UUIDField(unique=True)
+    request_hash = models.CharField(max_length=64)
+    action = models.CharField(max_length=32)
+    publication_ids = models.JSONField(default=list, blank=True)
+    before_snapshot = models.JSONField(default=dict, blank=True)
+    after_snapshot = models.JSONField(default=dict, blank=True)
+    catalogue_revision = models.PositiveIntegerField(default=1)
+    undone_at = models.DateTimeField(null=True, blank=True)
+    blocked_reason = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
 
 
 class LibrarySolution(models.Model):

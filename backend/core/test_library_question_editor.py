@@ -260,23 +260,22 @@ class LibraryQuestionEditorTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.unchanged(question, pub), before)
 
-    def test_changed_math_invalidates_generated_extras_and_flags_solution_without_moving_it(self):
+    def test_changed_math_invalidates_generated_answer_and_flags_solution_without_moving_it(self):
         fingerprint = library.generation_fingerprint(self.pub.content, self.pub.pk)
         solution = library_solutions.save(self.pub, {"answer": "C", "analysis": "独立人工解析", "figures": [],
                                                     "base_revision": None, "sync_library": True})
         self.pub.refresh_from_db()
-        extras = {**self.pub.extras, "tags": ["函数"], "tags_fingerprint": fingerprint,
+        extras = {**self.pub.extras,
                   "ai_answer": {"answer": "D", "analysis": "旧模型解析", "fingerprint": fingerprint}}
         library.save_extras(self.pub, extras)
         old = deepcopy(self.pub.content)
         edited, _, _ = editor.save(self.pub, self.payload(stem="完全不同的题 $x+1=0$。"))
-        self.assertNotIn("tags", edited.extras)
         self.assertNotIn("ai_answer", edited.extras)
         self.assertNotIn("solution_id", edited.extras)
         self.assertEqual(edited.extras["solution_needs_review_id"], str(solution.pk))
         self.pub.refresh_from_db()
         self.assertEqual(self.pub.content, old)
-        self.assertEqual(self.pub.extras, extras)
+        self.assertIn("ai_answer", self.pub.extras, "旧入库版保留原 AI 参考答案历史")
         self.assertEqual(library_solutions.selected(self.pub).pk, solution.pk)
         self.assertEqual(LibrarySolution.objects.count(), 1)
 

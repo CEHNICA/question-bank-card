@@ -21,7 +21,7 @@ import requests
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
-from . import credential_settings, features, knowledge, provider_catalog, readers
+from . import credential_settings, features, provider_catalog, readers
 
 ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_URL = ARK_BASE + "/chat/completions"
@@ -107,6 +107,8 @@ def _load() -> dict:
     config["provider"] = provider
     timing = config.get("on_intake")
     config["on_intake"] = {kind: isinstance(timing, dict) and timing.get(kind) is True for kind in ("tags", "answer")}
+    # New tag proposals are only created by an explicit action in the formal library.
+    config["on_intake"]["tags"] = False
     if legacy:
         config.update(model=str(value.get("endpoint_id") or ""), base_url=ARK_BASE, supports_images=True)
     states = config.get("key_states")
@@ -401,16 +403,14 @@ def public_status() -> dict:
 
 
 def _knowledge_summary(enabled: bool) -> dict:
-    """目录有多大、放在哪。关着标签功能时不必去读这个文件。"""
+    """Summarize the live formal-library taxonomy, never the legacy text file."""
     if not enabled:
-        return {"total": 0, "chapters": 0, "file": ""}
-    try:
-        points = knowledge.load()
-    except OSError:
-        return {"total": 0, "chapters": 0, "file": str(knowledge.path())}
+        return {"total": 0, "chapters": 0, "source": "正式题库标签目录"}
+    from .library_tagging import knowledge_directory
+    points = knowledge_directory()
     return {"total": len(points),
             "chapters": len({item["chapter"] for item in points if item["chapter"]}),
-            "file": str(knowledge.path())}
+            "source": "正式题库标签目录"}
 
 
 def _key_operation(operation, label: str = "API Key") -> tuple[str, str]:
@@ -476,7 +476,7 @@ def save(payload: dict) -> dict:
             raise SettingsError("请选择当前 AI 助手或独立 API，以及有效的服务商。")
         switching = provider != previous["provider"]
         config = {**_select_provider(previous, provider), "mode": mode}
-        config["on_intake"] = {**previous["on_intake"], **timing}
+        config["on_intake"] = {**previous["on_intake"], **timing, "tags": False}
         for field in API_FIELDS:
             if field in payload:
                 config[field] = payload[field]
@@ -678,16 +678,17 @@ def _request(config: dict, prompt: str, image_urls: list[str], max_tokens: int, 
         raise ConnectionError("独立 API 没有返回完整可用的答案，未保存结果。") from None
 
 
-def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 12000, explicit_api=False) -> tuple[str, str]:
-    if explicit_api and kind is not None:
+def chat(prompt: str, image_urls: list[str], *, kind: str | None, max_tokens: int = 12000,
+         explicit_api=False, manual_tag=False) -> tuple[str, str]:
+    if explicit_api and kind is not None and not manual_tag:
         raise ServiceError("本次 API 执行仅适用于明确选择的答案解析任务。")
-    ensure_api_ready() if explicit_api else ensure_ready(kind)
+    ensure_api_ready() if explicit_api or manual_tag else ensure_ready(kind)
     config = _load()
-    if not explicit_api and config["mode"] != "api":
+    if not explicit_api and not manual_tag and config["mode"] != "api":
         raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
     try:
-        if explicit_api:
-            text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind, explicit_api=True)
+        if explicit_api or manual_tag:
+            text, evidence = _request(config, prompt, image_urls, max_tokens, kind=None if manual_tag else kind, explicit_api=True)
         else:
             text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
         if _needs_reasoning_evidence(config) and not evidence["thinking"]:
@@ -695,9 +696,9 @@ def chat(prompt: str, image_urls: list[str], *, kind: str, max_tokens: int = 120
     except ConnectionError:
         _mark_unverified(config)
         raise
-    if not _same_configuration(config, _load()) or (not explicit_api and _load()["mode"] != "api"):
+    if not _same_configuration(config, _load()) or (not explicit_api and not manual_tag and _load()["mode"] != "api"):
         raise ServiceError("生成期间执行方式或 API 设置已变化，旧结果未保存。")
-    ensure_api_ready() if explicit_api else ensure_ready(kind)
+    ensure_api_ready() if explicit_api or manual_tag else ensure_ready(kind)
     return text, f"{config['provider']} API · {evidence['model']}"
 
 

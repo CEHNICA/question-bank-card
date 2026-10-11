@@ -13,8 +13,7 @@
 
 .library-main { max-width: 1760px; margin: 0 auto; padding: 0 clamp(10px, 1.4vw, 20px) 60px; }
 
-/* 查找与筛选在左侧栏（吸顶），顶部一条横条都不留 —— 每让出一行，
-   题面就多看一道题。窄屏（≤979px）侧栏改成右侧浮层，见本文件末尾。 */
+/* 搜索和标签入口放在侧栏；题目筛选和排序放在列表上方，方便边看边调整。 */
 .library-rail { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100dvh - var(--topbar-h) - 28px);
   overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 12px; align-content: start; min-width: 0; padding-right: 4px; }
 /* 筛选栏永远不该横向滚动：横向一滚，右边的条件就藏起来了。
@@ -26,18 +25,15 @@
    故意不写 overflow-x: hidden —— 那会把溢出悄悄切掉，连 test_library_compact.js
    和压力脚本里那条 scrollWidth == clientWidth 的断言都测不出来了。 */
 .library-rail > * { min-width: 0; }
+.library-rail-nav { display: grid; }
+.library-tag-manager-entry { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); color: var(--ink-2); font: 600 13px/1.4 var(--ui-font); text-align: left; cursor: pointer; }
+.library-tag-manager-entry .icon { width: 16px; height: 16px; color: var(--accent); }
+.library-tag-manager-entry:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
 .library-rail .library-filters { flex-direction: column; align-items: stretch; gap: 10px; }
-.library-rail .library-select { flex-direction: column; align-items: stretch; gap: 5px; }
-.library-rail .library-select select { width: 100%; max-width: none; }
 .library-rail .active-filters { flex-direction: column; align-items: flex-start; margin: 0; }
-/* 1.13：.button 全局是 white-space: nowrap。「给原卷没答案的题做 AI 参考答案」一行
-   最小要 226px，212px 的筛选栏装不下 —— 「更多筛选」一展开就把这一栏顶宽，
-   冒出横向滚动条。同一份 CSS 里 .settings-actions-grid .button 和
-   .settings-help-actions .button 早就为了同样的理由改回 normal 了。 */
+/* 侧栏窄，标签快捷入口允许换行，避免把搜索与题卡列撑宽。 */
 .library-extra-tools .button { white-space: normal; }
-/* 竖排时题型是一堆 chip，灰底胶囊会变成边缘不齐的方块，各自带边框更干净。 */
-.library-rail #typeFilters { background: none; padding: 0; gap: 6px; }
-.library-rail #typeFilters .draft-filter { border: 1px solid var(--line); background: var(--surface); }
 .rail-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(22,44,39,.34); backdrop-filter: blur(2px); }
 .rail-toggle { display: none; }
 /* 1.12.7：收侧栏的开关就一个按钮，骑在侧栏右边那道缝上、视口正中。
@@ -98,9 +94,27 @@ body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-coll
   scroll-margin-top: calc(var(--topbar-h) + var(--library-bulk-h, 0px) + 12px);
   transition: box-shadow .18s, border-color .18s; overflow: visible; }
 .library-card:hover { box-shadow: var(--shadow); }
+.library-card { container-name: librarycard; container-type: inline-size; }
+.library-card-body { min-width: 0; }
+.library-card-body.has-tag-review { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.library-card-body > .paper { min-width: 0; }
+.library-card-body.has-tag-review > .tag-suggestion-card { margin: 4px 20px 16px; }
+@container librarycard (min-width: 850px) {
+  .library-card-body.has-tag-review { grid-template-columns: minmax(0, 1fr) 316px; }
+  .library-card-body.has-tag-review > .tag-suggestion-card { margin: 16px 16px 16px 0; }
+}
 .library-card.in-basket { border-color: #9cc2b5; }
 .library-card.in-basket::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
 .library-card.focused { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow); }
+.library-card.inspector-active { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 26px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow-sm); }
+.library-card.inspector-active:hover { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent), 0 10px 30px color-mix(in srgb, var(--accent) 25%, transparent), var(--shadow); }
+.library-card.inspector-focus-pulse { animation: inspector-focus-pulse 900ms ease-in-out 2; }
+@keyframes inspector-focus-pulse {
+  0%, 100% { outline-color: color-mix(in srgb, var(--accent) 35%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-sm); }
+  50% { outline-color: var(--accent); box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 28%, transparent), 0 10px 34px color-mix(in srgb, var(--accent) 32%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .library-card.inspector-focus-pulse { animation: none; } }
 .library-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 12px 20px 0; font-size: 12px; color: var(--muted); }
 .library-card-meta > span:not(.library-source):not(.library-type):not(.library-review):not(.library-note)::before { content: "·"; margin-right: 10px; color: var(--faint); }
 .library-source { font-weight: 600; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -173,8 +187,31 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .question-viewer-answer-history > summary { color: var(--muted); cursor: pointer; font-size: 14px; }
 .library-answer-label { margin: 0; color: #7a5314; font-family: var(--ui-font); font-size: 12px; font-weight: 700; }
 .library-job-error { margin: 0; font-size: 12px; color: var(--amber); }
-.library-extra-tools { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
-.library-extra-tools .helper { margin: 0; }
+.library-extra-tools { display: grid; gap: 10px; }
+.library-tool-group { display: grid; gap: 6px; }
+.library-tool-heading { margin: 0; color: var(--muted); font-size: 11.5px; font-weight: 700; }
+.library-tool-actions { display: grid; gap: 5px; }
+.library-tool-action { display: flex; width: 100%; min-height: 34px; justify-content: flex-start; gap: 7px; white-space: normal; text-align: left; line-height: 1.35; }
+.library-tool-action .icon { flex: 0 0 auto; width: 14px; height: 14px; }
+.library-tool-action.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+.library-extra-tools .helper { margin: 0 0 8px; font-size: 11.5px; }
+.library-batch-ai { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.library-batch-ai > summary { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; color: var(--ink-2); font-size: 12.5px; font-weight: 650; cursor: pointer; list-style: none; }
+.library-batch-ai > summary::-webkit-details-marker { display: none; }
+.library-batch-ai > summary::after { content: "▾"; color: var(--muted); font-size: 11px; font-weight: 500; }
+.library-batch-ai[open] > summary::after { content: "▴"; }
+.library-batch-ai > summary:hover { background: var(--accent-soft); color: var(--accent-dark); }
+.library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
+.library-batch-toolbar:not([hidden]) { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; position: relative; }
+.library-batch-toolbar .library-batch-ai { overflow: visible; border: 0; background: transparent; }
+.library-batch-toolbar .library-batch-ai > summary { min-height: 31px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); white-space: nowrap; }
+.library-batch-toolbar .library-batch-count { margin-left: 2px; }
+.library-batch-toolbar .library-batch-ai-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
+.library-batch-toolbar .library-tool-actions { gap: 6px; }
+.library-batch-toolbar .library-tool-action { min-height: 36px; padding: 7px 9px; }
+.tag-saved-filter-box { display: grid; gap: 7px; }
+.tag-saved-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tag-saved-filter-actions .button { min-width: 0; padding-inline: 7px; white-space: normal; }
 .print-origin { color: #555; font-size: .9em; margin-right: 2px; }
 .print-ai-note { margin-left: 6px; color: #666; font-size: .9em; }
 .library-card .paper { padding: 10px 22px 14px; color: #1a2321; }
@@ -191,17 +228,131 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-more { display: flex; justify-content: center; margin: 22px 0; }
 .library-more .button { min-width: 160px; }
 
-/* Teacher browsing: the questions take the rest, search and filters ride in the left rail.
+/* Teacher browsing: search and browse scope stay in the left rail; filters sit above the list.
    篮子把手贴在屏幕右缘，不进栅格 —— 收起时那 30px 全还给题目。 */
-.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr);
+.library-workspace { position: relative; display: grid; grid-template-columns: 212px minmax(0, 1fr) 310px;
   gap: 16px; align-items: start; padding-top: 12px; }
-/* 只有展开的时候才把第三列让出来给面板。 */
+/* 右侧默认显示题目详情；打开试题篮时让篮子替换详情栏，避免题面继续变窄。 */
 body.library-basket-open .library-workspace { grid-template-columns: 212px minmax(0, 1fr) 300px; }
 /* 把手是 fixed 的，不进栅格流；面板才占第三格。不写死 grid-column 的话，
    自动排布会把侧栏挤走，题目反而被塞进 212px 那条窄列。 */
 .library-workspace > .library-rail { grid-column: 1; grid-row: 1; }
 .library-workspace > .library-results { grid-column: 2; grid-row: 1; min-width: 0; }
+.library-workspace > .question-inspector { grid-column: 3; grid-row: 1; }
 .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
+body.library-basket-open .question-inspector { display: none; }
+
+.question-inspector { position: sticky; top: calc(var(--topbar-h) + 12px); display: flex; flex-direction: column;
+  min-width: 0; min-height: 220px; height: calc(100dvh - var(--topbar-h) - 28px); overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
+.question-inspector-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 13px 15px 10px; border-bottom: 1px solid var(--line); }
+.question-inspector-head .eyebrow { margin-bottom: 1px; }
+.question-inspector-head h2 { margin: 0; font: 650 16px/1.4 var(--ui-font); }
+.question-inspector-content { display: grid; align-content: start; gap: 13px; min-width: 0; min-height: 0; padding: 13px; overflow-y: auto; overscroll-behavior: contain; }
+.question-inspector-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.question-inspector-title h3 { margin: 0; font: 700 19px/1.35 var(--ui-font); }
+.question-inspector-target { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface));
+  color: var(--accent-dark); font-size: 12px; }
+.question-inspector-target > span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
+.question-inspector-locate { flex: 0 0 auto; }
+.question-inspector-facts { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
+.question-inspector-fact { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; }
+.question-inspector-fact dt { color: var(--muted); }
+.question-inspector-fact dd { min-width: 0; margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.question-inspector-preview { min-width: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.question-inspector-preview > summary { padding: 8px 10px; color: var(--ink-2); font-size: 12px; font-weight: 600; cursor: pointer; }
+.question-inspector-paper { max-height: 230px; overflow: auto; padding: 4px 10px 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 13px; }
+.question-inspector-paper .qb-stem-body, .question-inspector-paper .qb-question-image { max-width: 100%; }
+.question-inspector-paper img { max-height: 180px; max-width: 100%; object-fit: contain; }
+.question-inspector-tags { display: grid; gap: 7px; min-width: 0; }
+.question-inspector-tags h4 { margin: 0; color: var(--ink-2); font: 650 13px/1.5 var(--ui-font); }
+.question-inspector-tags .library-extras { margin: 0; }
+.question-inspector-tags .library-tags { align-items: flex-start; }
+.question-inspector-tags .tag-suggestion-card { margin: 0; padding: 11px; }
+.question-inspector-tags .tag-suggestion-name { font-size: 13px; }
+.question-inspector-tags .tag-suggestion-rationale { margin-left: 24px; }
+.question-inspector-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.question-inspector-empty { display: grid; justify-items: start; gap: 4px; padding: 12px 3px; }
+.question-inspector-empty strong { color: var(--ink-2); font-size: 14px; }
+.inspector-toggle, .inspector-close { display: inline-flex; }
+.inspector-scrim { display: none; }
+.question-inspector-source { margin: -5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.question-inspector-info > summary { color: var(--muted); font-size: 12px; cursor: pointer; padding-block: 5px; }
+.library-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.library-card-context { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 22px 10px; }
+.library-card-tag-glimpse, .library-card-ai-glimpse { padding: 2px 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; }
+.library-card-ai-glimpse { color: var(--muted); background: var(--surface-2); }
+.library-tag-chip { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; border: 1px solid var(--tag-color, var(--line-strong)); border-radius: 6px; background: var(--surface-2); }
+.library-tag-info { min-width: 0; }
+.library-tag-chip .library-tag { display: block; border: 0; border-radius: 0; padding: 5px 3px 5px 8px; background: transparent; color: var(--ink-2); font-size: 12px; line-height: 1.4; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
+.library-tag-chip > .library-tag { min-width: 0; text-align: left; font-family: var(--ui-font); }
+.library-card-tag-glimpse { border: 0; cursor: pointer; font-family: var(--ui-font); text-align: left; }
+.library-card-tag-glimpse:hover, .library-card-tag-glimpse:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.library-tag-hover { position: fixed; inset: auto; margin: 0; z-index: 10000; box-sizing: border-box;
+  max-width: calc(100vw - 24px); max-height: min(620px, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain;
+  padding: 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface);
+  color: var(--ink-2); box-shadow: 0 10px 36px rgba(20, 57, 49, .2); font: 13px/1.5 var(--ui-font); }
+.library-tag-hover[hidden] { display: none; }
+.library-tag-hover-head { display: flex; gap: 10px; align-items: start; justify-content: space-between; }
+.library-tag-hover-head strong { overflow-wrap: anywhere; }
+.library-tag-hover-source { margin: 2px 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.library-tag-hover-scope { color: var(--muted); font-size: 11px; }
+.library-tag-hover-close { flex: none; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 20px/1 var(--ui-font); cursor: pointer; }
+.library-tag-hover-close:hover { background: var(--surface-2); }
+.library-tag-hover-help { margin: 3px 0 10px; color: var(--muted); font-size: 12px; }
+.library-tag-hover-paths { display: grid; gap: 5px; padding: 8px; border-radius: 7px; background: var(--accent-soft); }
+.library-tag-hover-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; }
+.library-tag-hover-paths small { color: var(--muted); }
+.library-tag-hover-name { min-width: 0; padding: 3px 5px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.library-tag-hover-name:hover:not(:disabled), .library-tag-hover-name:focus-visible { background: var(--accent-soft); color: var(--accent-dark); outline: 1px solid var(--accent); }
+.library-tag-hover-name.current { font-weight: 700; color: var(--accent-dark); }
+.library-tag-hover-name:disabled { cursor: default; opacity: .65; }
+.library-tag-hover-section { margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line); }
+.library-tag-hover-section h4 { margin: 0 0 4px; color: var(--muted); font: 600 12px/1.5 var(--ui-font); }
+.library-tag-hover-row { display: flex; gap: 4px; align-items: center; min-height: 32px; }
+.library-tag-hover-row .library-tag-hover-name { flex: 1; }
+.library-tag-hover-arrow { flex: none; width: 26px; min-height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--accent-dark); font: 16px/1 var(--ui-font); cursor: pointer; }
+.library-tag-hover-arrow:disabled { color: var(--muted); cursor: default; }
+.library-tag-hover-arrow:hover:not(:disabled) { background: var(--surface-2); }
+.library-tag-hover-branch .library-tag-hover-branch { margin-left: 12px; padding-left: 7px; border-left: 1px solid var(--line); }
+.library-tag-hover-count { flex: none; color: var(--muted); font-size: 11px; }
+.library-tag-hover-method { margin: 4px 4px 0 0; }
+.library-tag-hover-rationale { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.library-tag-hover-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line); }
+.library-tag-hover-status { flex-basis: 100%; color: var(--accent-dark); font-size: 12px; }
+.library-tag-retained { padding: 3px 7px; border-radius: 5px; background: var(--amber-soft); color: var(--amber); font-size: 11px; }
+.tag-suggestion-top-level { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+.tag-suggestion-top-level input { width: 15px; height: 15px; }
+.tag-template-dependencies { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft); }
+.tag-template-dependencies h4 { margin: 0 0 6px; color: var(--accent-dark); font: 600 13px/1.5 var(--ui-font); }
+.tag-template-parent-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-template-parent-list span { padding: 3px 7px; border-radius: 5px; background: var(--surface); color: var(--ink-2); font-size: 12px; }
+.tag-template-preview .tag-template-path, .tag-template-preview .tag-template-related { display: block; color: var(--accent-dark); font-size: 11px; line-height: 1.5; }
+.tag-history-directory { margin-top: 7px; color: var(--muted); font-size: 12px; }
+.tag-history-directory > p { margin: 5px 0; overflow-wrap: anywhere; }
+.tag-history-directory > p small { margin-left: 8px; }
+.library-tag::-webkit-details-marker { display: none; }
+.library-tags-remove { align-self: stretch; flex: none; border: 0; padding: 0 7px; background: transparent; color: var(--muted); font-size: 17px; cursor: pointer; border-radius: 0 5px 5px 0; }
+.library-tags-remove:hover { background: #f6e5e1; color: #a44231; }
+.library-tags-remove:disabled { cursor: wait; opacity: .45; }
+.library-tags-edit { width: auto; height: auto; min-height: 30px; padding: 4px 8px; border-radius: 6px; font-size: 12px; }
+.library-tag-info[open] { width: 100%; }
+.library-tag-chip:has(.library-tag-info[open]) { flex-basis: 100%; align-items: start; }
+.library-tag-popover { display: grid; gap: 6px; padding: 6px 8px 9px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.5; }
+.library-tag-popover small { color: var(--muted); }
+.library-tag-popover p { margin: 0; }
+.library-tag-popover .button { justify-self: start; }
+.library-tags-save-state { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--accent-dark); font-size: 12px; }
+.tag-suggestion-recovery { display: grid; justify-items: start; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; background: var(--amber-soft); }
+.tag-suggestion-entry-actions { display: flex; gap: 5px; margin: 8px 0 0 24px; }
+.tag-suggestion-card[aria-busy="true"] { opacity: .75; }
+@media (min-width: 980px) {
+  body.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: 212px minmax(0, 1fr); }
+  body.library-inspector-collapsed .question-inspector { display: none; }
+  .library-card-details { display: none; }
+}
 
 /* 收起时右边只留这一条把手，骑在屏幕右缘上，像贴在边上一个小抽屉拉手。
    它一直都在：篮空着也得看得见往哪儿加题。 */
@@ -243,10 +394,18 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    infinite 动画仍会以 0.01ms 的周期一直转。
    这条要 !important：上面那条状态选择器带了三个类，比这条具体，不加就会被它盖住。 */
 @media (prefers-reduced-motion: reduce) { .basket-handle::after { animation: none !important; } }
-.library-advanced { font-size: 13px; color: var(--ink-2); }
-.library-advanced > summary { width: max-content; cursor: pointer; padding: 3px 0; }
-.library-advanced[open] > .library-filters { margin-top: 10px; }
-.library-advanced .library-extra-tools { margin-top: 10px; }
+.library-advanced { position: relative; flex: none; font-size: 13px; color: var(--ink-2); }
+.library-advanced > summary { width: max-content; cursor: pointer; list-style: none; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink-2); font-weight: 600; }
+.library-advanced > summary::-webkit-details-marker { display: none; }
+.library-advanced > summary::before { content: "+"; margin-right: 6px; color: var(--accent); }
+.library-advanced[open] > summary::before { content: "−"; }
+.library-advanced[open] > .library-filters { position: absolute; z-index: 25; top: calc(100% + 7px); right: 0;
+  display: flex; align-items: flex-start; gap: 10px 14px; width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.library-advanced .library-select { align-items: flex-start; flex-direction: column; gap: 5px; }
+.library-advanced #tagFilterBox select { min-width: 170px; }
+.library-rail > .library-extra-tools { margin-top: -2px; }
 /* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。
    1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了。吸在顶栏下面，
    top 用 var(--topbar-h) —— 顶栏在 ≤760px 时会变成 52px，跟着走就行。
@@ -255,6 +414,14 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    窄屏时它是 61 的浮层，两边都不会盖到它。 */
 .library-bulk { position: sticky; top: var(--topbar-h); z-index: 20;
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; font-size: 12.5px; }
+.library-filterbar { position: relative; z-index: 21; display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  margin-bottom: 8px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-size: 12.5px; }
+.library-filterbar > .draft-filters { flex: none; }
+.library-filterbar > #typeFilters { flex: 1 1 300px; min-width: min(100%, 300px); gap: 2px; padding: 3px; }
+.library-filterbar > #typeFilters .draft-filter { flex: none; padding: 5px 8px; white-space: nowrap; }
+.library-filterbar .library-select { gap: 6px; white-space: nowrap; }
+.library-filterbar .library-select select { max-width: 190px; }
+.library-filterbar > .library-advanced { margin-left: auto; }
 /* 吸住时才加阴影：题卡从底下滑过去，光靠那条 1px 下边框会像是被削掉一块。
    样式照抄终审页的 .toolbar.stuck（styles.css:386），JS 那边照抄 app.js:8458。 */
 .library-bulk.stuck { box-shadow: 0 8px 18px -14px rgba(22, 44, 39, .45); }
@@ -271,6 +438,9 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    整条 display:none 会让手机上的用户完全不知道自己看的是旧数据。 */
 @media (max-width: 760px) {
   .library-bulk #libraryStatus[data-tone="plain"] { display: none; }
+  .library-batch-toolbar:not([hidden]) { margin-left: 0; }
+  .library-filterbar > #typeFilters { flex-basis: 100%; }
+  .library-filterbar > .library-advanced { margin-left: auto; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }
 .library-filter-chip { display: flex; align-items: baseline; gap: 6px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); padding: 5px 8px; font: 12px/1.4 var(--ui-font); text-align: left; }
@@ -335,9 +505,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 /* 屏幕不够宽，212px 的侧栏会从题目身上啃掉一块（820 时正文只剩 471px）。
    这时侧栏改成右侧浮层：不占宽度，触发按钮在顶栏右端，和左端的 ☰ 分开。 */
 @media (max-width: 979px) {
-  /* 窄屏上右侧已经有筛选浮层了，篮抽屉不能再占一列 —— 两者改成同一个位置的浮层，
-     互相替换（开一个关另一个由 library.js 的 setRail / setBasketPanel 保证）。 */
-  .library-workspace { grid-template-columns: minmax(0, 1fr); }
+  /* 窄屏上的筛选、题目详情和试题篮共用右侧浮层位置，开一个时收起另一个。 */
+  body.library-page .library-workspace,
+  body.library-page.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr); }
+  .library-workspace > .library-results { grid-column: 1; }
+  .library-workspace > .question-inspector { grid-column: 1; }
+  .question-inspector { position: fixed; z-index: 56; top: var(--topbar-h); right: 0; bottom: 0; width: min(90vw, 370px);
+    height: auto; min-height: 0; border-radius: 0; border-top: 0; border-right: 0; border-bottom: 0;
+    box-shadow: var(--shadow-lg); transform: translateX(100%); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+  body.library-inspector-open .question-inspector { transform: none; }
+  body.library-inspector-open { overflow: hidden; }
+  body.library-basket-open .question-inspector { display: none; }
+  .inspector-toggle { display: inline-flex; }
+  .inspector-close { display: inline-flex; }
+  .inspector-scrim:not([hidden]) { position: fixed; z-index: 55; inset: var(--topbar-h) 0 0; display: block; background: rgba(22,44,39,.32); backdrop-filter: blur(2px); }
   /* 把手本来就是 fixed 的，从顶栏下面开始才不会盖住顶栏右端的「筛选」——
      想开筛选的人正被篮挡住。筛选浮层同样从顶栏下面开始。 */
   /* 浮层原来正好压在把手上（面板 z-index 61、把手 4，位置都是 right:0）：篮一打开，
@@ -356,16 +537,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
     border-left: 1px solid var(--line); box-shadow: var(--shadow-lg);
     transform: translateX(100%); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
   body.rail-open .library-rail { transform: none; }
-  body.rail-open, body.library-basket-open { overflow: hidden; }
+  body.rail-open, body.library-basket-open, body.library-inspector-open { overflow: hidden; }
   .library-select select { max-width: min(300px, 65vw); }
-  .library-rail .library-select select { max-width: none; }
   /* 侧栏窄，chip 横向滚动会把后面的选项藏起来 —— 竖着换行。 */
   .library-rail .draft-filters { width: auto; flex-wrap: wrap; overflow-x: visible; }
 }
-@media (prefers-reduced-motion: reduce) { .library-rail { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .library-rail, .question-inspector { transition: none; } }
 @media (max-width: 560px) {
   .library-search input { font-size: 14px; padding-left: 38px; }
   .library-filters { gap: 8px; }
+  .library-filterbar { gap: 6px; }
+  .library-filterbar .library-select span { display: none; }
+  .library-filterbar .library-select select { max-width: min(155px, 42vw); padding-left: 8px; }
+  .library-filterbar > #typeFilters { min-width: 100%; }
+  .library-advanced[open] > .library-filters { width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }
   .library-card-meta { gap: 6px; }
   .library-source { white-space: normal; overflow-wrap: anywhere; flex-basis: calc(100% - 28px); }
   .library-card-meta > span::before { display: none; }
@@ -691,6 +876,169 @@ body.printing { overflow: hidden; }
   .print-paper .katex-display { max-width: 100%; overflow-x: auto; }
 }
 
+/* Formal library tag picker and review cards. */
+.tag-picker-dialog, .tag-manager-dialog {
+  width: min(1120px, calc(100vw - 32px)); max-width: 1120px; height: min(88dvh, 900px); max-height: min(88dvh, 900px);
+  padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--ink);
+  background: var(--surface); box-shadow: 0 24px 80px #10231d38; overflow: hidden;
+}
+.tag-picker-dialog[open], .tag-manager-dialog[open] { display: flex; flex-direction: column; }
+#tagPickerDialog { width: min(860px, calc(100vw - 28px)); height: min(76dvh, 760px); }
+.tag-picker-mixed-row { display: flex; flex: 0 0 auto; gap: 6px; align-items: center; }
+.tag-picker-mixed-row > .tag-picker-row { flex: 1; width: auto; }
+.tag-picker-mixed-row > .button { flex: none; }
+.tag-saved-filter-box { display: grid; gap: 7px; }
+.tag-saved-filter-box .library-select { min-width: 170px; }
+.tag-picker-dialog::backdrop, .tag-manager-dialog::backdrop { background: #14231f66; backdrop-filter: blur(2px); }
+.tag-picker-head { display: flex; flex: 0 0 auto; align-items: start; justify-content: space-between; gap: 16px; padding: 18px 20px 12px; background: var(--surface); }
+.tag-picker-head > div { min-width: 0; }
+.tag-manager-dialog-title { display: flex; align-items: baseline; gap: 10px; }
+.tag-manager-total { color: var(--muted); font-size: 12px; }
+.tag-picker-head > .button { flex: none; }
+.tag-picker-head h2 { margin: 0; font-size: 20px; }
+.tag-picker-subtitle { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
+.tag-picker-search { display: block; flex: 0 0 auto; width: calc(100% - 40px); margin: 0 20px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.tag-picker-tools { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 7px; padding: 0 20px 12px; }
+.tag-picker-quick { display: flex; flex: 0 0 auto; gap: 8px; padding: 0 20px 12px; overflow-x: auto; }
+.tag-picker-quick > .button { flex: 0 0 auto; }
+/* The directory and label rows share the remaining height. Their scroll areas
+   must shrink inside the dialog so the status bar never covers a group row. */
+.tag-picker-body, .tag-manager-body { display: grid; flex: 1 1 0; grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; min-width: 0; min-height: 0; max-height: none; padding: 0 20px 18px; overflow: hidden; }
+.tag-picker-groups { display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px; overscroll-behavior: contain; }
+.tag-group-button { flex: 0 0 auto; border: 0; border-radius: 8px; padding: 8px 10px; text-align: left; color: var(--ink-2); background: transparent; }
+.tag-manager-body .tag-group-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.tag-group-count { min-width: 22px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.tag-group-button:hover, .tag-group-button.active { color: var(--accent-dark); background: #e7f1ed; }
+.tag-picker-list, .tag-manager-list { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px; overscroll-behavior: contain; }
+.tag-picker-row { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--tag-color, var(--line)); border-radius: 10px; text-align: left; color: var(--ink); background: #fff; }
+.tag-picker-row:hover, .tag-picker-row.active { border-color: #4b9081; background: #f0f7f4; }
+.tag-picker-row.mixed { border-color: #b8843d; background: #fff8e9; }
+.tag-picker-row-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.tag-picker-row-title small, .tag-picker-row-detail { color: var(--ink-2); font-size: 12px; }
+.tag-picker-row-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; color: var(--accent-dark); }
+.tag-picker-foot { position: relative; z-index: 1; display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+.tag-picker-save-state { min-width: 0; flex: 1 1 120px; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-2); }
+.tag-picker-foot > .button { flex: none; }
+.tag-manager-tools { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
+.tag-manager-search { flex: 0 0 auto; margin: 0 20px 12px; min-height: 38px; }
+.tag-manager-group-row { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; }
+.tag-manager-group-row > .tag-group-button { min-width: 0; overflow-wrap: anywhere; }
+.tag-manager-group-row > .tag-group-button { grid-column: 1 / -1; }
+.tag-manager-group-row > .button { grid-row: 2; }
+.tag-manager-history { flex: 0 0 auto; min-height: 0; margin: 0 20px 16px; border-top: 1px solid var(--line); padding-top: 10px; background: var(--surface); }
+.tag-manager-history[open] { display: flex; flex-direction: column; flex: 0 1 auto; max-height: min(260px, 30dvh); overflow: hidden; }
+.tag-manager-history > summary { flex: 0 0 auto; cursor: pointer; color: var(--ink-2); }
+.tag-manager-history-list { display: grid; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 8px; }
+.tag-manager-history-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border-radius: 8px; background: #f7f8f5; font-size: 12px; }
+.tag-manager-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; }
+.tag-manager-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-left: 3px solid var(--tag-color, var(--line)); border-radius: 8px; background: var(--surface); }
+.tag-manager-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tag-manager-name { width: fit-content; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--ink); font: 600 13px/1.45 var(--ui-font); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.tag-manager-name:hover { color: var(--accent-dark); text-decoration: underline; }
+.tag-manager-row small { color: var(--ink-2); font-size: 11px; }
+.tag-manager-row.inactive { opacity: .72; }
+.tag-manager-actions-menu { position: relative; justify-self: end; }
+.tag-manager-actions-menu > summary { padding: 2px 6px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
+.tag-manager-actions-menu > summary::-webkit-details-marker { display: none; }
+.tag-manager-actions-menu > summary:hover, .tag-manager-actions-menu[open] > summary { border-color: var(--line); background: var(--surface-2); color: var(--ink); }
+.tag-manager-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 6px; }
+.tag-manager-actions-menu[open] .tag-manager-actions { position: absolute; z-index: 8; top: calc(100% + 4px); right: 0; width: min(280px, 78vw); padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.tag-manager-actions select { max-width: 220px; }
+.button-danger { color: #a93437; border-color: #e0b8b6; }
+.tag-template-dialog { width: min(860px, calc(100vw - 32px)); height: min(82dvh, 780px); }
+.tag-template-body { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; gap: 10px; padding: 0 20px 18px; overflow: hidden; }
+.tag-template-packages { display: flex; flex-wrap: wrap; gap: 7px; }
+.tag-template-all { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.tag-template-list { display: grid; gap: 7px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.tag-template-group { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
+.tag-template-group > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.tag-template-group > summary small { margin-left: auto; color: var(--ink-2); }
+.tag-template-preview { display: grid; gap: 5px; padding: 7px 4px 0 28px; }
+.tag-template-preview p { display: grid; gap: 2px; margin: 0; font-size: 12px; }
+.tag-template-preview span { color: var(--ink-2); }
+.tag-history-dialog { width: min(720px, calc(100vw - 28px)); max-height: min(82dvh, 760px); padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.tag-history-dialog[open] { display: flex; flex-direction: column; }
+.tag-history-list { display: grid; gap: 10px; min-height: 0; overflow-y: auto; padding: 14px 20px; }
+.tag-history-record { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.tag-history-record > header { display: flex; justify-content: space-between; gap: 12px; }
+.tag-history-record small, .tag-history-entry small { color: var(--ink-2); }
+.tag-history-entry { display: grid; gap: 3px; padding: 8px; border-radius: 8px; background: var(--surface-2); }
+.tag-history-entry p, .tag-history-record p { margin: 0; }
+.tag-suggestion-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; padding: 7px 10px; border-left: 3px solid var(--amber); border-radius: 6px; background: var(--amber-soft); font-size: 12px; }
+.tag-suggestion-compact small { flex: 1 1 220px; color: var(--ink-2); }
+.tag-suggestion-retry-inline { margin-left: auto; flex: 0 0 auto; }
+.library-tag-history-link { margin-top: 4px; }
+.tag-picker-dialog.loading, .tag-picker-dialog.saving { opacity: 1; }
+.tag-catalogue-editor-dialog { width: min(620px, calc(100vw - 32px)); max-width: 620px; max-height: 90dvh; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); overflow: hidden; }
+.tag-catalogue-editor-dialog[open] { display: flex; flex-direction: column; }
+.tag-catalogue-editor-dialog::backdrop { background: #14231f66; backdrop-filter: blur(2px); }
+.tag-catalogue-editor-form { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.tag-catalogue-editor-body { display: grid; flex: 1 1 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-height: 0; padding: 0 20px 20px; overflow-y: auto; overscroll-behavior: contain; }
+.tag-catalogue-field { display: grid; min-width: 0; align-content: start; gap: 5px; font-size: 13px; color: var(--ink-2); }
+.tag-catalogue-wide { grid-column: 1 / -1; min-width: 0; }
+.tag-catalogue-editor-body > fieldset { display: grid; align-content: start; gap: 7px; min-width: 0; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.tag-catalogue-editor-body > fieldset > legend { padding: 0 4px; color: var(--ink-2); font-size: 13px; }
+.tag-catalogue-field input:not([type="checkbox"]), .tag-catalogue-field textarea, .tag-catalogue-field select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: 13px/1.5 var(--ui-font); }
+.tag-catalogue-field textarea { min-height: 72px; resize: vertical; }
+.tag-catalogue-field input:focus, .tag-catalogue-field textarea:focus, .tag-catalogue-field select:focus { outline: 2px solid var(--accent-ring); border-color: var(--accent); }
+.tag-catalogue-group-choices { display: grid; gap: 7px; max-height: 170px; min-height: 0; overflow-y: auto; padding: 6px 2px; overscroll-behavior: contain; }
+.tag-catalogue-check { display: flex; align-items: start; gap: 7px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.tag-catalogue-check input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
+.tag-catalogue-status { min-width: 0; flex: 1 1 120px; margin: 0; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.tag-catalogue-editor-form > .tag-catalogue-status { flex: 0 0 auto; padding: 0 20px 10px; background: var(--surface); }
+.tag-catalogue-editor-form > .tag-catalogue-status:empty { display: none; }
+.tag-suggestion-card { min-width: 0; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); font-family: var(--ui-font); overflow-wrap: anywhere; }
+.tag-suggestion-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.tag-suggestion-heading h3 { margin: 0; font: 600 13px/1.5 var(--ui-font); color: var(--ink-2); }
+.tag-suggestion-status { padding: 2px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; line-height: 1.5; }
+.tag-suggestion-card[data-status="stale"] .tag-suggestion-status, .tag-suggestion-card[data-status="failed"] .tag-suggestion-status { background: var(--amber-soft); color: var(--amber); }
+.tag-suggestion-message { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.tag-suggestion-entry { margin-top: 12px; }
+.tag-suggestion-entry + .tag-suggestion-entry { border-top: 1px solid var(--line); padding-top: 12px; }
+.tag-suggestion-line { display: flex; gap: 8px; align-items: start; margin: 0; cursor: pointer; }
+.tag-suggestion-line > input { flex: none; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); }
+.tag-suggestion-label { display: grid; gap: 5px; min-width: 0; }
+.tag-suggestion-name { font-size: 14px; line-height: 1.55; color: var(--ink); }
+.tag-suggestion-meta { display: flex; flex-wrap: wrap; gap: 4px 7px; font-size: 11px; line-height: 1.5; color: var(--muted); }
+.tag-suggestion-meta .tag-suggestion-new { color: var(--accent-dark); }
+.tag-suggestion-rationale { margin: 7px 0 0 24px; color: var(--ink-2); font-size: 12px; line-height: 1.65; }
+.tag-suggestion-evidence, .tag-suggestion-edit { margin: 7px 0 0 24px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.tag-suggestion-evidence > summary, .tag-suggestion-edit > summary { cursor: pointer; width: fit-content; }
+.tag-suggestion-evidence > p { margin: 6px 0 0; color: var(--ink-2); }
+.tag-suggestion-fields { display: grid; gap: 10px; margin-top: 9px; }
+.tag-suggestion-field { display: grid; gap: 4px; color: var(--ink-2); }
+.tag-suggestion-field input, .tag-suggestion-field select { width: 100%; min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); font: 12px/1.5 var(--ui-font); }
+.tag-suggestion-field input:focus, .tag-suggestion-field select:focus { outline: 2px solid var(--accent-ring); border-color: var(--accent); }
+.tag-suggestion-groups { min-width: 0; margin: 0; padding: 0; border: 0; }
+.tag-suggestion-groups legend { padding: 0; margin-bottom: 5px; color: var(--ink-2); }
+.tag-suggestion-group-list { display: grid; gap: 6px; max-height: 150px; overflow-y: auto; padding: 1px 3px 1px 0; }
+.tag-suggestion-group-list > label { display: flex; gap: 6px; align-items: start; cursor: pointer; color: var(--ink-2); }
+.tag-suggestion-group-list input { width: 14px; height: 14px; margin: 3px 0 0; flex: none; accent-color: var(--accent); }
+.tag-suggestion-actions { display: grid; gap: 7px; margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--line); }
+.tag-suggestion-selection { margin: 0; color: var(--muted); font-size: 11px; }
+.tag-suggestion-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-suggestion-buttons .button { min-height: 30px; font-size: 12px; padding-inline: 9px; }
+.library-tag-legacy-review { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #fff6df; }
+@media (max-width: 680px) {
+  .library-card-body.has-tag-review > .tag-suggestion-card { margin-inline: 14px; }
+  .tag-picker-dialog, .tag-manager-dialog { width: 100vw; max-width: 100vw; max-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; }
+  .tag-picker-body, .tag-manager-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); max-height: none; padding-inline: 12px; }
+  .tag-picker-groups { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding-bottom: 3px; }
+  .tag-picker-head, .tag-picker-foot { padding-inline: 12px; }
+  .tag-picker-search { width: calc(100% - 24px); margin-inline: 12px; }
+  .tag-picker-tools, .tag-picker-quick, .tag-manager-tools { padding-inline: 12px; }
+  .tag-manager-search { margin-inline: 12px; }
+  .tag-manager-history { margin-inline: 12px; }
+  .tag-manager-row { grid-template-columns: 1fr; }
+  .tag-manager-list { grid-template-columns: minmax(0, 1fr); }
+  .tag-manager-body .tag-group-button { width: auto; }
+  .tag-template-body { padding-inline: 12px; }
+  .tag-history-list { padding-inline: 12px; }
+  .tag-catalogue-editor-dialog { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+  .tag-catalogue-editor-body { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
+  .tag-catalogue-editor-form > .tag-catalogue-status { padding-inline: 12px; }
+}
+
 /* 题面宽度不够时，选项自动减少列数（按题面自身宽度，而不是屏幕宽度） */
 @container qpaper (max-width: 540px) {
   .qb-options.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -737,7 +1085,7 @@ body.printing { overflow: hidden; }
 
 @media print {
   :root { background: #fff; }
-  .site-header, .topbar, .no-print, .toast, .site-drawer, .drawer-scrim, .drawer-staging, .library-rail, .rail-scrim, .rail-collapse, .basket-panel, .basket-handle { display: none !important; }
+  .site-header, .topbar, .no-print, .toast, .site-drawer, .drawer-scrim, .drawer-staging, .library-rail, .rail-scrim, .rail-collapse, .question-inspector, .inspector-scrim, .basket-panel, .basket-handle { display: none !important; }
   body.printing > *:not(.print-sheet) { display: none !important; }
   body.printing { overflow: visible; background: #fff; }
   .print-sheet { position: static; width: auto; height: auto; max-height: none; padding: 0; background: #fff; overflow: visible; border-radius: 0; box-shadow: none; animation: none; }
@@ -819,13 +1167,15 @@ body.printing { overflow: hidden; }
 .question-viewer-ai h3 { color: #835813; }
 .question-viewer-status { margin: 14px 0 0; font: 13px/1.6 var(--ui-font); color: #6b552f; }
 .question-viewer-status:empty { display: none; }
-/* 专注模式藏的是侧栏（还有批量条、筛选条），让题目铺满。
-   篮不在这里：它已经搬进抽屉了，属于导航。跟着一起藏的话，专注模式下点开
-   抽屉只剩「试题篮 N」一个标题，下面一片空白 —— 那一版就是这么坏的。 */
+/* 专注模式藏筛选栏和批量条，题目详情仍留在右侧，便于检查当前题。 */
 .library-focus-mode .library-rail, .library-focus-mode .library-bulk, .library-focus-mode #activeFilters { display: none !important; }
-/* 侧栏藏了，栅格要收回单列，否则题目会被塞进 212px 那条空列里。 */
-.library-focus-mode .library-workspace { grid-template-columns: minmax(0, 1fr); padding-top: 0; }
+/* 专注模式收起筛选栏，保留当前题目的详情。 */
+.library-focus-mode .library-workspace { grid-template-columns: minmax(0, 1fr) 310px; padding-top: 0; }
 .library-focus-mode .library-workspace > .library-results { grid-column: 1; }
+.library-focus-mode .library-workspace > .question-inspector { grid-column: 2; }
+/* 详情收起时，专注模式只保留题目列；避免结果区仍被旧 grid-column 规则钉在窄列。 */
+.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: minmax(0, 1fr); }
+.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace > .library-results { grid-column: 1; }
 /* 1.12.9：上面那条「篮展开占第三列」（body.library-basket-open .library-workspace）
    特异性更高，会把专注模式的单列覆盖回三列；题目因此被塞进 212px 那条本该放
    侧栏的列里，1650 宽下只剩 309px，右边空一大片。专注模式下侧栏已经没了，

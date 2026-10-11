@@ -7,7 +7,7 @@ const visible = source.slice(source.indexOf("  function visibleItems("), source.
 const first = Array.from({ length: 40 }, (_, index) => ({ id: `pub-${index + 1}`, number: index + 1, content: { stem: `完整题目 ${index + 1}` } }));
 const second = Array.from({ length: 15 }, (_, index) => ({ id: `pub-${index + 41}`, number: index + 41, content: { stem: `完整题目 ${index + 41}` } }));
 const state = { view: "all", items: first.slice(), total: 55, q: "  函数 $x$  ", document: "paper-original", type: "single_choice", review: "human", answer: "no", tag: "几何", sort: "source",
-  basket: ["basket-unused"], basketMissing: [], selected: new Set(["pub-3"]), draft: { id: "immutable-draft", solutions: { "pub-2": "original-solution" } }, catalog: new Map([["unrelated-history", { id: "unrelated-history" }]]) };
+  retainedTagItems: new Map(), basket: ["basket-unused"], basketMissing: [], selected: new Set(["pub-3"]), draft: { id: "immutable-draft", solutions: { "pub-2": "original-solution" } }, catalog: new Map([["unrelated-history", { id: "unrelated-history" }]]) };
 const requests = []; let response = { items: second, total: 55 }, gate = null, failed = false;
 const context = { state, URLSearchParams, fetch: async (url, options) => {
   assert(!options.method, "The viewer page loader is read-only"); requests.push({ url, options }); const body = response, fail = failed;

@@ -35,11 +35,20 @@ TIDY_STEM = (
 
 class TempDataMixin:
     def use_temp_data(self):
-        self.temp = Path(tempfile.mkdtemp())
+        # Desktop/test launchers explicitly configure QB_FEATURES_FILE. Keep
+        # each test's switches beside its own data instead of sharing that
+        # launcher's file across cases (including cases that turn them off).
+        isolated_root = os.environ.get("QB_DATA_ROOT", "").strip()
+        if isolated_root:
+            Path(isolated_root).mkdir(parents=True, exist_ok=True)
+        self.temp = Path(tempfile.mkdtemp(dir=isolated_root or None))
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
         override = override_settings(DATA_ROOT=self.temp)
         override.enable()
         self.addCleanup(override.disable)
+        feature_file = mock.patch.dict(os.environ, {"QB_FEATURES_FILE": str(self.temp / "features.json")})
+        feature_file.start()
+        self.addCleanup(feature_file.stop)
 
     def make_paper(self, **extra):
         paper = Paper.objects.create(filename="微信图片_20260927143927_512_79 等 4 张照片", kind="pdf",
@@ -452,8 +461,8 @@ class FeatureSwitchTests(TempDataMixin, TestCase):
                                     content_type="application/json", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(features.enabled("knowledge_tags"))
-        self.assertTrue(knowledge.path().is_file())
-        # A broken file falls back to the defaults.
+        self.assertFalse(knowledge.path().exists())
+        # Enabling labels no longer creates a second, legacy text catalogue.
         features.path().write_text("{oops", encoding="utf-8")
         self.assertEqual(features.load(), features.DEFAULTS)
 
@@ -532,47 +541,42 @@ class LibraryExtrasTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(LibraryJob.objects.count(), 0)
 
-    def test_tags_and_ai_answer_are_made_by_the_worker_and_kept_out_of_the_snapshot(self):
-        features.save({"knowledge_tags": True, "ai_answer": True})
+    def test_ai_answer_is_made_by_the_worker_and_kept_out_of_the_snapshot(self):
+        features.save({"ai_answer": True})
         question, publication = self.published(2)
         old_hash = publication.content_hash
-        self.assertEqual(self.post("/api/library/jobs", {"kind": "tags", "missing": True}).json()["queued"], 1)
         self.assertEqual(self.post("/api/library/jobs", {"kind": "answer", "ids": [str(publication.id)]}).json()["queued"], 1)
         # Asking twice reuses the waiting job.
         self.post("/api/library/jobs", {"kind": "answer", "ids": [str(publication.id)]})
-        self.assertEqual(LibraryJob.objects.filter(status="queued").count(), 2)
+        self.assertEqual(LibraryJob.objects.filter(status="queued").count(), 1)
         listed = self.client.get("/api/library").json()["items"][0]
-        self.assertEqual(sorted(listed["jobs"]), ["answer", "tags"])
+        self.assertEqual(listed["jobs"], ["answer"])
 
         def chat(prompt, _images, **_kwargs):
-            if "知识点目录" in prompt:
-                return "【知识点】集合间的基本关系；全称量词与存在量词；随便编的", "模拟豆包 Pro"
             return "【答案】(1) $3\\leqslant m\\leqslant 4$；(2) $3\\leqslant m\\leqslant \\frac{9}{2}$\n【解析】由 $B\\neq\\varnothing$ 得 $m\\geqslant 3$。", "模拟豆包 Pro"
 
         with mock.patch.object(library_ai_settings, "chat", chat):
-            self.assertEqual(library_jobs.process_pending(), 2)
+            self.assertEqual(library_jobs.process_pending(), 1)
         publication.refresh_from_db()
-        self.assertEqual(publication.extras["tags"], ["集合间的基本关系", "全称量词与存在量词"])
+        self.assertNotIn("tags", publication.extras)
         self.assertIn("3\\leqslant m\\leqslant 4", publication.extras["ai_answer"]["answer"])
         self.assertEqual(publication.content_hash, old_hash)
         self.assertEqual(publication.version, 1)
         body = self.client.get("/api/library?tag=集合间的基本关系").json()
-        self.assertEqual(body["total"], 1)
-        self.assertIn({"tag": "集合间的基本关系", "count": 1}, body["facets"]["tags"])
+        self.assertEqual(body["total"], 0)
         self.assertEqual(self.client.get("/api/library?tag=集合").json()["total"], 0)
-        self.assertEqual(self.client.get("/api/library?q=全称量词").json()["total"], 1)
+        self.assertEqual(self.client.get("/api/library?q=全称量词").json()["total"], 0)
 
-        # A new version (the answer was added by a person) keeps the tags; the
-        # AI answer stays because the task text did not change.
+        # A new version keeps the AI answer; tagging remains a separate, explicit task.
         question = Question.objects.select_related("paper").get(pk=question.pk)
         question.answer = "(1) [3,4]；(2) [3,9/2]"
         question.approved_content_hash = library.approval_hash(question)
         question.save()
         newer, created = library.publish(question)
         self.assertTrue(created)
-        self.assertEqual(newer.extras["tags"], ["集合间的基本关系", "全称量词与存在量词"])
+        self.assertNotIn("tags", newer.extras)
         self.assertIn("ai_answer", newer.extras)
-        self.assertEqual(self.client.get("/api/library?tag=全称量词与存在量词").json()["total"], 1)
+        self.assertEqual(self.client.get("/api/library?tag=全称量词与存在量词").json()["total"], 0)
 
     def test_a_waiting_job_keeps_its_source_version_and_new_version_needs_its_own_job(self):
         features.save({"ai_answer": True})
