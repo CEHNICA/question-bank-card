@@ -958,23 +958,23 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
 # 是 1/96 英寸。实测四张 240px 的图预览排成 2×2，Word 原来每张一个段落，排成 1×4。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
-# styles.css: "@container qpaper (max-width: 680px) { .qb-options.cols-4 ->
-# two columns }". The container is .qb-question, and on a printed page that is
-# the 178mm text area (673px), so the preview and the PDF always show four
-# options as 2x2. Word is always that page, so it applies the same reduction:
-# without it every four-option question downloads as 1x4.
+# 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
+# .qb-options.cols-4 -> two columns }"。
+#
+# 那条规则在浏览器里从来不生效：``exam-layout.js`` 的 ``fitOptions`` 对每一个
+# ``.qb-options`` 都无条件写一行内联 ``grid-template-columns``（那是它逐级降列的实现），
+# 内联样式压过样式表，容器查询也压不过。实测（2026-10-11，2024 全国甲卷理，23 题）：
+# 老师选「四项一行」，PDF 4 页、选项一行四个；Word 5 页、2×2。而且四个选项只有
+# ``10i / 2i / 10 / −2``，宽度上排四列绰绰有余——那条降列从来就没量过宽度，于是
+# 给老师的提示「选项较宽，Word 已使用两列」是在冤枉选项。
+#
+# 现在 Word 只按自己量出来的宽度决定列数（``_option_columns``），和 PDF 一致；
+# 真的排不下四列时它才降，并如实说是宽度不够。
 #
 # Known remaining difference: five options each carrying a diagram. The
 # preview keeps five columns and lets the images shrink to ~82px, while Word
 # refuses to shrink content to hold a column count (it warns instead), so it
 # lays those out in two columns. Left alone on purpose.
-PREVIEW_OPTION_FOUR_COLUMN_MAX_PX = 680
-
-
-def _preview_option_columns(columns, text_width_mm=178):
-    if columns == 4 and text_width_mm / 25.4 * PREVIEW_PX_PER_INCH <= PREVIEW_OPTION_FOUR_COLUMN_MAX_PX:
-        return 2
-    return columns
 
 
 def _figure_columns(images, text_width_mm=178):
@@ -1204,7 +1204,7 @@ def _option_columns(item, options, *, text_width_mm=178):
     for columns in candidates:
         # Cell margins and a 10% reserve absorb font/rendering variation.
         if max(widths) <= (text_width_mm / columns - 4.0) * 0.90:
-            return _preview_option_columns(columns, text_width_mm)
+            return columns
     return 1
 
 

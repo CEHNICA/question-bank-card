@@ -720,13 +720,15 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_global_and_per_question_columns_and_font_size_safe_fallback(self):
         first = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
         second = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
-        # The per-question override still wins. Four columns arrive as two:
-        # the printed question box is 178mm, so the preview's own container
-        # query never shows four there either.
+        # The per-question override still wins, and "four" is honoured: the PDF the
+        # teacher checked prints these four-across, so the download has to agree.
+        # (Until 2026-11-04 Word downgraded every four-option question to 2x2 by
+        # copying a styles.css container query that fitOptions shadows with an
+        # inline style — it can never fire in a browser.)
         options = {"document": "questions", "option_layout": "four", "option_overrides": {str(second.id): "vertical"}}
         result = self.post(self.payload([first, second], print_options=options))
         tables = document_xml(result.content).findall(".//w:tbl", NS)
-        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [2])
+        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [4])
         first.content["options"] = {key: "长" * 14 for key in "ABCD"}  # wide enough to react to the font size
         first.save(update_fields=["content"])
         columns = []
@@ -896,16 +898,17 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
 
     def test_four_short_options_auto_uses_four_columns_and_complex_options_keep_vertical(self):
-        # Four short options: the preview and the PDF show them 2x2, because the
-        # printed question box is 178mm (673px) and styles.css turns four option
-        # columns into two under its 680px container query. Word must match.
+        # Four short options: one row of four. This is what the preview and the PDF
+        # have always shown — styles.css turns four columns into two only under a
+        # 680px container query, and exam-layout.js fitOptions writes an inline
+        # grid-template-columns on every option list, which outranks it.
         pub = self.publication(kind="single_choice", options={key: "离线选项" for key in "ABCD"})
         result = self.post(self.payload([pub], print_options={"document": "questions"}))
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertIsNotNone(table)
-        self.assertEqual(len(table.findall("w:tr", NS)), 2)
-        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
+        self.assertEqual(len(table.findall("w:tr", NS)), 1)
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 4)
         self.assertEqual(table.find("w:tblPr/w:tblBorders/w:top", NS).get(f'{{{NS["w"]}}}val'), "nil")
         for paragraph in table.findall("w:tr", NS)[-1].findall(".//w:p", NS):
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
@@ -962,10 +965,10 @@ class LibraryExportTests(ExportFixture, TestCase):
             pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
-        for mode, columns in (("four", 2), ("two", 2), ("vertical", 0), ("auto", 2)):
-            # "four" and "auto" both land on two columns: the preview's printed
-            # question box is 178mm, so four option columns never survive the
-            # 680px container query there either.
+        for mode, columns in (("four", 4), ("two", 2), ("vertical", 0), ("auto", 4)):
+            # A 200px diagram fits a 178mm/4 column, so "four" and "auto" keep four
+            # columns and every label and image survives. Only the explicit "two"
+            # and "vertical" reduce.
             with self.subTest(mode=mode):
                 response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": mode}))
                 self.assertEqual(response.status_code, 200, response.content[:100])
