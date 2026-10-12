@@ -868,7 +868,61 @@ def _write_segments(paragraph, segments, size, bold=False):
             _font(paragraph.add_run(shown), size, bold)
 
 
+# Word 单元格左右各留 0.19cm 的默认内边距，算列宽时要算进去。
+CELL_PADDING_MM = 3.8
+# 一列最少给多少。跟预览里 `.qb-table td { min-width: 2.6em }` 一个量级，
+# 免得内容窄的时候挤成一条看不见的缝。
+COLUMN_FLOOR_MM = 8.0
+
+
+def _WIDE_CHAR(ch):
+    """中日韩字符和全角标点按一个字宽算，其余按半个字宽。"""
+    return "\u2e80" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef"
+
+
+def _cell_width_mm(cell, size):
+    """这一格大概要占多宽（毫米）。
+
+    系数是量出来的，不是猜的：12pt 正文里一个汉字 4.23mm、数字 2.51mm，
+    也就是 1 em = 4.23mm、数字 0.59 em。取 0.6 是宁可高估一点——
+    差 0.3mm 就够把「12」顶到换行（实测 8.3mm 的格子放不下 5.02mm 的「12」，
+    因为两侧内边距吃掉了 3.8mm）。
+
+    公式段按 LaTeX 去命令后估：`\\tan\\theta` 当 4 个字符算，量出来 8.26mm。
+    """
+    em = 0.0
+    for segment in cell["segments"]:
+        if segment.get("type") == "math":
+            stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
+            em += max(1.0, len(stripped) * 0.6)
+        else:
+            em += sum(1.0 if _WIDE_CHAR(ch) else 0.6 for ch in segment.get("raw") or "")
+    return em * size * 25.4 / 72.0 + CELL_PADDING_MM
+
+
+def _table_column_widths(placements, width, size, text_width_mm=178.0):
+    """按内容分列宽，跟预览里那张表一样（`.qb-table` 是 table-layout:auto，不写死列宽）。
+
+    早先每列都 `Mm(178 / width)`：13 列的表每列只剩 13.7mm，「零售收入/万元」
+    七个字被挤成五行，整张表凭空长高一倍——同一份内容在 PDF 路线里是一行。
+    真库 27 个表格里 11 个会这样，九上第 1 题（#1282）最典型。
+    """
+    need = [COLUMN_FLOOR_MM] * width
+    for _, column, cell in placements:
+        span = min(max(1, cell["colspan"]), width - column)
+        share = _cell_width_mm(cell, size) / span
+        for offset in range(span):
+            need[column + offset] = max(need[column + offset], share)
+    total = sum(need)
+    if total <= text_width_mm:
+        # 内容窄就照内容的宽度印，别硬撑满——预览里那张表也是这么收着的。
+        return need
+    factor = text_width_mm / total
+    return [value * factor for value in need]
+
+
 def _write_table(document, rows, size, where):
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -895,8 +949,10 @@ def _write_table(document, rows, size, where):
     table = document.add_table(rows=len(rows), cols=width)
     table.style = "Table Grid"
     table.autofit = False
-    for column in table.columns:
-        column.width = Mm(178 / width)
+    # `.qb-table { margin: 0 auto }`：预览里窄表是居中的，Word 这边也要跟着居中。
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for column, value in zip(table.columns, _table_column_widths(placements, width, size)):
+        column.width = Mm(value)
     for r, c, cell in placements:
         target = table.cell(r, c)
         if cell["rowspan"] > 1 or cell["colspan"] > 1:

@@ -879,6 +879,58 @@ class LibraryExportTests(ExportFixture, TestCase):
         rows[1].pop()
         self.assertEqual(self.post(payload).status_code, 400)
 
+    def table_export(self, raw):
+        """把一段 Markdown 表格走完真导出，返回 docx 的 XML。"""
+        pub = self.publication(stem=raw)
+        rows = export._table_source(raw, "合成表格")
+        for row in rows:
+            for cell in row:
+                cell["segments"] = field(cell["source"])["blocks"][0]["segments"] if cell["source"] else []
+        payload = self.payload([pub])
+        payload["rendered_fields"][str(pub.id)]["stem"] = {
+            "source": raw, "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}]}
+        result = self.post(payload)
+        self.assertEqual(result.status_code, 200)
+        return document_xml(result.content)
+
+    @staticmethod
+    def column_widths_mm(xml):
+        return [int(node.get(f"{{{NS['w']}}}w")) * 25.4 / 1440
+                for node in xml.findall(".//w:tblGrid/w:gridCol", NS)]
+
+    def test_a_long_header_column_gets_the_width_its_text_needs(self):
+        """宽表里每一列都等分的话，长表头会被挤成五行——真库 27 个表格里 11 个这样。
+
+        九上第 1 题（#1282）是 13 列，「零售收入/万元」七个字要 30mm，
+        等分只能给到 13.7mm；同一份内容在 PDF 路线里是一行。
+        """
+        header = "| 零售收入/万元 | " + " | ".join(str(day) for day in range(12, 24)) + " |"
+        row = "| " + " | ".join("40" for _ in range(12)) + " |"
+        raw = f"{header}\n| --- | {' | '.join(['---'] * 12)} |\n{row}"
+        widths = self.column_widths_mm(self.table_export(raw))
+
+        self.assertEqual(len(widths), 13)
+        self.assertGreater(widths[0], max(widths[1:]) * 1.8,
+                           f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分")
+
+    def test_a_table_wider_than_the_page_is_scaled_back_inside_it(self):
+        """内容再宽也不能超出 178mm 的版心，超了就整体缩回去。"""
+        header = "| 项目 | " + " | ".join(f"第{i}列" for i in range(1, 20)) + " |"
+        row = "| 甲 | " + " | ".join("乙乙" for _ in range(19)) + " |"
+        raw = f"{header}\n| --- | {' | '.join(['---'] * 19)} |\n{row}"
+        widths = self.column_widths_mm(self.table_export(raw))
+
+        self.assertLessEqual(sum(widths), 178.5)
+
+    def test_a_narrow_table_is_left_at_its_own_width_and_centred(self):
+        """内容窄的表不硬撑满版心——预览里那张表是 `margin: 0 auto`，居中收着。"""
+        raw = "| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |"
+        xml = self.table_export(raw)
+        widths = self.column_widths_mm(xml)
+
+        self.assertLess(sum(widths), 178.0)
+        self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
+
     def test_html_merged_table_has_native_span_structure(self):
         raw = '<table><tr><th rowspan="2">甲</th><th>乙</th></tr><tr><td>&amp; 丙</td></tr></table>'
         pub = self.publication(stem=raw)
