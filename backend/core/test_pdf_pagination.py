@@ -208,6 +208,43 @@ class SharedPdfPaginationTests(SimpleTestCase):
         self.assertEqual(len(spaces),3)
         for space in spaces:self.assertAlmostEqual(space["rect"][3]*25.4/96,60,delta=.02)
 
+    def page_heads(self,geometry):
+        heads={}
+        for index,page in enumerate(geometry["pages"]):
+            if page["questions"]:heads[page["questions"][0]["id"]]=index
+        return heads
+
+    def page_of(self,geometry):
+        where={}
+        for index,page in enumerate(geometry["pages"]):
+            for question in page["questions"]:where[question["id"]]=index
+        return where
+
+    def test_question_break_starts_that_question_on_a_new_page_and_leaves_the_others_alone(self):
+        target=self.items[3]["id"]
+        before=deepcopy(self.items)
+        _,base_count,base_geometry=self.render(self.documents()[1])
+        base_heads=self.page_heads(base_geometry)
+        base_where=self.page_of(base_geometry)
+        self.assertNotIn(target,base_heads,"The fixture must not already break this question for the test to mean anything")
+
+        options={**self.options,"question_breaks":[target]}
+        preview,exported=self.documents(options)
+        _,preview_count,preview_geometry=self.render(preview)
+        _,export_count,geometry=self.render(exported)
+        self.assertEqual((preview_count,export_count),(preview_count,export_count))
+        self.assert_geometry(preview_geometry,geometry)
+        heads=self.page_heads(geometry)
+        self.assertIn(target,heads,"The chosen question has to become the first one on its page")
+        self.assertGreaterEqual(heads[target],1,"A break on the first question cannot invent a page before the title")
+        broken_where=self.page_of(geometry)
+        for index,other in enumerate(self.items,1):
+            if index>=4:break
+            self.assertEqual(broken_where[other["id"]],base_where[other["id"]],
+                             "Questions printed before the break must not move")
+        self.assertGreaterEqual(export_count,base_count)
+        self.assertEqual(self.items,before,"Rendering must not rewrite the caller's items")
+
     def test_teacher_ai_note_matches_preview_text_order_and_geometry(self):
         for index,item in enumerate(self.items):
             item["selected"]={"answer":"合成答案","analysis":r"由 $x=1$ 代入计算，得到结论。"}
