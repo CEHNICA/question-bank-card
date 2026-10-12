@@ -31,17 +31,28 @@
   </svg>
 
   <header class="topbar site-header">
-    <a class="brand" href="/" aria-label="题有据首页">
+    <div class="brand">
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
       </span>
-    </a>
+    </div>
     <nav class="topnav header-nav" aria-label="页面" data-drawer="nav">
       <a class="header-link" href="/">录入终审</a>
       <a class="header-link active" href="/library" aria-current="page">正式题库</a>
       <a class="header-link" href="/settings">设置</a>
     </nav>
+    <!-- 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭/最小化只能从这里来。
+         标题栏不再显示浏览器残留的标题文字，点图标也不再跳回首页。 -->
+    <div class="window-controls" aria-label="窗口">
+      <span class="window-title" aria-hidden="true">题有据</span>
+      <button id="windowMinimize" class="window-button" type="button" title="最小化" aria-label="最小化">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.5h7"/></svg>
+      </button>
+      <button id="windowClose" class="window-button window-close" type="button" title="关闭题有据" aria-label="关闭题有据">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+      </button>
+    </div>
     <nav class="library-top-navigation" aria-label="题库查找与管理">
       <div class="library-search">
         <svg class="icon search-icon" aria-hidden="true"><use href="#i-search"/></svg>
