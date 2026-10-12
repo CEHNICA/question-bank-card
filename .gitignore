@@ -18,6 +18,11 @@ packaging/dist/
 tmp/
 .planning/
 
+# 导出链路的命令行驱动（只在 tmp/ 下的验收探针里用，浏览器里跑的是同一份函数）。
+# 它们必须待在 frontend/ 里 —— require 走的是 ./qb-render.js、./exam-export.js。
+frontend/render_for_export.js
+frontend/serialize_for_word.js
+
 credentials.dat
 *.pem
 *.key
