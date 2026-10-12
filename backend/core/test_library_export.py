@@ -739,6 +739,40 @@ class LibraryExportTests(ExportFixture, TestCase):
             self.assertIn(f'w:val="{size * 2}"'.encode(), etree.tostring(document_xml(result.content)))
         self.assertEqual(columns, [2, 0], "a bigger font must still fall back: two columns, then one per line")
 
+    def test_per_question_answer_space_override_matches_the_global_setting_it_copies(self):
+        first = self.publication(kind="free_response", stem="第一题专用题干标记")
+        second = self.publication(kind="free_response", stem="第二题专用题干标记")
+
+        def writing_space(stem, print_options):
+            """The `w:after` of the blank paragraph the writer adds after that question."""
+            response = self.post(self.payload([first, second], print_options=print_options))
+            self.assertEqual(response.status_code, 200)
+            paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+            index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
+            for paragraph in paragraphs[index + 1:]:
+                if "".join(paragraph.itertext()).strip():
+                    break
+                spacing = paragraph.find("w:pPr/w:spacing", NS)
+                if spacing is not None and spacing.get(f'{{{NS["w"]}}}after'):
+                    return spacing.get(f'{{{NS["w"]}}}after')
+            return None
+
+        none = {"document": "questions", "answer_space": "none"}
+        large = {"document": "questions", "answer_space": "large"}
+        only_second = {**none, "answer_space_overrides": {str(second.id): "large"}}
+
+        # The override has to print exactly what picking that value globally would.
+        self.assertEqual(writing_space("第二题专用题干标记", only_second),
+                         writing_space("第二题专用题干标记", large))
+        # And it must not drag the other question along with it.
+        self.assertEqual(writing_space("第一题专用题干标记", only_second),
+                         writing_space("第一题专用题干标记", none))
+        self.assertNotEqual(writing_space("第一题专用题干标记", only_second),
+                            writing_space("第一题专用题干标记", large))
+        # Without a space there is nothing to inherit, so the override must add one.
+        self.assertIsNone(writing_space("第二题专用题干标记", none))
+        self.assertIsNotNone(writing_space("第二题专用题干标记", only_second))
+
     def test_five_options_and_wide_forced_four_never_drop_or_shrink_content(self):
         pub = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCDE"})
         result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four"}))
