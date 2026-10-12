@@ -17,6 +17,21 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 ASSETS_ROOT = PROJECT_ROOT / "assets"
 BUILD_ROOT = PROJECT_ROOT / "packaging" / ".build"
+WINDOWS_UCRT = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "ucrtbase.dll"
+
+if not WINDOWS_UCRT.is_file():
+    raise RuntimeError(
+        "此桌面程序支持 Windows 10 及更新版本；构建环境必须提供系统 UCRT（ucrtbase.dll）。"
+    )
+
+
+def app_local_binaries(analysis):
+    """Avoid bundling a duplicate UCRT that is supplied by Windows 10+."""
+    return [
+        entry
+        for entry in analysis.binaries
+        if Path(entry[0]).name.casefold() != "ucrtbase.dll"
+    ]
 
 
 def destination_for(root: Path, path: Path, prefix: str) -> str:
@@ -202,10 +217,10 @@ cli_exe = EXE(
 
 coll = COLLECT(
     exe,
-    a.binaries,
+    app_local_binaries(a),
     a.datas,
     cli_exe,
-    cli_analysis.binaries,
+    app_local_binaries(cli_analysis),
     cli_analysis.datas,
     strip=False,
     upx=False,

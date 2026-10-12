@@ -1186,6 +1186,11 @@
     if (saved?.operationId) { const undo = node("button", "button button-small", "撤销"); undo.type = "button"; undo.disabled = busy; undo.addEventListener("click", () => undoInlineTag(item)); footer.append(undo); }
     if (attempt) { const retry = node("button", "button button-small", "核实上次操作"); retry.type = "button"; retry.disabled = busy; retry.addEventListener("click", () => submitInlineTagAttempt(item, attempt)); footer.append(retry); }
     const find = node("button", "button button-quiet button-small", "查找同标签题目"); find.type = "button"; find.disabled = busy || Boolean(attempt); find.addEventListener("click", () => { closeTagHover(); browseTag(current); }); footer.append(find);
+    const map = node("button", "button button-quiet button-small", "查看标签地图"); map.type = "button"; map.id = "libraryTagMapEntry"; map.disabled = busy || Boolean(attempt);
+    map.addEventListener("click", () => {
+      const context = { publicationId: hover.publicationId, tagId: hover.sourceTagId, label: `第 ${item?.number || ""} 题`, source: item?.source_filename || "" };
+      closeTagHover(); void openTagManager({ view: "map", tagId: current.id, questionContext: context });
+    }); footer.append(map);
     tagHoverPanel.append(footer); tagHoverPanel.scrollTop = scrollTop; positionTagHover();
   }
   async function replaceInlineTag(publicationId, fromTagId, toTag) {
@@ -1637,12 +1642,12 @@
       renderTagPicker();
     } catch (error) { $("tagPickerStatus").textContent = "目录更新尚未载入：" + error.message; }
   }
-  async function openTagManager() {
+  async function openTagManager(context = {}) {
     if (tagDialog?.classList.contains("saving")) return;
     if (tagDialog?.open) tagDialog.close();
     if (window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(false);
     if (document.body.classList.contains("rail-open")) setRail(false);
-    try { await ensureTagManagerDialog().show(); } catch (error) { toast(error.message, "error"); }
+    try { await ensureTagManagerDialog().show(context); } catch (error) { toast(error.message, "error"); }
   }
   function browseTag(tag) {
     state.tag = ""; state.tagAll = ""; state.tagNot = ""; state.tagAny = tag.id; state.tagMode = "any";
@@ -1658,6 +1663,13 @@
         return openTagCatalogueEditor(entity, record, defaults);
       }, openTemplates: openTagTemplates, clearCatalogue: startEmptyTagCatalogue,
       deleteTag: deleteCatalogueTag, browseTag,
+      contextValid: context => Boolean(state.catalog.get(context.publicationId)?.tag_assignments?.some(link => link.tag.id === context.tagId && !link.needs_review)),
+      replaceForQuestion: (context, tag) => replaceInlineTag(context.publicationId, context.tagId, tag),
+      questionSaveState: context => inlineTagStates.get(context.publicationId),
+      retryQuestionSave: context => {
+        const item = state.catalog.get(context.publicationId), attempt = inlineTagStates.get(context.publicationId)?.attempt;
+        return item && attempt ? submitInlineTagAttempt(item, attempt) : false;
+      },
       onClose: () => { void load({ quiet: true }); void refreshOpenTagPicker(); }
     });
     const retry = node("button", "button button-small", "核实上次目录操作"); retry.id = "tagCatalogueRetry"; retry.type = "button"; retry.hidden = !catalogueUnknown;

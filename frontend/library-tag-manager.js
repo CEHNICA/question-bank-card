@@ -2,7 +2,7 @@
 ((root) => {
   "use strict";
   const kinds = { knowledge: "知识点", method: "解题方法", custom: "自定义", legacy: "历史标签" };
-  const historyNames = { assign: "人工贴标", "suggestion:accept": "采纳 AI 建议", "suggestion:reject": "拒绝 AI 建议",
+  const historyNames = { assign: "人工贴标", replace: "校正题目标签", "suggestion:accept": "采纳 AI 建议", "suggestion:reject": "拒绝 AI 建议",
     "catalogue:create_tag": "新建标签", "catalogue:update_tag": "修改标签", "catalogue:favorite_tag": "收藏调整",
     "catalogue:activate_tag": "启用标签", "catalogue:deactivate_tag": "停用标签", "catalogue:merge_tags": "合并标签",
     "catalogue:merge_tags_batch": "批量合并标签", "catalogue:create_group": "新建分组", "catalogue:update_group": "修改分组",
@@ -32,7 +32,8 @@
     if (!mount) throw new Error("标签管理缺少页面容器");
     const state = { open: false, busy: false, group: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
       relations: new Map(), relationLoads: new Map(),
-      catalogue: { groups: [], tags: [] }, shown: [], history: [], notice: "", error: false, scroll: 0, original: null, originalDisplay: "", originalHidden: false };
+      catalogue: { groups: [], tags: [] }, shown: [], history: [], notice: "", error: false, scroll: 0, original: null, originalDisplay: "", originalHidden: false,
+      view: "list", mapKind: "knowledge", questionContext: null };
     const page = element("section", "tag-directory-workspace"); page.id = "tagManagerWorkspace"; page.hidden = true; page.tabIndex = -1;
     page.setAttribute("aria-labelledby", "tagManagerHeading");
     const header = element("header", "tag-directory-header"), headerText = element("div"), heading = element("h1", "", "标签管理");
@@ -42,7 +43,7 @@
     const toolbar = element("div", "tag-directory-toolbar"), searchBox = element("label", "tag-directory-search"), searchLabel = element("span", "sr-only", "搜索标签");
     const search = element("input"); search.id = "tagManagerSearch"; search.type = "search"; search.placeholder = "搜索标签、别名或说明"; search.setAttribute("aria-label", "搜索标签、别名或说明");
     searchBox.append(searchLabel, search);
-    const newTag = button("＋ 新建标签", () => options.editEntity("tag", null, { group_id: currentGroup()?.id,
+    const newTag = button("＋ 新建标签", () => options.editEntity("tag", null, state.view === "map" ? { kind: state.mapKind } : { group_id: currentGroup()?.id,
       ...(state.hierarchyKind ? { kind: state.hierarchyKind } : {}), ...(state.hierarchyNode ? { parent_ids: [state.hierarchyNode] } : {}) }), "button button-primary"); newTag.id = "tagManagerCreateTag";
     const templates = button("追加模板", () => options.openTemplates()); templates.id = "tagManagerTemplates";
     const advanced = element("details", "tag-directory-advanced"), advancedTitle = element("summary", "button button-small", "更多"), advancedMenu = element("div", "tag-directory-menu");
@@ -51,7 +52,13 @@
     migrationReport.setAttribute("download", "");
     const reset = button("清空标签目录", () => run(() => options.clearCatalogue(), "目录操作已完成"), "button button-quiet button-danger"); reset.id = "tagManagerReset";
     advancedMenu.append(migrationReport, reset, element("small", "", "清空全库标签与题目关联，提交前会显示影响范围。")); advanced.append(advancedTitle, advancedMenu);
-    toolbar.append(searchBox, newTag, templates, advanced);
+    const views = element("div", "tag-directory-view-switch"); views.setAttribute("role", "group"); views.setAttribute("aria-label", "标签管理视图");
+    const listView = button("列表", () => switchView("list"), "tag-directory-view-button"), mapView = button("标签地图", () => switchView("map"), "tag-directory-view-button");
+    listView.id = "tagManagerListView"; mapView.id = "tagManagerMapView"; views.append(listView, mapView);
+    const mapType = element("select", "tag-directory-map-kind"); mapType.id = "tagManagerMapKind"; mapType.setAttribute("aria-label", "地图类型");
+    for (const kind of ["knowledge", "method", "custom", "legacy"]) mapType.add(new Option(kinds[kind], kind));
+    mapType.addEventListener("change", () => { state.mapKind = mapType.value; state.focused = ""; state.selected.clear(); render(); });
+    toolbar.append(views, searchBox, mapType, newTag, templates, advanced);
     const status = element("p", "tag-directory-status"); status.id = "tagManagerStatus"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
     const body = element("div", "tag-directory-body"), groupsPanel = element("aside", "tag-directory-groups"), groups = element("nav", "tag-directory-group-list");
     groups.id = "tagManagerGroups"; groups.setAttribute("aria-label", "标签分组");
@@ -77,12 +84,49 @@
     bulk.append(selectedCount, hiddenSelection, groupSelect, addToGroup, removeFromGroup, merge, remove, clearSelection);
     const location = element("div", "tag-directory-location"); location.id = "tagManagerLocation";
     const list = element("div", "tag-directory-list"); list.id = "tagManagerList"; list.setAttribute("aria-label", "标签列表");
-    results.append(location, listHeading, bulk, list);
+    const mapHost = element("div", "tag-directory-map-host"); mapHost.id = "tagManagerMap"; mapHost.hidden = true;
+    results.append(location, listHeading, bulk, list, mapHost);
     const detail = element("aside", "tag-directory-detail"); detail.id = "tagManagerDetail"; detail.setAttribute("aria-label", "选中标签的信息");
     body.append(groupsPanel, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
     historyList.id = "tagManagerHistoryList"; history.append(historySummary, historyList);
     page.append(header, toolbar, status, body, history); mount.append(page);
+    let map = null;
+    function ensureMap() {
+      if (map || !root.QBLibraryTagMap) return map;
+      map = root.QBLibraryTagMap.create({ host: mapHost,
+        onQueryChange: (value) => { state.query = value; search.value = value; },
+        onSelect: (tag) => { if (state.busy) return; state.focused = String(tag.id); state.selected = new Set([String(tag.id)]); renderDetail(); void ensureRelations(tag); },
+        onFindQuestions: (tag) => { if (state.busy) return; close(); options.browseTag(tag); },
+        onEdit: (tag) => options.editEntity("tag", tag),
+        onAddChild: (tag) => options.editEntity("tag", null, { kind: tag.kind, parent_ids: [tag.id] }),
+        onEditParents: (tag) => openRelationDialog(tag, "parents"),
+        onRelatedMethods: (tag) => openRelationDialog(tag, "methods") });
+      return map;
+    }
+    function switchView(view, tag = null) {
+      if (state.busy) return;
+      if (view === "map" && !ensureMap()) { setNotice("标签地图暂时未载入，请刷新后重试。", true); return; }
+      state.view = view;
+      if (tag) { state.focused = String(tag.id); state.selected = new Set([String(tag.id)]); }
+      if (view === "map") {
+        const selected = tag || tagById(state.focused); if (selected) state.mapKind = selected.kind;
+        if (state.selected.size > 1) state.selected = new Set(state.focused ? [state.focused] : []);
+      }
+      render();
+      if (view === "map") {
+        if (tag) map.focus(String(tag.id), { local: true });
+        else requestAnimationFrame(() => { if (state.open && state.view === "map") map.fit(); });
+      }
+    }
+    function renderView() {
+      const mapped = state.view === "map";
+      page.classList.toggle("tag-directory-map-view", mapped); groupsPanel.hidden = mapped;
+      location.hidden = mapped || !state.hierarchyKind; listHeading.hidden = list.hidden = mapped;
+      bulk.hidden = mapped || !state.selected.size; mapHost.hidden = !mapped; mapType.hidden = !mapped; mapType.value = state.mapKind;
+      listView.setAttribute("aria-pressed", String(!mapped)); mapView.setAttribute("aria-pressed", String(mapped));
+      if (mapped) ensureMap()?.update({ catalogue: state.catalogue, kind: state.mapKind, focusId: state.focused, query: state.query, busy: state.busy });
+    }
 
     function currentGroup() { return (state.catalogue.groups || []).find((group) => String(group.id) === state.group); }
     function selectedTags() { return (state.catalogue.tags || []).filter((tag) => state.selected.has(String(tag.id))); }
@@ -110,6 +154,7 @@
     function subtreeCount(tag) { return tag.subtree_count ?? directCount(tag); }
     function browseHierarchy(tag) {
       if (state.busy || !["knowledge", "method"].includes(tag.kind)) return;
+      if (state.view === "map") { state.focused = String(tag.id); state.selected = new Set([String(tag.id)]); state.mapKind = tag.kind; state.query = ""; search.value = ""; render(); map?.focus(String(tag.id), { local: true }); return; }
       state.hierarchyKind = tag.kind; state.hierarchyNode = String(tag.id); state.group = "all"; state.query = ""; search.value = "";
       render(); list.scrollTop = 0; location.querySelector("button")?.focus({ preventScroll: true });
     }
@@ -125,7 +170,7 @@
         for (const field of ["parent_ids", "child_ids", "related_method_ids", "direct_count", "subtree_count"]) {
           if (result.tag[field] !== undefined) current[field] = result.tag[field];
         }
-        if (String(state.focused) === id) renderDetail();
+        if (String(state.focused) === id && !state.busy) renderDetail();
       } catch (_) { /* The loaded catalogue remains usable if relation refresh is unavailable. */ }
       finally { state.relationLoads.delete(key); }
     }
@@ -136,6 +181,7 @@
         if (value) { control.dataset.busyWasDisabled = control.disabled ? "1" : "0"; control.disabled = true; }
         else if (control.dataset.busyWasDisabled !== undefined) { control.disabled = control.dataset.busyWasDisabled === "1"; delete control.dataset.busyWasDisabled; }
       });
+      if (state.view === "map") map?.update({ busy: value });
     }
     async function reloadHistory() {
       try { const data = await options.request("/api/library/tags/operations"); renderHistory(data.operations || []); }
@@ -150,23 +196,27 @@
         const catalogue = result?.catalogue || await options.loadCatalogue();
         render(catalogue); setNotice(message); await reloadHistory(); return true;
       } catch (error) { setNotice(error.message + "；选择仍保留，请检查后重试。", true); return false; }
-      finally { setBusy(false); }
+      finally { setBusy(false); if (state.questionContext) renderDetail(); }
     }
-    async function show() {
-      if (state.open) { search.focus(); return; }
+    async function show(context = {}) {
+      if (state.open) { if (context.view === "map") switchView("map", tagById(context.tagId)); else search.focus(); return; }
       state.scroll = window.scrollY; state.original = mount.querySelector(".library-workspace");
       if (state.original) { state.originalDisplay = state.original.style.display; state.originalHidden = state.original.hidden; state.original.hidden = true; state.original.style.display = "none"; }
       state.open = true; page.hidden = false; document.body.classList.add("library-tag-manager-open"); window.scrollTo(0, 0);
       setBusy(true); setNotice("正在载入标签目录…");
+      state.questionContext = context.questionContext || null;
       try { render(await options.loadCatalogue()); setNotice(""); await reloadHistory(); }
       catch (error) { setNotice("目录暂时无法载入：" + error.message, true); }
-      finally { setBusy(false); if (state.open) search.focus({ preventScroll: true }); }
+      finally { setBusy(false); if (state.open) {
+        if (context.view === "map") { state.query = ""; search.value = ""; switchView("map", tagById(context.tagId)); }
+        search.focus({ preventScroll: true });
+      } }
     }
     function close() {
       if (!state.open || state.busy) return;
       state.open = false; page.hidden = true; document.body.classList.remove("library-tag-manager-open");
       if (state.original) { state.original.hidden = state.originalHidden; state.original.style.display = state.originalDisplay; }
-      window.scrollTo(0, state.scroll); options.onClose?.();
+      window.scrollTo(0, state.scroll); state.questionContext = null; options.onClose?.();
     }
     function choose(tag, event = {}) {
       const id = String(tag.id);
@@ -178,7 +228,7 @@
       else { state.selected.clear(); state.selected.add(id); state.anchor = id; }
       state.focused = id; render();
       void ensureRelations(tag);
-      page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] .tag-directory-name')?.focus({ preventScroll: true });
+      if (state.view === "list") page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] .tag-directory-name')?.focus({ preventScroll: true });
     }
     function renderGroups() {
       const scroll = groups.scrollTop, tags = state.catalogue.tags || []; groups.replaceChildren();
@@ -371,6 +421,31 @@
         detail.append(groupInfo); return;
       }
       const title = element("div", "tag-directory-detail-title"); title.append(element("h2", "", tag.name), element("small", "", kinds[tag.kind] || "标签")); detail.append(title);
+      if (state.questionContext) {
+        const context = state.questionContext, originalTag = tagById(context.tagId), block = element("section", "tag-directory-question-context");
+        block.id = "tagManagerQuestionContext";
+        block.append(element("strong", "", context.label || "正在查看题目标签"), element("p", "", "本题当前标签：" + (originalTag?.name || "已移除")));
+        if (context.source) block.append(element("small", "", context.source));
+        const saved = options.questionSaveState?.(context);
+        if (saved?.message) block.append(element("small", "", saved.message));
+        if (saved?.attempt && options.retryQuestionSave) {
+          const targetId = saved.attempt.payload?.replace?.to_tag_id;
+          const retry = button("核实上次标签操作", async () => {
+            const confirmed = await run(() => options.retryQuestionSave(context), "上次标签操作已核实，可继续整理");
+            if (confirmed && targetId) { context.tagId = String(targetId); render(); }
+          }); retry.id = "tagManagerRetryQuestionTag"; retry.disabled = state.busy; block.append(retry);
+        }
+        if (options.replaceForQuestion) {
+          const replace = button(tag.id === context.tagId ? "当前题目正在使用此标签" : "将本题这条标签改为「" + tag.name + "」", async () => {
+            const saved = await run(() => options.replaceForQuestion(context, tag), "本题标签已保存；返回题库可继续阅读，可在操作记录中撤销");
+            if (saved) { context.tagId = String(tag.id); renderDetail(); }
+          }, "button button-primary"); replace.id = "tagManagerReplaceQuestionTag";
+          replace.disabled = state.busy || Boolean(saved?.attempt) || tag.id === context.tagId || tag.active === false || !originalTag || tag.kind !== originalTag.kind || (options.contextValid && !options.contextValid(context));
+          if (originalTag && tag.kind !== originalTag.kind) block.append(element("small", "", "跨类型的方法请在题目中使用“添加标签”。"));
+          block.append(replace);
+        }
+        detail.append(block);
+      }
       const edit = button("编辑标签", () => options.editEntity("tag", tag), "button button-primary"); edit.id = "tagManagerEditTag";
       const usage = button("本级 " + directCount(tag) + " 题 · 含下级 " + subtreeCount(tag) + " 题 →", () => { close(); options.browseTag(tag); }, "tag-directory-detail-usage");
       detail.append(edit, usage, info("说明", tag.description), info("别名", (tag.aliases || []).join("、")));
@@ -397,7 +472,9 @@
       if (!["all", "ungrouped", "favorite"].includes(state.group) && !currentGroup()) state.group = "all";
       const busy = state.busy; if (busy) setBusy(false);
       total.textContent = (state.catalogue.tags || []).length + " 个标签";
-      renderGroups(); renderLocation(); renderList(); renderDetail(); status.textContent = state.notice; status.classList.toggle("error", state.error);
+      if (state.view === "list") { renderGroups(); renderLocation(); renderList(); }
+      else state.shown = [];
+      renderDetail(); renderView(); status.textContent = state.notice; status.classList.toggle("error", state.error);
       if (focusedId && !busy) (page.querySelector('[data-tag-id="' + CSS.escape(focusedId) + '"] ' + focusedControl) || page).focus({ preventScroll: true });
       if (busy) setBusy(true);
     }
@@ -456,6 +533,7 @@
     groupSelect.addEventListener("change", () => { addToGroup.disabled = removeFromGroup.disabled = !groupSelect.value; });
     page.addEventListener("keydown", (event) => {
       if (!state.open || state.busy || event.isComposing || document.querySelector("dialog[open]") || event.target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (state.view === "map" && event.key !== "Escape" && event.target.closest(".tag-map-viewport")) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (state.selected.size) { state.selected.clear(); state.focused = ""; render(); } else close(); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); state.shown.forEach((tag) => state.selected.add(String(tag.id))); render(); }
       else if (["ArrowDown", "ArrowUp"].includes(event.key) && state.shown.length) {

@@ -18,6 +18,8 @@ urlpatterns = [
     path("library.js", views.library_script),
     path("library-tag-manager.js", views.library_tag_manager_script),
     path("library-tag-manager.css", views.library_tag_manager_styles),
+    path("library-tag-map.js", views.library_tag_map_script),
+    path("library-tag-map.css", views.library_tag_map_styles),
     path("library-workspace.js", views.library_workspace_script),
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),

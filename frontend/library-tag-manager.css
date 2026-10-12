@@ -8,6 +8,19 @@
 .tag-directory-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding-bottom: 14px; }
 .tag-directory-search { flex: 1 1 230px; max-width: 500px; }
 .tag-directory-search input { width: 100%; min-height: 38px; border: 1px solid var(--line, #e3e3dc); border-radius: 9px; padding: 8px 12px; background: var(--surface, #fff); color: var(--ink, #262c29); }
+.tag-directory-view-switch { display: inline-flex; flex: 0 0 auto; padding: 3px; gap: 3px; border: 1px solid #e0e5df; border-radius: 9px; background: #eef1ed; }
+.tag-directory-view-button { border: 0; border-radius: 6px; padding: 7px 12px; background: transparent; color: #6c7871; font: inherit; font-size: 13px; cursor: pointer; }
+.tag-directory-view-button[aria-pressed=true] { background: #fff; color: #246b5a; box-shadow: 0 1px 3px #20382912; font-weight: 600; }
+.tag-directory-map-kind { max-width: 130px; min-height: 36px; border: 1px solid #dce4dd; border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 13px; background: #fff; color: #30493e; }
+.tag-directory-map-kind[hidden], .tag-directory-map-host[hidden], .tag-directory-groups[hidden], .tag-directory-list-heading[hidden], .tag-directory-list[hidden] { display: none; }
+.tag-directory-map-view .tag-directory-body { grid-template-columns: minmax(0, 1fr) 290px; }
+.tag-directory-map-view .tag-directory-results { min-width: 0; overflow: hidden; }
+.tag-directory-map-view .tag-directory-detail { max-height: 720px; overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.tag-directory-question-context { margin: 12px 0 18px; padding: 12px; border: 1px solid #cce3d8; border-radius: 9px; background: #f1f8f3; }
+.tag-directory-question-context > strong { font-size: 13px; color: #246b5a; }
+.tag-directory-question-context > p { font-size: 12px; line-height: 1.6; margin: 6px 0; overflow-wrap: anywhere; }
+.tag-directory-question-context > small { display: block; font-size: 11px; line-height: 1.6; color: #697b70; overflow-wrap: anywhere; }
+.tag-directory-question-context > button { margin-top: 10px; width: 100%; white-space: normal; line-height: 1.6; font-size: 12px; }
 .tag-directory-advanced { position: relative; }
 .tag-directory-advanced > summary { list-style: none; cursor: pointer; }
 .tag-directory-advanced > summary::-webkit-details-marker { display: none; }
@@ -125,6 +138,8 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
   .tag-directory-detail { padding: 16px 13px; }
 }
 @media (max-width: 900px) {
+  .tag-directory-map-view .tag-directory-body { grid-template-columns: minmax(0, 1fr); }
+  .tag-directory-map-view .tag-directory-detail { grid-column: 1; max-height: none; }
   .tag-directory-body { grid-template-columns: 175px minmax(0, 1fr); }
   .tag-directory-detail { grid-column: 2; border-left: 0; border-top: 1px solid var(--line, #e3e3dc); min-height: 0; }
   .tag-directory-groups { grid-row: 1 / span 2; }
@@ -132,6 +147,8 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
   .tag-directory-group-list { max-height: 62vh; }
 }
 @media (max-width: 600px) {
+  .tag-directory-view-switch { order: -2; }
+  .tag-directory-map-kind { order: -1; }
   .tag-directory-workspace { padding-top: 12px; }
   .tag-directory-header { gap: 10px; margin-bottom: 12px; }
   .tag-directory-header > div { display: block; }

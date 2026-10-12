@@ -56,7 +56,8 @@ def source_files():
         if path.is_file() and not path.is_symlink():
             selected.append((name, path))
     required = {"backend/core/version.py", "backend/core/library_tagging.py", "backend/core/tag_catalogue_seed.py",
-                "frontend/library.js", "frontend/library-tag-manager.js", "backend/core/migrations/0027_librarytagrelation.py"}
+                "frontend/library.js", "frontend/library-tag-manager.js", "frontend/library-tag-map.js",
+                "frontend/library-tag-map.css", "backend/core/migrations/0027_librarytagrelation.py"}
     if not required.issubset({name for name, _ in selected}):
         raise ValueError("Source snapshot would omit required hierarchy files")
     return selected
