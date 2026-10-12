@@ -437,6 +437,85 @@ class LibraryExportTests(ExportFixture, TestCase):
                 # 原生公式，不是把 LaTeX 源码塞进去。
                 self.assertNotIn("\\", "".join(omml.itertext()))
 
+    def test_a_function_name_becomes_a_function_so_word_keeps_the_gap(self):
+        r"""``\sin x`` 在 Word 纸上不能印成 ``sinx``。
+
+        mathml2omml 把函数名和参数之间留成一个**空 run**，Word 不会给空 run 补
+        空格，于是 ``(e^x+2\sin x)/(1+x^2)`` 里的 ``\sin`` 紧贴 ``x``，学生会当成
+        一个变量名。PDF 路线由 KaTeX 加空格，两条路线于是印得不一样。
+        改成 ``m:func`` 之后细空格由 Word 自己补。
+
+        参数只能取到下一个算符为止：``\sin\alpha+\cos\beta`` 里 ``\sin`` 的参数是
+        ``\alpha``，不能把 ``+\cos\beta`` 一起吞进去。
+        """
+        corpus = json.loads((Path(export.__file__).parent / "test_mathml_corpus.json").read_text(encoding="utf-8"))
+        wanted = {"\\sin\\alpha+\\cos\\beta", "\\ln x", "\\hat{y}=\\ln x",
+                  "\\lim_{x\\to 0}\\frac{\\sin x}{x}", "\\log_{2}8"}
+        checked = 0
+        for item in corpus:
+            latex = item["latex"]
+            if latex not in wanted:
+                continue
+            checked += 1
+            with self.subTest(latex=latex):
+                source = "$" + latex + "$"
+                value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
+                          "segments": [{"type": "math", "start": 0, "end": units(source), "latex": latex,
+                                        "mathml": item["mathml"], "display": False}]}]}
+                omml = export._field(value, source, "语料")[0]["segments"][0]["omml"]
+
+                functions = omml.findall(".//m:func", NS)
+                self.assertTrue(functions, f"{latex} 里一个 m:func 都没有，纸上会印成 sinx")
+                for function in functions:
+                    holder = function.find("m:fName", NS)
+                    # 函数名取 fName 里第一个字；``\log_{2}`` 的下标 2 在 sSub 里，
+                    # 用 itertext 会把它一起拼进来。
+                    first = holder.find(".//m:t", NS)
+                    name = (first.text or "").strip() if first is not None else ""
+                    self.assertIn(name, export._FUNCTION_NAMES, f"{latex} 里 {name} 被当成了函数")
+                    argument = function.find("m:e", NS)
+                    self.assertIsNotNone(argument, f"{latex} 里 {name} 没有参数")
+                    parts = ["".join(node.itertext()) for node in argument]
+                    self.assertTrue(any(part.strip() for part in parts),
+                                    f"{latex} 里 {name} 的参数是空的")
+                    # 参数只能取到下一个算符为止，不能把 ``+\cos\beta`` 一起吞进去。
+                    self.assertNotIn("+", parts, f"{latex} 里 {name} 的参数吞了后面的加号")
+                # 一个函数名都不该再留在 m:func 外面（m:fName 里当然还有）。
+                # 不能用 id() 比：lxml 每次访问都会新建代理对象，同一个节点的 id 不同。
+                outside = ["".join(node.itertext()).strip()
+                           for node in omml.iter(f"{{{NS['m']}}}r")
+                           if node.find("m:t", NS) is not None
+                           and not any(parent.tag == f"{{{NS['m']}}}func"
+                                       for parent in node.iterancestors())
+                           and (node.find("m:t", NS).text or "").strip() in export._FUNCTION_NAMES]
+                self.assertEqual(outside, [], f"{latex} 里还有函数名没被收进 m:func")
+        self.assertGreaterEqual(checked, 4, "语料里没有足够的函数公式，这条闸门没意义")
+
+    def test_marking_a_function_changes_the_structure_and_not_a_single_character(self):
+        """参数边界判错会吃掉字：``\\sin x + 1`` 印成 ``\\sin(x+1)``。
+
+        所以改写前后 ``itertext()`` 必须一模一样。空 run 本来就没有文字，把它并进
+        ``m:func`` 不影响这句话；真库 1267 条公式跑下来 0 处变化。
+        """
+        corpus = json.loads((Path(export.__file__).parent / "test_mathml_corpus.json").read_text(encoding="utf-8"))
+        functions = 0
+        for item in corpus:
+            latex, mathml = item["latex"], item["mathml"]
+            source = "$" + latex + "$"
+            value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
+                      "segments": [{"type": "math", "start": 0, "end": units(source),
+                                    "latex": latex, "mathml": mathml, "display": False}]}]}
+            with self.subTest(latex=latex):
+                omml = export._field(value, source, "语料")[0]["segments"][0]["omml"]
+                self.assertIsNotNone(omml, "这条公式没有转成原生公式")
+                before = "".join(omml.itertext())
+                again = export._field(value, source, "语料")[0]["segments"][0]["omml"]
+                self.assertEqual("".join(again.itertext()), before,
+                                 f"{latex} 跑第二遍文字就变了")
+                if omml.findall(".//m:func", NS):
+                    functions += 1
+        self.assertGreaterEqual(functions, 5, "语料里一条 m:func 都没写出来，这条闸门没意义")
+
     def unconvertible_field(self, latex, body, *, head="化简 ", tail=" 并写出结果。"):
         """一条 Word 明确不支持的公式，夹在题干文字中间。"""
         source = head + "$" + latex + "$" + tail

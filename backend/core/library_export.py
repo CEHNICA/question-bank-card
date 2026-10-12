@@ -177,7 +177,129 @@ def _convert_math_root(root):
             radical.insert(1, etree.Element(f"{{{OMML_NS}}}deg"))
         if radical.find(f"{{{OMML_NS}}}e") is None:
             raise ValueError("radical")
+    _mark_functions(omml)
     return omml
+
+
+# ``\sin x`` 这类写法，mathml2omml 会拆成「函数名、一个空 run、参数」。
+# 那个空 run 就是它给函数名和参数留的位置，可 Word 不会给空 run 补空格，
+# 纸上就印成 ``sinx``——学生会当成一个变量名（高考卷第 6 题的
+# ``(e^x+2\sin x)/(1+x^2)``、``\sin x`` 等 5 处最典型）。PDF 路线由 KaTeX 自己
+# 加空格，两条路线于是印得不一样。
+#
+# 这里只认「紧跟在函数名后面的空 run」这个标记——那是上游自己的意图，不去猜
+# LaTeX；没有这个标记的一律不动。
+_FUNCTION_NAMES = {"sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh",
+                   "arcsin", "arccos", "arctan", "log", "ln", "lg", "exp", "det", "gcd", "lcm"}
+# 函数名取参数到这些普通文字算符为止：``2\sin x+1`` 的参数是 ``x``，不是 ``x+1``。
+_ARGUMENT_STOP = set("+-−*/^=<>,;:")
+
+
+def _base_runs(script):
+    """上下标的底座里那几段 run（上游常多包一层 ``m:box``）。底座不是「函数名 + 空串」就返回 None。"""
+    base = script.find(f"{{{OMML_NS}}}e")
+    if base is None:
+        return None
+    holder = base
+    if len(base) == 1 and base[0].tag == f"{{{OMML_NS}}}box":
+        holder = base[0].find(f"{{{OMML_NS}}}e")
+    if holder is None:
+        return None
+    runs = [child for child in holder if child.tag == f"{{{OMML_NS}}}r"]
+    if len(runs) != 2 or len(list(holder)) != 2:
+        return None
+    name, gap = (child.find(f"{{{OMML_NS}}}t") for child in runs)
+    if name is None or gap is None or (gap.text or "") != "":
+        return None
+    if (name.text or "").strip().lower() not in _FUNCTION_NAMES:
+        return None
+    return runs
+
+
+def _mark_scripted_functions(omml):
+    r"""``\log_{2}8`` / ``\sin^{2}x``：下标或上标挂在函数名上。
+
+    底座正好是「函数名 + 空串」，空串是上游给参数留的位置——参数却跟在**整个
+    上下标**后面（``\log_2`` 8），所以 :func:`_mark_functions` 看不到它。Word 里
+    这种要写成 ``fName`` 里带 ``m:sSub``，真库里有 28 处。
+    """
+    from lxml import etree
+
+    for script in list(omml.iter(f"{{{OMML_NS}}}sSub", f"{{{OMML_NS}}}sSup")):
+        runs = _base_runs(script)
+        if not runs:
+            continue
+        parent = script.getparent()
+        if parent is None:
+            continue
+        siblings = list(parent)
+        position = siblings.index(script)
+        argument = []
+        for node in siblings[position + 1:]:
+            if node.tag == f"{{{OMML_NS}}}r":
+                value = node.find(f"{{{OMML_NS}}}t")
+                if value is not None and (value.text or "") in _ARGUMENT_STOP:
+                    break
+            argument.append(node)
+            if len(argument) >= 12:
+                break
+        if not argument:
+            continue
+        function = etree.Element(f"{{{OMML_NS}}}func")
+        name = etree.SubElement(function, f"{{{OMML_NS}}}fName")
+        body = etree.SubElement(function, f"{{{OMML_NS}}}e")
+        for node in argument:
+            body.append(node)                       # 参数都在 script 之后
+        runs[1].getparent().remove(runs[1])          # 空串已经被 fName 取代
+        # name.append(script) 会把 script 从 parent 摘走，replace() 就找不到它了；
+        # 只能按原下标摘掉再插回去。
+        parent.remove(script)
+        name.append(script)
+        parent.insert(position, function)
+
+
+def _mark_functions(omml):
+    """把「函数名 + 空 run + 参数」改写成 Word 认识的 ``m:func``。
+
+    改写之后细空格由 Word 自己补，和 KaTeX 印出来的一致；老师在 Word 里改这条
+    公式时看到的也是「函数」而不是三个挤在一起的字符。
+    """
+    from lxml import etree
+
+    _mark_scripted_functions(omml)
+    for run in list(omml.iter(f"{{{OMML_NS}}}r")):
+        text = run.find(f"{{{OMML_NS}}}t")
+        if text is None or (text.text or "").strip().lower() not in _FUNCTION_NAMES:
+            continue
+        parent = run.getparent()
+        if parent is None or parent.tag == f"{{{OMML_NS}}}func":
+            continue
+        siblings = list(parent)
+        position = siblings.index(run)
+        if position + 2 >= len(siblings):
+            continue
+        gap = siblings[position + 1]
+        gap_text = gap.find(f"{{{OMML_NS}}}t") if gap.tag == f"{{{OMML_NS}}}r" else None
+        if gap_text is None or (gap_text.text or "") != "":
+            continue
+        argument = []
+        for node in siblings[position + 2:]:
+            if node.tag == f"{{{OMML_NS}}}r":
+                value = node.find(f"{{{OMML_NS}}}t")
+                if value is not None and (value.text or "") in _ARGUMENT_STOP:
+                    break
+            argument.append(node)
+            if len(argument) >= 12:
+                break
+        if not argument:
+            continue
+        function = etree.Element(f"{{{OMML_NS}}}func")
+        name = etree.SubElement(function, f"{{{OMML_NS}}}fName")
+        name.append(run)
+        body = etree.SubElement(function, f"{{{OMML_NS}}}e")
+        for node in argument:
+            body.append(node)
+        parent.replace(gap, function)
 
 
 def _math(segment, where, *, word_math=True):
