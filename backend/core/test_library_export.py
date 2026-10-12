@@ -935,6 +935,67 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertLess(sum(widths), 178.0)
         self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
 
+    def test_an_over_wide_table_keeps_the_columns_that_already_fit(self):
+        """版心放不下时，被挤的只该是本来就超宽的那几列。
+
+        九上「根据图象，填写下表」那张五列表（性质 二次函数 / 开口方向 / 对称轴 /
+        顶点坐标 / 取哪些值时…）需求合计 195.2mm，超版心 17.2mm。按比例全体缩到
+        0.912，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格左右各
+        1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就印成
+        「开口方 / 向」两行。需求本来放得下的三列全被陪着缩窄了。
+        """
+        raw = ("| 性质 二次函数 | 开口方向 | 对称轴 | 顶点坐标 | 取哪些值时，x的值随y值的增大而增大 |\n"
+               "| --- | --- | --- | --- | --- |\n"
+               "| y = 1/2 * x^2 |  |  |  |  |\n"
+               "| y = 1/2 * (x + 2)^2 |  |  |  |  |")
+        widths = self.column_widths_mm(self.table_export(raw))
+
+        # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，加上留白。
+        # docx 的列宽存在 twip 里（1 twip = 0.0176mm），比下来会少 0.008mm。
+        tolerance = 25.4 / 1440
+        self.assertGreaterEqual(
+            widths[1], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
+            f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行")
+        self.assertGreaterEqual(
+            widths[3], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
+            f"「顶点坐标」列只有 {widths[3]:.2f}mm")
+        self.assertLessEqual(sum(widths), 178.5)
+
+    def test_squeezing_a_wide_table_wraps_fewer_cells_than_scaling_every_column(self):
+        """水位线分法换掉按比例缩放，为的是折行的格子更少，不是每列都更宽。
+
+        水位线必须**刚好凑满版心**：``sum(min(need_i, λ)) == 178``，且每一列拿到的
+        就是 ``min(need_i, λ)``。这个方程的解唯一，所以「凑满」就等于「水位最低、
+        能让多少列保持完整需求就让多少列保持」。等分和按比例都不满足——等分留下
+        45mm 没用上，按比例则让所有列都折行。
+
+        不写死毫米数：拿九上那两张真的超宽表（五列需求合计 195.2mm、十三列
+        244.2mm）当输入。
+        """
+        for need in ([48.18, 21.93, 17.70, 21.93, 85.43],
+                     [30.40, 27.86, 10.08, 27.86, 10.08, 10.08, 27.86, 25.32,
+                      8.00, 8.00, 25.32, 8.00, 25.32],
+                     [60.0, 60.0, 60.0, 12.0], [200.0], [90.0, 90.0, 90.0]):
+            budget = 178.0
+            fair = export._fair_widths(need, budget)
+            squeezed = [got for want, got in zip(need, fair) if got < want - 1e-9]
+
+            self.assertTrue(squeezed, f"{need} 本该挤掉几列，却一列没挤")
+            level = min(squeezed)
+            self.assertAlmostEqual(
+                sum(min(want, level) for want in need), budget, places=6,
+                msg=f"{need} 水位线 {level:.3f}mm 没凑满版心")
+            for index, (want, got) in enumerate(zip(need, fair)):
+                self.assertAlmostEqual(
+                    got, min(want, level), places=6,
+                    msg=f"第 {index} 列拿到 {got:.3f}mm，水位线却是 {min(want, level):.3f}mm")
+
+    def test_a_single_wide_column_is_capped_at_the_text_width(self):
+        """一列就超出版心时，也不能让它把纸撑出去。"""
+        fair = export._fair_widths([300.0], 178.0)
+
+        self.assertEqual([round(value, 3) for value in fair], [178.0])
+
     def test_html_merged_table_has_native_span_structure(self):
         raw = '<table><tr><th rowspan="2">甲</th><th>乙</th></tr><tr><td>&amp; 丙</td></tr></table>'
         pub = self.publication(stem=raw)

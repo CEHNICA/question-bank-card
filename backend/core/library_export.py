@@ -901,6 +901,39 @@ def _cell_width_mm(cell, size):
     return em * size * 25.4 / 72.0 + CELL_PADDING_MM
 
 
+def _fair_widths(need, budget):
+    """版心放不下时，先让每一列都够用，实在放不下的几列再一起挤。
+
+    按比例全体缩小是错的：九上「根据图象，填写下表」那张五列表（性质/二次函数、
+    开口方向、对称轴、顶点坐标、取哪些值时……）需求合计 195.2mm，超版心 17.2mm。
+    按比例缩到 0.912 之后，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格
+    左右各 1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就被顶成
+    「开口方 / 向」两行。同一张表里需求本来就放得下的三列，全被陪着缩窄了。
+
+    这里按水位线分：需求不超过水位的列照需求给，剩下的列一律给水位线，水位由
+    「未分到水位的列的需求之和」摊平得出。对五列表算出来是
+    ``[48.18, 21.93, 17.70, 21.93, 68.26]``——需求放得下的四列全都拿到完整需求，
+    只有最后那列（需求 85.43mm，本来就超出版心）被挤；按比例缩放则是四列一起折行。
+
+    水位线取的是「能让总和凑齐版心的最低水位」，所以能让多少列保持完整需求就让
+    多少列保持——**折行的格子数最少**，这才是换掉按比例的理由（按比例并不逐列
+    都不更窄：上面那列按比例给 77.91mm，比水位线的 68.26mm 还宽）。
+    """
+    capped = list(range(len(need)))
+    free = 0.0
+    level = budget / len(need) if need else 0.0
+    while capped:
+        level = (budget - free) / len(capped)
+        small = [index for index in capped if need[index] <= level]
+        if not small:
+            break
+        for index in small:
+            free += need[index]
+        capped = [index for index in capped if need[index] > level]
+    capped_set = set(capped)
+    return [level if index in capped_set else need[index] for index in range(len(need))]
+
+
 def _table_column_widths(placements, width, size, text_width_mm=178.0):
     """按内容分列宽，跟预览里那张表一样（`.qb-table` 是 table-layout:auto，不写死列宽）。
 
@@ -918,8 +951,7 @@ def _table_column_widths(placements, width, size, text_width_mm=178.0):
     if total <= text_width_mm:
         # 内容窄就照内容的宽度印，别硬撑满——预览里那张表也是这么收着的。
         return need
-    factor = text_width_mm / total
-    return [value * factor for value in need]
+    return _fair_widths(need, text_width_mm)
 
 
 def _write_table(document, rows, size, where):
