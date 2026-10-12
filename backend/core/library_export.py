@@ -868,8 +868,10 @@ def _write_segments(paragraph, segments, size, bold=False):
             _font(paragraph.add_run(shown), size, bold)
 
 
-# Word 单元格左右各留 0.19cm 的默认内边距，算列宽时要算进去。
-CELL_PADDING_MM = 3.8
+# Word 标称单元格左右各留 0.19cm，合起来 3.8mm。实测按 3.8 算仍然会差一点：
+# 「二次项系数」五个字要 21.17mm，列宽算出来 24.9mm，减去 3.8 只剩 21.1mm，
+# 就差 0.07mm 被顶成两行。留到 5mm，一列多 1.2mm，十三列的表也还有富余。
+CELL_PADDING_MM = 5.0
 # 一列最少给多少。跟预览里 `.qb-table td { min-width: 2.6em }` 一个量级，
 # 免得内容窄的时候挤成一条看不见的缝。
 COLUMN_FLOOR_MM = 8.0
@@ -884,9 +886,8 @@ def _cell_width_mm(cell, size):
     """这一格大概要占多宽（毫米）。
 
     系数是量出来的，不是猜的：12pt 正文里一个汉字 4.23mm、数字 2.51mm，
-    也就是 1 em = 4.23mm、数字 0.59 em。取 0.6 是宁可高估一点——
-    差 0.3mm 就够把「12」顶到换行（实测 8.3mm 的格子放不下 5.02mm 的「12」，
-    因为两侧内边距吃掉了 3.8mm）。
+    也就是 1 em = 4.23mm、数字 0.6 em。取 0.6 是宁可高估一点——
+    差 0.3mm 就够把「12」顶到换行（实测 8.3mm 的格子放不下 5.02mm 的「12」）。
 
     公式段按 LaTeX 去命令后估：`\\tan\\theta` 当 4 个字符算，量出来 8.26mm。
     """

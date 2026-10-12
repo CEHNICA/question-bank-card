@@ -912,6 +912,10 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(widths), 13)
         self.assertGreater(widths[0], max(widths[1:]) * 1.8,
                            f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分")
+        # 「12」两个数字是 5.02mm，Word 标称的两侧内边距是 3.8mm。
+        # 正好卡在 8.82mm 上就会断成两行——实测就是，所以数字列必须留出余量。
+        self.assertGreaterEqual(max(widths[1:]), 2 * 0.6 * 12 * 25.4 / 72 + 3.8 + 0.8,
+                                f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字")
 
     def test_a_table_wider_than_the_page_is_scaled_back_inside_it(self):
         """内容再宽也不能超出 178mm 的版心，超了就整体缩回去。"""
