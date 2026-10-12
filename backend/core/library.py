@@ -67,7 +67,12 @@ def figure_identity(figure: dict) -> str:
 
 
 def figure_file(question: Question, index: int) -> Path:
-    """按题卡保存的配图坐标从高清原页裁图（缓存，坐标变了文件名就变）。"""
+    """按题卡保存的配图坐标从高清原页裁图（缓存，坐标没变就不重裁）。
+
+    裁图用 :func:`imaging.crop_figure`：框边正好压在某行字上时（教材里最常见的是
+    图注「第 N 题」），严格照框裁会把那行字切成半截，印在卷子上看得见。让开一点
+    就不切了。已经裁好的图还在缓存里，不会被改动；重裁要删 ``<paper>/figures``。
+    """
     from .pipeline import PageStore, paper_dir
 
     figure = question.figures[index]
@@ -82,10 +87,13 @@ def figure_file(question: Question, index: int) -> Path:
             for piece in [{"page_idx": figure["page_idx"], "bbox": figure["bbox"]}, *parts]:
                 page = store.load(piece["page_idx"])
                 pieces.append((page, imaging.to_pixels(piece["bbox"], page.size)))
-            imaging.stack_figure_pieces(pieces).save(target, format="PNG", optimize=True)
+            # 多片是同一张图被页断切开，每片的余量必须一样大，否则拼回去列对不齐。
+            image = imaging.stack_figure_pieces(pieces)
+            image.save(target, format="PNG", optimize=True)
         else:
             page = store.load(figure["page_idx"])
-            page.crop(imaging.to_pixels(figure["bbox"], page.size)).save(target, format="PNG", optimize=True)
+            imaging.crop_figure(page, imaging.to_pixels(figure["bbox"], page.size)).save(
+                target, format="PNG", optimize=True)
     return target
 
 

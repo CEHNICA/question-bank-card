@@ -126,6 +126,51 @@ def to_pixels(bbox: list[float], size: tuple[int, int]) -> tuple[int, int, int, 
     return box
 
 
+# 严格按识读给的框裁，一点余量都不留：框边一旦压在某行字上，裁出来那行字就只剩
+# 半截。教材里最常见的是压在图注上——图注「第 N 题」被切成上半行（八下 #1048、
+# #1034，九上第 205 题印出来那张反比例函数图，底部一整行坐标数字被切掉）。
+#
+# 所以裁之前把边往外让一点，让到边上没有墨为止。原页长边 3000 像素，一行正文
+# 约 40 像素，让 56 像素足够把一整行图注收进来，又不会碰到下一段正文。
+FIGURE_CROP_SLACK_PX = 56
+INK_MAX = 200          # 亮度高于这个算「白」。浅蓝方格线约 147，也算有墨——
+# 方格线让进来只是几像素白边，无所谓；真正的目标是别把字切掉。
+
+
+def _edge_has_ink(page: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """这条边上有没有墨。只看最外面一列/一行，不看里面。"""
+    return page.crop(box).convert("L").getextrema()[0] < INK_MAX
+
+
+def crop_figure(page: Image.Image, box: tuple[int, int, int, int],
+                slack: int = FIGURE_CROP_SLACK_PX) -> Image.Image:
+    """按框裁图，但把切到字的那几条边往外让开，让到边上干净为止。
+
+    四条边各自独立判断：有墨的那条才让，别的边一动不动，所以整张图不会平白
+    胀一圈。让满 ``slack`` 像素仍有墨的（整版照片、坐标方格纸）就到头为止，
+    不无限往外长。
+    """
+    left, top, right, bottom = box
+    width, height = page.size
+    for _ in range(max(0, slack)):
+        grew = False
+        if left > 0 and _edge_has_ink(page, (left, top, left + 1, bottom)):
+            left -= 1
+            grew = True
+        if right < width and _edge_has_ink(page, (right - 1, top, right, bottom)):
+            right += 1
+            grew = True
+        if top > 0 and _edge_has_ink(page, (left, top, right, top + 1)):
+            top -= 1
+            grew = True
+        if bottom < height and _edge_has_ink(page, (left, bottom - 1, right, bottom)):
+            bottom += 1
+            grew = True
+        if not grew:
+            break
+    return page.crop((left, top, right, bottom))
+
+
 def stack_figure_pieces(pieces: list[tuple[Image.Image, tuple[int, int, int, int]]]) -> Image.Image:
     """Join the pieces of one figure (a table cut by a page break) into one image.
 
