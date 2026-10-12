@@ -47,12 +47,24 @@ def caption_line_pdf(path: Path) -> None:
     第 2 页印一句含编号的正文和一个离得很远的编号，是两个「不许报」的反例。
     第 3 页是左栏（1）（3）（5）、右栏（2）（4）（6）的习题，
     两条栏印在**同一个基线上**（真教材就是这样），按行取只能看见左栏。
+    第 4 页排的是八下 #922 那一类：左栏（1）（3）、右栏（2）（4），
+    题干里最大号是 3，右栏的（4）压根没进过「缺号」那一步。
     """
     import pymupdf as fitz
 
     with fitz.open() as pdf:
-        for index in range(4):
+        for index in range(5):
             page = pdf.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+            if index == 4:
+                # 右栏止步于（4），而题干只剩（1）（3）：跳号只看得见（2），
+                # （4）在题干里没出现过，不按「题干里没有的」取就永远看不见它。
+                page.insert_text((60, 470), "3. 解下列方程：", fontname="china-s", fontsize=11)
+                for row, baseline in enumerate((510, 550)):
+                    page.insert_text((60, baseline), f"（{row * 2 + 1}）求 w 的值；",
+                                      fontname="china-s", fontsize=11)
+                    page.insert_text((300, baseline), f"（{row * 2 + 2}）求 t 的值；",
+                                      fontname="china-s", fontsize=11)
+                continue
             if index == 2:
                 page.insert_text((60, CAPTION_BASELINE_Y), "例 1  确定图 9-9 中路灯灯泡所在的位置。",
                                  fontname="china-s", fontsize=11)
@@ -97,7 +109,7 @@ class ReconcileFlagsCommandTests(TestCase):
             filename="月考.pdf", kind="pdf", material_type=Paper.MaterialType.EXAM,
             sha256="a" * 64, source_path=str(source),
             pages=[{"page_idx": index, "width": PAGE_WIDTH, "height": PAGE_HEIGHT}
-                   for index in range(4)],
+                   for index in range(5)],
             status=Paper.Status.READY)
         self.group = QuestionGroup.objects.create(
             paper=self.paper, title="第一章", sequence=1, page_start=1, page_end=2,
@@ -142,6 +154,12 @@ class ReconcileFlagsCommandTests(TestCase):
         self.neighbour = self.card(
             stem="接着解：\n（2）$x^2=9$。",
             regions=[{"page_idx": 3, "bbox": normalized_box(290, 645, 470, 754)}])
+        # 八下 #922 那一类：左栏（1）（3）、右栏（2）（4），题干只剩（1）（3）。
+        # 跳号只把（2）算成缺号，（4）比题干里最大号还大，老写法看不见它，
+        # 旗上就会只写「（2）没有读出来」，老师补完还是少一条。
+        self.short_column = self.card(
+            stem="解下列方程：\n（1）$x^2=1$；\n（3）$x^2=3$。",
+            regions=[{"page_idx": 4, "bbox": normalized_box(55, 455, 260, 605)}])
 
         # 教材在图的正下方印一行「图 4-1」，切图只圈了图形本身，编号落在框外 9pt。
         self.cut_caption = self.card(
@@ -219,7 +237,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_fill_blank_slot_flags(self.paper), 1)
-        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 1)
+        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 2)
         self.assertEqual(pipeline.reconcile_figure_caption_flags(self.paper), 2)
 
         rows = self.stored()
@@ -231,7 +249,21 @@ class ReconcileFlagsCommandTests(TestCase):
         flag = next(f for f in rows[self.two_column.pk][1]
                     if str(f).startswith(pipeline.SUBITEM_GAP_PREFIX))
         self.assertIn("（2）、（4）没有读出来", flag)
+        self.assertIn("从（1）跳到（5）", flag)
         self.assertIn("左右两栏", flag)
+
+    def test_a_right_column_number_past_the_last_one_read_is_named_too(self):
+        """右栏那一列不一定止步于跳号：八下 #922 是左栏（1）（3）、右栏（2）（4）。
+
+        跳号只把（2）算成缺号，（4）比题干里最大号还大，老写法压根看不见它，
+        旗上写「（2）没有读出来」，老师照着补完还是少一条。
+        """
+        self.run_command()
+
+        flag = next(f for f in Question.objects.get(pk=self.short_column.pk).flags
+                    if str(f).startswith(pipeline.SUBITEM_GAP_PREFIX))
+        self.assertIn("（2）、（4）没有读出来", flag)
+        self.assertIn("从（1）跳到（3）", flag)
 
     # -- 第五条：图号被切在配图框外 ----------------------------------------
 
@@ -320,7 +352,7 @@ class ReconcileFlagsCommandTests(TestCase):
 
     def test_a_full_width_gap_is_left_alone(self):
         """小问跳号但范围是满宽的：#1152 那种被切成两张卡的情况，内容并没有丢。"""
-        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 1)
+        self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 2)
 
         self.assertEqual(self.stored()[self.wide_gap.pk], (Question.State.GREEN, []))
 
@@ -380,7 +412,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertIn("几何挂图落在本题范围外：命中 1 张", preview)
         self.assertIn("卡号那一行认不出：命中 1 张", preview)
         self.assertIn("题型标成填空题却没有空格：命中 1 张", preview)
-        self.assertIn("小问排成两栏、只读到了左栏：命中 1 张", preview)
+        self.assertIn("小问排成两栏、只读到了左栏：命中 2 张", preview)
         self.assertIn("题干点名的图号被切在配图框外：命中 2 张", preview)
 
     def test_list_only_says_the_library_was_left_alone(self):
@@ -435,4 +467,15 @@ class ReconcileFlagsCommandTests(TestCase):
             self.run_command("--paper", "没有这份卷子.pdf")
 
     def test_a_real_run_reports_how_many_cards_were_recoloured(self):
-        self.assertIn("绿卡 15 → 10", self.run_command())
+        self.assertIn("绿卡 16 → 10", self.run_command())
+
+        # 变黄的就这六张，剩下十张不该被顺手染上——单张图缺个编号不算大事。
+        rows = self.stored()
+        yellow = sorted(q.pk for q in Question.objects.all() if rows[q.pk][0] == Question.State.YELLOW)
+        self.assertEqual(yellow, sorted([
+            self.geometric.pk, self.anchor.pk, self.no_slot.pk,
+            self.two_column.pk, self.short_column.pk, self.two_captions.pk]))
+        for card in (self.kept_caption, self.wide_gap, self.taken,
+                     self.neighbour, self.absent_caption, self.far_caption,
+                     self.sentence_caption, self.wrong_side, self.real_blank):
+            self.assertEqual(rows[card.pk][0], Question.State.GREEN, card.pk)

@@ -3247,7 +3247,7 @@ def _subitem_claimed_elsewhere(question, number, x, y, page_idx, size, others) -
 
 
 def _column_lost_numbers(question, missing, printed, mine, page_idx, size, others) -> list[int]:
-    """缺掉的编号里，哪几个真的印在本卡范围的右边、而且没人收下。
+    """右栏同一高度带里，本卡题干没收下、别的卡也没收下的小问编号。
 
     判据量的是直接证据——那一行印在哪、谁罩着它：
       · 印在**右边**同一栏排布的位置（紧挨着本卡的右边界，不超过一栏宽）；
@@ -3257,26 +3257,31 @@ def _column_lost_numbers(question, missing, printed, mine, page_idx, size, other
     早先用「范围宽度 < 同页中位数 80%」当代理指标，那是间接证据：
     #873 的范围宽 441、#874 只有 330，一模一样的两栏题，只因切题时多框了
     100pt 就一个报一个不报，白漏三张（#873/#948/#949）。
+
+    **不按 missing 取，只按题干里没有的取**：右栏那一列不一定止步于跳号。
+    八下 #922 原书是左栏（1）（3）、右栏（2）（4），题干只剩（1）（3）——
+    跳号只把（2）算成缺号，（4）在题干里根本没出现过，`_missing_subitem_numbers`
+    连门都进不去，于是旗上写「（2）没有读出来」，老师照着补完还是少一条。
+    真库 959 张实测：右栏另有编号的 9 张里，8 张属于这一种（#975 是（8））。
     """
     if not mine:
         return []
     right = max(box[2] for box in mine)
     top = min(box[1] for box in mine) - _COLUMN_BAND_PAD
     bottom = max(box[3] for box in mine) + _COLUMN_BAND_PAD
+    mine_numbers = {int(value) for value in _SUBITEM_MARK.findall(question.stem or "")}
     lost = []
-    for number in missing:
-        for value, x, y in printed:
-            if value != number:
-                continue
-            if not right - 5.0 <= x <= right + _COLUMN_GAP_POINTS:
-                continue
-            if not top <= y <= bottom:
-                continue
-            if _subitem_claimed_elsewhere(question, number, x, y, page_idx, size, others):
-                continue
-            lost.append(number)
-            break
-    return lost
+    for value, x, y in printed:
+        if value in mine_numbers:
+            continue
+        if not right - 5.0 <= x <= right + _COLUMN_GAP_POINTS:
+            continue
+        if not top <= y <= bottom:
+            continue
+        if _subitem_claimed_elsewhere(question, value, x, y, page_idx, size, others):
+            continue
+        lost.append(value)
+    return sorted(set(lost))
 
 
 def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
@@ -3294,6 +3299,8 @@ def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
     #949 #954 #975，九上 #1258，全在两本教材里，试卷一张都没有。
     抽 3 张回原书页面上核对（#948 八下第 77 页、#873 八下第 49 页、
     #949 同页第 2 题），确认右栏那些小问确实印在框外。
+    其中 8 张的右栏还多印着比题干最大号更大的编号（#922 是（4）、#975 是（8）），
+    旗上一并点名，否则老师照着旗补完还是少一条。
 
     人工改过字、核对过、已经通过的卡一律跳过（那是人的决定）。
     只提示，不擅自改题干——补上右栏小问得靠重新识读或人工录入。
@@ -3337,7 +3344,9 @@ def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
                                         page_idx, (width, height), others)
             if not lost:
                 continue
-            present = [value for value in _SUBITEM_MARK.findall(question.stem or "")][:len(lost)]
+            # 拿题干里**全部**的小问编号报首尾：只取前 len(lost) 个的话，
+            # 「（1）（3）」缺（2）会写成「从（1）跳到（1）」，老师看不出该补哪一条。
+            present = [int(value) for value in _SUBITEM_MARK.findall(question.stem or "")]
             labels = "、".join(f"（{value}）" for value in lost)
             question.flags = [
                 *(question.flags or []),
