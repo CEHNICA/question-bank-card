@@ -6,7 +6,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function harness() {
   const state = { basket: ["pub-1"], draft: null, draftDirty: false, draftBaseline: null, catalog: new Map(), features: {} };
-  const printState = { token: 0, solutions: {}, solutionRecords: new Map(), exporting: false, items: [], missing: [] };
+  const printState = { token: 0, solutions: {}, solutionRecords: new Map(), exporting: false, items: [], missing: [], dropped: [] };
   const controls = new Map(), confirms = [], notices = [], navigations = [], unloads = [], requests = [];
   const control = id => { if (!controls.has(id)) controls.set(id, { textContent: "", className: "", value: "", disabled: false, hidden: false, focus() {} }); return controls.get(id); };
   const ui = { printTitle: { value: "练习" }, basketCount: {}, basketButton: { classList: { remove() {}, add() {} } }, printAiBox: {}, paper: { replaceChildren() {} }, sheet: { open: false, hidden: true, showModal() { this.open = true; } } };
@@ -31,6 +31,7 @@ function harness() {
   };
   vm.createContext(context);
   vm.runInContext(section("  function saveBasket()", "  function syncUrl()"), context);
+  vm.runInContext(section("  function syncDroppedQuestions()", "  function renderPrintMissing()"), context);
   vm.runInContext(section("  async function openPrint()", "  async function saveDraft("), context);
   vm.runInContext(section("  async function saveDraft(", "  async function openDrafts()"), context);
   vm.runInContext(section("  let libraryNavigationPending", "  // ---------------------------------------------------------------- 事件"), context);

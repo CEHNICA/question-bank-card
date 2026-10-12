@@ -1614,7 +1614,7 @@
   // ---------------------------------------------------------------- 组卷
 
   let printAnswersPreference = ui.printAnswers.checked;
-  const printState = { token: 0, items: [], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
+  const printState = { token: 0, items: [], missing: [], dropped: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
     optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "",
     // 排版是异步的：A4 分页跑完会把整卷重排一遍，刚才拿到焦点的按钮随之被换掉。
     // 这里记下「排完之后焦点该放回哪」，等重排结束再兑现（见 applyPrintFocus）。
@@ -1948,6 +1948,7 @@
     if (!state.draftDirty) state.draftBaseline = draftSignature();
     printState.loading = false;
     printState.missing = missing;
+    syncDroppedQuestions();
     renderPrint(items);
     await printState.layoutPromise;
   }
@@ -2080,12 +2081,31 @@
     }
   }
 
+  // 老师把题移出试题篮就是接受了这卷少一道题，但「少了几道」不能跟着一起消失 ——
+  // 移出过的题已经不在篮里，openPrint 重载也不会再报 missing，提示只跟着 missing 走的话
+  // 就会在这里悄悄清零。所以单独记一笔；之后加回篮里的题再从这笔记里划掉
+  // （篮子回到原样，卷面也就完整了）。每次 openPrint 末尾调一次。
+  function syncDroppedQuestions() {
+    printState.dropped = printState.dropped.filter((row) => !state.basket.includes(row.id));
+  }
+
   function renderPrintMissing() {
     const box = $("printMissing");
+    const pending = printState.missing.length;
+    const dropped = printState.dropped;
     box.replaceChildren();
-    box.hidden = !printState.missing.length;
+    box.hidden = !pending && !dropped.length;
     if (box.hidden) return;
-    box.append(node("p", "", `试题篮 ${state.basket.length} 题，成功载入 ${printState.items.length} 题；以下 ${printState.missing.length} 题尚未载入。处理后才能导出或打印。`));
+    // 「移出试题篮」把缺题赶走了，missing 随之清空、导出解锁、纸上的红框也没了。
+    // 卷面从此比老师挑的那些题少几道，而界面上一句话都不剩 —— 印出去的卷子缺题，
+    // 老师自己都不知道。所以已移出的题单独记着，提示不跟着 missing 一起消失。
+    if (dropped.length) {
+      box.append(node("p", "", pending
+        ? `本卷有 ${pending} 题尚未载入，你已移出 ${dropped.length} 题；导出的卷面会少这 ${dropped.length} 道题。`
+        : `你已把 ${dropped.length} 道题移出试题篮，本卷卷面比试题篮少 ${dropped.length} 道题。确认过再导出。`));
+    }
+    if (!pending) { return; }
+    box.append(node("p", "", `试题篮 ${state.basket.length} 题，成功载入 ${printState.items.length} 题；以下 ${pending} 题尚未载入。处理后才能导出或打印。`));
     printState.missing.forEach((item) => {
       const row = node("div", "print-missing-row");
       const remove = node("button", "button button-small", "移出试题篮");
@@ -2094,6 +2114,7 @@
       remove.addEventListener("click", () => {
         state.basket = state.basket.filter((id) => id !== item.id);
         printState.missing = printState.missing.filter((row) => row.id !== item.id);
+        printState.dropped = printState.dropped.filter((row) => row.id !== item.id).concat(item);
         saveBasket();
         renderPrint(printState.items);
         render();
