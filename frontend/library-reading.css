@@ -15,14 +15,16 @@
     --radius-lg: 10px;
     background: var(--bg);
   }
-  .library-page .topbar { grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; border-bottom: 1px solid var(--line); }
-  /* .topnav 隐藏后不再占列。这里把剩下几块按「☰ 品牌 | 查找与标签管理 | 题目详情 |
-     窗口控件」显式定位到四列：靠自动流会换行，也会让两个右对齐的元素叠在一起。 */
+  .library-page .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; border-bottom: 1px solid var(--line); }
+  /* .topnav 隐藏后不再占列。这里按「☰ | 品牌 | 查找与标签管理 | 题目详情 | 窗口控件」
+     显式定位到五列。每一块都必须独占一列：共用列再靠外边距错开会重叠（gap 只在列
+     之间生效，同列内不分），查找区与题目详情共用一列时量出来是 935–1375 与
+     1303–1375 直接压在一起。查找区给它 1fr，窗口才能吃掉剩余宽度。 */
   .library-page .topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
-  .library-page .topbar > .brand { grid-column: 1; grid-row: 1; justify-self: end; margin-left: 14px; }
-  .library-page .topbar > .library-top-navigation { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 14px; }
-  .library-page .topbar > .topbar-tools { grid-column: 3; grid-row: 1; justify-self: end; }
-  .library-page .topbar > .window-controls { grid-column: 4; grid-row: 1; }
+  .library-page .topbar > .brand { grid-column: 2; grid-row: 1; justify-self: start; }
+  .library-page .topbar > .library-top-navigation { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 14px; }
+  .library-page .topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
+  .library-page .topbar > .window-controls { grid-column: 5; grid-row: 1; }
   .library-page .brand-text { display: flex; align-items: center; gap: 18px; }
   /* 页面导航由 ☰ 抽屉统一承担（里面已经有录入终审 / 正式题库 / 设置）。
      顶栏这份是同一份 .topnav 的搬运源，宽屏再摆一份只是重复 ——
@@ -176,12 +178,12 @@
   }
   @media (max-width: 979px) {
     .library-page { --topbar-h: 96px; }
-    .library-page .topbar { grid-template-columns: 32px minmax(0, 1fr) auto auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
+    .library-page .topbar { grid-template-columns: 32px auto minmax(0, 1fr) auto auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
     .library-page .topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
     .library-page .topbar > .brand { display: none; }
-    .library-page .topbar > .library-top-navigation { grid-column: 1 / 4; grid-row: 2; }
-    .library-page .topbar > .topbar-tools { grid-column: 3; grid-row: 1; }
-    .library-page .topbar > .window-controls { grid-column: 4; grid-row: 1; padding-left: 0; }
+    .library-page .topbar > .library-top-navigation { grid-column: 1 / 5; grid-row: 2; }
+    .library-page .topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
+    .library-page .topbar > .window-controls { grid-column: 5; grid-row: 1; padding-left: 0; }
     .library-top-navigation { grid-column: 1 / -1; grid-row: 2; gap: 8px; }
     .library-top-navigation .library-search { min-width: 90px; max-width: none; }
     .library-top-navigation .library-tag-manager-entry { padding: 5px 8px; }
