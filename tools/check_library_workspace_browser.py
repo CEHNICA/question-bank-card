@@ -72,6 +72,7 @@ def check(base):
         expect(page.locator("#basketPanel")).to_be_visible()
         page.locator("#allQuestionsButton").click()
         expect(page.locator("#searchInput")).to_be_enabled()
+        expect(page.locator("#allQuestionsButton")).to_be_hidden()
         expect(page.locator(".library-card")).to_have_count(0)
         page.get_by_role("button", name="清除搜索与筛选", exact=True).click()
         expect(page.locator(".library-card")).to_have_count(total)

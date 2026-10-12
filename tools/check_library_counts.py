@@ -300,6 +300,8 @@ def run(port: int) -> None:
                 page.locator("#typeFilters button", has_text="填空题").first.click()
                 page.wait_for_timeout(600)
                 base = lock_state(page)
+                page.locator("#basketHandle").click()
+                page.wait_for_timeout(500)
                 page.locator("#basketViewButton").click()
                 page.wait_for_timeout(500)
                 locked = lock_state(page)

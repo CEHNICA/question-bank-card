@@ -109,13 +109,17 @@ def main():
         page.keyboard.press("Escape")
         page.wait_for_timeout(250)
 
-        # 「已选题目 / 全部题目」在筛选行上，抽屉关着才点得到
+        # 顶部不再常驻这两个视图按钮：篮内视图只有一条返回条。
+        # 进入篮内视图要篮里有题，所以先经把手把篮子填出来再点。
+        page.locator("#basketHandle").click()
+        page.wait_for_timeout(500)
+        check("「全部题目」视图下顶部没有返回条", page.locator("#allQuestionsButton").is_hidden())
         page.locator("#basketViewButton").click()
         page.wait_for_timeout(700)
-        check("「已选题目」切到篮内视图", page.locator("#basketViewButton").get_attribute("aria-pressed") == "true")
+        check("切到篮内视图后出现返回条", page.locator("#allQuestionsButton").is_visible())
         page.locator("#allQuestionsButton").click()
         page.wait_for_timeout(700)
-        check("「全部题目」切回来", page.locator("#allQuestionsButton").get_attribute("aria-pressed") == "true")
+        check("「全部题目」切回来后返回条消失", page.locator("#allQuestionsButton").is_hidden())
 
         # 侧栏里的「更多筛选」空时整条不出现，有内容时能展开
         print("== 更多筛选 ==")

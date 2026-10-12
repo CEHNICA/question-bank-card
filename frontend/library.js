@@ -2391,10 +2391,14 @@
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = !state.basket.length;
     ui.basketButton.disabled = state.basketLoading;
-    $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
-    $("allQuestionsButton").classList.toggle("active", state.view === "all");
-    $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
-    $("basketViewButton").classList.toggle("active", state.view === "selected");
+    // 顶部不再常驻「全部题目 / 试题篮」这一对切换按钮：篮子由右边缘把手打开。
+// 「只看篮里的题」是少数才需要的能力，只在篮子非空时露出；返回条只在篮里视图出现。
+const selectedView = state.view === "selected";
+const returnButton = $("allQuestionsButton"), enterButton = $("basketViewButton");
+returnButton.hidden = !selectedView;
+enterButton.hidden = selectedView || !state.basket.length;
+enterButton.setAttribute("aria-pressed", String(selectedView));
+$("selectedViewCount").textContent = String(state.basket.length);
     const counts = {}, sources = new Set();
     const list = $("basketList");
     list.replaceChildren();

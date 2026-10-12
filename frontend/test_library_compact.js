@@ -171,10 +171,12 @@ assert.match(libraryCss, /\.library-advanced\[open\] > \.library-filters \{ posi
 assert.match(libraryCss, /\.rail-collapse \{[^}]*position: sticky/, "收侧栏的小按钮钉在题面上，滚到哪儿都在");
 assert.ok(!libraryJs.includes("QBSiteDrawer?.slot?.(\"library\")"), "抽屉里不再放一份专注浏览，只有侧栏接缝上那一个按钮");
 assert.ok(libraryHtml.indexOf('id="allQuestionsButton"') < libraryHtml.indexOf('id="sourceSelect"'),
-  "「全部题目 / 已选题目」留在搜索侧栏中");
+  "试题篮的返回条留在顶栏，且排在筛选工具栏之前");
+assert.match(libraryHtml, /id="allQuestionsButton"[^>]*\bhidden\b/, "返回条默认隐藏，切到篮内视图才出现");
 const rail = libraryHtml.slice(libraryHtml.indexOf('id="libraryRail"'), libraryHtml.indexOf('id="libraryRailToggle"'));
 assert.doesNotMatch(rail, /sourceSelect|typeFilters|sortSelect|advancedFilters/, "来源、题型、排序和更多筛选已从侧栏移出");
 assert.match(libraryHtml, /id="libraryFilterBar"[\s\S]*?id="sourceSelect"[\s\S]*?id="typeFilters"[\s\S]*?id="sortSelect"[\s\S]*?id="advancedFilters"/, "所有常用筛选都在列表顶部工具栏");
+assert.match(libraryHtml, /id="typeFacetLabel"[^>]*>题型/, "题型有可见的维度标签，不再和「来源」的「全部」并排混淆");
 assert.ok(libraryHtml.indexOf('id="libraryRail"') < libraryHtml.indexOf('id="activeFilters"'),
   "当前筛选那行搬进了侧栏");
 assert.ok(libraryHtml.indexOf('id="activeFilters"') < libraryHtml.indexOf('id="libraryList"'),

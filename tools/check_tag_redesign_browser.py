@@ -156,12 +156,11 @@ def check(base):
         for control in ("#sourceSelect", "#typeFilters", "#sortSelect", "#advancedFilters"):
             expect(page.locator(control)).to_be_visible()
             assert page.locator(control).evaluate("node => !!node.closest('#libraryFilterBar')"), control
+        # 试题篮的两个动作不再进侧栏，也不在筛选行里：默认隐藏，按需出现在顶栏。
         for control in ("#allQuestionsButton", "#basketViewButton"):
-            expect(page.locator(control)).to_be_visible()
-            assert page.locator(control).evaluate("node => !!node.closest('#libraryRail')"), control
-        for control in ("#sourceSelect", "#typeFilters", "#sortSelect", "#advancedFilters"):
+            expect(page.locator(control)).to_be_hidden()
             assert not page.locator(control).evaluate("node => !!node.closest('#libraryRail')"), control
-        assert not page.locator("#allQuestionsButton").evaluate("node => !!node.closest('#libraryFilterBar')")
+            assert not page.locator(control).evaluate("node => !!node.closest('#libraryFilterBar')"), control
         filter_height = page.locator(".library-bulk").evaluate("node => node.offsetHeight")
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")

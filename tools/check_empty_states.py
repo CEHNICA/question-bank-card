@@ -94,17 +94,17 @@ def run(page, width: int, height: int) -> None:
           f"{tag}：搜不到时「加载更多」收起来了")
     check(none["bodyOverflow"] <= 0, f"{tag}：搜不到时整页没有横向溢出（{none['bodyOverflow']}px）")
 
-    # 2. 清掉搜索，进「已选题目」（篮是空的）
+    # 2. 清掉搜索，打开空篮（顶部进入按钮在篮空时不出现，这里走右边缘把手）
     search.fill("")
     page.wait_for_timeout(800)
-    page.locator("#basketViewButton").click()
+    page.locator("#basketHandle").click()
     page.wait_for_timeout(900)
     empty_basket = report(page, f"{tag} 篮是空的", f"{SHOTS}/empty_{width}x{height}_nobasket.png")
     check(bool(empty_basket["emptyText"]),
           f"{tag}：篮空着时有一句提示（「{empty_basket['emptyText']}」）")
     check(bool(empty_basket["handle"] and empty_basket["handle"]["clickable"]),
           f"{tag}：篮空着时篮把手还点得到")
-    page.locator("#allQuestionsButton").click()
+    page.locator("#basketHandle").click()
     page.wait_for_timeout(800)
 
     # 3. 200 个字符的搜索词：长内容不撑破版式
