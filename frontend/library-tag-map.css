@@ -39,9 +39,10 @@
 .tag-map-node-footer { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 30px; padding: 0 9px 0 13px; border-top: 1px solid #eff3ef; }
 .tag-map-node-count { min-width: 0; border: 0; background: transparent; padding: 3px 0; color: #6f8879; font: inherit; font-size: 10px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tag-map-node-count:hover { color: #237b5b; text-decoration: underline; }
-.tag-map-expand { min-width: 25px; height: 21px; border: 0; border-radius: 5px; padding: 0 5px; background: #eef5f0; color: #49846a; font: inherit; font-size: 11px; cursor: pointer; }
+.tag-map-expand { min-width: 30px; height: 21px; border: 0; border-radius: 5px; padding: 0 5px; background: #eef5f0; color: #49846a; font: inherit; font-size: 11px; cursor: pointer; }
 .tag-map-expand:hover { background: #dcefe2; }
-.tag-map-expand[aria-expanded="true"] { font-size: 16px; }
+/* Keep the glyph the same size in both states so the button does not jump on click. */
+.tag-map-expand[aria-expanded="true"] { font-size: 11px; }
 .tag-map-zoom-tools { position: absolute; z-index: 3; bottom: 16px; right: 16px; display: flex; align-items: center; gap: 3px; padding: 5px; border: 1px solid #dce5df; border-radius: 9px; background: #ffffffed; box-shadow: 0 3px 10px #36513f08; cursor: default; }
 .tag-map-zoom-tools .tag-map-button { min-width: 31px; min-height: 30px; padding: 4px 7px; border-color: transparent; }
 .tag-map-zoom-tools .tag-map-button[data-map-action="fit"] { border-left: 1px solid #e3eae5; border-radius: 0 5px 5px 0; margin-left: 4px; }
@@ -51,6 +52,8 @@
 .tag-map-empty { position: absolute; z-index: 1; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; color: #788f80; text-align: center; cursor: default; }
 .tag-map-empty[hidden] { display: none; }
 .tag-map-empty-mark { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; margin-bottom: 15px; border: 1px solid #dbe7df; border-radius: 50%; background: #fff; color: #7eaa92; font-size: 32px; }
+/* The magnifier is an emoji, which renders far larger than the geometric marks next to it. */
+.tag-map-empty-mark.is-emoji { font-size: 22px; line-height: 1; }
 .tag-map-empty strong { color: #4f715d; font-size: 16px; font-weight: 500; }
 .tag-map-empty p { max-width: 370px; margin-top: 10px; font-size: 12px; line-height: 1.9; }
 @media (max-width: 980px) {
