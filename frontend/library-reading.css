@@ -18,12 +18,12 @@
   .library-page .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 18px; box-shadow: none; border-bottom: 1px solid var(--line); }
   .library-page .brand-text { display: flex; align-items: center; gap: 18px; }
   .library-page-title { padding-left: 18px; border-left: 1px solid var(--line); color: var(--ink-2); font-size: 14px; font-weight: 600; }
+  /* 顶栏按内容排布，不再让搜索框顶到 560px 就停：篮子两个动作默认隐藏时，
+     原来会在搜索框和标签管理之间留下一大片空白。搜索框吃掉剩余宽度，
+     上限放宽，标签管理紧贴在它右边。 */
   .library-top-navigation { display: flex; min-width: 0; align-items: center; justify-content: flex-start; gap: 14px; }
-  .library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: 560px; }
+  .library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: none; }
   .library-top-navigation .library-search input { min-height: 34px; border-radius: 6px; font-size: 13px; }
-  .library-top-navigation .library-top-scope { flex: none; width: auto; flex-wrap: nowrap; overflow: visible; gap: 4px; padding: 0; background: none; }
-  .library-top-navigation .draft-filter { white-space: nowrap; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
-  .library-top-navigation .draft-filter.active { background: var(--accent-soft); color: var(--accent-dark); box-shadow: none; }
   .library-top-navigation .library-tag-manager-entry { flex: none; width: auto; min-height: 32px; padding: 6px 9px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; font-size: 12px; }
   .library-top-navigation .library-tag-manager-entry:hover { border-left-color: var(--line); background: var(--accent-soft); }
   .library-page .library-rail,
@@ -161,7 +161,6 @@
     .library-page .topbar > .topbar-tools { grid-column: 3; grid-row: 1; }
     .library-top-navigation { grid-column: 1 / -1; grid-row: 2; gap: 8px; }
     .library-top-navigation .library-search { min-width: 90px; max-width: none; }
-    .library-top-navigation .draft-filter { padding: 5px 7px; font-size: 11px; }
     .library-top-navigation .library-tag-manager-entry { padding: 5px 8px; }
     .library-page .library-main { padding: 0 16px 36px; }
     .library-page .library-workspace,
