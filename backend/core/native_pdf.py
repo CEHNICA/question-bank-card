@@ -12,6 +12,63 @@ from pathlib import Path
 import pymupdf as fitz
 
 
+# 一页里读不出来的替换字符超过这个比例，才当成「这页正文不可信」。
+# 零星几个不降级：文字层其余部分照常能用，把整页的题丢掉代价比留下几个空位大得多。
+UNREADABLE_PAGE_RATIO = 0.05
+
+
+def count_private(text: str) -> int:
+    """字体私有区（Co）字符的个数。
+
+    私有区是 PDF 字体厂商给数学符号的正常编码：分段函数的大括号、⌈ ⌉ ⌊ ⌋ 这些
+    在原图上印出来是对的，只是 Unicode 里没有对应码位，复制不出来。把它当成乱码，
+    整页会因为三个取整号降级去手工框题，那一页的题一道都不剩 —— 《凤城高一数学
+    试题_打印版_v8》第 9-15 题就这样没了，而那一页 945 个字符里 942 个都正常。
+    """
+    return sum(unicodedata.category(ch) == "Co" for ch in text)
+
+
+def mark_private(text: str) -> str:
+    """把私有区字符换成一个看得见的占位符。
+
+    卡上正文本来是原图，这个占位只出现在给人核对的草稿文本里；留一个方框让老师
+    看得出「这儿少了个符号」，比一片空白好。
+    """
+    return "".join("\u25a1" if unicodedata.category(ch) == "Co" else ch for ch in text)
+
+
+def unreadable_ratio(text: str) -> float:
+    """真正读不出来的字符（替换字符 U+FFFD）占全页的比例。"""
+    return text.count("\ufffd") / max(1, len(text))
+
+
+def page_mode(text: str, *, full_page_image: bool = False) -> str:
+    """这一页的文字层够不够格让切题器自己切题。
+
+    只有整页读不出东西、或者读不出来的比例大到正文不可信时才降级去手工。零星几个
+    替换字符不该让整页的题从题库里消失。
+    """
+    if not text.strip() or full_page_image:
+        return "manual"
+    return "native" if unreadable_ratio(text) <= UNREADABLE_PAGE_RATIO else "manual"
+
+
+def classify_page_text(text: str, *, full_page_image: bool = False) -> list[str]:
+    """给这一页的文字层该说的话。判定本身在 page_mode。"""
+    messages = []
+    private, corrupt = count_private(text), text.count("\ufffd")
+    if not text.strip():
+        messages.append("没有可复制文字，保留原页并手工框题。")
+    elif corrupt:
+        messages.append(f"文字层有 {corrupt} 个字符读不出来，正文应保留原图并对照原卷。")
+    if private:
+        messages.append(f"文字层有 {private} 个符号是字体私有编码（复制不出来，打印和阅读不受影响）。")
+    if full_page_image:
+        messages.append("本页以整页扫描图为主，文字层只作辅助，请手工框出完整题目。")
+    messages.append("文字层不能保证分式、上下标和图表准确；没有自动补写公式。")
+    return messages
+
+
 def normalized_bbox(page, bbox) -> list[float] | None:
     rect = fitz.Rect(bbox)
     if any(not math.isfinite(value) for value in rect):
@@ -73,21 +130,15 @@ def extract(source: Path, selected_pages: list[int] | None = None) -> dict:
                         box = normalized_bbox(page, line["bbox"])
                         if box is not None and text.strip():
                             text_lines.append(text)
+                            marked = mark_private(text)
                             blocks.append({"seq": len(blocks), "type": "text", "page_idx": index,
-                                           "bbox": box, "text": text[:20000], "html": ""})
+                                           "bbox": box, "text": marked[:20000], "html": ""})
                 for box in visual_boxes:
                     blocks.append({"seq": len(blocks), "type": "image", "page_idx": index,
                                    "bbox": box, "text": "", "html": ""})
                 joined = "\n".join(text_lines)
-                corrupt = sum(ch == "\ufffd" or unicodedata.category(ch) == "Co" for ch in joined)
-                if not joined.strip():
-                    warnings.append("没有可复制文字，保留原页并手工框题。")
-                elif corrupt:
-                    warnings.append("文字层存在乱码，正文应保留原图并对照原卷。")
-                if full_page_image:
-                    warnings.append("本页以整页扫描图为主，文字层只作辅助，请手工框出完整题目。")
-                warnings.append("文字层不能保证分式、上下标和图表准确；没有自动补写公式。")
-                pages.append({"page_idx": index, "mode": "native" if joined.strip() and not corrupt and not full_page_image else "manual",
+                warnings.extend(classify_page_text(joined, full_page_image=full_page_image))
+                pages.append({"page_idx": index, "mode": page_mode(joined, full_page_image=full_page_image),
                               "text_characters": len(joined), "warnings": warnings})
             except Exception as exc:
                 # One malformed page must not erase successful pages.
