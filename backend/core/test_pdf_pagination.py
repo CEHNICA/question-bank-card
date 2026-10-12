@@ -245,6 +245,32 @@ class SharedPdfPaginationTests(SimpleTestCase):
         self.assertGreaterEqual(export_count,base_count)
         self.assertEqual(self.items,before,"Rendering must not rewrite the caller's items")
 
+    _COLUMNS = r"""(()=>[...document.querySelectorAll('#printPaper .print-question')].map(q=>({
+      id:q.dataset.questionId,
+      columns:[...q.querySelectorAll('.qb-options')].map(n=>n.dataset.examColumns)})))()"""
+
+    def test_per_question_option_columns_override_wins_and_leaves_the_others_alone(self):
+        choices=[item for item in self.items if item["content"]["options"]]
+        self.assertGreaterEqual(len(choices),2,"The fixture needs a target plus a bystander")
+        target=choices[1]["id"]; bystanders={item["id"] for item in choices} - {target}
+        before=deepcopy(self.items)
+
+        _,_,plain=self.render(self.documents({**self.options,"option_layout":"four"})[1],probe=self._COLUMNS)
+        plain={row["id"]:row["columns"] for row in plain}
+        self.assertEqual(plain[target],["4"],"The fixture must print four across for the test to mean anything")
+
+        options={**self.options,"option_layout":"four","option_overrides":{target:"vertical"}}
+        preview,exported=self.documents(options)
+        _,_,preview_columns=self.render(preview,probe=self._COLUMNS)
+        _,_,export_columns=self.render(exported,probe=self._COLUMNS)
+        self.assertEqual(preview_columns,export_columns,"The preview the teacher checked has to match the download")
+        columns={row["id"]:row["columns"] for row in export_columns}
+        self.assertEqual(columns[target],["1"],"The named question has to print one option per line")
+        for other in bystanders:
+            self.assertEqual(columns[other],plain[other],
+                             "An option override is per question; the rest keep the global layout")
+        self.assertEqual(self.items,before,"Rendering must not rewrite the caller's items")
+
     def test_teacher_ai_note_matches_preview_text_order_and_geometry(self):
         for index,item in enumerate(self.items):
             item["selected"]={"answer":"合成答案","analysis":r"由 $x=1$ 代入计算，得到结论。"}
