@@ -14,8 +14,11 @@
   // minimize/close controls. In a plain browser tab these simply do nothing,
   // which keeps the same markup usable during development.
   function wireWindowControls() {
-    const close = root.document?.getElementById("windowClose");
-    const minimize = root.document?.getElementById("windowMinimize");
+    // getElementById is looked up defensively: the unit test drives this file
+    // with a document stub that only carries addEventListener.
+    const byId = root.document?.getElementById?.bind(root.document);
+    const close = byId?.("windowClose");
+    const minimize = byId?.("windowMinimize");
     // window.close() only works on a window opened by script. The application
     // window qualifies; an ordinary tab does not, and stays untouched.
     close?.addEventListener("click", () => {
