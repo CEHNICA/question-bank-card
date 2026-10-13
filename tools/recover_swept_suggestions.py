@@ -99,7 +99,7 @@ def main():
             "resolved_at = null, taxonomy_revision = ?, updated_at = ? "
             "where status = 'stale' and message = ? and substr(resolved_at, 1, 16) = ?",
             (RECOVER_MESSAGE, revision, now, SWEEP_MESSAGE, SWEEP_BUCKET))
-        changed = cursor.total_changes
+        changed = connection.total_changes
         print("已写回:", changed, "批")
 
     remaining = cursor.execute(
