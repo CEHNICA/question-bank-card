@@ -217,3 +217,23 @@ console.log("Shared A4 formula fit retains readable minimum width and reports ov
   assert.equal(first.childNodes.length, 1);
   console.log("Continued pages keep the stem body, its blank lines and the question number: OK");
 }
+
+// A writing-space sliver thinner than a text line is not writing space. The real
+// sample is 胜利初四月考 第 22 题: page 6 kept 1 mm of the 30 mm block, invisible
+// on paper, and page 7 opened with 「第 22 题答题区（续）」 — where the student then
+// wrote all 30 mm. Slicing a remainder that thin cannot help anybody.
+//
+// writingSpace() lives inside paginate() and needs a laid-out document, so this
+// guards the two things that decide the behaviour: that a floor exists at all, and
+// that it is a real writing height rather than a token value that barely filters.
+{
+  const floor = source.match(/const MIN_WRITABLE = (\d+);/);
+  assert.ok(floor, "答题区切分必须有一个下限，没有下限就会切出 0~1mm 的碎片");
+  const pixels = Number(floor[1]);
+  assert.ok(pixels >= 60, `下限 ${pixels}px 不够一行（20mm≈76px），等于没修`);
+  assert.match(source, /if \(available < MIN_WRITABLE\) \{ newPage\(\); continue; \}/,
+    "剩余空间低于下限时必须整块换页，而不是切一小块留在当前页");
+  assert.doesNotMatch(source, /if \(available <= \.5\) \{ newPage\(\); continue; \}/,
+    "旧的 0.5px 下限会把 1mm 碎片照切不误");
+  console.log("Answer space is never sliced below one text line: OK");
+}

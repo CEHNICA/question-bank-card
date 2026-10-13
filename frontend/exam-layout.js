@@ -263,6 +263,14 @@
         // Writing space is divisible; moving an entire 60 mm blank block left
         // otherwise usable page bottoms empty and created blank continuation
         // sheets. Keep the requested total, using the current page first.
+        // A remainder thinner than one text line is not writing space: the
+        // fragment is invisible on paper (the real sample is 胜利初四月考 第 22
+        // 题, 1 mm left at the foot of page 6) yet still forces a
+        // 「第 N 题答题区（续）」 heading on the next page, where the student then
+        // writes the whole thing. Below this, leave the sliver at the page foot
+        // and move the whole block down instead: 20 mm is about five text lines,
+        // so the abandoned strip costs less than the unusable fragment saves.
+        const MIN_WRITABLE = 76;
         let remaining = height(blank.cloneNode(true));
         while (remaining > .01) {
           let owner = body.lastElementChild;
@@ -275,7 +283,7 @@
           }
           const previousHeight = height(owner.cloneNode(true));
           const available = BODY_HEIGHT - used - (existing ? 0 : previousHeight);
-          if (available <= .5) { newPage(); continue; }
+          if (available < MIN_WRITABLE) { newPage(); continue; }
           const allocated = Math.min(remaining, available);
           const piece = blank.cloneNode(false);
           piece.style.height = `${allocated}px`;
