@@ -119,15 +119,30 @@
       });
       layer.forEach((id, index) => order.set(id, index));
     });
-    const rows = Math.max(1, ...layers.map((layer) => layer.length));
+    // A flat directory puts every tag in one layer. A single column of hundreds of nodes
+    // becomes an unreadable vertical ribbon, so wide layers wrap into a grid instead.
+    const columnsFor = (layer) => (layer.length > 1 && layers.length === 1
+      ? Math.ceil(Math.sqrt(layer.length * HEIGHT / WIDTH)) : 1);
+    const gridColumns = new Map(layers.map((layer) => [layer, columnsFor(layer)]));
+    const gridRows = (layer) => Math.ceil(layer.length / gridColumns.get(layer));
+    const rows = Math.max(1, ...layers.map(gridRows));
     const contentHeight = rows * (HEIGHT + ROW_GAP) - ROW_GAP;
     const positions = new Map();
-    layers.forEach((layer, depth) => layer.forEach((id, index) => positions.set(id, {
-      x: MARGIN + depth * (WIDTH + COLUMN_GAP),
-      y: MARGIN + (contentHeight - (layer.length * (HEIGHT + ROW_GAP) - ROW_GAP)) / 2 + index * (HEIGHT + ROW_GAP),
-      width: WIDTH, height: HEIGHT, depth
-    })));
-    return { positions, width: layers.length ? MARGIN * 2 + (layers.length - 1) * (WIDTH + COLUMN_GAP) + WIDTH : WIDTH + MARGIN * 2,
+    layers.forEach((layer, depth) => {
+      const columns = gridColumns.get(layer), columnWidth = WIDTH + COLUMN_GAP;
+      layer.forEach((id, index) => {
+        const row = Math.floor(index / columns), column = index % columns;
+        const layerRows = gridRows(layer);
+        positions.set(id, {
+          x: MARGIN + (depth + column) * columnWidth,
+          // Center each column vertically so a wrapped grid stays visually balanced.
+          y: MARGIN + (contentHeight - (layerRows * (HEIGHT + ROW_GAP) - ROW_GAP)) / 2 + row * (HEIGHT + ROW_GAP),
+          width: WIDTH, height: HEIGHT, depth
+        });
+      });
+    });
+    const widest = Math.max(...layers.map((layer) => gridColumns.get(layer)), 1);
+    return { positions, width: MARGIN * 2 + (layers.length - 1 + widest - 1) * (WIDTH + COLUMN_GAP) + WIDTH,
       height: contentHeight + MARGIN * 2, layers };
   }
 
@@ -159,7 +174,7 @@
     const empty = element("div", "tag-map-empty"); empty.hidden = true; viewport.append(empty);
     const zoomTools = element("div", "tag-map-zoom-tools");
     const zoomOut = button("−", "zoom-out", "缩小标签地图"), zoomLabel = element("span", "tag-map-zoom-label", "100%");
-    const zoomIn = button("＋", "zoom-in", "放大标签地图"), fitButton = button("适合画布", "fit", "把当前可见结构放进画布");
+    const zoomIn = button("+", "zoom-in", "放大标签地图"), fitButton = button("适合画布", "fit", "把当前可见结构放进画布");
     zoomTools.append(zoomOut, zoomLabel, zoomIn, fitButton); viewport.append(zoomTools);
     const footer = element("div", "tag-map-footer"), status = element("span", "tag-map-status");
     status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
@@ -191,13 +206,18 @@
       const x = Math.min(...values.map((p) => p.x)), y = Math.min(...values.map((p) => p.y));
       return { x, y, width: Math.max(...values.map((p) => p.x + WIDTH)) - x, height: Math.max(...values.map((p) => p.y + HEIGHT)) - y };
     }
+    // Fitting a very large directory must not shrink the text into an unreadable mosaic.
+    // Below this scale the map stays pannable and the status line says so.
+    const READABLE_ZOOM = .55;
     function fit(markTouched = true) {
       const size = viewportSize(); if (size.width < 20 || size.height < 20) { state.pendingFit = true; return; }
       const area = bounds(), padding = size.width < 480 ? 18 : 38;
-      state.zoom = clamp(Math.min((size.width - padding * 2) / area.width, (size.height - padding * 2 - 36) / area.height, 1), .25, 1);
+      const raw = Math.min((size.width - padding * 2) / area.width, (size.height - padding * 2 - 36) / area.height, 1);
+      state.zoom = clamp(raw, raw < READABLE_ZOOM ? READABLE_ZOOM : .25, 1);
       state.tx = (size.width - area.width * state.zoom) / 2 - area.x * state.zoom;
       state.ty = (size.height - area.height * state.zoom) / 2 - area.y * state.zoom;
-      state.pendingFit = false; state.touched = markTouched; applyTransform();
+      state.pendingFit = false; state.touched = markTouched; state.cropped = raw < READABLE_ZOOM;
+      applyTransform();
     }
     function centerNode(id) {
       const position = state.positions.get(id); if (!position) return;
@@ -273,7 +293,7 @@
         count.disabled = state.busy || !options.onFindQuestions; footer.append(count);
         const childCount = state.model.children.get(id)?.size || 0;
         if (childCount) {
-          const expand = button(state.expanded.has(id) ? "−" : "+ " + childCount, "expand", (state.expanded.has(id) ? "收起" : "展开") + tag.name + "的直接子标签");
+          const expand = button(state.expanded.has(id) ? "−" : "+" + childCount, "expand", (state.expanded.has(id) ? "收起" : "展开") + tag.name + "的直接子标签");
           expand.className = "tag-map-expand"; expand.dataset.tagId = id; expand.setAttribute("aria-expanded", String(state.expanded.has(id))); expand.disabled = state.busy; footer.append(expand);
         }
         node.append(select, footer); nodeLayer.append(node);
@@ -282,7 +302,9 @@
       renderWires(); renderContext();
       empty.hidden = graph.nodes.size > 0;
       if (!empty.hidden) {
-        empty.replaceChildren(element("span", "tag-map-empty-mark", state.query ? "⌕" : "○"),
+        const mark = element("span", "tag-map-empty-mark", state.query ? "🔍" : "○");
+        if (state.query) mark.classList.add("is-emoji");
+        empty.replaceChildren(mark,
           element("strong", "", state.query ? "没有找到匹配的标签" : "这里还没有" + (KIND_NAMES[state.kind] || "标签")),
           element("p", "", state.query ? "试试标签名称、别名或说明。搜索只定位目录，不会修改标签。" : "可以新建自己的标签，也可以预览并追加系统模板。地图不会替你创建目录。"));
       }
@@ -290,6 +312,7 @@
       scope.textContent = state.local ? "当前标签附近" : state.rootId ? "当前主题" : "顶级与已展开分支";
       status.textContent = state.query ? "找到 " + graph.matches.size + " 个标签 · 已显示上级路径" : "显示 " + baseCount + " / " + graph.total + " 个标签";
       if (state.related) status.textContent += " · 虚线仅表示相关方法";
+      if (state.cropped && graph.nodes.size) status.textContent += " · 已保持文字可读，可拖动画布查看其余标签";
       if (preserveFocus) nodeLayer.querySelector('.tag-map-expand[data-tag-id="' + CSS.escape(preserveFocus) + '"]')?.focus({ preventScroll: true });
       if (fitView) fit(false);
       else {
