@@ -303,7 +303,9 @@ body.drawer-open { overflow: hidden; }
 .paper-link:hover { background: var(--surface-2); }
 .paper-item.active .paper-link { background: #eef3ef; }
 .paper-item.active .paper-link::before { content: ""; position: absolute; left: 3px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--accent); }
-.paper-file { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 八份卷子竖着摆在一起，名字截成「初三特殊的平行四边形(二次过…」就分不出是哪几份了。
+   教学卷名多半两行放得下，所以折两行而不是省略；副标题仍保持一行。 */
+.paper-file { font-size: 13.5px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .paper-meta { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paper-meta.busy { color: var(--accent); }
 .paper-item.failed .paper-meta { color: var(--red); }
