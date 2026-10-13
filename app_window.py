@@ -286,6 +286,10 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
 _SW_MINIMIZE = 6
 _WM_CLOSE = 0x0010
 _CONTROL_NAME = "window-control.json"
+# 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
+# 窗口却要 1.2 秒才缩下去 —— 那是这里一秒一轮询的代价。100ms 一轮，
+# 每轮只多读一个几十字节的 json，可以忽略不计。
+_CONTROL_POLL = 0.1
 # 窗口迟迟不出现就放弃守候，不拖住退出。
 _WINDOW_GRACE = 60.0
 
@@ -363,7 +367,7 @@ def _read_control() -> tuple[str, str] | None:
     return None
 
 
-def watch_window(profile: Path, interval: float = 1.0) -> None:
+def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
     """守着应用窗口，执行页面发来的最小化/关闭。
 
     窗口消失且已经过了宽限期就收工，不会拖住进程退出。
@@ -376,8 +380,12 @@ def watch_window(profile: Path, interval: float = 1.0) -> None:
     stale = _read_control()
     seen: str | None = stale[1] if stale else None
     deadline = time.monotonic() + _WINDOW_GRACE
+    hwnd = 0
     while True:
-        hwnd = _app_window(user32, profile)
+        # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号，每轮都做的话
+        # 一个循环要一秒多，点「最小化」就得等一秒才动。句柄缓存住，只在它失效时才重找。
+        if not hwnd or not user32.IsWindow(hwnd):
+            hwnd = _app_window(user32, profile)
         if not hwnd:
             if time.monotonic() > deadline:
                 return

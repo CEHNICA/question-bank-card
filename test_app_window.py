@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import os
 import shutil
@@ -28,6 +29,13 @@ class DirectSplash:
 
     def run(self, work):
         return work(self)
+
+
+def _record(slot, sequence):
+    """按剧本返回 IsWindow 的答案，同时记住上一次答案，供桩函数判断。"""
+    value = next(sequence, False)
+    slot[0] = value
+    return value
 
 
 class CredentialTests(unittest.TestCase):
@@ -216,8 +224,11 @@ class WindowTests(unittest.TestCase):
             target = root / "window-control.json"
             target.write_text(json.dumps({"action": "close", "nonce": "from-last-run"}), encoding="utf-8")
             seen = []
-            windows = iter([1, 1, 1, 0])
+            windows = iter([1, 1, 0])
             fake_user32 = Mock()
+            # 窗口先活一轮、再失效一次：watch_window 会因此重新定位，直到宽限期结束收工。
+            alive = iter([True, False])
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
 
             def fake_app_window(user32, profile):
                 return next(windows, 0)
@@ -225,16 +236,81 @@ class WindowTests(unittest.TestCase):
             def fake_read_control():
                 return ("close", "from-last-run") if not seen else None
 
+            clock = itertools.count(0, 1)
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
                  patch.object(app_window, "_app_window", side_effect=fake_app_window), \
                  patch.object(app_window, "_read_control", side_effect=fake_read_control), \
                  patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=[0, 0, 0, 0, 1000, 1000]):
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
                 app_window.watch_window(root, interval=0)
             fake_user32.PostMessageW.assert_not_called()
             fake_user32.ShowWindow.assert_not_called()
             self.assertEqual(seen, [], "遗留的请求既不能执行，也不该再被当成待处理的新请求")
+
+    def test_minimize_is_picked_up_quickly_and_the_window_is_looked_up_once(self):
+        # 真机上量到的延迟：请求 20~100ms 就到了，窗口 1.2 秒后才缩下去 —— 每轮轮询都
+        # 重新起一个 PowerShell 进程去定位窗口，一个循环要一秒多。这里把轮询压到 100ms，
+        # 并把窗口句柄缓存住：只在句柄失效时才重新定位。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            served = [0]
+            alive = [False]                       # 上一次 IsWindow 的答案
+            found = []
+            looked_up_while_alive = []
+            # 窗口先活十轮再失效：这十轮里如果每轮都重新定位，就又回到一秒一轮了。
+            alive_sequence = iter([True] * 10 + [False])
+            fake_user32 = Mock()
+            fake_user32.IsWindow.side_effect = lambda hwnd: _record(alive, alive_sequence)
+
+            def fake_app_window(user32, profile):
+                # 句柄明明还有效却又定位了一次 —— 这正是原来一秒多一轮的来源。
+                if alive[0]:
+                    looked_up_while_alive.append(1)
+                found.append(1)
+                return 4242 if len(found) <= 2 else 0
+
+            def fake_read_control():
+                served[0] += 1
+                return ("minimize", "n1") if served[0] == 2 else None
+
+            clock = itertools.count(0, 1)
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
+                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
+                 patch.object(app_window.time, "sleep") as sleep, \
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+                app_window.watch_window(root)
+
+            fake_user32.ShowWindow.assert_called_once_with(4242, app_window._SW_MINIMIZE)
+            self.assertEqual(looked_up_while_alive, [], "句柄还有效时不该重新定位")
+            # 存下来的句柄每轮都要先问它还活着，而不是直接重新定位 —— 不查 IsWindow
+            # 的写法（也就是改动前的写法）会被这一条挡下。
+            self.assertGreaterEqual(fake_user32.IsWindow.call_count, 10)
+            self.assertTrue(sleep.call_args_list, "总得让出时间片")
+            for call in sleep.call_args_list:
+                self.assertLessEqual(call[0][0], 0.25, "轮询间隔太大会让页面按钮看起来没反应")
+
+    def test_the_window_is_looked_up_again_once_it_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alive = iter([True, False, True, False])
+            handles_used = []
+            handles = iter([111, 222])
+            fake_user32 = Mock()
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
+            clock = itertools.count(0, 1)
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=lambda u, p: handles_used.append(next(handles, 0)) or handles_used[-1]), \
+                 patch.object(app_window, "_read_control", return_value=None), \
+                 patch.object(app_window.time, "sleep"), \
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+                app_window.watch_window(root)
+
+            # 句柄还有效时不找；失效后重新定位（111 -> 222），之后再失效就等宽限期收工。
+            self.assertEqual([h for h in handles_used if h], [111, 222])
 
     def test_password_preferences_change_only_the_dedicated_profile_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
