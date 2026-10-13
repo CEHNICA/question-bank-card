@@ -15,32 +15,14 @@
     --radius-lg: 10px;
     background: var(--bg);
   }
-  .library-page .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; border-bottom: 1px solid var(--line); }
-  /* .topnav 隐藏后不再占列。这里按「☰ | 品牌 | 查找与标签管理 | 题目详情 | 窗口控件」
-     显式定位到五列。每一块都必须独占一列：共用列再靠外边距错开会重叠（gap 只在列
-     之间生效，同列内不分），查找区与题目详情共用一列时量出来是 935–1375 与
-     1303–1375 直接压在一起。查找区给它 1fr，窗口才能吃掉剩余宽度。 */
-  .library-page .topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
-  .library-page .topbar > .brand { grid-column: 2; grid-row: 1; justify-self: start; }
-  .library-page .topbar > .library-top-navigation { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 14px; }
-  .library-page .topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
-  .library-page .topbar > .window-controls { grid-column: 5; grid-row: 1; }
+  /* 顶栏骨架（五列 + 窗口控件）与录入终审共用，规则在 styles.css 的 .app-topbar。
+     这里只留题库页自己的部分，别再写一份，否则两页迟早又跑偏。 */
+  .library-page .topbar { border-bottom: 1px solid var(--line); }
   .library-page .brand-text { display: flex; align-items: center; gap: 18px; }
   /* 页面导航由 ☰ 抽屉统一承担（里面已经有录入终审 / 正式题库 / 设置）。
      顶栏这份是同一份 .topnav 的搬运源，宽屏再摆一份只是重复 ——
      页面上看不到自己在哪一节，全靠抽屉里的高亮。 */
   .library-page .topbar > .topnav { display: none; }
-  /* 窗口控件：宿主窗口没有系统标题栏，关闭/最小化由页面自己提供。
-     整条顶栏留出拖拽区（-webkit-app-region），点控件时不触发拖动。 */
-  .window-controls { -webkit-app-region: drag; display: flex; align-items: center; gap: 2px;
-    height: 100%; margin-left: auto; padding-left: 10px; }
-  .window-title { -webkit-app-region: no-drag; display: none; color: var(--muted); font-size: 12px; }
-  .window-button { -webkit-app-region: no-drag; display: inline-flex; align-items: center; justify-content: center;
-    width: 44px; height: 100%; min-height: 32px; padding: 0; border: 0; border-radius: 0;
-    background: none; color: var(--muted); cursor: default; }
-  .window-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; }
-  .window-button:hover { background: var(--bg-sunken); color: var(--ink); }
-  .window-button.window-close:hover { background: #c42b1c; color: #fff; }
   /* 顶栏按内容排布，不再让搜索框顶到 560px 就停：篮子两个动作默认隐藏时，
      原来会在搜索框和标签管理之间留下一大片空白。搜索框吃掉剩余宽度，
      上限放宽，标签管理紧贴在它右边。 */

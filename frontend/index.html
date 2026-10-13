@@ -33,13 +33,15 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
   </svg>
 
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="题有据首页">
+  <header class="topbar app-topbar">
+    <!-- 品牌只作标识，不跳首页：这里已经是当前页，点自己的图标却切走属于误导。
+         页面导航统一收进 ☰ 抽屉（下面的 .topnav 是抽屉的搬运源）。 -->
+    <div class="brand">
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
       </span>
-    </a>
+    </div>
     <nav class="topnav" aria-label="页面" data-drawer="nav">
       <a class="active" href="/" aria-current="page">录入终审</a>
       <a href="/library">正式题库</a>
@@ -47,6 +49,17 @@
     </nav>
     <div class="topbar-tools">
       <span id="engineLine" class="engine-line" hidden></span>
+    </div>
+    <!-- 窗口控件由页面自己画，与正式题库页同一份：宿主窗口去掉系统标题栏后，
+         关闭与最小化只能从这里来，否则这一页没法关窗口。 -->
+    <div class="window-controls" aria-label="窗口">
+      <span class="window-title" aria-hidden="true">题有据</span>
+      <button id="windowMinimize" class="window-button" type="button" title="最小化" aria-label="最小化">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.5h7"/></svg>
+      </button>
+      <button id="windowClose" class="window-button window-close" type="button" title="关闭题有据" aria-label="关闭题有据">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+      </button>
     </div>
   </header>
 
