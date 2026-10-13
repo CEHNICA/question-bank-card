@@ -118,6 +118,8 @@ assert.match(libraryCss, /\.tag-picker-now \{[^}]*max-height: [^;]+;/,
   "the question's own blocks are capped so they cannot push the status bar away");
 assert.match(libraryCss, /\.tag-picker-now \{[^}]*overflow-y: auto;/,
   "long proposal lists scroll inside the dialog");
+assert.match(libraryCss, /#tagPickerDialog \.tag-picker-body \{ min-height: [^;]+; \}/,
+  "the directory keeps a usable height even when the proposals above it are long");
 assert.match(libraryCss, /\.tag-picker-now\[hidden\] \{ display: none; \}/,
   "a hidden block takes no space in batch mode");
 

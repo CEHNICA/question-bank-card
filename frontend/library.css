@@ -913,8 +913,11 @@ body.printing { overflow: hidden; }
 /* The single place a question's tags live: what it already has, what AI proposed,
    and the directory to pick from. It has to scroll on its own, otherwise the blocks
    grow past the dialog and the status bar is pushed off the bottom. */
-.tag-picker-now { display: grid; flex: 0 1 auto; gap: 12px; max-height: 46%; padding: 0 20px 14px; overflow-y: auto; overscroll-behavior: contain; }
+.tag-picker-now { display: grid; flex: 0 1 auto; gap: 12px; max-height: 44%; padding: 0 20px 14px; overflow-y: auto; overscroll-behavior: contain; }
 .tag-picker-now[hidden] { display: none; }
+/* The directory below has to stay usable: picking a tag is the most common thing
+   done here, so it keeps a floor and the blocks above it give up height first. */
+#tagPickerDialog .tag-picker-body { min-height: 190px; }
 .tag-picker-more { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 7px 12px; padding: 12px 20px 12px; border-top: 1px solid var(--line); }
 .tag-picker-block { display: grid; gap: 8px; min-width: 0; }
 .tag-picker-block-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; }
