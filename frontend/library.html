@@ -30,29 +30,39 @@
     <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9.5 5 16 12l-6.5 7"/></symbol>
   </svg>
 
-  <header class="topbar site-header">
-    <a class="brand" href="/" aria-label="题有据首页">
+  <header class="topbar site-header app-topbar">
+    <div class="brand">
       <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">
         <strong>题有据</strong>
-        <span class="library-page-title">正式题库</span>
       </span>
-    </a>
+    </div>
     <nav class="topnav header-nav" aria-label="页面" data-drawer="nav">
       <a class="header-link" href="/">录入终审</a>
       <a class="header-link active" href="/library" aria-current="page">正式题库</a>
       <a class="header-link" href="/settings">设置</a>
     </nav>
+    <!-- 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭/最小化只能从这里来。
+         标题栏不再显示浏览器残留的标题文字，点图标也不再跳回首页。 -->
+    <div class="window-controls" aria-label="窗口">
+      <span class="window-title" aria-hidden="true">题有据</span>
+      <button id="windowMinimize" class="window-button" type="button" title="最小化" aria-label="最小化">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.5h7"/></svg>
+      </button>
+      <button id="windowClose" class="window-button window-close" type="button" title="关闭题有据" aria-label="关闭题有据">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+      </button>
+    </div>
     <nav class="library-top-navigation" aria-label="题库查找与管理">
       <div class="library-search">
         <svg class="icon search-icon" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="searchInput" type="search" placeholder="搜索题干、选项…" title="搜索题干、选项、答案，如 ∠BAD、AB//CD、平行四边形" aria-label="搜索题目" autocomplete="off">
         <kbd class="search-kbd" aria-hidden="true">/</kbd>
       </div>
-      <div class="draft-filters library-top-scope" role="group" aria-label="浏览范围">
-        <button id="allQuestionsButton" class="draft-filter active" type="button" aria-pressed="true">全部题目</button>
-        <button id="basketViewButton" class="draft-filter" type="button" aria-pressed="false">试题篮 <span id="selectedViewCount" class="count">0</span></button>
-      </div>
+      <!-- 试题篮不再占用顶部常驻位置：右边缘把手打开侧栏。
+           只有真正切到「只看篮里」时，这里才出现一条明确的返回条。 -->
+      <button id="allQuestionsButton" class="library-basket-return" type="button" hidden>← 返回全部题目</button>
+      <button id="basketViewButton" class="library-basket-enter" type="button" hidden>只看篮里的 <span id="selectedViewCount" class="count">0</span> 题</button>
       <button id="libraryTagManager" class="library-tag-manager-entry" type="button" title="标签管理" aria-label="标签管理"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>标签管理</span></button>
     </nav>
     <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false" hidden>查找</button><button id="inspectorToggle" class="button quiet small inspector-toggle" type="button" aria-controls="questionInspector" aria-expanded="false" disabled>题目详情</button><button id="libraryKeysButton" class="button quiet small" type="button" data-drawer="tools">快捷键</button></div>
@@ -78,7 +88,10 @@
               <span>来源</span>
               <select id="sourceSelect" aria-label="来源试卷"><option value="">全部试卷</option></select>
             </label>
-            <div id="typeFilters" class="draft-filters" role="group" aria-label="题型"></div>
+            <div class="library-facet">
+              <span class="library-facet-label" id="typeFacetLabel">题型</span>
+              <div id="typeFilters" class="draft-filters" role="group" aria-labelledby="typeFacetLabel"></div>
+            </div>
             <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
             <details id="advancedFilters" class="library-advanced">
               <summary>更多筛选</summary>

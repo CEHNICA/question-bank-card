@@ -15,15 +15,20 @@
     --radius-lg: 10px;
     background: var(--bg);
   }
-  .library-page .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 18px; box-shadow: none; border-bottom: 1px solid var(--line); }
+  /* 顶栏骨架（五列 + 窗口控件）与录入终审共用，规则在 styles.css 的 .app-topbar。
+     这里只留题库页自己的部分，别再写一份，否则两页迟早又跑偏。 */
+  .library-page .topbar { border-bottom: 1px solid var(--line); }
   .library-page .brand-text { display: flex; align-items: center; gap: 18px; }
-  .library-page-title { padding-left: 18px; border-left: 1px solid var(--line); color: var(--ink-2); font-size: 14px; font-weight: 600; }
+  /* 页面导航由 ☰ 抽屉统一承担（里面已经有录入终审 / 正式题库 / 设置）。
+     顶栏这份是同一份 .topnav 的搬运源，宽屏再摆一份只是重复 ——
+     页面上看不到自己在哪一节，全靠抽屉里的高亮。 */
+  .library-page .topbar > .topnav { display: none; }
+  /* 顶栏按内容排布，不再让搜索框顶到 560px 就停：篮子两个动作默认隐藏时，
+     原来会在搜索框和标签管理之间留下一大片空白。搜索框吃掉剩余宽度，
+     上限放宽，标签管理紧贴在它右边。 */
   .library-top-navigation { display: flex; min-width: 0; align-items: center; justify-content: flex-start; gap: 14px; }
-  .library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: 560px; }
+  .library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: none; }
   .library-top-navigation .library-search input { min-height: 34px; border-radius: 6px; font-size: 13px; }
-  .library-top-navigation .library-top-scope { flex: none; width: auto; flex-wrap: nowrap; overflow: visible; gap: 4px; padding: 0; background: none; }
-  .library-top-navigation .draft-filter { white-space: nowrap; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
-  .library-top-navigation .draft-filter.active { background: var(--accent-soft); color: var(--accent-dark); box-shadow: none; }
   .library-top-navigation .library-tag-manager-entry { flex: none; width: auto; min-height: 32px; padding: 6px 9px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; font-size: 12px; }
   .library-top-navigation .library-tag-manager-entry:hover { border-left-color: var(--line); background: var(--accent-soft); }
   .library-page .library-rail,
@@ -155,13 +160,14 @@
   }
   @media (max-width: 979px) {
     .library-page { --topbar-h: 96px; }
-    .library-page .topbar { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
+    .library-page .topbar { grid-template-columns: 32px auto minmax(0, 1fr) auto auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
     .library-page .topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
-    .library-page .topbar > .brand { grid-column: 2; grid-row: 1; }
-    .library-page .topbar > .topbar-tools { grid-column: 3; grid-row: 1; }
+    .library-page .topbar > .brand { display: none; }
+    .library-page .topbar > .library-top-navigation { grid-column: 1 / 5; grid-row: 2; }
+    .library-page .topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
+    .library-page .topbar > .window-controls { grid-column: 5; grid-row: 1; padding-left: 0; }
     .library-top-navigation { grid-column: 1 / -1; grid-row: 2; gap: 8px; }
     .library-top-navigation .library-search { min-width: 90px; max-width: none; }
-    .library-top-navigation .draft-filter { padding: 5px 7px; font-size: 11px; }
     .library-top-navigation .library-tag-manager-entry { padding: 5px 8px; }
     .library-page .library-main { padding: 0 16px 36px; }
     .library-page .library-workspace,
@@ -175,7 +181,6 @@
     .library-page .library-workspace > .question-inspector { grid-column: 1; }
   }
   @media (max-width: 559px) {
-    .library-page-title { display: none; }
     .library-page .library-main { padding-inline: 10px; }
     .library-top-navigation .library-tag-manager-entry { border: 0; padding: 5px; }
     .library-top-navigation .library-tag-manager-entry > span { display: none; }

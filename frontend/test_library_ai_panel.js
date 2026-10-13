@@ -22,8 +22,23 @@ assert.match(libraryHtml, /id="libraryTagManager"/,
   "the formal library owns tag directory management through its dedicated page entry");
 assert.match(libraryJs, /AI 建议标签/,
   "the library exposes an explicit per-question suggestion action");
-assert.match(libraryJs, /当前筛选全部/,
+assert.match(libraryJs, /只处理当前这批/,
   "the library can explicitly queue suggestions for the full current result set");
+// 三个批量按钮以前叫「全库缺少知识点」「当前筛选全部」，看不出差别，
+// 只能靠 784 与 781 相差 3 去猜。名字改成人话，并且每个都必须在悬停时说清
+// 「处理哪些题」和「会消耗额度」，否则下次还会有人点错。
+assert.match(libraryJs, /补齐缺的知识点标签/,
+  "the whole-library batch action says what it fills in");
+assert.match(libraryJs, /补齐缺的参考答案/,
+  "the answer batch action reads as the same kind of sentence");
+assert.match(libraryJs, /tags\.title = apiReady[\s\S]*?不受上面的筛选影响[\s\S]*?消耗额度/,
+  "the whole-library batch action explains its scope and its cost on hover");
+assert.match(libraryJs, /current\.title = apiReady[\s\S]*?只处理你现在筛选出来的这[\s\S]*?消耗额度/,
+  "the current-result batch action explains its scope and its cost on hover");
+assert.match(libraryJs, /answers\.title = apiReady[\s\S]*?消耗额度/,
+  "the answer batch action explains its cost on hover");
+assert.doesNotMatch(libraryJs, /全库缺少知识点|当前筛选全部|原卷无答案题/,
+  "the internal wording is gone from the batch buttons");
 assert.match(libraryJs, /AI 建议待核对/,
   "generated candidates are labeled as pending human review");
 assert.match(libraryJs, /pending.*checkbox|checkbox.*pending/s,

@@ -128,10 +128,13 @@ def check(base):
         expect(first.locator(".library-number")).to_have_text("第 1 题")
         expect(page.locator("#libraryRail")).to_be_hidden()
         header_bottom = page.locator(".topbar").bounding_box()["height"]
-        for key in ["searchInput", "allQuestionsButton", "basketViewButton", "libraryTagManager"]:
+        # 试题篮的两个动作按需出现：默认全部题目视图下都不显示，但必须留在顶栏里。
+        for key in ["searchInput", "libraryTagManager"]:
             expect(page.locator("#" + key)).to_be_visible()
             assert page.locator("#" + key).count() == 1
             assert page.locator("#" + key).bounding_box()["y"] < header_bottom
+        for key in ["allQuestionsButton", "basketViewButton"]:
+            assert page.locator("#" + key).count() == 1
         assert page.locator("#questionInspector").bounding_box()["height"] < 600
         types = page.locator("#typeFilters .draft-filter").evaluate_all("nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))")
         assert len(set(types)) == 1, types
@@ -148,6 +151,7 @@ def check(base):
         page.locator("#clearSelection").click()
         first.get_by_role("button", name="加入试题篮", exact=True).click()
         expect(page.locator("#selectedViewCount")).to_have_text("1")
+        expect(page.locator("#basketViewButton")).to_be_visible()
         page.locator("#basketHandle").click()
         expect(page.locator("#basketPanel")).to_be_visible()
         overflow()

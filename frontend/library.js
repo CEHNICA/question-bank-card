@@ -422,31 +422,48 @@
     }
 
     if (tagsEnabled) {
-      const tags = iconButton("button", "button button-quiet button-small library-tool-action", `全库缺少知识点 · ${missingCount} 题`, "plus");
+      // 按钮名先说「做什么、对谁做」，范围和代价放进悬停说明。
+      // 原来两个按钮名用的是内部说法（全库 / 当前筛选这类词），看不出两条差在哪；
+      // 而两个题数只差 3，光看数字更看不出来。
+      const tags = iconButton("button", "button button-quiet button-small library-tool-action",
+        `补齐缺的知识点标签 · ${missingCount} 题`, "plus");
       tags.dataset.disabledInSelectedView = String(!apiReady);
-      tags.title = apiReady ? "给全库缺少知识点的题生成待核对建议；每题一次 API 调用" : "需要先配置并测试 API";
+      tags.title = apiReady
+        ? `整个题库里还没打知识点标签的题，共 ${missingCount} 道。点一次让 AI 全部补上，不受上面的筛选影响。`
+          + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
+        : "需要先到「设置 → API 配置」里配置并测试通过。";
       tags.addEventListener("click", () => queueJobs("tags", { missing: true }));
       batchActions.push(tags);
-      const current = iconButton("button", "button button-quiet button-small library-tool-action", `当前筛选全部 · ${Number(state.total) || 0} 题`, "plus");
-      current.title = "给当前全部筛选结果生成待核对建议，包括尚未加载到页面的题";
+      const current = iconButton("button", "button button-quiet button-small library-tool-action",
+        `只处理当前这批 · ${Number(state.total) || 0} 题`, "plus");
+      current.title = apiReady
+        ? `只处理你现在筛选出来的这 ${Number(state.total) || 0} 道题，包括还没加载到屏幕上的。`
+          + "想补整个题库请用上面那条。每道题调用一次 AI，会消耗额度。"
+          + "生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
+        : "需要先到「设置 → API 配置」里配置并测试通过。";
       current.dataset.disabledInSelectedView = String(!apiReady || Number(state.total) === 0);
       current.addEventListener("click", async () => {
         const count = Number(state.total) || 0;
         const filters = currentFilterPayload();
         if (!count) { toast("当前筛选没有题目。", "error"); return; }
         const confirmed = await confirmDialog({
-          title: "为当前筛选全部生成标签建议？",
-          text: `本次会固定处理全部 ${count} 道匹配题目，包括尚未加载到页面的题。每题会调用一次已配置的 API 并使用服务额度；结果只进入待核对，不会直接贴到题目。开始后再改变筛选不会扩大本次范围。`,
-          ok: "开始生成建议"
+          title: `给当前这批 ${count} 道题生成标签建议？`,
+          text: `只处理当前筛选出来的 ${count} 道题，包括还没显示在屏幕上的；想补整个题库请用上面那条。`
+            + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，不会直接贴到题目上。"
+            + "开始之后再改筛选，也不会扩大这次的范围。",
+          ok: "开始生成"
         });
         if (confirmed) queueJobs("tags", { scope: "current_filter", filters });
       });
       batchActions.push(current);
     }
     if (state.features.ai_answer) {
-      const answers = iconButton("button", "button button-quiet button-small library-tool-action", "原卷无答案题 · 生成参考答案", "plus");
+      const answers = iconButton("button", "button button-quiet button-small library-tool-action", "补齐缺的参考答案", "plus");
       answers.dataset.disabledInSelectedView = String(!apiReady);
-      answers.title = apiReady ? "为原卷没有答案的题生成 AI 参考答案" : "需要先配置并测试 API";
+      answers.title = apiReady
+        ? "原卷里没有答案的题，让 AI 生成一个参考答案。每道题调用一次 AI，会消耗额度。"
+          + "生成的答案标着「AI 参考 · 未核对」，和原卷答案分开存放。"
+        : "需要先到「设置 → API 配置」里配置并测试通过。";
       answers.addEventListener("click", () => queueJobs("answer", { missing: true }));
       batchActions.push(answers);
     }
@@ -469,8 +486,9 @@
       batch.append(summary);
       const body = node("div", "library-batch-ai-body");
       body.append(node("p", "helper", apiReady
-        ? "会按题调用已配置的 API；标签任务只生成待核对建议，不会直接贴标。"
-        : "先到“设置 → API 配置”完成配置和测试，再使用这些批量操作。"));
+        ? "这几项都会让 AI 逐题处理、消耗额度。生成的知识点标签只是建议，要你逐条核对确认后才贴到题目上；"
+          + "鼠标放在按钮上会说明它处理哪些题。点之前建议先看一眼题数。"
+        : "需要先到「设置 → API 配置」里配置并测试通过，才能用这几项。"));
       const actions = node("div", "library-tool-actions");
       actions.append(...batchActions);
       body.append(actions);
@@ -2391,10 +2409,14 @@
     ui.basketCount.textContent = String(state.basket.length);
     ui.basketButton.hidden = !state.basket.length;
     ui.basketButton.disabled = state.basketLoading;
-    $("allQuestionsButton").setAttribute("aria-pressed", String(state.view === "all"));
-    $("allQuestionsButton").classList.toggle("active", state.view === "all");
-    $("basketViewButton").setAttribute("aria-pressed", String(state.view === "selected"));
-    $("basketViewButton").classList.toggle("active", state.view === "selected");
+    // 顶部不再常驻「全部题目 / 试题篮」这一对切换按钮：篮子由右边缘把手打开。
+// 「只看篮里的题」是少数才需要的能力，只在篮子非空时露出；返回条只在篮里视图出现。
+const selectedView = state.view === "selected";
+const returnButton = $("allQuestionsButton"), enterButton = $("basketViewButton");
+returnButton.hidden = !selectedView;
+enterButton.hidden = selectedView || !state.basket.length;
+enterButton.setAttribute("aria-pressed", String(selectedView));
+$("selectedViewCount").textContent = String(state.basket.length);
     const counts = {}, sources = new Set();
     const list = $("basketList");
     list.replaceChildren();

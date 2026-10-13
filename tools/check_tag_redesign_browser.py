@@ -156,12 +156,11 @@ def check(base):
         for control in ("#sourceSelect", "#typeFilters", "#sortSelect", "#advancedFilters"):
             expect(page.locator(control)).to_be_visible()
             assert page.locator(control).evaluate("node => !!node.closest('#libraryFilterBar')"), control
+        # 试题篮的两个动作不再进侧栏，也不在筛选行里：默认隐藏，按需出现在顶栏。
         for control in ("#allQuestionsButton", "#basketViewButton"):
-            expect(page.locator(control)).to_be_visible()
-            assert page.locator(control).evaluate("node => !!node.closest('#libraryRail')"), control
-        for control in ("#sourceSelect", "#typeFilters", "#sortSelect", "#advancedFilters"):
+            expect(page.locator(control)).to_be_hidden()
             assert not page.locator(control).evaluate("node => !!node.closest('#libraryRail')"), control
-        assert not page.locator("#allQuestionsButton").evaluate("node => !!node.closest('#libraryFilterBar')")
+            assert not page.locator(control).evaluate("node => !!node.closest('#libraryFilterBar')"), control
         filter_height = page.locator(".library-bulk").evaluate("node => node.offsetHeight")
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")
@@ -217,8 +216,15 @@ def check(base):
         # API-consuming tasks without starting one or hiding quick filters.
         batch_tools.locator("summary").click()
         expect(batch_tools).to_have_attribute("open", "")
-        expect(batch_tools.get_by_role("button", name=re.compile("全库缺少知识点"))).to_be_visible()
-        expect(batch_tools.get_by_role("button", name=re.compile("当前筛选全部"))).to_be_visible()
+        expect(batch_tools.get_by_role("button", name=re.compile("补齐缺的知识点标签"))).to_be_visible()
+        expect(batch_tools.get_by_role("button", name=re.compile("只处理当前这批"))).to_be_visible()
+        # 每个批量按钮都要在悬停时说清「处理哪些题」和「会消耗额度」，
+        # 名字再短，光看名字仍然可能点错。
+        for name in ("补齐缺的知识点标签", "只处理当前这批"):
+            title = batch_tools.get_by_role("button", name=re.compile(name)).get_attribute("title")
+            assert "消耗额度" in (title or ""), f"{name} 的悬停说明没有提到会消耗额度：{title}"
+        assert "筛选" in (batch_tools.get_by_role(
+            "button", name=re.compile("补齐缺的知识点标签")).get_attribute("title") or "")
         assert queued_requests == [], queued_requests
         capture("tag-batch-tools.png")
         batch_tools.locator("summary").click()

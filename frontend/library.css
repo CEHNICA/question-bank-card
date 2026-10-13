@@ -417,8 +417,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-filterbar { position: relative; z-index: 21; display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 8px;
   margin-bottom: 8px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-size: 12.5px; }
 .library-filterbar > .draft-filters { flex: none; }
-.library-filterbar > #typeFilters { flex: 1 1 300px; min-width: min(100%, 300px); gap: 2px; padding: 3px; }
-.library-filterbar > #typeFilters .draft-filter { flex: none; padding: 5px 8px; white-space: nowrap; }
+/* 「来源」和「题型」是两个正交维度，原来两个「全部」并排看着像同一个东西。
+   给题型补一个可见标签，视觉层级就和「来源」对齐了。 */
+.library-facet { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.library-facet-label { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.library-facet > .draft-filters { flex: 1 1 auto; min-width: 0; }
+/* 顶部不再常驻视图切换：篮子由右边缘把手打开，这里只放偶尔出现的两个动作。 */
+.library-basket-return, .library-basket-enter { align-self: center; min-height: 30px; padding: 5px 11px; border: 1px solid var(--line-strong);
+  border-radius: 9px; background: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.library-basket-return:hover, .library-basket-enter:hover { border-color: var(--accent); color: var(--ink); }
+.library-basket-return:focus-visible, .library-basket-enter:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+.library-basket-enter .count { font-variant-numeric: tabular-nums; }
+.library-filterbar > .library-facet { flex: 1 1 300px; min-width: min(100%, 300px); }
+.library-filterbar #typeFilters { gap: 2px; padding: 3px; }
+.library-filterbar #typeFilters .draft-filter { flex: none; padding: 5px 8px; white-space: nowrap; }
 .library-filterbar .library-select { gap: 6px; white-space: nowrap; }
 .library-filterbar .library-select select { max-width: 190px; }
 .library-filterbar > .library-advanced { margin-left: auto; }
@@ -549,7 +561,8 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   .library-filterbar { gap: 6px; }
   .library-filterbar .library-select span { display: none; }
   .library-filterbar .library-select select { max-width: min(155px, 42vw); padding-left: 8px; }
-  .library-filterbar > #typeFilters { min-width: 100%; }
+  .library-filterbar > .library-facet { min-width: 100%; }
+  .library-filterbar > .library-facet .library-facet-label { display: none; }
   .library-advanced[open] > .library-filters { width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }
   .library-card-meta { gap: 6px; }
   .library-source { white-space: normal; overflow-wrap: anywhere; flex-basis: calc(100% - 28px); }
