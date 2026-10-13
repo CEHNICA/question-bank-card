@@ -258,16 +258,21 @@ class LibraryTagHierarchyTests(TestCase):
         self.assertEqual(response.json()["matches"], {str(p1.pk): True, str(p2.pk): False})
         self.assertEqual(response.json()["total"], 1)
 
-    def test_hierarchy_edit_stales_pending_ai_and_can_be_undone(self):
+    def test_hierarchy_edit_keeps_pending_ai_reviewable_and_can_be_undone(self):
         a, b = self.tag("函数"), self.tag("二次函数")
         p = self.publication()
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, taxonomy_revision=library_tagging.catalogue_state().revision,
+        revision = library_tagging.catalogue_state().revision
+        suggestion = LibraryTagSuggestion.objects.create(publication=p, taxonomy_revision=revision,
             status="pending", suggestions=[{"tag_id": str(a.pk), "kind": "knowledge"}])
         result = self.parents(b, a)
-        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "stale")
+        moved = library_tagging.catalogue_state().revision
+        self.assertGreater(moved, revision)
+        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "pending")
+        self.assertEqual(suggestion.taxonomy_revision, moved)
         library_tagging.undo_catalogue_operation(LibraryTagOperation.objects.get(pk=result["operation_id"]))
         self.assertFalse(LibraryTagRelation.objects.exists())
-        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "stale")
+        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "pending")
+        self.assertEqual(suggestion.taxonomy_revision, library_tagging.catalogue_state().revision)
 
     def test_new_ai_candidate_missing_parent_retains_pending_and_no_creation(self):
         self.tag("函数")

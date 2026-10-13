@@ -1285,14 +1285,7 @@ def catalogue_mutation(payload: dict) -> dict:
         stale_suggestions = LibraryTagSuggestion.objects.filter(taxonomy_revision=revision,
             status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
                         LibraryTagSuggestion.Status.PENDING])
-        stale_job_ids = list(stale_suggestions.exclude(job_id=None).values_list("job_id", flat=True))
-        stale_suggestions.update(
-                status=LibraryTagSuggestion.Status.STALE, resolved_at=timezone.now(),
-                message="标签目录已变化；旧建议保留在 AI 标签记录中。", updated_at=timezone.now())
-        LibraryJob.objects.filter(pk__in=stale_job_ids,
-            status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING]).update(
-                status=LibraryJob.Status.FAILED, error="标签目录已变化，旧任务已取消。",
-                updated_at=timezone.now())
+        _rebase_after_catalogue_change(stale_suggestions, new_revision)
         operation = LibraryTagOperation.objects.create(
             client_request_id=request_id, request_hash=digest, action="catalogue:" + action,
             before_snapshot={**before, "relations": before_relations},
@@ -1300,6 +1293,54 @@ def catalogue_mutation(payload: dict) -> dict:
             catalogue_revision=new_revision)
     return {"ok": True, "operation_id": str(operation.pk), "revision": new_revision,
             "catalogue": _catalogue_rows()}
+
+
+def _split_by_catalogue_damage(candidates):
+    """Split pending proposals into the ones a catalogue change broke and the ones it did not.
+
+    A proposal only points at labels through the identifiers stored on each of its own
+    entries: the label it wants to attach, and the label it wants to sit under. It goes
+    stale when one of those is gone or no longer in use. Everything else - adding a
+    label, renaming one, regrouping the tree - leaves it exactly as reviewable as before,
+    and retiring the whole queue for that is what made the review impossible to work
+    through: one new label threw away several hundred questions' worth of pending
+    decisions. Untouched proposals are re-stamped onto the new revision instead.
+    """
+    alive = {str(tag.pk): tag for tag in LibraryTag.objects.all()}
+    broken, intact = [], []
+    for pk, entries in candidates.values_list("id", "suggestions"):
+        damage = False
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            referenced = [entry.get("tag_id")] + list(entry.get("parent_ids") or [])
+            for tag_id in referenced:
+                if not tag_id:
+                    continue
+                tag = alive.get(str(tag_id))
+                if tag is None or not tag.active:
+                    damage = True
+        (broken if damage else intact).append(pk)
+    return broken, intact
+
+
+def _rebase_after_catalogue_change(candidates, new_revision):
+    """Keep proposals that survive a catalogue change actionable; retire the ones it broke."""
+    broken, intact = _split_by_catalogue_damage(candidates)
+    if broken:
+        stale_rows = LibraryTagSuggestion.objects.filter(pk__in=broken)
+        stale_job_ids = list(stale_rows.exclude(job_id=None).values_list("job_id", flat=True))
+        stale_rows.update(
+            status=LibraryTagSuggestion.Status.STALE, resolved_at=timezone.now(),
+            message="标签目录已变化；旧建议保留在 AI 标签记录中。", updated_at=timezone.now())
+        LibraryJob.objects.filter(pk__in=stale_job_ids,
+            status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING]).update(
+            status=LibraryJob.Status.FAILED, error="标签目录已变化，旧任务已取消。",
+            updated_at=timezone.now())
+    if intact:
+        LibraryTagSuggestion.objects.filter(pk__in=intact).update(taxonomy_revision=new_revision,
+                                                                  updated_at=timezone.now())
+    return len(broken), len(intact)
 
 
 def assignments_view(request, publication_id):
@@ -1713,6 +1754,12 @@ def undo_catalogue_operation(operation):
             raise TaggingError("此类目录操作不能撤销", 409)
         if "relations" in before:
             _restore_relations(before["relations"])
+        # Undo only ever moves the catalogue forward in revision, so every still-pending
+        # proposal would be left stamped on a revision that no longer exists and could
+        # never be accepted again. Re-align them against the restored directory.
+        _rebase_after_catalogue_change(LibraryTagSuggestion.objects.filter(
+            status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
+                        LibraryTagSuggestion.Status.PENDING]), expected + 1)
         operation.undone_at = timezone.now()
         operation.save(update_fields=["undone_at"])
     return {"ok": True, "revision": expected + 1, "message": "目录操作已撤销", "catalogue": _catalogue_rows()}
@@ -2003,14 +2050,7 @@ def resolve_suggestion(suggestion_id, payload):
                 taxonomy_revision=suggestion.taxonomy_revision - 1,
                 status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
                             LibraryTagSuggestion.Status.PENDING])
-            stale_jobs = list(stale_suggestions.exclude(job_id=None).values_list("job_id", flat=True))
-            stale_suggestions.update(
-                    status=LibraryTagSuggestion.Status.STALE, resolved_at=timezone.now(),
-                    message="标签目录已变化；旧建议保留在 AI 标签记录中。", updated_at=timezone.now())
-            LibraryJob.objects.filter(pk__in=stale_jobs,
-                status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING]).update(
-                    status=LibraryJob.Status.FAILED, error="标签目录已变化，旧任务已取消。",
-                    updated_at=timezone.now())
+            _rebase_after_catalogue_change(stale_suggestions, suggestion.taxonomy_revision)
         _bump_publication(publication, expected)
         suggestion.assignment_revision = expected + 1
         suggestion.suggestions = entries

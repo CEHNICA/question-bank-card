@@ -426,6 +426,26 @@ class FormalLibraryTaggingTests(TestCase):
         library_tagging.undo_catalogue_operation(operation)
         self.assertFalse(LibraryTag.objects.filter(pk=tag.pk).exists())
 
+    def test_only_proposals_pointing_at_a_retired_label_are_swept(self):
+        state = library_tagging.catalogue_state()
+        kept, doomed = self.tag("仍然在用的标签"), self.tag("被停用的标签")
+        survivor = self.suggestion(self.publication(), [{"tag_id": str(kept.pk), "name": kept.name}])
+        casualty = self.suggestion(self.publication(), [{"tag_id": str(doomed.pk), "name": doomed.name}])
+        library_tagging.catalogue_mutation({"action": "create_tag", "name": "顺手新建的标签", "kind": "custom",
+            "revision": state.revision, "request_id": str(uuid.uuid4())})
+        after_add = library_tagging.catalogue_state().revision
+        self.assertGreater(after_add, state.revision)
+        for proposal in (survivor, casualty):
+            proposal.refresh_from_db()
+            self.assertEqual(proposal.status, LibraryTagSuggestion.Status.PENDING)
+            self.assertEqual(proposal.taxonomy_revision, after_add)
+        library_tagging.catalogue_mutation({"action": "deactivate_tag", "tag_id": str(doomed.pk),
+            "revision": after_add, "request_id": str(uuid.uuid4())})
+        survivor.refresh_from_db(); casualty.refresh_from_db()
+        self.assertEqual(survivor.status, LibraryTagSuggestion.Status.PENDING)
+        self.assertEqual(survivor.taxonomy_revision, library_tagging.catalogue_state().revision)
+        self.assertEqual(casualty.status, LibraryTagSuggestion.Status.STALE)
+
     def test_batch_undo_refuses_to_overwrite_a_later_edit(self):
         first, second = self.publication(), self.publication()
         a, b = self.tag("批量甲"), self.tag("批量乙")
