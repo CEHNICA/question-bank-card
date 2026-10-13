@@ -165,6 +165,36 @@ class WindowTests(unittest.TestCase):
             # 少了这个线程，标题栏不会被去掉，而页面按钮又还关不掉窗口。
             self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
 
+    def test_a_control_file_left_by_the_previous_run_is_not_replayed(self):
+        # 上一次运行留下的控制文件必须当成「已处理」。否则新窗口一打开就会被
+        # 上一次的「关闭」立刻关掉 —— 这条真机上撞过一次。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "window-control.json"
+            target.write_text(json.dumps({"action": "close", "nonce": "from-last-run"}), encoding="utf-8")
+            seen = []
+            windows = iter([1, 1, 1, 0])
+            fake_user32 = Mock()
+            # 样式里没有标题栏：让去标题栏那一段跳过去，这一条只测控制文件。
+            fake_user32.GetWindowLongW.return_value = 0
+
+            def fake_app_window(user32, profile):
+                return next(windows, 0)
+
+            def fake_read_control():
+                return ("close", "from-last-run") if not seen else None
+
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
+                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
+                 patch.object(app_window.time, "sleep"), \
+                 patch.object(app_window.time, "monotonic", side_effect=[0, 0, 0, 0, 1000, 1000]):
+                app_window.watch_window(root, interval=0)
+            fake_user32.PostMessageW.assert_not_called()
+            fake_user32.ShowWindow.assert_not_called()
+            self.assertEqual(seen, [], "遗留的请求既不能执行，也不该再被当成待处理的新请求")
+
     def test_password_preferences_change_only_the_dedicated_profile_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

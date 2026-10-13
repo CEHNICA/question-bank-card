@@ -362,7 +362,10 @@ def watch_window(profile: Path, interval: float = 1.0) -> None:
     user32 = _user32()
     if user32 is None:
         return
-    seen: str | None = None
+    # 上一次运行可能留下了控制文件（上次没关窗口、或关到一半）。那一条是上一次
+    # 的请求，这次不能再执行一遍 —— 否则新窗口一开就被上一轮的「关闭」关掉。
+    stale = _read_control()
+    seen: str | None = stale[1] if stale else None
     deadline = time.monotonic() + _CAPTION_GRACE
     while True:
         hwnd = _app_window(user32, profile)
