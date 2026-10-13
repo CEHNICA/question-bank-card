@@ -269,12 +269,135 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------- 窗口外观与控制
+
+# 宿主窗口不带系统标题栏：页面顶部留了拖拽区（-webkit-app-region: drag），
+# 最小化与关闭由页面右上角自绘。
+#
+# 去掉标题栏之后那两个按钮就成了唯一的窗口控制入口，所以窗口动作必须同时做出来 ——
+# 只去掉标题栏会得到一个关不掉的软件。浏览器没有「最小化/关闭本窗口」的脚本接口
+# （window.close() 对命令行 --app 打开的窗口无效），因此网页只写一个控制文件，
+# 由这里去操作真正的窗口句柄。
+#
+# 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
+_GWL_STYLE = -16
+_WS_CAPTION = 0x00C00000
+_SWP_FRAMECHANGED = 0x0020
+_SW_MINIMIZE = 6
+_WM_CLOSE = 0x0010
+_CONTROL_NAME = "window-control.json"
+# 去掉标题栏只在这段时间里重试：窗口迟迟不出现就放弃，不拖住退出。
+_CAPTION_GRACE = 40.0
+
+
+def control_file() -> Path:
+    """页面与启动器之间唯一约定的控制文件。两端各自算出路径但指向同一个：
+    启动器把自己的 DATA_ROOT 通过 QB_DATA_ROOT 传给了服务进程。"""
+    return launcher.DATA_ROOT / _CONTROL_NAME
+
+
+def _user32():
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        return ctypes.windll.user32
+    except Exception:  # noqa: BLE001 - 拿不到 Win32 就保持原样，不让启动器崩溃
+        return None
+
+
+def _browser_pids(profile: Path) -> set[int]:
+    """命令行里带着这个配置目录的浏览器进程号。窗口可能被交给一个已经在运行的
+    浏览器进程，不能只看自己 spawn 出来的那个 pid。"""
+    marker = str(profile).replace("'", "''")
+    script = ("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
+              f"Where-Object {{ $_.CommandLine -like '*{marker}*' }} | ForEach-Object {{ $_.ProcessId }}")
+    try:
+        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                                capture_output=True, text=True, timeout=20, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    return {int(line) for line in (result.stdout or "").split() if line.strip().isdigit()}
+
+
+def _app_window(user32, profile: Path) -> int:
+    """应用窗口的句柄；还没出现就返回 0。"""
+    import ctypes
+
+    pids = _browser_pids(profile)
+    if not pids:
+        return 0
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_size_t)
+    def collect(handle, _):
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+        if pid.value in pids and user32.IsWindowVisible(handle):
+            found.append(int(handle))
+            return False
+        return True
+
+    user32.EnumWindows(collect, 0)
+    return found[0] if found else 0
+
+
+def _read_control() -> tuple[str, str] | None:
+    """控制文件里的 (动作, nonce)。文件不存在、被写坏或缺字段都当没有。"""
+    try:
+        data = json.loads(control_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("action"), str) and isinstance(data.get("nonce"), str):
+        return data["action"], data["nonce"]
+    return None
+
+
+def watch_window(profile: Path, interval: float = 1.0) -> None:
+    """守着应用窗口：去掉系统标题栏，并执行页面发来的最小化/关闭。
+
+    窗口消失且已经过了宽限期就收工，不会拖住进程退出。
+    """
+    user32 = _user32()
+    if user32 is None:
+        return
+    seen: str | None = None
+    deadline = time.monotonic() + _CAPTION_GRACE
+    while True:
+        hwnd = _app_window(user32, profile)
+        if not hwnd:
+            if time.monotonic() > deadline:
+                return
+            time.sleep(interval)
+            continue
+        if time.monotonic() < deadline:
+            style = int(user32.GetWindowLongW(hwnd, _GWL_STYLE))
+            if style & _WS_CAPTION and user32.SetWindowLongW(hwnd, _GWL_STYLE, style & ~_WS_CAPTION):
+                # 去掉标题栏后边框不会自己重算，得让窗口重新算一次。
+                user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                                    _SWP_FRAMECHANGED | 0x1 | 0x2 | 0x4 | 0x10)
+        request = _read_control()
+        if request is not None and request[1] != seen:
+            action, seen = request
+            if action == "minimize":
+                user32.ShowWindow(hwnd, _SW_MINIMIZE)
+            elif action == "close":
+                user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
+            else:
+                seen = None          # 不认识的动作不执行，也不当成已处理
+        time.sleep(interval)
+
+
 def open_window(url: str) -> subprocess.Popen | None:
     browsers = browser_candidates()
     if not browsers:
         webbrowser.open_new_tab(url)
         return None
-    return subprocess.Popen(window_command(browsers[0], url, window_profile()), creationflags=CREATE_NO_WINDOW)
+    profile = window_profile()
+    web = subprocess.Popen(window_command(browsers[0], url, profile), creationflags=CREATE_NO_WINDOW)
+    threading.Thread(target=watch_window, args=(profile,), daemon=True).start()
+    return web
 
 
 def _profile_still_open(profile: Path) -> bool:

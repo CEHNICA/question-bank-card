@@ -128,6 +128,43 @@ class WindowTests(unittest.TestCase):
             self.assertIs(preferences["credentials_enable_service"], False)
             self.assertIs(preferences["credentials_enable_autosignin"], False)
 
+    def test_control_file_sits_where_the_web_service_will_look_for_it(self):
+        # 去掉系统标题栏之后，页面那两个按钮是唯一的窗口控制入口。两端约定的控制
+        # 文件必须同名：启动器按 launcher.DATA_ROOT 算，服务按 settings.DATA_ROOT 算，
+        # 而 launcher.DATA_ROOT 正是它通过 QB_DATA_ROOT 传给服务进程的那个值。
+        self.assertEqual(app_window.control_file().name, "window-control.json")
+        self.assertEqual(app_window.control_file().parent, app_window.launcher.DATA_ROOT)
+        service = (app_window.ROOT / "backend" / "core" / "window_control.py").read_text(encoding="utf-8")
+        self.assertIn('CONTROL_NAME = "window-control.json"', service)
+
+    def test_a_broken_control_file_is_ignored_instead_of_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(app_window.launcher, "DATA_ROOT", root):
+                self.assertIsNone(app_window._read_control())
+                target = app_window.control_file()
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("{不是 JSON", encoding="utf-8")
+                self.assertIsNone(app_window._read_control())
+                target.write_text(json.dumps({"action": "minimize"}), encoding="utf-8")
+                self.assertIsNone(app_window._read_control(), "缺少 nonce 时不当作一条新请求")
+                target.write_text(json.dumps({"action": "minimize", "nonce": "abc"}), encoding="utf-8")
+                self.assertEqual(app_window._read_control(), ("minimize", "abc"))
+
+    def test_opening_the_window_starts_the_thread_that_removes_the_caption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            browser = Path(tmp) / "msedge.exe"
+            browser.parent.mkdir(parents=True, exist_ok=True)
+            browser.write_bytes(b"")
+            with patch.object(app_window, "browser_candidates", return_value=[browser]), \
+                 patch.object(app_window, "window_profile", return_value=Path(tmp) / "profile"), \
+                 patch.object(app_window.subprocess, "Popen", return_value=Mock()) as popen, \
+                 patch.object(app_window.threading, "Thread") as thread:
+                app_window.open_window("http://127.0.0.1:8768")
+            self.assertEqual(popen.call_args.args[0][1], "--app=http://127.0.0.1:8768")
+            # 少了这个线程，标题栏不会被去掉，而页面按钮又还关不掉窗口。
+            self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
+
     def test_password_preferences_change_only_the_dedicated_profile_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
