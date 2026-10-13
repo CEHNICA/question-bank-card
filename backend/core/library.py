@@ -32,11 +32,12 @@ OPTION_KEYS = ("A", "B", "C", "D", "E")
 BASE_OPTION_KEYS = ("A", "B", "C", "D")
 
 
-def option_content(options: dict | None) -> dict:
+def option_content(options: dict | None, *, plain: bool = False) -> dict:
     options = options or {}
-    content = {key: options.get(key, "") for key in BASE_OPTION_KEYS}
+    text = prose.plain_markup if plain else (lambda value: value)
+    content = {key: text(options.get(key, "")) for key in BASE_OPTION_KEYS}
     if str(options.get("E") or "").strip():
-        content["E"] = options["E"]
+        content["E"] = text(options["E"])
     return content
 REVIEWABLE_STATES = {Question.State.GREEN, Question.State.YELLOW}
 
@@ -110,15 +111,18 @@ def final_content(question: Question) -> dict:
     is_choice = question.question_type in CHOICE_TYPES or bool(question.options)
     source_origin = "manual" if question.start_source == "manual" or question.regions != question.regions_auto \
         else question.start_source
+    # 入库版是要印给人看的，所以这里再清一次识读标记。早于清理规则的旧题，
+    # 题卡里留着“**做一做**”“<!-- Image(268, 493, 650, 637) -->”这样的原文，
+    # 审核时看得见原样，印出去的卷子上不该有它们。题卡本身一个字不改。
     content = {
         "number": question.number,
-        "section": question.section,
+        "section": prose.plain_markup(question.section or ""),
         "question_type": question.question_type,
-        "stem": question.stem,
-        "options": option_content(question.options) if is_choice else {},
-        "answer": question.answer or "",
-        "analysis": question.analysis or "",
-        "origin": question.origin or "",
+        "stem": prose.plain_markup(question.stem or ""),
+        "options": option_content(question.options, plain=True) if is_choice else {},
+        "answer": prose.plain_markup(question.answer or ""),
+        "analysis": prose.plain_markup(question.analysis or ""),
+        "origin": prose.plain_markup(question.origin or ""),
         "figures": [_content_figure(f) for f in question.figures],
         "sources": [
             {"page_idx": r["page_idx"], "bbox": r["bbox"], "type": "text", "source": source_origin}

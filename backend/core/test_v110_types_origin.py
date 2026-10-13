@@ -333,6 +333,60 @@ class OriginHashTests(TempDataMixin, TestCase):
         self.assertNotEqual(library.content_hash(library.final_content(question)), library.content_hash(content))
 
 
+class PublishedMarkupTests(TempDataMixin, TestCase):
+    """旧题的题卡里还留着识读标记：题卡保留原样，印出去的卷子上不能有。
+
+    真实样本是《数学九年级上册》的题卡：卷面上印着
+    “**做一做**图3-7是二次函数…<!-- Image (268, 493, 650, 637) -->图3-7”。
+    """
+
+    def setUp(self):
+        self.use_temp_data()
+        self.paper = self.make_paper()
+
+    def approve(self, question):
+        question.approved = True
+        question.approved_at = timezone.now()
+        question.save()
+        question = Question.objects.select_related("paper").get(pk=question.pk)
+        question.approved_content_hash = library.approval_hash(question)
+        question.save()
+        return question
+
+    def test_the_printed_copy_drops_reading_marks_and_the_card_keeps_them(self):
+        stem = "**做一做**\n画出图象。\n<!-- Image (268, 493, 650, 637) -->\n图3-7"
+        question = self.approve(self.card(self.paper, question_type="free_response", stem=stem,
+                                          answer="**一元二次方程**", analysis="**读一读**\n看这里。",
+                                          origin="**2026** 滕州", section="**随堂练习**"))
+        publication, _created = library.publish(question)
+
+        self.assertEqual(publication.content["stem"], "做一做\n画出图象。\n\n图3-7")
+        self.assertEqual(publication.content["answer"], "一元二次方程")
+        self.assertEqual(publication.content["analysis"], "读一读\n看这里。")
+        self.assertEqual(publication.content["origin"], "2026 滕州")
+        self.assertEqual(publication.content["section"], "随堂练习")
+        # 题卡一个字不改，审核时还能看见原样，也还能自己改。
+        question.refresh_from_db()
+        self.assertEqual(question.stem, stem)
+        self.assertEqual(question.answer, "**一元二次方程**")
+        # 印出去的版本与内容哈希对得上，导出时不会被判成「原文与入库版不一致」。
+        self.assertEqual(publication.content_hash, library.content_hash(publication.content))
+        self.assertTrue(library.approval_is_current(question))
+
+    def test_choice_options_are_cleaned_the_same_way(self):
+        question = self.approve(self.card(self.paper, question_type="single_choice",
+                                          stem="选一个。", options={"A": "**甲**", "B": "乙", "C": "", "D": ""}))
+        publication, _created = library.publish(question)
+        self.assertEqual(publication.content["options"]["A"], "甲")
+        question.refresh_from_db()
+        self.assertEqual(question.options["A"], "**甲**")
+
+    def test_a_card_without_marks_is_untouched(self):
+        question = self.approve(self.card(self.paper, question_type="free_response", stem=TIDY_STEM))
+        content = library.final_content(question)
+        self.assertEqual(content["stem"], TIDY_STEM)
+
+
 class TidySavedCardsTests(TempDataMixin, TestCase):
     def setUp(self):
         self.use_temp_data()
