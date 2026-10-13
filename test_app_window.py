@@ -123,7 +123,10 @@ class WindowTests(unittest.TestCase):
             self.assertIn("--app=http://127.0.0.1:8768", command)
             self.assertIn(f"--user-data-dir={profile}", command)
             self.assertIn("--profile-directory=Default", command)
-            self.assertIn("--start-maximized", command)
+            # --kiosk 才是没有标题栏的窗口：--app 自带的那个标题栏是浏览器自己画在客户区
+            # 里的，Win32 摘 WS_CAPTION 对它无效，真机上摘完屏幕上那条窄条仍然在。
+            self.assertIn("--kiosk", command)
+            self.assertNotIn("--start-maximized", command)
             preferences = json.loads((profile / "Default" / "Preferences").read_text(encoding="utf-8"))
             self.assertIs(preferences["credentials_enable_service"], False)
             self.assertIs(preferences["credentials_enable_autosignin"], False)
@@ -151,7 +154,7 @@ class WindowTests(unittest.TestCase):
                 target.write_text(json.dumps({"action": "minimize", "nonce": "abc"}), encoding="utf-8")
                 self.assertEqual(app_window._read_control(), ("minimize", "abc"))
 
-    def test_opening_the_window_starts_the_thread_that_removes_the_caption(self):
+    def test_opening_the_window_starts_the_thread_that_watches_window_controls(self):
         with tempfile.TemporaryDirectory() as tmp:
             browser = Path(tmp) / "msedge.exe"
             browser.parent.mkdir(parents=True, exist_ok=True)
@@ -162,8 +165,48 @@ class WindowTests(unittest.TestCase):
                  patch.object(app_window.threading, "Thread") as thread:
                 app_window.open_window("http://127.0.0.1:8768")
             self.assertEqual(popen.call_args.args[0][1], "--app=http://127.0.0.1:8768")
-            # 少了这个线程，标题栏不会被去掉，而页面按钮又还关不掉窗口。
+            # 少了这个线程，页面右上角那两个按钮点了没反应，窗口就关不掉了。
             self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
+
+    def test_the_app_window_is_the_biggest_one_not_the_first_in_z_order(self):
+        # 这些浏览器进程同时还开着「无法更新 Microsoft Edge」之类的小气泡窗。按 Z 序
+        # 取第一个会挑中它们，最小化和关闭就作用到了错的窗口上。
+        with tempfile.TemporaryDirectory() as tmp:
+            import ctypes
+
+            profile = Path(tmp)
+            bubbles = [(1234, (0, 0, 506, 202)), (5678, (0, 0, 1024, 700))]
+            app = (9012, (0, 0, 1938, 1038))
+            rects = dict(bubbles + [app])
+
+            class FakeRect(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+            class FakeUser32:
+                def IsWindowVisible(self, handle):
+                    return handle in rects
+
+                def GetWindowThreadProcessId(self, handle, byref):
+                    byref._obj.value = 7
+                    return 1
+
+                def GetWindowRect(self, handle, byref):
+                    left, top, right, bottom = rects[handle]
+                    byref._obj.left, byref._obj.top = left, top
+                    byref._obj.right, byref._obj.bottom = right, bottom
+                    return True
+
+                def EnumWindows(self, callback, _):
+                    # 真实的 EnumWindows 在回调返回 False 时就停。
+                    for handle in (bubbles[0][0], bubbles[1][0], app[0]):
+                        if not callback(handle, 0):
+                            break
+                    return True
+
+            fake = FakeUser32()
+            with patch.object(app_window, "_browser_pids", return_value={7}):
+                self.assertEqual(app_window._app_window(fake, profile), app[0])
 
     def test_a_control_file_left_by_the_previous_run_is_not_replayed(self):
         # 上一次运行留下的控制文件必须当成「已处理」。否则新窗口一打开就会被
@@ -175,8 +218,6 @@ class WindowTests(unittest.TestCase):
             seen = []
             windows = iter([1, 1, 1, 0])
             fake_user32 = Mock()
-            # 样式里没有标题栏：让去标题栏那一段跳过去，这一条只测控制文件。
-            fake_user32.GetWindowLongW.return_value = 0
 
             def fake_app_window(user32, profile):
                 return next(windows, 0)
