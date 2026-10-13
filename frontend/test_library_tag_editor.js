@@ -88,7 +88,8 @@ assert.match(managerJs, /impact\?action=merge_tags_batch[\s\S]*?impact_token: im
   "bulk merging checks full-library impact before submitting");
 assert.match(libraryJs, /tag-suggestion-actions/, "AI suggestions require an explicit human action");
 assert.match(libraryJs, /采纳所选建议/, "AI results become formal only through explicit acceptance");
-assert.match(libraryJs, /全部 \$\{count\} 道匹配题目/, "Current-filter AI work confirms the full result count before queueing");
+assert.match(libraryJs, /当前筛选出来的 \$\{count\} 道题/, "Current-filter AI work confirms the full result count before queueing");
+assert.match(libraryJs, /消耗额度/, "the confirmation states the quota cost before a bulk AI run is queued");
 assert.match(libraryJs, /scope: "current_filter"/, "Current-filter AI tasks keep their explicit scope");
 assert.match(libraryJs, /旧标签待核对/, "Unmapped legacy relationships remain visible for cleanup");
 assert.match(libraryHtml, /包含全部[\s\S]*包含任一[\s\S]*排除这些/, "The library exposes all/any/exclusion tag matching");

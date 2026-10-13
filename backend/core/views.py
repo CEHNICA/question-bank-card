@@ -3367,7 +3367,7 @@ def library_jobs_view(request):
         return _error("retry 应为 true 或 false")
     if payload.get("scope") == "current_filter":
         if kind != LibraryJob.Kind.TAGS or not isinstance(payload.get("filters"), dict):
-            return _error("当前筛选全部只支持标签建议，并需要完整筛选条件")
+            return _error("只处理当前这批只支持知识点标签建议，并需要完整的筛选条件")
         from . import library_browse
         allowed = {"q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not",
                    "tag_mode", "untagged_knowledge", "tag_review"}

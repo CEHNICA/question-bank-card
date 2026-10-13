@@ -216,8 +216,15 @@ def check(base):
         # API-consuming tasks without starting one or hiding quick filters.
         batch_tools.locator("summary").click()
         expect(batch_tools).to_have_attribute("open", "")
-        expect(batch_tools.get_by_role("button", name=re.compile("全库缺少知识点"))).to_be_visible()
-        expect(batch_tools.get_by_role("button", name=re.compile("当前筛选全部"))).to_be_visible()
+        expect(batch_tools.get_by_role("button", name=re.compile("补齐缺的知识点标签"))).to_be_visible()
+        expect(batch_tools.get_by_role("button", name=re.compile("只处理当前这批"))).to_be_visible()
+        # 每个批量按钮都要在悬停时说清「处理哪些题」和「会消耗额度」，
+        # 名字再短，光看名字仍然可能点错。
+        for name in ("补齐缺的知识点标签", "只处理当前这批"):
+            title = batch_tools.get_by_role("button", name=re.compile(name)).get_attribute("title")
+            assert "消耗额度" in (title or ""), f"{name} 的悬停说明没有提到会消耗额度：{title}"
+        assert "筛选" in (batch_tools.get_by_role(
+            "button", name=re.compile("补齐缺的知识点标签")).get_attribute("title") or "")
         assert queued_requests == [], queued_requests
         capture("tag-batch-tools.png")
         batch_tools.locator("summary").click()
