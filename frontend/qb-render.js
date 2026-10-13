@@ -571,7 +571,10 @@
     value = value.replace(/([^\n])\n(?=([^\n]))/g, (all, a, b, offset) => {
       const rest = value.slice(offset + 2);
       const hard = /^[（(]?\d+[)）.．、]/.test(rest) || /^[（(][一二三四五六七八九十]/.test(rest) || /^[①②③④⑤⑥⑦⑧⑨⑩]/.test(rest);
-      if (hard) return `${a}\n`;
+      // 「又」「而」「则」领着下一步推理：上一行已经用句末标点收尾时，换行必须
+      // 留在它前面，否则这一步会被并进上一行，而连接词自己吊在上一行末尾
+      // （「…∴ OA = OC。又」）。上一行不是句末（识读稿的软换行）时照旧并成一段。
+      if (hard || (/[\u3002\uff0c\uff1b\uff1a\uff1f\uff01\u3001]/.test(a) && /^[又而则]/.test(rest))) return `${a}\n`;
       return CJK.test(a) || CJK.test(b) ? a : `${a} `;
     });
     value = value.replace(/ (?=[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff])|(?<=[\u3000-\u303f\uff00-\uffef\u4e00-\u9fff]) /g, "");
@@ -960,6 +963,22 @@
       } else {
         displayGroup = "";
         displayGroupNode = null;
+      }
+      // 几何证明的每一步都单起一行：∵ … / ∴ …。
+      // tidyText 会吃掉「汉字 + 换行 + 汉字」这种换行（识读稿里的软换行不该
+      // 真的分段），而 ∵/∴ 前面多半也是汉字——于是每一步推理都被并进上一行，
+      // 整段证明压成流水账。这里在段的边界上把它补回来：只看离本段最近的换行，
+      // 以及它和本段之间夹着什么（只容许空格；「又」由 tidyText 自己留换行）。
+      // 不动任何段内下标，所以差异高亮的偏移不受影响。
+      if (segment.type === "math" && !segment.displayGroup) {
+        const previous = index > 0 ? segments[index - 1] : null;
+        const before = previous ? source.slice(previous.start, segment.start) : "";
+        const head = source.slice(segment.start, segment.end);
+        const breakAt = before.lastIndexOf("\n");
+        const gap = breakAt >= 0 ? before.slice(breakAt + 1) : null;
+        if (gap !== null && /^[\s\u3000]*$/.test(gap) && /^\s*[∵∴]/.test(head)) {
+          target.append(document.createElement("br"));
+        }
       }
       const overlapping = marks.filter((mark) => mark.end > segment.start && mark.start < segment.end);
       if (segment.type === "parallelogram") {
