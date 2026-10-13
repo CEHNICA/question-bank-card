@@ -95,14 +95,34 @@
         return;
       }
       if (child.nodeType !== 1) return;
-      const whole = child.matches(atomic) || (child.matches(".qb-options, .qb-figures, .qb-option") && outerHeight(child) <= pageHeight);
+      // 图组不进这个名单：一整组图跟页面一样高的时候，整组当一块就永远放不下
+      // （真实样本：九上第 227 题，六张图合起来 985px，页高 986px），二分找不到任何
+      // 能放下的片段，整卷导出直接失败。组里每张图各自不许拆，组与组之间可以分页。
+      // 选项反过来：一条选项列表被拆到两页比放不下更难读，所以仍按整块算。
+      const whole = child.matches(atomic) || (child.matches(".qb-options, .qb-option") && outerHeight(child) <= pageHeight);
       if (whole) {
-        out.push({ node: child.parentNode, offset: Array.prototype.indexOf.call(child.parentNode.childNodes, child) + 1 });
+        const index = Array.prototype.indexOf.call(child.parentNode.childNodes, child);
+        // 整块前面也要留一个可断点。一整块图表常常「自己放得下、跟着前面的文字就放不下」
+        // （真实样本：九上第 227 题，六张图合起来 961px，加上一行文字就超过一页）。
+        // 没有这个断点时二分找不到任何能放下的片段，整卷导出直接失败，
+        // 而整块照旧不许拆——该分的是分页，不是这块图本身。
+        const before = { node: child.parentNode, offset: index };
+        const last = out[out.length - 1];
+        if (!last || last.node !== before.node || last.offset !== before.offset) out.push(before);
+        out.push({ node: child.parentNode, offset: index + 1 });
       } else Array.from(child.childNodes).forEach(visit);
     }
     Array.from(content.childNodes).forEach(visit);
     out.push({ node: content, offset: content.childNodes.length });
     return out;
+  }
+  // 报不出一句「哪道题」的话，老师就得自己一题题试。
+  function describe(node) {
+    if (node.matches?.(".print-question")) {
+      const number = String(node.querySelector(".qb-number")?.textContent || node.dataset.questionId || "?").replace(/\.$/, "");
+      return `第 ${number} 题`;
+    }
+    return node.matches?.(".print-answer-row") ? "答题区" : "分区标题";
   }
   function fragment(node, points, from, to, continued) {
     const range = node.ownerDocument.createRange();
@@ -233,7 +253,7 @@
       function add(node, h) { body.append(node); used += h; }
       function atomic(node) {
         const h = height(node);
-        if (h > BODY_HEIGHT + 1) throw new Error("有图表或公式高于一页 A4，请调整字号或导出 Word 排版");
+        if (h > BODY_HEIGHT + 1) throw new Error(`${describe(node)}有图表或公式高于一页 A4，请调整字号或导出 Word 排版`);
         if (used && used + h > BODY_HEIGHT + .5) newPage();
         add(node, h);
       }
@@ -295,7 +315,7 @@
             else high = middle - 1;
           }
           if ((best === start || (!continued && bestHeight < 42)) && used) { newPage(); continue; }
-          if (best === start) throw new Error("有完整公式或图表无法放进 A4，请调整字号或导出 Word 排版");
+          if (best === start) throw new Error(`${describe(node)}有完整公式或图表无法放进 A4，请调整字号或导出 Word 排版`);
           const piece = fragment(node, points, start, best, continued);
           if (!piece.textContent.trim() && !piece.querySelector("img, .print-answer-space")) { start = best; continue; }
           add(piece, bestHeight); start = best; continued = true;

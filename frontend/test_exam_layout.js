@@ -61,7 +61,9 @@ const label = new DomNode("strong", doc); label.textContent = "1.";
 const body = new DomNode("div", doc); const first = new DomNode("div", doc), second = new DomNode("div", doc);
 first.className = second.className = "qb-analysis"; first.textContent = "第 4 步完整横排正文"; second.textContent = "第 5 步完整横排正文";
 body.append(first, second); row.append(label, body);
-const context = { element: (owner, tag, className, text) => { const value = owner.createElement(tag); value.className = className; value.textContent = text; return value; } };
+const measured = new WeakMap();
+const context = { element: (owner, tag, className, text) => { const value = owner.createElement(tag); value.className = className; value.textContent = text; return value; },
+  outerHeight: (node) => measured.get(node) || 0 };
 vm.createContext(context); vm.runInContext(source.slice(source.indexOf("  function boundaries("), source.indexOf("  async function paginate(")), context);
 const points = context.boundaries(row, 900);
 assert.equal(points[0].node, body); assert.equal(points.at(-1).node, body, "Answer splitting must stay inside the wide body cell");
@@ -73,6 +75,71 @@ for (const continued of [false, true]) {
   assert.equal(part.lastElementChild.textContent, first.textContent + second.textContent);
 }
 console.log("Long answer fragments retain one full-width body cell and preserve every paragraph: OK");
+
+// A figure row that fills a page must still be able to move on: the real sample is
+// 九上第 227 题, a row of six figures measuring 985px on a 986px page. Treating
+// the row as one unbreakable block leaves the binary search with nothing that
+// fits, and the whole paper export fails. Each figure stays whole; the row may
+// break between them.
+{
+  const doc = { createElement: tag => new DomNode(tag, doc) };
+  const question = new DomNode("div", doc); question.className = "print-question";
+  const stem = new DomNode("div", doc); stem.className = "qb-stem";
+  const body = new DomNode("span", doc); body.className = "qb-stem-body";
+  body.append({ nodeType: 3, textContent: "如图，画出图象。" });
+  stem.append(body);
+  const row = new DomNode("div", doc); row.className = "qb-figures";
+  const pictures = [new DomNode("figure", doc), new DomNode("figure", doc)];
+  pictures.forEach(picture => { picture.className = "qb-figure"; measured.set(picture, 600); });
+  row.append(...pictures);
+  question.append(stem, row);
+  measured.set(row, 1200);
+
+  // boundaries() 在 vm 里跑，返回的数组原型属于那个 realm；assert/strict 的
+  // deepEqual 会比原型，直接比必然红。先在本地 realm 取成普通数组再比。
+  const rowOffsets = points => { const out = []; for (const point of Array.from(points)) if (point.node === row) out.push(point.offset); return out; };
+  assert.deepEqual(rowOffsets(context.boundaries(question, 900)), [0, 1, 2],
+    "两张图之间要留断点：图本身不拆，图与图之间可以分页，整组不能被当成一块");
+  // 一组本来就放得下的小图也照旧只在图之间留断点——分不分页由放不放得下决定。
+  measured.set(row, 400); measured.set(pictures[0], 200); measured.set(pictures[1], 200);
+  assert.deepEqual(rowOffsets(context.boundaries(question, 900)), [0, 1, 2]);
+  console.log("A figure row splits between its figures instead of failing the whole export: OK");
+}
+
+// 一整块图表常常「自己放得下、跟在它前面的文字就放不下」。没有块前断点时，
+// 二分找不到任何能放下的片段，整卷导出直接失败。整块照旧不许拆，该分的是分页。
+{
+  const doc = { createElement: tag => new DomNode(tag, doc) };
+  const question = new DomNode("div", doc); question.className = "print-question";
+  const stem = new DomNode("div", doc); stem.className = "qb-stem";
+  stem.append({ nodeType: 3, textContent: "如图，已知 AB = 5cm，请用量角器量出 ∠A 的度数，并写出做法。" });
+  const picture = new DomNode("figure", doc); picture.className = "qb-figure"; measured.set(picture, 900);
+  question.append(stem, picture);
+  // 收尾断点和最后一条断点会重合（同一 node 同一 offset），对分页没影响，断言看去重后的。
+  const offsetsOf = (points, owner) => [...new Set(Array.from(points, point => point.node === owner ? point.offset : -1))].filter(offset => offset >= 0);
+  assert.deepEqual(offsetsOf(context.boundaries(question, 986), question), [0, 1, 2], "文字后面跟一张高图，图前面要能分页；图本身仍不许拆");
+  console.log("A whole block keeps a break point in front of it: OK");
+}
+
+// 报错要指出是哪道题，否则老师只能一题题自己试。
+{
+  const doc = { createElement: tag => new DomNode(tag, doc) };
+  const question = new DomNode("div", doc); question.className = "print-question"; question.dataset.questionId = "1150";
+  const number = new DomNode("span", doc); number.className = "qb-number"; number.textContent = "227.";
+  question.append(number);
+  assert.equal(context.describe(question), "第 227 题", "报错要念出卷面上印的题号，不是数据库主键");
+  const answerRow = new DomNode("div", doc); answerRow.className = "print-answer-row";
+  assert.equal(context.describe(answerRow), "答题区");
+  const heading = new DomNode("div", doc); heading.className = "print-section";
+  assert.equal(context.describe(heading), "分区标题");
+  // 只测 describe() 证明不了「报错真的用上了它」。两道「放不下」的出口都要点名，
+  // 而且必须是紧跟在 throw new Error( 后面的模板字面量——挪到别处或注释里都不算数。
+  const layoutThrows = source.match(/throw new Error\(`[^`]*(?:高于一页 A4|无法放进 A4)[^`]*`\)/g) || [];
+  assert.equal(layoutThrows.length, 2, "两道放不下的报错出口各一处，少一处就有一道题还会报不出题号");
+  for (const text of layoutThrows) assert.match(text, /throw new Error\(`\$\{describe\(node\)\}/,
+    "报错要念出题号：${describe(node)} 必须紧跟在 throw new Error( 后面");
+  console.log("Export failures name the question on paper: OK");
+}
 
 // Explicit vertical must win over the renderer's compact default, including
 // picture-only options and a fifth real choice; labels/content stay untouched.
