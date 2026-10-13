@@ -1200,6 +1200,9 @@ FLAG_SHARED_FIGURE = "原卷注明多道题共用配图，已补入对应题卡�
 FLAG_OPTION_ASSIGNMENT_CONFLICT = "印刷选项标签与识读的配图归属不一致，请核对对应选项"
 FLAG_WITHDRAWN_FIGURE = "自动撤下了疑似手写的配图（整幅没有一笔印刷内容）；若原卷确实印了这张图，请点“配图”框回来"
 FLAG_DOUBTFUL_FIGURE = "这张配图整幅没有一笔印刷内容，像是学生写上去的；请确认要不要删掉"
+FLAG_SLOTTED_NON_CHOICE = (
+    "这不是选择题，但有配图被分到 A/B/C/D 选项里，成品卷上会凭空印出这些字母；"
+    "请把这些图改挂到题干下，或把本题改成选择题")
 DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE, FLAG_FIGURE_CLAIM_CONFLICT,
                             FLAG_SHARED_FIGURE, FLAG_OPTION_ASSIGNMENT_CONFLICT,
                             FLAG_WITHDRAWN_FIGURE, FLAG_DOUBTFUL_FIGURE})

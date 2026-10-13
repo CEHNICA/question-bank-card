@@ -6,7 +6,7 @@
 这些判据其实只跟卡上已有的范围、题型、旗标有关，跟重切没有半点关系——
 却只能等一次全量重切才补得上，一次几分钟到十几分钟，还要重新读一遍题。
 
-    manage.py reconcile_flags                    # 五条都补（与重切时的行为一致）
+    manage.py reconcile_flags                    # 六条都补（与重切时的行为一致）
     manage.py reconcile_flags --only fill_blank,anchor
     manage.py reconcile_flags --paper 数学九年级上册.pdf
 
@@ -17,6 +17,11 @@
 （回原书看那一行印在哪、谁罩着它，而不是量范围宽窄），命中从 6 张变成 9 张。
 2026-11-04 加了第五条（caption）：教材在图的正下方印一行「图 4-1」，切图只圈了
 图形本身，编号差几 pt 落在框外。全库命中 42 张、4.3 秒，全在两本教材，试卷零命中。
+2026-10-14 加了第六条（slotted）：不是选择题，配图却被分到了 A/B/C/D/E 槽。
+两条导出路都照槽印字母（Word 的 `_write_question` 每个 ABCDE 槽都写一个
+``f"{letter}. "`，PDF 的 `LibraryQuestion` 同理），跟题型无关。全库命中 1 张：
+九上第 1 题 #1426，8 张视图配 4 个物体的配对填空题，成品卷上凭空多出 A. B. C. D.，
+而题干说的括号没有，学生当四选一做但原题根本不是选择题。
 
 ⚠️ 「几何挂图」那条在存量卡上误报明显：22 张里 18 张原本是绿卡，
 抽 3 张（#786/#1083/#1121）导成品卷看纸面，图都紧跟题干、位置正确。
@@ -40,8 +45,9 @@ CHECKS = {
     "fill_blank": ("题型标成填空题却没有空格", pipeline.reconcile_fill_blank_slot_flags),
     "subitem": ("小问排成两栏、只读到了左栏", pipeline.reconcile_subitem_column_flags),
     "caption": ("题干点名的图号被切在配图框外", pipeline.reconcile_figure_caption_flags),
+    "slotted": ("非选择题却把图挂进了 A~D 选项槽", pipeline.reconcile_slotted_figure_flags),
 }
-ORDER = ("geometric", "anchor", "fill_blank", "subitem", "caption")
+ORDER = ("geometric", "anchor", "fill_blank", "subitem", "caption", "slotted")
 
 
 class Command(BaseCommand):

@@ -212,6 +212,48 @@ class ReconcileFlagsCommandTests(TestCase):
             figures=[{"slot": "stem", "page_idx": 1, "source": "auto",
                       "bbox": normalized_box(175, 400, 265, 640)}])
 
+        # 九上第 1 题 #1426：配对填空题，4 个物体被分到了 A~D 槽。
+        # 成品卷上凭空多出 A. B. C. D.，题干说的括号却没有——做不出来。
+        self.slotted = self.card(
+            stem="根据下列主视图和俯视图，分别找出所对应的物体，"
+                 "并将视图的序号填在相应物体下面的括号里：",
+            regions=[{"page_idx": 0, "bbox": [40, 90, 490, 320]}],
+            question_type="fill_blank",
+            figures=[{"slot": "stem", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(50, 350, 150, 450)},
+                     {"slot": "A", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(60, 500, 130, 600)},
+                     {"slot": "D", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(330, 500, 400, 600)}])
+        # 真的是选择题：四个选项各配一张图，正是 A~D 槽的用法，不该报。
+        self.choice_slotted = self.card(
+            stem="下列图形中，是主视图的是（　　）",
+            regions=[{"page_idx": 0, "bbox": [40, 90, 490, 320]}],
+            question_type="single_choice",
+            options={"A": "甲", "B": "乙", "C": "丙", "D": "丁"},
+            figures=[{"slot": "A", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(60, 500, 130, 600)},
+                     {"slot": "D", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(330, 500, 400, 600)}])
+        # 题型标成填空题、卡上却留着选项文字：``final_content`` 按「有选项文字」
+        # 照样印选项行，字母不是凭空来的。不该报。
+        self.slotted_with_option_text = self.card(
+            stem="下列说法正确的是（　　）",
+            regions=[{"page_idx": 0, "bbox": [40, 90, 490, 320]}],
+            question_type="fill_blank",
+            options={"A": "甲", "B": "乙"},
+            figures=[{"slot": "A", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(60, 500, 130, 600)}])
+        # 填空题 + 图挂在题干下，没有字母要印。不该报。
+        # 题干里得有个真的填空位，否则它会踩「填空题却没有空格」那条，
+        # 两条判据混在一起，这条负例就说明不了自己守的是哪一条。
+        self.stem_slotted = self.card(
+            stem="如图，△ABC 中，$AB=5$，则 $\\angle A=$ ______。",
+            regions=[{"page_idx": 0, "bbox": [40, 90, 490, 320]}],
+            question_type="fill_blank",
+            figures=[{"slot": "stem", "page_idx": 0, "source": "auto",
+                      "bbox": normalized_box(175, 400, 265, 640)}])
+
     def card(self, **values):
         self.counter += 1
         base = dict(
@@ -233,12 +275,13 @@ class ReconcileFlagsCommandTests(TestCase):
 
     # -- 五条判据的接线 ---------------------------------------------------
 
-    def test_each_of_the_five_reaches_its_own_card(self):
+    def test_each_of_the_six_reaches_its_own_card(self):
         self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_fill_blank_slot_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_subitem_column_flags(self.paper), 2)
         self.assertEqual(pipeline.reconcile_figure_caption_flags(self.paper), 2)
+        self.assertEqual(pipeline.reconcile_slotted_figure_flags(self.paper), 1)
 
         rows = self.stored()
         self.assertIn(figure_policy.FLAG_FIGURE_OUTSIDE_RANGE, rows[self.geometric.pk][1])
@@ -397,6 +440,87 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertEqual(self.stored()[self.real_blank.pk],
                          (Question.State.GREEN, []))
 
+    # -- 第六条：非选择题却把图挂进了 A~E 选项槽 ----------------------------
+
+    def slotted_flags(self, card):
+        return [f for f in Question.objects.get(pk=card.pk).flags
+                if f == figure_policy.FLAG_SLOTTED_NON_CHOICE]
+
+    def test_a_non_choice_card_with_slotted_figures_is_named(self):
+        """两条导出路都照槽印字母，跟题型无关——所以只在 slot 上判断。"""
+        self.assertEqual(pipeline.reconcile_slotted_figure_flags(self.paper), 1)
+
+        self.assertEqual(len(self.slotted_flags(self.slotted)), 1)
+        self.assertIn("凭空印出", self.slotted_flags(self.slotted)[0])
+        self.assertEqual(self.stored()[self.slotted.pk][0], Question.State.YELLOW)
+
+    def test_a_real_choice_question_with_slotted_figures_is_left_alone(self):
+        """选择题的选项本来就配图，A~D 槽是正确用法。"""
+        self.run_command()
+
+        self.assertEqual(self.slotted_flags(self.choice_slotted), [])
+        self.assertEqual(self.stored()[self.choice_slotted.pk],
+                         (Question.State.GREEN, []))
+
+    def test_option_text_on_the_card_means_the_letters_are_not_invented(self):
+        """题型写成填空题、卡上却留着选项文字时，``final_content`` 照样印选项行，
+        字母有出处。口径必须跟渲染器一致，不能只看题型。"""
+        self.run_command()
+
+        self.assertEqual(self.slotted_flags(self.slotted_with_option_text), [])
+        self.assertEqual(self.stored()[self.slotted_with_option_text.pk],
+                         (Question.State.GREEN, []))
+
+    def test_a_figure_hung_under_the_stem_prints_no_letter(self):
+        self.run_command()
+
+        self.assertEqual(self.slotted_flags(self.stem_slotted), [])
+        self.assertEqual(self.stored()[self.stem_slotted.pk], (Question.State.GREEN, []))
+
+    def test_the_slotted_hint_is_never_written_twice(self):
+        self.run_command()
+        self.run_command()
+
+        self.assertEqual(len(self.slotted_flags(self.slotted)), 1)
+
+    def test_a_card_a_person_already_checked_is_not_flagged(self):
+        """人工核对过就是人的决定，提示不该推翻它。"""
+        self.slotted.approved = True
+        self.slotted.save()
+
+        self.assertEqual(pipeline.reconcile_slotted_figure_flags(self.paper), 0)
+        self.assertEqual(self.stored()[self.slotted.pk], (Question.State.GREEN, []))
+
+    def test_the_criterion_agrees_with_the_renderer_on_what_counts_as_a_choice(self):
+        """判据必须和 ``library.final_content`` 用同一个口径，否则纸面上照样出问题。"""
+        from . import library
+
+        for card in (self.slotted, self.choice_slotted, self.slotted_with_option_text,
+                     self.stem_slotted, self.real_blank):
+            self.assertEqual(pipeline.renders_as_choice(card),
+                             library.final_content(card)["question_type"] in library.CHOICE_TYPES
+                             or bool(library.final_content(card)["options"]),
+                             card.pk)
+
+    def test_the_end_of_segmenting_really_calls_these_criteria(self):
+        """判据本身测得再细，接线断了测试也不会知道——上面六条改坏全红，
+        把这一行删掉却一条都不红（实测 2026-10-14）。
+
+        只看 ``segment_paper`` 的函数体，而且要求那几行是**真的调用**：
+        行首除了空白不能有 ``#``，否则一句注释就能骗过去。
+        """
+        import inspect
+
+        import re
+
+        body = inspect.getsource(pipeline.segment_paper)
+        for name in ("reconcile_geometric_figure_flags", "reconcile_anchor_reading_flags",
+                     "reconcile_fill_blank_slot_flags", "reconcile_slotted_figure_flags"):
+            with self.subTest(name):
+                self.assertTrue(
+                    re.search(rf"^[ \t]*{name}\(paper\)[ \t]*$", body, re.M),
+                    f"segment_paper 末尾没有真正调用 {name}")
+
     # -- 1) --list 不许写库 ----------------------------------------------
 
     def test_list_only_writes_nothing_at_all(self):
@@ -414,6 +538,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertIn("题型标成填空题却没有空格：命中 1 张", preview)
         self.assertIn("小问排成两栏、只读到了左栏：命中 2 张", preview)
         self.assertIn("题干点名的图号被切在配图框外：命中 2 张", preview)
+        self.assertIn("非选择题却把图挂进了 A~D 选项槽：命中 1 张", preview)
 
     def test_list_only_says_the_library_was_left_alone(self):
         self.assertIn("库没有改动", self.run_command("--list"))
@@ -430,6 +555,7 @@ class ReconcileFlagsCommandTests(TestCase):
         self.assertIn("题型标成填空题却没有空格：命中 0 张", second)
         self.assertIn("小问排成两栏、只读到了左栏：命中 0 张", second)
         self.assertIn("题干点名的图号被切在配图框外：命中 0 张", second)
+        self.assertIn("非选择题却把图挂进了 A~D 选项槽：命中 0 张", second)
 
     def test_a_flag_is_never_written_twice(self):
         self.run_command()
@@ -467,15 +593,18 @@ class ReconcileFlagsCommandTests(TestCase):
             self.run_command("--paper", "没有这份卷子.pdf")
 
     def test_a_real_run_reports_how_many_cards_were_recoloured(self):
-        self.assertIn("绿卡 16 → 10", self.run_command())
+        self.assertIn("绿卡 20 → 13", self.run_command())
 
-        # 变黄的就这六张，剩下十张不该被顺手染上——单张图缺个编号不算大事。
+        # 变黄的就这七张，剩下十三张不该被顺手染上——单张图缺个编号不算大事。
         rows = self.stored()
         yellow = sorted(q.pk for q in Question.objects.all() if rows[q.pk][0] == Question.State.YELLOW)
         self.assertEqual(yellow, sorted([
             self.geometric.pk, self.anchor.pk, self.no_slot.pk,
-            self.two_column.pk, self.short_column.pk, self.two_captions.pk]))
+            self.two_column.pk, self.short_column.pk, self.two_captions.pk,
+            self.slotted.pk]))
         for card in (self.kept_caption, self.wide_gap, self.taken,
                      self.neighbour, self.absent_caption, self.far_caption,
-                     self.sentence_caption, self.wrong_side, self.real_blank):
+                     self.sentence_caption, self.wrong_side, self.real_blank,
+                     self.choice_slotted, self.slotted_with_option_text,
+                     self.stem_slotted):
             self.assertEqual(rows[card.pk][0], Question.State.GREEN, card.pk)

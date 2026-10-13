@@ -3119,6 +3119,7 @@ def segment_paper(paper: Paper) -> None:
     # 过这句话，而 25 张现在符合判据的卡一条都没挂（其中 5 张还是绿的）。
     reconcile_anchor_reading_flags(paper)
     reconcile_fill_blank_slot_flags(paper)
+    reconcile_slotted_figure_flags(paper)
 
 
 def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
@@ -3149,6 +3150,59 @@ def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
         if not qtypes.fill_blank_without_slot(question.question_type, question.stem):
             continue
         question.flags = [*(question.flags or []), qtypes.FLAG_FILL_NO_SLOT]
+        if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+            question.state = Question.State.YELLOW
+        if not dry_run:
+            _invalidate_approval(question)
+            question.save()
+        changed += 1
+    return changed
+
+
+# 配图被分到 A/B/C/D/E 槽时，两条导出路都会在那个位置印出字母，不管题型是什么。
+# 非选择题拿到这样的槽，成品卷上就凭空多出一组 A. B. C. D.，而原卷从来没有过。
+SLOT_OPTION_KEYS = frozenset({"A", "B", "C", "D", "E"})
+
+
+def renders_as_choice(question: Question) -> bool:
+    """这道题印在卷面上会不会带选项行。口径跟 ``library.final_content`` 一致：
+    题型是选择题、或者卡上留着选项文字，任一条成立就算。"""
+    return question.question_type in qtypes.CHOICE_TYPES or bool(question.options)
+
+
+def reconcile_slotted_figure_flags(paper: Paper, dry_run: bool = False) -> int:
+    """把「非选择题却把配图挂进了 A~E 选项槽」这条兜底补回存量卡。
+
+    配图带槽的语义是「这张图是选项 A/B/C/D 的一张」，两条导出路都照办：
+    Word 在 ``_write_question`` 里给每个 ABCDE 槽都写一个 ``f"{letter}. "``，
+    PDF 的 ``LibraryQuestion`` 同理。**它不看题型**——这是有意的，因为选择题的
+    图确实要印字母。
+
+    真实样本：数学九上第 1 题 #1426「根据下列主视图和俯视图，分别找出所对应的
+    物体，并将视图的序号填在相应物体下面的括号里」。原书上是 8 张视图加 4 个
+    物体、物体下面各有一个括号，识读把 4 个物体分到了 A~D 槽。成品卷上就变成
+
+        13. 根据下列主视图和俯视图……填在相应物体下面的括号里：（8 张视图）
+        13.（续）A.〔物体〕 B.〔物体〕 C.〔物体〕 D.〔物体〕
+
+    学生会当成四选一去做，可原题是配对填空，括号也没有——这道题印出来做不出来。
+
+    真库实测（2026-10-14，959 张）：**命中 1 张，零误报**，就是上面这张。
+    人工改过字、人工核对过、已经通过的卡一律跳过（那是人的决定），已经挂着
+    这句话的也跳过。只提示，不擅自改题型、不动配图。
+    """
+    changed = 0
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        if _figure_decision_protected(question):
+            continue
+        if figure_policy.FLAG_SLOTTED_NON_CHOICE in (question.flags or []):
+            continue
+        if renders_as_choice(question):
+            continue
+        if not any(str(figure.get("slot") or "stem") in SLOT_OPTION_KEYS
+                   for figure in question.figures or []):
+            continue
+        question.flags = [*(question.flags or []), figure_policy.FLAG_SLOTTED_NON_CHOICE]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
         if not dry_run:
