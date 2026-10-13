@@ -401,6 +401,8 @@
     batchBox.replaceChildren();
     const missingCount = Number(state.tagWork?.untagged_knowledge) || 0;
     const pendingCount = Number(state.tagWork?.pending_review) || 0;
+    const actionableCount = Number(state.tagWork?.pending_actionable) || 0;
+    const outdatedCount = Number(state.tagWork?.outdated_suggestions) || 0;
     const apiReady = state.ai.mode === "api" && state.ai.api_ready === true;
     const tagsEnabled = state.features.knowledge_tags === true;
     const batchActions = [];
@@ -409,6 +411,12 @@
     if (pendingCount || state.tagReview) {
       const pending = iconButton("button", `button button-quiet button-small library-tool-action${state.tagReview ? " active" : ""}`,
         `AI 建议待核对 · ${pendingCount} 题`, "search");
+      // 这个数字原来把「现在就能采纳」和「旧版遗留、对不上现在的标签库」混在一起，
+      // 看上去是一堆待办，点进去却几乎一步都走不了。分开说清楚，数目才不作假。
+      pending.title = outdatedCount
+        ? `这 ${pendingCount} 道题有 AI 建议，其中 ${actionableCount} 道现在就能采纳。`
+          + `另外 ${outdatedCount} 道对不上现在的标签库，或者题目后来改过标签，需要重新生成才能采纳。`
+        : `这 ${pendingCount} 道题有 AI 建议等你核对，采纳之后才会真的贴到题目上。`;
       pending.setAttribute("aria-pressed", String(state.tagReview));
       pending.addEventListener("click", () => { state.tagReview = !state.tagReview; syncUrl(); load(); });
       quickActions.push(pending);
@@ -1720,6 +1728,15 @@
       try { await loadTagCatalogue(); } catch (error) { toast(error.message + " 请先载入目录再采纳新标签。", "error"); return; }
       for (const index of selected) {
         const entry = suggestion.suggestions[index], fields = draft[index] || {};
+        if (entry.retired_tag) {
+          // 旧标签本来就在库里，不用你挑上级；但启用前要你定它属于哪一学段。
+          if (!(fields.levels || []).length) {
+            const block = panel.querySelector(`[data-suggestion-index="${index}"]`);
+            if (block) block.scrollIntoView({ block: "nearest" });
+            toast("「" + entry.retired_tag.name + "」是你库里原有的旧标签。重新启用前，请先选它适用哪一学段。", "error"); return;
+          }
+          continue;
+        }
         const existing = tagCatalogue.tags.some(tag => tag.kind === (fields.kind || entry.kind)
           && tag.name.normalize("NFKC") === String(fields.name ?? entry.new_name ?? "").trim().normalize("NFKC"));
         if (entry.new_name && !existing && !(fields.parent_ids ?? entry.parent_ids ?? []).length && fields.top_level !== true && tagCatalogue.tags.length) {
@@ -1732,7 +1749,8 @@
       const entry = suggestion.suggestions[index], fields = draft[index] || {};
       if (entry.new_name) newTags[String(index)] = { name: String(fields.name ?? entry.new_name).trim() || entry.new_name,
         kind: fields.kind || entry.kind, group_ids: fields.groups || entry.group_ids || [],
-        parent_ids: fields.parent_ids ?? entry.parent_ids ?? [], top_level: fields.top_level === true };
+        parent_ids: fields.parent_ids ?? entry.parent_ids ?? [], top_level: fields.top_level === true,
+        ...(entry.retired_tag ? { levels: fields.levels || [] } : {}) };
     });
     const previous = suggestionAttempts.get(suggestion.id);
     const fields = retryOriginal && previous ? { action: previous.payload.action, indices: previous.payload.indices,
@@ -1859,8 +1877,30 @@
       text.append(node("b", "tag-suggestion-name", label));
       const meta = node("span", "tag-suggestion-meta");
       meta.append(node("span", "", entry.kind === "method" ? "解题方法" : "知识点"), node("span", "", scope));
-      if (entry.new_name) meta.append(node("span", "tag-suggestion-new", "新标签"));
+      if (entry.new_name) meta.append(node("span", "tag-suggestion-new", entry.retired_tag ? "旧标签" : "新标签"));
       text.append(meta); line.append(check, text); block.append(line); checks.push(check);
+      if (entry.retired_tag) {
+        // 这条以前会被当成全新标签，于是要你从一堆标签里挑个上级；
+        // 实际上它一直躺在你的库里，只是当年没启用。说出来，才不用你做那个选择。
+        const known = node("p", "tag-suggestion-rationale");
+        known.append(node("b", "", "你的库里已经有「" + entry.retired_tag.name + "」了"),
+          document.createTextNode("，只是以前没启用，AI 才当成了新标签。采纳就会把它重新启用；点「修改名称、上级或分组」仍可以改别的。"));
+        block.append(known);
+        const levels = node("fieldset", "tag-suggestion-groups");
+        levels.append(node("legend", "", "重新启用后适用哪一学段（必须选）"));
+        const chosen = entryDraft.levels ?? [];
+        ["初中", "高中"].forEach(function(level) {
+          const row = node("label", "tag-suggestion-group-list"), box = node("input");
+          box.type = "checkbox"; box.value = level; box.checked = chosen.includes(level);
+          box.dataset.retiredLevel = suggestion.id + "-" + index;
+          box.addEventListener("change", () => {
+            entryDraft.levels = Array.from(levels.querySelectorAll("input:checked")).map(input => input.value);
+            saveSuggestionDrafts();
+          });
+          row.append(box, node("span", "", level)); levels.append(row);
+        });
+        block.append(levels);
+      }
       if (entry.rationale) block.append(node("p", "tag-suggestion-rationale", entry.rationale));
       if (entry.evidence) {
         const evidence = node("details", "tag-suggestion-evidence");

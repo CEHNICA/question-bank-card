@@ -569,6 +569,79 @@ class FormalLibraryTaggingTests(TestCase):
                                   HTTP_X_QB_REQUEST="1").json()
         self.assertEqual(history["items"][0]["status"], "stale")
 
+    def test_tag_work_counts_keep_the_outdated_backlog_out_of_the_actionable_number(self):
+        tag = self.tag("统计用知识点", "knowledge")
+        outdated = self.suggestion(self.publication(), [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name}])
+        catalogue = LibraryTagCatalogue.objects.get(pk=1)
+        catalogue.revision += 1
+        catalogue.save(update_fields=["revision"])
+        reachable = self.suggestion(self.publication(), [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name}])
+        self.assertEqual(outdated.taxonomy_revision + 1, reachable.taxonomy_revision)
+
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["pending_review"], 2)
+        self.assertEqual(work["pending_actionable"], 1)
+        self.assertEqual(work["outdated_suggestions"], 1)
+
+        # 题目核对状态也算一件待办，但和 AI 建议是同一个键，不能把同一道题数两次。
+        LibraryTagAssignment.objects.filter(publication_id=reachable.publication_id).update(needs_review=True)
+        self.assertEqual(library_browse.tag_work_counts()["pending_review"], 2)
+
+        # 题目后来改过标签的，也不能算「现在就能采纳」，否则数字又变回骗人。
+        retagged = PublishedQuestion.objects.get(pk=reachable.publication_id)
+        retagged.tag_revision += 1
+        retagged.save(update_fields=["tag_revision"])
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["pending_review"], 2)
+        self.assertEqual(work["pending_actionable"], 0)
+        self.assertEqual(work["outdated_suggestions"], 2)
+
+    def test_accepting_a_proposal_naming_a_retired_label_reinstates_it_and_undo_puts_it_back(self):
+        retired = self.tag("旧目录里的椭圆", "legacy")
+        retired.active = False
+        retired.levels = []
+        retired.save(update_fields=["active", "levels"])
+        publication = self.publication()
+        suggestion = self.suggestion(publication, [{"kind": "knowledge", "new_name": retired.name,
+            "name": retired.name, "levels": ["高中"], "scope": {"whole": True},
+            "rationale": "题面给出椭圆定义。", "evidence": "题干中的标准方程"}])
+        survivor = self.suggestion(self.publication(), [{"kind": "knowledge", "tag_id": str(retired.pk),
+            "name": retired.name, "rationale": "另一道题也用它。", "evidence": "另一处题面"}])
+
+        # 界面上先要看见「这个标签你的库里本来就有」，否则还是会被当成全新标签。
+        served = library_tagging.suggestion_json(suggestion)["suggestions"][0]
+        self.assertEqual(served["retired_tag"]["id"], str(retired.pk))
+        self.assertFalse(served["retired_tag"]["active"])
+
+        base = {"action": "accept", "indices": [0], "expected_revision": publication.tag_revision,
+                "request_id": str(uuid.uuid4())}
+        without = self.post_json("/api/library/tag-suggestions/%s/resolve" % suggestion.pk, dict(base))
+        self.assertEqual(without.status_code, 400, without.content)
+        self.assertIn("学段", without.json()["error"])
+        retired.refresh_from_db()
+        self.assertFalse(retired.active)
+
+        response = self.post_json("/api/library/tag-suggestions/%s/resolve" % suggestion.pk,
+                                  dict(base, request_id=str(uuid.uuid4()), new_tags={"0": {"levels": ["初中", "高中"]}}))
+        self.assertEqual(response.status_code, 200, response.content)
+        retired.refresh_from_db()
+        self.assertTrue(retired.active)
+        self.assertEqual(retired.kind, "knowledge")
+        self.assertEqual(retired.levels, ["初中", "高中"])
+        self.assertTrue(publication.tag_assignments.filter(tag=retired).exists())
+
+        # 转正一个旧标签不能把整队待核对建议带走，否则第一笔采纳就把剩下的全作废。
+        survivor.refresh_from_db()
+        self.assertEqual(survivor.status, LibraryTagSuggestion.Status.PENDING)
+
+        undo = self.post_json("/api/library/tags/undo", {"operation_id": response.json()["operation_id"]})
+        self.assertEqual(undo.status_code, 200, undo.content)
+        retired.refresh_from_db()
+        self.assertFalse(retired.active)
+        self.assertEqual(retired.kind, "legacy")
+        self.assertEqual(retired.levels, [])
+        self.assertFalse(publication.tag_assignments.filter(tag=retired).exists())
+
     def test_new_ai_tag_is_created_only_when_human_accepts_and_can_be_undone(self):
         publication = self.publication()
         group = LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE).first().groups.first()
@@ -681,6 +754,31 @@ class FormalLibraryTaggingTests(TestCase):
         with self.assertRaises(library_tagging.TaggingError): library_tagging.normalize_ai_output(bad, [knowledge])
         bad = json.loads(json.dumps(good)); bad["suggestions"][0]["scope"] = {"whole": False}
         with self.assertRaises(library_tagging.TaggingError): library_tagging.normalize_ai_output(bad, [knowledge])
+
+    def test_ai_reproposing_an_active_tag_by_name_binds_it_and_asks_for_no_parent(self):
+        existing = self.tag("椭圆", "knowledge")
+        raw = {"status": "ok", "suggestions": [{"kind": "knowledge", "new_name": "椭圆",
+            "levels": ["高中"], "scope": {"whole": True}, "rationale": "题面给出椭圆定义。", "evidence": "题干中的标准方程"}]}
+        item = library_tagging.normalize_ai_output(raw, [existing])["suggestions"][0]
+        self.assertEqual(item["tag_id"], str(existing.pk))
+        self.assertEqual(item["name"], existing.name)
+        self.assertNotIn("new_name", item)
+        self.assertNotIn("parent_ids", item)
+        spaced = json.loads(json.dumps(raw))
+        spaced["suggestions"][0]["new_name"] = "  椭 圆  "
+        self.assertEqual(library_tagging.normalize_ai_output(spaced, [existing])["suggestions"][0]["tag_id"],
+                         str(existing.pk))
+
+    def test_an_inactive_legacy_tag_is_not_silently_bound_as_a_new_label(self):
+        legacy = self.tag("抛物线", "legacy")
+        legacy.active = False
+        legacy.save(update_fields=["active"])
+        raw = {"status": "ok", "suggestions": [{"kind": "knowledge", "new_name": "抛物线",
+            "levels": ["高中"], "scope": {"whole": True}, "rationale": "题面出现抛物线。", "evidence": "题干中的抛物线"}]}
+        # Promoting an inactive legacy record is an unresolved product decision, so the
+        # proposal must keep falling through to the new-tag branch instead of binding it.
+        with self.assertRaises(library_tagging.TaggingError):
+            library_tagging.normalize_ai_output(raw, [legacy])
 
     def test_read_only_picker_lists_aliases_and_tag_usage_count(self):
         publication = self.publication(); tag = self.tag("别名统计测试")

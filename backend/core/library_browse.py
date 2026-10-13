@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
-from django.db.models import Count
+from django.db.models import Count, F
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -196,6 +196,34 @@ def resolve_ids(ids: list[str], *, include_items: bool = True) -> dict:
     return result
 
 
+def tag_work_counts() -> dict:
+    """Tag work a teacher can act on, kept apart from the backlog that cannot be reached.
+
+    A pending suggestion only becomes acceptable while the tag catalogue has not moved
+    since it was produced. One flat "pending" total therefore looks like a pile of
+    reviewable work while almost none of it can actually be accepted, so the reachable
+    part is reported separately instead of being hidden inside the same number.
+    """
+    from . import library_tagging
+    from .models import LibraryTagAssignment, LibraryTagSuggestion
+    published = PublishedQuestion.Status.PUBLISHED
+    revision = library_tagging.catalogue_state().revision
+    pending = LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
+                                                  publication__status=published)
+    waiting = set(pending.values_list("publication_id", flat=True))
+    reachable = set(pending.filter(taxonomy_revision=revision,
+                                   assignment_revision=F("publication__tag_revision"))
+                     .values_list("publication_id", flat=True))
+    flagged = set(LibraryTagAssignment.objects.filter(needs_review=True, publication__status=published)
+                  .values_list("publication_id", flat=True))
+    return {"untagged_knowledge": PublishedQuestion.objects.filter(status=published)
+            .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
+                tag__kind="knowledge", needs_review=False)).distinct().count(),
+            "pending_review": len(waiting | flagged),
+            "pending_actionable": len(reachable),
+            "outdated_suggestions": len(waiting - reachable)}
+
+
 def library_list(request):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -212,15 +240,7 @@ def library_list(request):
     items = serialize_items(rows[offset:offset + limit])
     next_offset = offset + len(items)
     ai_status = library_ai_settings.public_status()
-    from .models import LibraryTagAssignment, LibraryTagSuggestion
-    tag_work = {
-        "untagged_knowledge": PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-            .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)).distinct().count(),
-        "pending_review": LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
-            publication__status=PublishedQuestion.Status.PUBLISHED).count()
-            + LibraryTagAssignment.objects.filter(needs_review=True,
-                publication__status=PublishedQuestion.Status.PUBLISHED).values("publication_id").distinct().count(),
-    }
+    tag_work = tag_work_counts()
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
@@ -257,12 +277,6 @@ def library_batch(request):
             return JsonResponse({"error": "筛选条件格式不正确"}, status=400)
         rows = library_rows(filters)
         matching = set(map(str, rows.filter(pk__in=ids).values_list("id", flat=True)))
-        from .models import LibraryTagSuggestion, LibraryTagAssignment
         result.update(matches={key: key in matching for key in ids}, total=rows.count(), facets=facet_counts(filters),
-            tag_work={"untagged_knowledge": PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-                .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)).distinct().count(),
-                "pending_review": LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
-                    publication__status=PublishedQuestion.Status.PUBLISHED).count()
-                    + LibraryTagAssignment.objects.filter(needs_review=True, publication__status=PublishedQuestion.Status.PUBLISHED)
-                      .values("publication_id").distinct().count()})
+            tag_work=tag_work_counts())
     return JsonResponse(result)

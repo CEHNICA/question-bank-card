@@ -46,7 +46,31 @@ def catalogue_state() -> LibraryTagCatalogue:
 
 
 def normalized(value: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"\s+", "", text).casefold()
+
+
+def tag_name_candidates(name: str, kind: str):
+    """The library's own records for a proposed name: an active tag, and a retired one.
+
+    Retired labels were never deleted, only switched off, so the directory still holds
+    them under the old ``legacy`` kind. The model is only ever shown active labels, so it
+    keeps re-proposing these words as brand new names and the interface then asks for a
+    parent that cannot exist. Returning both lets a human accept the existing record
+    instead.
+    """
+    key = normalized(name)
+    if not key:
+        return None, None
+    active = retired = None
+    for tag in LibraryTag.objects.filter(kind__in=[kind, LibraryTag.Kind.LEGACY]):
+        if normalized(tag.name) != key:
+            continue
+        if tag.kind == kind and tag.active:
+            active = active or tag
+        elif tag.kind == LibraryTag.Kind.LEGACY and not tag.active:
+            retired = retired or tag
+    return active, retired
 
 
 def _clean_name(value, label="标签名") -> str:
@@ -271,11 +295,38 @@ def knowledge_directory(*, include_inactive=False) -> list[dict]:
     return result
 
 
+def _retired_match_index(entries) -> dict:
+    """Retired labels these entries re-propose by name, keyed by normalised name.
+
+    One query for the whole batch so the interface can say "this label was already in
+    your library" instead of asking for a parent that does not exist.
+    """
+    names = {normalized(str(entry.get("new_name") or entry.get("name") or "")) for entry in entries}
+    names.discard("")
+    index = {}
+    if not names:
+        return index
+    for tag in LibraryTag.objects.filter(kind=LibraryTag.Kind.LEGACY, active=False):
+        key = normalized(tag.name)
+        if key in names:
+            index.setdefault(key, {"id": str(tag.pk), "name": tag.name, "kind": tag.kind,
+                                   "levels": tag.levels or [], "active": False})
+    return index
+
+
 def suggestion_json(row: LibraryTagSuggestion) -> dict:
     fresh = row.publication.status == PublishedQuestion.Status.PUBLISHED
+    entries = copy.deepcopy(row.suggestions or [])
+    retired = _retired_match_index(entries)
+    for entry in entries:
+        if entry.get("tag_id"):
+            continue
+        match = retired.get(normalized(str(entry.get("new_name") or entry.get("name") or "")))
+        if match is not None:
+            entry["retired_tag"] = match
     return {"id": str(row.pk), "job_id": str(row.job_id) if row.job_id else None,
             "publication_id": str(row.publication_id), "status": "stale" if not fresh else row.status,
-            "message": row.message, "suggestions": copy.deepcopy(row.suggestions or []),
+            "message": row.message, "suggestions": entries,
             "catalogue_snapshot": copy.deepcopy(row.catalogue_snapshot or {}),
             "prompt_version": row.prompt_version,
             "generation_source": row.generation_source, "created_at": row.created_at.isoformat(),
@@ -1395,12 +1446,13 @@ def undo_view(request):
     try:
         with transaction.atomic():
             created_tag_ids = operation.after_snapshot.get("created_tag_ids", [])
+            retired_tags = operation.after_snapshot.get("retired_tags", [])
             suggestion_snapshot = operation.before_snapshot.get("suggestion") or {}
-            if created_tag_ids and LibraryTagCatalogue.objects.filter(
+            if (created_tag_ids or retired_tags) and LibraryTagCatalogue.objects.filter(
                     pk=1, revision=operation.catalogue_revision).update(
                         revision=F("revision") + 1,
                         initialized=suggestion_snapshot.get("catalogue_initialized", True)) != 1:
-                raise TaggingError("目录后来有过修改，新建标签不能安全撤销", 409)
+                raise TaggingError("目录后来有过修改，新建或转正的标签不能安全撤销", 409)
             for publication_id in operation.publication_ids:
                 expected = after_revisions.get(publication_id)
                 publication = PublishedQuestion.objects.get(pk=publication_id, status=PublishedQuestion.Status.PUBLISHED)
@@ -1425,7 +1477,7 @@ def undo_view(request):
                         suggestion.status = snapshot.get("status", LibraryTagSuggestion.Status.PENDING)
                         suggestion.resolved_at = datetime.fromisoformat(snapshot["resolved_at"]) if snapshot.get("resolved_at") else None
                         suggestion.assignment_revision = expected + 1
-                        if created_tag_ids:
+                        if created_tag_ids or retired_tags:
                             suggestion.taxonomy_revision = catalogue_state().revision
                         suggestion.save(update_fields=["suggestions", "status", "resolved_at", "assignment_revision",
                                                        "taxonomy_revision", "updated_at"])
@@ -1433,6 +1485,14 @@ def undo_view(request):
                         tag = LibraryTag.objects.filter(pk=tag_id).first()
                         if tag is not None and not tag.assignments.exists():
                             tag.delete()
+            for value in retired_tags:
+                retired = LibraryTag.objects.filter(pk=value["id"]).first()
+                if retired is None:
+                    continue
+                retired.kind = value.get("kind", retired.kind)
+                retired.levels = value.get("levels", [])
+                retired.active = value.get("active", True)
+                retired.save(update_fields=["kind", "levels", "active", "updated_at"])
             operation.undone_at = timezone.now()
             operation.save(update_fields=["undone_at"])
     except (TaggingError, PublishedQuestion.DoesNotExist, LibraryTag.DoesNotExist) as error:
@@ -1816,6 +1876,7 @@ def resolve_suggestion(suggestion_id, payload):
             "catalogue_initialized": catalogue_state().initialized}
         new_catalogue_tag = False
         created_tag_ids = []
+        retired_tags = []
         directory_was_empty = not LibraryTag.objects.exists()
         if action == "accept":
             new_values = payload.get("new_tags", {})
@@ -1854,6 +1915,32 @@ def resolve_suggestion(suggestion_id, payload):
                             matches = [candidate for candidate in LibraryTag.objects.filter(kind=kind, active=True)
                                        if any(normalized(alias) == normalized(name) for alias in candidate.aliases or [])]
                             tag = matches[0] if len(matches) == 1 else None
+                        if tag is None:
+                            # The exact name may already sit in the library under a spelling
+                            # the database comparison above cannot match, or as a label the
+                            # directory retired instead of deleting.
+                            same_name_active, retired = tag_name_candidates(name, kind)
+                            if same_name_active is not None:
+                                tag = same_name_active
+                            elif retired is not None:
+                                # Putting a retired label back into use is the review it was
+                                # waiting for, so the teacher chooses the school stage. The
+                                # stage carried by the old proposal is never reused here: those
+                                # rows came across unverified.
+                                levels = override.get("levels")
+                                if (not isinstance(levels, list) or not levels
+                                        or any(level not in {"初中", "高中"} for level in levels)):
+                                    raise TaggingError("请先选择这个旧标签适用的学段（初中或高中）")
+                                retired_tags.append({"id": str(retired.pk), "kind": retired.kind,
+                                                     "levels": retired.levels or [], "active": retired.active})
+                                retired.kind, retired.levels, retired.active = kind, levels, True
+                                retired.save(update_fields=["kind", "levels", "active", "updated_at"])
+                                tag = retired
+                                # Deliberately no `new_catalogue_tag`: a retired label was never
+                                # in the directory the model was shown, so switching it back on
+                                # cannot invalidate any proposal. Every other pending proposal
+                                # naming it only becomes easier to accept, and bumping the
+                                # revision here would throw away the whole review queue.
                         if tag is None:
                             levels = override.get("levels", item.get("levels", []))
                             if not isinstance(levels, list) or not levels or any(level not in {"初中", "高中"} for level in levels):
@@ -1938,7 +2025,8 @@ def resolve_suggestion(suggestion_id, payload):
             action="suggestion:" + action, publication_ids=[str(publication.pk)],
             before_snapshot={"assignments": {str(publication.pk): before},
                              "revisions": {str(publication.pk): expected}, "suggestion": suggestion_before},
-            after_snapshot={"revisions": {str(publication.pk): after_rev}, "created_tag_ids": created_tag_ids},
+            after_snapshot={"revisions": {str(publication.pk): after_rev}, "created_tag_ids": created_tag_ids,
+                        "retired_tags": retired_tags},
             catalogue_revision=catalogue_state().revision)
     return {"ok": True, "operation_id": str(op.pk), "status": suggestion.status,
             "accepted": sum(1 for entry in entries if entry.get("decision") == "accepted"),
@@ -1995,20 +2083,31 @@ def normalize_ai_output(value, catalogue):
             key = str(tag.pk)
             item.update({"tag_id": key, "name": tag.name, "description": tag.description})
         else:
-            item["new_name"] = _clean_name(row.get("new_name"), "新标签建议")
-            item["name"] = item["new_name"]
-            item["description"] = str(row.get("description") or "")[:300]
-            levels = row.get("levels", [])
-            if not isinstance(levels, list) or not levels or any(level not in {"初中", "高中"} for level in levels):
-                raise TaggingError("AI 新标签的适用学段不正确", 502)
-            item["levels"] = levels
-            parent_ids = _relation_ids(row.get("parent_ids", []))
-            if not parent_ids and by_id:
-                raise TaggingError("AI 新标签建议缺少具体上级，请重新建议", 502)
-            if any(key not in by_id or by_id[key].kind != kind or not by_id[key].active for key in parent_ids):
-                raise TaggingError("AI 新标签上级不存在、已停用或类型不符", 502)
-            item["parent_ids"] = parent_ids
-            key = kind + ":" + normalized(item["new_name"])
+            new_name = _clean_name(row.get("new_name"), "新标签建议")
+            # The model is only ever shown active tags, so it re-proposing one of them by
+            # name is not a new label. Bind the existing tag instead of opening a duplicate
+            # that later demands a parent the model had no way to pick.
+            existing = next((candidate for candidate in catalogue if candidate.kind == kind and candidate.active
+                             and normalized(candidate.name) == normalized(new_name)), None)
+            if existing is not None:
+                item.update({"tag_id": str(existing.pk), "name": existing.name,
+                             "description": existing.description})
+                key = str(existing.pk)
+            else:
+                item["new_name"] = new_name
+                item["name"] = new_name
+                item["description"] = str(row.get("description") or "")[:300]
+                levels = row.get("levels", [])
+                if not isinstance(levels, list) or not levels or any(level not in {"初中", "高中"} for level in levels):
+                    raise TaggingError("AI 新标签的适用学段不正确", 502)
+                item["levels"] = levels
+                parent_ids = _relation_ids(row.get("parent_ids", []))
+                if not parent_ids and by_id:
+                    raise TaggingError("AI 新标签建议缺少具体上级，请重新建议", 502)
+                if any(key not in by_id or by_id[key].kind != kind or not by_id[key].active for key in parent_ids):
+                    raise TaggingError("AI 新标签上级不存在、已停用或类型不符", 502)
+                item["parent_ids"] = parent_ids
+                key = kind + ":" + normalized(new_name)
         if key in seen:
             raise TaggingError("AI 重复推荐了同一个标签", 502)
         seen.add(key)
