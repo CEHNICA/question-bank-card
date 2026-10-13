@@ -896,7 +896,7 @@ body.printing { overflow: hidden; }
   background: var(--surface); box-shadow: 0 24px 80px #10231d38; overflow: hidden;
 }
 .tag-picker-dialog[open], .tag-manager-dialog[open] { display: flex; flex-direction: column; }
-#tagPickerDialog { width: min(860px, calc(100vw - 28px)); height: min(76dvh, 760px); }
+#tagPickerDialog { width: min(860px, calc(100vw - 28px)); height: min(86dvh, 880px); }
 .tag-picker-mixed-row { display: flex; flex: 0 0 auto; gap: 6px; align-items: center; }
 .tag-picker-mixed-row > .tag-picker-row { flex: 1; width: auto; }
 .tag-picker-mixed-row > .button { flex: none; }
@@ -910,6 +910,24 @@ body.printing { overflow: hidden; }
 .tag-picker-head > .button { flex: none; }
 .tag-picker-head h2 { margin: 0; font-size: 20px; }
 .tag-picker-subtitle { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
+/* The single place a question's tags live: what it already has, what AI proposed,
+   and the directory to pick from. It has to scroll on its own, otherwise the blocks
+   grow past the dialog and the status bar is pushed off the bottom. */
+.tag-picker-now { display: grid; flex: 0 1 auto; gap: 12px; max-height: 46%; padding: 0 20px 14px; overflow-y: auto; overscroll-behavior: contain; }
+.tag-picker-now[hidden] { display: none; }
+.tag-picker-more { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 7px 12px; padding: 12px 20px 12px; border-top: 1px solid var(--line); }
+.tag-picker-block { display: grid; gap: 8px; min-width: 0; }
+.tag-picker-block-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; }
+.tag-picker-block-title small { color: var(--ink-2); font-size: 12px; font-weight: normal; }
+.tag-picker-hint { margin: 0; color: var(--ink-2); font-size: 13px; }
+.tag-picker-current { display: flex; flex-wrap: wrap; gap: 7px; }
+.tag-picker-current-chip { display: inline-flex; align-items: center; gap: 2px; padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--tag-color, var(--surface-2, #f4f6f5)); font-size: 13px; }
+.tag-picker-current-drop { border: 0; border-radius: 999px; padding: 0 6px; background: transparent; color: var(--ink-2); font-size: 15px; line-height: 1.2; cursor: pointer; }
+.tag-picker-current-drop:hover:not(:disabled) { color: var(--ink); background: #00000014; }
+.tag-picker-now .tag-suggestion-card { margin: 0; }
+.tag-suggestion-summary { display: grid; gap: 4px; justify-items: start; margin-top: 6px; }
+.tag-suggestion-summary small { color: var(--ink-2); font-size: 12px; }
+.tag-suggestion-open { font-size: 13px; }
 .tag-picker-search { display: block; flex: 0 0 auto; width: calc(100% - 40px); margin: 0 20px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .tag-picker-tools { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 7px; padding: 0 20px 12px; }
 .tag-picker-quick { display: flex; flex: 0 0 auto; gap: 8px; padding: 0 20px 12px; overflow-x: auto; }

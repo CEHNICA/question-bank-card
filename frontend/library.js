@@ -1245,7 +1245,8 @@
     tagDialog = node("dialog", "tag-picker-dialog"); tagDialog.id = "tagPickerDialog";
     const header = node("header", "tag-picker-head"), title = node("div");
     const heading = node("h2", "", "添加标签"); heading.id = "tagPickerTitle";
-    title.append(heading, node("p", "tag-picker-subtitle", "点击标签立即保存；再次点击移除。"));
+    const subtitle = node("p", "tag-picker-subtitle", "点击标签立即保存；再次点击移除。"); subtitle.id = "tagPickerSubtitle";
+    title.append(heading, subtitle);
     const close = node("button", "button", "关闭"); close.type = "button"; close.addEventListener("click", function() { tagDialog.close(); });
     header.append(title, close);
     const tools = node("div", "tag-picker-tools");
@@ -1261,7 +1262,12 @@
     status.id = "tagPickerStatus"; undo.id = "tagPickerUndo"; undo.type = "button"; undo.hidden = true; undo.addEventListener("click", undoTagOperation); footer.append(status, undo);
     const retry = node("button", "button button-small", "核实上次操作"); retry.id = "tagPickerRetry"; retry.type = "button"; retry.hidden = true;
     retry.addEventListener("click", () => { if (pickerAttempt) void toggleTag(pickerAttempt.tag, pickerAttempt.remove, { attempt: pickerAttempt }); }); footer.append(retry);
-    tagDialog.append(header, tools, search, quick, body, footer); document.body.append(tagDialog); return tagDialog;
+    const now = node("div", "tag-picker-now"); now.id = "tagPickerNow";
+    const more = node("div", "tag-picker-more"); more.id = "tagPickerMore";
+    const moreTitle = node("h3", "tag-picker-block-title");
+    moreTitle.append(node("b", "", "想加的"), node("small", "", "点一下贴上，再点一下拿掉"));
+    more.append(moreTitle, tools);
+    tagDialog.append(header, now, more, search, quick, body, footer); document.body.append(tagDialog); return tagDialog;
   }
   async function openTagEditor(item, options = {}) {
     if (item && inlineTagStates.get(item.id)?.attempt) { toast("先核实上次标签操作，再添加其他标签。", "error"); return; }
@@ -1272,6 +1278,8 @@
     }
     if (tagTargetIds.length > 500) { toast("一次最多整理 500 题，请减少勾选后重试。", "error"); return; }
     $("tagPickerTitle").textContent = pickerAttempt ? `核实上次标签操作（${tagTargetIds.length} 题）` : item ? `第 ${item.number} 题的标签` : `整理勾选的 ${tagTargetIds.length} 题标签`;
+    $("tagPickerSubtitle").textContent = item
+      ? "已经贴上的、AI 建议的、想加的，都在这个窗口里。" : "点一下贴上，再点一下拿掉。";
     tagDialog.classList.add("loading");
     try {
       const ids = tagTargetIds.join(","), pair = await Promise.all([loadTagCatalogue(), tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(ids))]);
@@ -1287,7 +1295,47 @@
     } catch (error) { toast(error.message + " 请刷新后重试。", "error"); }
     finally { tagDialog.classList.remove("loading"); }
   }
+  function renderTagPickerNow() {
+    // 打开一道题时，标签只该有一个地方：已经贴上的、AI 建议的、想加的，
+    // 都在这个窗口里。以前 AI 建议另开一套采纳按钮，同一个决定有两个地方能做，
+    // 老师不知道该点哪儿，两边还可能各点一次。
+    const box = $("tagPickerNow"); if (!box) return;
+    box.replaceChildren();
+    if (tagTargetIds.length !== 1) { box.hidden = true; return; }
+    box.hidden = false;
+    const id = tagTargetIds[0], item = state.catalog.get(id);
+    if (!item) return;
+    const saving = tagDialog.classList.contains("saving");
+    const owned = Array.from(tagMemberships[id] || [])
+      .map(tagId => (tagCatalogue.tags || []).find(tag => tag.id === tagId)).filter(Boolean);
+    const current = node("section", "tag-picker-block");
+    const currentTitle = node("h3", "tag-picker-block-title");
+    currentTitle.append(node("b", "", "已经在这道题上"), node("small", "", owned.length ? owned.length + " 个" : "还没有标签"));
+    const chips = node("div", "tag-picker-current");
+    if (!owned.length) chips.append(node("p", "tag-picker-hint", "还没有标签。往下挑一个，或者直接采纳 AI 的建议。"));
+    owned.forEach(function(tag) {
+      const chip = node("span", "tag-picker-current-chip");
+      if (tag.color) chip.style.setProperty("--tag-color", tag.color);
+      chip.append(node("span", "", tag.name));
+      const drop = node("button", "tag-picker-current-drop", "×"); drop.type = "button";
+      drop.title = "从这道题移除「" + tag.name + "」"; drop.setAttribute("aria-label", drop.title);
+      drop.disabled = saving; drop.addEventListener("click", () => void toggleTag(tag, true));
+      chip.append(drop); chips.append(chip);
+    });
+    current.append(currentTitle, chips); box.append(current);
+    const card = tagSuggestionNode(item, { embedded: true }); if (!card) return;
+    const suggestion = item.tag_suggestion;
+    const pendingCount = suggestion.status === "pending"
+      ? (suggestion.suggestions || []).filter(entry => !entry.decision).length : 0;
+    const ai = node("section", "tag-picker-block");
+    const aiTitle = node("h3", "tag-picker-block-title");
+    const note = pendingCount ? pendingCount + " 条待核对"
+      : { queued: "排队中", running: "生成中", review: "暂不能判断", no_match: "没有合适的标签", failed: "生成失败", stale: "依据已变化" }[suggestion.status] || "";
+    aiTitle.append(node("b", "", "AI 建议的"), node("small", "", note));
+    ai.append(aiTitle, card); box.append(ai);
+  }
   function renderTagPicker() {
+    renderTagPickerNow();
     if (!tagDialog) return;
     const groupBox = $("tagPickerGroups"), list = $("tagPickerList"), quick = $("tagPickerQuick"); if (!groupBox || !list || !quick) return;
     const groupScrollTop = groupBox.scrollTop, groupScrollLeft = groupBox.scrollLeft;
@@ -1780,6 +1828,7 @@
       controls.forEach(control => { control.disabled = control.dataset.wasDisabled === "true"; delete control.dataset.wasDisabled; });
       panel.dispatchEvent(new Event("suggestion-unlocked"));
       inspectorRenderedKey = null; renderInspector(state.catalog.get(state.inspectorId));
+      if (tagDialog?.open && tagTargetIds.length === 1 && tagTargetIds[0] === item.id) renderTagPickerNow();
     }
   }
   async function openTagSuggestionHistory(item) {
@@ -1836,7 +1885,7 @@
     close.addEventListener("click", function() { dialog.close(); });
     dialog.addEventListener("close", function() { dialog.remove(); }); dialog.showModal(); void loadPage();
   }
-  function tagSuggestionNode(item) {
+  function tagSuggestionNode(item, { embedded = false } = {}) {
     const suggestion = item.tag_suggestion;
     if (!suggestion || !["pending", "queued", "running", "review", "no_match", "failed", "stale", "accepted", "rejected"].includes(suggestion.status)) return null;
     if (["accepted", "rejected"].includes(suggestion.status)) return null;
@@ -1859,7 +1908,10 @@
     const heading = node("header", "tag-suggestion-heading");
     const statusText = { pending: "待核对", queued: "排队中", running: "生成中", review: "暂不能判断", no_match: "无合适标签", failed: "生成失败", stale: "依据已变化", accepted: "已采纳", rejected: "已拒绝" }[suggestion.status];
     heading.append(node("h3", "", "AI 标签建议"), node("span", "tag-suggestion-status", statusText));
-    panel.append(heading);
+    // Inside the merged dialog the block above already says "AI 建议的"; repeating it
+    // here would spend a whole header row on the same four characters.
+    if (embedded) panel.append(node("p", "tag-suggestion-message", statusText));
+    else panel.append(heading);
     if (suggestion.message) panel.append(node("p", "tag-suggestion-message", suggestion.message));
     const checks = [];
     (suggestion.suggestions || []).forEach((entry, index) => {
@@ -2117,7 +2169,7 @@
       remove.disabled = inlineTagLocks.has(item.id); remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove); row.append(wrapper);
     });
     const edit = node("button", "library-tags-edit", "＋ 添加标签"); edit.type = "button";
-    edit.title = "为当前这道题添加标签"; edit.disabled = inlineTagLocks.has(item.id);
+    edit.title = "为当前这道题添加标签；AI 的建议也在同一个窗口里核对"; edit.disabled = inlineTagLocks.has(item.id);
     edit.addEventListener("click", () => openTagEditor(item)); row.append(edit); box.append(row);
     const saved = inlineTagStates.get(item.id);
     if (saved) {
@@ -2140,7 +2192,20 @@
         const retry = node("button", "button button-small tag-suggestion-retry", "核实上次提交"); retry.type = "button";
         retry.addEventListener("click", () => resolveTagSuggestion({ ...item, tag_suggestion: { id: pending.suggestionId, status: "pending", suggestions: [] } }, pending.payload.action, recovery, pending.payload.indices, true)); recovery.append(retry); box.append(recovery);
       }
-      const panel = tagSuggestionNode(item); if (panel) box.append(panel);
+      // 待核对的建议只在标签窗口里处理：窗口里已经有「AI 建议的」这一块。
+      // 右侧再摆一套采纳/拒绝，同一个决定就有两个地方能点，两边各点一次还会打架。
+      if (item.tag_suggestion?.status === "pending") {
+        const pendingCount = (item.tag_suggestion.suggestions || []).filter(entry => !entry.decision).length;
+        const summary = node("div", "tag-suggestion-summary");
+        const open = node("button", "button button-small tag-suggestion-open",
+          pendingCount ? `AI 有 ${pendingCount} 条建议待核对 · 去核对` : "AI 的建议已核对完 · 重新打开标签窗口");
+        open.type = "button"; open.title = "这道题已有的标签、AI 的建议、想加的标签，都在这个窗口里";
+        open.addEventListener("click", () => openTagEditor(item)); summary.append(open);
+        if (item.tag_suggestion.message) summary.append(node("small", "", item.tag_suggestion.message));
+        box.append(summary);
+      } else {
+        const panel = tagSuggestionNode(item); if (panel) box.append(panel);
+      }
     }
     if (item.tag_suggestion) {
       const history = node("button", "button button-quiet button-small library-tag-history-link", "AI 标签记录"); history.type = "button";
