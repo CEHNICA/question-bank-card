@@ -115,7 +115,27 @@
       const label = node.firstElementChild.cloneNode(true), body = node.lastElementChild.cloneNode(false);
       if (continued) label.textContent = label.textContent ? `${label.textContent}（续）` : "续";
       body.append(range.cloneContents()); result.append(label, body);
-    } else result.append(range.cloneContents());
+    } else {
+      // cloneContents() returns only what the range covers: when both ends fall
+      // inside the same .qb-stem-body — a question running onto the next page —
+      // the shared ancestors are dropped and the fragment becomes bare text
+      // nodes. Only .qb-stem-body carries white-space: pre-wrap, so every blank
+      // line in the stem then collapses into a space on paper. Re-wrap the cloned
+      // content in shallow copies of the ancestors between the range and here.
+      const shared = range.commonAncestorContainer;
+      const innermost = shared.nodeType === 3 ? shared.parentNode : shared;
+      if (innermost && innermost !== node && node.contains(innermost)) {
+        const chain = [];
+        for (let up = innermost; up && up !== node; up = up.parentNode) chain.unshift(up);
+        let host = result;
+        for (const ancestor of chain) {
+          const copy = ancestor.cloneNode(false);
+          host.append(copy);
+          host = copy;
+        }
+        host.append(range.cloneContents());
+      } else result.append(range.cloneContents());
+    }
     result.classList.add("exam-fragment");
     if (continued) {
       result.dataset.continuation = "1";

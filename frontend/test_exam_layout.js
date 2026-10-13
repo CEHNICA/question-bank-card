@@ -105,3 +105,48 @@ assert(Math.abs(parseFloat(fitted.at(-1)[1])-18*668/700)<.0001);
 sample=formula(1800,674,18);assert.equal(layout.fitFormulas(sample.root),1);assert.equal(sample.math.dataset.examMathOverflow,"1");
 sample=formula(100,674,18);assert.equal(layout.fitFormulas(sample.root),0);
 console.log("Shared A4 formula fit retains readable minimum width and reports overflow: OK");
+
+// A question that runs onto the next page has both page ends inside the same
+// .qb-stem-body, and cloneContents() only returns what the range covers — the
+// shared ancestors are dropped. The fragment must put them back: only
+// .qb-stem-body carries white-space: pre-wrap, so a bare fragment turns every
+// blank line in the stem into a space and the whole continuation reads as one
+// paragraph.
+{
+  const covered = { nodeType: 3, textContent: "。∵ 第二步\n∴ 第三步\n" };
+  const pageDoc = {
+    createElement: tag => new DomNode(tag, pageDoc),
+    createRange: () => ({
+      startNode: null,
+      setStart(node) { this.startNode = node; },
+      setEnd(node) { this.endNode = node; },
+      // Both ends sit in the same node, so the range covers part of it and its
+      // shared ancestors: exactly what the browser hands back in this case.
+      get commonAncestorContainer() { return this.startNode; },
+      cloneContents: () => ({ nodeType: 11, childNodes: [{ nodeType: 3, textContent: covered.textContent.slice(1) }] })
+    })
+  };
+  const stemBody = new DomNode("span", pageDoc); stemBody.className = "qb-stem-body";
+  const stem = new DomNode("div", pageDoc); stem.className = "qb-stem";
+  const question = new DomNode("div", pageDoc); question.className = "print-question";
+  stemBody.append(covered); stem.append(stemBody); question.append(stem);
+  DomNode.prototype.contains = function (node) { for (let up = node; up; up = up.parentNode) { if (up === this) return true; } return false; };
+
+  const points = [{ node: covered, offset: 0 }, { node: covered, offset: covered.textContent.length }];
+  const continued = context.fragment(question, points, 1, 1, true);
+  const wrapped = continued.querySelector(".qb-stem-body");
+  assert.ok(wrapped, "续页仍要有 .qb-stem-body，否则题面里的空行会被折成空格");
+  assert.equal(wrapped.className, "qb-stem-body");
+  assert.equal(wrapped.textContent, "∵ 第二步\n∴ 第三步\n", "题面文字一个都不能少");
+  assert.equal(continued.querySelector(".qb-stem").className, "qb-stem");
+  // 续页仍要带着题号出现。
+  const continued2 = context.fragment(question, points, 1, 1, true);
+  assert.ok(continued2.querySelector(".qb-stem").querySelector(".qb-number").textContent.includes("（续）"));
+
+  // 起止都还在题目这一层时（首页片段），不额外套壳。
+  const whole = { node: question, offset: 0 };
+  const first = context.fragment(question, [whole, whole], 0, 1, false);
+  assert.equal(first.children.length, 0, "首页片段直接放内容，不多套一层");
+  assert.equal(first.childNodes.length, 1);
+  console.log("Continued pages keep the stem body, its blank lines and the question number: OK");
+}
