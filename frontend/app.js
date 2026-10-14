@@ -1649,13 +1649,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("toolbarPaper").replaceChildren(el("strong", "", paperDisplayName(state.paper || {})),
       document.createTextNode(` · ${c.approved} / ${c.all} 已入库`));
     $("toolbarPaper").title = $("toolbarPaper").textContent;
-    $("meterLegend").replaceChildren(...segments.filter(([, n]) => n > 0).map(([, n, label, color]) => {
-      const item = el("span");
-      const dot = el("i");
-      dot.style.background = color;
-      item.append(dot, document.createTextNode(`${label} ${n}`));
-      return item;
-    }));
+    // 以前这里还往一个写死了 hidden 的 .meter-legend 里填「已入库 2 / 需要核查 32 /
+    // 识读中 N」。那个节点从来没人解开过 hidden，页面上从来不显示，进度条和页签
+    // 也已经把同样的数字写过一遍。留着这段等于：控制台里看着有内容、实际看不见，
+    // 下一个人很容易据此误判「图例已经显示了」。连同 HTML 和 CSS 一起删掉。
   }
 
   function renderDoneBanner(c) {
@@ -1721,11 +1718,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     } else if (!c.all) {
       statusText.textContent = paper.pages?.length
         ? "原卷已保存，可以从原卷选取题目。" : "没有题卡";
-    } else if (c.todo) {
-      statusText.textContent = `${c.all} 道题，${c.todo} 题需要核查。`;
-    } else if (c.green) {
-      // 和上一句同一个口径：todo 已经归零，剩下的就是不用再看的。
-      statusText.textContent = `${c.all} 道题，${c.approved} 题已入库。`;
+    } else if (c.todo || c.green) {
+      // todo 归零后剩下的就是不用再看的（已通过或已入库），和进度条、上面那排页签
+      // 是同一组数字。这句话以前是第三次重复，进度条和页签都已经写清楚，这里让位。
+      // 处理中、失败、题号乱序、没有题卡这些真需要单独说一句的状态，都留在上面
+      // 各自的分支里，不受这条影响。
+      statusText.textContent = "";
     } else if (paperComplete(c)) {
       // 绿色完成条已经把「全部 N 题已处理完」写在下面了，这里不再重复一遍。
       statusText.textContent = "";
@@ -3909,7 +3907,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     menu.append(button("查看识读记录", "quiet small", () => { more.open = false; toggleReads(card, q); }));
     if (q.body_mode !== "source_image") {
       menu.append(button("框选识读（纠错）", "quiet small", () => { more.open = false; openPageDialog("read", q); }, "只重读需要纠正的一小块，确认替换位置后再保存"));
-      menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }));
+      // 照片题在动作行里有一个醒目的「重新 AI 识读」按钮并写清了后果，而 PDF 题
+      // （题库里的大头）走的是这一行。以前这里一点说明都没有，用户既不知道它会
+      // 替换掉现有文字，也分不清它和上面「框选识读」的范围差别。
+      menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }, "重读这道题的全部片段并替换现有文字（改过的地方会先问你）；只纠一小块用「框选识读（纠错）」"));
     }
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
     more.append(menu);
