@@ -1,7 +1,8 @@
-// The Word export reproduces the preview's figure wrapping in Python
-// (library_export.py: _figure_row_layout / _figure_display_size). That only
-// stays true while the CSS it was measured against is unchanged. Read the real
-// stylesheets and the real exporter, and fail when the two drift apart.
+// The Word export reproduces the print preview's figure layout in Python
+// (library_export.py: _figure_paper_size / _figure_row_layout). The preview
+// does NOT get that geometry from CSS — exam-layout.js writes every picture's
+// width inline once the image has decoded — so read the script that actually
+// decides it, read the exporter, and fail when the two drift apart.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -9,41 +10,75 @@ const assert = require("assert");
 const root = path.join(__dirname, "..");
 const styles = fs.readFileSync(path.join(root, "frontend/styles.css"), "utf8");
 const library = fs.readFileSync(path.join(root, "frontend/library.css"), "utf8");
+const examLayout = fs.readFileSync(path.join(root, "frontend/exam-layout.js"), "utf8");
 const exporter = fs.readFileSync(path.join(root, "backend/core/library_export.py"), "utf8");
 
-// --- the preview's geometry, read back out of the stylesheets -----------------
+// --- how the row wraps --------------------------------------------------------
 const figuresRow = styles.match(/\.qb-figures\s*\{([^}]*)\}/);
 assert.ok(figuresRow, ".qb-figures is the container that wraps stem figures");
 const row = figuresRow[1];
 assert.match(row, /display:\s*flex/, "figures wrap by flex, not by an explicit grid");
 assert.match(row, /flex-wrap:\s*wrap/, "figures wrap onto new rows");
+assert.match(row, /justify-content:\s*center/, ".qb-figures centres the row, so Word must too");
 
 const gap = row.match(/gap:\s*(\d+(?:\.\d+)?)px/);
 assert.ok(gap, ".qb-figures declares its own gap");
 const gapPx = Number(gap[1]);
 
-const textWidth = library.match(/\.print-flow\s*\{([^}]*)\}/);
-assert.ok(textWidth, ".print-flow is the printed text area");
-const widthMm = Number((textWidth[1].match(/width:\s*(\d+(?:\.\d+)?)mm/) || [])[1]);
-assert.ok(widthMm > 0, ".print-flow has an explicit width in mm");
+// --- how large a picture is ----------------------------------------------------
+// exam-layout.js, inside paginate():
+//     const imageScale = Math.min(chosenWidth > 0 ? ... : 96 / 150,
+//                                  BODY_WIDTH / image.naturalWidth,
+//                                  210 * MM / image.naturalHeight);
+//     image.style.width = `${image.naturalWidth * imageScale}px`;
+const mmConstant = examLayout.match(/const MM\s*=\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+assert.ok(mmConstant, "exam-layout.js defines how many CSS pixels make a millimetre");
+const mmPerPixel = Number(mmConstant[2]) / Number(mmConstant[1]);
 
-// In print an image is capped at the text area and has no height cap, so its
-// rendered width is its pixel width unless that is wider than the text area.
-const printedFigure = library.match(/\.print-flow\s+\.qb-figure\s+img[^{]*\{([^}]*)\}/);
-assert.ok(printedFigure, "print narrows .qb-figure img to the text area");
-assert.match(printedFigure[1], /max-width:\s*100%/);
-assert.match(printedFigure[1], /max-height:\s*none/);
+const bodyWidth = examLayout.match(/BODY_WIDTH\s*=\s*(\d+(?:\.\d+)?)\s*\*\s*MM/);
+assert.ok(bodyWidth, "exam-layout.js names the printed text width");
+const textWidthMm = Number(bodyWidth[1]);
 
-// On screen a figure is capped at 320x220. That cap is not decoration: three
-// crops of one scanned row (279x226, 231x226, 210px) come out 272/225/196 wide
-// because of it, which is the whole reason they sit on one line on screen. The
-// exporter measures the same box, so both numbers have to move together.
+const imageScale = examLayout.match(/const imageScale = [^;]*;/);
+assert.ok(imageScale, "exam-layout.js is what sizes a picture, not the stylesheet");
+const scaleLine = imageScale[0];
+
+const naturalDpi = (scaleLine.match(/:\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*,/) || [])[2];
+assert.ok(Number(naturalDpi) > 0, "the preview states the natural figure size as one ratio");
+
+const pageHeightMm = (scaleLine.match(/,\s*(\d+(?:\.\d+)?)\s*\*\s*MM\s*\/\s*image\.naturalHeight/) || [])[1];
+assert.ok(Number(pageHeightMm) > 0, "the preview caps a figure's height at one A4 page");
+
+// All three terms of that Math.min have to be the ones the exporter mirrors; a
+// new cap added here must be mirrored there rather than quietly ignored.
+assert.match(scaleLine, /BODY_WIDTH\s*\/\s*image\.naturalWidth/,
+  "a figure is capped at the text area");
+assert.match(scaleLine, /Math\.min\(\s*chosenWidth/,
+  "answer-diagram widths come from the record, which Word reads separately");
+
+
+// The stylesheet caps on screen, but library.css overrides them inside the print
+// flow. Reading those caps is what made the download bigger than the preview, so
+// pin the override down: if it is ever removed, this test must be revisited, not
+// silently kept working.
 const screenFigure = styles.match(/\.qb-figure\s+img\s*\{([^}]*)\}/);
 assert.ok(screenFigure, ".qb-figure img is capped on screen");
 assert.match(screenFigure[1], /max-width:\s*min\(100%,\s*320px\)/,
-  "the on-screen 320px cap is what makes wide diagrams differ on screen");
-const screenMaxHeight = Number((screenFigure[1].match(/max-height:\s*(\d+(?:\.\d+)?)px/) || [])[1]);
-assert.ok(screenMaxHeight > 0, "the on-screen figure also has a height cap");
+  "the on-screen width cap is still there");
+const printedFigure = library.match(/\.print-flow\s+\.qb-figure\s+img[^{]*\{([^}]*)\}/);
+assert.ok(printedFigure, "print narrows .qb-figure img to the text area");
+assert.match(printedFigure[1], /max-width:\s*100%/);
+assert.match(printedFigure[1], /max-height:\s*none/,
+  "the 320px/220px screen caps must stay overridden in the print flow");
+
+// .print-flow is the printed text area; it has to agree with BODY_WIDTH, or the
+// row would wrap in a different place on paper than on screen.
+const printFlow = library.match(/\.print-flow\s*\{([^}]*)\}/);
+assert.ok(printFlow, ".print-flow is the printed text area");
+const cssWidthMm = Number((printFlow[1].match(/width:\s*(\d+(?:\.\d+)?)mm/) || [])[1]);
+assert.ok(cssWidthMm > 0, ".print-flow has an explicit width in mm");
+assert.equal(cssWidthMm, textWidthMm,
+  `.print-flow is ${cssWidthMm}mm wide but exam-layout.js paginates at ${textWidthMm}mm`);
 
 // --- the exporter must use exactly those numbers ------------------------------
 const gapConstant = exporter.match(/PREVIEW_FIGURE_GAP_PX\s*=\s*(\d+(?:\.\d+)?)/);
@@ -51,23 +86,33 @@ assert.ok(gapConstant, "library_export.py names the preview gap it assumes");
 assert.equal(Number(gapConstant[1]), gapPx,
   `Word wraps with a ${gapConstant[1]}px gap but .qb-figures uses ${gapPx}px`);
 
-const widthCap = exporter.match(/PREVIEW_FIGURE_MAX_W_PX\s*=\s*(\d+(?:\.\d+)?)/);
-assert.ok(widthCap, "library_export.py names the on-screen width cap it assumes");
-assert.equal(Number(widthCap[1]), 320,
-  `Word assumes a ${widthCap[1]}px figure width cap but the screen uses 320px`);
+const dpiConstant = exporter.match(/PREVIEW_FIGURE_DPI\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(dpiConstant, "library_export.py names the figure dpi it assumes");
+assert.equal(Number(dpiConstant[1]), naturalDpi,
+  `Word places figures at ${dpiConstant[1]} dpi but the preview uses ${naturalDpi} dpi`);
 
-const heightCap = exporter.match(/PREVIEW_FIGURE_MAX_H_PX\s*=\s*(\d+(?:\.\d+)?)/);
-assert.ok(heightCap, "library_export.py names the on-screen height cap it assumes");
-assert.equal(Number(heightCap[1]), screenMaxHeight,
-  `Word assumes a ${heightCap[1]}px figure height cap but the screen uses ${screenMaxHeight}px`);
+const widthConstant = exporter.match(/PREVIEW_TEXT_WIDTH_MM\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(widthConstant, "library_export.py names the text area it wraps to");
+assert.equal(Number(widthConstant[1]), textWidthMm,
+  `Word wraps at ${widthConstant[1]}mm but the preview paginates at ${textWidthMm}mm`);
+
+const pageConstant = exporter.match(/PREVIEW_PAGE_HEIGHT_MM\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(pageConstant, "library_export.py names the height a figure is capped at");
+assert.equal(Number(pageConstant[1]), pageHeightMm,
+  `Word caps figures at ${pageConstant[1]}mm but the preview caps at ${pageHeightMm}mm`);
 
 const dxf = exporter.match(/text_width_mm=(\d+(?:\.\d+)?)/g) || [];
-assert.ok(dxf.includes(`text_width_mm=${widthMm}`),
-  `the exporter must measure against the ${widthMm}mm .print-flow text area`);
+assert.ok(dxf.includes(`text_width_mm=${textWidthMm}`),
+  `the exporter must measure against the ${textWidthMm}mm text area`);
 
-const dpiConstant = exporter.match(/PREVIEW_PX_PER_INCH\s*=\s*(\d+)/);
-assert.ok(dpiConstant, "one CSS pixel is 1/96 inch");
-assert.equal(Number(dpiConstant[1]), 96, "CSS px to inch is fixed by the browser");
+const pxPerInch = exporter.match(/PREVIEW_PX_PER_INCH\s*=\s*(\d+)/);
+assert.ok(pxPerInch, "one CSS pixel is 1/96 inch");
+assert.equal(Number(pxPerInch[1]), 96, "CSS px to inch is fixed by the browser");
+assert.equal(mmPerPixel * 96, 25.4, "96 CSS px must be 25.4 mm");
+
+// The exporter must not have grown a second opinion about figure size.
+assert.doesNotMatch(exporter, /PREVIEW_FIGURE_MAX_W_PX|PREVIEW_FIGURE_MAX_H_PX|PREVIEW_BODY_FONT_PX/,
+  "the 320px/220px/17px screen numbers are overridden in the print flow and must not come back");
 
 // --- option columns -----------------------------------------------------------
 // styles.css still carries "@container qpaper (max-width: 680px) { .qb-options.cols-4
@@ -86,26 +131,41 @@ assert.doesNotMatch(exporter, /PREVIEW_OPTION_FOUR_COLUMN_MAX_PX|def _preview_op
 assert.doesNotMatch(exporter, /_preview_option_columns\(/,
   "no column decision may route through the removed reduction");
 
-// --- the wrapping itself, checked against what Chrome was measured doing ------
-// Cases come from measuring the real renderer at a 178mm container.
-function wrap(sizes, mm = widthMm, gapPxValue = gapPx) {
-  const container = mm / 25.4 * 96;
-  const widths = sizes.filter((value) => value > 0).map((value) => Math.min(value, container));
-  if (widths.length < 2) return 1;
-  let best = 1, used = widths[0], count = 1;
-  for (const value of widths.slice(1)) {
-    if (used + gapPxValue + value <= container + 0.5) { used += gapPxValue + value; count += 1; }
-    else { best = Math.max(best, count); used = value; count = 1; }
-  }
-  return Math.max(best, count);
+// --- the wrapping itself, checked against the preview's own formula ------------
+// Same arithmetic as _figure_paper_size + _figure_row_layout, written here
+// independently so a change on one side shows up as a failure.
+function paperMm(pxWidth) {
+  return Math.min(pxWidth * 25.4 / naturalDpi, textWidthMm);
 }
-const four = [240, 240, 240, 240];
-assert.equal(wrap(four), 2, "four 240px diagrams fit two per row at 178mm");
-assert.equal(wrap([120, 120, 120, 120]), 4, "four 120px diagrams fit on one row");
-assert.equal(wrap([400, 400, 400, 400]), 1, "a 400px diagram takes a whole row");
-assert.equal(wrap([300, 300, 300, 300, 300]), 2, "five 300px diagrams wrap two per row");
-assert.equal(wrap([240]), 1, "one diagram is never a grid");
+function wrap(pxWidths) {
+  const gapMm = gapPx * mmPerPixel;
+  const widths = pxWidths.filter((value) => value > 0).map(paperMm);
+  if (!widths.length) return 1;
+  let best = 0, used = widths[0], count = 1;
+  for (const width of widths.slice(1)) {
+    if (used + gapMm + width <= textWidthMm + 0.01) { used += gapMm + width; count += 1; }
+    else { best = Math.max(best, count); used = width; count = 1; }
+  }
+  return Math.max(best, count, 1);
+}
 
-console.log(`figure layout parity: ${gapPx}px gap, ${widthMm}mm text area, `
-  + `four 240px diagrams -> ${wrap(four)} per row (matches the measured preview); `
-  + `four options -> 2 columns on the printed ${(widthMm / 25.4 * 96).toFixed(0)}px page`);
+const four = [240, 240, 240, 240];
+assert.equal(wrap(four), 4, "four 240px diagrams fit on one row at 150 dpi");
+assert.equal(wrap([120, 120, 120, 120]), 4, "four 120px diagrams fit on one row");
+assert.equal(wrap([400, 400, 400, 400]), 2, "four 400px diagrams go two per row");
+assert.equal(wrap([300, 300, 300, 300, 300]), 3, "five 300px diagrams go three then two");
+assert.equal(wrap([240]), 1, "one diagram is never a grid");
+assert.equal(wrap([600, 600]), 1, "two 600px strips each take a whole row");
+// The reported case, 初三「特殊的平行四边形」第 23 题.
+assert.equal(wrap([279, 231, 210]), 3, "the three scanned diagrams stay on one row");
+// The row must come out exactly as wide as the browser draws it, not as wide as
+// the text area: 178.56 + 147.84 + 134.4 px plus two 14px gaps = 488.8 px.
+const rowMm = [279, 231, 210].reduce((sum, value) => sum + paperMm(value), 0)
+  + 2 * gapPx * mmPerPixel;
+assert.ok(Math.abs(rowMm - 488.8 * mmPerPixel) < 0.2,
+  `the measured preview row is 129.3mm, this computes ${rowMm.toFixed(1)}mm`);
+
+console.log(`figure layout parity: ${naturalDpi} dpi figures, ${gapPx}px gap, `
+  + `${textWidthMm}mm text area; four 240px diagrams -> ${wrap(four)} per row, `
+  + `the three scanned diagrams -> ${wrap([279, 231, 210])} per row `
+  + `(${rowMm.toFixed(1)}mm, the same row the preview draws)`);

@@ -1,4 +1,4 @@
-"""Mutation check: the new figure-row tests must fail when the fix is undone.
+"""Mutation check: the figure-layout tests must fail when the rules are undone.
 
 Each mutation reverts one part of the behaviour and requires the named tests
 to go red. A mutation that leaves them green proves the test does not check
@@ -16,25 +16,34 @@ TESTS = "core.test_library_export.LibraryExportTests"
 
 MUTATIONS = [
     (
-        "the 220px height cap stops moving the flex base size again",
-        "    return width * min(1.0, PREVIEW_FIGURE_MAX_H_PX / height)",
-        "    return width",
+        "figures go back to a 96 dpi guess instead of the preview's 150 dpi",
+        "PREVIEW_FIGURE_DPI = 150",
+        "PREVIEW_FIGURE_DPI = 96",
     ),
     (
-        "the 320px screen width cap is ignored again",
-        "    scale = min(1.0, PREVIEW_FIGURE_MAX_W_PX / width, PREVIEW_FIGURE_MAX_H_PX / height)",
-        "    scale = min(1.0, PREVIEW_FIGURE_MAX_H_PX / height)",
+        "figures are sized against the paper font size again, not the preview's dpi",
+        "    paper = min(width * 25.4 / PREVIEW_FIGURE_DPI,",
+        "    paper = min(width * 25.4 / 72 / 17,",
     ),
     (
-        "a near-miss row wraps instead of shrinking",
-        "PREVIEW_FIGURE_ROW_MIN_SCALE = 0.5",
-        "PREVIEW_FIGURE_ROW_MIN_SCALE = 0.95",
+        "a figure may grow wider than the text area",
+        "PREVIEW_TEXT_WIDTH_MM = 178",
+        "PREVIEW_TEXT_WIDTH_MM = 1000",
     ),
     (
-        "pictures go back to a 96 dpi guess instead of the paper font size",
-        "                _write_images(document, item, \"stem\", columns, shrink,\n"
-        "                              size * 25.4 / 72 / PREVIEW_BODY_FONT_PX)",
-        "                _write_images(document, item, \"stem\", columns, shrink)",
+        "a figure may grow taller than one page",
+        "PREVIEW_PAGE_HEIGHT_MM = 210",
+        "PREVIEW_PAGE_HEIGHT_MM = 2100",
+    ),
+    (
+        "the row stops wrapping and takes every figure",
+        "        if used + gap + width <= text_width_mm + 0.01:",
+        "        if True:",
+    ),
+    (
+        "the gap between figures is guessed at 1/96 inch instead of read off the row",
+        "    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH",
+        "    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / 72",
     ),
     (
         "the figure row stops being centred",
