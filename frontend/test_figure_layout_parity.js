@@ -1,7 +1,7 @@
 // The Word export reproduces the preview's figure wrapping in Python
-// (library_export.py: _figure_columns). That only stays true while the CSS it
-// was measured against is unchanged. Read the real stylesheets and the real
-// exporter, and fail when the two drift apart.
+// (library_export.py: _figure_row_layout / _figure_display_size). That only
+// stays true while the CSS it was measured against is unchanged. Read the real
+// stylesheets and the real exporter, and fail when the two drift apart.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -34,16 +34,32 @@ assert.ok(printedFigure, "print narrows .qb-figure img to the text area");
 assert.match(printedFigure[1], /max-width:\s*100%/);
 assert.match(printedFigure[1], /max-height:\s*none/);
 
-// Screen caps at 320px, which is why the preview and the print differ for very
-// wide diagrams. The exporter models the print geometry; make that deliberate.
-assert.match(styles, /\.qb-figure\s+img\s*\{[^}]*max-width:\s*min\(100%,\s*320px\)/,
+// On screen a figure is capped at 320x220. That cap is not decoration: three
+// crops of one scanned row (279x226, 231x226, 210px) come out 272/225/196 wide
+// because of it, which is the whole reason they sit on one line on screen. The
+// exporter measures the same box, so both numbers have to move together.
+const screenFigure = styles.match(/\.qb-figure\s+img\s*\{([^}]*)\}/);
+assert.ok(screenFigure, ".qb-figure img is capped on screen");
+assert.match(screenFigure[1], /max-width:\s*min\(100%,\s*320px\)/,
   "the on-screen 320px cap is what makes wide diagrams differ on screen");
+const screenMaxHeight = Number((screenFigure[1].match(/max-height:\s*(\d+(?:\.\d+)?)px/) || [])[1]);
+assert.ok(screenMaxHeight > 0, "the on-screen figure also has a height cap");
 
 // --- the exporter must use exactly those numbers ------------------------------
 const gapConstant = exporter.match(/PREVIEW_FIGURE_GAP_PX\s*=\s*(\d+(?:\.\d+)?)/);
 assert.ok(gapConstant, "library_export.py names the preview gap it assumes");
 assert.equal(Number(gapConstant[1]), gapPx,
   `Word wraps with a ${gapConstant[1]}px gap but .qb-figures uses ${gapPx}px`);
+
+const widthCap = exporter.match(/PREVIEW_FIGURE_MAX_W_PX\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(widthCap, "library_export.py names the on-screen width cap it assumes");
+assert.equal(Number(widthCap[1]), 320,
+  `Word assumes a ${widthCap[1]}px figure width cap but the screen uses 320px`);
+
+const heightCap = exporter.match(/PREVIEW_FIGURE_MAX_H_PX\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(heightCap, "library_export.py names the on-screen height cap it assumes");
+assert.equal(Number(heightCap[1]), screenMaxHeight,
+  `Word assumes a ${heightCap[1]}px figure height cap but the screen uses ${screenMaxHeight}px`);
 
 const dxf = exporter.match(/text_width_mm=(\d+(?:\.\d+)?)/g) || [];
 assert.ok(dxf.includes(`text_width_mm=${widthMm}`),

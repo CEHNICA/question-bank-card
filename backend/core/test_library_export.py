@@ -1220,30 +1220,42 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIn("X-QB-Layout-Warning", response)
 
     def test_stem_figures_wrap_onto_the_same_rows_as_the_preview(self):
-        """The download must read like the preview: four diagrams stay 2x2.
+        """The download must read like the preview, rows and sizes both.
 
-        The expected numbers below are what the browser actually produced for
-        frontend/styles.css (.qb-figures: flex-wrap, 14px gap, images capped at
-        100% of the 178mm .print-flow text area), measured with Chrome at a
-        178mm container. They are written out as literals on purpose — deriving
-        them from _figure_columns would only prove the function agrees with
-        itself.
+        Row counting follows what Chrome actually does with
+        frontend/styles.css (.qb-figures: flex-wrap, 14px gap, .qb-figure img
+        capped at 320x220) inside a 1100px question panel — the width of an
+        expanded library card. Only the 220px height cap moves the flex base
+        size; the ``100%`` in ``min(100%, 320px)`` cannot resolve against an
+        auto-width figure, so Chrome still wraps a 1484px-wide strip at its own
+        width while painting it 320px wide.
+
+        ``width_mm`` is the picture size on paper (1 CSS pixel = 1/96 inch).
+        It replaced the old 150 dpi guess, which made the same diagrams a
+        different size on screen and on paper. The numbers are literals on
+        purpose — deriving them from _figure_row_layout would only prove the
+        function agrees with itself.
         """
-        for label, size, columns, rows in (
-            ("4 x 240px wraps to 2 columns", (240, 120), 2, 2),
-            ("3 x 240px wraps to 2 columns", (240, 120), 2, 2),
-            ("6 x 240px wraps to 2 columns", (240, 120), 2, 3),
-            ("4 x 320px still fits two per row", (320, 200), 2, 2),
-            ("4 x 120px stays on one row", (120, 90), 4, 1),
-            ("5 x 300px wraps to 2 columns", (300, 200), 2, 3),
+        for label, sizes, columns, rows, width_mm in (
+            ("4 x 240px shrinks onto one row", [(240, 120)] * 4, 4, 1, 42.6),
+            ("3 x 240px shrinks onto one row", [(240, 120)] * 3, 3, 1, 57.1),
+            ("6 x 240px shrinks too far, wraps", [(240, 120)] * 6, 2, 3, 63.5),
+            ("4 x 320px shrinks onto one row", [(320, 200)] * 4, 4, 1, 43.1),
+            ("4 x 120px fits without shrinking", [(120, 90)] * 4, 4, 1, 31.8),
+            ("5 x 300px shrinks too far, wraps", [(300, 200)] * 5, 2, 3, 79.4),
+            # Wider than 320px but short enough that only the width cap bites.
+            ("2 x 600x100 keeps the 320px cap", [(600, 100)] * 2, 2, 1, 46.9),
+            # 必修第一册 1-1, four diagrams the preview shows on one line.
+            ("textbook 4 diagrams", [(340, 354), (347, 360), (336, 360), (326, 357)],
+             4, 1, [43.2, 43.3, 41.9, 41.0]),
         ):
             with self.subTest(label):
-                count = int(label[0])
+                count = len(sizes)
                 pub = self.publication(kind="free_response")
                 folder = self.root / "library" / str(pub.id)
                 folder.mkdir(parents=True, exist_ok=True)
                 pub.content["figures"] = []
-                for index in range(1, count + 1):
+                for index, size in enumerate(sizes, start=1):
                     target = folder / f"figure-{index}.png"
                     Image.new("RGB", size, "red").save(target)
                     pub.content["figures"].append({"slot": "stem", "file": target.name,
@@ -1263,22 +1275,28 @@ class LibraryExportTests(ExportFixture, TestCase):
                 for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
                     node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
                     self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil", f"{label}: {side} border")
-                # Arrangement follows the preview; image size keeps the 150 dpi rule.
-                extents = tree.xpath(
+                # Arrangement and size both follow the preview.
+                extents = [int(value) / 36000 for value in tree.xpath(
                     "//*[local-name()='extent' and namespace-uri()="
-                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")
-                self.assertTrue(all(abs(int(width) / 36000 - size[0] * 25.4 / 150) < .01 for width in extents))
+                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+                wanted = width_mm if isinstance(width_mm, list) else [width_mm] * count
+                self.assertEqual([round(value, 1) for value in extents], wanted, f"{label}: mm on paper")
 
-        # A figure wider than half the text area gets a row to itself in the
-        # preview, so the download keeps one picture per line instead of
-        # squeezing two onto a row and shrinking them.
+        # 必修第一册 2-2: two very wide strips. Chrome wraps these two lines in
+        # a 1100px panel, and the download must not shrink them to 23% to keep
+        # them on one line. One column means one paragraph per picture, which
+        # is what a lone figure has always printed as.
+        #
+        # That path still uses the 150 dpi natural size rather than the screen
+        # size: one picture per line has no neighbour to line up with, and
+        # changing it would resize every single-figure question in the bank.
         pub = self.publication(kind="free_response")
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True, exist_ok=True)
         pub.content["figures"] = []
-        for index in range(1, 5):
+        for index, size in enumerate(((1484, 144), (1476, 147)), start=1):
             target = folder / f"figure-{index}.png"
-            Image.new("RGB", (400, 260), "red").save(target)
+            Image.new("RGB", size, "red").save(target)
             pub.content["figures"].append({"slot": "stem", "file": target.name,
                                            "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
@@ -1286,8 +1304,59 @@ class LibraryExportTests(ExportFixture, TestCase):
         response = self.post(self.payload([pub], print_options={"document": "questions"}))
         self.assertEqual(response.status_code, 200)
         tree = document_xml(response.content)
-        self.assertIsNone(tree.find(".//w:tbl", NS))
-        self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
+        self.assertIsNone(tree.find(".//w:tbl", NS), "one column must not build a grid")
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 2)
+        # Capped to the 178mm text area: 1484 * 178 / 1484 mm.
+        extents = [round(int(value) / 36000, 1) for value in tree.xpath(
+            "//*[local-name()='extent' and namespace-uri()="
+            "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+        self.assertEqual(extents, [178.0, 178.0])
+
+    def test_three_side_by_side_diagrams_stay_on_one_row(self):
+        """The reported case: 初三「特殊的平行四边形」第 23 题.
+
+        Three crops of one row on the original page — 279x226, 231x226 and
+        210x236 px. On screen the 220px cap brings them to 272/225/196 wide,
+        721px together, so they sit side by side. Measured raw they are 748px,
+        7% over the 673px text area, and the download used to split them 2+1
+        and leave an empty cell. They must now shrink onto one row, keeping
+        their relative widths.
+        """
+        pub = self.publication(kind="free_response")
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        pub.content["figures"] = []
+        for index, size in enumerate(((279, 226), (231, 226), (210, 236)), start=1):
+            target = folder / f"figure-{index}.png"
+            Image.new("RGB", size, "red").save(target)
+            pub.content["figures"].append({"slot": "stem", "file": target.name,
+                                           "page_idx": 3, "bbox": [500 + index * 10, 228, 612, 334]})
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+        table = tree.find(".//w:tbl", NS)
+        self.assertIsNotNone(table, "three diagrams must share one grid")
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 3,
+                         "they must stay on one row, not 2+1")
+        self.assertEqual(len(table.findall("w:tr", NS)), 1)
+        self.assertEqual(len(tree.findall(".//a:blip", NS)), 3)
+
+        # Shrunk by 672.756/721 onto the text area: 67.1 / 55.6 / 48.4 mm.
+        extents = [int(value) / 36000 for value in tree.xpath(
+            "//*[local-name()='extent' and namespace-uri()="
+            "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+        self.assertEqual([round(value, 1) for value in extents], [67.1, 55.6, 48.4])
+        # Relative widths survive: the widest diagram is still the widest cell.
+        widths = [int(column.get(f'{{{NS["w"]}}}w'))
+                  for column in table.findall("w:tblGrid/w:gridCol", NS)]
+        self.assertEqual(len(widths), 3)
+        self.assertGreater(widths[0], widths[1])
+        self.assertGreater(widths[1], widths[2])
+        # And the row still fills the text area instead of running off the page.
+        self.assertLessEqual(sum(width / 36000 for width in widths), 178)
 
     def test_a_single_stem_figure_stays_a_plain_paragraph(self):
         pub = self.publication(kind="free_response")
@@ -1340,10 +1409,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 8)
         tables = tree.findall(".//w:tbl", NS)
         self.assertEqual(len(tables), 2, "one grid for the stem figures, one for the options")
+        # Four 240px stem diagrams fit on one line in the preview, so they do
+        # here too; the four option diagrams still answer to the option grid.
+        self.assertEqual(len(tables[0].findall("w:tblGrid/w:gridCol", NS)), 4)
+        self.assertEqual(len(tables[1].findall("w:tblGrid/w:gridCol", NS)), 2)
         for table in tables:
-            self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
             self.assertEqual(len(table.findall(".//a:blip", NS)), 4)
-        self.assertEqual(len(tables[0].findall("w:tr", NS)), 2)
+        self.assertEqual(len(tables[0].findall("w:tr", NS)), 1)
         self.assertEqual(len(tables[1].findall("w:tr", NS)), 2)
 
     def test_inline_missing_solution_does_not_emit_a_separate_placeholder(self):

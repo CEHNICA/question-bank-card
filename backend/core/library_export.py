@@ -1160,6 +1160,17 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
 # 是 1/96 英寸。实测四张 240px 的图预览排成 2×2，Word 原来每张一个段落，排成 1×4。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
+# 屏幕上每张配图还有上限：styles.css 的 .qb-figure img 是 max-width 320px、
+# max-height 220px，超出的部分等比缩掉。这个上限不是可有可无的装饰 ——
+# 初三「特殊的平行四边形」第 23 题的三张原卷裁片是 279×226、231×226、210×236，
+# 屏幕上被压到各 220px 高（272/225/196 宽），一行并排共 721px；
+# 导出以前拿原始像素算 748px，比 178mm 正文栏（672.76px）多 7%，
+# 于是这组明明并排的图被拆成 2 行，Word 里跟预览对不上。
+PREVIEW_FIGURE_MAX_W_PX = 320
+PREVIEW_FIGURE_MAX_H_PX = 220
+# 整行只差一点点时缩进栏宽、保持一行（比例不变）；要缩过这个比例就换行。
+# 缩到一半图还看得清，缩到一半以下不如老实地排成两行。
+PREVIEW_FIGURE_ROW_MIN_SCALE = 0.5
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
@@ -1179,22 +1190,65 @@ PREVIEW_FIGURE_GAP_PX = 14
 # lays those out in two columns. Left alone on purpose.
 
 
-def _figure_columns(images, text_width_mm=178):
-    """How many figures the preview puts on one row, counted the way it wraps.
+def _figure_row_width(size):
+    """The width the preview's figure row reserves for one picture.
 
-    .print-flow is 178mm wide and .qb-figure img is capped at 100% of it with no
-    height cap, so a figure is as wide as its pixels unless that exceeds the text
-    area. Rows fill greedily left to right. Answer/solution figures are not in this
-    row — they stack one per line in the preview too, and keep doing so.
+    Only the 220px height cap moves the flex base size. The 320px width cap is
+    ``min(100%, 320px)``, and that ``100%`` cannot resolve against an
+    auto-width figure, so Chrome lays the item out at the image's own width and
+    paints it narrower — measured on 2026-10-15: a 1484x144 strip and a
+    1476x147 strip wrap onto two lines in a 1100px panel even though they only
+    paint 320px wide, while four 340x354 diagrams (each capped to 220px tall,
+    211px wide) fit on one line.
+    """
+    width, height = float(size[0]), float(size[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    return width * min(1.0, PREVIEW_FIGURE_MAX_H_PX / height)
+
+
+def _figure_display_size(size):
+    """The size the on-screen preview really shows for one figure.
+
+    ``.qb-figure img`` caps a figure at 320px wide and 220px tall, so a tall
+    scan comes out narrower than its own pixels. Measuring anything else
+    miscounts how much room the pictures need on paper.
+    """
+    width, height = float(size[0]), float(size[1])
+    if width <= 0 or height <= 0:
+        return 0.0, 0.0
+    scale = min(1.0, PREVIEW_FIGURE_MAX_W_PX / width, PREVIEW_FIGURE_MAX_H_PX / height)
+    return width * scale, height * scale
+
+
+def _figure_row_layout(images, text_width_mm=178):
+    """``(columns, scale)``: the rows the preview keeps the figures on, and
+    the shrink that fits them into the text area without changing the row.
+
+    Rows are counted the way the browser wraps them, with the height cap
+    applied. When a row misses the text area by a little, the whole row shrinks
+    instead of splitting — that is what keeps three scanned diagrams side by
+    side, the way they sit on the original page. A row that would have to
+    shrink past ``PREVIEW_FIGURE_ROW_MIN_SCALE`` wraps instead; below half
+    size a diagram stops being readable, and two honest lines beat one
+    illegible one.
+
+    ``scale`` applies to the on-screen size; callers that place one figure per
+    line keep using their own size rule.
     """
     widths = []
     for image in images:
-        width = float(image["size"][0])
+        width = _figure_row_width(image["size"])
         if width > 0:
-            widths.append(min(width, text_width_mm / 25.4 * PREVIEW_PX_PER_INCH))
+            widths.append(width)
     if len(widths) < 2:
-        return 1
+        return 1, 1.0
     container = text_width_mm / 25.4 * PREVIEW_PX_PER_INCH
+    row = sum(widths) + PREVIEW_FIGURE_GAP_PX * (len(widths) - 1)
+    if row > container + 0.5:
+        shrink = container / row
+        if shrink >= PREVIEW_FIGURE_ROW_MIN_SCALE:
+            return len(widths), shrink
     best = 1
     used = widths[0]
     count = 1
@@ -1205,32 +1259,34 @@ def _figure_columns(images, text_width_mm=178):
         else:
             best = max(best, count)
             used, count = width, 1
-    return int(max(best, count))
+    return int(max(best, count)), 1.0
 
 
-def _write_images(document, item, slot, columns=1):
+def _write_images(document, item, slot, columns=1, scale=1.0):
     from docx.shared import Mm
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
     if columns > 1 and len(pictures) > 1:
-        _write_figure_grid(document, pictures, columns)
+        _write_figure_grid(document, pictures, columns, scale=scale)
         return
     for image in pictures:
         width, height = image["size"]
-        # 150 dpi natural size, capped to the A4 text area and one-page height.
-        scale = min(178 / width, (235 if slot == "body" else 210) / height, 25.4 / 150)
+        # One figure per line keeps the 150 dpi natural size, capped to the A4
+        # text area and one-page height.
+        natural = min(178 / width, (235 if slot == "body" else 210) / height, 25.4 / 150)
         paragraph = document.add_paragraph()
-        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
+        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * natural), height=Mm(height * natural))
         paragraph.paragraph_format.keep_together = True
 
 
-def _write_figure_grid(document, pictures, columns, text_width_mm=178):
+def _write_figure_grid(document, pictures, columns, text_width_mm=178, scale=1.0):
     """Stem figures on the same rows the preview wraps them onto.
 
-    Images keep the 150 dpi size they always had; only the arrangement follows
-    the preview, so a question with four diagrams reads as 2×2 in the download
-    instead of four full-width lines.
+    Columns take the widths the preview gave each figure, so three diagrams of
+    different sizes keep their relative proportions instead of being stretched
+    into equal cells, and the pictures are the on-screen size rather than a
+    150 dpi guess that made the same question look different on paper.
     """
     from docx.shared import Mm
     from docx.oxml import OxmlElement
@@ -1238,8 +1294,20 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=178):
     rows = (len(pictures) + columns - 1) // columns
     table = document.add_table(rows=rows, cols=columns)
     table.autofit = False
-    for column in table.columns:
-        column.width = Mm(text_width_mm / columns)
+    # Column widths follow the widths the preview gave each figure, so three
+    # differently sized diagrams keep their relative proportions instead of
+    # being stretched into equal cells. A column is as wide as the widest
+    # picture in it, and the row still fills the text area exactly.
+    shown = [_figure_display_size(image["size"])[0] * scale for image in pictures]
+    column_px = [max((shown[index] for index in range(len(pictures))
+                      if index % columns == column), default=0.0)
+                 for column in range(columns)]
+    total_px = sum(column_px) or 1.0
+    gap_mm = PREVIEW_FIGURE_GAP_PX * scale / PREVIEW_PX_PER_INCH * 25.4
+    room = text_width_mm - gap_mm * (columns - 1)
+    column_widths = [max(width / total_px * room, 1.0) for width in column_px]
+    for column, width in zip(table.columns, column_widths):
+        column.width = Mm(width)
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
@@ -1247,13 +1315,18 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=178):
         borders.append(border)
     table._tbl.tblPr.append(borders)
     for index, image in enumerate(pictures):
-        width, height = image["size"]
-        scale = min(178 / width, 210 / height, 25.4 / 150)
-        paragraph = table.cell(index // columns, index % columns).paragraphs[0]
+        display_width, display_height = _figure_display_size(image["size"])
+        width_mm = display_width * scale * 25.4 / PREVIEW_PX_PER_INCH
+        height_mm = display_height * scale * 25.4 / PREVIEW_PX_PER_INCH
+        cell_width = column_widths[index % columns]
+        fit = min(1.0, cell_width / width_mm, 210 / height_mm)
+        cell = table.cell(index // columns, index % columns)
+        cell.width = Mm(cell_width)
+        paragraph = cell.paragraphs[0]
         # .qb-figures centres its row; the grid cells do the same job here.
         paragraph.alignment = 1
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]),
-                                        width=Mm(width * scale), height=Mm(height * scale))
+                                        width=Mm(width_mm * fit), height=Mm(height_mm * fit))
         paragraph.paragraph_format.keep_together = True
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
@@ -1668,7 +1741,8 @@ def _document(captured, title, options, mode):
                 _write_images(document, item, "body")
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
-                _write_images(document, item, "stem", _figure_columns(stem_figures))
+                columns, shrink = _figure_row_layout(stem_figures)
+                _write_images(document, item, "stem", columns, shrink)
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)
