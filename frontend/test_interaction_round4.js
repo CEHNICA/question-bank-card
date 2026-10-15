@@ -31,7 +31,15 @@ assert.match(js, /item\.classList\.add\("fresh"\)/);
 // The review meter is one row; its explanation opens on demand.
 assert.match(html, /<details class="meter-note">/);
 assert.match(css, /\.review-meter \{[^}]*display: flex/);
-assert.match(js, /\$\{c\.todo\} 题需要核查/);
+// What the yellow bar means must still be spelled out in words — colour alone is
+// not a cue. This used to be checked against the header sentence "34 道题，32 题
+// 需要核查。", but that sentence was a third copy of numbers the meter and the
+// tabs already show, so it was removed. Pin the two places that carry the word
+// now: the filter tab a person clicks, and the bar's own label.
+assert.match(js, /\{ key: "todo", label: "需要核查" \}/,
+  "the filter tab still names what the yellow bar counts");
+assert.match(js, /\["yellow", c\.todo, "需要核查"/,
+  "the bar segment still carries its label rather than a colour alone");
 
 // Long cards keep their buttons on screen; while editing, the original stays
 // in the sticky left column (1.10.1: every card is crop left, text right).

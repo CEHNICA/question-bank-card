@@ -5,6 +5,8 @@ const dom = require("./credential-test-dom.js");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const source = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf("  function renderSettingsTask("));
+const visionSource = js.slice(js.indexOf("  function selectedReadingProvider()"), js.indexOf("  // MiniMax 的并发"));
+const visionListener = js.slice(js.indexOf('  $("credentialVisionProvider").addEventListener("change"'), js.indexOf('  modelSettingFields.forEach', js.indexOf('  $("credentialVisionProvider").addEventListener("change"')));
 const listenerStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = js.slice(listenerStart, js.indexOf("  // Queue the values captured", listenerStart));
 const leaveSource = js.slice(js.indexOf("  async function prepareSettingsLeave()"), js.indexOf("  async function saveModelSettingsNow("));
@@ -32,6 +34,7 @@ for (const id of ["credentialForm", "modelSettingsForm"]) {
 }
 assert.ok(ancestry.get("libraryAIAPISettingsMount").some((item) => item.id === "credentialAnswerPanel"));
 assert.ok(!ancestry.get("libraryAIAPISettingsMount").some((item) => item.tag === "form"));
+for (const id of ["settingsModelSummary", "settingsModelResult"]) assert.ok(!ancestry.get(id).some(item => item.id === "settingsModels"), "Provider save feedback must remain visible when advanced model details are collapsed");
 assert.doesNotMatch(html, /libraryAISettingsMount/);
 assert.match(js, /modelFormDirty \|\| credentialHasNewKeys\(\) \|\| window\.LibraryAISettings\?\.hasUnsavedChanges/);
 
@@ -57,15 +60,16 @@ function scenario() {
     discard() { if (this.isBusy()) return false; this.dirty = false; this.key = ""; calls.push("discard-answer"); return true; }
   };
   const context = vm.createContext({ $, el: dom.el, icon: dom.icon, console, AbortController, setTimeout, clearTimeout,
-  state: { status: null }, credentialSourceNote: () => "",
+  state: { status: null }, credentialSourceNote: () => "", settingsEngineChoices: engines => engines.choices || [],
     window: { LibraryAISettings: ai, addEventListener(name, fn) { windowEvents.set(name, fn); }, location: { pathname: "/settings", hash: "", search: "" } },
     document: { addEventListener() {}, querySelectorAll(selector) { if (selector === "[data-settings-tab]") return tabs; if (selector === "#settingsDialog .settings-page") return pages; throw new Error(selector); }, querySelector() { return $("scroll"); } },
     requestAnimationFrame(fn) { frames.set(++frame, fn); return frame; }, cancelAnimationFrame(id) { frames.delete(id); },
     anyDialogOpen: () => $("credentialDialog").open, toast: () => {}, loadStatus: async () => true,
+    saveModelSettings() { calls.push({ selectedModel: $("settingsPrimaryModel").value }); },
     confirmDialog: async (options) => { confirmations.push(options); return typeof confirmResult === "boolean" ? confirmResult : confirmResult.promise; },
     api: async (url, options) => { calls.push({ url, options }); return { services: { minimax: { configured: true, count: 2 } } }; }
   });
-  vm.runInContext(source + listeners + routeSource + "\nlet modelFormDirty = false, lastModelSave = null, modelSaving = Promise.resolve();\n" + leaveSource, context);
+  vm.runInContext(visionSource + source + listeners + visionListener + routeSource + "\nlet modelFormDirty = false, lastModelSave = null, modelSaving = Promise.resolve();\n" + leaveSource, context);
   return { $, ai, context, calls, nativeTasks, confirmations, windowEvents,
     setConfirmation(value) { confirmResult = value; },
     drainClose() { while (nativeTasks.length) nativeTasks.shift()(); },
@@ -75,6 +79,31 @@ function scenario() {
 }
 
 (async () => {
+  const visual = scenario(); await visual.context.openCredentialSettings("reading");
+  visual.context.syncCredentialVisionPanel();
+  assert.equal(visual.$("credentialVisionProvider").value, "modelscope", "First-time setup starts with the recommended provider without saving it automatically");
+  assert.equal(visual.$("credentialModelscopeSection").hidden, false);
+  assert.equal(visual.$("credentialMinimaxSection").hidden, true); assert.equal(visual.$("credentialSiliconflowSection").hidden, true);
+  assert.equal(visual.calls.some(call => call.selectedModel), false);
+  const names = { modelscope: "Modelscope", minimax: "Minimax", siliconflow: "Siliconflow" };
+  visual.context.state.status = { configured: { modelscope: true }, engines: { saved: { primary: "modelscope-real-model" },
+    choices: Object.keys(names).map(provider => ({ key: `${provider}-real-model`, provider_key: provider })) } };
+  for (const title of Object.values(names)) visual.$(`credential${title}Input`).value = `synthetic-${title}-draft`;
+  for (const provider of ["minimax", "siliconflow", "assistant", "modelscope"]) {
+    visual.$("credentialVisionProvider").value = provider;
+    visual.$("credentialVisionProvider").events.change[0]();
+    for (const [candidate, title] of Object.entries(names)) {
+      assert.equal(visual.$(`credential${title}Section`).hidden, candidate !== provider);
+      assert.equal(visual.$(`credential${title}Input`).value, `synthetic-${title}-draft`, "Switching providers retains every intentional replacement draft");
+    }
+    assert.equal(visual.calls.at(-1).selectedModel, provider === "assistant" ? "assistant" : `${provider}-real-model`, "Explicit selection maps to the loaded model and requests one save");
+  }
+  const beforeBusyChoice = visual.calls.length;
+  vm.runInContext("credentialBusy = true", visual.context);
+  visual.$("credentialVisionProvider").value = "minimax"; visual.$("credentialVisionProvider").events.change[0]();
+  assert.equal(visual.calls.length, beforeBusyChoice, "Provider switching cannot start another save during a credential mutation");
+  assert.equal(visual.$("credentialVisionProvider").value, "modelscope");
+
   for (const oldHash of ["#ai", "#api"]) {
     const legacy = scenario(); legacy.context.window.location.hash = oldHash;
     legacy.context.syncSettingsRoute(); await turns();

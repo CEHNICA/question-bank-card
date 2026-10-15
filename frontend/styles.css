@@ -106,6 +106,37 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 /* 顶栏的容器还留着，因为专注浏览的退出按钮要进这里；平时是空的就不占位。 */
 .topbar-tools { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .topbar-tools:not(:has(> :not([hidden]))) { display: none; }
+
+/* ------------------------------------------------------------------
+   应用自己的顶栏骨架。录入终审（/）和正式题库（/library）共用这一套：
+   ☰ | 品牌 | 中间内容 | 工具 | 窗口控件。
+
+   之前两页各写各的：正式题库 gap 18px、录入终审沿用基础样式的 10px，
+   同样 32px 的 ☰ 之后，品牌图标在录入终审里比题库页靠左 8px（x=64 与
+   x=72），切页面时整条顶栏会肉眼可见地跳一下。骨架收在这里，差异就没了。
+
+   每一块都必须独占一列：共用列再靠外边距错开会压在一起 —— gap 只在列与列
+   之间生效，同列内不分。中间那列给 1fr，窗口控件才吃得到剩余宽度。
+   ------------------------------------------------------------------ */
+.app-topbar { grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; }
+.app-topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
+.app-topbar > .brand { grid-column: 2; grid-row: 1; justify-self: start; }
+.app-topbar > .library-top-navigation { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 14px; }
+.app-topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
+.app-topbar > .window-controls { grid-column: 5; grid-row: 1; }
+
+/* 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭与最小化只能从这里来。
+   整条顶栏留出拖拽区（-webkit-app-region），点控件时不触发拖动。
+   普通浏览器标签页里这两个按钮点了不报错也不生效，开发时不影响使用。 */
+.window-controls { -webkit-app-region: drag; display: flex; align-items: center; gap: 2px;
+  height: 100%; margin-left: auto; padding-left: 10px; }
+.window-title { -webkit-app-region: no-drag; display: none; color: var(--muted); font-size: 12px; }
+.window-button { -webkit-app-region: no-drag; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 100%; min-height: 32px; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--muted); cursor: default; }
+.window-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; }
+.window-button:hover { background: var(--bg-sunken); color: var(--ink); }
+.window-button.window-close:hover { background: #c42b1c; color: #fff; }
 .topbar-basket { display: inline-flex; align-items: center; gap: 6px; }
 .topbar-basket-icon { display: inline-flex; }
 .topbar-basket-count { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
@@ -272,7 +303,9 @@ body.drawer-open { overflow: hidden; }
 .paper-link:hover { background: var(--surface-2); }
 .paper-item.active .paper-link { background: #eef3ef; }
 .paper-item.active .paper-link::before { content: ""; position: absolute; left: 3px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--accent); }
-.paper-file { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 八份卷子竖着摆在一起，名字截成「初三特殊的平行四边形(二次过…」就分不出是哪几份了。
+   教学卷名多半两行放得下，所以折两行而不是省略；副标题仍保持一行。 */
+.paper-file { font-size: 13.5px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .paper-meta { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paper-meta.busy { color: var(--accent); }
 .paper-item.failed .paper-meta { color: var(--red); }
@@ -351,9 +384,6 @@ body.drawer-open { overflow: hidden; }
 .seg-red { background: var(--red); }
 .seg-waiting { background: repeating-linear-gradient(-45deg, #c7cfc8 0 5px, #dde2dc 5px 10px); animation: stripes 1s linear infinite; background-size: 14px 14px; }
 @keyframes stripes { to { background-position: 14px 0; } }
-.meter-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
-.meter-legend span { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
-.meter-legend i { width: 9px; height: 9px; border-radius: 3px; }
 .review-boundary { display: flex; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12px; line-height: 1.6; }
 .review-boundary::before { content: "i"; flex: none; display: grid; place-items: center; width: 15px; height: 15px; margin-top: 2px; border-radius: 50%;
   border: 1px solid currentColor; font: italic 700 10px/1 Georgia, serif; }
@@ -403,6 +433,19 @@ body.drawer-open { overflow: hidden; }
 .filter.active .filter-count { background: var(--accent-soft); color: var(--accent); }
 .filter.attention .filter-count { background: var(--amber-bar); color: #fff; }
 .toolbar-spacer { flex: 1; }
+.review-finder { position: relative; z-index: 10; display: grid; gap: 7px; margin: -6px 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.review-finder[hidden], .review-finder-results[hidden] { display: none; }
+.review-finder > label { font-size: 13px; font-weight: 650; }
+.review-finder-input-row { display: flex; gap: 8px; }
+.review-finder-input-row input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.review-finder .hint { margin: 0; font-size: 12px; }
+.review-finder-results { display: grid; gap: 5px; max-height: min(42vh, 420px); overflow: auto; }
+.review-finder-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 7px; background: var(--surface-2); color: var(--ink); text-align: left; cursor: pointer; }
+.review-finder-result:hover, .review-finder-result:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.review-finder-result-title { font-size: 13px; font-weight: 650; }
+.review-finder-result-meta { color: var(--muted); font-size: 11px; }
+.review-finder-result-snippet { grid-column: 1 / -1; overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.review-finder-empty { margin: 4px 0; padding: 8px 10px; color: var(--muted); font-size: 13px; }
 .tool-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .toggle-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
   color: var(--ink-2); font-size: 12.5px; cursor: pointer; user-select: none; }
@@ -760,6 +803,68 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
    「快捷键」面板里有，那儿不遮画布。 */
 .page-crop-guide[hidden] { display: none; }
 .page-crop-workspace > .page-stage { min-width: 0; }
+.original-layout-panel { flex: 0 0 280px; min-width: 0; overflow: auto; padding: 12px; border-right: 1px solid var(--line); background: var(--surface); font-size: 13px; }
+.original-layout-panel[hidden], .layout-overlap[hidden] { display: none; }
+.original-layout-panel > .hint { margin: 8px 0; line-height: 1.5; }
+.layout-filters, .layout-actions, .layout-targets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.layout-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+.layout-field input:not([type=checkbox]), .layout-field select, .layout-filters select { min-width: 0; max-width: 160px; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+.layout-field input[type=number] { width: 78px; }
+.layout-question-list { display: grid; gap: 4px; margin-top: 8px; }
+.layout-question { width: 100%; text-align: left; padding: 8px; border: 1px solid rgba(var(--layout-color), .3); border-left: 4px solid rgb(var(--layout-color)); background: rgba(var(--layout-color), .08); border-radius: 6px; color: var(--ink); font: inherit; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.layout-question[aria-pressed=true], .layout-targets button[aria-pressed=true] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.layout-current { margin: 10px 0 5px; font-weight: 650; }
+.layout-coverage { position: absolute; border: 1px solid rgba(var(--layout-color), .56); background: rgba(var(--layout-color), .12); pointer-events: none; box-sizing: border-box; transition: background-color .12s, box-shadow .12s; }
+.layout-coverage.question-selected { border: 2px solid rgb(var(--layout-color)); background: rgba(var(--layout-color), .17); }
+.layout-coverage.question-hovered { border: 2px solid rgb(var(--layout-color)); background: rgba(var(--layout-color), .23); box-shadow: 0 0 0 2px rgba(255,255,255,.88); }
+.layout-coverage.layout-new-draft { border-style: dashed; border-width: 2px; }
+.layout-coverage-label, .layout-box-label { position: absolute; top: 0; left: 0; padding: 1px 5px; background: rgba(var(--layout-color), .87); color: #fff; font-size: 11px; line-height: 18px; white-space: nowrap; }
+.layout-edit-box { border: 1px solid rgb(var(--layout-color)); }
+.layout-edit-box.selected { border: 2px solid rgb(var(--layout-color)); box-shadow: 0 0 0 1px #fff; }
+.layout-edit-box .layout-box-label { pointer-events: auto; cursor: pointer; }
+.layout-edit-box.selected .layout-box-label { cursor: move; }
+.layout-edit-box .grip { display: none; pointer-events: auto; }
+.layout-edit-box.selected .grip { display: block; border-color: rgb(var(--layout-color)); }
+.layout-parts { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 5px; }
+.layout-parts > li { display: flex; flex-wrap: wrap; gap: 3px; border: 1px solid var(--line); padding: 5px; border-radius: 6px; }
+.layout-parts > li.selected { border-color: var(--accent); background: var(--accent-soft); }
+.layout-parts select { max-width: 100%; width: 100%; font: inherit; padding: 4px; }
+.layout-draft-preview { margin: 10px 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.layout-draft-preview-fixed { display: grid; gap: 7px; }
+.layout-more-actions { margin: 8px 0; }
+.layout-more-actions > summary { cursor: pointer; color: var(--muted); }
+.layout-draft-preview summary { cursor: pointer; font-size: 12px; margin-bottom: 8px; }
+.layout-history { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.layout-history summary { cursor: pointer; margin-bottom: 8px; }
+.layout-operation { padding: 8px 0; border-top: 1px solid var(--line); }
+.layout-before-question { padding: 5px 0; }
+.layout-history-text { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.layout-confirm, .layout-conflict, .layout-merge-picker { padding: 10px; margin: 10px 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); }
+.layout-confirm .crop-view { margin: 8px 0 12px; }
+.layout-warning { color: var(--red); line-height: 1.5; }
+.layout-empty-range { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); }
+.layout-empty-range > strong, .layout-empty-range > p { flex-basis: 100%; margin: 0; line-height: 1.6; }
+.layout-overlap { position: fixed; z-index: 20; display: grid; gap: 5px; width: 260px; max-height: 310px; overflow: auto; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+.layout-overlap button { text-align: left; white-space: normal; }
+.layout-leave-dialog { width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); }
+.layout-leave-dialog::backdrop { background: rgba(15, 30, 26, .42); }
+.layout-leave-dialog > strong { font-size: 16px; }
+.layout-leave-dialog > p { margin: 8px 0 14px; color: var(--ink-2); line-height: 1.5; }
+.layout-leave-dialog .layout-actions { justify-content: flex-end; }
+.layout-workspace .page-crop-messages { display: none; }
+.layout-workspace .page-crop-workspace { flex-direction: row; flex-wrap: nowrap; overflow: hidden; }
+.layout-workspace .page-stage { flex: 1 1 0; width: 0; min-height: 0; }
+.layout-workspace .stage-surface { cursor: default; }
+.layout-workspace .stage-surface.layout-hit-hover { cursor: pointer; }
+.layout-workspace .page-stage.layout-drawing, .layout-workspace .page-stage.layout-drawing .stage-surface,
+.layout-workspace .page-stage.layout-drawing .stage-surface * { cursor: crosshair !important; }
+.layout-workspace .page-crop-preview { flex-basis: 230px; }
+@media (max-width: 1050px) { .layout-workspace .page-crop-preview { display: none; } }
+@media (max-width: 700px) {
+  .layout-workspace .page-crop-workspace { flex-direction: column; flex-wrap: nowrap; }
+  .original-layout-panel { flex: 0 0 auto; max-height: 34%; width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
+  .layout-workspace .page-stage { width: auto; min-height: 120px; }
+}
 .page-crop-preview { flex: 0 0 290px; min-width: 0; overflow: auto; padding: 14px; border-left: 1px solid var(--line); background: var(--surface); }
 .page-crop-preview[hidden] { display: none; }
 .page-crop-preview summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--ink-2); }
@@ -1020,7 +1125,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .paper-menu { position: relative; }
 .paper-menu > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; }
 .paper-menu > summary::-webkit-details-marker { display: none; }
-.paper-menu-panel { left: 0; right: auto; min-width: 260px; max-width: min(380px, 90vw); }
+.paper-menu-panel { left: 0; right: auto; min-width: 260px; max-width: min(380px, 90vw); max-height: min(72vh, 680px); overflow-y: auto; overscroll-behavior: contain; }
 .paper-menu-panel .menu-note { margin: 0; }
 .paper-menu-panel .link-button.danger { color: var(--red); }
 .paper-menu-panel .link-button:disabled { color: var(--faint); cursor: not-allowed; background: none; }
@@ -1102,12 +1207,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-dialog { width: min(690px, 94vw); max-height: 92vh; padding: 0; overflow: hidden; }
 .credential-dialog[open] { display: flex; flex-direction: column; }
 .credential-dialog::backdrop { backdrop-filter: none; }
-.credential-form { min-height: 0; display: flex; flex-direction: column; }
+.credential-form { min-height: 0; display: flex; flex-direction: column; flex: 1; }
 .credential-dialog > .dialog-head { flex: none; }
 .credential-tabs { flex: none; display: flex; gap: 5px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .credential-tabs button { padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 650; cursor: pointer; }
 .credential-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
 .credential-panel { min-height: 0; overflow-y: auto; background: var(--bg); }
+#credentialReadingPanel { display: flex; flex-direction: column; overflow: hidden; }
 /* 「标签与答案」挂在这一页里。外面这层是滚动容器，挂在里面的面板必须自己撑满、
    自己滚，否则面板按内容长高，「保存 API 设置」会被顶到 1366×768 这类屏幕的视口外面。 */
 #credentialAnswerPanel { display: flex; flex-direction: column; }
@@ -1115,8 +1221,21 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-panel[hidden] { display: none; }
 .credential-panel > .settings-models { margin: 0 20px 20px; background: var(--surface); }
 #credentialAnswerPanel { padding: 16px 20px; }
-.credential-body { min-height: 0; display: grid; gap: 11px; padding: 16px 20px; background: var(--bg); }
+.credential-body { min-height: 0; flex: 1; overflow-y: auto; display: grid; align-content: start; gap: 14px; padding: 16px 20px; background: var(--bg); }
 .credential-service { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.credential-service[hidden] { display: none; }
+.api-setup-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.api-setup-entry .settings-description { margin-bottom: 0; }
+.api-setup-entry > .button { flex: none; }
+.credential-step-number { display: inline-grid; place-items: center; width: 25px; height: 25px; margin-right: 5px; border-radius: 50%; color: #fff; background: var(--accent); font-size: 13px; }
+.credential-required { color: var(--accent); }
+.credential-purpose { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.credential-vision-step { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.credential-vision-step h4 { margin: 0; font-size: 16px; }
+.credential-vision-step > label { font-size: 13px; font-weight: 650; }
+.credential-vision-step > select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.credential-vision-step .credential-service { border: 0; padding: 0; }
+.credential-body > .settings-models { margin: 0; background: var(--surface); }
 .credential-service-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .credential-saved-total { margin: 8px 0 0; color: var(--accent); font-size: 13px; font-weight: 650; }
 .credential-saved-list { display: grid; gap: 5px; padding: 0; margin: 2px 0 5px; list-style: none; }
@@ -1137,6 +1256,17 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-security-note { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
 .credential-actions { position: sticky; bottom: 0; z-index: 1; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .credential-actions .settings-save-result { flex: 1; }
+@media (max-width: 480px) {
+  .api-setup-entry { align-items: flex-start; flex-direction: column; }
+  .credential-dialog { width: 96vw; max-height: 94dvh; }
+  .credential-dialog > .dialog-head { padding: 14px; }
+  .credential-tabs { padding: 0 10px; }
+  .credential-tabs button { padding: 10px 8px; font-size: 13px; }
+  .credential-body { padding: 12px; }
+  .credential-service-head { align-items: flex-start; flex-wrap: wrap; gap: 6px; }
+  .credential-actions { padding: 10px 12px; flex-wrap: wrap; }
+  .credential-actions .settings-save-result:not(:empty) { flex-basis: 100%; }
+}
 
 /* 粘贴/照片上传确认、调整页序 */
 .photo-dialog, .paste-dialog, .order-dialog, .split-dialog { width: min(980px, 96vw); max-height: 94vh; }
@@ -1254,7 +1384,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .settings-head { padding: 14px; }
   .settings-scroll { padding: 10px 10px 30px; }
   .settings-section { padding: 15px; }
-  .credential-dialog { width: 100vw; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
+  .credential-dialog { width: 100vw; max-width: none; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
   .resegment-preview-dialog { width: 100vw; height: 100vh; height: 100dvh; max-height: none; margin: 0; border-radius: 0; }
   .resegment-preview-scroll { padding-inline: 14px; }
   .resegment-preview-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1271,7 +1401,6 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .review-meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 10px; }
   .review-meter .meter-bar { min-width: 0; }
   .meter-note { grid-column: 1 / -1; justify-self: end; }
-  .meter-legend { grid-column: 1 / -1; }
   .main { padding-inline: 12px; }
   .toolbar { margin-inline: -12px; padding-inline: 12px; }
   .card-body { padding-inline: 14px; }

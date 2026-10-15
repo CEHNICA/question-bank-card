@@ -1,5 +1,11 @@
 # tiyouju 命令手册
 
+## 1.21.1 当前规则
+
+本页旧版本描述由 [技能入口的当前规则](../SKILL.md) 覆盖。保存或返回审核不会提交识读；新题入库不会自动贴标。人工标签即时保存；AI/助手提交标签只生成待核对候选，任务完成不等于采纳。旧名称 CLI/MCP 仍只提交知识点候选；不要假设它支持结构化新标签或方法参数，先核实实际安装版能力。
+
+任意层级有效标签可贴题，分组与父子关系分开；新标签候选指定同类型父级，空目录或人工明确顶级除外。方法建议依据已保存且当前采用的解析。开发、发布和验收不读取实际密钥、用户题库或样卷。
+
 ## 1.11.13：通过入库与补答案任务
 
 题卡人工或明确授权的 AI 审核“通过”后自动保存当前版本到题库，不需另点入库；示例卷不进正式题库。publish 旧命令仍兼容，重复执行不新增版本。题库的“修改题目”可直接改题干、选项、题型和已有配图归属/删除，保存保留历史版与原卷，旧组卷不会被静默换版。
@@ -41,9 +47,9 @@
 | `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--limit N]` | 在正式题库里搜题。关键词也能搜题源和知识点 |
 | `features [--enable knowledge_tags ai_answer] [--disable ...]` | 不加选项只读查看开关；明确要求生成后仅打开所需项，不自动发起模型请求 |
 | `enrich tasks [--ids 入库UUID…] [--limit 1–50]` | 只读列出待当前助手处理的任务，默认最多50个；不开功能、不调用云API |
-| `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；明确设置新题入库后自动排队，只改 `on_intake` 的指定项，不开功能、不改API、不扫旧题 |
+| `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；`tags` 为兼容参数，当前版本始终不启用入库自动贴标。答案自动排队只在用户明确授权后设置，不开功能、不改 API、不扫旧题 |
 | `enrich prepare 入库UUID [--kinds tags answer] [--out 目录] [--no-images]` | 准备指定任务，返回题面、目录、prompt和指纹；默认下载该题原卷截图与配图，整页原卷返回本机URL |
-| `enrich submit 任务UUID --fingerprint 指纹 --result-file 结果.json` | 一次提交一种结果：`tags`，或`answer`与可选`analysis`；只写AI附加内容，不改原卷或人工核对 |
+| `enrich submit 任务UUID --fingerprint 指纹 --result-file 结果.json` | 一次提交一种结果：旧名称知识点 `tags` 候选，或 `answer` 与可选 `analysis` 初稿；不成为正式标签，不改原卷或人工核对 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
 
 ## 组卷导出（软件界面）
@@ -113,7 +119,7 @@
 
 先检查安装版 `tiyouju enrich --help`；旧发布包可能没有这些命令。本节是用户明确调用 CLI/MCP 的助手流程，由当前豆包工作版或当前助手自己完成，不需要豆包 API。用户明确要求为指定题目生成后，才启用所需开关；不趁安装或升级批量处理全部历史题。
 
-功能开关、生成时机与独立答题 API 集中在“设置 → 服务与密钥 → 标签与答案”，位于共用配置窗口中；旧 `/settings#ai`、`#api` 链接仍打开该分区。设置外层为“API 配置、显示与导出、帮助、关于”四区，读题密钥和模型在同一窗口的“读题与切题”中。网页只提供独立 API 生成，暂时隐藏助手交接入口，CLI/MCP 协议仍保留。三种触发是新题录入并入库后自动排队、后期单题、勾选批量。自动排队默认 `on_intake:{tags:false,answer:false}`；只有明确要求以后自动处理才配置，例如 `tiyouju enrich auto --tags on`。不加参数只读；指定一项会保留另一项、模型模式、API和功能开关。助手任务仍由当前助手继续领取待办，不代表豆包已在后台常驻。
+功能开关与独立答题 API 集中在“设置 → API 配置 → 标签与答案”，位于共用配置窗口中；旧 `/settings#ai`、`#api` 链接仍打开该分区。设置外层为“API 配置、显示与导出、帮助、关于”四区，读题密钥和模型在同一窗口的“切题与读题”中。网页使用独立 API，CLI/MCP 协议保留。标签必须主动请求单题或明确批量范围，当前 `on_intake.tags` 始终为 false，不执行 `enrich auto --tags on`；旧版自动贴标签示例已被当前规则覆盖。答案自动排队仍是兼容能力，仅在用户明确授权后设置。助手任务由当前助手继续领取，不代表豆包后台常驻。
 
 ```powershell
 tiyouju features --json
@@ -126,11 +132,11 @@ tiyouju enrich submit <标签任务UUID> --fingerprint <该任务指纹> --resul
 tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --result-file answer.json --agent 豆包 --json
 ```
 
-`tags.json` 是 `{"tags":["知识点目录中的标签"]}`，选1–3个。`answer.json` 是 `{"answer":"参考答案","analysis":"参考解析"}`，解析可省略。UTF-8文件最多256 KiB；不允许夹带题面、密钥、审核或任务身份字段。也可用 `--tags 标签1 标签2`，或 `--answer-file answer.txt [--analysis-file analysis.txt]`；任务ID、指纹和助手名称始终由命令参数提供。
+旧名称兼容协议的 `tags.json` 是 `{"tags":["当前目录中的知识点名称"]}`，选 1–3 个；它只保存待核对候选，不正式贴标，不能通过该协议创建新标签或提交方法范围。新标签与方法使用实际安装版支持的界面或结构化接口，不给旧 CLI 虚构 `tag_result` 参数。`answer.json` 是 `{"answer":"参考答案","analysis":"参考解析"}`，解析可省略。UTF-8 文件最多 256 KiB；不夹带题面、密钥、审核或任务身份字段。也可用 `--tags 标签1 标签2`，或 `--answer-file answer.txt [--analysis-file analysis.txt]`；任务 ID、指纹和助手名称由命令参数提供。
 
 - `tasks` 返回 `tasks`、`total`、`limit`、`mode`、`message`。每项含任务 `id`、`publication_id`、`kind`、`executor`、`status`、`fingerprint`、`agent`、`enabled`、`stale`。关闭功能的任务仍可列出，但不能准备或提交。
 - `prepare` 返回 `publication`（完整题面与入库版本）、每种任务一项的 `jobs`（`id`、`kind`、`fingerprint`、`prompt`）、`knowledge.points`（`point`、`chapter`）、`images` 和 `local_images`。CLI只下载同一道题的本机原卷截图和配图，原卷整页URL供需要时打开；MCP直接附截图与配图。
-- 一次 `submit` 只交一个任务的标签或答案；必须用它自己的指纹。`complete` 返回 `job.status=done` 与当前 `publication` 后才报告成功。过期版本、配图变化、关闭开关、已完成任务或目录外标签会拒绝；重新准备并核对，不强行覆盖。
+- 一次 `submit` 只交一个任务的标签候选或答案初稿；必须用它自己的指纹。`complete` 返回 `job.status=done` 与当前 `publication` 后才报告候选或初稿保存成功；不把 done 说成人工采纳或解答正确。过期版本、配图变化、关闭开关、已完成任务或目录外标签会拒绝；重新准备并核对，不强行覆盖。
 - 内容保存为 AI 附加信息，记录真实助手来源，参考答案始终“未核对”。不使用 `fix --answer` 写入原卷答案，不因此打勾或撤销人工审核。
 - 整批按用户指定的入库UUID领取，每个题目分别准备，每种任务分别提交。完成当前最多50项后再取下一批；不能把批量题目拼成一个任务结果。新题任务在成功入库后才创建，识读开始前不会有生成答案。
 
@@ -149,8 +155,8 @@ tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --resul
 - `approve_cards(paper, cards | green)`、`unapprove_card(paper, card)`、`reread_card(paper, card)`
 - `publish_paper(paper)`、`search_library(keywords, review, limit)`
 - `configure_features(enable, disable)`：不传选项只看开关；按明确生成需求启用所需的 `knowledge_tags`、`ai_answer`
-- `configure_enrichment_auto(tags, answer)`：不传只看现状；明确设置新题入库后自动排队，不暗自开功能、改模型或处理旧题
+- `configure_enrichment_auto(tags, answer)`：不传只看现状；当前 tags 保持关闭，标签只主动请求；答案自动排队仅在明确授权后设置，不暗自开功能、改模型或处理旧题。
 - `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题
-- `submit_enrichment(job_id, fingerprint, agent, tags | answer, analysis)`：只交一种任务的AI附加结果
+- `submit_enrichment(job_id, fingerprint, agent, tags | answer, analysis)`：只交一种任务的知识点候选或答案初稿；候选须人工采纳，初稿须核对并保存。
 
 AI 的名字默认取 MCP 客户端的名字。

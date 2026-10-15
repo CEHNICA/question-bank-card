@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+const layout = fs.readFileSync(path.join(__dirname, "original-paper-layout.js"), "utf8");
 
 // 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
 for (const page of [html, libraryHtml]) {
@@ -33,13 +34,15 @@ assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
 assert.match(html, /id="libraryAIAPISettingsMount"/);
 assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true, confirm: confirmDialog \}\)/);
 assert.doesNotMatch(html + js, /libraryAISettingsMount/);
-// 1.12.6: “API 配置” 曾在一屏里出现三次（左侧 tab、内容区标题、底部按钮），
-// 看着分不清哪个能点。现在三处各有各的说法，只有底部按钮是入口。
-assert.doesNotMatch(html, />API 配置<\/button>/, "No entry may still be called plain “API 配置”");
-assert.doesNotMatch(html, /id="settingsServicesTitle"[^>]*>API 配置</, "The section heading is not “API 配置” either");
-assert.match(html, /data-settings-tab="settingsGeneral"[^>]*>服务与密钥</);
-assert.match(html, /id="settingsServicesTitle"[^>]*>读题与看图服务</);
-assert.match(html, /id="settingsCredentialOpen"[^>]*>打开密钥窗口<\/button>/);
+// 外层只给真实配置入口，不再重复四家服务的密钥状态清单。
+assert.match(html, /data-settings-tab="settingsGeneral"[^>]*>API 配置</);
+assert.match(html, /id="settingsServicesTitle"[^>]*>配置切题、读题和答题服务</);
+assert.match(html, /id="settingsCredentialOpen"[^>]*>配置 API<\/button>/);
+const outerAPI = html.slice(html.indexOf('id="settingsGeneral"'), html.indexOf('id="settingsDisplay"'));
+assert.doesNotMatch(outerAPI, /api-status|settings(?:Mineru|Modelscope|Minimax|Siliconflow)State|settingsFreePlan/);
+assert.match(html, /云端自动切题必填/);
+assert.match(html, /只手工框题或直接审核原图时，可以跳过这两步/);
+assert.match(html, /id="credentialVisionProvider"[\s\S]*?value="modelscope"[\s\S]*?value="minimax"[\s\S]*?value="siliconflow"[\s\S]*?value="assistant"/);
 assert.doesNotMatch(html + js, /settingsAI\b|settingsAPIOpen/);
 assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialSettings \}\)/);
 
@@ -92,7 +95,7 @@ for (const hash of ["#ai", "#api", "#services", "", "#display", "#help", "#about
   }
 }
 const navigation = routes(); navigation.context.openSettings();
-assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["服务与密钥", "显示与导出", "帮助", "关于"]);
+assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["API 配置", "显示与导出", "帮助", "关于"]);
 for (let index = 0; index < navigation.tabs.length; index++) {
   for (const key of ["ArrowLeft", "ArrowRight"]) {
     let prevented = false;
@@ -178,10 +181,11 @@ assert.match(js, /\/api\/papers\/\$\{paper\.id\}\/confirm-structure/);
 assert.match(js, /engines\.saved\?\.\[role\]\s*\|\|\s*engines\.selected/);
 assert.doesNotMatch(js, /AI 两次一致|AI 三读多数一致/);
 
-// 同一页存在多个题号作用域时，补录必须显式选择题组并把 group_id 交给后端。
-assert.match(html, /id="groupField"[\s\S]*?id="groupSelect"/);
-assert.match(js, /state\.paper\.question_groups/);
-assert.match(js, /body\.group_id\s*=\s*Number\(selectedGroup\)/);
+// 手工切题统一由原卷校正器保存；题组选择和 group_id 都在同一布局请求中。
+assert.match(layout, /groups\(\)\.forEach\(\(g\) => \{ const o = el\("option"/);
+assert.match(layout, /group_id: t\.group_id/);
+assert.match(js, /openPageDialog\("view"/);
+assert.doesNotMatch(js, /api\/papers\/\$\{state\.paperId\}\/questions/);
 
 // 真正的旧任务迁移后默认仍是“试卷”；失败的 PDF 必须给人明确的教材重试入口。
 assert.match(js, /按教材重试/);
@@ -200,19 +204,17 @@ const payload = require("node:vm").runInNewContext(readModelSource + "\nreadMode
 assert.deepEqual(JSON.parse(JSON.stringify(payload)), { primary: "assistant", models: { minimax: "ModelA", siliconflow: "ModelB", modelscope: "ModelC" } });
 assert.equal(Object.hasOwn(payload, "plans"), false);
 
-// 配置说明由用户主动展开；不承诺费用、额度或识读准确率。
-assert.match(html, /<details id="settingsFreePlan" class="free-plan">[\s\S]*?AI 助手读题[\s\S]*?mineru\.net[\s\S]*?modelscope\.cn[\s\S]*?<\/details>/);
-assert.doesNotMatch(js, /\$\("settingsFreePlan"\)\.open = !s\.upload_enabled/);
+// 获取密钥链接放在实际填写步骤，模型细节由用户主动展开。
+assert.doesNotMatch(html, /id="settingsFreePlan"/);
+assert.match(html, /href="https:\/\/mineru\.net\/apiManage\/token"/);
+assert.match(html, /href="https:\/\/www\.modelscope\.cn\/my\/myaccesstoken"/);
 assert.match(html, /id="settingsModels" class="settings-section settings-models"/);
 assert.match(js, /origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数"/);
 assert.match(css, /\.free-plan \{/);
-assert.match(js, /\{ value: "assistant", label: "AI 助手读题/);
+assert.match(js, /\{ value: "assistant", label: "原图审核或 AI 助手/);
 assert.match(js, /settingsPrimaryModel"\)\.value/);
 assert.match(js, /models:\s*\{[\s\S]*?modelscope:\s*\$\("settingsModelscopeModel"\)\.value\.trim\(\)/);
-for (const id of ["settingsModelscopeState"]) {
-  assert.match(html, new RegExp(`id="${id}"`));
-  assert.match(js, new RegExp(`setApiState\\("${id}"`));
-}
+assert.doesNotMatch(html, /id="settingsModelscopeState"/);
 // 选的那家没填密钥时显示实际读题的那家，而不是一个读不了的选项。
 assert.match(js, /if \(chosen && chosen\.available === false && engines\.primary\) primary = engines\.primary;/);
 

@@ -19,20 +19,26 @@ function harness(options = {}) {
   const store = new Map();
   const questions = options.questions || Array.from({ length: 8 }, (_, index) => ({ id: index + 1 }));
   const renders = [];
+  const nodes = new Map();
+  const $ = (id) => { if (!nodes.has(id)) nodes.set(id, { value: "", focus() {} }); return nodes.get(id); };
   const context = {
     state: { paperId: "paper-a", filter: "all", current: null, expanded: new Set(), autoExpanded: new Set(), questions },
     FILTERS: [{ key: "all" }, { key: "todo" }, { key: "approved" }, { key: "ai" }],
-    window: { sessionStorage: {
+    window: { scrollY: 0, scrollBy() {}, sessionStorage: {
       getItem: (key) => (store.has(key) ? store.get(key) : null),
       setItem: (key, value) => store.set(key, String(value)) } },
     document: { querySelector: () => null },
+    $,
+    REVIEW_STATE_KEY: "qb-review-state",
     questionById: (id) => questions.find((q) => q.id === id) || null,
     visible: options.visible || (() => true),
-    renderPaper: () => renders.push(context.state.filter),
+    renderPaper: () => renders.push(context.state.filter), renderReviewFinder() {},
+    reviewViewportAnchor: () => ({ questionId: context.state.current, offset: 0 }), viewTop: () => 0,
+    requestAnimationFrame: callback => callback(), toast() {},
     teach: () => {}, cardNodes: () => [], markReading: () => {}
   };
   vm.runInNewContext(helpers + setFilter + setCurrent + setExpanded, context);
-  return { context, store, renders, saved: () => JSON.parse(store.get("qb-review-state")) };
+  return { context, store, renders, saved: () => JSON.parse(store.get("qb-review-state")).papers[context.state.paperId] };
 }
 
 // 写入端：切筛选、跳题、展开/收起都要留下现场。
@@ -88,8 +94,10 @@ function harness(options = {}) {
 // 换卷：现场跟着换到新卷，不能留着旧卷的筛选。
 {
   const selectPaper = cut("  async function selectPaper(id)", "  async function clearPaperSelection()");
-  assert.match(selectPaper, /state\.filter = "all";[\s\S]*?state\.current = null;[\s\S]*?saveReviewState\(\);/,
-    "换卷后写下的必须是新卷的默认现场，否则下次进来会跳到别人的筛选");
+  assert.match(selectPaper, /if \(changedPaper\) saveReviewState\(\);[\s\S]*?state\.filter = "all";[\s\S]*?state\.current = null;/,
+    "切换前要保存旧卷现场，新卷初始状态不能沿用旧筛选");
+  assert.match(selectPaper, /saved\.activePaperId = id;/,
+    "当前试卷指针会随页面切换更新，但各卷的独立现场仍保留");
 }
 
 // 落地顺序：URL 里的 paper 优先，其次上一段现场，最后才第一份卷。
@@ -97,7 +105,7 @@ function harness(options = {}) {
   const start = cut("    await loadPapers();\n    const params", "    loadTeaching();");
   assert.ok(start.indexOf("if (wantedAvailable)") < start.indexOf("readReviewState()"),
     "?paper= 仍然优先，分享链接和书签不能被旧现场覆盖");
-  assert.match(start, /const saved = readReviewState\(\);[\s\S]*?await selectPaper\(saved\.paperId\);\s*restoreReviewState\(saved\);\s*opened = true;/,
+  assert.match(start, /const saved = readReviewState\(\);[\s\S]*?await selectPaper\(saved\.paperId\);\s*opened = true;/,
     "无 ?paper= 时要按上一段现场回来");
   assert.match(start, /if \(!opened && state\.papers\.length\) await selectPaper\(state\.papers\[0\]\.id\);/,
     "现场用不了才退回第一份");

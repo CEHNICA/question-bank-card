@@ -46,8 +46,8 @@ class GenerationBacklogTests(TempDataMixin, TestCase):
         self.publication(3, status=PublishedQuestion.Status.SUPERSEDED)
         self.assertEqual(library.generation_backlog(), {"tags": 1, "answer": 1, "total": 1})
 
-    def test_the_backlog_and_the_queue_agree_on_the_same_questions(self):
-        """同一批题：面板上写着还差几道，实际排进去的就该是几道。"""
+    def test_tag_backlog_is_manual_only_while_answer_intake_keeps_its_own_setting(self):
+        """缺知识点可从题库主动补齐；入库时只保留用户开启的答案任务。"""
         ready = self.publication(1, tags=["集合的概念"], answer="原卷有")
         half = self.publication(2, tags=["集合的概念"])
         bare = self.publication(3)
@@ -64,4 +64,5 @@ class GenerationBacklogTests(TempDataMixin, TestCase):
                 library_jobs.queue_on_intake(publication)
             queued_tags = sum(1 for call in enqueue.call_args_list if call.args[1] == "tags")
             queued_answers = sum(1 for call in enqueue.call_args_list if call.args[1] == "answer")
-        self.assertEqual((queued_tags, queued_answers), (backlog["tags"], backlog["answer"]))
+        self.assertEqual(queued_tags, 0, "贴标签由用户在正式题库主动发起，不随入库自动排队")
+        self.assertEqual(queued_answers, backlog["answer"])

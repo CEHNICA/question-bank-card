@@ -234,7 +234,7 @@ async function staleDownload(phase) {
 }
 
 async function successfulFlow() {
-  const initial = JSON.stringify({ paper: PAPER, version: 3, lesson: "review", completed: false, retained: "keep" });
+  const initial = JSON.stringify({ paper: PAPER, version: 4, lesson: "review", completed: false, retained: "keep" });
   const h = setup({ teach: initial }); await h.load(); await h.choose(1, true);
   assert.equal(JSON.parse(h.storage.get("qb-teach")).lesson, "basket");
   await h.previewReady(2); assert.equal(JSON.parse(h.storage.get("qb-teach")).lesson, "export");

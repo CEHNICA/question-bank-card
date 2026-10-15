@@ -85,7 +85,7 @@ test("confirmation and submission lock repeat clicks and conflicting manual/stop
   const h = harness({ confirm: () => confirmGate.promise, api: async () => { await requestGate.promise; return { paper: paper({ parse_mode: "mineru", status: "queued" }), action: "queued_mineru", changed: true }; } });
   const first = h.context.continueAiCut(); await settle();
   assert.equal(h.confirmations.length, 1); assert.equal(await h.context.continueAiCut(), false);
-  for (const id of ["paperContinueAi", "settingsStop", "settingsReparse", "manualProcessing", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
+  for (const id of ["paperContinueAi", "settingsStop", "settingsReparse", "viewOriginalPaper", "pageManualCut", "emptyManualCut"]) assert.equal(h.$(id).disabled, true);
   assert.deepEqual(h.stageEntryStates, [true], "Existing cutting-stage actions must be redrawn while confirmation is pending");
   confirmGate.resolve(true); await settle(); assert.equal(h.requests.length, 1); assert.equal(await h.context.continueAiCut(), false);
   requestGate.resolve(); await first; assert.equal(h.requests.length, 1); assert.equal(h.context.aiBusy.size, 0);
@@ -128,7 +128,7 @@ test("both first-step and later quiet manual stage buttons obey continuation bus
       $: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, document: { createTextNode: text => text }, el: node,
       button: label => ({ ...node(), label }), openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {} };
     vm.runInNewContext(stage, context); context.renderCutReadingStage();
-    const manualButton = () => nodes.get("cutReadingActions").children.find(button => /手工切题|正在准备原卷/.test(button.label));
+    const manualButton = () => nodes.get("cutReadingActions").children.find(button => /切题与校正|正在准备原卷/.test(button.label));
     assert.equal(manualButton().disabled, true, `Cutting stage ${stageNumber} must disable its manual button`);
     context.aiCutContinuations.clear(); context.renderCutReadingStage(); assert.equal(manualButton().disabled, false);
     context.manualSwitches.add("paper"); context.renderCutReadingStage(); assert.equal(manualButton().disabled, true);

@@ -9,12 +9,12 @@ from django.utils import timezone
 from PIL import Image
 
 from . import features, library, library_assistant as assistant, library_ai_settings as service, library_jobs
-from .models import LibraryJob, PublishedQuestion, Question
+from .models import LibraryJob, LibraryTag, LibraryTagSuggestion, PublishedQuestion, Question
 from . import test_library_ai_settings as settings_tests
 from .test_v110_types_origin import TempDataMixin
 
 
-class AssistantSettingsTests(SimpleTestCase):
+class AssistantSettingsTests(TestCase):
     """Reuse disposable DPAPI/transport fixtures, not the API test cases."""
     setUp = settings_tests.IndependentAISettingsTests.setUp
     configure = settings_tests.IndependentAISettingsTests.configure
@@ -150,7 +150,22 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         question.save()
 
     def prepare(self, kinds=None, agent="离线测试助手"):
-        return assistant.prepare({"publication_id": str(self.publication.pk), "kinds": kinds or ["answer"], "agent": agent})
+        kinds = kinds or ["answer"]
+        combined = None
+        for kind in kinds:
+            payload = {"publication_id": str(self.publication.pk), "kinds": [kind], "agent": agent}
+            if kind == "tags":
+                # Simulate a pending assistant task created by an older version.
+                # New tag tasks require a tested API; this task may only become a candidate.
+                job = LibraryJob.objects.create(publication=self.publication, kind="tags", executor="assistant",
+                    fingerprint=library.generation_fingerprint(self.publication.content, self.publication.pk))
+                payload["job_id"] = str(job.pk)
+            result = assistant.prepare(payload)
+            if combined is None:
+                combined = result
+            else:
+                combined["jobs"].extend(result["jobs"])
+        return combined
 
     def result(self, job, **data):
         return {"job_id": job["id"], "fingerprint": job["fingerprint"], "agent": job["agent"], **data}
@@ -162,7 +177,9 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(prepared["publication"]["content"], original)
         self.assertEqual(prepared["images"]["crop"], f"/api/library/{self.publication.pk}/crop")
         self.assertEqual(prepared["images"]["originals"], [{"page_idx": 0, "url": f"/api/library/{self.publication.pk}/pages/0"}])
-        self.assertTrue(prepared["knowledge"]["points"])
+        self.assertEqual(prepared["knowledge"]["points"], [])
+        tag_job = next(job for job in prepared["jobs"] if job["kind"] == "tags")
+        self.assertIn("new_name", tag_job["prompt"])
         for job in prepared["jobs"]:
             self.assertEqual(job["executor"], "assistant")
             self.assertEqual(job["fingerprint"], library.generation_fingerprint(original, self.publication.pk))
@@ -179,16 +196,21 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         jobs = self.prepare(["answer", "tags"])["jobs"]
         answer = assistant.complete(self.result(jobs[0], answer="2", analysis="相加得 2。"))
         self.assertEqual(answer["job"]["status"], "done")
-        assistant.complete(self.result(jobs[1], tags=["基本不等式"]))
+        assistant.complete(self.result(jobs[1], tag_result={"status": "ok", "suggestions": [{
+            "kind": "knowledge", "new_name": "基本不等式", "levels": ["高中"],
+            "rationale": "将倒数关系转化为和的下界。", "evidence": "题目要求证明两正数和的最小值。",
+            "scope": {"whole": True}}]}))
         self.publication.refresh_from_db()
         self.assertEqual(self.publication.content, before)
         self.assertEqual(self.publication.content["answer"], "原卷答案")
         self.assertEqual(Question.all_objects.filter(pk=self.question.pk).values().get(), before_q)
         generated = self.publication.extras["ai_answer"]
         self.assertEqual((generated["answer"], generated["agent"], generated["executor"], generated["checked"]), ("2", "离线测试助手", "assistant", False))
-        self.assertEqual(self.publication.extras["tags_agent"], "离线测试助手")
-        self.assertFalse(self.publication.extras["tags_checked"])
-        self.assertEqual(self.publication.extras["tags_publication_id"], str(self.publication.pk))
+        self.assertNotIn("tags", self.publication.extras)
+        proposal = LibraryTagSuggestion.objects.get(job_id=jobs[1]["id"])
+        self.assertEqual(proposal.status, LibraryTagSuggestion.Status.PENDING)
+        self.assertEqual(proposal.generation_source, "离线测试助手")
+        self.assertEqual(proposal.suggestions[0]["name"], "基本不等式")
         self.network.assert_not_called()
 
     def test_unpaired_dollar_in_answer_is_refused_instead_of_printing_a_stray_dollar(self):
@@ -215,6 +237,21 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.publication.refresh_from_db()
         self.assertEqual(self.publication.extras["ai_answer"]["answer"], "$x=1$（其中 $x$ 为正数）")
         self.network.assert_not_called()
+
+    def test_empty_catalogue_can_queue_assistant_suggestions_as_candidates(self):
+        jobs = assistant.prepare({"publication_id": str(self.publication.pk),
+            "kinds": ["tags"], "agent": "空目录测试助手"})["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["executor"], "assistant")
+        self.assertTrue(LibraryJob.objects.get(pk=jobs[0]["id"]).tag_scope)
+        assistant.complete(self.result(jobs[0], tag_result={"status": "ok", "suggestions": [{
+            "kind": "knowledge", "new_name": "新建候选知识点", "levels": ["高中"],
+            "rationale": "根据题目中的函数结构提出候选。", "evidence": "题干给出了函数解析式。",
+            "scope": {"whole": True}}]}))
+        proposal = LibraryTagSuggestion.objects.get(job_id=jobs[0]["id"])
+        self.assertEqual(proposal.status, LibraryTagSuggestion.Status.PENDING)
+        self.assertEqual(proposal.suggestions[0]["new_name"], "新建候选知识点")
+        self.assertFalse(LibraryTag.objects.exists())
 
     def test_same_assistant_reuses_queue_other_agent_and_duplicate_result_are_refused(self):
         job = self.prepare()["jobs"][0]
@@ -378,11 +415,13 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def test_intake_original_answer_skips_ai_answer_and_api_absence_does_not_undo_publish(self):
         service.save({"on_intake": {"tags": True, "answer": True}})
         _question, publication = self.fresh(3, answer="原卷已有解答")
-        self.assertEqual(list(publication.jobs.values_list("kind", flat=True)), ["tags"])
+        self.assertEqual(list(publication.jobs.values_list("kind", flat=True)), [],
+                         "入库不自动生成知识点标签；原卷已有答案也不排答案任务")
         service.save({"mode": "api"})
         _question, publication = self.fresh(4)
         self.assertEqual(publication.status, "published")
-        self.assertEqual(list(publication.jobs.values_list("status", flat=True)), ["failed", "failed"])
+        self.assertEqual(list(publication.jobs.values_list("status", flat=True)), ["failed"])
+        self.assertEqual(list(publication.jobs.values_list("kind", flat=True)), ["answer"])
         self.assertEqual(publication.extras, {})
         self.network.assert_not_called()
 

@@ -1,0 +1,25 @@
+{
+  "checks": [
+    "1536px: intentional filter rows, visible question titles, loaded figure, compact inspector and no overflow",
+    "Advanced filters, batch selection, basket, full-screen viewing and hierarchy hover remain usable",
+    "The left rail stays hidden; right inspector collapse gives full list width; header search and / shortcut return the correct subset",
+    "1366px and 390px: no horizontal overflow; explicit mobile drawers still work"
+  ],
+  "errors": [],
+  "external_requests": [],
+  "screenshots": [
+    "before-desktop.png",
+    "after-desktop.png",
+    "both-sidebars-collapsed.png",
+    "after-laptop.png",
+    "after-mobile.png",
+    "after-mobile-inspector.png"
+  ],
+  "real_backend": true,
+  "success": true,
+  "server_stopped": true,
+  "worker_started": false,
+  "isolated_root": "isolated/user",
+  "frontend_scripts_passed": 19,
+  "layout": "header navigation; no persistent left rail"
+}

@@ -83,8 +83,7 @@ assert.match(js, /function releaseToggleFocus\(event\) \{\s*if \(event\.detail =
 assert.match(js, /\$\("fullscreenToggle"\)\.addEventListener\("click", \(event\) => \{\s*setReviewFullscreen\([\s\S]*?releaseToggleFocus\(event\);/);
 assert.match(js, /\$\("focusToggle"\)\.addEventListener\("click", \(event\) => \{ setFocus\(!state\.focus\); releaseToggleFocus\(event\); \}\)/);
 assert.match(js, /\$\("lensToggle"\)\.addEventListener\("click", \(event\) => \{ setLens\(!state\.lens\); releaseToggleFocus\(event\); \}\)/);
-const menuGuard = new RegExp('\\$\\("toolsMenu"\\)\\.addEventListener\\("toggle",[\\s\\S]*?if \\(\\$' + '\\("toolsMenu"\\)\\.open\\) return;');
-assert.match(js, menuGuard);
+assert.match(js, /\$\("paperMenu"\)\.addEventListener\("toggle",[\s\S]*?if \(\$\("paperMenu"\)\.open\) \{ renderSettingsTask\(\); return; \}/);
 console.log("full-screen review checks: OK");
 
 // J/K pressed quickly: the card just jumped to may still be scrolling in, so keep

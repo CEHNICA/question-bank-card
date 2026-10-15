@@ -142,7 +142,18 @@ class BundleAuditTests(unittest.TestCase):
         spec = (root / "packaging" / "QuestionBankCard.spec").read_text(encoding="utf-8")
         self.assertRegex(spec, r'cli_analysis = Analysis\(\s*\[str\(PROJECT_ROOT / "tiyouju_cli.py"\)\]')
         self.assertRegex(spec, r'name="tiyouju",[\s\S]*?console=True,')
-        self.assertRegex(spec, r"coll = COLLECT\(\s*exe,\s*a\.binaries,\s*a\.datas,\s*cli_exe,")
+        # 这条断言真正想守住的是「命令行随应用一起打包」：COLLECT 里先 exe，
+        # 再它的二进制，再它的数据文件，最后 cli_exe —— 少任何一段都会让
+        # tiyouju.exe 落不进安装目录。
+        #
+        # 二进制那一段不能写死成 a.binaries：v1.22.0 为了不再捆绑一份系统自带的
+        # ucrtbase.dll，把它换成了 app_local_binaries(a)。这里按意图断言，两种写法
+        # 都接受，但 COLLECT 必须照旧带上 cli_exe。
+        self.assertRegex(
+            spec,
+            r"coll = COLLECT\(\s*exe,\s*(?:app_local_binaries\(a\)|a\.binaries),"
+            r"\s*a\.datas,\s*cli_exe,",
+        )
         build = (root / "packaging" / "build.ps1").read_text(encoding="utf-8")
         self.assertIn("$cliVersion.Trim() -ne \"tiyouju $Version\"", build)
         installer = (root / "packaging" / "installer.iss").read_text(encoding="utf-8")

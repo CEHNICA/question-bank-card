@@ -48,7 +48,7 @@ FIXTURE_ROOT = ROOT / "tmp" / "sweep-ux-fixture"
 
 # 默认只跑没有必填参数的；有 --paper 的按需补给。
 NEEDS_PAPER = {"check_fullscreen_editors", "check_fullscreen_nav", "check_review_restore", "check_tick_roundtrip"}
-RUN_FLAG = {"check_edit_assistance_browser", "check_library_counts", "check_library_recovery_browser",
+RUN_FLAG = {"check_api_setup_browser", "check_edit_assistance_browser", "check_library_counts", "check_library_recovery_browser",
             "check_model_settings_browser",
             "check_page_canvas_browser", "check_print_scroll_browser", "check_practice_browser",
             "check_source_pan_browser", "check_task_delete_after_withdraw", "check_unsaved_browser"}

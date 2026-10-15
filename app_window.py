@@ -263,10 +263,144 @@ def _disable_profile_password_saving(profile: Path) -> bool:
 
 
 def window_command(browser: Path, url: str, profile: Path) -> list[str]:
+    # --kiosk 才是真正没有标题栏的窗口。--app 自带的那个标题栏是浏览器自己画在客户区
+    # 里的（客户区顶端就在窗口顶端，没有标题栏高度），Win32 摘掉 WS_CAPTION 对它无效：
+    # 真机上摘完之后屏幕上那条带图标和三个按钮的窄条仍然在。--kiosk 则是整屏无边框，
+    # 页面内容从屏幕最顶端开始。
     return [
         str(browser), f"--app={url}", f"--user-data-dir={profile}",
-        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check", "--start-maximized",
+        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check", "--kiosk",
     ]
+
+
+# ---------------------------------------------------------------- 窗口控制
+
+# 窗口不带系统标题栏：页面顶部留了拖拽区（-webkit-app-region: drag），
+# 最小化与关闭由页面右上角自绘。
+#
+# 去掉标题栏之后那两个按钮就成了唯一的窗口控制入口，所以窗口动作必须同时做出来 ——
+# 浏览器没有「最小化/关闭本窗口」的脚本接口（window.close() 对命令行 --app 打开的
+# 窗口无效），因此网页只写一个控制文件，由这里去操作真正的窗口句柄。
+#
+# 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
+_SW_MINIMIZE = 6
+_WM_CLOSE = 0x0010
+_CONTROL_NAME = "window-control.json"
+# 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
+# 窗口却要 1.2 秒才缩下去 —— 那是这里一秒一轮询的代价。100ms 一轮，
+# 每轮只多读一个几十字节的 json，可以忽略不计。
+_CONTROL_POLL = 0.1
+# 窗口迟迟不出现就放弃守候，不拖住退出。
+_WINDOW_GRACE = 60.0
+
+
+def control_file() -> Path:
+    """页面与启动器之间唯一约定的控制文件。两端各自算出路径但指向同一个：
+    启动器把自己的 DATA_ROOT 通过 QB_DATA_ROOT 传给了服务进程。"""
+    return launcher.DATA_ROOT / _CONTROL_NAME
+
+
+def _user32():
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        return ctypes.windll.user32
+    except Exception:  # noqa: BLE001 - 拿不到 Win32 就保持原样，不让启动器崩溃
+        return None
+
+
+def _browser_pids(profile: Path) -> set[int]:
+    """命令行里带着这个配置目录的浏览器进程号。窗口可能被交给一个已经在运行的
+    浏览器进程，不能只看自己 spawn 出来的那个 pid。"""
+    marker = str(profile).replace("'", "''")
+    script = ("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
+              f"Where-Object {{ $_.CommandLine -like '*{marker}*' }} | ForEach-Object {{ $_.ProcessId }}")
+    try:
+        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                                capture_output=True, text=True, timeout=20, creationflags=CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    return {int(line) for line in (result.stdout or "").split() if line.strip().isdigit()}
+
+
+def _app_window(user32, profile: Path) -> int:
+    """应用窗口的句柄；还没出现就返回 0。
+
+    取面积最大的那个可见窗口，而不是 Z 序里的第一个：这些浏览器进程同时还开着
+    「无法更新 Microsoft Edge」之类的小气泡窗，按 Z 序取会挑中它们，最小化和关闭
+    就作用到了错的窗口上。
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    pids = _browser_pids(profile)
+    if not pids:
+        return 0
+    found: list[tuple[int, int]] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_size_t)
+    def collect(handle, _):
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+        if pid.value in pids and user32.IsWindowVisible(handle):
+            rect = ctypes.wintypes.RECT()
+            if user32.GetWindowRect(handle, ctypes.byref(rect)):
+                area = (rect.right - rect.left) * (rect.bottom - rect.top)
+                if area > 0:
+                    found.append((area, int(handle)))
+        return True
+
+    user32.EnumWindows(collect, 0)
+    return max(found)[1] if found else 0
+
+
+def _read_control() -> tuple[str, str] | None:
+    """控制文件里的 (动作, nonce)。文件不存在、被写坏或缺字段都当没有。"""
+    try:
+        data = json.loads(control_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("action"), str) and isinstance(data.get("nonce"), str):
+        return data["action"], data["nonce"]
+    return None
+
+
+def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
+    """守着应用窗口，执行页面发来的最小化/关闭。
+
+    窗口消失且已经过了宽限期就收工，不会拖住进程退出。
+    """
+    user32 = _user32()
+    if user32 is None:
+        return
+    # 上一次运行可能留下了控制文件（上次没关窗口、或关到一半）。那一条是上一次
+    # 的请求，这次不能再执行一遍 —— 否则新窗口一开就被上一轮的「关闭」关掉。
+    stale = _read_control()
+    seen: str | None = stale[1] if stale else None
+    deadline = time.monotonic() + _WINDOW_GRACE
+    hwnd = 0
+    while True:
+        # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号，每轮都做的话
+        # 一个循环要一秒多，点「最小化」就得等一秒才动。句柄缓存住，只在它失效时才重找。
+        if not hwnd or not user32.IsWindow(hwnd):
+            hwnd = _app_window(user32, profile)
+        if not hwnd:
+            if time.monotonic() > deadline:
+                return
+            time.sleep(interval)
+            continue
+        request = _read_control()
+        if request is not None and request[1] != seen:
+            action, seen = request
+            if action == "minimize":
+                user32.ShowWindow(hwnd, _SW_MINIMIZE)
+            elif action == "close":
+                user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
+            else:
+                seen = None          # 不认识的动作不执行，也不当成已处理
+        time.sleep(interval)
 
 
 def open_window(url: str) -> subprocess.Popen | None:
@@ -274,7 +408,10 @@ def open_window(url: str) -> subprocess.Popen | None:
     if not browsers:
         webbrowser.open_new_tab(url)
         return None
-    return subprocess.Popen(window_command(browsers[0], url, window_profile()), creationflags=CREATE_NO_WINDOW)
+    profile = window_profile()
+    web = subprocess.Popen(window_command(browsers[0], url, profile), creationflags=CREATE_NO_WINDOW)
+    threading.Thread(target=watch_window, args=(profile,), daemon=True).start()
+    return web
 
 
 def _profile_still_open(profile: Path) -> bool:

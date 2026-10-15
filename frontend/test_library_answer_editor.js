@@ -169,7 +169,7 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await editor.open([original, other], { scope: "paper", selected: [original.id] }); await settle();
   const generationPosts = requests.filter(value => value.url === "/api/library/jobs" && value.opts.method === "POST").length;
   assert.equal(byId("answerEditorAi").hidden, true); assert.equal(byId("answerEditorApiSettings"), undefined);
-  assert.match(byId("answerEditorApiNote").textContent, /设置 → 服务与密钥/);
+  assert.match(byId("answerEditorApiNote").textContent, /设置 → API 配置/);
   await byId("answerEditorAi").emit("click"); await settle();
   assert.equal(requests.filter(value => value.url === "/api/library/jobs" && value.opts.method === "POST").length, generationPosts, "Missing API cannot fall back to the current desktop assistant");
   assert.equal(timers.filter(value => value.callback.name === "pollJobs").length, timerCount, "Legacy assistant queues never start an endless background wait");
@@ -184,7 +184,7 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   jobResult = { id: "failed-api", publication_id: "pub-1", executor: "api", status: "failed", error: "服务商拒绝请求" };
   await editor.open([original], { scope: "paper" }); await settle();
   assert.match(document.body.textContent, /服务商拒绝请求/);
-  assert.match(document.body.textContent, /设置 → 服务与密钥/);
+  assert.match(document.body.textContent, /设置 → API 配置/);
   assert.equal(byId("answerEditorApiSettings"), undefined, "API configuration stays in the shared settings window");
   assert.equal(byId("answerEditorResult").value, original.content.answer, "Generation failure preserves the existing answer");
   await byText("返回").emit("click");

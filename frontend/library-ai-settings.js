@@ -1,23 +1,25 @@
 (() => {
   "use strict";
   const API = "/api/settings/library-ai";
-  const state = { current: null, baseline: null, provider: "", dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, keyPending: new Set(), reading: {}, confirm: null, advancedTouched: false };
+  const state = { current: null, baseline: null, provider: "", profileDrafts: {}, dirty: false, busy: false, operation: null, session: 0, inline: false, embedded: false, active: false, keyPending: new Set(), reading: {}, readingService: {}, confirm: null, advancedTouched: false };
   const defaults = {
     deepseek: { base_url: "https://api.deepseek.com", model: "deepseek-v4-pro", supports_images: false },
     doubao: { base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "", supports_images: false },
     minimax: { base_url: "https://api.minimax.cn/v1", model: "MiniMax-M3.1-Flash-Preview", supports_images: true },
+    modelscope: { base_url: "https://api-inference.modelscope.cn/v1", model: "Qwen/Qwen3.5-35B-A3B", supports_images: true, thinking: true },
+    siliconflow: { base_url: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-VL-32B-Instruct", supports_images: true, thinking: false },
     custom: { base_url: "", model: "", supports_images: false }
   };
-  const providerNames = { deepseek: "DeepSeek", minimax: "MiniMax", doubao: "豆包", custom: "其他兼容服务" };
+  const providerNames = { modelscope: "魔搭", siliconflow: "硅基流动", deepseek: "DeepSeek", minimax: "MiniMax", doubao: "豆包", custom: "其他兼容服务" };
   // 一家一块，和“读题与切题”那边一个形状：名字、用途、已保存几条、新密钥填哪、
   // 删除在哪，全在同一个块里说完，不另开一张“已保存的密钥”表。
-  const providerHints = { deepseek: "推荐 · 纯文字", minimax: "图文 · 可直接共用读题的密钥", doubao: "火山方舟 Endpoint", custom: "自己填地址和模型" };
-  const providerOrder = ["deepseek", "minimax", "doubao", "custom"];
+  const providerHints = { modelscope: "可复用读题密钥", siliconflow: "可复用读题密钥", deepseek: "独立答题服务", minimax: "可复用读题密钥", doubao: "火山方舟 Endpoint", custom: "填写地址和模型" };
+  const providerOrder = ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"];
   const KEY_MASK = "****************";
   const KEY_NOTE = "已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下面只填写新密钥；留空就保留原来的配置。";
   // 和“读题与切题”那几栏用同一个图标精灵里的眼睛，两边画出来才一样。
   const eyeIcon = '<svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>';
-  const fields = ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
+  const fields = ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
     "libraryAIModel", "libraryAIImages", "libraryAIThinking"];
   let dialog;
   const requests = new Map();
@@ -25,7 +27,6 @@
   const revealTimers = new Map();
   let revealEpoch = 0, revealController = null, revealedProvider = null, revealing = false;
   // 1.13.4：知识点目录的只读预览。打标签只能在目录里选，目录就该看得见。
-  let catalogueDialog = null, catalogue = null;
   const $ = (id) => document.getElementById(id);
   const keyInput = (provider) => $(`libraryAIKey-${provider}`);
 
@@ -37,21 +38,13 @@
 
   function keyBlocks() {
     return providerOrder.map((provider) => `
-        <section class="credential-service library-ai-key-block" data-library-service="${provider}">
+        <section id="libraryAIKeyBlock-${provider}" class="credential-service library-ai-key-block" data-library-service="${provider}" hidden>
           <div class="credential-service-head">
             <strong>${providerNames[provider]} <small>${providerHints[provider]}</small></strong>
             <span id="libraryAIKeyState-${provider}" class="api-state missing">未保存</span>
           </div>
           <ul id="libraryAISaved-${provider}" class="credential-saved-list" aria-label="${providerNames[provider]}已保存的密钥"></ul>
-          ${provider === "minimax" ? `
-          <div id="libraryAIShareKey" class="library-ai-share" hidden>
-            <p id="libraryAIShareHelp"></p>
-            <div class="library-ai-share-actions">
-              <button id="libraryAIShareReadingKey" class="button" type="button">共用读题的 MiniMax 密钥</button>
-              <button id="libraryAIKeepOwnKey" class="button quiet" type="button" hidden>改用独立密钥</button>
-            </div>
-          </div>` : ""}
-          <label for="libraryAIKey-${provider}">新的 Key（留空就不改）</label>
+          <label for="libraryAIKey-${provider}">新的密钥（留空就不改）</label>
           <div class="library-ai-key-row">
             <input id="libraryAIKey-${provider}" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
                    data-lpignore="true" data-1p-ignore="true" placeholder="粘贴 ${providerNames[provider]} 的 API Key" aria-label="${providerNames[provider]}新填的密钥">
@@ -115,10 +108,10 @@
       .catalogue-foot .settings-path{font-size:12px;overflow-wrap:anywhere}
       .library-ai-panel .dialog-head{padding:0 0 16px;border:0;background:none}
       .library-ai-panel .dialog-head h2{font-size:23px}
-      .library-ai-panel .library-ai-body{padding:0;background:none;gap:24px;overflow:auto;min-height:0}
+      .library-ai-panel .library-ai-body{padding:0;background:none;gap:14px;overflow:auto;min-height:0}
       .library-ai-panel .library-ai-section{border:0;padding:0;background:none;border-radius:0;gap:12px}
       .library-ai-panel .library-ai-section p,.library-ai-panel .library-ai-section label{font-size:14px}
-      .library-ai-panel .library-ai-switch{padding:14px 0;border-bottom:1px solid var(--line);gap:12px}
+      .library-ai-panel .library-ai-switch{padding:8px 0;border-bottom:1px solid var(--line);gap:12px}
       .library-ai-panel .library-ai-switch strong{font-size:15px}
       .library-ai-panel .library-ai-switch small{font-size:13px}
       .library-ai-panel .library-ai-timing{padding:0 0 10px;border:0;margin-left:28px}
@@ -129,6 +122,7 @@
       .library-ai-key-block>.library-ai-switch{color:var(--ink);font-size:13px;font-weight:400}
       .library-ai-key-row{display:flex;gap:8px;align-items:stretch}
       .library-ai-key-row>input{flex:1;min-width:0}
+      .library-ai-api-fields>.credential-service>select,.library-ai-key-row>input{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-size:14px}
       .library-ai-key-row>.button{flex:none;padding:9px 12px;min-height:38px}
       .library-ai-key-row>.button svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}
       .library-ai-saved-row .credential-saved-value{font-family:var(--mono);font-size:12.5px;letter-spacing:.5px}
@@ -148,122 +142,77 @@
     dialog.setAttribute("aria-labelledby", "libraryAISettingsTitle");
     dialog.innerHTML = `
       <form id="libraryAISettingsForm" class="library-ai-form">
-        <div class="dialog-head"><h2 id="libraryAISettingsTitle">标签与答案</h2><button id="libraryAIClose" class="button quiet" type="button" aria-label="关闭标签与参考答案设置" ${state.inline ? "hidden" : ""}>关闭</button></div>
+        <div class="dialog-head"><h2 id="libraryAISettingsTitle">标签与答案 · 可选</h2><button id="libraryAIClose" class="button quiet" type="button" aria-label="关闭标签与参考答案设置" ${state.inline ? "hidden" : ""}>关闭</button></div>
         <div class="library-ai-body">
+          <p class="credential-purpose">需要时再开启。可以复用第二步的看图服务，也可以选独立答题 API；无需再填写所有服务商的密钥。</p>
           <p id="libraryAIState" class="library-ai-status" role="status" aria-live="polite">正在读取本机设置…</p>
+          <section id="libraryAIReadingReuse" class="library-ai-section library-ai-share" hidden>
+            <p id="libraryAIReadingReuseHelp"></p>
+            <button id="libraryAIUseReadingService" class="button" type="button">使用已配置的读题服务</button>
+          </section>
           <section class="library-ai-section" aria-label="分别开启功能">
             <p id="libraryAICost" class="library-ai-cost"></p>
-            <label class="library-ai-switch"><input id="libraryAITags" type="checkbox"><span><strong>生成知识点标签</strong><small>从知识点目录选标签，方便下次找题。</small></span></label>
-            <label id="libraryAITagsTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAITagsIntake" type="checkbox"><span>新题入库时生成标签<small id="libraryAITagsBacklog"></small></span></label>
+            <label class="library-ai-switch"><input id="libraryAITags" type="checkbox"><span><strong>允许 AI 建议标签</strong><small>只在正式题库中由你主动发起；每条建议都要人工核对后才会成为正式标签。</small></span></label>
             <label class="library-ai-switch"><input id="libraryAIAnswer" type="checkbox"><span><strong>补充 AI 参考答案</strong><small>原卷无答案时补充解答，保存为“AI 参考 · 未核对”。</small></span></label>
             <label id="libraryAIAnswerTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAIAnswerIntake" type="checkbox"><span>新题入库时生成参考答案<small id="libraryAIAnswerBacklog"></small></span></label>
-          </section>
-          <section id="libraryAIKnowledge" class="library-ai-section library-ai-knowledge" aria-label="知识点目录" hidden>
-            <p class="library-ai-knowledge-head"><strong>知识点目录</strong><span id="libraryAIKnowledgeCount">正在读取…</span></p>
-            <p class="library-ai-knowledge-note">标签只能从这个目录里选，模型和自己都不能临时造词。要增删知识点，用记事本打开下面的文件，每行一个，# 开头的是章名。</p>
-            <p class="library-ai-knowledge-tools">
-              <button id="libraryAIKnowledgeOpen" class="button small" type="button">查看目录</button>
-              <span id="libraryAIKnowledgeFile" class="settings-path"></span>
-            </p>
           </section>
           <section class="library-ai-section" aria-label="生成方式" hidden>
             <input id="libraryAIMode" type="hidden" value="api">
           </section>
           <section id="libraryAIAssistantHelp" class="library-ai-section" hidden></section>
-          <details id="libraryAIAdvanced" class="library-ai-advanced">
-            <summary>独立模型配置 · DeepSeek、MiniMax、豆包及其他模型</summary>
-            <section class="library-ai-section" aria-label="可选处理方式">
-              <div id="libraryAIAPIFields" class="library-ai-api-fields" hidden>
-                <p class="credential-storage-note">推荐 DeepSeek Pro，也可选择 MiniMax M3.1、豆包或其他兼容服务。模型名以服务商实际提供的 ID 为准。</p>
-
-                <section class="credential-service" data-library-service="active">
-                  <div class="credential-service-head">
-                    <strong>生成用的服务 <small>标签和答案都用这一家</small></strong>
-                    <span id="libraryAIActiveState" class="api-state">正在读取…</span>
-                  </div>
-                  <label for="libraryAIProvider">服务商</label><select id="libraryAIProvider"><option value="deepseek">DeepSeek（推荐）</option><option value="minimax">MiniMax M3.1（M Plan）</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></select>
-                  <p id="libraryAIMinimaxHelp" hidden></p>
-                  <label for="libraryAIBaseURL">API 地址</label><input id="libraryAIBaseURL" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
-                  <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
-                  <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>仅在服务商确认支持时开启；纯文本模型不会跳过配图处理含图题。</small></span></label>
-                  <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
-                </section>
-
-                <p id="libraryAIKeyNote" class="credential-storage-note" role="status" aria-live="polite">${KEY_NOTE}</p>
-${keyBlocks()}
-                <p class="credential-storage-note">密钥只加密保存在这台电脑上。查看不会重新保存；关闭窗口后立即隐藏。</p>
-                <details class="credential-more">
-                  <summary>密钥存在哪里？换一个服务商会怎样？</summary>
-                  <p>密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。保存时只检查填写格式，不上传文件、不消耗识读额度。</p>
-                  <p>每家服务各存 1 个 Key。上面换一家服务商，只是换用哪一家；已经填好的其他家密钥原样留着，切回来还能用。删除某一家也只删那一家。</p>
-                  <p>同一家 MiniMax 可以直接共用读题那份，不用再粘贴一次；共用以后改了读题的密钥，这里要再点一次才会跟着变。</p>
-                </details>
-
-                <section class="credential-service" data-library-service="test">
-                  <div class="credential-service-head">
-                    <strong>先确认能力，再生成</strong>
-                    <span class="api-state">保存后先测一次</span>
-                  </div>
-                  <p>用软件自带的合成题测试连接与响应；开启图像时还会测试合成图，不上传你的试卷。测试不评定数学水平；生成准确性仍需核对，测试与生成可能产生费用或消耗订阅额度。</p>
-                  <label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>我确认发起一次可能计费的 API 测试</span></label>
-                  <div class="credential-service-actions"><button id="libraryAITest" class="button" type="button" disabled>测试连接</button></div>
-                </section>
-              </div>
+          <section id="libraryAIAPIFields" class="library-ai-api-fields" hidden>
+            <section class="credential-service" data-library-service="active">
+              <div class="credential-service-head"><strong>选择生成服务 <small>标签和答案都用这一家</small></strong><span id="libraryAIActiveState" class="api-state">正在读取…</span></div>
+              <label for="libraryAIProvider">服务商</label>
+              <select id="libraryAIProvider"><optgroup label="可复用看图读题密钥"><option value="modelscope">魔搭</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option></optgroup><optgroup label="独立答题服务"><option value="deepseek">DeepSeek</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></optgroup></select>
+              <p id="libraryAIMinimaxHelp" hidden></p>
             </section>
-          </details>
+            <div id="libraryAIShareKey" class="library-ai-share" hidden>
+              <p id="libraryAIShareHelp"></p>
+              <div class="library-ai-share-actions"><button id="libraryAIShareReadingKey" class="button" type="button">复用读题密钥</button><button id="libraryAIKeepOwnKey" class="button quiet" type="button" hidden>填写独立密钥</button></div>
+            </div>
+            <p id="libraryAIKeyNote" class="credential-storage-note" role="status" aria-live="polite">${KEY_NOTE}</p>
+${keyBlocks()}
+            <details id="libraryAIAdvanced" class="library-ai-advanced">
+              <summary>模型和 API 地址（一般不用改）</summary>
+              <section class="library-ai-section">
+                <label for="libraryAIBaseURL">API 地址</label><input id="libraryAIBaseURL" type="text" placeholder="服务商提供的 API 地址" autocomplete="off" spellcheck="false">
+                <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
+                <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>含配图的题需要图文模型；纯文字模型不会跳过配图直接作答。</small></span></label>
+                <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
+              </section>
+            </details>
+            <section class="credential-service" data-library-service="test">
+              <div class="credential-service-head"><strong>保存后，测试一次连接</strong><span class="api-state">通过后才可生成</span></div>
+              <p class="credential-purpose">测试只发送软件的合成题和合成图，不发送你的试卷。可能消耗服务额度；通过测试仍需要人工核对答案。</p>
+              <label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>同意发起一次 API 测试</span></label>
+              <div class="credential-service-actions"><button id="libraryAITest" class="button" type="button" disabled>测试连接</button></div>
+            </section>
+            <details class="credential-more"><summary>复用密钥和切换服务会怎样？</summary><p>复用会复制读题侧的第一个账号，不需要再次粘贴。以后更换读题密钥时，在这里再点一次复用即可；不会自动跟着更改。每家已保存的密钥和模型配置分别保留，选择其他服务不会删除它们。</p><p>密钥仅加密保存在本机。配置、保存或测试都不会自动生成标签和答案。</p></details>
+          </section>
         </div>
         <div class="library-ai-actions"><span id="libraryAIResult" class="settings-save-result" role="status" aria-live="polite"></span><button id="libraryAICancel" class="button" type="button">${state.inline ? "撤销更改" : "取消"}</button><button id="libraryAISave" class="button primary" type="submit" disabled>保存设置</button></div>
       </form>`;
     (host || document.body).append(dialog);
     $("libraryAISettingsForm").addEventListener("submit", (event) => { event.preventDefault(); void save(); });
-    $("libraryAIKnowledgeOpen").addEventListener("click", () => void openCatalogue());
-    catalogueDialog = document.createElement("dialog");
-    catalogueDialog.id = "knowledgeCatalogueDialog";
-    catalogueDialog.className = "catalogue-dialog";
-    catalogueDialog.setAttribute("aria-labelledby", "catalogueTitle");
-    catalogueDialog.innerHTML = `
-      <header class="catalogue-bar">
-        <h3 id="catalogueTitle">知识点目录</h3>
-        <button id="catalogueClose" class="button quiet" type="button">关闭</button>
-      </header>
-      <div class="catalogue-body">
-        <input id="libraryAIKnowledgeSearch" type="search" placeholder="搜知识点或章名，例如 函数" aria-label="在知识点目录里搜索">
-        <div id="catalogueList" class="catalogue-list" aria-label="知识点目录"></div>
-      </div>
-      <footer class="catalogue-foot">
-        <span id="catalogueFile" class="settings-path"></span>
-        <span>标签只能从这里选。要增删，用记事本打开上面这个文件，每行一个知识点，# 开头的是章名。</span>
-      </footer>`;
-    document.body.append(catalogueDialog);
-    $("catalogueClose").addEventListener("click", () => catalogueDialog.close());
-    $("libraryAIKnowledgeSearch").addEventListener("input", renderCatalogue);
     for (const id of fields) {
       if (id === "libraryAIMode") continue;
       const changed = () => {
         if (["libraryAITags", "libraryAIAnswer"].includes(id)) {
           renderTiming();
-          // 功能一关，入库时生成跟着收掉，别把这种组合存进去。
-          const paired = $(id === "libraryAITags" ? "libraryAITagsIntake" : "libraryAIAnswerIntake");
-          if (paired && !$(id).checked) paired.checked = false;
+          const paired = $("libraryAIAnswerIntake");
+          if (id === "libraryAIAnswer" && paired && !$(id).checked) paired.checked = false;
         }
-        // 「入库时生成」这两个开关一改，费用那句话要当场跟着变。
-        if (["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake"].includes(id) && state.current) {
+        // 答案的入库选项会影响费用提示；标签只在正式题库中主动发起。
+        if (["libraryAIAnswer", "libraryAIAnswerIntake"].includes(id) && state.current) {
           renderCost(state.current);
-        }
-        // 目录这一段跟着「生成知识点标签」走，当场就跟着开关走，别等保存后重读。
-        if (id === "libraryAITags") {
-          $("libraryAIKnowledge").hidden = !$(id).checked;
-          // 服务端在功能关着时故意不读目录文件（读一次就会替用户建出这个文件），
-          // 那一档回的 0 是「还没读」，不是「目录是空的」。所以这里必须自己去问一次：
-          // 否则用户刚打开开关就先看见一句永远不兑现的「正在读取…」，
-          // 再或者更糟，看见「目录是空的」和一行空路径 —— 目录其实有几百个知识点。
-          if ($(id).checked && !catalogue) void loadCatalogue();
         }
         const switchingProvider = id === "libraryAIProvider" && $(id).value !== state.provider;
         if (switchingProvider) {
+          state.profileDrafts[state.provider] = readProfileDraft();
           state.provider = $(id).value;
-          cancelPendingReveal();
-          const preset = state.current?.provider === state.provider ? state.current : defaults[state.provider];
+          hideKey();
+          const preset = state.profileDrafts[state.provider] || (state.current?.provider === state.provider ? state.current : (state.current?.provider_profiles?.[state.provider] || defaults[state.provider]));
           if (preset) {
             $("libraryAIBaseURL").value = preset.base_url;
             $("libraryAIModel").value = preset.model;
@@ -290,6 +239,10 @@ ${keyBlocks()}
       $(`libraryAIDelete-${provider}`).addEventListener("click", () => { void deleteKey(provider); });
     }
     $("libraryAITestConsent").addEventListener("change", updateButtons);
+    $("libraryAIUseReadingService").addEventListener("click", () => {
+      const provider = reusableReadingProvider();
+      if (provider) void shareReadingKey(provider);
+    });
     $("libraryAIShareReadingKey").addEventListener("click", () => { void shareReadingKey(); });
     $("libraryAIKeepOwnKey").addEventListener("click", () => { void keepOwnKey(); });
     $("libraryAITest").addEventListener("click", () => { void test(); });
@@ -488,7 +441,16 @@ ${keyBlocks()}
     if (!block) return;
     const provider = $("libraryAIProvider").value;
     const shareable = (state.current?.shareable_from_reading || []).includes(provider);
-    block.hidden = !isAPI() || !shareable || provider !== "minimax";
+    const reusable = reusableReadingProvider();
+    const reuse = $("libraryAIReadingReuse");
+    if (reuse) {
+      reuse.hidden = !reusable || reusable === provider;
+      $("libraryAIUseReadingService").disabled = state.busy || !state.current;
+      $("libraryAIUseReadingService").textContent = `使用已配置的${providerNames[reusable] || "读题"}服务`;
+      $("libraryAIReadingReuseHelp").textContent = reusable
+        ? `读题已配置${providerNames[reusable]}，可以复用它的密钥。点击后才切换当前答题服务；不会开启生成开关。` : "";
+    }
+    block.hidden = !isAPI() || !shareable || !["minimax", "modelscope", "siliconflow"].includes(provider);
     if (block.hidden) return;
     const own = (state.current?.keys || {})[provider] || {};
     const shared = own.shared_with_reading === true;
@@ -496,30 +458,43 @@ ${keyBlocks()}
     // status, handed in by the page: this module must never read that store.
     const readingReady = Boolean(state.reading?.[provider]?.configured);
     const share = $("libraryAIShareReadingKey"), keep = $("libraryAIKeepOwnKey");
-    share.hidden = shared || !readingReady;
+    share.hidden = !readingReady;
     share.disabled = state.busy || !state.current;
-    share.textContent = own.configured ? "改用读题的 MiniMax 密钥" : "共用读题的 MiniMax 密钥";
+    share.textContent = own.configured ? `重新复用读题的${providerNames[provider]}密钥` : `复用读题的${providerNames[provider]}密钥`;
     keep.hidden = !shared;
     keep.disabled = state.busy || !state.current;
     $("libraryAIShareHelp").textContent = shared
-      ? "这里用的是读题那份 MiniMax 密钥（读题侧第 1 个账号）。以后改了读题的密钥，这里不会自动跟着变，要跟着改请再点一次共用。"
+      ? `已复用读题的${providerNames[provider]}第 1 个账号。更换读题密钥后，请在这里再点一次复用；不会自动跟着更改。`
       : readingReady
-        ? (own.configured ? "这里已经有一份独立的 MiniMax 密钥。共用会用读题的那份替换它，随时可以改回来。"
-          : "读题这边已经保存了 MiniMax 密钥，可以直接共用，不用再粘贴一次。")
-        : "读题那边还没有保存 MiniMax 密钥。先到“读题与切题”里填一次并保存，回来这里就能共用。";
+        ? (own.configured ? `当前有独立的${providerNames[provider]}密钥。点击复用会用读题侧第 1 个账号替换它。`
+          : "读题侧已经保存了这家的密钥，直接复用即可，不需要再次粘贴。")
+        : "先到“切题与读题”保存这家的密钥，才能复用；也可以在下面填写独立密钥。";
   }
 
-  async function shareReadingKey() {
+  function reusableReadingProvider() {
+    const shareable = state.current?.shareable_from_reading || [];
+    const candidates = [state.readingService.provider, "modelscope", "minimax", "siliconflow"];
+    return candidates.find((provider) => shareable.includes(provider) && state.reading?.[provider]?.configured) || "";
+  }
+
+  async function shareReadingKey(provider = $("libraryAIProvider").value) {
     if (state.busy || !state.current) return;
+    if (!(state.current.shareable_from_reading || []).includes(provider) || !state.reading?.[provider]?.configured) return;
+    hideKey();
+    const openingSession = state.session;
+    if (syncDirty()) {
+      const discard = await askConfirm({ title: "复用前放弃未保存的设置？", text: "当前新密钥或设置还未保存。继续会放弃这些改动，再使用已保存的读题服务。", ok: "放弃并复用", cancel: "继续设置", focusCancel: true });
+      if (!discard || state.busy || openingSession !== state.session || !isActive()) return;
+    }
     const session = ++state.session;
     state.busy = true; state.operation = "share";
     $("libraryAIResult").textContent = "正在从读题那边取密钥…";
     updateButtons();
     try {
-      const body = await request(`${API}/share-reading-key`, { provider: "minimax" });
+      const body = await request(`${API}/share-reading-key`, { provider });
       if (session !== state.session || !isActive()) return;
       render(body);
-      $("libraryAIResult").textContent = "已共用读题的 MiniMax 密钥。点“测试连接”验证一次即可。";
+      $("libraryAIResult").textContent = `已复用${providerNames[provider]}读题密钥。请测试连接；标签与答案开关保持原样。`;
     } catch (error) {
       if (session === state.session && isActive()) $("libraryAIResult").textContent = error.message;
     } finally {
@@ -529,13 +504,8 @@ ${keyBlocks()}
 
   async function keepOwnKey() {
     if (state.busy || !state.current) return;
-    try {
-      const body = await request(API, { key: { action: "clear" } });
-      render(body);
-      $("libraryAIResult").textContent = "已清除共用的密钥，可以在下面粘贴自己的 Key 并保存。";
-    } catch (error) {
-      $("libraryAIResult").textContent = error.message;
-    }
+    keyInput($("libraryAIProvider").value)?.focus();
+    $("libraryAIResult").textContent = "粘贴新的独立密钥并保存后才会替换；当前密钥继续保留。";
   }
 
   // ---------------------------------------------------------------- 表单状态
@@ -552,11 +522,10 @@ ${keyBlocks()}
   // 现在默认收起——没配好 API 时才替用户展开，此外一旦他自己动过就不再插手。
   function syncAdvanced(apiReady) {
     if (!isAPI()) return;
-    if (!apiReady && !state.advancedTouched) $("libraryAIAdvanced").open = true;
+    if (!apiReady && !state.advancedTouched && (!state.current?.model || !state.current?.base_url)) $("libraryAIAdvanced").open = true;
   }
 
   function renderTiming() {
-    $("libraryAITagsTiming").hidden = !$("libraryAITags").checked;
     $("libraryAIAnswerTiming").hidden = !$("libraryAIAnswer").checked;
   }
 
@@ -566,16 +535,11 @@ ${keyBlocks()}
   function renderCost(body) {
     const backlog = body.backlog || { tags: 0, answer: 0, total: 0 };
     const on = (id) => Boolean($(id)?.checked);
-    const tagsRunning = on("libraryAITags") && on("libraryAITagsIntake");
     const answerRunning = on("libraryAIAnswer") && on("libraryAIAnswerIntake");
-    const perQuestion = Number(tagsRunning) + Number(answerRunning);
-    const queued = (tagsRunning ? backlog.tags : 0) + (answerRunning ? backlog.answer : 0);
-    $("libraryAICost").textContent = perQuestion
-      ? `题库现在 ${backlog.total} 道题。开着「入库时生成」，每道新题入库会调用 ${perQuestion} 次服务；`
-        + `还没做的共 ${queued} 道（${[tagsRunning && `标签 ${backlog.tags}`, answerRunning && `答案 ${backlog.answer}`].filter(Boolean).join("、")}）。`
-      : `两项默认关闭。题库现在 ${backlog.total} 道题，还差 ${backlog.tags} 道标签、${backlog.answer} 道答案；`
-        + "开启后可在题库单题生成或勾选批量生成，都开「入库时生成」的话，每道新题入库要调用两次服务。";
-    $("libraryAITagsBacklog").textContent = `题库里还差 ${backlog.tags} 道有标签`;
+    $("libraryAICost").textContent = `题库现在 ${backlog.total} 道题。AI 标签只在正式题库中按你的选择主动生成，结果先进入待核对；`
+      + (answerRunning
+        ? `新题入库时会调用一次答案服务，当前还有 ${backlog.answer} 道题没有答案。`
+        : `参考答案当前不会随新题入库自动生成，题库里还有 ${backlog.answer} 道题没有答案。`);
     $("libraryAIAnswerBacklog").textContent = `题库里还差 ${backlog.answer} 道有答案`;
   }
 
@@ -604,16 +568,39 @@ ${keyBlocks()}
     return value ? { action: "replace", value } : { action: "keep" };
   }
 
+  function profileValues(profile) {
+    return { base_url: profile?.base_url || "", model: profile?.model || "",
+      supports_images: profile?.supports_images === true, thinking: profile?.thinking !== false,
+      reasoning_effort: "high" };
+  }
+
+  function readProfileDraft() {
+    return { base_url: $("libraryAIBaseURL").value.trim(), model: $("libraryAIModel").value.trim(),
+      supports_images: $("libraryAIImages").checked, thinking: $("libraryAIThinking").checked,
+      reasoning_effort: "high" };
+  }
+
+  function inactiveProfileChanges() {
+    const active = $("libraryAIProvider").value, changes = {};
+    for (const provider of providerOrder) {
+      if (provider === active || !state.profileDrafts[provider]) continue;
+      const saved = state.current?.provider === provider ? state.current : (state.current?.provider_profiles?.[provider] || defaults[provider]);
+      const draft = profileValues(state.profileDrafts[provider]);
+      if (JSON.stringify(draft) !== JSON.stringify(profileValues(saved))) changes[provider] = draft;
+    }
+    return changes;
+  }
+
   function effectiveSettings() {
     const active = $("libraryAIProvider").value;
     const keys = {};
     for (const provider of providerOrder) if (provider !== active) keys[provider] = keyOperation(provider);
     return JSON.stringify({
       features: { knowledge_tags: $("libraryAITags").checked, ai_answer: $("libraryAIAnswer").checked },
-      on_intake: { tags: $("libraryAITagsIntake").checked, answer: $("libraryAIAnswerIntake").checked },
+      on_intake: { tags: false, answer: $("libraryAIAnswerIntake").checked },
       provider: active, base_url: $("libraryAIBaseURL").value.trim(), model: $("libraryAIModel").value.trim(),
       supports_images: $("libraryAIImages").checked, thinking: $("libraryAIThinking").checked,
-      key: keyOperation(active), keys
+      key: keyOperation(active), keys, provider_profiles: inactiveProfileChanges()
     });
   }
 
@@ -628,18 +615,21 @@ ${keyBlocks()}
     $("libraryAISave").disabled = !idle || state.keyPending.size > 0;
     $("libraryAITest").disabled = state.busy || state.dirty || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked;
     for (const id of fields) $(id).disabled = !idle;
-    $("libraryAITagsIntake").disabled = !idle || !$("libraryAITags").checked;
     $("libraryAIAnswerIntake").disabled = !idle || !$("libraryAIAnswer").checked;
     $("libraryAITestConsent").disabled = !idle;
     const active = $("libraryAIProvider").value;
-    const activeReady = Boolean(state.current?.configured);
+    const savedSelection = active === state.current?.provider;
+    const activeReady = savedSelection && Boolean(state.current?.configured);
+    const activeVerified = savedSelection && Boolean(state.current?.api_ready);
     const chip = $("libraryAIActiveState");
     if (chip) {
-      const label = !state.current ? "正在读取…" : state.current.mode === "assistant" ? "交给当前助手" : state.current.api_ready ? "已测通" : activeReady ? "已保存，未测试" : "缺密钥";
+      const label = !state.current ? "正在读取…" : !savedSelection ? "未保存选择" : state.current.mode === "assistant" ? "交给当前助手" : activeVerified ? "已测通" : activeReady ? "已保存，未测试" : "缺密钥";
       chip.textContent = label;
-      chip.className = `api-state ${state.current?.api_ready ? "ready" : "missing"}`;
+      chip.className = `api-state ${activeVerified ? "ready" : "missing"}`;
     }
     for (const provider of providerOrder) {
+      const block = $(`libraryAIKeyBlock-${provider}`);
+      if (block) block.hidden = provider !== active;
       const count = storedKeyCount(provider);
       const state$ = $(`libraryAIKeyState-${provider}`);
       if (state$) {
@@ -647,7 +637,7 @@ ${keyBlocks()}
         state$.className = `api-state ${count ? "ready" : "missing"}`;
       }
       const input = keyInput(provider);
-      if (input) input.disabled = !idle || state.keyPending.has(provider);
+      if (input) input.disabled = !idle;
       const eye = $(`libraryAIKeyReveal-${provider}`);
       // 眼睛一直可点：这一栏空着的时候，点了会说明该看的是上面已保存那一条，
       // 而不是给一个按了没反应的按钮。
@@ -678,9 +668,7 @@ ${keyBlocks()}
         || typeof body.supports_images !== "boolean" || typeof body.thinking !== "boolean"
         || typeof body.on_intake?.tags !== "boolean" || typeof body.on_intake?.answer !== "boolean"
         || typeof body.features?.knowledge_tags !== "boolean" || typeof body.features?.ai_answer !== "boolean"
-        || typeof body.knowledge?.total !== "number" || typeof body.knowledge?.chapters !== "number"
-        || typeof body.knowledge?.file !== "string"
-        || !["tags", "answer", "total"].every((key) => typeof body.backlog?.[key] === "number")) {
+        || !["answer", "total"].every((key) => typeof body.backlog?.[key] === "number")) {
       throw new Error("设置状态读取不完整，请重新读取设置后再试。");
     }
     return body;
@@ -690,79 +678,15 @@ ${keyBlocks()}
     } finally { clearTimeout(timeout); requests.delete(controller); }
   }
 
-  // 目录那一行的说法只有这一处。刚打开面板、切换开关、从「查看目录」回来，
-  // 三条路都必须说同一件事，否则用户会先看见一句永远不兑现的「正在读取…」。
-  function showKnowledgeSummary(summary) {
-    const value = summary || { total: 0, chapters: 0, file: "" };
-    // 有文件却一个知识点都没有，多半是文件空的或打不开。说「目录是空的」会让用户
-    // 以为这套标签没得用，其实要做的只是看一眼下面那个文件。
-    $("libraryAIKnowledgeCount").textContent = value.total
-      ? `${value.total} 个知识点，分 ${value.chapters} 章`
-      : value.file ? "目录里读不出知识点，请看下面这个文件" : "知识点目录是空的";
-    $("libraryAIKnowledgeFile").textContent = value.file || "";
-    const cataloguePath = $("catalogueFile");
-    if (catalogue && cataloguePath) cataloguePath.textContent = value.file || "";
-  }
-
-  function renderKnowledge(body) {
-    // 大小和文件位置随设置一起下发，面板一打开就有，不必先发一次请求。
-    // 关着标签功能时这一段是藏着的，但文字照样写：用户当场打开开关就能看见真实数量。
-    showKnowledgeSummary(body.knowledge);
-    // 目录只有在开着「生成知识点标签」时才相关，免得关了功能还让人去管目录。
-    $("libraryAIKnowledge").hidden = !body.features.knowledge_tags;
-  }
-
-  async function loadCatalogue() {
-    try {
-      const response = await fetch("/api/settings/knowledge", { cache: "no-store", headers: { "X-QB-Request": "1" } });
-      const body = await response.json();
-      if (!response.ok || !Array.isArray(body.points)) throw new Error(body.error || "目录没读到");
-      catalogue = body;
-      showKnowledgeSummary(body);
-      renderCatalogue();
-    } catch (error) {
-      $("libraryAIKnowledgeCount").textContent = `目录没读到：${error.message || "稍后再试一次"}`;
-    }
-  }
-
-  function renderCatalogue() {
-    const list = $("catalogueList");
-    if (!list || !catalogue) return;
-    const keyword = String($("libraryAIKnowledgeSearch")?.value || "").trim();
-    // 章名一起搜：搜「圆锥」要能看到椭圆、双曲线、抛物线，这三个词本身不含「圆锥」。
-    const shown = keyword ? catalogue.points.filter((item) => item.point.includes(keyword) || (item.chapter || "").includes(keyword)) : catalogue.points;
-    list.replaceChildren();
-    if (!shown.length) {
-      list.append(Object.assign(document.createElement("p"), { className: "catalogue-empty", textContent: keyword ? `目录里没有含“${keyword}”的知识点。` : "目录是空的。" }));
-      return;
-    }
-    let chapter = null;
-    for (const item of shown) {
-      if (item.chapter && item.chapter !== chapter) {
-        chapter = item.chapter;
-        list.append(Object.assign(document.createElement("p"), { className: "catalogue-chapter", textContent: chapter }));
-      }
-      list.append(Object.assign(document.createElement("span"), { className: "catalogue-point", textContent: item.point }));
-    }
-  }
-
-  async function openCatalogue() {
-    if (!catalogue) await loadCatalogue();
-    if (!catalogue) { $("libraryAIKnowledgeCount").textContent = "目录没读到，稍后再试一次"; return; }
-    $("libraryAIKnowledgeSearch").value = "";
-    renderCatalogue();
-    if (!catalogueDialog.open) catalogueDialog.showModal();
-  }
-
   function render(body) {
     state.current = body;
+    state.profileDrafts = {};
     state.baseline = null; clearSecret(); state.provider = body.provider;
     $("libraryAITags").checked = body.features.knowledge_tags;
     $("libraryAIAnswer").checked = body.features.ai_answer;
     // 功能关着的时候，「入库时生成」跟着一起收掉。留着会出现一个用户没见过的
     // 组合：上面写着「两项默认关闭」，下面两个开关却是开的；哪天把功能打开，
     // 每道新题入库就悄悄恢复调用一次服务。读入时先按实际生效的状态对齐。
-    $("libraryAITagsIntake").checked = body.features.knowledge_tags && body.on_intake.tags;
     $("libraryAIAnswerIntake").checked = body.features.ai_answer && body.on_intake.answer;
     renderTiming();
     renderCost(body);
@@ -775,9 +699,8 @@ ${keyBlocks()}
     renderMode();
     syncAdvanced(body.api_ready);
     renderCapabilities(); renderSavedKeys();
-    renderKnowledge(body);
     state.baseline = effectiveSettings(); state.dirty = false;
-    $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "请为答题助手配置 API，保存并测试后再生成。";
+    $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "选择或复用一家服务，保存并测试后才可生成；不需要标签和答案时可以跳过。";
     $("libraryAIState").classList.toggle("error", !body.api_ready);
   }
 
@@ -801,7 +724,6 @@ ${keyBlocks()}
   function deactivate() {
     if (isMutating() || syncDirty()) return false;
     state.active = false; ++state.session;
-    if (catalogueDialog?.open) catalogueDialog.close();
     for (const [controller, request] of requests) if (!request.mutating) controller.abort();
     clearSecret(); state.current = null; state.baseline = null;
     state.dirty = false; state.busy = false; state.operation = null;
@@ -819,7 +741,6 @@ ${keyBlocks()}
     // 用户一旦自己开合过模型配置，就别再替他决定这一块该不该展开。
     // isTrusted 区分「他自己点的」和「代码设的」，不然每读一次设置都会被当成他动过。
     $("libraryAIAdvanced").ontoggle = (event) => { state.advancedTouched = event.isTrusted; };
-    $("libraryAITagsTiming").hidden = true;
     $("libraryAIAnswerTiming").hidden = true;
     $("libraryAIAPIFields").hidden = true;
     $("libraryAIAssistantHelp").hidden = true;
@@ -851,7 +772,6 @@ ${keyBlocks()}
   }
 
   function close() {
-    if (catalogueDialog?.open) catalogueDialog.close();
     if (state.inline) { discard(); return; }
     if (syncDirty() && !window.confirm("这些设置还没保存。放弃更改并关闭？")) return;
     dialog.close();
@@ -867,7 +787,7 @@ ${keyBlocks()}
     const active = $("libraryAIProvider").value;
     const payload = { mode: "api",
       features: { knowledge_tags: $("libraryAITags").checked, ai_answer: $("libraryAIAnswer").checked },
-      on_intake: { tags: $("libraryAITagsIntake").checked, answer: $("libraryAIAnswerIntake").checked } };
+      on_intake: { tags: false, answer: $("libraryAIAnswerIntake").checked } };
     const keys = {};
     for (const provider of providerOrder) {
       if (provider === active) continue;
@@ -878,6 +798,8 @@ ${keyBlocks()}
     Object.assign(payload, { provider: active, base_url: $("libraryAIBaseURL").value.trim(),
       model: $("libraryAIModel").value.trim(), supports_images: $("libraryAIImages").checked,
       thinking: $("libraryAIThinking").checked, reasoning_effort: "high", key });
+    const profiles = inactiveProfileChanges();
+    if (Object.keys(profiles).length) payload.provider_profiles = profiles;
     if (Object.keys(keys).length) payload.keys = keys;
     // 换了凭据却没保存成功，就当它没存：清空那一栏并挡住保存，逼着重填一次。
     const replaced = [...(key.action === "replace" ? [active] : []), ...Object.keys(keys)];
@@ -929,13 +851,18 @@ ${keyBlocks()}
 
   function setReadingKeys(services) {
     // Read-side status, handed in by the page that already loaded it. The
-    // answers panel asks "is there a MiniMax key on the reading side?" without
+    // answers panel checks the available reading providers without
     // ever opening that store from here.
     state.reading = (services && typeof services === "object") ? { ...services } : {};
     if (dialog) updateButtons();
   }
 
-  window.LibraryAISettings = Object.freeze({ open, mount, activate, deactivate, hideSecrets: hideKey, discard, setReadingKeys,
+  function setReadingService(service) {
+    state.readingService = service && typeof service === "object" ? { ...service } : {};
+    if (dialog) updateButtons();
+  }
+
+  window.LibraryAISettings = Object.freeze({ open, mount, activate, deactivate, hideSecrets: hideKey, discard, setReadingKeys, setReadingService,
     hasUnsavedChanges: syncDirty, isBusy: () => state.busy, isMutating });
   window.addEventListener("beforeunload", (event) => {
     hideKey();

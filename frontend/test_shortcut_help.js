@@ -10,7 +10,9 @@ assert(!keys(help.reference("review")).includes("4")); assert(keys(help.referenc
 assert(keys(help.reference("crop")).includes("S") && keys(help.reference("crop")).includes("Ctrl+S"));
 assert(!keys(help.reference("crop", { mode: "figures" })).includes("Ctrl+Z"), "Figure editing must not advertise range-only undo");
 assert(keys(help.reference("crop", { mode: "regions" })).includes("Ctrl+Z"));
-assert(!keys(help.reference("crop", { mode: "view" })).includes("Ctrl+Enter"));
+assert(keys(help.reference("crop", { mode: "regions" })).includes("Ctrl+Enter"));
+assert(keys(help.reference("crop", { mode: "view" })).includes("Ctrl+Enter"));
+assert(keys(help.reference("crop", { mode: "view" })).includes("Shift+Enter"));
 assert(!keys(help.reference("crop", { mode: "read", practiceRead: true })).includes("Ctrl+Enter"));
 assert(keys(help.reference("answers")).includes("Ctrl+S")); assert(!keys(help.reference("answers")).includes("Ctrl+Enter"));
 assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "Esc", "Ctrl+滚轮"]);
@@ -58,8 +60,8 @@ assert.equal(cropShortcutAction(event("s"), canvas), "next"); assert.equal(cropS
 for (const extra of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { altKey: true }, { shiftKey: true }]) assert.equal(cropShortcutAction(event("s", extra), canvas), null);
 assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), { ...canvas, editing: true }), null);
 assert.equal(cropShortcutAction(event("s", { ctrlKey: true }), { ...canvas, canvasFocused: false }), "complete");
-assert.match(help.reference("crop").extra, /S 保存下一题需先点原卷画布/);
-assert.match(help.reference("crop").extra, /Ctrl\+S 完成切题可在窗口工具栏和教学提示中使用/);
+assert.match(help.reference("crop").extra, /新增题画框时光标变为十字/);
+assert.match(help.reference("crop").extra, /双击已保存题框返回对应审核卡/);
 
 const app = read("app.js"), viewerApprove = app.slice(app.indexOf("  async function viewerApprove()"), app.indexOf("  function viewerKey("));
 const viewerKeys = app.slice(app.indexOf("  function viewerKey("), app.indexOf("  function editFromViewer("));
@@ -105,10 +107,14 @@ function libraryChecks() {
   const code = source.slice(start, source.indexOf("  if (state.document)", start));
   let handler, searches = 0, helps = 0, dialog = false; const search = { disabled: false, focus() { searches++; } };
   const context = { document: { activeElement: target(), addEventListener(type, callback) { handler = callback; }, querySelector() { return dialog ? {} : null; } },
-    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {} };
+    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {}, tagManagerDialog: null };
   vm.runInNewContext(code, context); handler(event("/")); assert.equal(searches, 1); handler(event("?", { shiftKey: true })); assert.equal(helps, 1);
   for (const extra of [{ defaultPrevented: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { target: target("input") }, { target: target("contenteditable") }, { target: target('role="textbox"') }]) handler(event("/", extra));
   dialog = true; handler(event("/")); assert.equal(searches, 1, "Search cannot steal input, IME, modified browser shortcuts or a modal's focus");
+  dialog = false; context.tagManagerDialog = { open: true };
+  handler(event("/")); handler(event("?", { shiftKey: true }));
+  assert.equal(searches, 1, "The independent tag manager keeps shortcuts from focusing the hidden question search");
+  assert.equal(helps, 1, "The manager handles its own keys rather than opening hidden question-list help");
   const editor = read("library-answer-editor.js"), marker = editor.indexOf('      dialog.addEventListener("keydown", event => {'); let saveHandler, saves = 0;
   vm.runInNewContext(editor.slice(marker, editor.indexOf('      cropSurface.addEventListener("click"', marker)), { dialog: { addEventListener: (_, callback) => saveHandler = callback }, saveCurrent: () => saves++ });
   saveHandler(event("s", { ctrlKey: true, target: target("textarea") })); assert.equal(saves, 1, "Answer saving remains available while typing");

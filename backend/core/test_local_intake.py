@@ -490,8 +490,10 @@ class LocalIntakeTests(TestCase):
         self.run_read(question, result)
         question.refresh_from_db()
         self.assertEqual(question.stem, "Newest human correction")
-        self.assertEqual(question.processing_mode, "manual")
-        self.assertEqual(question.content_revision, 2)
+        # An unchanged range is a no-op; it neither switches the saved mode
+        # nor advances the revision. The explicit human edit rejects late OCR.
+        self.assertEqual(question.processing_mode, "auto")
+        self.assertEqual(question.content_revision, 1)
 
     def test_expired_suggestion_cannot_be_adopted_after_range_edit(self):
         question = self.question(self.paper(), ocr_suggestion={"revision": 0, "stem": "Stale suggestion"})

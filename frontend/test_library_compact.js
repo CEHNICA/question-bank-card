@@ -165,11 +165,18 @@ assert.match(libraryCss, /\.library-search input \{[^}]*min-height: 34px/, "搜�
 assert.match(libraryCss, /\.library-search input \{[^}]*box-shadow: none/, "阴影去掉");
 assert.match(libraryCss, /\.library-search input \{[^}]*border: 1px solid var\(--line\);/);
 assert.match(libraryCss, /\.library-search input:focus \{[^}]*box-shadow: 0 0 0 3px/);
-assert.match(libraryCss, /\.library-workspace \{[^}]*grid-template-columns: 212px minmax\(0, 1fr\)/, "查找和筛选在左侧栏，题目拿走剩下的");
+assert.match(libraryCss, /\.library-workspace \{[^}]*grid-template-columns: 212px minmax\(0, 1fr\)/, "题目列表拿走侧栏之外的空间");
+assert.match(libraryCss, /\.library-filterbar \{[^}]*display: flex[^}]*flex-wrap: wrap/, "筛选和排序在题目列表上方并可换行");
+assert.match(libraryCss, /\.library-advanced\[open\] > \.library-filters \{ position: absolute;[^}]*box-shadow:/, "更多筛选以浮层打开，不把题目推下去");
 assert.match(libraryCss, /\.rail-collapse \{[^}]*position: sticky/, "收侧栏的小按钮钉在题面上，滚到哪儿都在");
 assert.ok(!libraryJs.includes("QBSiteDrawer?.slot?.(\"library\")"), "抽屉里不再放一份专注浏览，只有侧栏接缝上那一个按钮");
 assert.ok(libraryHtml.indexOf('id="allQuestionsButton"') < libraryHtml.indexOf('id="sourceSelect"'),
-  "「全部题目 / 已选题目」并进了筛选行最左侧");
+  "试题篮的返回条留在顶栏，且排在筛选工具栏之前");
+assert.match(libraryHtml, /id="allQuestionsButton"[^>]*\bhidden\b/, "返回条默认隐藏，切到篮内视图才出现");
+const rail = libraryHtml.slice(libraryHtml.indexOf('id="libraryRail"'), libraryHtml.indexOf('id="libraryRailToggle"'));
+assert.doesNotMatch(rail, /sourceSelect|typeFilters|sortSelect|advancedFilters/, "来源、题型、排序和更多筛选已从侧栏移出");
+assert.match(libraryHtml, /id="libraryFilterBar"[\s\S]*?id="sourceSelect"[\s\S]*?id="typeFilters"[\s\S]*?id="sortSelect"[\s\S]*?id="advancedFilters"/, "所有常用筛选都在列表顶部工具栏");
+assert.match(libraryHtml, /id="typeFacetLabel"[^>]*>题型/, "题型有可见的维度标签，不再和「来源」的「全部」并排混淆");
 assert.ok(libraryHtml.indexOf('id="libraryRail"') < libraryHtml.indexOf('id="activeFilters"'),
   "当前筛选那行搬进了侧栏");
 assert.ok(libraryHtml.indexOf('id="activeFilters"') < libraryHtml.indexOf('id="libraryList"'),
@@ -190,8 +197,10 @@ assert.ok(!under1100.includes("grid-template-columns"), "试题篮进抽屉后�
 assert.match(libraryCss, /@media \(max-width: 979px\) \{[\s\S]*?body\.rail-open \.library-rail \{ transform: none; \}/,
   "窄屏侧栏要从右侧滑出，靠 body.rail-open 打开");
 assert.match(libraryCss, /\.library-rail \{ position: sticky;/, "宽屏侧栏吸顶");
-assert.match(libraryCss, /\.library-focus-mode \.library-workspace \{ grid-template-columns: minmax\(0, 1fr\)/,
-  "专注浏览藏了侧栏，栅格要收回单列，否则题目被塞进空列");
+assert.match(libraryCss, /\.library-focus-mode \.library-workspace \{ grid-template-columns: minmax\(0, 1fr\) 310px/,
+  "专注浏览收起筛选栏后仍保留右侧题目详情");
+assert.match(libraryCss, /\.library-focus-mode \.library-workspace > \.question-inspector \{ grid-column: 2; \}/,
+  "专注浏览的题目详情栏位于题卡右侧");
 assert.ok(!libraryJs.includes("syncToolbar") && !libraryJs.includes("--library-toolbar-h"),
   "顶部横条没了，吸顶高度那一套要删干净");
 assert.ok(!libraryCss.includes(".library-toolbar"), "library-toolbar 已整体改成 library-rail");

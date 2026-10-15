@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const App = require("./app.js");
 const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
 const start = source.indexOf('  $("pageDialog").addEventListener("keydown", (event) => {');
-const end = source.indexOf('  $("manualProcessing").addEventListener', start);
+const end = source.indexOf('  const manualSwitches = new Set();', start);
 assert.ok(start > 0 && end > start);
 const listeners = new Map(), calls = [];
 const stage = { classList: { add: (value) => calls.push(["class", value]) } };
@@ -126,7 +126,7 @@ slotContext.dialog.saving = true; slotListeners.get("keydown")({ key: "a" });
 assert.equal(slots.length, 4, "Composition and saving cannot reassign a figure");
 
 const html = fs.readFileSync(require.resolve("./index.html"), "utf8");
-assert.match(html, /id="pageDialogSaveNext"[^>]*aria-keyshortcuts="S Enter"[^>]*>保存下一题<span class="kbd-hint">S<\/span>/);
-assert.match(html, /id="pageDialogComplete"[^>]*aria-keyshortcuts="Control\+S Control\+Enter"[^>]*>完成切题<span class="kbd-hint">Ctrl\+S<\/span>/);
+assert.match(html, /id="pageDialogSaveNext"[^>]*aria-keyshortcuts="Shift\+Enter"[^>]*>保存并框下一题<span class="kbd-hint">Shift\+Enter<\/span>/);
+assert.match(html, /id="pageDialogComplete"[^>]*aria-keyshortcuts="Control\+Enter"[^>]*>返回审核<span class="kbd-hint">Ctrl\+Enter<\/span>/);
 
-console.log("Crop shortcuts: left-hand S/Ctrl+S, Enter compatibility, browser-save suppression, scoped input/IME/modal/save locks, page navigation, undo/redo and S figure ownership: OK");
+console.log("Crop shortcuts: legacy modes retain scoped protections; unified workspace uses save, save-next, return-review, undo/redo and input/IME guards: OK");

@@ -11,7 +11,7 @@
   function progress(lesson, completed = false) {
     try {
       const old = JSON.parse(localStorage.getItem("qb-teach") || "null");
-      if (!old || old.paper !== paper || old.version !== 3) return;
+      if (!old || old.paper !== paper || old.version !== 4) return;
       localStorage.setItem("qb-teach", JSON.stringify({ ...old, lesson, completed, course: "basic", practiceUrl: `/practice/${paper}` }));
     } catch { /* The practice remains usable without persistence. */ }
   }

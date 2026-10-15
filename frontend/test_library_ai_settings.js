@@ -38,6 +38,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
     replaceChildren(...children) { this.children = [...children]; }
     showModal() { this.open = true; this.modalOpens++; }
     close() { this.open = false; this.trigger("close"); }
+    focus() { this.focused = true; }
     trigger(name, detail = {}) { for (const fn of this.listeners.get(name) || []) fn({ preventDefault() {}, ...detail }); }
   }
   const document = { head: new Element(), body: new Element(), listeners: new Map(), events: [],
@@ -155,14 +156,11 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(pendingMutation.window.APISettings.close(), true);
   assert.equal(s.get("libraryAITags").checked, false);
   assert.equal(s.get("libraryAIAnswer").checked, false);
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "intake generation is opt-in, separately from the feature");
   assert.equal(s.get("libraryAIAnswerIntake").checked, false);
-  assert.equal(s.get("libraryAITagsIntake").disabled, true);
   assert.equal(s.get("libraryAIAnswerIntake").disabled, true);
-  assert.equal(s.get("libraryAITagsTiming").hidden, true);
   assert.equal(s.get("libraryAIAnswerTiming").hidden, true);
   assert.equal(s.get("libraryAIMode").value, "api");
-  assert.equal(s.get("libraryAIAdvanced").open, true, "answer API setup is directly visible");
+  assert.equal(s.get("libraryAIAdvanced").open, false, "Saved address/model details stay collapsed while service and active key are visible");
   assert.equal(s.get("libraryAIAPIFields").hidden, false);
   assert.equal(s.get("libraryAIAssistantHelp").hidden, true);
   assert.equal(s.get("libraryAIKey-deepseek").value, "");
@@ -173,9 +171,13 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   assert.equal(s.get("libraryAITest").disabled, true);
   assert.equal(s.settingsCalls().length, 1, "opening only reads non-secret settings");
   assert.equal(s.window.LibraryAISettings.hasUnsavedChanges(), false, "Showing the legacy assistant config as API-only does not manufacture a change");
+  assert.equal(s.get("libraryAIProvider").value, "deepseek", "Opening a legacy profile never silently switches to the recommended visual service");
+  for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
+    assert.equal(s.get(`libraryAIKeyBlock-${provider}`).hidden, provider !== "deepseek", "The active provider is the only visible credential card");
+  }
 
   const unchanged = setup(); await unchanged.window.LibraryAISettings.mount(unchanged.document.createElement("section"));
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking", "libraryAIBaseURL", "libraryAIModel", "libraryAIKey-deepseek", "libraryAIKey-minimax", "libraryAIProvider", "libraryAIMode"]) {
     unchanged.get(id).trigger("focus"); unchanged.get(id).trigger("input"); unchanged.get(id).trigger("change");
     assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} without an effective change stays clean`);
   }
@@ -184,7 +186,7 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   unchanged.get("libraryAIKey-deepseek").value = " \n "; unchanged.get("libraryAIKey-deepseek").trigger("input");
   assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, "An empty replacement after trimming keeps the stored key");
   unchanged.get("libraryAIKey-deepseek").value = ""; unchanged.get("libraryAIKey-deepseek").trigger("input");
-  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAITagsIntake", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking"]) {
+  for (const id of ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIImages", "libraryAIThinking"]) {
     const field = unchanged.get(id), saved = field.checked;
     field.checked = !saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), true, `${id} real changes remain protected`);
     field.checked = saved; field.trigger("input"); assert.equal(unchanged.window.LibraryAISettings.hasUnsavedChanges(), false, `${id} reverted to the snapshot is clean`);
@@ -217,6 +219,46 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   restoredProvider.consentClose(false); restoredProvider.window.APISettings.close();
   assert.equal(restoredProvider.get("apiSettingsDialog").open, false, "A clean close does not ask for discard confirmation");
 
+  const providerDraft = setup(); Object.assign(providerDraft.current, { mode: "api", configured: true, key_configured: true,
+    ready: true, api_ready: true, verified: true });
+  await providerDraft.window.LibraryAISettings.open();
+  assert.equal(providerDraft.get("libraryAIActiveState").textContent, "已测通");
+  providerDraft.get("libraryAIBaseURL").value = "https://offline-edited-provider.example/v1"; providerDraft.get("libraryAIBaseURL").trigger("input");
+  providerDraft.get("libraryAIModel").value = "offline-unsaved-provider-model"; providerDraft.get("libraryAIModel").trigger("input");
+  providerDraft.get("libraryAIThinking").checked = false; providerDraft.get("libraryAIThinking").trigger("input");
+  providerDraft.get("libraryAIKey-deepseek").value = "offline-provider-retained-key"; providerDraft.get("libraryAIKey-deepseek").trigger("input");
+  providerDraft.get("libraryAIProvider").value = "modelscope"; providerDraft.get("libraryAIProvider").trigger("change");
+  assert.equal(providerDraft.get("libraryAIActiveState").textContent, "未保存选择", "The next provider must not inherit the previous provider's successful test state");
+  assert.equal(providerDraft.get("libraryAIKeyBlock-modelscope").hidden, false); assert.equal(providerDraft.get("libraryAIKeyBlock-deepseek").hidden, true);
+  providerDraft.get("libraryAIProvider").value = "deepseek"; providerDraft.get("libraryAIProvider").trigger("change");
+  assert.equal(providerDraft.get("libraryAIBaseURL").value, "https://offline-edited-provider.example/v1", "Returning to a service preserves its unsaved address draft");
+  assert.equal(providerDraft.get("libraryAIModel").value, "offline-unsaved-provider-model", "Returning to a service preserves its unsaved model draft");
+  assert.equal(providerDraft.get("libraryAIThinking").checked, false); assert.equal(providerDraft.get("libraryAIKey-deepseek").value, "offline-provider-retained-key");
+  assert.equal(providerDraft.window.LibraryAISettings.hasUnsavedChanges(), true);
+  assert.equal(providerDraft.calls.length, 1, "Switching providers retains local drafts without a secret read or implicit save/test");
+  providerDraft.window.LibraryAISettings.discard();
+  assert.equal(providerDraft.get("libraryAIModel").value, providerDraft.current.model, "Discard restores the saved model rather than a cached unsaved provider draft");
+  assert.equal(providerDraft.get("libraryAIKey-deepseek").value, "");
+
+  const inactiveProfile = setup(); inactiveProfile.current.mode = "api";
+  await inactiveProfile.window.LibraryAISettings.open();
+  inactiveProfile.get("libraryAIBaseURL").value = "https://offline-inactive.example/v1"; inactiveProfile.get("libraryAIBaseURL").trigger("input");
+  inactiveProfile.get("libraryAIModel").value = "offline-inactive-model"; inactiveProfile.get("libraryAIModel").trigger("input");
+  inactiveProfile.get("libraryAIThinking").checked = false; inactiveProfile.get("libraryAIThinking").trigger("input");
+  inactiveProfile.get("libraryAIProvider").value = "modelscope"; inactiveProfile.get("libraryAIProvider").trigger("change");
+  inactiveProfile.get("libraryAIKey-modelscope").value = "offline-new-selected-key"; inactiveProfile.get("libraryAIKey-modelscope").trigger("input");
+  inactiveProfile.response((_url, payload) => ({ ...inactiveProfile.current, ...payload }));
+  inactiveProfile.get("libraryAISettingsForm").trigger("submit"); await flush();
+  const inactiveSave = inactiveProfile.calls.at(-1).payload;
+  assert.equal(inactiveSave.provider, "modelscope");
+  assert.deepEqual(inactiveSave.provider_profiles, { deepseek: { base_url: "https://offline-inactive.example/v1", model: "offline-inactive-model",
+    supports_images: false, thinking: false, reasoning_effort: "high" } }, "Saving another selected service persists real inactive profile edits in the same request");
+  assert.deepEqual(inactiveSave.key, { action: "replace", value: "offline-new-selected-key" });
+  assert.equal(Object.hasOwn(inactiveSave.provider_profiles, "minimax"), false, "An untouched service profile is not overwritten by defaults");
+  inactiveProfile.get("libraryAIProvider").value = "deepseek"; inactiveProfile.get("libraryAIProvider").trigger("change");
+  assert.equal(inactiveProfile.get("libraryAIBaseURL").value, "https://offline-inactive.example/v1");
+  assert.equal(inactiveProfile.get("libraryAIModel").value, "offline-inactive-model", "The server-confirmed inactive profile remains available after the local draft cache is reset");
+
   const switchStyle = unchanged.document.head.children[0].textContent, switchMarkup = unchanged.get("libraryAISettingsDialog").html;
   assert.match(switchStyle, /\.library-ai-switch\{[^}]*display:inline-flex;[^}]*width:fit-content;[^}]*max-width:100%;[^}]*justify-self:start;/);
   assert.match(switchMarkup, /<label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>/, "Checkbox and actual text retain native label/Space accessibility");
@@ -224,34 +266,21 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
   s.get("libraryAITags").checked = true;
   s.get("libraryAITags").trigger("input");
   assert.equal(s.get("libraryAIAnswer").checked, false, "enabling tags must not enable answers");
-  assert.equal(s.get("libraryAITagsIntake").disabled, false);
-  assert.equal(s.get("libraryAITagsTiming").hidden, false);
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "enabling a feature keeps manual timing by default");
   assert.equal(s.get("libraryAIAnswerIntake").disabled, true);
-  s.get("libraryAITagsIntake").checked = true;s.get("libraryAITagsIntake").trigger("input");
   s.get("libraryAITags").checked = false;s.get("libraryAITags").trigger("input");
-  // 功能一关，入库时生成跟着收掉。原来是「保留用户的偏好」—— 但那一行这时候是藏着的，
-  // 用户看不见自己留了开关；等他哪天把功能打开，每道新题入库就悄悄恢复调用一次服务。
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "turning a feature off closes its timing switch too");
-  assert.equal(s.get("libraryAITagsIntake").disabled, true);
-  assert.equal(s.get("libraryAITagsTiming").hidden, true);
   s.get("libraryAITags").checked = true;s.get("libraryAITags").trigger("input");
-  assert.equal(s.get("libraryAITagsIntake").checked, false, "re-opening the feature does not resurrect it");
   s.response((_url, payload) => ({ ...s.current, mode: payload.mode, features: payload.features, on_intake: payload.on_intake }));
   s.get("libraryAISettingsForm").trigger("submit");
   await flush();
   assert.equal(s.calls.at(-1).payload.mode, "api", "only an explicit save changes legacy execution mode");
   assert.deepEqual(s.calls.at(-1).payload.features, { knowledge_tags: true, ai_answer: false });
-// 上一步已经断言过「功能重新打开也不会自己复活入库时生成」，所以这里发出去的
-// 必须是 tags:false —— 旧断言写的是 true，等于把「偷偷恢复调用」当成正确行为。
 assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false });
   assert.deepEqual(s.calls.at(-1).payload.key, { action: "keep" });
   assert.equal(s.calls.at(-1).headers["X-QB-Request"], "1");
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "assistant saves clear local password input without changing the stored key");
   assert.doesNotMatch(s.get("libraryAIResult").textContent, /当前助手/);
   assert.equal(s.document.events.at(-1).type, "library-ai-settings-saved");
-  // 「助手模式不探 API」要看的是这一次点击有没有发出请求，不是面板一共发了几条：
-// 打开「生成知识点标签」现在会自己去问一次目录大小，那条跟 API 探测无关。
+  // API tests only happen after an explicit click; settings never load the old text catalogue.
   const beforeProbe = s.calls.length;
   s.get("libraryAITestConsent").checked = true;
   s.get("libraryAITest").trigger("click");
@@ -308,6 +337,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   s.get("libraryAIProvider").trigger("change");
   assert.equal(s.get("libraryAIKey-custom").value, "", "a newly typed key stays in the service it was typed for");
   assert.equal(s.get("libraryAIKey-deepseek").value, "previous-provider-unsaved-key", "switching service does not throw away another service's pending key");
+  assert.equal(s.get("libraryAIKeyBlock-custom").hidden, false); assert.equal(s.get("libraryAIKeyBlock-deepseek").hidden, true);
   assert.equal(s.get("libraryAIKeyState-custom").textContent, "当前使用 · 未保存");
   assert.equal(s.get("libraryAIKeyState-deepseek").textContent, "未保存", "the service that is no longer in use is still reported on its own");
   s.get("libraryAIBaseURL").value = "https://offline.example/v1";
@@ -325,6 +355,8 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(s.get("libraryAIKey-deepseek").value, "", "a failed save also drops the other service's pending replacement");
   assert.match(s.get("libraryAIResult").textContent, /格式无效.*新密钥未保存.*重新填写/);
   assert.equal(s.get("libraryAISave").disabled, true, "a failed replacement cannot become a silent keep on retry");
+  assert.equal(s.get("libraryAIKey-custom").disabled, false, "An unconfirmed replacement must remain re-enterable instead of trapping the user");
+  assert.equal(s.get("libraryAIKey-deepseek").disabled, false, "Hidden providers' failed replacements remain re-enterable after selection");
   const failedSaveCount = s.calls.length;
   s.get("libraryAISettingsForm").trigger("submit"); await flush();
   assert.equal(s.calls.length, failedSaveCount, "retry without re-entering a failed replacement never posts keep");
@@ -348,7 +380,7 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   legacy.response((_url, payload) => ({ ...legacy.current, configured: true, key_configured: true, key_count: 1, provider: "doubao",
     base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "ep-existing-offline", features: payload?.features || legacy.current.features }));
   await legacy.window.LibraryAISettings.open();
-  assert.equal(legacy.get("libraryAIAdvanced").open, true, "existing API settings are directly visible without rewriting storage");
+  assert.equal(legacy.get("libraryAIAdvanced").open, false, "Existing API address/model remain available in optional details without rewriting storage");
   assert.equal(legacy.get("libraryAIModel").value, "ep-existing-offline");
   legacy.get("libraryAITags").checked = true;legacy.get("libraryAITags").trigger("input");
   legacy.get("libraryAISettingsForm").trigger("submit");await flush();
@@ -670,31 +702,11 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1, "A bounded explicit test never automatically performs another test");
   assert.match(testTimeout.get("libraryAIResult").textContent, /结果.*未确认/); assert.equal(testTimeout.timers.size, 0);
   finishTimedTest({ ...testTimeout.current }); await flush(); assert.equal(testTimeout.calls.filter(call => call.url.endsWith("/test")).length, 1);
-  // 服务端在标签功能关着时故意不读目录文件（读一次就会替用户把这个文件建出来），
-  // 那一档回的 0 是「还没读」，不是「目录是空的」。可用户当场打开开关时这一段就显示出来了，
-  // 面板必须自己去问一次，不能让他先看见一句永远不兑现的「正在读取…」或者「目录是空的」。
-  const catalogue = setup();
-  catalogue.response(url => (url.includes("/knowledge")
-    ? { file: "C:/data/knowledge-points.txt", points: [{ point: "集合", chapter: "第一章" }], total: 1, chapters: 1 }
-    : { ...catalogue.current, knowledge: { total: 0, chapters: 0, file: "" } }));
-  await catalogue.window.LibraryAISettings.mount(catalogue.document.createElement("div"));
-  assert.equal(catalogue.get("libraryAIKnowledge").hidden, true, "the catalogue section stays hidden while tagging is off");
-  catalogue.get("libraryAITags").checked = true; catalogue.get("libraryAITags").trigger("input");
-  await flush();
-  assert.equal(catalogue.get("libraryAIKnowledge").hidden, false);
-  assert.equal(catalogue.get("libraryAIKnowledgeCount").textContent, "1 个知识点，分 1 章",
-    "revealing the section must read the real count, not leave a promise that never settles");
-  assert.equal(catalogue.get("libraryAIKnowledgeFile").textContent, "C:/data/knowledge-points.txt",
-    "the note tells the user to open the file below, so the path has to be there");
-
-  const unreadable = setup();
-  unreadable.response(url => (url.includes("/knowledge")
-    ? { file: "C:/data/knowledge-points.txt", points: [], total: 0, chapters: 0 }
-    : { ...unreadable.current, features: { knowledge_tags: true, ai_answer: false },
-        knowledge: { total: 0, chapters: 0, file: "C:/data/knowledge-points.txt" } }));
-  await unreadable.window.LibraryAISettings.mount(unreadable.document.createElement("div"));
-  assert.match(unreadable.get("libraryAIKnowledgeCount").textContent, /读不出/,
-    "a known file that yields no points is reported as unreadable, not as an empty catalogue");
+  const noLegacyCatalogue = setup();
+  noLegacyCatalogue.response(() => ({ ...noLegacyCatalogue.current }));
+  await noLegacyCatalogue.window.LibraryAISettings.mount(noLegacyCatalogue.document.createElement("div"));
+  assert.equal(noLegacyCatalogue.calls.some(call => call.url.includes("/api/settings/knowledge")), false,
+    "API settings no longer load the legacy text catalogue; tags use the formal library catalogue");
 
   console.log("API settings, explicit eye reveal and secret lifecycle: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

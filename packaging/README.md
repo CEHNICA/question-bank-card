@@ -8,6 +8,8 @@
 - Python 3.12（仅构建电脑需要）
 - Inno Setup 7.1.0
 
+冻结程序使用 Windows 10 及更新版本系统自带的 `ucrtbase.dll`，不重复打包开发环境中的同名运行库。
+
 ```powershell
 winget install --id JRSoftware.InnoSetup.7 --exact --source winget --accept-source-agreements --accept-package-agreements
 ```
