@@ -83,3 +83,23 @@ assert.equal(direct.length, 0,
   `library.js 里还有直接拼题号的地方：${direct.map((m) => rest.slice(Math.max(0, m.index - 50), m.index + 20).replace(/\s+/g, " ")).join(" | ")}`);
 assert.match(guarded, /if \(item\?\.number\) return `第 \$\{item\.number\} 题`/,
   "sourceLocator 必须先判题号再拼，否则无题号的栏目题会印出「第 0 题」");
+
+// ---- 定位句挂在哪儿 ----
+
+// 卡头是三列 grid：18px（复选框）| auto（题号+题型）| minmax(0,1fr)（文件名）。
+// 一句没有类名的定位如果作为卡头的直接子元素，会被自动排进那个 18px 的窄槽，
+// 每个字换一行，竖成一列——实机量到过 18px 宽 × 108px 高。
+// 只在 card() 里查：标签建议那块也有一个叫 meta 的 span，是不相干的东西。
+const cardStart = js.indexOf("function card(item)");
+const cardEnd = js.indexOf("\n  function ", cardStart + 10);
+assert.ok(cardStart > 0 && cardEnd > cardStart, "card() 必须能被切出来");
+const cardBody = js.slice(cardStart, cardEnd);
+assert.doesNotMatch(cardBody, /meta\.append\([^)]*node\("span", "", /,
+  "定位句不能作为没有类名的直接子元素挂到卡头上（会被挤成一竖列）");
+assert.match(cardBody, /provenance\.append\(node\("span", "", cardLocator\(item\)\)\)/,
+  "定位句和「录于…」「无答案」排在同一行");
+
+// 试卷卡的标题已经写着「第 N 题」，再补一句「原卷第 N 题」是同一句话说两遍；
+// 教材卡每一章都从 1 重新编（全库 94 张都叫「第 1 题」），只有带章节才认得出。
+assert.match(cardBody, /if \(shortSection\(item\)\) provenance\.append\(/,
+  "定位句只在能补上章节时才显示");

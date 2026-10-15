@@ -734,13 +734,20 @@
     });
     // 题号不能直接拼：教材「做一做」「随堂练习」里的题纸面上没有印刷题号，
     // 后端给 null/0，硬拼会印出「第 0 题」——翻书翻不到的一句话比没有更糟。
-    // sourceLocator 负责兜底（无题号就给栏目标题），cardLocator 补上章节 + 原卷题号。
+    // sourceLocator 负责兜底（无题号就给栏目标题）。
     const heading = node("div", "library-card-heading");
     heading.append(node("h3", "library-number", sourceLocator(item)), typeChip(item));
     const sourceName = node("span", "library-source", item.source_filename);
     sourceName.title = item.source_filename || "试卷";
     const provenance = node("div", "library-card-provenance");
-    meta.append(select, heading, sourceName, node("span", "", cardLocator(item)), provenance);
+    meta.append(select, heading, sourceName, provenance);
+    // 定位句只在它真能补上信息时才显示：
+    //   试卷卡——标题已经写着「第 N 题」，再补一句「原卷第 N 题」是同一句话说两遍；
+    //   教材卡——每一章的习题都从 1 重新编，全库有 94 张都写着「第 1 题」，
+    //             只有带上章节（习题 6.1 · 原卷第 1 题）才认得出是哪一章。
+    // 放在 provenance 里而不是卡头：卡头是三列 grid（18px 复选框 | 标题 | 文件名），
+    // 一句没有类名的定位会被自动排进那个 18px 的窄槽，每个字换一行，竖成一列。
+    if (shortSection(item)) provenance.append(node("span", "", cardLocator(item)));
     // 1.12.6：同一份卷被录过两次时，两份来源在题库里同名，只看文件名分不出
     // 哪份是哪份。补上录入时间，撤回一批时才不会撤错那一份。
     if (duplicateSourceNames().has(item.source_filename)) {
