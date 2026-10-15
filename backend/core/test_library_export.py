@@ -1230,24 +1230,26 @@ class LibraryExportTests(ExportFixture, TestCase):
         auto-width figure, so Chrome still wraps a 1484px-wide strip at its own
         width while painting it 320px wide.
 
-        ``width_mm`` is the picture size on paper (1 CSS pixel = 1/96 inch).
-        It replaced the old 150 dpi guess, which made the same diagrams a
-        different size on screen and on paper. The numbers are literals on
-        purpose — deriving them from _figure_row_layout would only prove the
-        function agrees with itself.
+        ``width_mm`` is the picture size on paper. One preview pixel is one
+        line of body text on screen, so the size follows the paper font size:
+        a 220px figure is 13 text-heights tall in both places. It replaced the
+        old 150 dpi guess, which made the same diagrams a different size on
+        screen and on paper. The numbers are literals on purpose — deriving
+        them from _figure_row_layout would only prove the function agrees with
+        itself.
         """
         for label, sizes, columns, rows, width_mm in (
-            ("4 x 240px shrinks onto one row", [(240, 120)] * 4, 4, 1, 42.6),
-            ("3 x 240px shrinks onto one row", [(240, 120)] * 3, 3, 1, 57.1),
-            ("6 x 240px shrinks too far, wraps", [(240, 120)] * 6, 2, 3, 63.5),
-            ("4 x 320px shrinks onto one row", [(320, 200)] * 4, 4, 1, 43.1),
-            ("4 x 120px fits without shrinking", [(120, 90)] * 4, 4, 1, 31.8),
-            ("5 x 300px shrinks too far, wraps", [(300, 200)] * 5, 2, 3, 79.4),
+            ("4 x 240px shrinks onto one row", [(240, 120)] * 4, 4, 1, 40.1),
+            ("3 x 240px shrinks onto one row", [(240, 120)] * 3, 3, 1, 53.8),
+            ("6 x 240px wraps to two columns", [(240, 120)] * 6, 2, 3, 59.8),
+            ("4 x 320px shrinks onto one row", [(320, 200)] * 4, 4, 1, 40.6),
+            ("4 x 120px fits without shrinking", [(120, 90)] * 4, 4, 1, 29.9),
+            ("5 x 300px wraps to two columns", [(300, 200)] * 5, 2, 3, 74.7),
             # Wider than 320px but short enough that only the width cap bites.
-            ("2 x 600x100 keeps the 320px cap", [(600, 100)] * 2, 2, 1, 46.9),
+            ("2 x 600x100 keeps the 320px cap", [(600, 100)] * 2, 2, 1, 44.2),
             # 必修第一册 1-1, four diagrams the preview shows on one line.
             ("textbook 4 diagrams", [(340, 354), (347, 360), (336, 360), (326, 357)],
-             4, 1, [43.2, 43.3, 41.9, 41.0]),
+             4, 1, [40.6, 40.8, 39.5, 38.6]),
         ):
             with self.subTest(label):
                 count = len(sizes)
@@ -1275,12 +1277,29 @@ class LibraryExportTests(ExportFixture, TestCase):
                 for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
                     node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
                     self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil", f"{label}: {side} border")
+                # The preview centres its figure row; the grid must not sit
+                # left-aligned on the page instead.
+                justification = table.find("w:tblPr/w:jc", NS)
+                self.assertIsNotNone(justification, f"{label}: the row has to be centred")
+                self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
                 # Arrangement and size both follow the preview.
                 extents = [int(value) / 36000 for value in tree.xpath(
                     "//*[local-name()='extent' and namespace-uri()="
                     "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
                 wanted = width_mm if isinstance(width_mm, list) else [width_mm] * count
                 self.assertEqual([round(value, 1) for value in extents], wanted, f"{label}: mm on paper")
+                # Word table columns touch, so each column carries the 14px gap
+                # that the preview puts between figures. Without it the labels
+                # of neighbouring diagrams meet.
+                column_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
+                             for column in table.findall("w:tblGrid/w:gridCol", NS)]
+                first_row = wanted[:columns]
+                for position in range(columns):
+                    slack = column_mm[position] - first_row[position]
+                    self.assertGreater(slack, 1.5 if position < columns - 1 else -0.1,
+                                       f"{label}: column {position + 1} has no gap "
+                                       f"({column_mm[position]} vs {first_row[position]})")
+                self.assertLessEqual(sum(column_mm), 178, f"{label}: the row runs off the page")
 
         # 必修第一册 2-2: two very wide strips. Chrome wraps these two lines in
         # a 1100px panel, and the download must not shrink them to 23% to keep
@@ -1344,19 +1363,29 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(table.findall("w:tr", NS)), 1)
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 3)
 
-        # Shrunk by 672.756/721 onto the text area: 67.1 / 55.6 / 48.4 mm.
+        # Sized through the paper font (12pt over a 17px preview line), then
+        # shrunk onto the text area: 63.2 / 52.3 / 45.5 mm.
         extents = [int(value) / 36000 for value in tree.xpath(
             "//*[local-name()='extent' and namespace-uri()="
             "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
-        self.assertEqual([round(value, 1) for value in extents], [67.1, 55.6, 48.4])
+        self.assertEqual([round(value, 1) for value in extents], [63.2, 52.3, 45.5])
         # Relative widths survive: the widest diagram is still the widest cell.
-        widths = [int(column.get(f'{{{NS["w"]}}}w'))
-                  for column in table.findall("w:tblGrid/w:gridCol", NS)]
-        self.assertEqual(len(widths), 3)
-        self.assertGreater(widths[0], widths[1])
-        self.assertGreater(widths[1], widths[2])
-        # And the row still fills the text area instead of running off the page.
-        self.assertLessEqual(sum(width / 36000 for width in widths), 178)
+        columns_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
+                      for column in table.findall("w:tblGrid/w:gridCol", NS)]
+        self.assertEqual(len(columns_mm), 3)
+        self.assertGreater(columns_mm[0], columns_mm[1])
+        self.assertGreater(columns_mm[1], columns_mm[2])
+        # Each column carries the 14px gap the preview shows between figures —
+        # except the last one, which ends the row. Edge to edge the diagrams'
+        # A-F labels would touch and neither would be readable.
+        for position, (column_mm, picture_mm) in enumerate(zip(columns_mm, extents)):
+            floor = 1.5 if position < len(columns_mm) - 1 else -0.1
+            self.assertGreater(column_mm - picture_mm, floor,
+                               f"column {position + 1} ({column_mm} mm) has no room for "
+                               f"its {picture_mm} mm picture")
+        # Centred, like .qb-figures, and still inside the 178mm text area.
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "center")
+        self.assertLessEqual(sum(columns_mm), 178)
 
     def test_a_single_stem_figure_stays_a_plain_paragraph(self):
         pub = self.publication(kind="free_response")

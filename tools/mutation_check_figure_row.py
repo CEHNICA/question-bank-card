@@ -31,16 +31,27 @@ MUTATIONS = [
         "PREVIEW_FIGURE_ROW_MIN_SCALE = 0.95",
     ),
     (
-        "pictures go back to the 150 dpi size instead of the preview's",
-        "        width_mm = display_width * scale * 25.4 / PREVIEW_PX_PER_INCH\n"
-        "        height_mm = display_height * scale * 25.4 / PREVIEW_PX_PER_INCH",
-        "        width_mm = image[\"size\"][0] * scale * 25.4 / 150\n"
-        "        height_mm = image[\"size\"][1] * scale * 25.4 / 150",
+        "pictures go back to a 96 dpi guess instead of the paper font size",
+        "                _write_images(document, item, \"stem\", columns, shrink,\n"
+        "                              size * 25.4 / 72 / PREVIEW_BODY_FONT_PX)",
+        "                _write_images(document, item, \"stem\", columns, shrink)",
     ),
     (
-        "columns are equal width instead of following each picture",
-        "    column_widths = [max(width / total_px * room, 1.0) for width in column_px]",
-        "    column_widths = [max(room / len(column_px), 1.0) for _ in column_px]",
+        "the figure row stops being centred",
+        "    table.alignment = WD_TABLE_ALIGNMENT.CENTER\n"
+        "    for column, width in zip(table.columns, column_widths):",
+        "    table.alignment = WD_TABLE_ALIGNMENT.LEFT\n"
+        "    for column, width in zip(table.columns, column_widths):",
+    ),
+    (
+        "columns stop carrying the gap between figures",
+        "        column_widths.append(width + gap_mm if column < columns - 1 else width)",
+        "        column_widths.append(width)",
+    ),
+    (
+        "the first row is measured as if every picture were on it",
+        "    first_row = widths[:columns] if columns else []",
+        "    first_row = widths",
     ),
     (
         "figures stop sharing one grid",

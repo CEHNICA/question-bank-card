@@ -1168,6 +1168,10 @@ PREVIEW_FIGURE_GAP_PX = 14
 # 于是这组明明并排的图被拆成 2 行，Word 里跟预览对不上。
 PREVIEW_FIGURE_MAX_W_PX = 320
 PREVIEW_FIGURE_MAX_H_PX = 220
+# 题面预览里正文一行的字号（.library-card 的 .paper 是 17px）。图的大小按「图高是
+# 几行字」换算到纸面，这样同一道题在屏幕上和在纸上一样大 —— 之前图被拉满整页，
+# 相对文字大了将近一倍。
+PREVIEW_BODY_FONT_PX = 17
 # 整行只差一点点时缩进栏宽、保持一行（比例不变）；要缩过这个比例就换行。
 # 缩到一半图还看得清，缩到一半以下不如老实地排成两行。
 PREVIEW_FIGURE_ROW_MIN_SCALE = 0.5
@@ -1262,13 +1266,13 @@ def _figure_row_layout(images, text_width_mm=178):
     return int(max(best, count)), 1.0
 
 
-def _write_images(document, item, slot, columns=1, scale=1.0):
+def _write_images(document, item, slot, columns=1, scale=1.0, px_to_mm=None):
     from docx.shared import Mm
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
     if columns > 1 and len(pictures) > 1:
-        _write_figure_grid(document, pictures, columns, scale=scale)
+        _write_figure_grid(document, pictures, columns, scale=scale, px_to_mm=px_to_mm)
         return
     for image in pictures:
         width, height = image["size"]
@@ -1280,32 +1284,52 @@ def _write_images(document, item, slot, columns=1, scale=1.0):
         paragraph.paragraph_format.keep_together = True
 
 
-def _write_figure_grid(document, pictures, columns, text_width_mm=178, scale=1.0):
-    """Stem figures on the same rows the preview wraps them onto.
+def _write_figure_grid(document, pictures, columns, text_width_mm=178, scale=1.0, px_to_mm=None):
+    """Stem figures on the same rows, with the same look, as the preview.
 
-    Columns take the widths the preview gave each figure, so three diagrams of
-    different sizes keep their relative proportions instead of being stretched
-    into equal cells, and the pictures are the on-screen size rather than a
-    150 dpi guess that made the same question look different on paper.
+    Three things have to match or the download reads differently from the
+    screen it was checked on:
+
+    - **Size relative to the text.** One preview pixel is one line of body
+      text, so ``px_to_mm`` converts screen pixels to millimetres through the
+      chosen font size. A 220px figure is then 13x the height of a line, on
+      screen and on paper alike, instead of being stretched to fill the page.
+    - **The gap between figures.** Word table columns touch each other, so the
+      14px gap has to live *inside* a column. Dividing the text area between
+      columns instead puts the pictures edge to edge, and the labels A–F of
+      neighbouring diagrams end up touching.
+    - **Centring.** ``.qb-figures`` centres its row; the grid is centred here
+      so a narrower row is not left-aligned on an A4 text area.
     """
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    unit = 25.4 / PREVIEW_PX_PER_INCH if px_to_mm is None else px_to_mm
+    shown = [_figure_display_size(image["size"]) for image in pictures]
+    widths = [width * scale * unit for width, _ in shown]
+    heights = [height * scale * unit for _, height in shown]
+    gap_mm = PREVIEW_FIGURE_GAP_PX * scale * unit
+    # Only the first row has to fit the text area; later rows are as wide as
+    # their own column. Summing every picture would shrink a 2x3 grid as if it
+    # were one long row.
+    first_row = widths[:columns] if columns else []
+    row_mm = sum(first_row) + gap_mm * max(len(first_row) - 1, 0)
+    if row_mm > text_width_mm:
+        shrink = text_width_mm / row_mm
+        widths = [width * shrink for width in widths]
+        heights = [height * shrink for height in heights]
+        gap_mm *= shrink
+    # A column is as wide as its widest picture plus the gap that follows it.
+    column_widths = []
+    for column in range(columns):
+        members = [widths[index] for index in range(len(pictures)) if index % columns == column]
+        width = max(members) if members else 1.0
+        column_widths.append(width + gap_mm if column < columns - 1 else width)
     rows = (len(pictures) + columns - 1) // columns
     table = document.add_table(rows=rows, cols=columns)
     table.autofit = False
-    # Column widths follow the widths the preview gave each figure, so three
-    # differently sized diagrams keep their relative proportions instead of
-    # being stretched into equal cells. A column is as wide as the widest
-    # picture in it, and the row still fills the text area exactly.
-    shown = [_figure_display_size(image["size"])[0] * scale for image in pictures]
-    column_px = [max((shown[index] for index in range(len(pictures))
-                      if index % columns == column), default=0.0)
-                 for column in range(columns)]
-    total_px = sum(column_px) or 1.0
-    gap_mm = PREVIEW_FIGURE_GAP_PX * scale / PREVIEW_PX_PER_INCH * 25.4
-    room = text_width_mm - gap_mm * (columns - 1)
-    column_widths = [max(width / total_px * room, 1.0) for width in column_px]
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
     for column, width in zip(table.columns, column_widths):
         column.width = Mm(width)
     borders = OxmlElement("w:tblBorders")
@@ -1315,9 +1339,7 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=178, scale=1.0
         borders.append(border)
     table._tbl.tblPr.append(borders)
     for index, image in enumerate(pictures):
-        display_width, display_height = _figure_display_size(image["size"])
-        width_mm = display_width * scale * 25.4 / PREVIEW_PX_PER_INCH
-        height_mm = display_height * scale * 25.4 / PREVIEW_PX_PER_INCH
+        width_mm, height_mm = widths[index], heights[index]
         cell_width = column_widths[index % columns]
         fit = min(1.0, cell_width / width_mm, 210 / height_mm)
         cell = table.cell(index // columns, index % columns)
@@ -1742,7 +1764,11 @@ def _document(captured, title, options, mode):
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
                 columns, shrink = _figure_row_layout(stem_figures)
-                _write_images(document, item, "stem", columns, shrink)
+                # One preview pixel is one line of body text on screen; converting
+                # through the paper font size keeps a figure the same number of
+                # text-heights tall in the download as it is on screen.
+                _write_images(document, item, "stem", columns, shrink,
+                              size * 25.4 / 72 / PREVIEW_BODY_FONT_PX)
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)
