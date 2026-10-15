@@ -54,13 +54,24 @@ MUTATIONS = [
     ),
     (
         "columns stop carrying the gap between figures",
-        "        column_widths.append(width + gap_mm if column < columns - 1 else width)",
-        "        column_widths.append(width)",
+        "        column_widths.append((max(members) if members else 1.0) + gap_mm)",
+        "        column_widths.append(max(members) if members else 1.0)",
     ),
     (
         "the first row is measured as if every picture were on it",
         "    first_row = widths[:columns] if columns else []",
         "    first_row = widths",
+    ),
+    (
+        "the last column loses its gap again and the row drifts right",
+        "        column_widths.append((max(members) if members else 1.0) + gap_mm)",
+        "        column_widths.append((max(members) if members else 1.0)\n"
+        "                            + (gap_mm if column < columns - 1 else 0))",
+    ),
+    (
+        "a tight row is shrunk instead of letting the empty ends spill",
+        "    row_mm = sum(first_row) + gap_mm * max(len(first_row) - 1, 0)",
+        "    row_mm = sum(first_row) + gap_mm * len(first_row)",
     ),
     (
         "figures stop sharing one grid",

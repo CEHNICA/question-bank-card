@@ -1309,7 +1309,10 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
     gap_mm = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
     # Only the first row has to fit the text area; later rows are as wide as
     # their own column. Summing every picture would shrink a 2x3 grid as if it
-    # were one long row.
+    # were one long row. Fit is judged on the pictures and the gaps between
+    # them — the empty space the columns add at each end is allowed to spill
+    # into the A4 margins rather than shrink the diagrams by a percent and
+    # put them back out of step with the preview.
     first_row = widths[:columns] if columns else []
     row_mm = sum(first_row) + gap_mm * max(len(first_row) - 1, 0)
     if row_mm > text_width_mm:
@@ -1317,12 +1320,17 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
         widths = [width * shrink for width in widths]
         heights = [height * shrink for height in heights]
         gap_mm *= shrink
-    # A column is as wide as its widest picture plus the gap that follows it.
+    # Every column carries the gap, the last one included. The pictures are
+    # centred in their cells, so a column with a gap on both sides of its
+    # picture — rather than only after it — is what puts the same amount of
+    # space before the first diagram and after the last. Leaving the last
+    # column bare made the row sit 1.85mm right of true centre, which is what
+    # Word 16.0 reported for the real export: the visible pictures and the gaps
+    # between them are unchanged, the row is simply centred on them.
     column_widths = []
     for column in range(columns):
         members = [widths[index] for index in range(len(pictures)) if index % columns == column]
-        width = max(members) if members else 1.0
-        column_widths.append(width + gap_mm if column < columns - 1 else width)
+        column_widths.append((max(members) if members else 1.0) + gap_mm)
     rows = (len(pictures) + columns - 1) // columns
     table = document.add_table(rows=rows, cols=columns)
     table.autofit = False

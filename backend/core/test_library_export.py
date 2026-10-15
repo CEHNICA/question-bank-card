@@ -1296,18 +1296,25 @@ class LibraryExportTests(ExportFixture, TestCase):
                     "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
                 wanted = width_mm if isinstance(width_mm, list) else [width_mm] * count
                 self.assertEqual([round(value, 1) for value in extents], wanted, f"{label}: mm on paper")
-                # Word table columns touch, so each column carries the 14px gap
-                # that the preview puts between figures. Without it the labels
-                # of neighbouring diagrams meet.
+                # Word table columns touch, so each column carries the gap the
+                # preview shows — including the last one, which is what keeps
+                # the same space before the first diagram as after the last.
                 column_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
                              for column in table.findall("w:tblGrid/w:gridCol", NS)]
+                gap_mm = export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
                 first_row = wanted[:columns]
                 for position in range(columns):
                     slack = column_mm[position] - first_row[position]
-                    self.assertGreater(slack, 1.5 if position < columns - 1 else -0.1,
+                    self.assertGreater(slack, 1.5,
                                        f"{label}: column {position + 1} has no gap "
                                        f"({column_mm[position]} vs {first_row[position]})")
-                self.assertLessEqual(sum(column_mm), 178, f"{label}: the row runs off the page")
+                # The pictures and the gaps between them must fit the text area.
+                # The columns add one empty gap at each end on top of that; it
+                # is the space that centres the row and may spill into the A4
+                # margins, which is far better than shrinking every diagram by
+                # a percent and putting it out of step with the preview.
+                self.assertLessEqual(sum(column_mm) - gap_mm, 178,
+                                     f"{label}: the row runs off the page")
 
         # Two pictures too wide to share a row get one paragraph each — the
         # preview wraps them too, and neither side may shrink them to force a
@@ -1386,21 +1393,25 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(columns_mm), 3)
         self.assertGreater(columns_mm[0], columns_mm[1])
         self.assertGreater(columns_mm[1], columns_mm[2])
-        # Each column carries the 14px gap the preview shows between figures —
-        # except the last one, which ends the row. Edge to edge the diagrams'
-        # A-F labels would touch and neither would be readable.
+        # Each column carries the gap the preview shows between figures. It is
+        # not optional on the last column either: the pictures sit centred in
+        # their cells, so a bare last column leaves 1.85mm more space on the
+        # left of the row than on the right — Word 16.0 measured that on the
+        # real export before the trailing gap was added.
         for position, (column_mm, picture_mm) in enumerate(zip(columns_mm, extents)):
-            floor = 1.5 if position < len(columns_mm) - 1 else -0.1
-            self.assertGreater(column_mm - picture_mm, floor,
+            self.assertGreater(column_mm - picture_mm, 1.5,
                                f"column {position + 1} ({column_mm} mm) has no room for "
                                f"its {picture_mm} mm picture")
         # Centred, like .qb-figures, and still inside the 178mm text area.
         self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "center")
         self.assertLessEqual(sum(columns_mm), 178)
-        # The whole point: the row is exactly as wide as the row the teacher
-        # checked on screen. 178.56 + 147.84 + 134.4 px of pictures plus two
-        # 14px gaps = 488.8 px, and 488.8 / 3.7795 = 129.3 mm.
-        self.assertAlmostEqual(sum(columns_mm), 129.3, delta=0.2,
+        # The whole point: the pictures and the gaps between them are exactly
+        # what the teacher checked on screen. 178.56 + 147.84 + 134.4 px of
+        # pictures plus two 14px gaps = 488.8 px, and 488.8 / 3.7795 = 129.3 mm.
+        # The grid carries one extra gap at each end, which is the empty space
+        # that puts the content in the middle.
+        content_mm = sum(columns_mm) - export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
+        self.assertAlmostEqual(content_mm, 129.3, delta=0.2,
                                msg="the row must be the same width as the preview row")
 
         # Centring only means something with these three in place. Word pads each
