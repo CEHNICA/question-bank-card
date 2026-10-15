@@ -67,6 +67,28 @@ MUTATIONS = [
         "    if columns > 1 and len(pictures) > 1:",
         "    if columns > 2 and len(pictures) > 1:",
     ),
+    (
+        "a lone stem figure goes back to the left margin",
+        "            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER",
+        "            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT",
+    ),
+    (
+        "Word's default cell padding comes back and drags the row off centre",
+        '        edge.set(qn("w:w"), "0")',
+        '        edge.set(qn("w:w"), "108")',
+    ),
+    (
+        "the table width is left for Word to re-infer",
+        '    table_width.set(qn("w:type"), "dxa")',
+        '    table_width.set(qn("w:type"), "auto")',
+    ),
+    (
+        "table properties are appended instead of inserted in order",
+        '    properties.insert_element_before(\n'
+        '        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook",\n'
+        '        "w:tblCaption", "w:tblDescription")',
+        "    properties.append(borders)",
+    ),
 ]
 
 original = TARGET.read_text(encoding="utf-8")

@@ -1266,6 +1266,15 @@ def _write_images(document, item, slot, columns=1):
                       (235 if slot == "body" else PREVIEW_PAGE_HEIGHT_MM) / height,
                       25.4 / PREVIEW_FIGURE_DPI)
         paragraph = document.add_paragraph()
+        # A lone stem figure still belongs to a .qb-figures row, and that row is
+        # centred — measured in the app, a single 188px picture sits with 242px of
+        # space on each side. Left alone, Word parks it against the margin, which
+        # is the one case where the download reads visibly off-centre. A scanned
+        # page is the opposite case: .qb-question-images is a column flex box, so
+        # a picture with a set width stays at the left there, and must here too.
+        if slot != "body":
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * natural), height=Mm(height * natural))
         paragraph.paragraph_format.keep_together = True
 
@@ -1285,7 +1294,10 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
       columns instead puts the pictures edge to edge, and the labels A–F of
       neighbouring diagrams end up touching.
     - **Centring.** ``.qb-figures`` centres its row; the grid is centred here
-      so a narrower row is not left-aligned on an A4 text area.
+      so a narrower row is not left-aligned on an A4 text area. Centring a table
+      only means anything once its own width is pinned and its cells stop
+      carrying Word's default 1.9mm padding — otherwise the pictures inside the
+      grid sit a few millimetres right of true centre.
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.shared import Mm
@@ -1317,12 +1329,45 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     for column, width in zip(table.columns, column_widths):
         column.width = Mm(width)
+    properties = table._tbl.tblPr
+
+    # Word pads every table cell by 1.9mm on each side. A column that already
+    # carries the gap between two diagrams then ends up 3.8mm wider than its
+    # contents, and a picture that exactly fills the last column is pushed off
+    # centre by about 4mm — measured in Word 16.0, not estimated. The gap is
+    # already part of the column width above, so the cells get no padding.
+    cell_margins = OxmlElement("w:tblCellMar")
+    for side in ("top", "left", "bottom", "right"):
+        edge = OxmlElement("w:" + side)
+        edge.set(qn("w:w"), "0")
+        edge.set(qn("w:type"), "dxa")
+        cell_margins.append(edge)
+    properties.insert_element_before(cell_margins, "w:tblLook", "w:tblCaption", "w:tblDescription")
+
+    # State the width instead of leaving "auto" for Word to re-infer from the
+    # content, which is how a centred table still ends up hugging the margin.
+    table_width = properties.find(qn("w:tblW"))
+    if table_width is None:
+        table_width = OxmlElement("w:tblW")
+        properties.insert_element_before(
+            table_width, "w:jc", "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd",
+            "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription")
+    table_width.set(qn("w:w"), str(int(round(sum(column_widths) * 1440 / 25.4))))
+    table_width.set(qn("w:type"), "dxa")
+
+    # w:tblPr is a fixed sequence: borders belong between w:jc and w:tblLayout.
+    # Appending them at the end put them after w:tblLook, which is not a valid
+    # document and is exactly the kind of thing Word quietly repairs on its own
+    # terms. Insert against the elements that must follow instead.
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
         border.set(qn("w:val"), "nil")
         borders.append(border)
-    table._tbl.tblPr.append(borders)
+    properties.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook",
+        "w:tblCaption", "w:tblDescription")
+
     for index, image in enumerate(pictures):
         width_mm, height_mm = widths[index], heights[index]
         cell_width = column_widths[index % columns]

@@ -1403,6 +1403,31 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertAlmostEqual(sum(columns_mm), 129.3, delta=0.2,
                                msg="the row must be the same width as the preview row")
 
+        # Centring only means something with these three in place. Word pads each
+        # cell by 1.9mm a side, which measured 4mm of rightward drift, and it
+        # re-infers a table marked "auto" width from the content instead of
+        # centring the columns it was given.
+        for side in ("top", "left", "bottom", "right"):
+            edge = table.find(f"w:tblPr/w:tblCellMar/w:{side}", NS)
+            self.assertIsNotNone(edge, f"the grid must declare its own {side} cell padding")
+            self.assertEqual(edge.get(f'{{{NS["w"]}}}w'), "0", f"{side} cell padding")
+        declared = table.find("w:tblPr/w:tblW", NS)
+        self.assertEqual(declared.get(f'{{{NS["w"]}}}type'), "dxa",
+                         "the table width must be stated, not left to Word")
+        self.assertAlmostEqual(int(declared.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440,
+                               sum(columns_mm), delta=0.2)
+
+        # w:tblPr is a fixed sequence. Borders appended at the end landed after
+        # w:tblLook, which is not a valid document; Word then does whatever it
+        # likes with the whole block, including the centring.
+        order = ["tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize",
+                 "tblStyleColBandSize", "tblW", "jc", "tblCellSpacing", "tblInd",
+                 "tblBorders", "shd", "tblLayout", "tblCellMar", "tblLook",
+                 "tblCaption", "tblDescription"]
+        positions = [order.index(node.tag.split("}")[1]) for node in table.find("w:tblPr", NS)]
+        self.assertEqual(positions, sorted(positions),
+                         f"w:tblPr children out of order: {[n.tag.split('}')[1] for n in table.find('w:tblPr', NS)]}")
+
     def test_a_single_stem_figure_stays_a_plain_paragraph(self):
         pub = self.publication(kind="free_response")
         self.figure(pub)
@@ -1411,6 +1436,55 @@ class LibraryExportTests(ExportFixture, TestCase):
         tree = document_xml(response.content)
         self.assertIsNone(tree.find(".//w:tbl", NS))
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 1)
+
+    def test_a_lone_stem_figure_is_centred_like_the_preview_centres_it(self):
+        """A single picture is a .qb-figures row of one, so it is centred.
+
+        Word 16.0 was asked directly where a lone 50mm diagram lands: against
+        the left margin, paragraph alignment left, with 128mm of blank page to
+        its right. The preview puts it in the middle with 242px of space on each
+        side. The grid case has its own test; this is the one-figure case.
+        """
+        pub = self.publication(kind="free_response")
+        self.figure(pub)
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200)
+        tree = document_xml(response.content)
+        drawing = tree.find(".//w:drawing", NS)
+        self.assertIsNotNone(drawing)
+        paragraph = next(node for node in tree.iter(f'{{{NS["w"]}}}p')
+                         if node.find(".//w:drawing", NS) is not None)
+        justification = paragraph.find("w:pPr/w:jc", NS)
+        self.assertIsNotNone(justification, "a lone figure must be centred, not left on the margin")
+        self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
+
+    def test_a_scanned_page_stays_left_because_the_preview_leaves_it_left(self):
+        """The mirror image: .qb-question-images is a column flex box.
+
+        A picture with a set width in a column flex container sits at the start
+        of the cross axis, so the preview leaves scanned pages at the left.
+        Centring them here would introduce the very mismatch this test guards.
+        """
+        pub = self.publication(kind="single_choice", stem="")
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        images = []
+        for index in (1, 2):
+            target = folder / f"question-{index}.png"
+            Image.new("RGB", (240, 120), "red").save(target)
+            images.append({"file": target.name, "width": 240, "height": 120,
+                           "page_idx": index - 1, "bbox": [0, 0, 100, 100], "order": index - 1,
+                           "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+        pub.content.update(body_mode="source_image", question_images=images, figures=[])
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        response = self.post(self.payload([pub], print_options={"document": "questions"}))
+        self.assertEqual(response.status_code, 200)
+        tree = document_xml(response.content)
+        for paragraph in [node for node in tree.iter(f'{{{NS["w"]}}}p')
+                          if node.find(".//w:drawing", NS) is not None]:
+            self.assertIsNone(paragraph.find("w:pPr/w:jc", NS),
+                              "a scanned page is left in the preview, so it stays left here")
 
     def test_source_image_papers_keep_one_picture_per_line(self):
         # A scanned page is not a diagram: the preview stacks those one per line
