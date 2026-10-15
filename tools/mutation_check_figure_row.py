@@ -41,47 +41,68 @@ MUTATIONS = [
         "        if True:",
     ),
     (
-        "the gap between figures is guessed at 1/96 inch instead of read off the row",
+        "the line lengths collapse back to one uniform count, losing the lone tail",
+        "    lines.append(current)\n    return lines",
+        "    lines.append(current)\n    return [len(widths)]",
+    ),
+    (
+        "the gap between figures is guessed at 1/72 inch instead of read off the row",
         "    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH",
         "    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / 72",
     ),
     (
+        "every line is packed into a single table again, so a lone tail sits left",
+        "    if lines and max(lines) > 1:",
+        "    if lines and sum(lines) > 1:",
+    ),
+    (
+        "the paragraph that keeps two figure lines apart is dropped, Word merges them",
+        "            _figure_row_separator(document)",
+        "            pass",
+    ),
+    (
         "the figure row stops being centred",
+        "    table.autofit = False\n"
         "    table.alignment = WD_TABLE_ALIGNMENT.CENTER\n"
         "    for column, width in zip(table.columns, column_widths):",
+        "    table.autofit = False\n"
         "    table.alignment = WD_TABLE_ALIGNMENT.LEFT\n"
         "    for column, width in zip(table.columns, column_widths):",
     ),
     (
-        "columns stop carrying the gap between figures",
-        "        column_widths.append((max(members) if members else 1.0) + gap_mm)",
-        "        column_widths.append(max(members) if members else 1.0)",
+        "the grid cell stops centring the picture inside its column",
+        "        # .qb-figures centres its row; the grid cells do the same job here.\n"
+        "        paragraph.alignment = 1",
+        "        # .qb-figures centres its row; the grid cells do the same job here.\n"
+        "        paragraph.alignment = 0",
     ),
     (
-        "the first row is measured as if every picture were on it",
-        "    first_row = widths[:columns] if columns else []",
-        "    first_row = widths",
+        "columns stop carrying the gap between figures",
+        "    column_widths = [width + gap_mm for width in widths]",
+        "    column_widths = [width for width in widths]",
     ),
     (
         "the last column loses its gap again and the row drifts right",
-        "        column_widths.append((max(members) if members else 1.0) + gap_mm)",
-        "        column_widths.append((max(members) if members else 1.0)\n"
-        "                            + (gap_mm if column < columns - 1 else 0))",
+        "    column_widths = [width + gap_mm for width in widths]",
+        "    column_widths = [width + gap_mm for width in widths[:-1]] + widths[-1:]",
     ),
     (
         "a tight row is shrunk instead of letting the empty ends spill",
-        "    row_mm = sum(first_row) + gap_mm * max(len(first_row) - 1, 0)",
-        "    row_mm = sum(first_row) + gap_mm * len(first_row)",
-    ),
-    (
-        "figures stop sharing one grid",
-        "    if columns > 1 and len(pictures) > 1:",
-        "    if columns > 2 and len(pictures) > 1:",
+        "    row_mm = sum(widths) + gap_mm * max(len(widths) - 1, 0)",
+        "    row_mm = sum(widths) + gap_mm * max(len(widths), 0)",
     ),
     (
         "a lone stem figure goes back to the left margin",
         "            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER",
         "            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT",
+    ),
+    (
+        "a scanned page gets centred too, which the preview does not do",
+        "        if slot != \"body\":\n"
+        "            from docx.enum.text import WD_ALIGN_PARAGRAPH\n"
+        "            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER",
+        "        from docx.enum.text import WD_ALIGN_PARAGRAPH\n"
+        "        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER",
     ),
     (
         "Word's default cell padding comes back and drags the row off centre",

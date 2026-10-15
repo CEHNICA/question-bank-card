@@ -18,7 +18,7 @@ django.setup()
 from PIL import Image
 from docx import Document
 
-from core.library_export import _figure_row_layout, _write_figure_grid, _write_images
+from core.library_export import _figure_row_lines, _write_figure_line, _write_images
 
 
 def picture(size, colour="red"):
@@ -35,8 +35,16 @@ def build(path):
 
     # The reported case: three diagrams that belong on one row.
     grid = [picture((279, 226)), picture((231, 226)), picture((210, 236))]
-    columns, _ = _figure_row_layout(grid)
-    _write_figure_grid(document, grid, columns)
+    lines = _figure_row_lines(grid)
+    _write_figure_line(document, grid)
+
+    # The other reported case: a set that wraps 2+1 (必修第一册第 4 题's real
+    # widths), where the lone second line used to land hard against the left of
+    # an otherwise centred table.
+    wrapped = [picture((415, 231)), picture((419, 228)), picture((419, 228))]
+    wrap_lines = _figure_row_lines(wrapped)
+    _write_figure_line(document, wrapped[:wrap_lines[0]])
+    _write_figure_line(document, wrapped[wrap_lines[0]:])
 
     # A lone stem figure: the case that was hugging the left margin.
     _write_images(document, {"images": [picture((294, 201))]}, "stem")
@@ -46,11 +54,11 @@ def build(path):
     _write_images(document, {"images": body}, "body")
 
     document.save(path)
-    return columns
+    return lines
 
 
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         tempfile.gettempdir(), "qb-figure-centring.docx")
     columns = build(target)
-    print(f"wrote {target} ({columns} columns in the figure row)")
+    print(f"wrote {target} (first figure row splits {columns})")

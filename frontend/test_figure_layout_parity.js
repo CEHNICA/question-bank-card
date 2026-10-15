@@ -1,5 +1,5 @@
 // The Word export reproduces the print preview's figure layout in Python
-// (library_export.py: _figure_paper_size / _figure_row_layout). The preview
+// (library_export.py: _figure_paper_size / _figure_row_lines). The preview
 // does NOT get that geometry from CSS — exam-layout.js writes every picture's
 // width inline once the image has decoded — so read the script that actually
 // decides it, read the exporter, and fail when the two drift apart.
@@ -132,32 +132,44 @@ assert.doesNotMatch(exporter, /_preview_option_columns\(/,
   "no column decision may route through the removed reduction");
 
 // --- the wrapping itself, checked against the preview's own formula ------------
-// Same arithmetic as _figure_paper_size + _figure_row_layout, written here
-// independently so a change on one side shows up as a failure.
+// Same arithmetic as _figure_paper_size + _figure_row_lines, written here
+// independently so a change on one side shows up as a failure. It returns the
+// line lengths, not a single count, because that is what the export now uses:
+// the preview centres every line on its own, so Word writes one table per line.
 function paperMm(pxWidth) {
   return Math.min(pxWidth * 25.4 / naturalDpi, textWidthMm);
 }
 function wrap(pxWidths) {
   const gapMm = gapPx * mmPerPixel;
   const widths = pxWidths.filter((value) => value > 0).map(paperMm);
-  if (!widths.length) return 1;
-  let best = 0, used = widths[0], count = 1;
+  if (!widths.length) return [1];
+  const lines = [];
+  let used = widths[0], count = 1;
   for (const width of widths.slice(1)) {
     if (used + gapMm + width <= textWidthMm + 0.01) { used += gapMm + width; count += 1; }
-    else { best = Math.max(best, count); used = width; count = 1; }
+    else { lines.push(count); used = width; count = 1; }
   }
-  return Math.max(best, count, 1);
+  lines.push(count);
+  return lines;
 }
 
 const four = [240, 240, 240, 240];
-assert.equal(wrap(four), 4, "four 240px diagrams fit on one row at 150 dpi");
-assert.equal(wrap([120, 120, 120, 120]), 4, "four 120px diagrams fit on one row");
-assert.equal(wrap([400, 400, 400, 400]), 2, "four 400px diagrams go two per row");
-assert.equal(wrap([300, 300, 300, 300, 300]), 3, "five 300px diagrams go three then two");
-assert.equal(wrap([240]), 1, "one diagram is never a grid");
-assert.equal(wrap([600, 600]), 1, "two 600px strips each take a whole row");
+assert.deepEqual(wrap(four), [4], "four 240px diagrams fill one row at 150 dpi");
+assert.deepEqual(wrap([120, 120, 120, 120]), [4], "four 120px diagrams fill one row");
+assert.deepEqual(wrap([400, 400, 400, 400]), [2, 2], "four 400px diagrams go two per row");
+assert.deepEqual(wrap([300, 300, 300, 300, 300]), [3, 2], "five 300px diagrams go three then two");
+assert.deepEqual(wrap([240]), [1], "one diagram is a single line");
+assert.deepEqual(wrap([600, 600]), [1, 1], "two 600px strips each take a whole row");
 // The reported case, 初三「特殊的平行四边形」第 23 题.
-assert.equal(wrap([279, 231, 210]), 3, "the three scanned diagrams stay on one row");
+assert.deepEqual(wrap([279, 231, 210]), [3], "the three scanned diagrams stay on one row");
+// The wrapping case that was still off centre: a set that breaks 2+1. The lone
+// second line has to be its own centred table, not the first column of a wider
+// one, or that picture sits hard against the left of the page. These are the
+// real picture widths of 必修第一册第 4 题, which wraps exactly that way.
+assert.deepEqual(wrap([415, 419, 419]), [2, 1],
+  "必修第一册第 4 题 wraps 2+1, so the second line holds one diagram on its own");
+assert.deepEqual(wrap([340, 347, 336, 326]), [2, 2],
+  "必修第一册第 1 题 wraps 2+2, and both lines are the same length");
 // The row must come out exactly as wide as the browser draws it, not as wide as
 // the text area: 178.56 + 147.84 + 134.4 px plus two 14px gaps = 488.8 px.
 const rowMm = [279, 231, 210].reduce((sum, value) => sum + paperMm(value), 0)
@@ -166,6 +178,7 @@ assert.ok(Math.abs(rowMm - 488.8 * mmPerPixel) < 0.2,
   `the measured preview row is 129.3mm, this computes ${rowMm.toFixed(1)}mm`);
 
 console.log(`figure layout parity: ${naturalDpi} dpi figures, ${gapPx}px gap, `
-  + `${textWidthMm}mm text area; four 240px diagrams -> ${wrap(four)} per row, `
-  + `the three scanned diagrams -> ${wrap([279, 231, 210])} per row `
-  + `(${rowMm.toFixed(1)}mm, the same row the preview draws)`);
+  + `${textWidthMm}mm text area; four 240px diagrams -> ${wrap(four).join('+')} per row, `
+  + `the three scanned diagrams -> ${wrap([279, 231, 210]).join('+')} per row `
+  + `(${rowMm.toFixed(1)}mm, the same row the preview draws), `
+  + `必修第一册第 4 题 -> ${wrap([415, 419, 419]).join('+')}, each line centred on its own`);

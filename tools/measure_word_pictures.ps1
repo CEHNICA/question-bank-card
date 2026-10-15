@@ -21,15 +21,22 @@ try {
     Write-Output ("text column {0:N2} .. {1:N2} mm  (width {2:N2} mm)" -f $colLeft, $colRight, $colWidth)
 
     $spans = @()
+    $rows = @()
 
+    $rowNumber = 0
     foreach ($tbl in $doc.Tables) {
         $pics = @($tbl.Range.InlineShapes)
         if ($pics.Count -eq 0) { continue }
         $tableLeft = $tbl.Range.Information(5) * $mm
+        # Row.Cells, not Table.Columns: Word refuses Columns.Item on a table with
+        # mixed cell widths, which is exactly what two adjacent figure lines are.
+        $row = $tbl.Rows.Item(1)
         $widths = @()
-        for ($i = 1; $i -le $tbl.Columns.Count; $i++) { $widths += $tbl.Columns.Item($i).Width * $mm }
+        for ($i = 1; $i -le $row.Cells.Count; $i++) { $widths += $row.Cells.Item($i).Width * $mm }
         Write-Output ("  table: left {0:N2}mm, {1} columns {2:N1} mm each, total {3:N2}mm, rowsAlign={4}" -f `
             $tableLeft, $widths.Count, $widths[0], ($widths | Measure-Object -Sum).Sum, $tbl.Rows.Alignment)
+        $rowNumber++
+        $rowSpans = @()
         foreach ($shp in $pics) {
             $r = $shp.Range
             $index = $r.Cells.Item(1).ColumnIndex
@@ -38,11 +45,21 @@ try {
             $picture = $shp.Width * $mm
             $slack = ($widths[$index - 1] - $picture) / 2
             $left = $tableLeft + $before + $slack
-            $spans += [pscustomobject]@{ left = $left; right = $left + $picture; width = $picture }
+            $span = [pscustomobject]@{ left = $left; right = $left + $picture; width = $picture }
+            $spans += $span
+            $rowSpans += $span
+        }
+        $rows += [pscustomobject]@{
+            label = "table row $rowNumber ($($pics.Count) picture$(if ($pics.Count -gt 1) { 's' } else { '' }))"
+            left = ($rowSpans | Measure-Object -Property left -Minimum).Minimum
+            right = ($rowSpans | Measure-Object -Property right -Maximum).Maximum
+            count = $pics.Count
         }
     }
 
-    # Pictures outside a table follow their paragraph's alignment.
+    # Pictures outside a table follow their paragraph's alignment. Each one is its
+    # own line here, exactly as the preview treats it, so it is measured alone.
+    $loose = 0
     foreach ($shp in $doc.InlineShapes) {
         $r = $shp.Range
         if ($r.Information(12)) { continue }
@@ -53,7 +70,13 @@ try {
             2 { $colRight - $picture }                    # right
             default { $colLeft }                          # left (the default)
         }
-        $spans += [pscustomobject]@{ left = $left; right = $left + $picture; width = $picture }
+        $span = [pscustomobject]@{ left = $left; right = $left + $picture; width = $picture }
+        $spans += $span
+        $loose++
+        $rows += [pscustomobject]@{
+            label = "paragraph $loose (alignment $alignment)"
+            left = $left; right = $span.right; count = 1
+        }
     }
 
     Write-Output ""
@@ -66,13 +89,25 @@ try {
             (($span.left - $colLeft) - ($colRight - $span.right)))
     }
 
-    $lo = ($spans | Measure-Object -Property left -Minimum).Minimum
-    $hi = ($spans | Measure-Object -Property right -Maximum).Maximum
-    $skew = ($lo - $colLeft) - ($colRight - $hi)
+    # Per line, not per document. The preview centres each line of figures on its
+    # own, and a lone picture on a second line used to sit against the left of an
+    # otherwise centred table — a verdict over the whole page hides exactly that.
+    # |skew| <= 0.5mm counts as centred; anything wider is visible on the page.
     Write-Output ""
-    Write-Output ("whole document spans {0:N2} .. {1:N2} mm, {2:N2} mm of paper" -f $lo, $hi, ($hi - $lo))
-    Write-Output ("centred as a block: skew {0:N2} mm  ->  {1}" -f $skew,
-        $(if ([math]::Abs($skew) -le 0.5) { 'CENTRED' } else { 'OFF CENTRE' }))
+    Write-Output "per line:"
+    $worst = 0.0
+    $off = 0
+    foreach ($row in $rows) {
+        $skew = ($row.left - $colLeft) - ($colRight - $row.right)
+        if ([math]::Abs($skew) -gt $worst) { $worst = [math]::Abs($skew) }
+        if ([math]::Abs($skew) -gt 0.5) { $off++ }
+        Write-Output ("  {0,-32} left {1,7:N2}  right {2,7:N2}  content {3,6:N2}mm  gapL {4,6:N2}  gapR {5,6:N2}  skew {6,6:N2}  {7}" -f `
+            $row.label, $row.left, $row.right, ($row.right - $row.left),
+            ($row.left - $colLeft), ($colRight - $row.right), $skew,
+            $(if ([math]::Abs($skew) -le 0.5) { 'CENTRED' } else { 'OFF CENTRE' }))
+    }
+    Write-Output ""
+    Write-Output ("lines measured {0}, off centre {1}, worst skew {2:N2} mm" -f $rows.Count, $off, $worst)
     $doc.Close($false)
 } finally {
     $word.Quit()

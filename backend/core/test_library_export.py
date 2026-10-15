@@ -1234,30 +1234,32 @@ class LibraryExportTests(ExportFixture, TestCase):
         never looks at before exporting — which is how the download ended up
         bigger than the preview it was checked against.
 
-        ``_figure_paper_size`` is that formula, and ``_figure_row_layout`` is
+        ``_figure_paper_size`` is that formula, and ``_figure_row_lines`` is
         the plain greedy wrap of ``.qb-figures``: fill a line until the next
         picture does not fit, then start another. The preview never scales a
-        row to keep it on one line, so neither does the download.
+        row to keep it on one line, so neither does the download. The line
+        lengths are kept rather than collapsed to one count, because the
+        preview centres every line on its own.
 
         ``width_mm`` is the picture size on paper. The numbers are literals on
         purpose — deriving them from _figure_paper_size would only prove the
         function agrees with itself.
         """
-        for label, sizes, columns, rows, width_mm in (
-            ("4 x 240px fills one row", [(240, 120)] * 4, 4, 1, 40.6),
-            ("3 x 240px fills one row", [(240, 120)] * 3, 3, 1, 40.6),
-            ("6 x 240px wraps four then two", [(240, 120)] * 6, 4, 2, 40.6),
-            ("4 x 320px wraps three then one", [(320, 200)] * 4, 3, 2, 54.2),
-            ("4 x 120px fills one row", [(120, 90)] * 4, 4, 1, 20.3),
-            ("5 x 300px wraps three then two", [(300, 200)] * 5, 3, 2, 50.8),
+        for label, sizes, lines, width_mm in (
+            ("4 x 240px fills one row", [(240, 120)] * 4, [4], 40.6),
+            ("3 x 240px fills one row", [(240, 120)] * 3, [3], 40.6),
+            ("6 x 240px wraps four then two", [(240, 120)] * 6, [4, 2], 40.6),
+            ("4 x 320px wraps three then one", [(320, 200)] * 4, [3, 1], 54.2),
+            ("4 x 120px fills one row", [(120, 90)] * 4, [4], 20.3),
+            ("5 x 300px wraps three then two", [(300, 200)] * 5, [3, 2], 50.8),
             # Sits right on the wrap boundary: 3 x 56.73mm plus two 3.70mm gaps
             # is 177.59mm, inside the 178mm text area by 0.4mm. Read the gap one
             # point off and this row no longer fits, which is what keeps the
             # constant honest.
-            ("3 x 335px fills one row by 0.4mm", [(335, 200)] * 3, 3, 1, 56.7),
+            ("3 x 335px fills one row by 0.4mm", [(335, 200)] * 3, [3], 56.7),
             # 必修第一册 1-1: four diagrams, two to a line at 150 dpi.
             ("textbook 4 diagrams", [(340, 354), (347, 360), (336, 360), (326, 357)],
-             2, 2, [57.6, 58.8, 56.9, 55.2]),
+             [2, 2], [57.6, 58.8, 56.9, 55.2]),
         ):
             with self.subTest(label):
                 count = len(sizes)
@@ -1276,45 +1278,80 @@ class LibraryExportTests(ExportFixture, TestCase):
                 response = self.post(self.payload([pub], print_options={"document": "questions"}))
                 self.assertEqual(response.status_code, 200, response.content[:200])
                 tree = document_xml(response.content)
-                table = tree.find(".//w:tbl", NS)
-                self.assertIsNotNone(table, f"{label}: the figures must share one borderless grid")
-                self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), columns)
-                self.assertEqual(len(table.findall("w:tr", NS)), rows)
+                # One borderless table per preview line, each a single row. A
+                # single Word grid cannot do this: it would put a lone trailing
+                # diagram in the first column of a table centred on the widest
+                # line, hard against the left of the text area.
+                tables = tree.findall(".//w:tbl", NS)
+                self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables],
+                                 lines, f"{label}: one table per preview line")
+                for table in tables:
+                    self.assertEqual(len(table.findall("w:tr", NS)), 1,
+                                     f"{label}: a preview line is one row, not a grid")
+                # Word folds two w:tbl elements that sit back to back into ONE
+                # table, which would drag the second line's columns back to the
+                # first line's width and undo the per-line centring. The XML
+                # still shows two tables either way, so nothing above would notice
+                # a missing separator — this is the assertion that does.
+                wanted_tables = {id(table) for table in tables}
+                seated = [index for index, child in enumerate(tree.find("w:body", NS))
+                          if child.tag == f'{{{NS["w"]}}}tbl' and id(child) in wanted_tables]
+                self.assertEqual(len(seated), len(tables), f"{label}: figure tables in the body")
+                for position in range(len(seated) - 1):
+                    self.assertGreater(
+                        seated[position + 1] - seated[position], 1,
+                        f"{label}: two figure lines sit back to back, so Word merges them "
+                        f"into one table and the second line loses its own width")
                 self.assertEqual(len(tree.findall(".//a:blip", NS)), count)
-                # Borderless, like the preview's plain figure row.
-                for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
-                    node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
-                    self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil", f"{label}: {side} border")
-                # The preview centres its figure row; the grid must not sit
-                # left-aligned on the page instead.
-                justification = table.find("w:tblPr/w:jc", NS)
-                self.assertIsNotNone(justification, f"{label}: the row has to be centred")
-                self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
-                # Arrangement and size both follow the preview.
+                gap_mm = export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
                 extents = [int(value) / 36000 for value in tree.xpath(
                     "//*[local-name()='extent' and namespace-uri()="
                     "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
                 wanted = width_mm if isinstance(width_mm, list) else [width_mm] * count
                 self.assertEqual([round(value, 1) for value in extents], wanted, f"{label}: mm on paper")
-                # Word table columns touch, so each column carries the gap the
-                # preview shows — including the last one, which is what keeps
-                # the same space before the first diagram as after the last.
-                column_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
-                             for column in table.findall("w:tblGrid/w:gridCol", NS)]
-                gap_mm = export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
-                first_row = wanted[:columns]
-                for position in range(columns):
-                    slack = column_mm[position] - first_row[position]
-                    self.assertGreater(slack, 1.5,
-                                       f"{label}: column {position + 1} has no gap "
-                                       f"({column_mm[position]} vs {first_row[position]})")
-                # The pictures and the gaps between them must fit the text area.
-                # The columns add one empty gap at each end on top of that; it
-                # is the space that centres the row and may spill into the A4
-                # margins, which is far better than shrinking every diagram by
-                # a percent and putting it out of step with the preview.
-                self.assertLessEqual(sum(column_mm) - gap_mm, 178,
-                                     f"{label}: the row runs off the page")
+                cursor = 0
+                for number, columns in enumerate(lines, start=1):
+                    table = tables[number - 1]
+                    row = wanted[cursor:cursor + columns]
+                    cursor += columns
+                    # Borderless, like the preview's plain figure row.
+                    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                        node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
+                        self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil",
+                                         f"{label} line {number}: {side} border")
+                    # The preview centres every line on its own; a table left
+                    # aligned on an A4 text area is the difference the teacher sees.
+                    justification = table.find("w:tblPr/w:jc", NS)
+                    self.assertIsNotNone(justification, f"{label} line {number}: has to be centred")
+                    self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
+                    # Centring the table is only half of it. Each column is a gap
+                    # wider than its picture, and the picture has to sit in the
+                    # middle of that column — a left-aligned cell paragraph puts
+                    # it hard against the neighbour and drags the row left by half
+                    # a gap, about 1.9mm, which is visible on the page.
+                    for cell in table.findall(".//w:tc", NS):
+                        inner = cell.find("w:p/w:pPr/w:jc", NS)
+                        self.assertIsNotNone(inner,
+                                              f"{label} line {number}: a cell has to centre its picture")
+                        self.assertEqual(inner.get(f'{{{NS["w"]}}}val'), "center",
+                                         f"{label} line {number}: a cell paragraph is not centred")
+                    # Word table columns touch, so each column carries the gap the
+                    # preview shows — including the last one, which is what keeps
+                    # the same space before the first diagram as after the last.
+                    column_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
+                                 for column in table.findall("w:tblGrid/w:gridCol", NS)]
+                    for position in range(columns):
+                        slack = column_mm[position] - row[position]
+                        self.assertGreater(slack, 1.5,
+                                           f"{label} line {number}: column {position + 1} "
+                                           f"has no gap ({column_mm[position]} vs {row[position]})")
+                    # The pictures and the gaps between them must fit the text
+                    # area. The columns add one empty gap at each end on top of
+                    # that; it is the space that centres the row and may spill
+                    # into the A4 margins, which is far better than shrinking
+                    # every diagram by a percent and putting it out of step.
+                    self.assertLessEqual(sum(column_mm) - gap_mm, 178,
+                                         f"{label} line {number}: the row runs off the page")
 
         # Two pictures too wide to share a row get one paragraph each — the
         # preview wraps them too, and neither side may shrink them to force a

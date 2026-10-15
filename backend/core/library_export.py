@@ -1214,48 +1214,51 @@ def _figure_paper_size(size, text_width_mm=PREVIEW_TEXT_WIDTH_MM, page_height_mm
     return paper, paper * height / width
 
 
-def _figure_row_layout(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
-    """``(columns, scale)``: how many figures the preview keeps on one line.
+def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+    """How many figures the preview puts on each line, e.g. ``[2, 1]``.
 
     ``.qb-figures`` is an ordinary ``flex-wrap`` row and ``exam-layout.js`` has
     already given every picture its final width by the time it wraps, so this is
     plain greedy packing against the text area: fill a line until the next
     picture no longer fits, then start another. There is no whole-row shrink to
-    reproduce — the preview never scales a row to make it fit, which is why the
-    old "shrink the row rather than wrap it" rule only ever fired against
-    widths the preview does not use.
+    reproduce — the preview never scales a row to make it fit.
 
-    The result is the widest greedy line. Word lays figures out in one uniform
-    grid, so lines the preview filled unevenly (3+2+1 comes out right; 2+3 does
-    not) get grouped by that widest line instead.
-
-    ``scale`` survives only so callers keep one shape; the print preview never
-    shrinks, so it is always 1.
+    The line lengths are kept, not just the widest one. The preview centres
+    *every* line on its own (``justify-content: center`` applies per flex line),
+    and one uniform Word grid cannot do that: a 3+2+1 set comes out right, but
+    2+1 puts the lone third picture in the first column, hard against the left
+    of a table that is itself centred. Three questions in the bank wrap that way,
+    so each line gets its own centred table.
     """
     widths = [width for width in (_figure_paper_size(image["size"], text_width_mm)[0]
                                   for image in images) if width > 0]
     if not widths:
-        return 1, 1.0
+        return [1]
     gap = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
-    best = 0
-    used, count = widths[0], 1
+    lines, current, used = [], 1, widths[0]
     for width in widths[1:]:
         if used + gap + width <= text_width_mm + 0.01:
             used += gap + width
-            count += 1
+            current += 1
         else:
-            best = max(best, count)
-            used, count = width, 1
-    return int(max(best, count, 1)), 1.0
+            lines.append(current)
+            current, used = 1, width
+    lines.append(current)
+    return lines
 
 
-def _write_images(document, item, slot, columns=1):
+def _write_images(document, item, slot, lines=None):
     from docx.shared import Mm
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
-    if columns > 1 and len(pictures) > 1:
-        _write_figure_grid(document, pictures, columns)
+    if slot != "body" and lines is None:
+        lines = _figure_row_lines(pictures)
+    # Only a line that actually holds two or more diagrams needs a table. When
+    # every line holds one, they are lone centred figures and a centred
+    # paragraph says so with less machinery than a one-column table.
+    if lines and max(lines) > 1:
+        _write_figure_rows(document, pictures, lines)
         return
     for image in pictures:
         width, height = image["size"]
@@ -1279,8 +1282,33 @@ def _write_images(document, item, slot, columns=1):
         paragraph.paragraph_format.keep_together = True
 
 
-def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
-    """Stem figures on the same rows, at the same size, as the print preview.
+def _write_figure_rows(document, pictures, lines):
+    """One centred table per preview line, separated so Word keeps them apart."""
+    start = 0
+    for number, count in enumerate(lines):
+        chunk = pictures[start:start + count]
+        start += count
+        if number:
+            # Two w:tbl elements with nothing between them are one table to Word,
+            # which would drag the second line's columns back to the first line's
+            # width. The paragraph is 1pt tall and carries the preview's row gap.
+            _figure_row_separator(document)
+        _write_figure_line(document, chunk)
+    return start
+
+
+def _figure_row_separator(document):
+    from docx.shared import Mm, Pt
+    paragraph = document.add_paragraph()
+    paragraph.add_run().font.size = Pt(1)
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing = Mm(PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH)
+    return paragraph
+
+
+def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+    """One line of stem figures, at the size and the centring the preview shows.
 
     Three things have to match or the download reads differently from the
     screen it was checked on:
@@ -1293,11 +1321,12 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
       gap has to live *inside* a column. Dividing the text area between
       columns instead puts the pictures edge to edge, and the labels A–F of
       neighbouring diagrams end up touching.
-    - **Centring.** ``.qb-figures`` centres its row; the grid is centred here
-      so a narrower row is not left-aligned on an A4 text area. Centring a table
-      only means anything once its own width is pinned and its cells stop
-      carrying Word's default 1.9mm padding — otherwise the pictures inside the
-      grid sit a few millimetres right of true centre.
+    - **Centring.** ``.qb-figures`` centres its row; the table is centred here
+      so a narrower row is not left-aligned on an A4 text area. Centring only
+      means anything once the table's own width is pinned and its cells stop
+      carrying Word's default 1.9mm padding, and once every column holds the
+      gap — including the last, which is what leaves the same space before the
+      first diagram as after the last.
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.shared import Mm
@@ -1307,32 +1336,18 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
     widths = [width for width, _ in sizes]
     heights = [height for _, height in sizes]
     gap_mm = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
-    # Only the first row has to fit the text area; later rows are as wide as
-    # their own column. Summing every picture would shrink a 2x3 grid as if it
-    # were one long row. Fit is judged on the pictures and the gaps between
-    # them — the empty space the columns add at each end is allowed to spill
-    # into the A4 margins rather than shrink the diagrams by a percent and
-    # put them back out of step with the preview.
-    first_row = widths[:columns] if columns else []
-    row_mm = sum(first_row) + gap_mm * max(len(first_row) - 1, 0)
+    # Fit is judged on the pictures and the gaps between them. The empty space
+    # the columns add at each end is allowed to spill into the A4 margins rather
+    # than shrink the diagrams by a percent and put them back out of step with
+    # the preview.
+    row_mm = sum(widths) + gap_mm * max(len(widths) - 1, 0)
     if row_mm > text_width_mm:
         shrink = text_width_mm / row_mm
         widths = [width * shrink for width in widths]
         heights = [height * shrink for height in heights]
         gap_mm *= shrink
-    # Every column carries the gap, the last one included. The pictures are
-    # centred in their cells, so a column with a gap on both sides of its
-    # picture — rather than only after it — is what puts the same amount of
-    # space before the first diagram and after the last. Leaving the last
-    # column bare made the row sit 1.85mm right of true centre, which is what
-    # Word 16.0 reported for the real export: the visible pictures and the gaps
-    # between them are unchanged, the row is simply centred on them.
-    column_widths = []
-    for column in range(columns):
-        members = [widths[index] for index in range(len(pictures)) if index % columns == column]
-        column_widths.append((max(members) if members else 1.0) + gap_mm)
-    rows = (len(pictures) + columns - 1) // columns
-    table = document.add_table(rows=rows, cols=columns)
+    column_widths = [width + gap_mm for width in widths]
+    table = document.add_table(rows=1, cols=len(pictures))
     table.autofit = False
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     for column, width in zip(table.columns, column_widths):
@@ -1378,9 +1393,9 @@ def _write_figure_grid(document, pictures, columns, text_width_mm=PREVIEW_TEXT_W
 
     for index, image in enumerate(pictures):
         width_mm, height_mm = widths[index], heights[index]
-        cell_width = column_widths[index % columns]
+        cell_width = column_widths[index]
         fit = min(1.0, cell_width / width_mm, 210 / height_mm)
-        cell = table.cell(index // columns, index % columns)
+        cell = table.cell(0, index)
         cell.width = Mm(cell_width)
         paragraph = cell.paragraphs[0]
         # .qb-figures centres its row; the grid cells do the same job here.
@@ -1801,8 +1816,7 @@ def _document(captured, title, options, mode):
                 _write_images(document, item, "body")
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
-                columns, _shrink = _figure_row_layout(stem_figures)
-                _write_images(document, item, "stem", columns)
+                _write_images(document, item, "stem", _figure_row_lines(stem_figures))
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)
