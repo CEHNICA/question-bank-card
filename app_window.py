@@ -446,6 +446,29 @@ def wait_for_window(window: subprocess.Popen | None, web: subprocess.Popen) -> N
     _control_window(web)
 
 
+def wait_for_reattached_window(window: subprocess.Popen | None) -> None:
+    """Wait out a window opened onto an instance this process did not start.
+
+    Same shape as ``wait_for_window`` without the server handle: this process
+    started no service, so the only thing it has to outlive is the window.
+    """
+    if window is None:
+        # No Edge/Chrome, so the page went to the default browser, which draws a
+        # real title bar and needs none of this.
+        return
+    profile = window_profile()
+    started = time.monotonic()
+    while window.poll() is None:
+        time.sleep(0.5)
+    if time.monotonic() - started > 5:
+        return
+    # The browser handed the window to a process it already had and returned at
+    # once: follow the profile directory instead.
+    time.sleep(2)
+    while _profile_still_open(profile):
+        time.sleep(4)
+
+
 def _control_window(web: subprocess.Popen) -> None:
     """找不到 Edge/Chrome 时，已在默认浏览器里打开；留一个小窗口，关掉它即停止服务。"""
     try:
@@ -634,7 +657,12 @@ def _main(arguments: list[str] | None = None) -> int:
     existing = launcher._running_instance()
     if existing:
         print(f"已在运行：{existing}，只打开窗口", flush=True)
-        open_window(existing)
+        window = open_window(existing)
+        # 窗口上的「最小化 / 关闭」是网页自己画的按钮，由 watch_window 这条守护
+        # 线程照着控制文件去做。就在这里 return 的话，进程一退出，线程跟着被杀，
+        # 两个按钮就再也点不动了 —— 窗口还开着，按钮却是死的。
+        # 这个进程没有自己启动服务，不需要收尾，陪着窗口开下去就行。
+        wait_for_reattached_window(window)
         return 0
     if _needs_install():
         return _hand_off_to_console("第一次使用（或组件有更新），需要联网安装已验证版本的组件")

@@ -409,12 +409,40 @@ class MainFlowTests(unittest.TestCase):
 
     def test_running_instance_only_opens_window(self):
         prepare = Mock()
-        opened = Mock()
-        result = self.run_patched(self.patches(open_window=opened),
+        opened = Mock(return_value=Mock())
+        waited = Mock()
+        result = self.run_patched(self.patches(open_window=opened, wait_for_reattached_window=waited),
                                   {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
         self.assertEqual(result, 0)
         opened.assert_called_once_with("http://127.0.0.1:8768")
         prepare.assert_not_called()
+        # This launch has to stay alive for as long as the window is open. The
+        # page draws its own minimise and close buttons, and the thread that acts
+        # on them dies with the process — returning straight out of here left the
+        # teacher with an open window whose two buttons did nothing.
+        waited.assert_called_once_with(opened.return_value)
+
+    def test_a_reattached_window_is_waited_for_without_a_server_handle(self):
+        window = Mock()
+        window.poll.side_effect = [None, None, 0]
+        with patch.object(app_window.time, "sleep", Mock()), \
+             patch.object(app_window, "_profile_still_open", Mock(return_value=False)):
+            app_window.wait_for_reattached_window(window)
+        self.assertEqual(window.poll.call_count, 3,
+                         "it keeps watching the window instead of returning at once")
+
+    def test_a_reattached_window_handed_to_a_running_browser_is_followed_by_profile(self):
+        # The browser reuses a process it already has and returns at once, so the
+        # window outlives its handle. Only the profile directory still says so.
+        window = Mock()
+        window.poll.return_value = 0
+        still_open = Mock(side_effect=[True, False])
+        with patch.object(app_window.time, "sleep", Mock()), \
+             patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 1.0, 10.0])), \
+             patch.object(app_window, "_profile_still_open", still_open):
+            app_window.wait_for_reattached_window(window)
+        self.assertEqual(still_open.call_count, 2,
+                         "a window that outlived its handle is followed until it goes")
 
     def test_first_install_is_handed_to_console(self):
         handoff = Mock(return_value=0)
