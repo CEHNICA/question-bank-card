@@ -123,23 +123,53 @@ class AnchorReadingFlagReconcileTests(TestCase):
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 0)
 
     def test_read_card_and_this_pass_say_the_same_thing(self):
-        """两处必须给出同一句话：识读那一刻挂的，和事后补的。"""
+        """两处必须给出同一句话：识读那一刻挂的，和事后补的。
+
+        这条以前是空跑通过的：read_card 一进来就因为「没配读题服务」原样返回，
+        flags 是空的，外面那两层 `if` 把断言整段跳过，于是无论 read_card 给出
+        什么都不算失败。现在照 test_anchor_reading.py 的搭法把读题服务、识读结果、
+        拼图都打上桩，让断言真的跑起来。
+        """
+        from PIL import Image
+
         from . import textnorm
+
         card = self.card()
-        fresh = pipeline.read_card({
-            "id": card.pk, "number": card.number, "regions": card.regions,
-            "source_anchor_seq": card.source_anchor_seq,
-            "witness_blocks": [{"seq": 671, "type": "text", "text": (
-                "20.已知两条对角线，利用尺规作一个菱形。※21.如图，画一个矩形 EFGH。")}],
-            "witness": "", "candidates": [], "options": {}, "body_mode": "text",
-            "processing_mode": "manual", "text_source": "", "stem": card.stem,
-            "edited": False, "source_kind": "", "start_source": "", "is_book": True,
-        }, store=type("Store", (), {"load": lambda self, page: object()})())
-        if fresh.get("flags"):
-            first = [f for f in fresh["flags"]
-                     if f.startswith(pipeline.ANCHOR_MISMATCH_FLAG_PREFIX)]
-            if first:
-                self.assertEqual(textnorm.anchor_reading_mismatch(
-                    "20.已知两条对角线，利用尺规作一个菱形。※21.如图，画一个矩形 EFGH。",
-                    card.stem), "利用尺规作一个菱形")
-                self.assertIn("利用尺规作一个菱形…", first[0])
+        printed = "20.已知两条对角线，利用尺规作一个菱形。※21.如图，画一个矩形 EFGH。"
+        reading = card.stem  # 卡上装的是另一道题：整段「读一读 反比例函数与三等分角」
+        probe = textnorm.anchor_reading_mismatch(printed, reading)
+        self.assertEqual(probe, "利用尺规作一个菱形")
+
+        store = type("Store", (), {"load": lambda self, page: Image.new("RGB", (2400, 3200), "white")})()
+        with mock.patch.object(pipeline.readers, "primary_engine", return_value=object()), \
+                mock.patch.object(pipeline.readers, "read_question", return_value={
+                    "stem": reading, "options": {}, "content_kind": "question",
+                    "figures": {}, "missing_figure": False, "number_seen": 20,
+                    "figure_descriptions": [], "unclear": False}), \
+                mock.patch.object(pipeline.imaging, "stack_regions",
+                                  return_value=(Image.new("RGB", (8, 8), "white"), [])), \
+                mock.patch.object(pipeline.imaging, "jpeg_data_url",
+                                  return_value="data:image/jpeg;base64,x"):
+            fresh = pipeline.read_card({
+                "id": card.pk, "number": card.number, "regions": card.regions,
+                "source_anchor_seq": card.source_anchor_seq,
+                "witness_blocks": [{"seq": 671, "type": "text", "text": printed}],
+                "witness": "", "candidates": [], "options": {}, "body_mode": "text",
+                "question_type": "free_response",
+                "processing_mode": "manual", "text_source": "", "stem": "",
+                "edited": False,
+                "source_kind": Question.SourceKind.EXERCISE,
+                "start_source": "mineru", "is_book": True,
+            }, store)
+
+        # 识读那一刻：read_card 自己就要挂上这条，而且用的是同一句话
+        first = [f for f in fresh["flags"]
+                 if f.startswith(pipeline.ANCHOR_MISMATCH_FLAG_PREFIX)]
+        self.assertEqual(len(first), 1, fresh.get("flags"))
+        self.assertIn(f"{probe}…", first[0])
+
+        # 事后补的那一遍：必须给出同一句，且卡要变黄
+        self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
+        card.refresh_from_db()
+        self.assertIn(f"{probe}…", card.flags[0], card.flags)
+        self.assertEqual(card.state, Question.State.YELLOW)
