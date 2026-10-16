@@ -1782,7 +1782,12 @@ def _document(captured, title, options, mode):
     heading.paragraph_format.keep_with_next = True
     _font(heading.add_run(title + (" · 答案解析" if mode == "answers" else "")), size + 6, True)
     if options["student_info"] and mode != "answers":
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         info = document.add_paragraph()
+        # 预览里这一行是居中的（.print-info 的 text-align: center），PDF 也跟着
+        # 那条样式走。Word 这里原来没写对齐，落在左边，于是老师在预览里看着居中、
+        # 导出来却贴着左页边 —— 整张卷子上只有这一行对不上，一眼就能看出来。
+        info.alignment = WD_ALIGN_PARAGRAPH.CENTER
         info.paragraph_format.keep_with_next = True
         _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
     numbered, number = [], 0

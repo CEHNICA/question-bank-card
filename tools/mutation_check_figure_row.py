@@ -105,6 +105,17 @@ MUTATIONS = [
         "        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER",
     ),
     (
+        "the name／class／score line goes back against the left margin",
+        "        info.alignment = WD_ALIGN_PARAGRAPH.CENTER",
+        "        info.alignment = WD_ALIGN_PARAGRAPH.LEFT",
+    ),
+    (
+        "the name／class／score line loses its alignment entirely",
+        "        info.alignment = WD_ALIGN_PARAGRAPH.CENTER\n"
+        "        info.paragraph_format.keep_with_next = True",
+        "        info.paragraph_format.keep_with_next = True",
+    ),
+    (
         "Word's default cell padding comes back and drags the row off centre",
         '        edge.set(qn("w:w"), "0")',
         '        edge.set(qn("w:w"), "108")',

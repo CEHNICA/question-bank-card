@@ -50,6 +50,11 @@ def document_xml(data):
         return etree.fromstring(archive.read("word/document.xml"))
 
 
+def tree_paras(tree):
+    """Every top-level paragraph, which is where the header lines live."""
+    return tree.find("w:body", NS).findall("w:p", NS)
+
+
 class ExportFixture:
     """Publication/payload/post helpers, shared with the opt-in browser module.
 
@@ -1484,6 +1489,35 @@ class LibraryExportTests(ExportFixture, TestCase):
         tree = document_xml(response.content)
         self.assertIsNone(tree.find(".//w:tbl", NS))
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 1)
+
+    def test_the_name_class_score_line_is_centred_like_the_preview_centres_it(self):
+        """姓名／班级／得分 is the one line that was left in Word only.
+
+        The preview centres it (``.print-info`` is ``text-align: center``), so the
+        PDF follows, and the teacher checks it on screen before exporting. Word
+        never got the alignment, so the download put the line against the left
+        margin while the title right above it stayed centred — the single
+        most visible difference on the whole page.
+        """
+        pub = self.publication(kind="free_response")
+        for student_info in (True, False):
+            with self.subTest(student_info=student_info):
+                response = self.post(self.payload([pub], print_options={
+                    "document": "questions", "student_info": student_info}))
+                self.assertEqual(response.status_code, 200)
+                line = None
+                for paragraph in tree_paras(document_xml(response.content)):
+                    if "姓名：" in "".join(paragraph.itertext()):
+                        line = paragraph
+                        break
+                if not student_info:
+                    self.assertIsNone(line, "the line is switched off, so it must be absent")
+                    continue
+                self.assertIsNotNone(line, "the 姓名／班级／得分 line is missing")
+                justification = line.find("w:pPr/w:jc", NS)
+                self.assertIsNotNone(justification, "the line carries no alignment at all")
+                self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center",
+                                 "姓名／班级／得分 must land in the middle, not against the margin")
 
     def test_a_lone_stem_figure_is_centred_like_the_preview_centres_it(self):
         """A single picture is a .qb-figures row of one, so it is centred.
