@@ -1392,6 +1392,154 @@ class LibraryExportTests(ExportFixture, TestCase):
                     "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
                 self.assertEqual(extents, expected, f"{label}: mm on paper")
 
+    def test_a_teacher_can_resize_realign_and_reline_their_figures(self):
+        """改过的预览就是最终的卷面，Word 只能照搬。
+
+        老师在这一份卷子里动过的三样东西：每张图多宽、整行靠左还是靠右、点名让
+        第几张图换行。预览和 PDF 共用 ``exam-layout.js``，只有 Word 是这份代码，
+        所以最容易分家 —— 分家的表现是「预览看着对，印出来不是那样」，而老师
+        恰恰只在预览里动手。
+
+        三个 240x120px 的图在 150dpi 下是 40.6mm，天然挤在一行（3×40.6 + 2×3.7
+        = 129.3mm）。下面每一项都先说清楚它为什么必须和预览一致，再看 Word。
+        """
+        sizes = [(240, 120)] * 4
+        wanted = [40.6] * 3
+
+        def build(count):
+            pub = self.publication(kind="free_response")
+            folder = self.root / "library" / str(pub.id)
+            folder.mkdir(parents=True, exist_ok=True)
+            pub.content["figures"] = []
+            for index, size in enumerate(sizes[:count], start=1):
+                target = folder / f"figure-{index}.png"
+                Image.new("RGB", size, "red").save(target)
+                pub.content["figures"].append({"slot": "stem", "file": target.name,
+                                               "page_idx": 0, "bbox": [0, 0, 100, 100]})
+            pub.content_hash = library.content_hash(pub.content)
+            pub.save(update_fields=["content", "content_hash"])
+            return pub
+
+        def widths_mm(tree):
+            return [round(int(value) / 36000, 1) for value in tree.xpath(
+                "//*[local-name()='extent' and namespace-uri()="
+                "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+
+        def heights_mm(tree):
+            return [round(int(value) / 36000, 1) for value in tree.xpath(
+                "//*[local-name()='extent' and namespace-uri()="
+                "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cy")]
+
+        def line_shapes(tree):
+            return [len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tree.findall(".//w:tbl", NS)]
+
+        def column_mm(table):
+            return [round(int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440, 2)
+                    for column in table.findall("w:tblGrid/w:gridCol", NS)]
+
+        # 不动任何东西时，跟没有这个功能之前一模一样。
+        pub = build(3)
+        response = self.post(self.payload([pub], print_options={"document": "questions",
+                                                                 "figure_overrides": {}}))
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+        self.assertEqual(line_shapes(tree), [3], "没设置时三张图仍然在一行")
+        self.assertEqual(widths_mm(tree), wanted)
+
+        # 放大一张：预览里 flex 塞不下就换行，Word 也得换行，而且换在哪一行都要一样。
+        pub = build(3)
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"width": {"0": 100}}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        self.assertEqual(line_shapes(tree), [2, 1],
+                         "100mm + 40.6mm + 3.7mm 之后第三张放不下了，预览会换行，Word 不能硬塞")
+        self.assertEqual(widths_mm(tree), [100.0, 40.6, 40.6], "老师填的 100 就是纸面上的 100 毫米")
+
+        # 再宽也不超过一整页：预览那一行本来就是 min(填的, 178mm 版心, 一页高)。
+        # 一条 100x2000 的竖条就算填满版心，178mm 宽也意味着 3.56 米高，只能按一页高
+        # 收成 10.5mm —— 预览里 flex 同样是这个结果。
+        pub = self.publication(kind="free_response")
+        folder = self.root / "library" / str(pub.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (100, 2000), "red").save(folder / "figure-1.png")
+        pub.content["figures"] = [{"slot": "stem", "file": "figure-1.png",
+                                   "page_idx": 0, "bbox": [0, 0, 100, 100]}]
+        pub.content_hash = library.content_hash(pub.content)
+        pub.save(update_fields=["content", "content_hash"])
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"width": {"0": 178}}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        self.assertEqual(widths_mm(tree), [10.5], "填满版心也不许超过一页高")
+
+        # 靠左：整行贴着左边距，行末不再留空隙 —— flex 靠左时那一头本来就是敞开的，
+        # 留着空隙会把整行推离页边 1.85mm。
+        pub = build(3)
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"align": "left"}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        table = tree.find(".//w:tbl", NS)
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "left",
+                         "老师选了靠左，整行就得真的靠左")
+        for cell in table.findall(".//w:tc", NS):
+            self.assertEqual(cell.find("w:p/w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "left",
+                             "格里的图也要靠左，否则还是居中，行的位置跟着偏")
+        self.assertEqual([round(value - 40.6, 1) for value in column_mm(table)], [3.7, 3.7, 0.0],
+                         "靠左时空隙只留在两张图之间，行末不留，否则整行会右移一个空隙")
+
+        # 靠右：反过来，行首不留空隙，整行贴着右页边。
+        pub = build(3)
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"align": "right"}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        table = tree.find(".//w:tbl", NS)
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "right")
+        for cell in table.findall(".//w:tc", NS):
+            self.assertEqual(cell.find("w:p/w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "right")
+        self.assertEqual([round(value - 40.6, 1) for value in column_mm(table)], [0.0, 3.7, 3.7])
+
+        # 一张图时走的是段落不是表格，对齐也得跟着变，否则单图永远是居中的。
+        pub = build(1)
+        for align, wanted_jc in (("left", "left"), ("right", "right"), ("center", "center")):
+            with self.subTest(align=align):
+                options = {"document": "questions", "figure_overrides": {str(pub.id): {"align": align}}}
+                tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+                self.assertIsNone(tree.find(".//w:tbl", NS))
+                picture = tree.xpath("//w:p[w:r/w:drawing]", namespaces=NS)[0]
+                self.assertEqual(picture.find("w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), wanted_jc)
+
+        # 点名换行：预览里插一道占满整行的空隙，Word 里就是多一张表。
+        pub = build(3)
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"breaks": [2]}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        self.assertEqual(line_shapes(tree), [2, 1], "第 3 张要求另起一行，就是 2+1")
+
+        pub = build(4)
+        options = {"document": "questions", "figure_overrides": {str(pub.id): {"breaks": [1, 3]}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        self.assertEqual(line_shapes(tree), [1, 2, 1],
+                         "四张图本来挤在一行，点名第 2、第 4 张另起一行，就断成 1+2+1")
+
+        # 三样一起用，也是最像老师真实操作的一种：放大第三张、整行靠左、第二张换行。
+        pub = build(3)
+        options = {"document": "questions",
+                   "figure_overrides": {str(pub.id): {"width": {"2": 90}, "align": "left", "breaks": [2]}}}
+        tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
+        self.assertEqual(line_shapes(tree), [2, 1])
+        self.assertEqual(widths_mm(tree), [40.6, 40.6, 90.0])
+        # 放大只改宽、高按图自己原来的比例跟上去 —— 90mm 宽的 240x120 图是 45mm 高。
+        # 图被拉扁是最难一眼看出来的错：宽度对得上，比例不对，学生看不出来但一眼就别扭。
+        self.assertEqual(heights_mm(tree), [20.3, 20.3, 45.0], "放大后要按图自己的比例长高，不能被压扁")
+        tables = tree.findall(".//w:tbl", NS)
+        self.assertEqual([table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val') for table in tables],
+                         ["left", "left"], "两行都要靠左，预览里 justify-content 对每一行都生效")
+
+        # 别的题的设置不能串到这道题上。
+        first, second = build(3), build(3)
+        options = {"document": "questions", "figure_overrides": {str(first.id): {"align": "right", "width": {"0": 100}}}}
+        tree = document_xml(self.post(self.payload([first, second], print_options=options)).content)
+        tables = tree.findall(".//w:tbl", NS)
+        # 第一题放大一张后是 2+1 两行，第二题三张图一行，一共三张表。
+        self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [2, 1, 3])
+        self.assertEqual([table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val') for table in tables],
+                         ["right", "right", "center"],
+                         "没被调过的那道题仍然是居中，不能被上一道题的设置带跑")
+
     def test_three_side_by_side_diagrams_stay_on_one_row(self):
         """The reported case: 初三「特殊的平行四边形」第 23 题.
 

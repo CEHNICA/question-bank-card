@@ -1194,7 +1194,7 @@ PREVIEW_FIGURE_GAP_PX = 14
 # lays those out in two columns. Left alone on purpose.
 
 
-def _figure_paper_size(size, text_width_mm=PREVIEW_TEXT_WIDTH_MM, page_height_mm=PREVIEW_PAGE_HEIGHT_MM):
+def _figure_paper_size(size, text_width_mm=PREVIEW_TEXT_WIDTH_MM, page_height_mm=PREVIEW_PAGE_HEIGHT_MM, forced_mm=None):
     """``(width_mm, height_mm)``: how large one figure lands on paper.
 
     This is ``exam-layout.js``'s ``imageScale`` transcribed, because that is
@@ -1204,70 +1204,118 @@ def _figure_paper_size(size, text_width_mm=PREVIEW_TEXT_WIDTH_MM, page_height_mm
     instead is exactly what made the download disagree with the screen — those
     caps are overridden inside the print flow, so they describe a view no
     teacher looks at before exporting.
+
+    ``forced_mm`` is the teacher's own width in millimetres, and it takes the
+    place of the 150 dpi term rather than scaling on top of it: the preview's
+    line reads ``min(chosen, 178, 210 * naturalWidth / naturalHeight)``, so a
+    number typed into the preview is a millimetre on paper, not a percentage of
+    a default the teacher never chose.
     """
     width, height = float(size[0]), float(size[1])
     if width <= 0 or height <= 0:
         return 0.0, 0.0
-    paper = min(width * 25.4 / PREVIEW_FIGURE_DPI,
+    paper = min(float(forced_mm) if forced_mm else width * 25.4 / PREVIEW_FIGURE_DPI,
                 float(text_width_mm),
                 page_height_mm * width / height)
     return paper, paper * height / width
 
 
-def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
-    """How many figures the preview puts on each line, e.g. ``[2, 1]``.
+def _figure_settings(options, item):
+    """One question's saved figure adjustments, cleaned into the shapes below use.
 
-    ``.qb-figures`` is an ordinary ``flex-wrap`` row and ``exam-layout.js`` has
-    already given every picture its final width by the time it wraps, so this is
-    plain greedy packing against the text area: fill a line until the next
-    picture no longer fits, then start another. There is no whole-row shrink to
-    reproduce — the preview never scales a row to make it fit.
+    Draft storage already checked these values, but the export endpoint takes
+    them straight off the request, so the keys arrive as the strings a JSON
+    object turns them into and anything odd is dropped rather than allowed to
+    reach the layout maths.
+    """
+    settings = (options.get("figure_overrides") or {}).get(item["id"]) or {}
+    if not isinstance(settings, dict):
+        return {"width": {}, "breaks": [], "align": "center"}
+    widths = {}
+    for key, value in (settings.get("width") or {}).items():
+        try:
+            index = int(key)
+            millimetres = float(value)
+        except (TypeError, ValueError):
+            continue
+        if index >= 0 and millimetres > 0:
+            widths[index] = millimetres
+    breaks = sorted({int(value) for value in settings.get("breaks") or [] if str(value).lstrip("-").isdigit()})
+    align = settings.get("align")
+    return {"width": widths, "breaks": breaks,
+            "align": align if align in ("left", "center", "right") else "center"}
+
+
+def _figure_widths(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None):
+    """Every picture's printed width in millimetres, teacher's override applied."""
+    overrides = (settings or {}).get("width") or {}
+    return [_figure_paper_size(image["size"], text_width_mm, forced_mm=overrides.get(index))[0]
+            for index, image in enumerate(images)]
+
+
+def _pack_lines(widths, text_width_mm=PREVIEW_TEXT_WIDTH_MM, forced=()):
+    """Greedy line packing against the text area, honouring named line starts.
+
+    ``.qb-figures`` fills a line until the next picture no longer fits and then
+    wraps — greedy, left to right, never shrinking a row to make room. A
+    ``forced`` index is the teacher naming the figure that starts a new line; the
+    preview inserts a full-width spacer there, which is the same break told in
+    the language of a table row.
+    """
+    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
+    forced = set(forced or ())
+    lines, current, used = [], 0, 0.0
+    for index, width in enumerate(widths):
+        if index in forced and current:
+            lines.append(current)
+            current, used = 0, 0.0
+        if current and used + gap + width > text_width_mm + 0.01:
+            lines.append(current)
+            current, used = 0, 0.0
+        used += (gap if current else 0.0) + width
+        current += 1
+    if current:
+        lines.append(current)
+    return lines or [1]
+
+
+def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None):
+    """How many figures the preview puts on each line, e.g. ``[2, 1]``.
 
     The line lengths are kept, not just the widest one. The preview centres
     *every* line on its own (``justify-content: center`` applies per flex line),
     and one uniform Word grid cannot do that: a 3+2+1 set comes out right, but
     2+1 puts the lone third picture in the first column, hard against the left
     of a table that is itself centred. Three questions in the bank wrap that way,
-    so each line gets its own centred table.
+    so each line gets its own table.
     """
-    widths = [width for width in (_figure_paper_size(image["size"], text_width_mm)[0]
-                                  for image in images) if width > 0]
-    if not widths:
-        return [1]
-    gap = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
-    lines, current, used = [], 1, widths[0]
-    for width in widths[1:]:
-        if used + gap + width <= text_width_mm + 0.01:
-            used += gap + width
-            current += 1
-        else:
-            lines.append(current)
-            current, used = 1, width
-    lines.append(current)
-    return lines
+    return _pack_lines(_figure_widths(images, text_width_mm, settings), text_width_mm,
+                       (settings or {}).get("breaks"))
 
 
-def _write_images(document, item, slot, lines=None):
+def _write_images(document, item, slot, lines=None, settings=None):
     from docx.shared import Mm
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
+    align = (settings or {}).get("align", "center")
+    widths = _figure_widths(pictures, PREVIEW_TEXT_WIDTH_MM,
+                            settings if slot != "body" else None)
     if slot != "body" and lines is None:
-        lines = _figure_row_lines(pictures)
+        lines = _figure_row_lines(pictures, settings=settings)
     # Only a line that actually holds two or more diagrams needs a table. When
-    # every line holds one, they are lone centred figures and a centred
+    # every line holds one, they are lone figures and a single aligned
     # paragraph says so with less machinery than a one-column table.
     if lines and max(lines) > 1:
-        _write_figure_rows(document, pictures, lines)
+        _write_figure_rows(document, pictures, lines, align, widths)
         return
-    for image in pictures:
+    for index, image in enumerate(pictures):
         width, height = image["size"]
         # One figure per line keeps the same 150 dpi natural size the preview
         # uses. A scanned page ("body") may be taller, because the preview
         # stacks those vertically instead of feeding them into the figure row.
-        natural = min(PREVIEW_TEXT_WIDTH_MM / width,
-                      (235 if slot == "body" else PREVIEW_PAGE_HEIGHT_MM) / height,
-                      25.4 / PREVIEW_FIGURE_DPI)
+        paper = widths[index] if slot != "body" else _figure_paper_size(
+            image["size"], PREVIEW_TEXT_WIDTH_MM, 235)[0]
         paragraph = document.add_paragraph()
         # A lone stem figure still belongs to a .qb-figures row, and that row is
         # centred — measured in the app, a single 188px picture sits with 242px of
@@ -1277,13 +1325,16 @@ def _write_images(document, item, slot, lines=None):
         # a picture with a set width stays at the left there, and must here too.
         if slot != "body":
             from docx.enum.text import WD_ALIGN_PARAGRAPH
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * natural), height=Mm(height * natural))
+            paragraph.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT,
+                                    "right": WD_ALIGN_PARAGRAPH.RIGHT}.get(align, WD_ALIGN_PARAGRAPH.CENTER)
+        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]),
+                                        width=Mm(paper), height=Mm(height * paper / width))
         paragraph.paragraph_format.keep_together = True
 
 
-def _write_figure_rows(document, pictures, lines):
-    """One centred table per preview line, separated so Word keeps them apart."""
+def _write_figure_rows(document, pictures, lines, align="center", widths=None):
+    """One table per preview line, separated so Word keeps them apart."""
+    widths = list(widths or _figure_widths(pictures))
     start = 0
     for number, count in enumerate(lines):
         chunk = pictures[start:start + count]
@@ -1293,7 +1344,7 @@ def _write_figure_rows(document, pictures, lines):
             # which would drag the second line's columns back to the first line's
             # width. The paragraph is 1pt tall and carries the preview's row gap.
             _figure_row_separator(document)
-        _write_figure_line(document, chunk)
+        _write_figure_line(document, chunk, align=align, widths=widths[start - count:start])
     return start
 
 
@@ -1307,34 +1358,42 @@ def _figure_row_separator(document):
     return paragraph
 
 
-def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
-    """One line of stem figures, at the size and the centring the preview shows.
+def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM, align="center", widths=None):
+    """One line of stem figures, at the size and the position the preview shows.
 
     Three things have to match or the download reads differently from the
     screen it was checked on:
 
     - **Size.** Every picture is placed by ``_figure_paper_size`` — the same
-      150 dpi size the preview writes onto the image itself. Guessing from the
-      stylesheet's 320px/220px caps makes the download disagree with the
-      preview, because the print flow overrides those caps.
+      150 dpi size the preview writes onto the image itself, or the width the
+      teacher typed into the preview. Guessing from the stylesheet's 320px/220px
+      caps makes the download disagree with the preview, because the print flow
+      overrides those caps.
     - **The gap between figures.** Word table columns touch each other, so the
       gap has to live *inside* a column. Dividing the text area between
       columns instead puts the pictures edge to edge, and the labels A–F of
       neighbouring diagrams end up touching.
-    - **Centring.** ``.qb-figures`` centres its row; the table is centred here
-      so a narrower row is not left-aligned on an A4 text area. Centring only
-      means anything once the table's own width is pinned and its cells stop
-      carrying Word's default 1.9mm padding, and once every column holds the
-      gap — including the last, which is what leaves the same space before the
-      first diagram as after the last.
+    - **Where the row sits.** ``.qb-figures`` positions each row with
+      ``justify-content``, and the teacher can choose left, centre or right.
+      The table follows that choice, and the outer gap is dropped on whichever
+      end the row is pushed towards — otherwise a left-aligned row would sit
+      1.85mm off the margin the teacher aimed at. Centring only means anything
+      once the table's own width is pinned and its cells stop carrying Word's
+      default 1.9mm padding, and once every column holds the gap — including the
+      last, which is what leaves the same space before the first diagram as
+      after the last.
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    sizes = [_figure_paper_size(image["size"], text_width_mm) for image in pictures]
-    widths = [width for width, _ in sizes]
-    heights = [height for _, height in sizes]
+    # Widths arrive already resolved (teacher's millimetres, else 150 dpi natural
+    # size); the height follows from the picture's own aspect ratio so a widened
+    # diagram grows as tall as it needs and does not come out stretched.
+    widths = [float(width) for width in
+              (widths if widths is not None else _figure_widths(pictures, text_width_mm))]
+    heights = [width * float(image["size"][1]) / float(image["size"][0])
+               for width, image in zip(widths, pictures)]
     gap_mm = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
     # Fit is judged on the pictures and the gaps between them. The empty space
     # the columns add at each end is allowed to spill into the A4 margins rather
@@ -1346,10 +1405,23 @@ def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
         widths = [width * shrink for width in widths]
         heights = [height * shrink for height in heights]
         gap_mm *= shrink
-    column_widths = [width + gap_mm for width in widths]
+    # The gap belongs *between* two diagrams. A centred row therefore carries
+    # half of it at each end (flex's `justify-content: center` leaves a gap
+    # outside the first and last picture only because both ends are equally
+    # spaced), but a row pushed to the left or right has one open end, and a gap
+    # there would push the row 1.85mm off the margin the teacher aimed at.
+    if align == "left":
+        column_widths = [width + (gap_mm if position < len(widths) - 1 else 0.0)
+                         for position, width in enumerate(widths)]
+    elif align == "right":
+        column_widths = [width + (gap_mm if position else 0.0)
+                         for position, width in enumerate(widths)]
+    else:
+        column_widths = [width + gap_mm for width in widths]
     table = document.add_table(rows=1, cols=len(pictures))
     table.autofit = False
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.alignment = {"left": WD_TABLE_ALIGNMENT.LEFT, "right": WD_TABLE_ALIGNMENT.RIGHT}.get(
+        align, WD_TABLE_ALIGNMENT.CENTER)
     for column, width in zip(table.columns, column_widths):
         column.width = Mm(width)
     properties = table._tbl.tblPr
@@ -1398,8 +1470,10 @@ def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
         cell = table.cell(0, index)
         cell.width = Mm(cell_width)
         paragraph = cell.paragraphs[0]
-        # .qb-figures centres its row; the grid cells do the same job here.
-        paragraph.alignment = 1
+        # .qb-figures places each row with justify-content; the grid cells do
+        # the same job inside the table, and a lone figure in a one-picture
+        # column needs it just as much as a row of three.
+        paragraph.alignment = {"left": 0, "right": 2}.get(align, 1)
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]),
                                         width=Mm(width_mm * fit), height=Mm(height_mm * fit))
         paragraph.paragraph_format.keep_together = True
@@ -1821,7 +1895,12 @@ def _document(captured, title, options, mode):
                 _write_images(document, item, "body")
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
-                _write_images(document, item, "stem", _figure_row_lines(stem_figures))
+                # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
+                # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，
+                # 只有 Word 是这份代码，所以两边最容易分家 —— 数字先统一到这里。
+                figures = _figure_settings(options, item)
+                _write_images(document, item, "stem", _figure_row_lines(stem_figures, settings=figures),
+                              settings=figures)
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
                 _write_compact_options(document, item, size, columns)

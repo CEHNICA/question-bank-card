@@ -652,6 +652,22 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .print-advanced, .print-individual { border-top: 1px solid var(--line); padding-top: 10px; }
 .print-advanced > summary, .print-individual > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .print-advanced .print-options-body, .print-individual .print-options-body { padding: 14px 0 0; }
+/* 配图调整：每一张图两行 —— 上面是宽度（滑块 + 毫米数 + 还原），下面是「从这里换行」。
+   滑块和毫米数是同一个数的两种看法，拖滑块时毫米数跟着走，直接填毫米数时滑块也跟着走。 */
+.print-figure-box { grid-column: 1 / -1; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.print-figure-box .print-field, .print-figure-box .print-options-note { grid-column: 1 / -1; }
+.print-field-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.print-figure-list { grid-column: 1 / -1; display: grid; gap: 12px; margin-bottom: 10px; }
+.print-figure-row { display: grid; gap: 4px; }
+.print-figure-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.print-figure-name { flex: none; min-width: 62px; font-size: 12px; color: var(--muted); }
+.print-figure-slider { flex: 1 1 90px; min-width: 80px; accent-color: var(--accent, #2f6fdb); }
+.print-figure-mm { width: 74px; padding: 5px 6px; font: inherit; font-size: 12px; text-align: right; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: inherit; }
+.print-figure-mm:focus-visible, .print-figure-slider:focus-visible { outline: 2px solid var(--accent, #2f6fdb); outline-offset: 1px; }
+.print-figure-unit { font-size: 12px; color: var(--muted); }
+.print-figure-reset { padding: 4px 8px; font-size: 12px; }
+.print-figure-break { font-size: 12px; }
+.print-figure-break-label { margin-left: 6px; }
 .print-preview { min-width: 0; }
 .print-draft-menu { position: relative; }
 .print-draft-menu > summary { cursor: pointer; list-style: none; }

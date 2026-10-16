@@ -29,7 +29,19 @@ LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
 PRINT_DEFAULTS = {"answers": False, "origin": False, "ai_answers": False,
                   "document": "questions", "font_size": 12, "answer_space": "none", "student_info": True,
                   "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": [],
-                  "answer_layout": "inline", "answer_space_overrides": {}}
+                  "answer_layout": "inline", "answer_space_overrides": {}, "figure_overrides": {}}
+# 配图调整（figure_overrides）：老师在自己这份卷子里把题干配图放大缩小、决定每行靠左还是
+# 靠右、点名让某张图从下一行开始。跟着草稿存，不写回题库 —— 换一份卷子、换一个老师，
+# 题库里那道题还是原样。
+#
+#   {"<题目编号>": {"width": {"0": 60.5}, "align": "left", "breaks": [2]}}
+#
+# width 的键是这道题题干配图里的第几张（从 0 数，和预览里从上往下看到的顺序一致），
+# 值是这张图在纸上的宽度（毫米）。align 管这一题所有配图行，breaks 里的序号从该行开始。
+FIGURE_ALIGNMENTS = ("left", "center", "right")
+FIGURE_WIDTH_MIN_MM = 5
+FIGURE_WIDTH_MAX_MM = 178
+FIGURE_MAX_PER_QUESTION = 50
 INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -52,6 +64,67 @@ def _title(value) -> str:
     if not value or len(value) > MAX_TITLE_LENGTH or any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise DraftError(f"请填写 1–{MAX_TITLE_LENGTH} 字的草稿名称，不含换行或控制字符")
     return value
+
+
+def _figure_index(value):
+    """Figure positions arrive as 0-based ints or the strings JSON object keys become."""
+    if isinstance(value, bool):
+        raise DraftError("配图序号应为数字")
+    if isinstance(value, str):
+        if not value.isdigit():
+            raise DraftError("配图序号应为数字")
+        value = int(value)
+    if not isinstance(value, int) or not 0 <= value < FIGURE_MAX_PER_QUESTION:
+        raise DraftError(f"配图序号应在第 1–{FIGURE_MAX_PER_QUESTION} 张之间")
+    return value
+
+
+def _figure_overrides(value):
+    """Check one draft's figure adjustments, keeping only what changes something.
+
+    The keys are question numbers, normalised by ``normalize_ids`` like every other
+    per-question override, so a draft saved as ``1EF667E5…`` and one saved as
+    ``1ef667e5…`` are the same entry. ``width`` values are millimetres on paper —
+    the unit the number box in the preview asks for and the unit Word writes, so
+    "60" in the preview and "60" on the page are the same width.
+
+    ``align: "center"`` is the default, so an untouched row records nothing: a
+    question left at every default drops out of the map entirely instead of being
+    rewritten on every autosave.
+    """
+    if not isinstance(value, dict) or len(value) > 500:
+        raise DraftError("配图调整最多 500 题")
+    checked = {}
+    for question, setting in value.items():
+        if not isinstance(setting, dict) or set(setting) - {"width", "align", "breaks"}:
+            raise DraftError("配图调整只能包含图的大小、整行位置和从哪张图换行")
+        align = setting.get("align", "center")
+        if align not in FIGURE_ALIGNMENTS:
+            raise DraftError("配图整行位置只能选靠左、居中或靠右")
+        widths = setting.get("width", {})
+        if not isinstance(widths, dict) or len(widths) > FIGURE_MAX_PER_QUESTION:
+            raise DraftError(f"每题最多调整 {FIGURE_MAX_PER_QUESTION} 张配图")
+        clean_widths = {}
+        for key, millimetres in widths.items():
+            index = _figure_index(key)
+            if isinstance(millimetres, bool) or not isinstance(millimetres, (int, float)) \
+                    or not FIGURE_WIDTH_MIN_MM <= millimetres <= FIGURE_WIDTH_MAX_MM:
+                raise DraftError(f"配图宽度应为 {FIGURE_WIDTH_MIN_MM}–{FIGURE_WIDTH_MAX_MM} 毫米之间的数字")
+            clean_widths[index] = round(float(millimetres), 1)
+        breaks = setting.get("breaks", [])
+        if not isinstance(breaks, list) or len(breaks) > FIGURE_MAX_PER_QUESTION:
+            raise DraftError(f"每题最多指定 {FIGURE_MAX_PER_QUESTION} 处换行")
+        clean_breaks = sorted({_figure_index(index) for index in breaks})
+        entry = {}
+        if clean_widths:
+            entry["width"] = dict(sorted(clean_widths.items()))
+        if align != "center":
+            entry["align"] = align
+        if clean_breaks:
+            entry["breaks"] = clean_breaks
+        if entry:
+            checked[question] = entry
+    return checked
 
 
 def _print_options(value, defaults=None, *, ids=None) -> dict:
@@ -83,18 +156,22 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     if not isinstance(spaces, dict) or len(spaces) > 500 or any(mode not in ("none", "small", "medium", "large") for mode in spaces.values()):
         raise DraftError("单题留白应为题目编号到 none、small、medium、large 的映射，最多500题")
     try:
+        figures = _figure_overrides(result["figure_overrides"])
         keys = normalize_ids(list(overrides))
         space_keys = normalize_ids(list(spaces))
+        figure_keys = normalize_ids(list(figures))
         breaks = normalize_ids(result["question_breaks"])
         selected = set(normalize_ids(ids)) if ids is not None else None
     except BrowseError as error:
         raise DraftError("单题排版或另起页的题目编号不正确：" + str(error)) from None
-    if len(keys) != len(overrides) or len(space_keys) != len(spaces) or len(breaks) != len(result["question_breaks"]):
+    if len(keys) != len(overrides) or len(space_keys) != len(spaces) or len(breaks) != len(result["question_breaks"]) \
+            or len(figure_keys) != len(figures):
         raise DraftError("单题排版或另起页的题目编号不能重复")
-    if selected is not None and (set(keys) - selected or set(space_keys) - selected or set(breaks) - selected):
+    if selected is not None and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks)) - selected:
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
     result["answer_space_overrides"] = dict(zip(space_keys, spaces.values()))
+    result["figure_overrides"] = dict(zip(figure_keys, figures.values()))
     result["question_breaks"] = breaks
     return result
 
@@ -255,6 +332,7 @@ def _save(payload: dict, draft_id=None) -> dict:
         # hints for an unselected ID still fail validation rather than disappearing.
         defaults["option_overrides"] = {key: mode for key, mode in defaults["option_overrides"].items() if key in ids}
         defaults["answer_space_overrides"] = {key: mode for key, mode in defaults["answer_space_overrides"].items() if key in ids}
+        defaults["figure_overrides"] = {key: mode for key, mode in defaults["figure_overrides"].items() if key in ids}
         defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
         options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
         from .library_solutions import normalize_map, SolutionError

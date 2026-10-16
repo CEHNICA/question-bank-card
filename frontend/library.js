@@ -2989,7 +2989,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
 
   let printAnswersPreference = ui.printAnswers.checked;
   const printState = { token: 0, items: [], missing: [], dropped: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, returnFocus: null,
-    optionOverrides: {}, answerSpaceOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "",
+    optionOverrides: {}, answerSpaceOverrides: {}, figureOverrides: {}, questionBreaks: [], activeToolId: null, layoutToken: 0, layoutPending: false, layoutError: "",
     // 排版是异步的：A4 分页跑完会把整卷重排一遍，刚才拿到焦点的按钮随之被换掉。
     // 这里记下「排完之后焦点该放回哪」，等重排结束再兑现（见 applyPrintFocus）。
     printFocus: null,
@@ -3144,8 +3144,36 @@ $("selectedViewCount").textContent = String(state.basket.length);
       pagination: options.pagination === "keep" ? "keep" : "compact",
       option_layout: ["auto", "four", "two", "vertical"].includes(options.option_layout) ? options.option_layout : "auto",
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two", "vertical"].includes(value))),
-      question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : []
+      question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : [],
+      figure_overrides: normalizeFigureOverrides(options.figure_overrides)
     };
+  }
+
+  // 老师在预览里对配图做的调整，跟着这份草稿存。服务端 library_drafts 也查一遍，
+  // 这里的检查不是多余：这份设置最终要同时喂给预览排版、PDF 和 Word，三边都得先
+  // 收成同一种形状，谁也不该在下游处理「图宽是 -20」这种事。
+  const FIGURE_WIDTH_MIN = 5, FIGURE_WIDTH_MAX = 178;
+  const FIGURE_POSITIONS = ["left", "center", "right"];
+  function normalizeFigureOverrides(value) {
+    const result = {};
+    Object.entries(value || {}).forEach(([id, setting]) => {
+      if (!setting || typeof setting !== "object") return;
+      const entry = {};
+      const widths = {};
+      Object.entries(setting.width || {}).forEach(([key, size]) => {
+        const index = Number(key), millimetres = Number(size);
+        if (Number.isInteger(index) && index >= 0 && millimetres >= FIGURE_WIDTH_MIN && millimetres <= FIGURE_WIDTH_MAX) {
+          widths[String(index)] = Math.round(millimetres * 10) / 10;
+        }
+      });
+      if (Object.keys(widths).length) entry.width = widths;
+      if (FIGURE_POSITIONS.includes(setting.align) && setting.align !== "center") entry.align = setting.align;
+      const breaks = [...new Set((Array.isArray(setting.breaks) ? setting.breaks : [])
+        .map(Number).filter(index => Number.isInteger(index) && index > 0))].sort((a, b) => a - b);
+      if (breaks.length) entry.breaks = breaks;
+      if (Object.keys(entry).length) result[id] = entry;
+    });
+    return result;
   }
 
   function currentPrintOptions() {
@@ -3158,6 +3186,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
       option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
       answer_space_overrides: Object.fromEntries(Object.entries(printState.answerSpaceOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
+      figure_overrides: Object.fromEntries(Object.entries(printState.figureOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
       question_breaks: (printState.questionBreaks || []).filter(id => !state.basket || state.basket.includes(id))
     });
   }
@@ -3166,6 +3195,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     const ids = new Set(state.basket);
     printState.optionOverrides = Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => ids.has(id)));
     printState.answerSpaceOverrides = Object.fromEntries(Object.entries(printState.answerSpaceOverrides || {}).filter(([id]) => ids.has(id)));
+    printState.figureOverrides = Object.fromEntries(Object.entries(printState.figureOverrides || {}).filter(([id]) => ids.has(id)));
     printState.questionBreaks = (printState.questionBreaks || []).filter(id => ids.has(id));
     printState.solutions = solutions.fixedSelections(printState.solutions, state.basket);
   }
@@ -3181,6 +3211,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     $("printAnswerLayout").value = options.answer_layout ? restored.answer_layout : "appendix";
     printState.optionOverrides = restored.option_overrides;
     printState.answerSpaceOverrides = restored.answer_space_overrides;
+    printState.figureOverrides = restored.figure_overrides;
     printState.questionBreaks = restored.question_breaks;
     printAnswersPreference = restored.answers;
     ui.printAnswers.checked = restored.answers;
@@ -3661,6 +3692,104 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
     $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
     $("printIndividualHint").textContent = item?.content?.body_mode === "source_image" ? "原图题保留卷面排版，可调整顺序和分页；转成文字后可重排选项。" : id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
+    renderFigureControls(id);
+  }
+
+  // 一道题有几张题干配图，这里就列几张，顺序和预览里从上往下看到的一致。老师指着
+  // 预览上的第一张图，这儿就得是第一张 —— 编号对不上，等于这个功能没用。
+  function stemFiguresOf(id) {
+    const item = printState.items.find(item => item.id === id);
+    // 原图题（整页扫描）本来就是一个整体，改宽度没有意义，预览里也不走配图那一行。
+    if (!item || item.content?.body_mode === "source_image") return [];
+    return (item.content?.figures || []).filter(figure => figure.slot === "stem");
+  }
+
+  function figureRow(index) {
+    const row = node("div", "print-figure-row");
+    const line = node("div", "print-figure-line");
+    line.append(node("span", "print-figure-name", `第 ${index + 1} 张图`));
+    const slider = node("input", "print-figure-slider");
+    slider.type = "range";
+    Object.assign(slider, { min: FIGURE_WIDTH_MIN, max: FIGURE_WIDTH_MAX, step: 1 });
+    slider.dataset.figureIndex = String(index);
+    slider.title = "左右拖动就把这张图放大或缩小，右边的毫米数跟着变。最多铺满整张 A4 的正文宽度。";
+    slider.setAttribute("aria-label", `第 ${index + 1} 张图的宽度`);
+    const size = node("input", "print-figure-mm");
+    size.type = "number";
+    Object.assign(size, { min: FIGURE_WIDTH_MIN, max: FIGURE_WIDTH_MAX, step: 0.5 });
+    size.dataset.figureIndex = String(index);
+    size.title = "直接填这张图印在纸上的宽度，单位毫米。填多少，导出的 Word 和 PDF 上就是多少。";
+    size.setAttribute("aria-label", `第 ${index + 1} 张图的宽度（毫米）`);
+    const reset = node("button", "button button-quiet print-figure-reset", "还原");
+    reset.type = "button";
+    reset.dataset.figureReset = String(index);
+    reset.title = "把这张图恢复成系统自动的大小，不影响别的设置。";
+    line.append(slider, size, node("span", "print-figure-unit", "毫米"), reset);
+    const breaker = node("label", "library-toggle switch print-figure-break");
+    const toggle = node("input", "print-figure-break-box");
+    toggle.type = "checkbox";
+    toggle.dataset.figureBreak = String(index);
+    toggle.title = "勾上之后，这张图自己另起一行，后面的图排在它下面一行。";
+    breaker.append(toggle, node("span", "switch-track print-figure-track"), node("span", "print-figure-break-label", "这张图从下一行开始"));
+    breaker.querySelector(".switch-track").setAttribute("aria-hidden", "true");
+    row.append(line, breaker);
+    return row;
+  }
+
+  // 滑块一开始停在「这张图现在到底多宽」，而不是从头到尾都用同一个中间值。预览
+  // 已经把每一张图的宽度写成内联样式了（排版函数写死的），量回来就是毫米 —— 老师
+  // 不用先猜一个数才知道往左还是往右拖。
+  function printedFigureWidths(id) {
+    const question = ui.paper.querySelector(`.print-question[data-question-id="${CSS.escape(id)}"]`);
+    const row = question?.querySelector(".qb-figures");
+    if (!row) return [];
+    return Array.from(row.querySelectorAll(".qb-figure img")).map(image => {
+      // offsetWidth 是排版后的原始宽度；getBoundingClientRect 会把整张卷子的缩放
+      // 一起算进来，量出来的是屏幕上的大小，不是印在纸上的大小。
+      const mm = Math.round(image.offsetWidth * 25.4 / 96 * 10) / 10;
+      return mm > 0 ? mm : 40;
+    });
+  }
+
+  function renderFigureControls(id = $("printIndividualQuestion").value) {
+    const figures = stemFiguresOf(id);
+    const box = $("printFigureBox"), list = $("printFigureList");
+    box.hidden = !figures.length;
+    if (!figures.length) { list.replaceChildren(); return; }
+    const setting = printState.figureOverrides[id] || {};
+    const printed = printedFigureWidths(id);
+    // 切到另一道题才重建。同一道题重排时只改数值 —— 重建会把老师正按着的滑块换掉，
+    // 拖到一半手一松，滑块就跳回原处。
+    if (list.dataset.questionId !== id || list.children.length !== figures.length) {
+      list.dataset.questionId = id;
+      list.replaceChildren(...figures.map((figure, index) => figureRow(index)));
+    }
+    figures.forEach((figure, index) => {
+      const row = list.children[index];
+      const chosen = setting.width ? setting.width[String(index)] : undefined;
+      const current = chosen ?? printed[index] ?? 40;
+      const slider = row.querySelector(".print-figure-slider"), size = row.querySelector(".print-figure-mm");
+      const reset = row.querySelector(".print-figure-reset"), breaker = row.querySelector(".print-figure-break-box");
+      slider.disabled = size.disabled = reset.disabled = breaker.disabled = printState.exporting;
+      if (document.activeElement !== size) size.value = chosen ? String(chosen) : "";
+      slider.value = String(Math.min(FIGURE_WIDTH_MAX, Math.max(FIGURE_WIDTH_MIN, Math.round(current))));
+      slider.title = chosen
+        ? `第 ${index + 1} 张图现在是 ${chosen} 毫米。左右拖动可以改。`
+        : `第 ${index + 1} 张图现在是 ${current} 毫米，由系统自动定的。左右拖动可以改。`;
+      reset.hidden = chosen === undefined;
+      breaker.checked = (setting.breaks || []).includes(index);
+    });
+    $("printFigureAlign").value = setting.align || "";
+    $("printFigureAlign").disabled = printState.exporting;
+  }
+
+  function changeFigureOverride(id, change) {
+    const next = change({ ...(printState.figureOverrides[id] || {}) });
+    // 三个开关都回到默认，就把这道题的记录整个删掉：草稿里不留「改过又改回来」的痕迹。
+    if (next && Object.keys(next).length) printState.figureOverrides[id] = next;
+    else delete printState.figureOverrides[id];
+    markDraftDirty();
+    renderPrint(printState.items);
   }
 
   async function refreshPrintPages(flow) {
@@ -4209,6 +4338,61 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     const id = $("printIndividualQuestion").value;
     printState.questionBreaks = $("printIndividualBreak").checked ? [...new Set([...printState.questionBreaks, id])] : printState.questionBreaks.filter(value => value !== id);
     markDraftDirty(); renderPrint(printState.items);
+  });
+  function without(setting, key) {
+    const rest = { ...setting };
+    delete rest[key];
+    return rest;
+  }
+  $("printFigureAlign").addEventListener("change", () => {
+    const id = $("printIndividualQuestion").value, align = $("printFigureAlign").value;
+    changeFigureOverride(id, setting => (align ? { ...setting, align } : without(setting, "align")));
+  });
+  $("printFigureList").addEventListener("input", (event) => {
+    const slider = event.target.closest(".print-figure-slider");
+    if (!slider) return;
+    // 拖的过程中只把旁边的毫米数跟上去。每一格都重排整张卷子的话，预览会一直闪，
+    // 老师根本看不清自己拖到了哪儿；松手（change）才真的重排。
+    const size = slider.parentElement.querySelector(".print-figure-mm");
+    if (size && document.activeElement !== size) size.value = slider.value;
+  });
+  $("printFigureList").addEventListener("change", (event) => {
+    const id = $("printIndividualQuestion").value;
+    const slider = event.target.closest(".print-figure-slider");
+    const size = event.target.closest(".print-figure-mm");
+    const breaker = event.target.closest(".print-figure-break-box");
+    if (slider) {
+      const index = slider.dataset.figureIndex;
+      changeFigureOverride(id, setting => ({ ...setting, width: { ...(setting.width || {}), [index]: Number(slider.value) } }));
+    } else if (size) {
+      const index = size.dataset.figureIndex, millimetres = Number(size.value);
+      // 填了 0、填了 300、填成「宽一点」都不猜他要什么：退回这张图现在的样子，
+      // 并在鼠标停上来的时候说明能填多少。
+      if (!Number.isFinite(millimetres) || millimetres < FIGURE_WIDTH_MIN || millimetres > FIGURE_WIDTH_MAX) {
+        size.value = printState.figureOverrides[id]?.width?.[index] ?? "";
+        size.title = `请填 ${FIGURE_WIDTH_MIN}–${FIGURE_WIDTH_MAX} 之间的毫米数：太小图就没了，再大也超不过一张 A4 的正文宽度。`;
+        return;
+      }
+      changeFigureOverride(id, setting => ({ ...setting, width: { ...(setting.width || {}), [index]: millimetres } }));
+    } else if (breaker) {
+      const index = Number(breaker.dataset.figureBreak);
+      changeFigureOverride(id, (setting) => {
+        const breaks = new Set(setting.breaks || []);
+        if (breaker.checked) breaks.add(index); else breaks.delete(index);
+        const kept = [...breaks].sort((a, b) => a - b);
+        return kept.length ? { ...without(setting, "breaks"), breaks: kept } : without(setting, "breaks");
+      });
+    }
+  });
+  $("printFigureList").addEventListener("click", (event) => {
+    const reset = event.target.closest(".print-figure-reset");
+    if (!reset) return;
+    const id = $("printIndividualQuestion").value, index = reset.dataset.figureReset;
+    changeFigureOverride(id, (setting) => {
+      const width = { ...(setting.width || {}) };
+      delete width[index];
+      return Object.keys(width).length ? { ...setting, width } : without(setting, "width");
+    });
   });
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });

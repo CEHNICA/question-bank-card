@@ -114,6 +114,39 @@ assert.equal(mmPerPixel * 96, 25.4, "96 CSS px must be 25.4 mm");
 assert.doesNotMatch(exporter, /PREVIEW_FIGURE_MAX_W_PX|PREVIEW_FIGURE_MAX_H_PX|PREVIEW_BODY_FONT_PX/,
   "the 320px/220px/17px screen numbers are overridden in the print flow and must not come back");
 
+// --- what the teacher sets in the preview ---------------------------------------
+// A forced line break is drawn in the preview by a full-width spacer. Its height has
+// to be the row gap .qb-figures already uses, because Word separates two lines with
+// one 3.70mm paragraph — the same 14px. If the spacer took a different number, the
+// gap between two lines of diagrams would be 28px on screen and 14px on paper.
+const spacerGap = examLayout.match(/const FIGURE_GAP_PX\s*=\s*(\d+(?:\.\d+)?)/);
+assert.ok(spacerGap, "exam-layout.js names the gap a teacher-forced line break is drawn at");
+assert.equal(Number(spacerGap[1]), gapPx,
+  `the line-break spacer is ${spacerGap[1]}px tall but .qb-figures wraps at ${gapPx}px`);
+assert.match(examLayout, /row\.style\.rowGap\s*=\s*"0"/,
+  "a forced break must hand the row gap over to the spacer instead of adding to it");
+
+// A width typed into the preview replaces the 150 dpi term, it does not scale it —
+// so "60" means 60mm on paper in both places. The teacher must not have to think
+// about which one they are editing.
+assert.match(examLayout, /const chosenWidth = Number\(image\.dataset\.figureWidth\) \|\| Number\(image\.dataset\.solutionWidth\)/,
+  "a teacher-set figure width takes precedence, then an answer-diagram width, then the 150 dpi default");
+assert.match(exporter, /def _figure_paper_size\([^)]*forced_mm=None\)/,
+  "the exporter has to accept a teacher-set width at all");
+assert.match(exporter, /float\(forced_mm\) if forced_mm else width \* 25\.4 \/ PREVIEW_FIGURE_DPI/,
+  "the teacher-set width replaces the 150 dpi term in the exporter too, rather than scaling it");
+assert.match(exporter, /float\(text_width_mm\),\s*page_height_mm \* width \/ height/,
+  "a widened diagram is still capped at the text area and at one page of height");
+
+// Left and right rows must not keep the centred row's outer gap: flex leaves an open
+// end on whichever side the row is pushed to, and a gap there would sit the row
+// 1.85mm off the margin the teacher aimed at.
+for (const [align, code] of [["left", /if align == "left":/], ["right", /elif align == "right":/]]) {
+  assert.match(exporter, code, `a ${align}-aligned row drops the gap on its open end`);
+}
+assert.match(exporter, /"left": WD_TABLE_ALIGNMENT\.LEFT, "right": WD_TABLE_ALIGNMENT\.RIGHT/,
+  "the table follows the row position the teacher chose, not always centred");
+
 // --- option columns -----------------------------------------------------------
 // styles.css still carries "@container qpaper (max-width: 680px) { .qb-options.cols-4
 // -> two columns }", and the exporter used to model it verbatim. That rule can never

@@ -1,9 +1,9 @@
 "use strict";
 const assert = require("node:assert/strict");
 const layout = require("./exam-layout.js");
-assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, answer_space: "none", answer_space_overrides: {}, question_breaks: [] });
+assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, answer_space: "none", answer_space_overrides: {}, question_breaks: [], figure_overrides: {} });
 assert.deepEqual(layout.normalize({ pagination: "keep", option_layout: "four", option_overrides: { a: "two", b: "no" }, question_breaks: ["a", "a", 3] }),
-  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, answer_space: "none", answer_space_overrides: {}, question_breaks: ["a"] });
+  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, answer_space: "none", answer_space_overrides: {}, question_breaks: ["a"], figure_overrides: {} });
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "compact"), false);
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "keep"), true);
 assert.equal(layout.keepWhole(1200, layout.BODY_HEIGHT, "keep"), false, "An oversized question must be allowed to continue instead of creating an empty sheet");
@@ -35,6 +35,51 @@ for (const [first, expected] of [
 }
 assert(Math.abs(layout.BODY_HEIGHT - 986.45669) < .001);
 assert(Math.abs(layout.BODY_WIDTH - 672.755906) < .001);
+
+// 配图排版：老师在「调整单题」里改的东西要真的落到预览上，而且换行只能多出该有的那
+// 一份间距。上面那套假节点没有 before()/ownerDocument，这里单独搭一个最小的。
+function figureRowFixture(count, id = "q1") {
+  const doc = { createElement: tag => ({ tagName: tag.toUpperCase(), className: "", style: {}, attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } }) };
+  const row = { nodeType: 1, ownerDocument: doc, style: {}, pictures: [] };
+  for (let index = 0; index < count; index += 1) {
+    const image = { dataset: {} };
+    const picture = { nodeType: 1, className: "qb-figure", dataset: {}, image,
+      classList: { contains: name => name === "qb-figure" },
+      querySelector: selector => (selector === "img" ? image : null),
+      before(node) { row.pictures.splice(row.pictures.indexOf(this), 0, node); } };
+    row.pictures.push(picture);
+  }
+  row.children = row.pictures;
+  const question = { nodeType: 1, dataset: { questionId: id }, row, querySelector: selector => (selector === ".qb-figures" ? row : null) };
+  return { work: { querySelectorAll: selector => (selector === ".print-question" ? [question] : []) }, question, row };
+}
+{
+  const { work, row } = figureRowFixture(3);
+  layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { q1: { width: { 0: 60, 2: 35.5 }, align: "left" } } }));
+  assert.equal(row.style.justifyContent, "left", "老师选了靠左，这一行就得靠左");
+  assert.deepEqual(row.pictures.map(picture => picture.image.dataset.figureWidth), ["60", undefined, "35.5"],
+    "只改老师动过的那几张，没动过的留空走原来的默认大小");
+  assert.equal(row.style.rowGap, undefined, "不换行就不要碰行距：flex 自己的换行间距不能被改坏");
+}
+{
+  const { work, row } = figureRowFixture(3);
+  layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { q1: { breaks: [9, 2, 1, 0] } } }));
+  assert.equal(row.style.rowGap, "0", "插了空隙就得把 flex 的行距让出来，否则行与行之间会多出一整份间距");
+  assert.deepEqual(row.pictures.map(picture => picture.className),
+    ["qb-figure", "qb-figure-break", "qb-figure", "qb-figure-break", "qb-figure"],
+    "第 1 张本来就在行首、第 10 张这张题里没有，都不该插空隙；剩下的按从前往后插");
+  assert.deepEqual(row.pictures.filter(picture => picture.className === "qb-figure-break").map(spacer => spacer.style.height), ["14px", "14px"],
+    "空隙自己长到 14px，正好等于 .qb-figures 自己的 gap，也就是 Word 两行之间那道 3.70mm");
+}
+{
+  const { work, row } = figureRowFixture(2);
+  layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { other: { align: "right", width: { 0: 99 } } } }));
+  assert.equal(row.style.justifyContent, undefined, "别的题的调整不能落到这道题上");
+  assert.equal(row.pictures[0].image.dataset.figureWidth, undefined);
+}
+assert.deepEqual(layout.normalize({ figure_overrides: { a: { align: "center" }, b: { width: { "-1": 20, x: 20 } }, c: { width: { 0: -5 }, align: "top" } } }).figure_overrides, {},
+  "没改动的、序号不对的、宽度为负的、位置不认识的，一律不留下记录");
+console.log("A figure row follows the teacher's width, position and line breaks: OK");
 assert.rejects(layout.paginate(null), /缺少/).then(() => console.log("A4 layout options and pagination boundaries: OK"));
 
 // Real DOM Range can flatten several body paragraphs when a fragment starts

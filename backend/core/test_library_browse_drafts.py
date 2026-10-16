@@ -251,6 +251,68 @@ class LibraryBrowseDraftTests(TestCase):
             self.assertEqual(self.create_draft(**changes).status_code, 400)
         self.assertFalse(library_drafts.draft_path().exists())
 
+    def test_figure_adjustments_live_on_this_paper_only(self):
+        """老师把图调好，跟着这份草稿存；题库里的原题一个字都不许动。
+
+        配图调整是老师对自己这份卷子的排版决定，不是对题目的修改。所以两件事必须
+        同时成立：存下来下次打开还在（换个会话、关掉再开都还在），以及题库里那道题
+        的 content / content_hash 逐字不变 —— 后者要是变了，别人的卷子也会跟着变样。
+        """
+        first, second = self.publication(), self.publication()
+        before = list(PublishedQuestion.objects.order_by("pk").values("pk", "content", "content_hash"))
+        created = self.create_draft(
+            ids=[str(first.id), str(second.id)],
+            print_options={"figure_overrides": {str(first.id): {"width": {0: 60.5}, "align": "left", "breaks": [1]}}},
+        )
+        self.assertEqual(created.status_code, 201, created.content[:200])
+        draft = created.json()["draft"]
+        # 存盘走 JSON，第几张图的序号回来是 "0" 而不是 0；预览和 Word 两边都按序号
+        # 取值，取之前先转成数字，所以这里就是字符串，不另开一套类型。
+        self.assertEqual(draft["print_options"]["figure_overrides"],
+                         {str(first.id): {"width": {"0": 60.5}, "align": "left", "breaks": [1]}})
+        self.assertEqual(list(PublishedQuestion.objects.order_by("pk").values("pk", "content", "content_hash")), before,
+                         "配图调整不能写回题库")
+
+        # 下次打开还在。
+        again = self.client.get(f'/api/library/drafts/{draft["id"]}').json()["draft"]
+        self.assertEqual(again["print_options"]["figure_overrides"], draft["print_options"]["figure_overrides"])
+
+        # 去掉一道题，它的配图设置也跟着走 —— 和选项排版、留白一个规矩。
+        url = f'/api/library/drafts/{draft["id"]}'
+        kept = self.mutate("put", url, {"revision": 1, "ids": [str(second.id)]}).json()["draft"]
+        self.assertEqual(kept["print_options"]["figure_overrides"], {}, "题被移出卷子，它的配图设置也不留")
+
+        # 没改动的题不该占位置：默认的居中不算调整。
+        self.mutate("put", url, {"revision": 2, "ids": [str(first.id), str(second.id)],
+                                 "print_options": {"figure_overrides": {str(first.id): {"align": "center"}}}})
+        quiet = self.client.get(url).json()["draft"]
+        self.assertEqual(quiet["print_options"]["figure_overrides"], {}, "选了跟默认一样的居中，就当没动过")
+
+    def test_bad_figure_adjustments_are_refused_with_readable_words(self):
+        selected, other = self.publication(), self.publication()
+        for bad in (
+            {"align": "top"},                              # 没有这个位置
+            {"width": {0: 0}},                             # 缩到 0，图就没了
+            {"width": {0: 179}},                           # 比整张 A4 的版心还宽
+            {"width": {0: -20}},                           # 负数
+            {"width": {0: "宽一点"}},                      # 不是数字
+            {"width": {"第一张": 60}},                     # 序号得是数字
+            {"breaks": "第二张"},                           # 换行要一张一张列出来
+            {"breaks": [-1]},
+            {"scale": 2},                                  # 没有的选项
+        ):
+            with self.subTest(bad=bad):
+                response = self.create_draft(ids=[str(selected.id)],
+                                             print_options={"figure_overrides": {str(selected.id): bad}})
+                self.assertEqual(response.status_code, 400, response.content[:200])
+                self.assertNotIn("Traceback", response.content.decode("utf-8"))
+
+        # 没选进这份卷子的题，不接受它的配图设置。
+        stray = self.create_draft(ids=[str(selected.id)],
+                                  print_options={"figure_overrides": {str(other.id): {"align": "left"}}})
+        self.assertEqual(stray.status_code, 400)
+        self.assertFalse(library_drafts.draft_path().exists())
+
     def test_mutations_require_local_request_header_and_json(self):
         self.assertEqual(self.mutate("post", "/api/library/drafts", {"ids": []}, header=False).status_code, 403)
         self.assertEqual(self.mutate("post", "/api/library/drafts", {"ids": []}, content_type="text/plain").status_code, 415)

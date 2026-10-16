@@ -9,6 +9,30 @@
   const PAGE_WIDTH = 210 * MM, BODY_WIDTH = 178 * MM, BODY_HEIGHT = 261 * MM;
   const choices = new Set(["auto", "four", "two", "vertical"]);
   const writingSpace = Object.freeze({ none: 0, small: 12, medium: 30, large: 60 });
+  const positions = new Set(["left", "center", "right"]);
+  function figureSettings(value) {
+    // 老师在预览里对配图做的调整：width 是「第几张图 → 纸面上几毫米」，align 管整行
+    // 靠左还是靠右，breaks 里是从下一行开始的那几张。存储层已经查过一遍，这里再收
+    // 一次尾，是因为排版代码不只被草稿喂：导出 PDF 时 options 是从 JSON 直接送进
+    // 来的同一个函数。
+    const result = {};
+    for (const [id, setting] of Object.entries(value || {})) {
+      if (!setting || typeof setting !== "object") continue;
+      const widths = {};
+      for (const [key, millimetres] of Object.entries(setting.width || {})) {
+        const index = Number(key), size = Number(millimetres);
+        if (Number.isInteger(index) && index >= 0 && Number.isFinite(size) && size > 0) widths[index] = size;
+      }
+      const breaks = [...new Set((Array.isArray(setting.breaks) ? setting.breaks : [])
+        .map(Number).filter(value => Number.isInteger(value) && value >= 0))].sort((a, b) => a - b);
+      const entry = {};
+      if (Object.keys(widths).length) entry.width = widths;
+      if (positions.has(setting.align) && setting.align !== "center") entry.align = setting.align;
+      if (breaks.length) entry.breaks = breaks;
+      if (Object.keys(entry).length) result[id] = entry;
+    }
+    return result;
+  }
   function normalize(options = {}) {
     return {
       pagination: options.pagination === "keep" ? "keep" : "compact",
@@ -16,7 +40,8 @@
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => choices.has(value))),
       answer_space: Object.hasOwn(writingSpace, options.answer_space) ? options.answer_space : "none",
       answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {}).filter(([, value]) => Object.hasOwn(writingSpace, value))),
-      question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(value => typeof value === "string"))] : []
+      question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(value => typeof value === "string"))] : [],
+      figure_overrides: figureSettings(options.figure_overrides)
     };
   }
   function keepWhole(height, pageHeight, mode) { return mode === "keep" && height <= pageHeight + .5; }
@@ -198,6 +223,41 @@
     return overflow;
   }
 
+  // .qb-figures 的行距就是它自己的 14px gap。Word 那边两行配图之间隔的是一个
+  // 3.70mm 的小段落（同样是 14px），两边必须一样，所以这里插入的占位空隙也按 14px 算。
+  const FIGURE_GAP_PX = 14;
+  function applyFigureOverrides(work, options) {
+    const overrides = options.figure_overrides || {};
+    work.querySelectorAll(".print-question").forEach(question => {
+      const setting = overrides[question.dataset.questionId];
+      if (!setting) return;
+      const row = question.querySelector(".qb-figures");
+      if (!row) return;
+      if (setting.align) row.style.justifyContent = setting.align;
+      const figures = Array.from(row.children).filter(child => child.classList.contains("qb-figure"));
+      figures.forEach((figure, index) => {
+        const millimetres = setting.width ? setting.width[index] : 0;
+        const image = figure.querySelector("img");
+        if (image && millimetres) image.dataset.figureWidth = String(millimetres);
+      });
+      const breaks = (setting.breaks || []).filter(index => index > 0 && index < figures.length).sort((a, b) => a - b);
+      if (!breaks.length) return;
+      // flex 只会自然换行，「这张图必须另起一行」只能用占满整宽的空隙表达：它自己独占
+      // 一行，后面的图自然落到下一行。行距得单独再给一份 —— 把 row-gap 归零、让这个
+      // 空隙自己长到 14px，否则空隙自己占的那一行会再吃两道 14px，行与行之间变成
+      // 28px，而 Word 那边只隔 3.70mm。预览和纸面就不一样了。
+      row.style.rowGap = "0";
+      breaks.forEach(index => {
+        const spacer = element(row.ownerDocument, "div", "qb-figure-break");
+        spacer.setAttribute("aria-hidden", "true");
+        spacer.style.flex = "0 0 100%";
+        spacer.style.alignSelf = "flex-start";
+        spacer.style.height = `${FIGURE_GAP_PX}px`;
+        figures[index].before(spacer);
+      });
+    });
+  }
+
   async function paginate(source, supplied = {}) {
     if (!source?.ownerDocument || !supplied.host) throw new Error("缺少 A4 排版容器");
     const options = normalize(supplied), host = supplied.host, doc = source.ownerDocument;
@@ -218,6 +278,7 @@
         && Array.from(doc.fonts).some(face => face.status === "error" && /KaTeX_/.test(face.family))) {
         throw new Error("公式字体未能载入，请刷新组卷页面后重试。");
       }
+      applyFigureOverrides(work, options);
       await Promise.all(Array.from(work.querySelectorAll("img"), async image => {
         image.loading = "eager";
         if (typeof image.decode === "function") {
@@ -226,7 +287,9 @@
         if (!image.naturalWidth) throw new Error("试卷配图未能载入，请重试");
         // Match Word's natural 150 dpi size, capped to printable bounds. This is
         // independent of remaining space and never changes library thumbnails.
-        const chosenWidth = Number(image.dataset.solutionWidth);
+        // A width the teacher typed into the preview replaces the 150 dpi term
+        // rather than scaling it: the number they typed is millimetres on paper.
+        const chosenWidth = Number(image.dataset.figureWidth) || Number(image.dataset.solutionWidth);
         const imageScale = Math.min(chosenWidth > 0 ? Math.max(5, Math.min(178, chosenWidth)) * MM / image.naturalWidth : 96 / 150,
           BODY_WIDTH / image.naturalWidth, 210 * MM / image.naturalHeight);
         image.style.width = `${image.naturalWidth * imageScale}px`;
@@ -379,5 +442,5 @@
     });
     return factor;
   }
-  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, fitFormulas, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
+  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, fitFormulas, applyFigureOverrides, figureSettings, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
 });

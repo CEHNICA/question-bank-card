@@ -267,6 +267,18 @@
             <label class="print-field">本题留白 <select id="printIndividualSpace"><option value="">跟随全卷</option><option value="none">不留白</option><option value="small">少量（12 毫米）</option><option value="medium">适中（30 毫米）</option><option value="large">较多（60 毫米）</option></select></label>
             <label class="library-toggle switch"><input id="printIndividualBreak" type="checkbox"><span class="switch-track" aria-hidden="true"></span>这题另起一页</label>
             <p id="printIndividualHint" class="print-options-note"></p>
+            <div id="printFigureBox" class="print-figure-box" hidden>
+              <p class="print-field-title">本题配图</p>
+              <div id="printFigureList" class="print-figure-list"></div>
+              <label class="print-field" title="这一行的图整体靠哪一边。靠左或靠右时，图与图之间的间距不变，只是不再在行末留空。">整行位置
+                <select id="printFigureAlign" aria-label="本题配图整行靠哪一边">
+                  <option value="">居中（默认）</option>
+                  <option value="left">靠左</option>
+                  <option value="right">靠右</option>
+                </select>
+              </label>
+              <p class="print-options-note">只改这一份卷子，题库里的原图不动。导出的 Word 和 PDF 与这里看到的一致。</p>
+            </div>
           </div></details>
           <button id="clearBasket" class="button button-quiet" type="button">清空试题篮</button>
         </div>
