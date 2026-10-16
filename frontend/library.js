@@ -2251,20 +2251,51 @@
       .filter(([kind, message]) => (kind === "tags" ? true : state.features.ai_answer)
         && !(kind === "tags" && item.tag_suggestion?.status === "failed" && item.tag_suggestion.message === message))
       .forEach(([kind, message]) => {
+        const words = describeJobFailure(kind, message, aiReady(kind));
         const error = node("p", "library-job-error");
-        error.append(node("span", "", `${kind === "tags" ? "知识点标签任务" : "AI 解答任务"}未完成：${message}`));
-        if (/API 配置|服务商配置|密钥配置|模型配置|请重新配置/.test(message)) {
-          error.append(node("span", "", " 请检查“设置 → API 配置”。"));
-        }
+        error.title = words.title;
+        error.append(node("strong", "", words.head));
+        error.append(node("span", "", words.body));
+        if (words.body2) error.append(node("span", "", words.body2));
         box.append(error);
       });
     return box.childNodes.length ? box : null;
   }
 
+  // 「这个功能现在能不能用」只有一个口径。按钮显不显示、失败提示说不说人话，
+  // 都从这里判断；写两份判定迟早会有一处忘了跟着改，于是界面又开始骗人。
+  function aiReady(kind) {
+    if (state.ai.mode === "assistant") return kind === "tags" && state.ai.ready === true;
+    return state.ai.mode === "api" && state.ai.api_ready === true;
+  }
+
+  // 任务失败提示该怎么说，是另一件要单独定下来的事。同一条历史原因，在
+  // 「服务还没配好」和「后来配好了」两种时候该讲的话完全不同：照抄历史原因，
+  // 会让人以为此刻还没配好，于是反复回头检查已经配好的设置。
+  // ready 传的是此刻的真实状态，不是当时的状态。
+  function describeJobFailure(kind, message, ready) {
+    const label = kind === "tags" ? "AI 建议标签" : "AI 生成答案";
+    const configurationIssue = /API 配置|服务商配置|密钥配置|模型配置|请重新配置|尚未配置/.test(message);
+    if (configurationIssue && ready) {
+      return {
+        head: `${label}上次没跑成`,
+        body: "，当时服务还没配好。现在已经配好了——整批落下的活，回题库页点「"
+          + (kind === "tags" ? "补齐缺的知识点标签" : "补齐缺的参考答案") + "」一起补就行。",
+        title: `这道题上次${kind === "tags" ? "生成标签建议" : "生成参考答案"}时，服务还没配好，所以没跑成。现在服务已经配好，可以重来。`
+      };
+    }
+    return {
+      head: `${label}未完成`,
+      body: `：${message}`,
+      body2: configurationIssue ? " 请到“设置 → API 配置”里配好并测试。" : "",
+      title: message
+    };
+  }
+
   function jobButtons(item) {
     const buttons = [];
-    const tagReady = state.ai.mode === "assistant" ? state.ai.ready === true : state.ai.mode === "api" && state.ai.api_ready === true;
-    const answerReady = state.ai.mode === "api" && state.ai.api_ready === true;
+    const tagReady = aiReady("tags");
+    const answerReady = aiReady("answer");
     if (!tagReady && !answerReady) return buttons;
     const details = item.job_details || [];
     const waiting = new Set(details.length ? details.filter((job) => job.executor === state.ai.mode).map((job) => job.kind) : item.jobs || []);
