@@ -8,6 +8,7 @@ its own UTF-8 log before importing Django.
 from __future__ import annotations
 
 import contextlib
+import faulthandler
 import os
 import sys
 from pathlib import Path
@@ -63,6 +64,13 @@ def main(arguments: list[str] | None = None) -> int:
     role, *extra = arguments
     stream, owned = _log_stream()
     assert stream is not None
+    # 原生层的崩溃不会变成 Python 异常，日志里会一个字都留不下，只剩「进程没了」。
+    # 打开它，段错误和访问冲突会把当时的调用栈一起写进这份日志。取不到真实句柄时
+    # （日志被换成假对象）就跳过：记不了账，也不能因此起不来。
+    try:
+        faulthandler.enable(stream)
+    except Exception:
+        pass
     try:
         with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
             return _run(role, extra)

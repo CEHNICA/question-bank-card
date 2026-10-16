@@ -74,7 +74,62 @@ def _launch_browser(executable, profile):
     kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "shell": False}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    return subprocess.Popen(flags, **kwargs)
+    process = subprocess.Popen(flags, **kwargs)
+    # Record who this PID was at birth. Windows hands a freed PID to the next
+    # program that starts, so the bare number stops identifying our browser the
+    # moment it exits — and cleanup still has to be able to tell the difference.
+    process._qb_started_at = _process_started_at(process.pid)
+    return process
+
+
+def _process_started_at(pid) -> int | None:
+    """Windows creation time of a process, as a comparable integer.
+
+    None whenever the answer cannot be trusted (not Windows, no permission, the
+    process already gone). Callers must treat None as "unknown", never as "mine".
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        kernel.GetProcessTimes.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return None
+        try:
+            creation = wintypes.FILETIME()
+            others = [wintypes.FILETIME() for _ in range(3)]
+            if not kernel.GetProcessTimes(handle, ctypes.byref(creation), *[ctypes.byref(t) for t in others]):
+                return None
+        finally:
+            kernel.CloseHandle(handle)
+        return (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+    except Exception:
+        return None
+
+
+def _still_our_browser(process) -> bool:
+    """True only while this PID still belongs to the browser we started.
+
+    ``taskkill /T`` kills a whole tree, so acting on a recycled PID can take
+    down an unrelated program — including this app's own launcher, whose death
+    silently takes the service down with it. When the PID cannot be proven to be
+    ours, the browser we started is already gone and the only thing left to kill
+    is a stranger. So: no tree kill.
+    """
+    started_at = getattr(process, "_qb_started_at", None)
+    if started_at is None:
+        return False
+    current = _process_started_at(process.pid)
+    return current is not None and current == started_at
 
 
 def _remaining(deadline):
@@ -174,9 +229,15 @@ def _cleanup_browser(client, process):
     except Exception as error:
         _cleanup_warning("process_wait", error)
     try:
-        # Recheck this Popen before force-stopping its PID and child tree.
+        # Recheck this Popen before force-stopping its PID and child tree, and
+        # only while that PID still names the browser this call started.
         if process.poll() is None:
             if os.name == "nt":
+                if not _still_our_browser(process):
+                    # The PID was recycled: the browser is already gone, and a
+                    # tree kill here would hit whoever owns the number now.
+                    _cleanup_warning("process_recycled_pid", RuntimeError("process id reused"))
+                    return
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
                     timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)

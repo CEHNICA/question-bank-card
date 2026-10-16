@@ -376,6 +376,8 @@ class PdfCleanupTests(SimpleTestCase):
             stack.enter_context(mock.patch.object(pdf, "_wait_page_target", return_value=PdfPageStartupTests.target))
             stack.enter_context(mock.patch.object(pdf, "_CDP", return_value=client))
             stack.enter_context(mock.patch.object(pdf.subprocess, "Popen", return_value=process))
+            # 这个进程号出生时刻固定，结束时才认得出「还是原来那个」。
+            stack.enter_context(mock.patch.object(pdf, "_process_started_at", return_value=424242))
             terminator = stack.enter_context(mock.patch.object(pdf.subprocess, "run"))
             if fault == "process_terminate":
                 terminator.side_effect = pdf.subprocess.TimeoutExpired("synthetic owned termination", 5)
@@ -433,6 +435,34 @@ class PdfCleanupTests(SimpleTestCase):
             pdf._cleanup_browser(None, process)
         process.wait.assert_not_called()
         terminate.assert_not_called()
+
+    def test_process_id_reused_by_another_program_is_never_tree_killed(self):
+        """进程号被系统分给别人之后，连整棵树一起杀会误伤无辜的程序。"""
+        outcome = self.render_with_cleanup_failure("process_final_wait")
+        self.assertIsNone(outcome.error)
+        self.assertTrue(outcome.terminator.call_args_list, "这一步本该走到强杀分支")
+
+        process = outcome.process
+        process.poll.return_value = None
+        process.wait.side_effect = pdf.subprocess.TimeoutExpired("recycled", 2)
+        # 进程号还在，但已经不是自己起的那个浏览器了。
+        with mock.patch.object(pdf, "_process_started_at", return_value=999999), \
+                mock.patch.object(pdf.subprocess, "run") as run:
+            pdf._cleanup_browser(None, process)
+        self.assertEqual(run.call_args_list, [], "进程号已经换人，绝不能按它连整棵树一起杀")
+
+    def test_unknown_process_id_is_not_tree_killed_either(self):
+        """读不到出生时刻时只能当作「不敢认」，不能当作「是我的」。"""
+        for started in (None, 424242):
+            with self.subTest(started=started):
+                process = mock.Mock(pid=987654)
+                process._qb_started_at = started
+                process.poll.return_value = None
+                process.wait.side_effect = pdf.subprocess.TimeoutExpired("unknown", 2)
+                with mock.patch.object(pdf, "_process_started_at", return_value=None), \
+                        mock.patch.object(pdf.subprocess, "run") as run:
+                    pdf._cleanup_browser(None, process)
+                self.assertEqual(run.call_args_list, [])
 
     def test_unfinished_cleanup_records_only_phase_and_exception_type(self):
         for fault in self.faults:

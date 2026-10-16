@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 from concurrent.futures import ThreadPoolExecutor
+import faulthandler
 import hashlib
 import json
 import os
@@ -427,23 +428,43 @@ def _profile_still_open(profile: Path) -> bool:
         return False
 
 
-def wait_for_window(window: subprocess.Popen | None, web: subprocess.Popen) -> None:
-    """等到用户关掉题库窗口（或网页服务意外退出）。"""
+def wait_for_window(window: subprocess.Popen | None, web: subprocess.Popen) -> str:
+    """等到用户关掉题库窗口（或网页服务意外退出）。
+
+    返回结束原因。以前这两种情况都直接 return，日志里写的是同一句「窗口已关闭」，
+    于是「服务自己没了」和「你把窗口关了」分不开 —— 出了事回头查，只能靠猜。
+    """
     started = time.monotonic()
     if window is not None:
         while window.poll() is None:
             if web.poll() is not None:
-                return
+                return _service_died(web)
             time.sleep(0.5)
         if time.monotonic() - started > 5:
-            return
+            return "closed"
         # 浏览器把窗口交给了已有进程就立刻返回：改为按配置目录轮询。
         profile = window_profile()
         time.sleep(2)
         while web.poll() is None and _profile_still_open(profile):
             time.sleep(4)
-        return
+        if web.poll() is not None:
+            return _service_died(web)
+        return "closed"
     _control_window(web)
+    return "closed" if web.poll() is not None else "closed"
+
+
+def _service_died(web: subprocess.Popen) -> str:
+    """窗口还开着，网页服务却自己退了。
+
+    这种情况以前不留任何记录，事后只看得出「程序没了」，看不出服务是怎么没的。
+    退出码和当时的时间都写下来，下次再遇到就有据可查，不用再猜。
+    """
+    code = web.poll()
+    print(f"网页服务在窗口仍开着时退出（退出码 {code}）；"
+          f"如果是 0 多半是被人结束的，不是自己崩的。"
+          f"时间 {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    return "service-died"
 
 
 def wait_for_reattached_window(window: subprocess.Popen | None) -> None:
@@ -622,6 +643,13 @@ def main(arguments: list[str] | None = None) -> int:
         print("窗口版启动器仅支持 Windows。")
         return 1
     log = _log_stream()
+    # 原生层的崩溃（段错误、访问冲突）拿不到 Python 异常，日志里会一个字都没有，
+    # 事后只知道「程序没了」。打开它，这类崩溃会把当时的调用栈一起写进日志。
+    # 取不到真实句柄时（日志被换成假对象）就跳过：记不了账，也不能因此起不来。
+    try:
+        faulthandler.enable(log)
+    except Exception:  # noqa: BLE001 - 记不了崩溃绝不能连启动一起挡住
+        pass
     with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
         print(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')} 窗口版启动 ====", flush=True)
         try:
@@ -739,7 +767,9 @@ def _main(arguments: list[str] | None = None) -> int:
         url = value
         print(f"服务就绪：{url}", flush=True)
         window = open_window(url)
-        wait_for_window(window, processes[-1])
+        how = wait_for_window(window, processes[-1])
+        if how == "service-died":
+            print("窗口还开着但服务没了，下面这次退出会把整个软件一起关掉。", flush=True)
         print("窗口已关闭，停止服务", flush=True)
         return 0
     finally:
