@@ -1,83 +1,51 @@
-"""Check that a teacher's figure layout survives the whole export path, for real.
+"""Measure what the teacher's figure layout actually printed, in millimetres.
 
-The unit tests prove the formulas agree. This proves the app actually applies
-them: it takes a real three-diagram question out of the running app, asks the
-app for a Word file and a PDF with a layout the teacher set in the preview, then
-opens the Word file in WPS — the program the teacher opens it in — turns it into
-a PDF, and measures both papers in millimetres from the page edge.
+The export has to run in the page: KaTeX turns each formula into MathML there and
+the server refuses to export un-converted LaTeX, so a script that reads the
+database and posts its own payload is measuring a document the app would never
+produce. This measures the two files the running app actually handed over.
 
-The numbers to expect are written next to each check. A formula can be right and
-still never reach the page; only measuring the page says whether it did.
+The Word file is opened in WPS — the program the teacher opens it in — and turned
+into a PDF first; reading the docx XML only proves this script wrote a number,
+not that it printed. Both PDFs are then measured the same way and compared with
+what the preview shows, which the browser measures separately.
 
-Usage: python tools/check_figure_controls_real.py
+Usage: python tools/check_figure_controls_real.py [folder]
 """
-import json
 import os
-import sqlite3
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
-import uuid
 
-BASE = "http://127.0.0.1:8768"
 ROOT = r"C:\Users\17321\.minimax\sessions\mvs_fc946281665f4565a3d0ce7af01bd838\workspace\qbj-src"
-OUT = os.path.join(ROOT, "配图排版实测")
-DB = os.path.join(os.environ["LOCALAPPDATA"], "QuestionBankCard", "db.sqlite3")
+# 输出放在仓库外面：这里面是真实试卷的内容，不进版本库。
+FOLDER = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(ROOT), "配图排版实测-1.24.8")
 
-# 初三「特殊的平行四边形」第 23 题：三块裁片，279×226 / 231×226 / 210×236 px。
-# 在 150dpi 下是 47.2 / 39.1 / 35.6mm，三张挤一行是 129.3mm。
-QUESTION = "33de480e-99bc-4ced-b776-6812978246d8"
-# 老师在预览里做的事：把第一张放大到 100 毫米、整行靠左、点名第 3 张另起一行。
-# 100 + 3.70 + 39.1 = 142.8mm 放得下，再加第三张就到 182.1mm 超出版心，所以
-# 两边都该是「第一、二张一行，第三张一行」。
-OVERRIDES = {"width": {"0": 100.0}, "align": "left", "breaks": [2]}
 # 版心：页宽 210，两侧页边距 16，正文从 16.00mm 到 194.00mm。
 LEFT_EDGE = 16.0
 GAP_MM = 14 * 25.4 / 96
+# 老师在预览里设的是：第 1 张 100 毫米、整行靠左、第 3 张另起一行。
+# 100 + 3.70 + 39.1 = 142.8mm 放得下，再加 35.6 就到 182.1mm 超出版心，所以
+# 两边都该是「第一、二张一行，第三张一行」，两行都贴着左边距。
 EXPECTED_WIDTH_MM = [100.0, 39.1, 35.6]
 EXPECTED_LEFT_MM = [16.0, 16.0 + 100.0 + GAP_MM, 16.0]
-EXPECTED_LINES = [2, 1]
+# 老师亲手填的那个数必须是准的：100 毫米就是 100 毫米，差半毫米都不叫一致。
+CHOSEN_WIDTH_MM = 100.0
+CHOSEN_TOLERANCE = 0.05
+# 没动过的那几张，浏览器生成 PDF 时会把图的位置对齐到整磅（1 磅 = 0.35 毫米），
+# 于是最多差 0.13 毫米。这个和本次功能无关：不调整任何东西导出的 PDF 里，
+# 居中那一行的第一张图同样落在 40.22 而不是理论上的 40.31。
+BROWSER_TOLERANCE = 0.15
 
 
-def units(value):
-    return len(value.encode("utf-16-le")) // 2
+def close(got, want, tolerance):
+    return abs(got - want) <= tolerance
 
 
-def field(value):
-    if not value:
-        return []
-    return {"source": value, "blocks": [{"type": "text", "start": 0, "end": units(value),
-                                         "segments": [{"type": "text", "start": 0, "end": units(value)}]}]}
-
-
-def load():
-    connection = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    row = connection.execute("SELECT content FROM core_publishedquestion WHERE id = ?",
-                             (str(uuid.UUID(QUESTION)).replace("-", ""),)).fetchone()
-    content = json.loads(row["content"] or "{}")
-    figures = [figure for figure in content.get("figures") or [] if figure.get("slot") == "stem"]
-    fields = {name: field(str(content.get(name) or "")) for name in ("stem", "origin", "answer", "analysis")}
-    fields.update({f"options.{key}": field(value) for key, value in (content.get("options") or {}).items()})
-    return content, figures, {QUESTION: fields}
-
-
-def post(path, payload):
-    request = urllib.request.Request(
-        BASE + path, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), method="POST",
-        headers={"Content-Type": "application/json", "X-QB-Request": "1"})
-    try:
-        with urllib.request.urlopen(request, timeout=600) as response:
-            return response.read(), response.headers.get("Content-Type", "")
-    except urllib.error.HTTPError as error:
-        print(f"{path} 失败：{error.code} {error.read().decode('utf-8')[:400]}")
-        raise SystemExit(1)
+def worst(values, wanted):
+    return max(abs(value - want) for value, want in zip(values, wanted))
 
 
 def render_with_wps(docx, pdf):
-    """WPS is what the teacher opens the file in, so measure it in WPS."""
     import win32com.client
     app = win32com.client.Dispatch("KWPS.Application")
     app.Visible = False
@@ -95,71 +63,68 @@ def render_with_wps(docx, pdf):
 
 
 def measure(pdf):
-    """Every picture's box on the page, in millimetres from the page edge."""
     sys.path.insert(0, os.path.join(ROOT, "packaging", ".build", "venv", "Lib", "site-packages"))
     import fitz
     document = fitz.open(pdf)
+    point = 72 / 25.4
     boxes = []
     for number, page in enumerate(document, start=1):
-        point = 72 / 25.4
         for info in page.get_image_info():
             box = info["bbox"]
-            boxes.append((number, round(box[0] / point, 1), round(box[2] / point, 1), round((box[2] - box[0]) / point, 1)))
+            boxes.append((number, round(box[0] / point, 1), round(box[2] / point, 1),
+                          round((box[2] - box[0]) / point, 1)))
     document.close()
     return boxes
 
 
-def report(label, boxes):
+def report(label, boxes, preview=None):
     print(f"\n{label}")
-    print(f"  {'页':>2}  {'左':>6}  {'右':>6}  {'宽':>6}   期望")
+    print(f"  {'页':>2}  {'左(mm)':>7}  {'右(mm)':>7}  {'宽(mm)':>7}")
     for number, left, right, width in boxes:
-        print(f"  {number:>2}  {left:>6.1f}  {right:>6.1f}  {width:>6.1f}")
-    problems = []
+        print(f"  {number:>2}  {left:>7.1f}  {right:>7.1f}  {width:>7.1f}")
     widths = [box[3] for box in boxes]
     lefts = [box[1] for box in boxes]
-    if [round(value, 1) for value in widths] != EXPECTED_WIDTH_MM:
-        problems.append(f"图宽 {widths}，期望 {EXPECTED_WIDTH_MM}")
-    if [round(value, 1) for value in lefts] != [round(value, 1) for value in EXPECTED_LEFT_MM]:
-        problems.append(f"左边缘 {lefts}，期望 {[round(v, 1) for v in EXPECTED_LEFT_MM]}")
-    if problems:
-        for text in problems:
-            print("  [不一致] " + text)
-    else:
-        print("  [一致] 宽、位置、分行都与预览一致")
+    problems = []
+    if not close(widths[0], CHOSEN_WIDTH_MM, CHOSEN_TOLERANCE):
+        problems.append(f"老师填的 100 毫米印出来是 {widths[0]} 毫米")
+    if worst(widths, EXPECTED_WIDTH_MM) > BROWSER_TOLERANCE:
+        problems.append(f"图宽 {widths}，与预览的差超过 {BROWSER_TOLERANCE} 毫米")
+    if worst(lefts, EXPECTED_LEFT_MM) > BROWSER_TOLERANCE:
+        problems.append(f"左边缘 {lefts}，与预览的差超过 {BROWSER_TOLERANCE} 毫米")
+    if preview is not None:
+        if worst(widths, preview[0]) > BROWSER_TOLERANCE:
+            problems.append(f"与预览的宽度对不上：预览 {preview[0]}")
+        if worst(lefts, preview[1]) > BROWSER_TOLERANCE:
+            problems.append(f"与预览的位置对不上：预览 {preview[1]}")
+    print(f"  宽度最大差 {worst(widths, EXPECTED_WIDTH_MM):.2f} 毫米，位置最大差 {worst(lefts, EXPECTED_LEFT_MM):.2f} 毫米"
+          f"（老师填的那个数差 {abs(widths[0] - CHOSEN_WIDTH_MM):.2f} 毫米）")
+    for text in problems:
+        print("  [不一致] " + text)
+    if not problems:
+        print("  [一致] 宽度、位置、分行都与预览一致")
     return not problems
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
-    content, figures, rendered = load()
-    print(f"第 23 题的题干配图：{[tuple(figure.get('bbox') or ()) for figure in figures]}")
-    print(f"老师在预览里设的：{json.dumps(OVERRIDES, ensure_ascii=False)}")
+    docx = os.path.join(FOLDER, "配图排版.docx")
+    pdf = os.path.join(FOLDER, "配图排版.pdf")
+    for path in (docx, pdf):
+        if not os.path.isfile(path):
+            print(f"缺少 {path}；先让运行中的软件导出这两个文件")
+            return 1
+        print(f"{os.path.basename(path)}：{os.path.getsize(path)} 字节")
 
-    payload = {"ids": [QUESTION], "title": "配图排版实测",
-               "print_options": {"document": "questions", "student_info": False,
-                                 "figure_overrides": {QUESTION: OVERRIDES}},
-               "rendered_fields": rendered, "format": "docx"}
-    data, kind = post("/api/library/export-docx", payload)
-    docx = os.path.join(OUT, "配图排版.docx")
-    with open(docx, "wb") as handle:
-        handle.write(data)
-    print(f"\nWord：{len(data)} 字节 -> {docx}")
+    preview = ([100.0, 39.11, 35.56], [16.0, 119.7, 16.0])
+    print(f"\n预览上量到的（浏览器报的）：宽 {preview[0]}  左 {preview[1]}")
 
-    rendered_pdf = os.path.join(OUT, "Word渲染.pdf")
-    render_with_wps(docx, rendered_pdf)
-    print(f"WPS 渲染 -> {rendered_pdf}")
+    rendered = os.path.join(FOLDER, "Word渲染.pdf")
+    render_with_wps(docx, rendered)
+    print(f"WPS 渲染 -> {rendered}")
 
-    payload["format"] = "pdf"
-    data, kind = post("/api/library/export-pdf", payload)
-    pdf = os.path.join(OUT, "配图排版.pdf")
-    with open(pdf, "wb") as handle:
-        handle.write(data)
-    print(f"PDF：{len(data)} 字节 -> {pdf}")
-
-    word_ok = report("Word（经 WPS 渲染）", measure(rendered_pdf))
-    pdf_ok = report("PDF（软件自己排的）", measure(pdf))
+    word_ok = report("Word（经 WPS 渲染）", measure(rendered), preview)
+    pdf_ok = report("PDF（软件自己排的）", measure(pdf), preview)
     print()
-    print("预览 = Word = PDF" if word_ok and pdf_ok else "两边有一处对不上")
+    print("预览 = Word = PDF" if word_ok and pdf_ok else "有一处对不上")
     return 0 if word_ok and pdf_ok else 1
 
 

@@ -15,7 +15,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 FOLDER = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.environ["TEMP"], "qb-export")
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8902
-SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,8 +30,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        # 文件名是中文的（老师看的是「配图排版.docx」，不是 out.docx）。只挡掉能
+        # 跳出目标目录的字符，其余原样保留 —— 只留 ASCII 的话，名字会被剥成「.docx」。
         name = (query.get("name") or ["out.bin"])[0]
-        name = "".join(char for char in name if char in SAFE) or "out.bin"
+        name = os.path.basename(name.replace("\\", "/"))
+        if not name or name.startswith("."):
+            name = "out" + os.path.splitext(name)[1]
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         target = os.path.join(FOLDER, name)
         os.makedirs(FOLDER, exist_ok=True)
