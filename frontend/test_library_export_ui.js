@@ -15,8 +15,8 @@ function stubElement() {
   return {
     value: "", checked: false, disabled: false, hidden: false, className: "",
     dataset: {}, style: {}, title: "", type: "", children: [], parentElement: null,
-    setAttribute() {}, append(...kids) { kids.forEach(kid => { kid.parentNode = this; this.children.push(kid); }); },
-    replaceChildren(...kids) { this.children = []; kids.forEach(kid => { kid.parentNode = this; this.children.push(kid); }); },
+    setAttribute() {}, append(...kids) { kids.forEach(kid => { kid.parentNode = this; kid.parentElement = this; this.children.push(kid); }); },
+    replaceChildren(...kids) { this.children = []; kids.forEach(kid => { kid.parentNode = this; kid.parentElement = this; this.children.push(kid); }); },
     // 认得 ".class" 和 ".parent .child" 两种写法。真实代码找的是 ".qb-figure img"
     // 这种后代选择器，只认单个 class 的话，假元素会给出一个假的「找不到」。
     querySelectorAll(selector) {
@@ -229,9 +229,29 @@ assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-m
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-slider").value, "90");
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-reset").hidden, false, "改过的图要能一键还原");
 assert.equal(controls.printFigureAlign.value, "right");
+// 第 1 张图本来就在行首，让它「从下一行开始」什么也不会发生。留一个点了没反应的
+// 开关在那里，老师只会以为自己没设置好 —— 它锁着，并且把话说清楚为什么用不上。
+const breakers = Array.from(controls.printFigureList.children).map(row => row.querySelector(".print-figure-break-box"));
+assert.equal(breakers.length, 2, "这道题有两张题干配图");
+assert.equal(breakers[0].disabled, true, "第 1 张图的换行开关必须锁住");
+assert.equal(breakers[1].disabled, false);
+assert.match(breakers[0].parentElement.querySelector(".print-figure-break-label").textContent, /本来就另起一行/,
+  "锁住的开关要说清楚为什么用不上，不能只是灰着");
+assert.match(breakers[1].parentElement.querySelector(".print-figure-break-label").textContent, /从下一行开始/);
+printState.exporting = true; sandbox.syncIndividualControls();
+assert.equal(Array.from(controls.printFigureList.children)[1].querySelector(".print-figure-break-box").disabled, true);
+assert.equal(Array.from(controls.printFigureList.children)[0].querySelector(".print-figure-break-box").disabled, true,
+  "导出中解锁了「导出时禁用」，第 1 张图那个就跟着解锁了");
+printState.exporting = false;
+printState.items[0].content.figures = [{ slot: "stem" }];
 printState.items[0].content.body_mode = "source_image";
 sandbox.syncIndividualControls();
 assert.equal(controls.printFigureBox.hidden, true, "整页扫描的原图题保留卷面排版，不给配图调整");
+delete printState.items[0].content.body_mode;
+printState.items[0].content.figures = [{ slot: "stem" }];
+sandbox.syncIndividualControls();
+assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-break-box").disabled, true,
+  "只有一张图时没有换行可言，那个开关同样得锁住");
 printState.missing = []; printState.tooWide = 0; printState.exporting = true;
 sandbox.syncExportButtons();
 assert(controls.printButton.disabled && controls.exportWord.disabled && controls.exportSplit.disabled);

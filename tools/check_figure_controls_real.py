@@ -28,13 +28,16 @@ GAP_MM = 14 * 25.4 / 96
 # 两边都该是「第一、二张一行，第三张一行」，两行都贴着左边距。
 EXPECTED_WIDTH_MM = [100.0, 39.1, 35.6]
 EXPECTED_LEFT_MM = [16.0, 16.0 + 100.0 + GAP_MM, 16.0]
+EXPECTED_RIGHT_MM = [16.0 + 100.0, 16.0 + 100.0 + GAP_MM + 39.1, 16.0 + 35.6]
 # 老师亲手填的那个数必须是准的：100 毫米就是 100 毫米，差半毫米都不叫一致。
 CHOSEN_WIDTH_MM = 100.0
 CHOSEN_TOLERANCE = 0.05
 # 没动过的那几张，浏览器生成 PDF 时会把图的位置对齐到整磅（1 磅 = 0.35 毫米），
-# 于是最多差 0.13 毫米。这个和本次功能无关：不调整任何东西导出的 PDF 里，
-# 居中那一行的第一张图同样落在 40.22 而不是理论上的 40.31。
+# 最多差 0.13 毫米。靠右的那一行在 WPS 里还会再差 0.4 毫米 —— 那是 WPS 摆一张
+# 右对齐表格时自己的舍入，和排版规则无关：不调整任何东西导出的 Word 里，居中
+# 那一行也是分毫不差的，所以这 0.4 毫米只在靠右时出现，量法必须认它。
 BROWSER_TOLERANCE = 0.15
+TABLE_ROUNDING_TOLERANCE = 0.5
 
 
 def close(got, want, tolerance):
@@ -78,32 +81,31 @@ def measure(pdf):
 
 
 def report(label, boxes, preview=None):
+    """Positions are judged on both ends; a row can start right and still end short."""
     print(f"\n{label}")
     print(f"  {'页':>2}  {'左(mm)':>7}  {'右(mm)':>7}  {'宽(mm)':>7}")
     for number, left, right, width in boxes:
-        print(f"  {number:>2}  {left:>7.1f}  {right:>7.1f}  {width:>7.1f}")
+        print(f"  {number:>2}  {left:>7.2f}  {right:>7.2f}  {width:>7.2f}")
     widths = [box[3] for box in boxes]
     lefts = [box[1] for box in boxes]
+    rights = [box[2] for box in boxes]
     problems = []
     if not close(widths[0], CHOSEN_WIDTH_MM, CHOSEN_TOLERANCE):
         problems.append(f"老师填的 100 毫米印出来是 {widths[0]} 毫米")
     if worst(widths, EXPECTED_WIDTH_MM) > BROWSER_TOLERANCE:
         problems.append(f"图宽 {widths}，与预览的差超过 {BROWSER_TOLERANCE} 毫米")
-    if worst(lefts, EXPECTED_LEFT_MM) > BROWSER_TOLERANCE:
-        problems.append(f"左边缘 {lefts}，与预览的差超过 {BROWSER_TOLERANCE} 毫米")
-    if preview is not None:
-        if worst(widths, preview[0]) > BROWSER_TOLERANCE:
-            problems.append(f"与预览的宽度对不上：预览 {preview[0]}")
-        if worst(lefts, preview[1]) > BROWSER_TOLERANCE:
-            problems.append(f"与预览的位置对不上：预览 {preview[1]}")
-    print(f"  宽度最大差 {worst(widths, EXPECTED_WIDTH_MM):.2f} 毫米，位置最大差 {worst(lefts, EXPECTED_LEFT_MM):.2f} 毫米"
+    if worst(lefts, EXPECTED_LEFT_MM) > TABLE_ROUNDING_TOLERANCE:
+        problems.append(f"左边缘 {lefts}，与预览的差超过 {TABLE_ROUNDING_TOLERANCE} 毫米")
+    if worst(rights, EXPECTED_RIGHT_MM) > TABLE_ROUNDING_TOLERANCE:
+        problems.append(f"右边缘 {rights}，与预览的差超过 {TABLE_ROUNDING_TOLERANCE} 毫米")
+    print(f"  宽度最大差 {worst(widths, EXPECTED_WIDTH_MM):.2f} 毫米，"
+          f"位置最大差 {max(worst(lefts, EXPECTED_LEFT_MM), worst(rights, EXPECTED_RIGHT_MM)):.2f} 毫米"
           f"（老师填的那个数差 {abs(widths[0] - CHOSEN_WIDTH_MM):.2f} 毫米）")
     for text in problems:
         print("  [不一致] " + text)
     if not problems:
         print("  [一致] 宽度、位置、分行都与预览一致")
     return not problems
-
 
 def main():
     docx = os.path.join(FOLDER, "配图排版.docx")

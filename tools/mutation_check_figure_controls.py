@@ -155,6 +155,20 @@ MUTATIONS = [
         "      .querySelectorAll(\".qb-figures .qb-figure img\"));",
         ["frontend/test_library_export_ui.js"],
     ),
+    (
+        LIBRARY,
+        "the first figure offers a line-break switch that can never do anything",
+        "    const first = count < 2 || index === 0;",
+        "    const first = false;",
+        ["frontend/test_library_export_ui.js"],
+    ),
+    (
+        LIBRARY,
+        "the exporting state unlocks the first figure's line-break switch",
+        "      breaker.disabled = printState.exporting || figures.length < 2 || index === 0;",
+        "      breaker.disabled = printState.exporting;",
+        ["frontend/test_library_export_ui.js"],
+    ),
 ]
 
 

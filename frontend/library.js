@@ -3704,7 +3704,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     return (item.content?.figures || []).filter(figure => figure.slot === "stem");
   }
 
-  function figureRow(index) {
+  function figureRow(index, count) {
     const row = node("div", "print-figure-row");
     const line = node("div", "print-figure-line");
     line.append(node("span", "print-figure-name", `第 ${index + 1} 张图`));
@@ -3725,12 +3725,17 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     reset.dataset.figureReset = String(index);
     reset.title = "把这张图恢复成系统自动的大小，不影响别的设置。";
     line.append(slider, size, node("span", "print-figure-unit", "毫米"), reset);
+    // 第 1 张图本来就在第一行的开头，让它「从下一行开始」没有意义 ——
+    // 勾上什么也不会发生，而一个点了没反应的开关比没有更让人以为自己没设置好。
+    const first = count < 2 || index === 0;
     const breaker = node("label", "library-toggle switch print-figure-break");
     const toggle = node("input", "print-figure-break-box");
     toggle.type = "checkbox";
     toggle.dataset.figureBreak = String(index);
-    toggle.title = "勾上之后，这张图自己另起一行，后面的图排在它下面一行。";
-    breaker.append(toggle, node("span", "switch-track print-figure-track"), node("span", "print-figure-break-label", "这张图从下一行开始"));
+    toggle.disabled = first;
+    toggle.title = first ? "第一张图本来就在这一行的开头，不需要再换行。" : "勾上之后，这张图自己另起一行，后面的图排在它下面一行。";
+    breaker.append(toggle, node("span", "switch-track print-figure-track"),
+      node("span", "print-figure-break-label", first ? "第一张图本来就另起一行" : "这张图从下一行开始"));
     breaker.querySelector(".switch-track").setAttribute("aria-hidden", "true");
     row.append(line, breaker);
     return row;
@@ -3764,7 +3769,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     // 拖到一半手一松，滑块就跳回原处。
     if (list.dataset.questionId !== id || list.children.length !== figures.length) {
       list.dataset.questionId = id;
-      list.replaceChildren(...figures.map((figure, index) => figureRow(index)));
+      list.replaceChildren(...figures.map((figure, index) => figureRow(index, figures.length)));
     }
     figures.forEach((figure, index) => {
       const row = list.children[index];
@@ -3772,7 +3777,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       const current = chosen ?? printed[index] ?? 40;
       const slider = row.querySelector(".print-figure-slider"), size = row.querySelector(".print-figure-mm");
       const reset = row.querySelector(".print-figure-reset"), breaker = row.querySelector(".print-figure-break-box");
-      slider.disabled = size.disabled = reset.disabled = breaker.disabled = printState.exporting;
+      // 第 1 张图的换行开关是锁着的，别在导出中把「导出时禁用」顺手把它解锁了。
+      breaker.disabled = printState.exporting || figures.length < 2 || index === 0;
+      slider.disabled = size.disabled = reset.disabled = printState.exporting;
       if (document.activeElement !== size) size.value = chosen ? String(chosen) : "";
       slider.value = String(Math.min(FIGURE_WIDTH_MAX, Math.max(FIGURE_WIDTH_MIN, Math.round(current))));
       slider.title = chosen
