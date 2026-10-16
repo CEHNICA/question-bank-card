@@ -142,8 +142,17 @@ MUTATIONS = [
     (
         LIBRARY,
         "the slider is seeded from the scaled screen size instead of the printed size",
-        "      const mm = Math.round(image.offsetWidth * 25.4 / 96 * 10) / 10;",
-        "      const mm = Math.round(image.getBoundingClientRect().width * 25.4 / 96 * 10) / 10;",
+        "      const millimetres = Math.round(image.offsetWidth * 25.4 / 96 * 10) / 10;",
+        "      const millimetres = Math.round(image.getBoundingClientRect().width * 25.4 / 96 * 10) / 10;",
+        ["frontend/test_library_export_ui.js"],
+    ),
+    (
+        LIBRARY,
+        "the slider only measures the half of a split question that has no figures",
+        "    const images = Array.from(ui.paper.querySelectorAll(`.print-question[data-question-id=\"${CSS.escape(id)}\"]`))\n"
+        "      .flatMap(block => Array.from(block.querySelectorAll(\".qb-figures .qb-figure img\")));",
+        "    const images = Array.from((ui.paper.querySelector(`.print-question[data-question-id=\"${CSS.escape(id)}\"]`) || { querySelectorAll: () => [] })\n"
+        "      .querySelectorAll(\".qb-figures .qb-figure img\"));",
         ["frontend/test_library_export_ui.js"],
     ),
 ]

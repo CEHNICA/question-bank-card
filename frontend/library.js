@@ -3740,14 +3740,16 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   // 已经把每一张图的宽度写成内联样式了（排版函数写死的），量回来就是毫米 —— 老师
   // 不用先猜一个数才知道往左还是往右拖。
   function printedFigureWidths(id) {
-    const question = ui.paper.querySelector(`.print-question[data-question-id="${CSS.escape(id)}"]`);
-    const row = question?.querySelector(".qb-figures");
-    if (!row) return [];
-    return Array.from(row.querySelectorAll(".qb-figure img")).map(image => {
+    // 一道题跨页时会被排版函数拆成两段（前半页一段、后半页一段），两段共用同一个
+    // 题目编号。只看第一段的话，恰好是题干占满一页、配图被推到下一页的那种题 —— 量
+    // 到的段落里一张图也没有，滑块只能退回一个猜的默认宽度。
+    const images = Array.from(ui.paper.querySelectorAll(`.print-question[data-question-id="${CSS.escape(id)}"]`))
+      .flatMap(block => Array.from(block.querySelectorAll(".qb-figures .qb-figure img")));
+    return images.map(image => {
       // offsetWidth 是排版后的原始宽度；getBoundingClientRect 会把整张卷子的缩放
       // 一起算进来，量出来的是屏幕上的大小，不是印在纸上的大小。
-      const mm = Math.round(image.offsetWidth * 25.4 / 96 * 10) / 10;
-      return mm > 0 ? mm : 40;
+      const millimetres = Math.round(image.offsetWidth * 25.4 / 96 * 10) / 10;
+      return millimetres > 0 ? millimetres : 40;
     });
   }
 

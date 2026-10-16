@@ -199,7 +199,14 @@ shownRow.append(shownFigure);
 const shownQuestion = stubElement();
 shownQuestion.dataset = { questionId: "second" };
 shownQuestion.append(shownRow);
-ui.paper.querySelector = () => shownQuestion;
+// 一道题跨页会被拆成两段：前半页那一段只有题干，配图在另一半页。编号一样，
+// 滑块必须把两段里的图一起量，否则正好在这种题上退回猜的默认宽度。
+const headOnly = stubElement();
+headOnly.dataset = { questionId: "second" };
+ui.paper.querySelectorAll = selector => {
+  if (selector.startsWith(".print-question")) return [headOnly, shownQuestion];
+  return [shownQuestion].flatMap(block => block.querySelectorAll(selector));
+};
 sandbox.syncIndividualControls();
 assert.equal(controls.printFigureBox.hidden, false, "有配图的题要显示配图调整");
 assert.equal(controls.printFigureList.children.length, 2, "只列题干配图，选项里的图不算");
@@ -207,7 +214,7 @@ assert.equal(controls.printFigureList.children[0].children[0].children[0].textCo
 assert.equal(controls.printFigureList.children[1].children[0].children[0].textContent, "第 2 张图");
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-slider").type, "range", "每张图都要有一根能拖的滑块");
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-slider").value, "64",
-  "240px 是 63.5 毫米，滑块就该停在这儿，而不是从头到尾都用同一个默认值");
+  "240px 是 63.5 毫米，滑块就该停在这儿，而不是从头到尾都用同一个默认值；题目被拆成两页时也一样");
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-mm").value, "",
   "没调过的图不写死数字，空着才看得出「这一张还没动过」");
 assert.equal(controls.printFigureList.children[0].querySelector(".print-figure-reset").hidden, true,
