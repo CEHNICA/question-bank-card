@@ -51,7 +51,30 @@ assert.match(css, /\.library-card\.inspector-active[^\{]*\{[^}]*outline:[^}]*box
   "the question linked to the inspector has a persistent green outline and glow");
 assert.match(js, /tag-suggestion-retry-inline[\s\S]*?重新建议[\s\S]*?queueJobs\("tags", \{ ids: \[item\.id\], retry: true \}\)/,
   "a failed tag suggestion can be retried from the same visible error panel");
-assert.match(js, /function renderExtraTools\(\)[\s\S]*?快速查看[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?AI 批量处理[\s\S]*?batchBox\.append\(batch\)/, "quick browsing and API-consuming batch tasks have separate destinations");
+// 待办入口（待核对、未标知识点）必须常驻在筛选栏上，不能藏进「更多筛选」。
+// 它以前就住在那个浮层里，而浮层在三组筛选都为空时会把整个折叠板一起隐藏 ——
+// 于是「有 87 题待核对」这种提示跟着从页面上消失，用户完全不知道还有活要干。
+// 下面几条各自钉住一个环节：落在哪、隐藏判断算不算它、有没有格子、该消失时是不是真消失。
+const advancedBlock = html.match(/<details id="advancedFilters"[\s\S]*?<\/details>/)?.[0] || "";
+assert.doesNotMatch(advancedBlock, /id="tagQuickTools"/,
+  "the pending-work entry is not parked inside the More Filters disclosure");
+assert.ok(html.indexOf('id="tagQuickTools"')
+    > html.indexOf("</details>", html.indexOf('<details id="advancedFilters"')),
+  "the pending-work entry sits in the filter bar, after More Filters");
+assert.doesNotMatch(js, /\$\("advancedFilters"\)\.hidden = \[[^\]]*extraTools/,
+  "hiding More Filters never depends on the pending-work entry");
+assert.match(readingCss, /grid-template-areas:[^;]*"[^"]*quick[^"]*"/,
+  "the filter bar grid reserves a slot for the pending-work entry");
+// 上一条只查得到「排版里提到了 quick」，元素本身没被放进格子它照样会过。
+// 少了这一行，待办入口会被自动排到第二行跟题型抢格子，所以两条要钉在一起。
+assert.match(readingCss, /\.library-extra-tools\s*\{\s*grid-area:\s*quick/,
+  "the pending-work entry is actually placed in its reserved slot");
+assert.match(css.concat(readingCss), /\.library-extra-tools\[hidden\][^{]*\{[^}]*display:\s*none/,
+  "the pending-work entry really disappears when nothing is pending");
+assert.match(js, /function renderExtraTools\(\)[\s\S]*?box\.append\(\.\.\.quickActions\)/,
+  "pending-work buttons are rendered into the always-visible container");
+assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?AI 批量处理[\s\S]*?batchBox\.append\(batch\)/,
+  "quick browsing and API-consuming batch tasks have separate destinations");
 assert.match(js, /batch\.open = aiBatchToolsOpen/, "batch tasks are folded by default and restore their in-page state");
 assert.match(js, /batch\.addEventListener\("toggle", \(\) => \{ aiBatchToolsOpen = batch\.open; \}\)/, "the batch disclosure stays in its chosen state during in-page filter refreshes");
 assert.doesNotMatch(js.match(/function renderExtraTools\(\)[\s\S]*?\n  function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");

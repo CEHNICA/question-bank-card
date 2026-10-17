@@ -319,7 +319,9 @@
     renderAnswerFilters(facets.answers || {}, emptied);
     renderTagFilter(facets.tags || []);
     renderExtraTools();
-    // 四个分组全空时，「更多筛选」点开了也是一片空白 —— 那就不出现。
+    // 「更多筛选」里三组都空时，点开了也是一片空白 —— 那就不出现。
+    // 只能拿这三组判断：标签待办入口已经挪到折叠板外面常驻，它是「有活要干」
+    // 的提示，跟着这组一起隐藏就等于有活也不吭声（1.25.0 之前就是这样丢的）。
     $("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox]
       .every((box) => box.hidden);
     const selectedView = state.view === "selected";
@@ -393,7 +395,8 @@
     state.untaggedKnowledge = false; state.tagReview = false; syncUrl(); load();
   }
 
-  // 普通待处理入口常驻显示；会调用 API 的批量任务放进单独折叠区。
+  // 普通待处理入口常驻在筛选栏上；会调用 API 的批量任务放进单独折叠区。
+  // 两者都是按钮，靠「要不要花钱」和「要不要点开」区分，不靠藏起来。
   function renderExtraTools() {
     const box = ui.extraTools;
     box.replaceChildren();
@@ -478,14 +481,10 @@
     box.hidden = !quickActions.length;
     batchBox.hidden = !batchActions.length || state.view === "selected";
 
-    if (quickActions.length) {
-      const quick = node("section", "library-tool-group library-tool-quick");
-      quick.append(node("h3", "library-tool-heading", "快速查看"));
-      const actions = node("div", "library-tool-actions");
-      actions.append(...quickActions);
-      quick.append(actions);
-      box.append(quick);
-    }
+    // 常驻的一排小按钮，不再套一层「快速查看」标题。筛选栏里来源、题型、排序
+    // 都没有小标题，按钮名本身已经说清是做什么的，多套一层只占地方；
+    // 分组名留给 aria-label，读屏用户仍然听得到这一组的用途。
+    box.append(...quickActions);
     if (batchActions.length) {
       const batch = node("details", "library-batch-ai");
       batch.open = aiBatchToolsOpen;

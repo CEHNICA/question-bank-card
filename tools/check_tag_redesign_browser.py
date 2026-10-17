@@ -181,15 +181,19 @@ def check(base):
         mobile.close()
         report["screenshots"].extend([str(OUTPUT / "question-filterbar-desktop.png"), str(OUTPUT / "question-filterbar-mobile.png")])
         report["checks"].append("Source, question type, sort, and advanced filters live above the list; mobile controls wrap without horizontal overflow and More Filters does not shift cards")
-        # 「标签快速查看」住在「更多筛选」里面，所以要先把折叠板展开再断言里面的
-        # 按钮——对着关着的折叠板断言可见，永远不会通过。
+        # 待办入口常驻在筛选栏上：不展开「更多筛选」也要看得见。
+        # 以前它住在那个浮层里，对着关着的折叠板断言可见永远不会通过 ——
+        # 而那个浮层在三组筛选都为空时还会整个隐藏，于是「有 87 题待核对」跟着一起消失。
         extra_tools = page.locator("#tagQuickTools")
-        page.locator("#advancedFilters > summary").click()
         expect(extra_tools).to_be_visible()
         expect(page.locator("#libraryTagManager")).to_be_visible()
         expect(extra_tools.get_by_role("button", name="标签管理")).to_have_count(0)
         expect(extra_tools.get_by_role("button", name=re.compile("AI 建议待核对"))).to_be_visible()
         expect(extra_tools.get_by_role("button", name=re.compile("未标知识点"))).to_be_visible()
+        # 折叠板仍然要展开成浮层、不推动题卡 —— 这条和待办入口无关，单独测。
+        page.locator("#advancedFilters > summary").click()
+        expect(page.locator("#advancedFilters")).to_have_attribute("open", "")
+        expect(extra_tools).to_be_visible()
         page.locator("#advancedFilters > summary").click()
         assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, "Closing More Filters must not shift the question list"
         batch_container = page.locator("#aiBatchTools")
@@ -244,19 +248,29 @@ def check(base):
         fixture_api_ready["value"] = False
         page.reload()
         page.wait_for_load_state("networkidle")
-        # 快速查看住在「更多筛选」里，断言前得先把折叠板展开。
-        page.locator("#advancedFilters > summary").click()
-        expect(page.locator("#tagQuickTools .library-tool-quick")).to_be_visible()
+        # 待办入口常驻在筛选栏上，不点开「更多筛选」也要看得见。
+        quick_tools = page.locator("#tagQuickTools")
+        expect(quick_tools).to_be_visible()
+        expect(page.locator("#advancedFilters")).not_to_have_attribute("open", "")
+        quick_buttons = quick_tools.locator(".library-tool-action")
+        assert quick_buttons.count() >= 1, "待办入口一个按钮都没渲染"
+        for index in range(quick_buttons.count()):
+            expect(quick_buttons.nth(index)).to_be_visible()
+        # 直接复现原来的故障：把「更多筛选」隐藏掉，待办入口必须照样看得见。
+        # 它以前就住在那个浮层里，浮层一隐藏就跟着一起没了，于是有活也不吭声。
+        page.evaluate("document.getElementById('advancedFilters').hidden = true")
+        expect(page.locator("#tagQuickTools")).to_be_visible()
+        expect(page.locator("#tagQuickTools .library-tool-action").first).to_be_visible()
+        page.evaluate("document.getElementById('advancedFilters').hidden = false")
         expect(page.locator("#aiBatchTools .library-batch-ai")).to_be_visible()
         expect(page.locator("#aiBatchTools .library-batch-ai button")).to_have_count(2)
         expect(page.locator("#aiBatchTools .library-batch-ai button").nth(0)).to_be_disabled()
         expect(page.locator("#aiBatchTools .library-batch-ai button").nth(1)).to_be_disabled()
-        page.locator("#advancedFilters > summary").click()
         assert queued_requests == [], queued_requests
         fixture_api_ready["value"] = True
         page.reload()
         page.wait_for_load_state("networkidle")
-        report["checks"].append("Quick tag filters open with More Filters and need no request; API-consuming batch actions are folded and expanding them makes no request")
+        report["checks"].append("Pending-work filters stay visible without opening More Filters, and survive that disclosure being hidden; they need no request")
         report["checks"].append("API batch actions stay disabled when local readiness is false, while quick filters remain available")
 
         # These tests deliberately retain all four checked questions. The

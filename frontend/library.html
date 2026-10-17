@@ -96,7 +96,6 @@
             <details id="advancedFilters" class="library-advanced">
               <summary>更多筛选</summary>
               <div class="library-filters">
-                <div id="tagQuickTools" class="library-extra-tools" role="group" aria-label="标签快速查看" hidden></div>
                 <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
                 <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
                 <label id="tagFilterBox" class="library-select" hidden>
@@ -113,6 +112,11 @@
                 </div>
               </div>
             </details>
+            <!-- 待办入口常驻，不放进「更多筛选」。原来它住在折叠板里，
+                 而折叠板在三组筛选都为空时会整个隐藏，于是「有 87 题待核对」
+                 这类提示跟着一起从页面上消失，用户完全不知道有待办。
+                 常驻后它与来源、题型、排序并列，只在真有数字时出现。 -->
+            <div id="tagQuickTools" class="library-extra-tools" role="group" aria-label="标签待办" hidden></div>
         </div>
         <div class="library-bulk" aria-label="题目列表操作">
           <label><input id="selectVisible" type="checkbox">全选本页</label>

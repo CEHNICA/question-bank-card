@@ -45,15 +45,21 @@
   .library-page.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: minmax(0, 1fr); }
   .library-page.library-focus-mode.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
 
-  .library-page .library-extra-tools { width: 100%; display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-  .library-page .library-extra-tools .helper { margin: 0 0 8px; font-size: 11px; font-weight: 600; }
-  .library-page .library-extra-tools .button { justify-content: flex-start; padding: 5px 8px; line-height: 1.5; }
+  /* 待办入口（待核对、未标知识点）常驻在筛选栏第一行，紧挨「更多筛选」。
+     它原来住在「更多筛选」浮层里，而那个浮层在三组筛选都为空时会把整个折叠板
+     一起隐藏，于是「有 87 题待核对」这种提示跟着从页面上消失，用户完全不知道
+     还有活要干。这里改成一排紧凑小按钮，只在真有数字时出现，不占题面宽度。
+     [hidden] 必须显式写 display:none —— 上面那条 display:flex 的特异性更高，
+     会盖掉浏览器默认的 [hidden]{display:none}，结果没活的时候也占着一个空格子。 */
+  .library-page .library-filterbar > .library-extra-tools { grid-area: quick; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+  .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }
+  .library-page .library-filterbar > .library-extra-tools .button { justify-content: flex-start; padding: 5px 10px; line-height: 1.5; white-space: nowrap; }
   .library-page .active-filters { margin: -6px 0 18px; }
 
   /* An intentional two-row filter area, followed by its selection strip. */
   .library-page .library-filterbar {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
-    grid-template-areas: "source sort advanced" "types types types";
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-areas: "source sort quick advanced" "types types types types";
     gap: 15px 12px; margin-bottom: 0; padding: 15px 16px 0;
     border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface);
   }
@@ -179,6 +185,13 @@
     .library-page .question-inspector { top: calc(var(--topbar-h) + 10px); height: calc(100dvh - var(--topbar-h) - 20px); max-height: none; }
     .library-page .library-workspace > .library-results { grid-column: 1; }
     .library-page .library-workspace > .question-inspector { grid-column: 1; }
+    /* 窄屏第一行放不下四样东西，待办入口改占一整行放在题型上面。
+       不这么排的话 auto 列不肯缩，按钮文字会把筛选栏撑破、整页横向滚动。 */
+    .library-page .library-filterbar {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      grid-template-areas: "source sort advanced" "quick quick quick" "types types types";
+    }
+    .library-page .library-filterbar > .library-extra-tools { justify-content: flex-start; }
   }
   @media (max-width: 559px) {
     .library-page .library-main { padding-inline: 10px; }
