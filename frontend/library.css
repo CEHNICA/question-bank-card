@@ -513,6 +513,11 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .basket-item-open { flex: 1; min-width: 0; text-align: left; border: 0; padding: 0; background: none; color: var(--ink); font-family: var(--ui-font); }
 .basket-item-open strong { display: block; font-size: 12.5px; font-weight: 600; }
 .basket-item-open span { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+/* 1.25.14：文件名这一行单行省略。上一版让「文件名 · 第 4 题」在任意位置断行，文件名
+   一长就留下「· 第」在上一行、「4 题」单独掉到下一行，三行高度参差 57/40/40。完整名字
+   放在 title 上，悬停能看全。题号行同理：它本来就短，不该换行。 */
+.basket-item-open .basket-item-source { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.basket-item-open strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .basket-item-open .basket-item-error { color: var(--amber); }
 .basket-remove { flex: none; }
 .basket-preview { width: 100%; margin-top: 13px; }

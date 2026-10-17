@@ -2842,8 +2842,15 @@ $("selectedViewCount").textContent = String(state.basket.length);
       const open = node("button", "basket-item-open");
       open.type = "button";
       open.disabled = !item || missing.has(id);
-      const name = item ? `${item.source_filename} · ${sourceLocator(item)}` : `选题 ${index + 1}`;
-      open.append(node("strong", "", item ? `${sourceLocator(item)} · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : `选题 ${index + 1}`), node("span", "", name));
+      const locator = item ? sourceLocator(item) : `选题 ${index + 1}`;
+      const name = item ? `${item.source_filename} · ${locator}` : locator;
+      // 1.25.14：第二行原来印「文件名 · 第 4 题」，可题号在上一行的粗体里已经写过
+      // 一遍。文件名一长就把「第 4 题」挤下去 —— 屏幕上留下「· 第」在上一行、「4 题」
+      // 单独掉一行，三行的高度也跟着参差（57px / 40px / 40px）。现在这一行只说「这道题
+      // 出自哪份卷子」，题号不再重复；完整那句留给悬停和读屏用的名字。
+      const line = node("span", "basket-item-source", item ? item.source_filename : locator);
+      line.title = name;
+      open.append(node("strong", "", item ? `${locator} · ${QB.TYPE_NAMES[item.question_type] || "其他"}` : locator), line);
       // 1.13.6：这里原来直接印 reason，那是后端的状态枚举。老师看到的是
       // 「第 1 题: superseded」—— 一句英文，看不出自己该怎么办。
       if (missing.has(id)) open.append(node("span", "basket-item-error", missingReason(missing.get(id))));
