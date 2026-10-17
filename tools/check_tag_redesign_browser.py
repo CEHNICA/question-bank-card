@@ -190,6 +190,16 @@ def check(base):
         expect(extra_tools.get_by_role("button", name="标签管理")).to_have_count(0)
         expect(extra_tools.get_by_role("button", name=re.compile("AI 建议待核对"))).to_be_visible()
         expect(extra_tools.get_by_role("button", name=re.compile("未标知识点"))).to_be_visible()
+        # 「没有待办时不占位置」以前只有一条代码层面的断言盯着。这次把它变成
+        # 真的量一次：容器藏起来，筛选栏的高度不该变 —— 变了就是它还占着位置。
+        filter_bar_height = page.locator("#libraryFilterBar").evaluate("node => node.offsetHeight")
+        page.evaluate("document.getElementById('tagQuickTools').hidden = true")
+        expect(page.locator("#tagQuickTools")).to_be_hidden()
+        assert page.locator("#libraryFilterBar").evaluate(
+            "node => node.offsetHeight") == filter_bar_height, \
+            "待办入口在没有任何待办时仍然占着筛选栏的位置"
+        page.evaluate("document.getElementById('tagQuickTools').hidden = false")
+        expect(page.locator("#tagQuickTools")).to_be_visible()
         # 折叠板仍然要展开成浮层、不推动题卡 —— 这条和待办入口无关，单独测。
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")

@@ -53,7 +53,10 @@
      会盖掉浏览器默认的 [hidden]{display:none}，结果没活的时候也占着一个空格子。 */
   .library-page .library-filterbar > .library-extra-tools { grid-area: quick; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
   .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }
-  .library-page .library-filterbar > .library-extra-tools .button { justify-content: flex-start; padding: 5px 10px; line-height: 1.5; white-space: nowrap; }
+  /* width:auto 不能省：按钮本身带着「占满父容器」的设定（那套是给侧栏和浮层
+     设计的），不覆盖掉的话每个按钮都撑满整行，两个就被迫竖着摞，筛选栏凭空
+     高出一行，右边还空一大片。 */
+  .library-page .library-filterbar > .library-extra-tools .button { width: auto; justify-content: flex-start; padding: 5px 10px; line-height: 1.5; white-space: nowrap; }
   .library-page .active-filters { margin: -6px 0 18px; }
 
   /* An intentional two-row filter area, followed by its selection strip. */
