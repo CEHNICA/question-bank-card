@@ -34,7 +34,6 @@ const controls = Object.fromEntries([
 ].map((id) => [id, { value: "", checked: false, disabled: false, hidden: false, title: "", textContent: "" }]));
 controls.printAnswerStatus.setAttribute = () => {};
 // syncPrintAnswers 会去把「答案与解析」这一项锁上，得给这个下拉一个真的能问出选项的壳。
-controls.printDocument.querySelector = () => ({ disabled: false });
 const answersOption = { disabled: false };
 controls.printDocument.querySelector = () => answersOption;
 

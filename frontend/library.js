@@ -3504,10 +3504,25 @@ $("selectedViewCount").textContent = String(state.basket.length);
     $("printButton").disabled = blocked || answerEmpty || !!printState.tooWide;
     $("exportPdf").disabled = blocked || answerEmpty || !!printState.tooWide || printState.layoutPending || !!printState.layoutError;
     $("exportWord").disabled = blocked || answerEmpty;
+    // 1.25.15/1.25.16：这几颗按钮灰掉时各说各的为什么。刚打开时量到「分别导出题目卷与
+    // 答案卷」的 title 是空的，而同一屏的「答案解析」一直带着说明；1.25.16 又量到把
+    // 「输出内容」选成「答案与解析」、再关掉 AI 参考，「导出 Word」和「导出 PDF」一起灰掉、
+    // 同样是空的 —— 偏偏这两颗是这一屏最常按的。
+    // 四种原因各说各的：正在忙 / 选了答案卷可题没答案 / 有题没载入 / 图表排不进 A4。
+    const busyWhy = printState.exporting ? "正在导出，请稍等"
+      : printState.loading ? "正在载入题目和配图，请稍等" : "";
+    const answerWhy = answerEmpty ? "输出内容选了「答案与解析」，可这次组卷的题没有答案或解析，先改选题目，或去「答案解析」里补上答案" : "";
+    const missingWhy = !printState.items.length ? "先把未载入的选题处理掉，才能导出"
+      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能导出` : "";
+    const layoutWhy = printState.layoutError ? `这份卷子有图表排不下：${printState.layoutError}`
+      : printState.layoutPending ? "正在量这份卷子的版面，稍等一下"
+      : printState.tooWide ? "有图表高于一张 A4，换个排法再导出" : "";
+    const why = busyWhy || answerWhy || missingWhy;
+    $("printButton").title = why || layoutWhy || "打开系统打印窗口，按预览里看到的分页印";
+    $("exportWord").title = why || "下载可继续编辑的 Word 文档";
+    $("exportPdf").title = why || layoutWhy || "下载按预览分页的 A4 PDF";
     const split = $("exportSplit");
     split.disabled = blocked || !printState.availableAnswers;
-    // 1.25.15：这个按钮灰掉时整屏没有一句说为什么。紧挨着的「答案解析」一直带着悬停
-    // 说明，轮到它就空了 —— 灰掉还不解释，等于让人自己猜是哪一步没做对。
     split.title = !printState.items.length ? "先把未载入的选题处理掉，才能分别导出题目卷与答案卷"
       : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能分别导出`
       : !printState.availableAnswers ? "这次组卷的题还没有答案或解析，拆不出答案卷"
@@ -3652,7 +3667,19 @@ $("selectedViewCount").textContent = String(state.basket.length);
     await printState.layoutPromise;
   }
 
+  // 1.25.16：没打开草稿时，「保存草稿」和「复制为新草稿」发的是同一个请求 —— copy 只影响
+  // existing，而 existing 本来就是空的。同一个操作摆两个入口，第一次用的人只会愣一下。
+  // 真打开了一份草稿之后，「复制为新草稿」才有意义（另存一份，原稿不动），那时候才出现。
+  function syncDraftButtons() {
+    const save = $("saveDraft"), copy = $("saveDraftAs"), title = state.draft?.title;
+    copy.hidden = !state.draft;
+    save.title = title ? `保存这次改动，覆盖正在编辑的「${title}」`
+      : "把这次组卷存下来，下次从「草稿」里接着改";
+    copy.title = `另存一份新草稿，正在编辑的「${title}」保持不动`;
+  }
+
   function markDraftDirty() {
+    syncDraftButtons();
     if (state.draftBaseline === null && (state.draft || state.basket.length)) state.draftDirty = true;
     state.draftDirty = hasUnsavedDraft();
     $("draftSaveStatus").textContent = state.draftDirty
@@ -3697,6 +3724,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
         state.draftBaseline = submitted;
         state.draftDirty = draftSignature() !== submitted;
         $("draftSaveStatus").textContent = `已保存“${body.draft.title}” · ${body.draft.ids.length} 题${state.draftDirty ? " · 后续改动尚未保存" : body.draft.validity?.valid === false ? " · 有选题需要处理" : ""}`;
+        syncDraftButtons();
       }
       toast("组卷草稿已保存", "success");
     } catch (error) { toast(error.message || "草稿未保存", "error"); $("draftSaveStatus").textContent = error.message || "草稿未保存"; }
@@ -3751,6 +3779,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
             applyPrintOptions(current.print_options);
             state.draftBaseline = draftSignature();
             $("draftSaveStatus").textContent = `正在编辑“${current.title}”`;
+            syncDraftButtons();
             dialog.close();
             render();
             await openPrint();
