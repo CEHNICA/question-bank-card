@@ -104,22 +104,44 @@ def run(command):
     return subprocess.run(command, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
+def apply(source: str, original: str, mutation: str) -> str:
+    """Swap one anchor, matching whether this file uses \\n or \\r\\n.
+
+    Anchors are written with \\n so they stay readable in source. A file saved
+    with CRLF therefore has to be matched in its CRLF form too.
+    """
+    if original in source:
+        return source.replace(original, mutation, 1)
+    crlf_anchor = original.replace("\n", "\r\n")
+    if crlf_anchor in source:
+        return source.replace(crlf_anchor, mutation.replace("\n", "\r\n"), 1)
+    raise SystemExit(f"anchor not found, the check has gone stale:\n{original}")
+
+
 def main():
     results = []
     for relative, description, original, mutation, command in MUTATIONS:
         target = ROOT / relative
-        source = target.read_text(encoding="utf-8")
-        if original not in source:
+        # 1.25.11：这一轮的变异跨了两种行尾 —— frontend/app.js 是 LF，index.html /
+        # library.js / library-reading.css 都是 CRLF。read_text() 把两边都归一成 \n
+        # 所以锚点照常匹配得上，可 write_text() 在 Windows 上写回时会一律改成 CRLF，
+        # app.js 一次跑完就从 9500 行 LF 变成 9500 行 CRLF：diff 全红，还顺手把靠源码
+        # 切片当门禁的测试重新废掉一次（标记写死 \n 时 indexOf 返回 -1，slice 静默切出
+        # 空串）。所以这里全程走字节，还原时写回原始内容，一个 bit 都不动。
+        raw = target.read_bytes()
+        source = raw.decode("utf-8")
+        mutated = apply(source, original, mutation)
+        if mutated == source:
             raise SystemExit(f"{relative}: anchor not found, the check has gone stale:\n{original}")
         baseline = run(command)
         if baseline.returncode != 0:
             print(baseline.stdout[-3000:], baseline.stderr[-3000:])
             raise SystemExit(f"{relative}: the unmutated suite already fails, refusing to trust this run")
-        target.write_text(source.replace(original, mutation, 1), encoding="utf-8")
+        target.write_bytes(mutated.encode("utf-8"))
         try:
             broken = run(command)
         finally:
-            target.write_text(source, encoding="utf-8")
+            target.write_bytes(raw)
         caught = broken.returncode != 0
         results.append((description, caught))
         print(("挡住 ✓  " if caught else "漏过 ✗  ") + description)

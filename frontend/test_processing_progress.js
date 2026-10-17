@@ -177,11 +177,46 @@ assert.deepEqual(Progress.paperProgress(), { total: 0, todo: 0, done: 0 });
 assert.deepEqual(Progress.paperProgress({ total: 6, green: 4, red: 2, yellow: 0 }),
   { total: 6, todo: 2, done: 4 }, "识读失败的题同样算还要看，不能因为没有黄题就少算");
 
+// 1.25.11：卷名下面「还有 N 页没切出题目」和绿色完成条「全部 25 题已处理完」同屏出现。
+// 两句话必须自己交代清楚关系，否则读的人只会看见「还有活」和「干完了」对不上。
+assert.equal(Progress.manualPagesNote(4, 25),
+  "原卷另有 4 页没切出题目，不在上面这 25 道题里。需要更多题时可从原卷补齐。");
+assert.equal(Progress.manualPagesNote(1, 6),
+  "原卷另有 1 页没切出题目，不在上面这 6 道题里。需要更多题时可从原卷补齐。");
+// 一道题都还没切出来时不能说「不在上面这 0 道题里」。
+assert.equal(Progress.manualPagesNote(4, 0), "原卷有 4 页没切出题目。需要更多题时可从原卷补齐。");
+assert.equal(Progress.manualPagesNote(4, undefined), "原卷有 4 页没切出题目。需要更多题时可从原卷补齐。");
+assert.equal(Progress.manualPagesNote(0, 25), "", "没有手动页就别占一行");
+assert.equal(Progress.manualPagesNote(undefined, 25), "");
+// 旧口径会让人以为和绿色完成条打架：只说「还有页没切出来」，不说这几页不在题里。
+for (const note of [Progress.manualPagesNote(4, 25), Progress.manualPagesNote(4, 0)]) {
+  assert.doesNotMatch(note, /尚未自动切出题目/, "「尚未自动切出题目」听着像还有活没干完");
+  assert.doesNotMatch(note, /全部.*已处理完/, "完成的话交给绿色条说，别在这儿抢一遍");
+}
+// 页数必须真的写出来，不能丢成「有  页」。
+assert.match(Progress.manualPagesNote(4, 25), /另有 4 页/, "页数要出现在句子里");
+assert.match(Progress.manualPagesNote(3, 25), /另有 3 页/, "页数要跟着数走");
+assert.match(Progress.manualPagesNote(4, 25), /这 25 道题/, "已入库的题数也要在句子里");
+
+// 光测 manualPagesNote 不够：把这句话删掉、改回就地拼接，函数照样在那儿、上一批断言
+// 全绿，而页面上又变回「还有页没切出来」。所以要钉住调用点本身。
+assert.match(appSource, /const note = QBProgress\.manualPagesNote\(manualPages\.length, c\.all\);/,
+  "这句要收在 manualPagesNote 里，别在渲染处就地拼");
+assert.match(appSource, /if \(note\) statusText\.append\(el\("span", "processing-detail", note\)\);/,
+  "空句子不该占一行");
+assert.doesNotMatch(appSource, /尚未自动切出题目/,
+  "旧口气「尚未自动切出题目」不许再回到页面上：它和下面的绿色完成条摆在一起像打架");
+
 // 界面上真的只画两段。
 const vm = require("node:vm");
-const meterSource = appSource.slice(
-  appSource.indexOf("  function miniMeter(paper) {"),
-  appSource.indexOf("  function renderPaperList() {"));
+const meterStart = appSource.indexOf("  function miniMeter(paper) {");
+const meterEnd = appSource.indexOf("  function renderPaperList() {");
+// indexOf 找不到时不报错，只会安静地切出别的片段（甚至空串），那样的门禁等于没有。
+// 标记对不上就直接停下，别让「少了一个函数」这件事拖到那个函数真被调用才炸。
+assert.ok(meterStart > -1 && meterEnd > meterStart, "切不出 miniMeter：app.js 里的函数名或位置变了");
+const meterSource = appSource.slice(meterStart, meterEnd);
+assert.ok(meterSource.includes("function miniMeter(paper) {"), "切出来的片段里没有 miniMeter，断言会空跑");
+assert.ok(meterSource.includes("function renderPaperList() {") === false, "切片多带了一段别的函数进来");
 const meterNode = () => ({ dataset: {}, style: {}, children: [], append(...items) { this.children.push(...items); } });
 const meterContext = {
   QBProgress: Progress,
@@ -192,10 +227,26 @@ const drawn = (counts) => {
   const bar = meterContext.meter({ counts });
   return { title: bar.title, parts: bar.children.map((part) => [part.dataset.state, part.style.width, part.style.background]) };
 };
+// 1.25.11：细线的悬停说明必须用屏幕上的词。卷名那行写「已入库 25 · 22 张要看」，
+// 悬停再改口叫「不用再看 25」的话，同一个数字隔十几像素换了名字，人只会以为算错了。
 assert.deepEqual(drawn({ total: 25, done: 0, todo: 25, green: 21, yellow: 4, red: 0, approved: 0, settled: 0 }),
-  { title: "不用再看 0 · 还要看 25", parts: [["todo", "100%", "var(--amber-bar)"]] });
+  { title: "这条细线是这份卷子的进度：橙色 25 题还要看。", parts: [["todo", "100%", "var(--amber-bar)"]] });
 assert.deepEqual(drawn({ total: 10, done: 10, todo: 0, green: 0, yellow: 0, approved: 0, settled: 10 }),
-  { title: "不用再看 10 · 还要看 0", parts: [["done", "100%", "var(--green-bar)"]] });
+  { title: "这条细线是这份卷子的进度：绿色 10 题都处理完了，没有还要看的题。", parts: [["done", "100%", "var(--green-bar)"]] });
+assert.deepEqual(drawn({ total: 25, done: 9, todo: 16, green: 6, yellow: 13, red: 0, approved: 4, settled: 5 }),
+  { title: "这条细线是这份卷子的进度：绿色 9 题已经处理完，橙色 16 题还要看。",
+    parts: [["done", "36%", "var(--green-bar)"], ["todo", "64%", "var(--amber-bar)"]] });
+// 「不用再看」是内部口径，页面上从来没写过这四个字；留着就等于同一件事两套说法。
+// 断的是真正显示出去的那串 title，不是源码文本：源码注释里要留着这句话交代来历，
+// 拿注释去断，等于逼着后人把历史抹掉才让测试变绿。
+for (const counts of [
+  { total: 25, done: 0, todo: 25, green: 21, yellow: 4, approved: 0, settled: 0 },
+  { total: 10, done: 10, todo: 0, green: 0, yellow: 0, approved: 0, settled: 10 },
+  { total: 25, done: 9, todo: 16, green: 6, yellow: 13, red: 0, approved: 4, settled: 5 }
+]) {
+  assert.doesNotMatch(drawn(counts).title, /不用再看/, "细线的悬停说明不许再出现「不用再看」");
+}
+assert.doesNotMatch(appSource, /题不用再看（/, "进度数字的悬停说明也不许再出现「不用再看」");
 assert.equal(meterContext.meter({ counts: { total: 4, done: 0, todo: 0, waiting: 4 } }), null,
   "全部还在识读时不画绿条：上面那行文字已经说清这个状态了");
 // 1.12.7：没有题数时什么都不画。空壳 .mini-meter 也会画出自己的 3px 灰轨，

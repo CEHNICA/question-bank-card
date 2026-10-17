@@ -259,11 +259,15 @@ const QBProgress = (() => {
     return ["queued", "parsing", "segmenting", "reading"].includes(paper?.status);
   }
 
-  // A paper's bar has room for two states, not five.  不用再看 is what a person
-  // is never asked about again: ticked, or already in the library exactly as it
-  // reads on screen.  还要看 is everything else that exists — including a card
+  // A paper's bar has room for two states, not five.  done is what a person is
+  // never asked about again: ticked, or already in the library exactly as it
+  // reads on screen.  todo is everything else that exists — including a card
   // the reader read cleanly, because a person still has to tick it.  Cards still
   // being read belong to neither: nobody has looked at them yet.
+  //
+  // 这两个数只用来画颜色和算宽度。对外说的时候必须用屏幕上的词：卷名那行写的是
+  // 「已入库 N · M 张要看」，所以别再让悬停改口叫「不用再看 N」——同一份卷子同
+  // 一个数字换名字，读的人只会以为程序算错了。
   //
   // These two numbers come from the server, the same ones the review page's
   // “需要核查” tab counts.  Deriving them here from green/yellow/red is what
@@ -290,7 +294,20 @@ const QBProgress = (() => {
       || (paper.parse_mode === "mineru" && paper.status === "failed");
   }
 
-  return { STAGES, formatDuration, formatAge, processingPresentation, paperProgress, canStopPaper, canSwitchMinerUToManual, canContinueAiCut };
+  // 卷名下面那行「还有几页没切出题目」和下面绿色完成条「全部 N 题已处理完」会同时
+  // 出现在一屏上。两句话说的不是一回事（有几页原卷没切出题 vs 切出来的题审完了没有），
+  // 可写在一起时人只会看见「还有活没干」和「都干完了」摆在一起，以为程序前后打架。
+  // 这里把那层关系直接写进句子：这几页不在上面那几道题里。
+  function manualPagesNote(manualPageCount, totalQuestions) {
+    const pages = Number(manualPageCount) || 0;
+    if (pages <= 0) return "";
+    const total = Number(totalQuestions) || 0;
+    return total
+      ? `原卷另有 ${pages} 页没切出题目，不在上面这 ${total} 道题里。需要更多题时可从原卷补齐。`
+      : `原卷有 ${pages} 页没切出题目。需要更多题时可从原卷补齐。`;
+  }
+
+  return { STAGES, formatDuration, formatAge, processingPresentation, paperProgress, canStopPaper, canSwitchMinerUToManual, canContinueAiCut, manualPagesNote };
 })();
 
 const QBReviewDiff = (() => {
@@ -1372,7 +1389,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     // A three-pixel bar has no room for a legend; the hover says which two
     // states it stands for and how many sit in each.
-    if (done || todo) bar.title = `不用再看 ${done} · 还要看 ${todo}`;
+    //
+    // 1.25.11：这句以前写「不用再看 N」，可上面那行字写的是「已入库 N」—— 同一个
+    // 数字隔 12px 用了两个名字，人读到「不用再看」也不知道是不用再看原卷、不用再
+    // 核对，还是不用再入库。这里只说两件事：这条细线是什么、颜色代表什么。颜色只
+    // 在真的有那一段时才提，免得出现「绿色 0 题」这种没人见过的东西。
+    if (done || todo) {
+      bar.title = todo
+        ? `这条细线是这份卷子的进度：${done ? `绿色 ${done} 题已经处理完，` : ""}橙色 ${todo} 题还要看。`
+        : `这条细线是这份卷子的进度：绿色 ${done} 题都处理完了，没有还要看的题。`;
+    }
     return bar;
   }
 
@@ -1645,7 +1671,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }));
     bar.setAttribute("aria-label", segments.filter(([, n]) => n).map(([, n, label]) => `${label} ${n}`).join("，"));
     $("meterFigure").replaceChildren(el("strong", "", String(c.approved)), document.createTextNode(` / ${c.all} 已入库`));
-    $("meterFigure").title = `${c.approved} / ${c.all} 题不用再看（已通过或已入库）`;
+    $("meterFigure").title = `这份卷子的进度：${c.approved} / ${c.all} 题已入库`;
     $("meterPercent").textContent = `${Math.round((c.approved / c.all) * 100)}%`;
     $("toolbarPaper").replaceChildren(el("strong", "", paperDisplayName(state.paper || {})),
       document.createTextNode(` · ${c.approved} / ${c.all} 已入库`));
@@ -1739,7 +1765,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const manualPages = (plan.pages || []).filter((page) => page.mode === "manual");
       const noTextLayer = !paper.parse_mode || paper.parse_mode !== "mineru";
       if (manualPages.length && noTextLayer) {
-        statusText.append(el("span", "processing-detail", `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));
+        // 1.25.11：措辞和这句话和绿色完成条的关系都收在 QBProgress.manualPagesNote 里，
+        // 这样能直接测；别再把句子拼回这一行，免得哪天又改回「还有页没切出来」的口气。
+        const note = QBProgress.manualPagesNote(manualPages.length, c.all);
+        if (note) statusText.append(el("span", "processing-detail", note));
       }
       const warnings = plan.warnings;
       if (Array.isArray(warnings) && warnings.length) statusText.append(el("span", "processing-detail", warnings.map(String).join("；")));

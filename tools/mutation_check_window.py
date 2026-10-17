@@ -35,7 +35,13 @@ MUTATIONS = [
     ),
 ]
 
-original = TARGET.read_text(encoding="utf-8")
+# 1.25.11：这一版全程走字节。原来读一次 read_text、还原一次 write_text，在 Windows 上
+# 会把 app_window.py 从 LF 重写成 CRLF；而收尾那句
+#     if TARGET.read_text(...) != original
+# 恰恰抓不到 —— read_text 会把 CRLF 归一回 \n，两边照样相等，于是它一边把行尾改了一边
+# 报告「还原成功」。既要是真的逐字节还原，就不能拿会归一的读法去比。
+raw = TARGET.read_bytes()
+original = raw.decode("utf-8")
 backup = Path(tempfile.mkdtemp()) / "app_window.py"
 shutil.copy2(TARGET, backup)
 
@@ -46,7 +52,7 @@ try:
             print(f"[BAD ] {label}: pattern found {original.count(old)} times, need exactly 1")
             failed += 1
             continue
-        TARGET.write_text(original.replace(old, new), encoding="utf-8")
+        TARGET.write_bytes(raw.replace(old.encode("utf-8"), new.encode("utf-8"), 1))
         result = subprocess.run(
             [str(ROOT / "packaging" / ".build" / "venv" / "Scripts" / "python.exe"),
              "-m", "unittest", TESTS],
@@ -63,8 +69,8 @@ try:
             print(f"[FAIL] {label}: tests still passed, so nothing checks this")
             failed += 1
 finally:
-    TARGET.write_text(original, encoding="utf-8")
-    if TARGET.read_text(encoding="utf-8") != original:
+    TARGET.write_bytes(raw)
+    if TARGET.read_bytes() != raw:
         print("[BAD ] source was not restored byte for byte")
         failed += 1
 

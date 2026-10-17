@@ -33,8 +33,15 @@ def run():
 def mutate(name, old, new):
     path = root / name
     text = path.read_bytes().decode("utf-8")
-    assert old in text, f"anchor missing in {name}: {old[:40]!r}"
-    path.write_bytes(text.replace(old, new, 1).encode("utf-8"))
+    # 1.25.11：这三个目标文件行尾不统一 —— app.js 和 styles.css 是 LF，index.html 是
+    # CRLF。锚点为了好读都写成 \n，于是在 index.html 上永远匹配不上，脚本会一路崩在
+    # 第三条上，看起来像"这个检查没跑"，其实早就跑不了了。所以 \r\n 也试一次。
+    if old in text:
+        path.write_bytes(text.replace(old, new, 1).encode("utf-8"))
+        return
+    crlf_old, crlf_new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+    assert crlf_old in text, f"anchor missing in {name}: {old[:40]!r}"
+    path.write_bytes(text.replace(crlf_old, crlf_new, 1).encode("utf-8"))
 
 
 CASES = [
