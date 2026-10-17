@@ -377,12 +377,42 @@ def check(base):
         # the same operation and revision even though no pending panel remains.
         fourth = page.locator("#q-" + fixture["lost_reply_id"])
         fourth.locator(".paper").click()
-        # 待核对的建议只在标签窗口里处理，题卡和右侧都只留一个「去核对」的入口。
+
+        # 待核对的建议必须直接摊在右侧面板上。以前这儿只有一个「AI 有 N 条建议待核对 ·
+        # 去核对」的按钮，要点开另一个窗口才看得见 AI 建议了什么 —— 而面板这块
+        # 下面本来就空着，等于把最该显眼的东西藏起来。
+        # 这里量的是真实渲染：条目在不在、去核对的按钮在不在、面板有没有被撑爆。
+        panel_suggestions = inspector.locator(".question-inspector-tags .tag-suggestion-card")
+        expect(panel_suggestions).to_be_visible()
+        assert panel_suggestions.locator(".tag-suggestion-name").count() >= 1, "面板上应当直接列出 AI 建议的标签"
+        assert inspector.locator(".question-inspector-tags .tag-suggestion-open").count() == 0, \
+            "有建议要核对时，不该再让人点一下才能看见"
+        assert panel_suggestions.locator(".tag-suggestion-accept").count() >= 1, "面板上应当能就地采纳"
+        assert panel_suggestions.locator(".tag-suggestion-reject").count() >= 1, "面板上应当能就地拒绝"
+        assert panel_suggestions.locator(".tag-suggestion-buttons button").count() == 2, "底部应当是采纳/拒绝两个批量按钮"
+        # 改名、查依据是低频的精细活，留在标签窗口里；面板上不必摆折叠区把它挤满。
+        assert panel_suggestions.locator(".tag-suggestion-edit").count() == 0, "改名入口不该挤在面板上"
+        assert not inspector.evaluate("node => node.scrollHeight > node.clientHeight + 1"), "建议摊开后把面板撑破了"
+        assert not inspector.evaluate("node => node.scrollWidth > node.clientWidth + 1"), "建议在窄栏里横向溢出了"
+        # 窗口里同一个决定只能有一处能做：勾选框、每条采纳/拒绝、批量按钮都必须没有。
+        inspector.locator(".question-inspector-tags .library-tags-edit").click()
         tag_window = page.locator("#tagPickerDialog")
-        inspector.locator(".tag-suggestion-open").click()
         expect(tag_window).to_be_visible()
-        lost_panel = tag_window.locator("aside.tag-suggestion-card")
-        expect(lost_panel).to_have_count(1)
+        assert tag_window.locator(".tag-suggestion-accept").count() == 0, "标签窗口里不该再有第二套采纳按钮"
+        assert tag_window.locator(".tag-suggestion-reject").count() == 0, "标签窗口里不该再有第二套拒绝按钮"
+        assert tag_window.locator(".tag-suggestion-buttons button").count() == 0, "标签窗口里不该再有批量按钮"
+        assert tag_window.locator(".tag-suggestion-line input[type=checkbox]").count() == 0, \
+            "窗口里没有能处理它们的按钮，就不该摆勾选框"
+        # 同一份建议不在窗口里再画一遍：两处内容看两遍，还得对得上两份，改一处另一处就过期。
+        assert tag_window.locator("aside.tag-suggestion-card").count() == 0, "标签窗口里不该再有第二份建议清单"
+        assert tag_window.get_by_text("在右边详情面板上核对").count() == 1, "窗口应当把人指到面板上"
+        assert tag_window.get_by_role("button", name="去右边面板核对").count() == 1, "窗口应当有一条能过去的入口"
+        tag_window.get_by_role("button", name="关闭", exact=True).click()
+        report["checks"].append(
+            "Pending tag suggestions are listed in place in the inspector with accept/reject there, "
+            "while the tag window draws no second copy and just points at the panel — one place per decision")
+
+        lost_panel = inspector.locator(".question-inspector-tags .tag-suggestion-card")
         prior_operations = {operation["id"] for operation in read_api("/api/library/tags/operations")["operations"]}
         committed, replay_requests = [], []
 
@@ -428,9 +458,10 @@ def check(base):
         # The same tab's reload must preserve names, the chosen parent and the
         # checkbox. The parent tree is the only grouping mechanism left.
         second.locator(".paper").click()
-        inspector.locator(".tag-suggestion-open").click()
-        expect(tag_window).to_be_visible()
-        proposal = tag_window.locator("aside.tag-suggestion-card")
+        # 核对整套都在右侧面板上：改名、勾选、采纳/拒绝。这里刻意不再开标签窗口 ——
+        # 以前这两步分居两处，改个名再采纳要跳回去；「一个动作一个地方」现在也要成立。
+        proposal = inspector.locator(".question-inspector-tags aside.tag-suggestion-card")
+        expect(proposal).to_be_visible()
         entry = proposal.locator('.tag-suggestion-entry[data-suggestion-index="1"]')
         editor = entry.locator("details.tag-suggestion-edit")
         editor.locator("summary").click()
@@ -444,23 +475,18 @@ def check(base):
         parents.select_option([draft_parent_id])
         entry.locator("input[data-tag-suggestion]").check()
         # 看别的题再回来：草稿必须还在，刷新页面也必须还在。
-        tag_window.get_by_role("button", name="关闭", exact=True).click()
         first.locator(".paper").click()
         second.locator(".paper").click()
-        inspector.locator(".tag-suggestion-open").click()
-        expect(tag_window).to_be_visible()
         expect(name).to_have_value(DRAFT_NAME)
         expect(parents).to_have_values([draft_parent_id])
         expect(entry.locator("input[data-tag-suggestion]")).to_be_checked()
         page.reload()
         page.wait_for_load_state("networkidle")
         second.locator(".paper").click()
-        inspector.locator(".tag-suggestion-open").click()
-        expect(tag_window).to_be_visible()
         expect(name).to_have_value(DRAFT_NAME)
         expect(parents).to_have_values([draft_parent_id])
         expect(entry.locator("input[data-tag-suggestion]")).to_be_checked()
-        report["checks"].append("AI candidate draft name, chosen parent and checkboxes survive question switching and reload")
+        report["checks"].append("AI candidate draft name, chosen parent and checkboxes survive question switching and reload, all edited in place on the panel")
 
         # Hold a local request in-flight to check locking, then inject a failed
         # reply. Retrying must use the exact same request, not a second action.
@@ -496,8 +522,8 @@ def check(base):
         after_accept_position = second.evaluate("element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})")
         assert abs(after_accept_position["top"] - before_accept_position["top"]) < 12, (before_accept_position, after_accept_position)
         assert after_accept_position["scrollY"] > 0, after_accept_position
-        # 采纳之后窗口关上，题目列表原地不动，右侧定位也要能把题卡点亮。
-        tag_window.get_by_role("button", name="关闭", exact=True).click()
+        # 采纳之后题目列表原地不动，右侧定位也要能把题卡点亮。
+        # 这里刻意没有窗口可关：整件事都在面板上做完，不再另开一层。
         assert "inspector-active" in (second.get_attribute("class") or "")
         expect(inspector.locator(".question-inspector-target span")).to_have_attribute(
             "title", "右侧信息对应绿色高亮题卡")
@@ -513,20 +539,16 @@ def check(base):
         assert accepted_payload["new_tags"]["1"]["name"] == DRAFT_NAME
         assert accepted_payload["new_tags"]["1"]["parent_ids"] == [draft_parent_id]
         assert "group_ids" not in accepted_payload["new_tags"]["1"], accepted_payload
-        # 采纳后窗口已关，重新打开时那条已消失，另一条还能单独处理。
-        inspector.locator(".tag-suggestion-open").click()
-        expect(tag_window).to_be_visible()
-        expect(tag_window.locator('.tag-suggestion-entry[data-suggestion-index="1"]')).to_have_count(0)
+        # 采纳后那一条就该消失，另一条还能在同一个面板上单独处理 —— 不必另开窗口。
+        expect(proposal.locator('.tag-suggestion-entry[data-suggestion-index="1"]')).to_have_count(0)
         expect(inspector.locator(".library-tags")).to_contain_text("未提交的中点专项标签123")
-        remaining = tag_window.locator('.tag-suggestion-entry[data-suggestion-index="0"]')
+        remaining = proposal.locator('.tag-suggestion-entry[data-suggestion-index="0"]')
         with page.expect_response(lambda response: urlparse(response.url).path.endswith("/resolve")
                 and response.request.method == "POST") as rejected:
             remaining.locator(".tag-suggestion-reject").click()
         assert rejected.value.ok, rejected.value.text()
         assert rejected.value.request.post_data_json["indices"] == [0]
-        expect(tag_window.locator("aside.tag-suggestion-card")).to_have_count(0)
-        if tag_window.is_visible():
-            tag_window.get_by_role("button", name="关闭", exact=True).click()
+        expect(proposal).to_have_count(0)
         expect(inspector.locator("aside.tag-suggestion-card")).to_have_count(0)
         inspector.get_by_role("button", name="AI 标签记录", exact=True).click()
         history = page.locator(".tag-history-dialog")

@@ -1106,6 +1106,17 @@
     facts.append(row);
   }
 
+  // 从标签窗口跳回右侧面板核对：把面板切到这道题，并滚到它的建议清单上。
+  // 关掉窗口就回到主界面，所以这里要确保面板真的开着（窄屏上它默认收起），
+  // 并且强制重画一次 —— renderInspector 见到同一道题会直接跳过，滚不到刚渲染的块。
+  function focusInspectorTag(item) {
+    if (window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(true);
+    inspectorRenderedKey = "";
+    renderInspector(item);
+    const card = ui.inspectorContent && ui.inspectorContent.querySelector(".question-inspector-tags .tag-suggestion-card");
+    if (card) card.scrollIntoView({ block: "nearest" });
+  }
+
   function renderInspector(item) {
     if (!ui.inspectorContent) return;
     const renderKey = item ? JSON.stringify([item, state.features]) : "empty";
@@ -1504,7 +1515,7 @@
     if (tagTargetIds.length > 500) { toast("一次最多整理 500 题，请减少勾选后重试。", "error"); return; }
     $("tagPickerTitle").textContent = pickerAttempt ? `核实上次标签操作（${tagTargetIds.length} 题）` : item ? `${sourceLocator(item)}的标签` : `整理勾选的 ${tagTargetIds.length} 题标签`;
     $("tagPickerSubtitle").textContent = item
-      ? "已经贴上的、AI 建议的、想加的，都在这个窗口里。" : "点一下贴上，再点一下拿掉。";
+      ? "已经贴上的和想加的，都在这个窗口里；要采纳 AI 的建议，在右边详情面板上做。" : "点一下贴上，再点一下拿掉。";
     tagDialog.classList.add("loading");
     try {
       const ids = tagTargetIds.join(","), pair = await Promise.all([loadTagCatalogue(), tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(ids))]);
@@ -1521,9 +1532,12 @@
     finally { tagDialog.classList.remove("loading"); }
   }
   function renderTagPickerNow() {
-    // 打开一道题时，标签只该有一个地方：已经贴上的、AI 建议的、想加的，
-    // 都在这个窗口里。以前 AI 建议另开一套采纳按钮，同一个决定有两个地方能做，
-    // 老师不知道该点哪儿，两边还可能各点一次。
+    // 这个窗口只管「改标签」：已经贴上的、想加的。
+    // 「核对 AI 建议」是完整一件事 —— 看它建议了什么、觉得名字不对就改、然后采纳或拒绝。
+    // 它以前被拆成两半：右侧面板只给一个「去核对」的按钮，其余都在这个窗口里，
+    // 于是看建议要点一次、改完名再采纳又要跳回来。
+    // 现在整件事都在右边详情面板上做完，这个窗口不再重复摆一套 ——
+    // 同一个决定只有一个地方能点，两边各点一次还会打架。
     const box = $("tagPickerNow"); if (!box) return;
     box.replaceChildren();
     if (tagTargetIds.length !== 1) { box.hidden = true; return; }
@@ -1548,16 +1562,22 @@
       chip.append(drop); chips.append(chip);
     });
     current.append(currentTitle, chips); box.append(current);
-    const card = tagSuggestionNode(item, { embedded: true }); if (!card) return;
+    // 这里不摆建议清单本身：一份同样的内容出现在两个地方，看两遍还得对得上两份，
+    // 改了一处另一处就过期了。这里只留一条指路，说明去哪儿核对。
+    if (!item.tag_suggestion) return;
     const suggestion = item.tag_suggestion;
     const pendingCount = suggestion.status === "pending"
       ? (suggestion.suggestions || []).filter(entry => !entry.decision).length : 0;
     const ai = node("section", "tag-picker-block");
     const aiTitle = node("h3", "tag-picker-block-title");
-    const note = pendingCount ? pendingCount + " 条待核对"
+    const note = pendingCount ? pendingCount + " 条待核对 · 在右边详情面板上核对"
       : { queued: "排队中", running: "生成中", review: "暂不能判断", no_match: "没有合适的标签", failed: "生成失败", stale: "依据已变化" }[suggestion.status] || "";
     aiTitle.append(node("b", "", "AI 建议的"), node("small", "", note));
-    ai.append(aiTitle, card); box.append(ai);
+    const go = node("button", "button button-small", "去右边面板核对");
+    go.type = "button";
+    go.title = "关掉这个窗口，右边详情面板上会直接列出 AI 建议的标签，可以改名、采纳或拒绝";
+    go.addEventListener("click", function() { dialog.close(); focusInspectorTag(item); });
+    ai.append(aiTitle, go); box.append(ai);
   }
   const kindLabels = { knowledge: "知识点", method: "解题方法", custom: "自定义", legacy: "历史标签" };
   function tagChildrenIndex() {
@@ -2391,7 +2411,7 @@
       remove.disabled = inlineTagLocks.has(item.id); remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove); row.append(wrapper);
     });
     const edit = node("button", "library-tags-edit", "＋ 添加标签"); edit.type = "button";
-    edit.title = "为当前这道题添加标签；AI 的建议也在同一个窗口里核对"; edit.disabled = inlineTagLocks.has(item.id);
+    edit.title = "为当前这道题添加标签；AI 的建议就在这个按钮下面，可以直接改名、采纳或拒绝"; edit.disabled = inlineTagLocks.has(item.id);
     edit.addEventListener("click", () => openTagEditor(item)); row.append(edit); box.append(row);
     const saved = inlineTagStates.get(item.id);
     if (saved) {
@@ -2414,17 +2434,25 @@
         const retry = node("button", "button button-small tag-suggestion-retry", "核实上次提交"); retry.type = "button";
         retry.addEventListener("click", () => resolveTagSuggestion({ ...item, tag_suggestion: { id: pending.suggestionId, status: "pending", suggestions: [] } }, pending.payload.action, recovery, pending.payload.indices, true)); recovery.append(retry); box.append(recovery);
       }
-      // 待核对的建议只在标签窗口里处理：窗口里已经有「AI 建议的」这一块。
-      // 右侧再摆一套采纳/拒绝，同一个决定就有两个地方能点，两边各点一次还会打架。
+      // 待核对的建议直接摊在这里，而不是先摆一个「去核对」的按钮。
+      // 这块下面本来就是空着的，而核对是最高频的动作 —— 让人点一下才看得见
+      // AI 到底建议了什么，等于把最该显眼的东西藏进另一个窗口里。
+      // 改名、采纳、拒绝都在这儿做完，标签窗口不再重复摆一套。
       if (item.tag_suggestion?.status === "pending") {
         const pendingCount = (item.tag_suggestion.suggestions || []).filter(entry => !entry.decision).length;
-        const summary = node("div", "tag-suggestion-summary");
-        const open = node("button", "button button-small tag-suggestion-open",
-          pendingCount ? `AI 有 ${pendingCount} 条建议待核对 · 去核对` : "AI 的建议已核对完 · 重新打开标签窗口");
-        open.type = "button"; open.title = "这道题已有的标签、AI 的建议、想加的标签，都在这个窗口里";
-        open.addEventListener("click", () => openTagEditor(item)); summary.append(open);
-        if (item.tag_suggestion.message) summary.append(node("small", "", item.tag_suggestion.message));
-        box.append(summary);
+        const panel = tagSuggestionNode(item, { embedded: true });
+        if (panel) box.append(panel);
+        else {
+          // 一条未定的建议都画不出来时（都已处理过），只说明「剩下的去哪儿看」，
+          // 不再重复摆一套采纳/拒绝。
+          const summary = node("div", "tag-suggestion-summary");
+          const open = node("button", "button button-small tag-suggestion-open",
+            pendingCount ? `AI 有 ${pendingCount} 条建议待核对 · 去核对` : "AI 的建议已核对完 · 打开标签窗口");
+          open.type = "button"; open.title = "打开标签窗口添加标签";
+          open.addEventListener("click", () => openTagEditor(item)); summary.append(open);
+          if (item.tag_suggestion.message) summary.append(node("small", "", item.tag_suggestion.message));
+          box.append(summary);
+        }
       } else {
         const panel = tagSuggestionNode(item); if (panel) box.append(panel);
       }

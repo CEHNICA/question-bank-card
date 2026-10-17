@@ -188,6 +188,38 @@ MUTATIONS = [
      "      stateLine.textContent = queueBusy ? queueingText(queueCount, 0) : workingSummary(queuedTags, queuedAnswers);",
      "      stateLine.textContent = workingSummary(queuedTags, queuedAnswers);",
      [NODE, "test_library_ai_panel.js"]),
+
+    # 下面四条盯的是「核对在哪做」。以前面板只给一个「去核对」的按钮，其余全在
+    # 标签窗口里：看建议要点一次，改完名再采纳又要跳回来，而面板那块下面空着。
+    ("frontend/library.js",
+     "the panel hides the suggestions behind a way-in button again",
+     "        const panel = tagSuggestionNode(item, { embedded: true });\n        if (panel) box.append(panel);",
+     "        const panel = null;\n        if (panel) box.append(panel);",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library.js",
+     "the tag window draws a second copy of the suggestion list",
+     "    ai.append(aiTitle, go); box.append(ai);",
+     "    ai.append(aiTitle, tagSuggestionNode(item, { embedded: true }), go); box.append(ai);",
+     [NODE, "test_library_tag_panel.js"]),
+
+    ("frontend/library.js",
+     "the tag window points at the wrong place",
+     '"去右边面板核对"',
+     '"去标签窗口核对"',
+     [NODE, "test_library_tag_panel.js"]),
+
+    ("frontend/library.js",
+     "the window claims accepting happens inside it again",
+     '"已经贴上的和想加的，都在这个窗口里；要采纳 AI 的建议，在右边详情面板上做。"',
+     '"已经贴上的、AI 建议的、想加的，都在这个窗口里。"',
+     [NODE, "test_library_tag_panel.js"]),
+
+    ("frontend/library.js",
+     "the way back to the panel clears the redraw marker too late to matter",
+     "    inspectorRenderedKey = \"\";\n    renderInspector(item);",
+     "    renderInspector(item);\n    inspectorRenderedKey = \"\";",
+     [NODE, "test_library_context_sidebar.js"]),
 ]
 
 

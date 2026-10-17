@@ -51,6 +51,31 @@ assert.match(css, /\.library-card\.inspector-active[^\{]*\{[^}]*outline:[^}]*box
   "the question linked to the inspector has a persistent green outline and glow");
 assert.match(js, /tag-suggestion-retry-inline[\s\S]*?重新建议[\s\S]*?queueJobs\("tags", \{ ids: \[item\.id\], retry: true \}\)/,
   "a failed tag suggestion can be retried from the same visible error panel");
+
+// 待核对的 AI 建议必须直接摊在右侧详情面板上，而不是先摆一个「去核对」的按钮。
+// 面板那块下面本来就是空着的，而核对是最高频的动作 —— 让人点一下才看得见 AI
+// 建议了什么，等于把最该显眼的东西藏进另一个窗口。
+assert.match(js, /tagSuggestionNode\(item, \{ embedded: true \}\)/,
+  "the inspector lays the pending suggestions out in place instead of behind a button");
+assert.match(js, /if \(panel\) box\.append\(panel\);\s*else \{[\s\S]{0,400}?tag-suggestion-open/,
+  "the way-into-the-window button is only a fallback for when no suggestion row could be drawn");
+// 「核对」是完整一件事：看、改名、采纳/拒绝。以前被拆成两半（面板只给按钮、其余在
+// 窗口里），改个名再采纳要在两边来回跳。现在整件事都在面板上做完。
+assert.match(js, /function focusInspectorTag\(item\) \{[\s\S]*?renderInspector\(item\)[\s\S]*?tag-suggestion-card/,
+  "the tag window can jump straight to that question's suggestion list in the panel");
+// renderInspector 见到同一道题会直接跳过，那块建议清单就不会重画，滚也滚不到。
+// 所以清空「已渲染」标记必须在重画**之前** —— 顺序反了等于没清。
+assert.match(js, /inspectorRenderedKey = "";\s*renderInspector\(item\);/,
+  "the jump forces a redraw before scrolling to the list, not after");
+// 反过来，标签窗口里不能再摆一份同样的建议：两份内容看两遍、还得对得上两份。
+assert.doesNotMatch(js, /tagSuggestionNode\(item, \{ embedded: true \}\); if \(!card\) return;/,
+  "the tag window no longer renders a second copy of the suggestion list");
+assert.match(js, /"去右边面板核对"/,
+  "the tag window points at the panel instead of showing a duplicate list");
+assert.match(js, /条待核对 · 在右边详情面板上核对/,
+  "the count in the tag window says where to go, rather than implying you can decide here");
+assert.doesNotMatch(js, /已经贴上的、AI 建议的、想加的，都在这个窗口里/,
+  "the window no longer claims that accepting suggestions happens inside it");
 // 待办入口（待核对、未标知识点）必须常驻在筛选栏上，不能藏进「更多筛选」。
 // 它以前就住在那个浮层里，而浮层在三组筛选都为空时会把整个折叠板一起隐藏 ——
 // 于是「有 87 题待核对」这种提示跟着从页面上消失，用户完全不知道还有活要干。

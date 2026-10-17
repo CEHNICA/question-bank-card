@@ -20,8 +20,11 @@ assert.match(libraryJs, /moreTitle\.append\(node\("b", "", "想加的"\)/,
   "the directory below is labelled too, so all three blocks read the same way");
 assert.match(libraryJs, /more\.append\(moreTitle, tools\)/,
   "creating a new label belongs with the block it adds to");
-assert.match(libraryJs, /"已经贴上的、AI 建议的、想加的，都在这个窗口里。"/,
-  "the dialog says up front that one window holds all three");
+// 窗口现在只管「改标签」。采纳/拒绝搬到了右边详情面板的建议清单里（那块下面
+// 本来就有空位，核对是最高频的动作，不该藏在一个要点的按钮后面）。
+// 所以窗口的说明不能再声称「采纳也在这个窗口里」—— 那会把人引到没有按钮的地方。
+assert.match(libraryJs, /"已经贴上的和想加的，都在这个窗口里；要采纳 AI 的建议，在右边详情面板上做。"/,
+  "the dialog points accepting at the panel instead of claiming it happens here");
 
 const start = libraryJs.indexOf("  function renderTagPickerNow() {");
 const end = libraryJs.indexOf("  function renderTagPicker() {", start);
@@ -35,21 +38,38 @@ assert.match(libraryJs.slice(libraryJs.indexOf("  function renderTagPicker() {")
   /renderTagPickerNow\(\);/,
   "every repaint of the dialog redraws the question's own tags, so a removal shows up at once");
 
-// ---- the panel points at the dialog instead of offering a second set of buttons
+// ---- 核对在哪做：面板上就地做完，标签窗口不再摆第二份
+// 以前面板只给一个「去核对」的按钮，其余全在窗口里：看建议要点一次，改完名再采纳
+// 又要跳回来。面板那块下面本来就是空着的，于是改成直接摊开。
 const extrasStart = libraryJs.indexOf("  function extrasNode(item,");
 const extrasEnd = libraryJs.indexOf("    Object.entries(item.job_errors || {})", extrasStart);
 assert.ok(extrasStart >= 0 && extrasEnd > extrasStart, "the question panel region is available for checks");
 const extras = libraryJs.slice(extrasStart, extrasEnd);
 assert.match(extras, /item\.tag_suggestion\?\.status === "pending"/,
-  "only a proposal that still needs a decision is redirected into the dialog");
-assert.match(extras, /} else \{\s*const panel = tagSuggestionNode\(item\); if \(panel\) box\.append\(panel\);/,
-  "proposals that are not awaiting a decision keep their plain status line");
-assert.match(extras, /open\.addEventListener\("click", \(\) => openTagEditor\(item\)\)/,
-  "the panel entry opens the one place where tags are decided");
-assert.equal((extras.match(/tagSuggestionNode\(item\)/g) || []).length, 1,
-  "the panel must not render a second copy of the proposal card");
+  "only a proposal that still needs a decision gets the full list");
+assert.match(extras, /const panel = tagSuggestionNode\(item, \{ embedded: true \}\);/,
+  "the panel lays the suggestions out itself, rename and accept/reject included");
+assert.match(extras, /if \(panel\) box\.append\(panel\);\s*else \{/,
+  "the way into the tag window is only a fallback for when no row could be drawn");
 assert.match(extras, /AI 有 \$\{pendingCount\} 条建议待核对/,
-  "the panel still says how many are waiting, so nothing disappears silently");
+  "the fallback still says how many are waiting, so nothing disappears silently");
+// 两个分支互斥：待核对的摊开清单，其余状态只留一行说明。运行时只会走其中一条，
+// 所以是「一次一块」而不是「渲染两次」—— 只数出现次数会把正确的互斥写法也判成错。
+assert.match(extras, /\} else \{\s*const panel = tagSuggestionNode\(item\); if \(panel\) box\.append\(panel\);/,
+  "proposals that are not awaiting a decision keep their plain status line");
+assert.equal((extras.match(/box\.append\(panel\)/g) || []).length, 2,
+  "each of the two mutually exclusive branches appends exactly one proposal card");
+// 窗口里一份都不画：同一份内容出现在两处，看两遍还得对得上两份。
+const pickerNowStart = libraryJs.indexOf("  function renderTagPickerNow() {");
+const pickerNowEnd = libraryJs.indexOf("  const kindLabels =", pickerNowStart);
+const pickerNow = libraryJs.slice(pickerNowStart, pickerNowEnd);
+assert.ok(pickerNowStart >= 0 && pickerNowEnd > pickerNowStart, "the tag window renderer is available for checks");
+assert.doesNotMatch(pickerNow, /tagSuggestionNode\(/,
+  "the tag window must not render a second copy of the proposal card");
+assert.match(pickerNow, /"去右边面板核对"/,
+  "the window still points at the panel instead of duplicating it");
+assert.match(pickerNow, /focusInspectorTag\(item\)/,
+  "that button jumps straight to this question's list on the panel");
 
 // ---- behavior: the blocks render from real state
 class Element {
@@ -97,9 +117,16 @@ context.renderTagPickerNow();
 assert.equal(box.hidden, false, "a single question shows its own block");
 assert.match(textOf(box), /已经在这道题上/);
 assert.match(textOf(box), /平行四边形/, "the tag already on the question is listed, not just a count");
-assert.match(textOf(box), /AI 建议的/, "AI's proposals share the same window");
+assert.match(textOf(box), /AI 建议的/, "the block still says AI has suggestions");
 assert.match(textOf(box), /3 条待核对/, "the proposal count is shown next to the block");
-assert.ok(walk(box, node => node === suggestionCard).length, "the real proposal card is reused, not reimplemented");
+assert.match(textOf(box), /在右边详情面板上核对/, "the count says where to go, not that it can be done here");
+// 同一份建议清单不在窗口里再画一遍：两处内容看两遍，还得对得上两份，改一处另一处就过期。
+assert.equal(walk(box, node => node === suggestionCard).length, 0,
+  "the window draws no second copy of the proposal card");
+const jump = walk(box, node => node.textContent === "去右边面板核对")[0];
+assert.ok(jump, "the window offers a way to the panel");
+assert.equal(typeof jump.listeners.click[0], "function", "that button is wired to jump");
+assert.match(jump.title, /右边详情面板/, "it says where it will take you");
 
 const drop = walk(box, node => node.className === "tag-picker-current-drop")[0];
 assert.ok(drop, "each owned tag offers a way to take it off");
