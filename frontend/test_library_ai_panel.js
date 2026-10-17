@@ -31,14 +31,40 @@ assert.match(libraryJs, /补齐缺的知识点标签/,
   "the whole-library batch action says what it fills in");
 assert.match(libraryJs, /补齐缺的参考答案/,
   "the answer batch action reads as the same kind of sentence");
-assert.match(libraryJs, /tags\.title = apiReady[\s\S]*?不受上面的筛选影响[\s\S]*?消耗额度/,
+assert.match(libraryJs, /tags\.title = !apiReady[\s\S]*?不受上面的筛选影响[\s\S]*?消耗额度/,
   "the whole-library batch action explains its scope and its cost on hover");
 assert.match(libraryJs, /current\.title = apiReady[\s\S]*?只处理你现在筛选出来的这[\s\S]*?消耗额度/,
   "the current-result batch action explains its scope and its cost on hover");
-assert.match(libraryJs, /answers\.title = apiReady[\s\S]*?消耗额度/,
+assert.match(libraryJs, /answers\.title = !apiReady[\s\S]*?消耗额度/,
   "the answer batch action explains its cost on hover");
 assert.doesNotMatch(libraryJs, /全库缺少知识点|当前筛选全部|原卷无答案题/,
   "the internal wording is gone from the batch buttons");
+// 按钮上写的题数必须等于「点下去真会排上」的那一批。已经有建议在等或在跑的题
+// 也算没打标签，却再排一次什么也排不上 —— 按钮写着 805、点完没反应，比不给
+// 反馈更让人以为坏了。
+assert.match(libraryJs, /补齐缺的知识点标签 · \$\{readyCount\} 题/,
+  "the whole-library batch button counts the questions it would really queue");
+assert.match(libraryJs, /const readyCount = Number\(state\.tagWork\?\.untagged_ready\) \|\| 0/,
+  "the batch button reads the queueable count, not the wider untagged count");
+assert.match(libraryJs, /未标知识点 · \$\{missingCount\} 题/,
+  "the untagged filter keeps the wider count, because that is what it filters to");
+// 整库排队会逐题登记，题多时要忙十几秒。原来这段时间界面一动不动，
+// 用户以为卡死。现在必须：按钮先自己变样，再发请求；并且面板上留一行
+// 「正在处理多少道」，让排完队之后也不用一直盯着。
+assert.match(libraryJs, /label\.nodeValue = "正在排队…"/,
+  "the pressed button changes its own wording before the request is even sent");
+assert.match(libraryJs, /queueBusy = true;\s*applyBatchButtonState\(\)/,
+  "every batch button is locked while one is queueing");
+assert.match(libraryJs, /control\.disabled = queueBusy \|\| selectedView \|\| control\.dataset\.disabledInSelectedView === "true"/,
+  "locking and unlocking share one rule, so an API-less button is not re-enabled by mistake");
+assert.match(libraryJs, /已等 \$\{spent\} 秒/,
+  "the queueing line counts the seconds so a slow press still looks alive");
+assert.match(libraryJs, /AI 正在处理：/,
+  "the batch panel keeps saying how many questions are still being processed");
+assert.match(libraryJs, /confirmBulkTags\(tags, readyCount, missingCount\)/,
+  "the whole-library tag button asks before spending quota");
+assert.match(libraryJs, /confirmBulkAnswers\(answers, answerCount\)/,
+  "the whole-library answer button asks before spending quota");
 assert.match(libraryJs, /AI 建议待核对/,
   "generated candidates are labeled as pending human review");
 assert.match(libraryJs, /pending.*checkbox|checkbox.*pending/s,

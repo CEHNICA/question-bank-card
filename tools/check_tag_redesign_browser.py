@@ -283,6 +283,25 @@ def check(base):
         report["checks"].append("Pending-work filters stay visible without opening More Filters, and survive that disclosure being hidden; they need no request")
         report["checks"].append("API batch actions stay disabled when local readiness is false, while quick filters remain available")
 
+        # 题型筛选项必须永远在一行。以前它是会换行的一排：窗口稍窄一点，
+        # 「解答题」就被挤到第二行，一眼看上去像两排选项。这条只量排版，
+        # 断言「容器没折行」是量不出来的 —— 折行时容器照样是可见的。
+        for width in (1440, 1200, 1000, 768):
+            page.set_viewport_size({"width": width, "height": 960})
+            page.wait_for_timeout(120)
+            tops = page.locator("#typeFilters .draft-filter").evaluate_all(
+                "nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))")
+            assert tops, f"{width}px 下题型筛选一个按钮都没有"
+            assert len(set(tops)) == 1, f"{width}px 下题型筛选折成了多行：{tops}"
+        page.set_viewport_size({"width": 1440, "height": 960})
+        page.wait_for_timeout(120)
+        report["checks"].append("Question type filters stay on one row from 768px to 1440px instead of wrapping the last type onto a second line")
+
+        # 入口的名字必须自己说清「谁做什么、要不要花钱」。它以前只有「AI 批量处理」
+        # 四个字，又是个贴在右边缘的浅灰按钮，看不出代价、几乎不会被点开。
+        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("让 AI 批量处理题目")
+        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("要花额度")
+
         # These tests deliberately retain all four checked questions. The
         # inspector must still act on only the context question.
         first.locator(".paper").click()
@@ -519,6 +538,41 @@ def check(base):
         assert queued_requests == [{"kind": "tags", "ids": [fixture["failure_id"]],
             "retry": True, "api_only": True}], queued_requests
         report["checks"].append("Failure state exposes explicit retry with only the selected question; provider request is blocked")
+
+        # 「点了以为卡死」是这一版要解决的事，所以这里量的是过程，不是静态文案：
+        # 整库排队要逐题登记，请求会挂好几秒。必须先弹确认框（涉及额度和题数，
+        # 误点不可逆），确认之后按钮在服务端还没回话之前就已经自己变了样。
+        # 放在最后，因为上面几条断言都在数「一共发了几个排队请求」。
+        # 让排队请求在页面里多等一会儿，才量得到「服务端还没回话时界面长什么样」。
+        # 早先把路由对象按在手里不放，Playwright 会把它当成已处理而报错。
+        page.evaluate("""() => {
+          const original = window.fetch;
+          window.fetch = async (...args) => {
+            if (String(args[0]).includes('/api/library/jobs')) await new Promise(resolve => setTimeout(resolve, 2500));
+            return original(...args);
+          };
+        }""")
+        batch_panel = page.locator("#aiBatchTools .library-batch-ai")
+        if not batch_panel.evaluate("node => node.open"):
+            batch_panel.locator("summary").click()
+        queue_button = batch_panel.get_by_role("button", name=re.compile("补齐缺的知识点标签"))
+        expect(queue_button).to_be_enabled()
+        before = len(queued_requests)
+        queue_button.click()
+        expect(page.locator("#confirmDialog")).to_be_visible()
+        assert len(queued_requests) == before, "弹确认框之前不能就开始排队"
+        page.locator("#confirmOk").click()
+        # 请求还在路上，没有回话；此刻界面必须已经变了。
+        expect(batch_panel.get_by_role("button", name=re.compile("正在排队"))).to_be_visible()
+        expect(batch_panel.locator(".library-batch-state")).to_be_visible()
+        expect(batch_panel.get_by_role("button", name=re.compile("只处理当前这批"))).to_be_disabled()
+        assert batch_panel.get_by_role("button", name=re.compile("正在排队")).count() == 1, "整个面板只应有一个按钮在排队"
+        # 回话之后必须一样样还原，不能把按钮永久卡在「正在排队…」。
+        expect(batch_panel.get_by_role("button", name=re.compile("正在排队"))).to_have_count(0)
+        assert len(queued_requests) == before + 1, "确认之后应当恰好排一次队"
+        if batch_panel.evaluate("node => node.open"):
+            batch_panel.locator("summary").click()
+        report["checks"].append("The batch entry names its cost on its face, asks before spending quota, and the pressed button shows 正在排队 while the request is still in flight, then restores")
 
         first.locator(".paper").click()
         assert inspector.locator(".question-inspector-tags").evaluate("""element => {

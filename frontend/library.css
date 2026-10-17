@@ -205,11 +205,27 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
 .library-batch-toolbar:not([hidden]) { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; position: relative; }
 .library-batch-toolbar .library-batch-ai { overflow: visible; border: 0; background: transparent; }
-.library-batch-toolbar .library-batch-ai > summary { min-height: 31px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); white-space: nowrap; }
-.library-batch-toolbar .library-batch-count { margin-left: 2px; }
+/* 这个入口以前是个贴在右边缘的浅灰小按钮，名字又只有「AI 批量处理」四个字，
+   看不出要花钱、也不知道会动多少题，于是几乎不会被点开。改成主色的实心按钮，
+   把「要花额度」直接写在按钮上。 */
+.library-batch-toolbar .library-batch-ai > summary {
+  display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 5px 11px;
+  border: 1px solid var(--accent); border-radius: 9px; background: var(--accent);
+  color: #fff; font-size: 12.5px; font-weight: 650; white-space: nowrap; cursor: pointer;
+}
+.library-batch-toolbar .library-batch-ai > summary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+.library-batch-toolbar .library-batch-ai[open] > summary { background: var(--accent-dark); border-color: var(--accent-dark); }
+.library-batch-toolbar .library-batch-ai > summary::after { color: rgba(255, 255, 255, .8); }
+.library-batch-toolbar .library-batch-cost { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .2); font-size: 11px; font-weight: 600; }
+.library-batch-toolbar .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); font-size: 11px; font-weight: 700; }
+.library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
 .library-batch-toolbar .library-batch-ai-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
 .library-batch-toolbar .library-tool-actions { gap: 6px; }
 .library-batch-toolbar .library-tool-action { min-height: 36px; padding: 7px 9px; }
+/* 排队中、以及「还在处理多少道」都写在这一行，正对着按钮。
+   按钮点下去以后用户盯着的就是这几颗，这一行不写清楚就等于没反应。 */
+.library-batch-state:not([hidden]) { margin: 8px 0; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent-dark); font-size: 12px; line-height: 1.55; }
+.library-batch-ai-body .library-tool-action[aria-busy="true"] { opacity: .75; font-weight: 650; }
 .tag-saved-filter-box { display: grid; gap: 7px; }
 .tag-saved-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .tag-saved-filter-actions .button { min-width: 0; padding-inline: 7px; white-space: normal; }
@@ -451,7 +467,6 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 @media (max-width: 760px) {
   .library-bulk #libraryStatus[data-tone="plain"] { display: none; }
   .library-batch-toolbar:not([hidden]) { margin-left: 0; }
-  .library-filterbar > #typeFilters { flex-basis: 100%; }
   .library-filterbar > .library-advanced { margin-left: auto; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }

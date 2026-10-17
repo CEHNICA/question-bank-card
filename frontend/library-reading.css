@@ -72,18 +72,28 @@
   .library-page .library-filterbar .library-select { gap: 8px; font-weight: 400; }
   .library-page .library-filterbar .library-select select { min-height: 34px; border-radius: 6px; }
   .library-page .library-filterbar #sourceSelect { width: min(230px, 100%); min-width: 0; max-width: 230px; }
-  .library-page .library-filterbar > #typeFilters {
-    grid-area: types; display: flex; flex-wrap: wrap; min-width: 0; gap: 0 15px;
+  /* 题型这一组在 DOM 里是「.library-facet 的孙节点」，而这些老规则写的是
+     「筛选栏的直接子节点」—— 条件对不上，规则从来没生效过，于是这一组被自动
+     排版塞进第一列那个窄格子：标签「题型」被挤成一字一行，六个题型按钮也放不下、
+     后面几个折到第二行，看着像两排选项。
+     现在明确把它放进第二行、占满整行，六个平分宽度，永远不会折行；
+     窄屏另有三列网格那条规则兜底。 */
+  .library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }
+  .library-page .library-facet-label { padding-top: 3px; white-space: nowrap; }
+  .library-page .library-facet > #typeFilters {
+    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 10px;
     padding: 0; border-radius: 0; background: none;
   }
-  .library-page .library-filterbar > #typeFilters .draft-filter {
+  .library-page .library-facet > #typeFilters .draft-filter {
+    flex: 1 1 0; justify-content: center; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     gap: 5px; padding: 0 1px 10px; border-bottom: 2px solid transparent; border-radius: 0;
     background: none; color: var(--muted); box-shadow: none; font-size: 12px;
   }
-  .library-page .library-filterbar > #typeFilters .draft-filter.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
-  .library-page .library-filterbar > #typeFilters .count { min-width: 0; padding: 0 4px; background: transparent; color: inherit; font-size: 11px; }
-  .library-page .library-filterbar > #typeFilters .draft-filter.active .count { background: var(--accent-soft); }
-  .library-page .library-filterbar > #typeFilters .draft-filter:disabled { opacity: .45; }
+  .library-page .library-facet > #typeFilters .draft-filter.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
+  .library-page .library-facet > #typeFilters .count { min-width: 0; padding: 0 4px; background: transparent; color: inherit; font-size: 11px; }
+  .library-page .library-facet > #typeFilters .draft-filter.active .count { background: var(--accent-soft); }
+  .library-page .library-facet > #typeFilters .draft-filter:disabled { opacity: .45; }
   .library-page .library-advanced > summary { padding: 6px 9px; border-radius: 6px; font-weight: 400; background: var(--surface); }
   .library-page .library-advanced:not([open]) > .library-filters { display: none; }
   .library-page .library-bulk {
@@ -165,7 +175,7 @@
     .library-page.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: minmax(0, 1fr); }
     .library-page .library-filterbar { gap: 12px 8px; padding-inline: 12px; }
     .library-page .library-filterbar .library-select > span { display: none; }
-    .library-page .library-filterbar > #typeFilters { gap: 0 12px; }
+    .library-page .library-facet > #typeFilters { gap: 0 12px; }
   }
   @media (max-width: 979px) {
     .library-page { --topbar-h: 96px; }
@@ -207,8 +217,9 @@
     .library-page .library-filterbar #sourceSelect { width: 100%; max-width: 135px; font-size: 12px; }
     .library-page .library-filterbar #sortSelect { max-width: 102px; font-size: 12px; }
     .library-page .library-advanced > summary { padding: 6px; font-size: 11px; }
-    .library-page .library-filterbar > #typeFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px 8px; }
-    .library-page .library-filterbar > #typeFilters .draft-filter { justify-content: center; min-width: 0; font-size: 11px; padding-bottom: 7px; }
+    .library-page .library-facet-label { display: none; }
+    .library-page .library-facet > #typeFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px 8px; }
+    .library-page .library-facet > #typeFilters .draft-filter { justify-content: center; min-width: 0; font-size: 11px; padding-bottom: 7px; }
     .library-page .library-bulk { padding: 8px 10px; margin-bottom: 12px; font-size: 11px; }
     .library-page .library-card-meta { grid-template-columns: 17px minmax(0, 1fr); gap: 7px 9px; padding: 14px 15px 0; }
     .library-page .library-card-heading { justify-content: space-between; }

@@ -3437,6 +3437,9 @@ def library_jobs_view(request):
     executors = set()
     jobs = []
     try:
+        # 清一次过期任务就够了。原来是每道题清一次，整库排队时这一项
+        # 单独就吃掉好几秒，而这段时间界面上一动不动，看着像卡死。
+        library_job_control.expire_api_jobs()
         with transaction.atomic():
             for publication in targets:
                 options = {"solution_scope": solution_scope}
@@ -3447,7 +3450,7 @@ def library_jobs_view(request):
                     options["executor"] = payload["executor"]
                 if payload.get("api_only") is True:
                     options["api_only"] = True
-                job = library_jobs.enqueue(publication, kind, **options)
+                job = library_jobs.enqueue(publication, kind, expire=False, **options)
                 executors.add(job.executor)
                 jobs.append(job)
                 queued += 1

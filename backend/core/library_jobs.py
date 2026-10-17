@@ -57,10 +57,17 @@ def split_answer_tags(raw: str) -> dict[str, str]:
 
 def enqueue(publication: PublishedQuestion, kind: str, *, agent: str = "", solution_scope: bool = False,
             executor: str | None = None, api_only: bool = False, tag_scope: bool = False,
-            retry: bool = False) -> LibraryJob:
-    """Queue one job; an identical job already waiting is reused."""
+            retry: bool = False, expire: bool = True) -> LibraryJob:
+    """Queue one job; an identical job already waiting is reused.
+
+    ``expire=False`` is for callers that already swept timed-out API jobs once for
+    the whole batch. Sweeping per item is pure repeated work: at a thousand
+    questions it burned a noticeable slice of the wait that used to have no
+    on-screen feedback at all, which is exactly why a press looked like a hang.
+    """
     from .library_job_control import expire_api_jobs
-    expire_api_jobs()
+    if expire:
+        expire_api_jobs()
     if kind not in FEATURE_OF:
         raise JobError("不认识的任务")
     if kind == LibraryJob.Kind.TAGS:

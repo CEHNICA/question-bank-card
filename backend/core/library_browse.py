@@ -210,6 +210,11 @@ def tag_work_counts() -> dict:
     since it was produced. One flat "pending" total therefore looks like a pile of
     reviewable work while almost none of it can actually be accepted, so the reachable
     part is reported separately instead of being hidden inside the same number.
+
+    The same care applies to the number a bulk button prints. "Missing a knowledge
+    label" and "would queue if you pressed it" are different sets: questions whose
+    suggestion is already waiting or running are still untagged, yet re-queueing them
+    does nothing. A button that reports the wider set promises work it will not do.
     """
     from . import library_tagging
     from .models import LibraryTagAssignment, LibraryTagSuggestion
@@ -223,9 +228,27 @@ def tag_work_counts() -> dict:
                      .values_list("publication_id", flat=True))
     flagged = set(LibraryTagAssignment.objects.filter(needs_review=True, publication__status=published)
                   .values_list("publication_id", flat=True))
-    return {"untagged_knowledge": PublishedQuestion.objects.filter(status=published)
-            .exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
-                tag__kind="knowledge", needs_review=False)).distinct().count(),
+    live = PublishedQuestion.objects.filter(status=published)
+    untagged = live.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
+        tag__kind="knowledge", needs_review=False))
+    # 「还没打标签」和「点一下真能排上队」是两个数，不能混用。
+    # 筛选按钮要的是前者；批量按钮要的是后者 —— 已经有建议在等或在跑的题，
+    # 点了也不会再排一次。混用会让按钮写着 805、点下去却一道也没排上。
+    already_asked = LibraryTagSuggestion.objects.filter(
+        status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
+                    LibraryTagSuggestion.Status.PENDING]).values("publication_id")
+    missing_answers = sum(1 for content, extras in live.values_list("content", "extras")
+                          if not str((content or {}).get("answer") or "").strip()
+                          and not (extras or {}).get("ai_answer"))
+    processing = LibraryJob.objects.filter(executor=LibraryJob.Executor.API,
+                                           status__in=library_jobs.ACTIVE).aggregate(
+        tags=Count("pk", filter=models.Q(kind=LibraryJob.Kind.TAGS)),
+        answers=Count("pk", filter=models.Q(kind=LibraryJob.Kind.ANSWER)))
+    return {"untagged_knowledge": untagged.distinct().count(),
+            "untagged_ready": untagged.exclude(pk__in=already_asked).distinct().count(),
+            "missing_answer": missing_answers,
+            "queued_tags": processing["tags"],
+            "queued_answers": processing["answers"],
             "pending_review": len(waiting | flagged),
             "pending_actionable": len(reachable),
             "outdated_suggestions": len(waiting - reachable)}

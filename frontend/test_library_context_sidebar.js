@@ -73,8 +73,32 @@ assert.match(css.concat(readingCss), /\.library-extra-tools\[hidden\][^{]*\{[^}]
   "the pending-work entry really disappears when nothing is pending");
 assert.match(js, /function renderExtraTools\(\)[\s\S]*?box\.append\(\.\.\.quickActions\)/,
   "pending-work buttons are rendered into the always-visible container");
-assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?AI 批量处理[\s\S]*?batchBox\.append\(batch\)/,
+assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?让 AI 批量处理题目[\s\S]*?batchBox\.append\(batch\)/,
   "quick browsing and API-consuming batch tasks have separate destinations");
+// 「AI 批量处理」这个入口以前只有四个字，看不出要花钱、也不知道会动多少题，
+// 又贴在右边缘像个小灰按钮，于是几乎没人点。名字、代价提示、以及有活干时
+// 直接显示「还剩多少道」，三样都要钉住，缺一样又会退回成一个藏起来的入口。
+assert.match(js, /node\("span", "library-batch-cost", "要花额度"\)/,
+  "the batch entry says on its face that it costs quota");
+assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} 道`\)/,
+  "while AI is working, the entry itself says how many questions are left");
+assert.match(css.concat(readingCss), /\.library-batch-toolbar \.library-batch-ai > summary\s*\{[^}]*background:\s*var\(--accent\)/,
+  "the batch entry is a solid accent button, not a quiet grey one that gets missed");
+// 题型筛选项以前会换行：窗口稍窄一点，最后一个「解答题」就被挤到第二行，
+// 一眼看去像两排选项；左边「题型」两个字还被挤成一字一行。锁成一行、六个平分宽度。
+// 选择器必须对得上真实结构：题型那组是 .library-facet 的孙节点。写成
+// 「.library-filterbar > #typeFilters」的话规则从头到尾没生效过，而上面两条
+// 断言照样是绿的 —— 排版坏了，没有任何一条会响。
+assert.match(html, /<div class="library-facet">[\s\S]*?id="typeFilters"/,
+  "the type filter really is a grandchild of the filter bar, not a direct child");
+assert.match(readingCss, /\.library-filterbar > \.library-facet \{ grid-area: types/,
+  "the type facet is placed in the reserved full-width row instead of being auto-placed");
+assert.match(readingCss, /\.library-facet > #typeFilters\s*\{[^}]*flex-wrap:\s*nowrap/,
+  "the type filter never wraps to a second row");
+assert.match(readingCss, /\.library-facet > #typeFilters \.draft-filter\s*\{[^}]*flex:\s*1 1 0/,
+  "the type filter buttons share one row evenly instead of wrapping");
+assert.doesNotMatch(css.concat(readingCss), /\.library-filterbar > #typeFilters/,
+  "no rule still targets the type filter as a direct child of the filter bar");
 assert.match(js, /batch\.open = aiBatchToolsOpen/, "batch tasks are folded by default and restore their in-page state");
 assert.match(js, /batch\.addEventListener\("toggle", \(\) => \{ aiBatchToolsOpen = batch\.open; \}\)/, "the batch disclosure stays in its chosen state during in-page filter refreshes");
 assert.doesNotMatch(js.match(/function renderExtraTools\(\)[\s\S]*?\n  function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");
