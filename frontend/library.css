@@ -676,7 +676,7 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .print-options-note, .print-answer-status { margin: 0; color: var(--muted); line-height: 1.6; font-size: 12px; }
 .print-split { padding: 6px 0; font-size: 12px; white-space: normal; text-align: left; justify-content: flex-start; }
 .print-advanced, .print-individual { border-top: 1px solid var(--line); padding-top: 10px; }
-.print-advanced > summary, .print-individual > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.print-advanced > summary, .print-individual > summary { box-sizing: border-box; min-height: 30px; padding-block: 5px; line-height: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .print-advanced .print-options-body, .print-individual .print-options-body { padding: 14px 0 0; }
 /* 配图调整：每一张图两行 —— 上面是宽度（滑块 + 毫米数 + 还原），下面是「从这里换行」。
    滑块和毫米数是同一个数的两种看法，拖滑块时毫米数跟着走，直接填毫米数时滑块也跟着走。 */

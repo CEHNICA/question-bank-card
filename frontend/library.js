@@ -3504,7 +3504,14 @@ $("selectedViewCount").textContent = String(state.basket.length);
     $("printButton").disabled = blocked || answerEmpty || !!printState.tooWide;
     $("exportPdf").disabled = blocked || answerEmpty || !!printState.tooWide || printState.layoutPending || !!printState.layoutError;
     $("exportWord").disabled = blocked || answerEmpty;
-    $("exportSplit").disabled = blocked || !printState.availableAnswers;
+    const split = $("exportSplit");
+    split.disabled = blocked || !printState.availableAnswers;
+    // 1.25.15：这个按钮灰掉时整屏没有一句说为什么。紧挨着的「答案解析」一直带着悬停
+    // 说明，轮到它就空了 —— 灰掉还不解释，等于让人自己猜是哪一步没做对。
+    split.title = !printState.items.length ? "先把未载入的选题处理掉，才能分别导出题目卷与答案卷"
+      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能分别导出`
+      : !printState.availableAnswers ? "这次组卷的题还没有答案或解析，拆不出答案卷"
+      : "导出两份文件：一份只有题目，一份只有答案与解析";
     // 1.13.6：一道题都没载入时，这个按钮原来还是可点的，按下去打开一个空编辑器，
     // 屏幕上什么也不发生 —— 比灰掉更难查。载入中或有未载入的题也一并按不可用算。
     const manage = $("managePrintAnswers");
@@ -3543,6 +3550,14 @@ $("selectedViewCount").textContent = String(state.basket.length);
           : "这些题没有答案或解析，仅输出题目卷。")
       : available < items.length ? `${items.length} 题中 ${available} 题有答案或解析，其余标明原卷未提供。`
       : `${items.length} 题均有答案或解析。`;
+    // 1.25.15：上面那句话只说了「有没有答案」，没说因此按不了什么、怎么才能按。
+    // 灰着的正好是两个入口：下面那个按钮，和「输出内容」里锁着的「答案与解析」。
+    // 出路要点名写在这里 —— 页面说了出路却不说「所以这个按钮现在按不了」，人还是得自己拼。
+    if (items.length && !available) {
+      status.textContent += aiAvailable
+        ? "「分别导出题目卷与答案卷」和「输出内容」里的「答案与解析」要等打开上面的「附 AI 参考（未核对）」才能用。"
+        : "「分别导出题目卷与答案卷」和「输出内容」里的「答案与解析」都用不了，先在顶栏的「答案解析」里补上答案。";
+    }
     const resultOnly = items.filter(item => solutions.completeness(item, { ai_answers: Boolean(ui.printAi.checked && state.features.ai_answer) }) === "result_only");
     if (resultOnly.length) status.textContent += ` 第 ${resultOnly.map(item => groupedQuestionNumber(item)).join("、")} 题只有结果，可在“答案解析”中补充详细过程。`;
     const review = items.filter(item => item.solution_needs_review);
@@ -3971,6 +3986,17 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
     $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
     $("printIndividualHint").textContent = item?.content?.body_mode === "source_image" ? "原图题保留卷面排版，可调整顺序和分页；转成文字后可重排选项。" : id === printState.firstQuestion ? "首题已在第一页，无需另起页。" : "只影响当前组卷，不改题库原题。";
+    // 1.25.15：下面那句提示一次只讲得清一件事，它讲的是「这题另起一页」。可「本题留白」
+    // 锁不锁是另一回事（非解答题、或答案紧跟题后），提示一个字没提，控件自己也没有悬停
+    // 说明 —— 两件互不相干的事挤在一句话里，读的人猜不出哪句说的是哪个。
+    $("printIndividualSpace").title = !item ? "先在上面选一道题，才能逐题调整"
+      : item.question_type !== "free_response" ? "只对解答题有用，这道题留白没有意义"
+      : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"
+      : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"
+      : "这一题在卷面上留多少空白给学生写过程";
+    $("printIndividualBreak").title = !item ? "先在上面选一道题，才能逐题调整"
+      : id === printState.firstQuestion ? "第一题本来就在第一页，不用再另起一页"
+      : "让这道题从新的一页开始印";
     renderFigureControls(id);
   }
 
