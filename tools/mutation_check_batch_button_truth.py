@@ -94,10 +94,24 @@ MUTATIONS = [
      'node("span", "library-batch-cost", "")',
      [NODE, "test_library_context_sidebar.js"]),
 
+    ("frontend/library.js",
+     "the batch entry stops naming the two things it actually fills in",
+     'node("summary", "", "批量补标签和答案")',
+     'node("summary", "", "批量处理题目")',
+     [NODE, "test_library_context_sidebar.js"]),
+
     ("frontend/library-reading.css",
      "the type filters are allowed to wrap onto a second row again",
-     "grid-area: types; display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 10px;",
-     "grid-area: types; display: flex; flex-wrap: wrap; min-width: 0; gap: 0 10px;",
+     ".library-page .library-facet > #typeFilters {\n"
+     "    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 10px;",
+     ".library-page .library-facet > #typeFilters {\n"
+     "    display: flex; flex-wrap: wrap; min-width: 0; gap: 0 10px;",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library-reading.css",
+     "the type facet is no longer placed in its own full-width row",
+     ".library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }",
+     ".library-page .library-filterbar > .library-facet { min-width: 0; }",
      [NODE, "test_library_context_sidebar.js"]),
 ]
 

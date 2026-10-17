@@ -519,10 +519,12 @@
       const batch = node("details", "library-batch-ai");
       batch.open = aiBatchToolsOpen;
       // 入口名字原来只写「AI 批量处理」，看不出它要花钱、也不知道会动多少题，
-      // 又是个贴在右边缘的小灰按钮，很容易整天没被看见。名字改成一句人话，
-      // 把「谁做什么」和「要不要花钱」直接摆出来；有活干的时候直接显示还剩多少。
+      // 又是个贴在右边缘的小灰按钮，很容易整天没被看见。改成「AI 批量处理题目」
+      // 之后还是有人问「批量处理啥呀」——名字里必须出现真正被处理的那两样东西，
+      // 而且要和下面两条按钮用同一个动作词（都是「补齐缺…」），一眼能对上。
+      // 要不要花钱挂在按钮上；有活干的时候直接显示还剩多少。
       const working = queuedTags + queuedAnswers;
-      const summary = node("summary", "", "让 AI 批量处理题目");
+      const summary = node("summary", "", "批量补标签和答案");
       summary.append(node("span", "library-batch-cost", "要花额度"));
       summary.append(working
         ? node("span", "library-batch-live", `处理中 ${working} 道`)

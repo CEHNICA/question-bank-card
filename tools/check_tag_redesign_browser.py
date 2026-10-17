@@ -297,9 +297,10 @@ def check(base):
         page.wait_for_timeout(120)
         report["checks"].append("Question type filters stay on one row from 768px to 1440px instead of wrapping the last type onto a second line")
 
-        # 入口的名字必须自己说清「谁做什么、要不要花钱」。它以前只有「AI 批量处理」
-        # 四个字，又是个贴在右边缘的浅灰按钮，看不出代价、几乎不会被点开。
-        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("让 AI 批量处理题目")
+        # 入口的名字必须自己说清「补什么、要不要花钱」。它以前只有「AI 批量处理」
+        # 四个字，看不出代价、几乎不会被点开；改成「AI 批量处理题目」之后仍然
+        # 有人问「批量处理啥呀」，所以真正被补的两样东西必须出现在名字里。
+        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("批量补标签和答案")
         expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("要花额度")
 
         # These tests deliberately retain all four checked questions. The

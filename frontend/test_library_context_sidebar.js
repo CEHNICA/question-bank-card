@@ -73,11 +73,15 @@ assert.match(css.concat(readingCss), /\.library-extra-tools\[hidden\][^{]*\{[^}]
   "the pending-work entry really disappears when nothing is pending");
 assert.match(js, /function renderExtraTools\(\)[\s\S]*?box\.append\(\.\.\.quickActions\)/,
   "pending-work buttons are rendered into the always-visible container");
-assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?让 AI 批量处理题目[\s\S]*?batchBox\.append\(batch\)/,
-  "quick browsing and API-consuming batch tasks have separate destinations");
 // 「AI 批量处理」这个入口以前只有四个字，看不出要花钱、也不知道会动多少题，
 // 又贴在右边缘像个小灰按钮，于是几乎没人点。名字、代价提示、以及有活干时
 // 直接显示「还剩多少道」，三样都要钉住，缺一样又会退回成一个藏起来的入口。
+// 名字本身还必须说清「处理什么」：改成「AI 批量处理题目」之后仍然有人问
+// 「批量处理啥呀」——真正被补的就是标签和答案，必须出现在名字里。
+assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?批量补标签和答案[\s\S]*?batchBox\.append\(batch\)/,
+  "quick browsing and API-consuming batch tasks have separate destinations");
+assert.match(js, /node\("summary", "", "批量补标签和答案"\)/,
+  "the batch entry names the two things it actually fills in");
 assert.match(js, /node\("span", "library-batch-cost", "要花额度"\)/,
   "the batch entry says on its face that it costs quota");
 assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} 道`\)/,
