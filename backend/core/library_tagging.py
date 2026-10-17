@@ -592,13 +592,15 @@ def replace_assignment(payload):
 
 def _catalogue_rows():
     state = catalogue_state()
-    counts = {str(row["tag_id"]): row["count"] for row in LibraryTagAssignment.objects.filter(
-        publication__status=PublishedQuestion.Status.PUBLISHED, needs_review=False
-    ).values("tag_id").annotate(count=Count("publication_id", distinct=True))}
+    # 1.25.12：这两段以前各写了一遍同一个 filter。留着两份一模一样的条件，就只能靠
+    # 「谁忘了改」来提醒，那正好是出错的地方。收成一个。
+    live = LibraryTagAssignment.objects.filter(
+        publication__status=PublishedQuestion.Status.PUBLISHED, needs_review=False)
+    counts = {str(row["tag_id"]): row["count"] for row in live
+              .values("tag_id").annotate(count=Count("publication_id", distinct=True))}
     context = relation_context()
     publications_by_tag = {}
-    for tag_id, publication_id in LibraryTagAssignment.objects.filter(
-            publication__status=PublishedQuestion.Status.PUBLISHED, needs_review=False).values_list("tag_id", "publication_id"):
+    for tag_id, publication_id in live.values_list("tag_id", "publication_id"):
         publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
     tags = []
     for tag in LibraryTag.objects.all():
@@ -608,8 +610,18 @@ def _catalogue_rows():
             publications.update(publications_by_tag.get(key, set()))
         row["subtree_count"] = len(publications)
         tags.append(row)
+    # 1.25.12：标签管理页以前只说「299 个标签」，然后每行自己写「0 题」。走进来的人
+    # 只看见一整屏 0，既不知道题库里到底有多少道题，也不知道其实只有两道贴过标签 ——
+    # 更不知道后台已经攒着几百条能直接采纳的 AI 建议（采纳不花钱）。这三个数和标签
+    # 目录本来就是同一件事，所以放在这一次请求里一起给，别让页面自己再去拼一遍。
+    tagged_questions = len({publication_id for ids in publications_by_tag.values() for publication_id in ids})
     return {"revision": state.revision, "tags": tags,
-            "total": len(tags), "max_name": MAX_NAME, "initialized": state.initialized}
+            "total": len(tags), "max_name": MAX_NAME, "initialized": state.initialized,
+            "published_questions": PublishedQuestion.objects.filter(
+                status=PublishedQuestion.Status.PUBLISHED).count(),
+            "tagged_questions": tagged_questions,
+            "pending_suggestions": LibraryTagSuggestion.objects.filter(
+                status=LibraryTagSuggestion.Status.PENDING).count()}
 
 
 def template_rows():

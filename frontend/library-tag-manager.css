@@ -63,6 +63,14 @@
 .tag-directory-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 14px 16px; border-bottom: 1px solid var(--line, #e3e3dc); }
 .tag-directory-select-all { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted, #747971); cursor: pointer; }
 .tag-directory-select-all input, .tag-directory-row > input { width: 15px; height: 15px; margin: 0; accent-color: #236e60; }
+/* 1.25.12：列表正上方的现状说明。配色跟批量操作条一致，都属于「现在能做什么」的提示，
+   跟标签目录本身（那张表）分开一眼。
+   文字和按钮上下排，不并排：并排时文本只剩 771px、12px 字号一行最多 64 个字，实际句子
+   66 个字，于是第二行只挤得出三个字，看着像坏行。上下排让文字占满整行，句子在
+   1280 到 1560 这两种窗口下都是一整行。 */
+.tag-directory-usage-note { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 11px 14px; background: #eff6f2; border-bottom: 1px solid #dce9e1; }
+.tag-directory-usage-note[hidden] { display: none; }
+.tag-directory-usage-note > p { margin: 0; font-size: 12px; line-height: 1.6; color: #3f4a44; }
 .tag-directory-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 11px 14px; background: #eff6f2; border-bottom: 1px solid #dce9e1; }
 .tag-directory-bulk[hidden] { display: none; }
 .tag-directory-bulk > strong { font-size: 12px; margin-right: 2px; }

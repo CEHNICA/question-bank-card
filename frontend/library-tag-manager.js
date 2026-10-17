@@ -77,9 +77,19 @@
     const clearSelection = button("取消选择", () => { state.selected.clear(); state.focused = ""; render(); }, "button button-quiet button-small");
     bulk.append(selectedCount, hiddenSelection, merge, remove, clearSelection);
     const location = element("div", "tag-directory-location"); location.id = "tagManagerLocation";
+    // 1.25.12：走进标签管理的人看到的是 299 行「0 题」，而页面从头到尾没说过题库里
+    // 有多少道题、其中几道贴过标签。这条把现状摆出来，并给出唯一真正走得通的下一步
+    // ——后台已经攒着可以逐条采纳的 AI 建议，采纳不花钱。
+    const usageNoteBox = element("div", "tag-directory-usage-note"); usageNoteBox.id = "tagManagerUsageNote";
+    const usageNoteText = element("p");
+    // 走这条出路要先把标签管理收起来，再让题库筛出待核对的那批 —— 两件事一起做，
+    // 人回来时已经在要干的地方了，而不是回到列表首页再自己找一遍。
+    const goReview = button("回题库核对 AI 标签建议", () => { close(); options.onReviewSuggestions?.(); }, "button button-small");
+    goReview.id = "tagManagerGoReviewSuggestions";
+    usageNoteBox.append(usageNoteText, goReview);
     const list = element("div", "tag-directory-list"); list.id = "tagManagerList"; list.setAttribute("aria-label", "标签列表");
     const mapHost = element("div", "tag-directory-map-host"); mapHost.id = "tagManagerMap"; mapHost.hidden = true;
-    results.append(location, listHeading, bulk, list, mapHost);
+    results.append(location, listHeading, usageNoteBox, bulk, list, mapHost);
     const detail = element("aside", "tag-directory-detail"); detail.id = "tagManagerDetail"; detail.setAttribute("aria-label", "选中标签的信息");
     body.append(sidebar, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
@@ -294,6 +304,42 @@
           button("＋ 添加子标签", () => options.editEntity("tag", null, { parent_ids: [current.id], kind: current.kind }), "button button-small"));
       } else location.append(element("small", "", state.query ? "搜索当前类型的全部标签" : "展开箭头查看子标签；每一级都可以贴题。"));
     }
+    // 1.25.12：把「现在是什么情况、下一步做什么」写成一句话放在列表正上方。以前这
+    // 一块只有一排「0 题」，看的人无从判断是标签统计坏了还是题真的一道都没贴，更
+    // 不知道后台已经攒着几百条能直接采纳的 AI 建议。
+    //
+    // 句子和按钮文案放在一起算，别拆成两处：数字变了只改这里就够，句子不会因此跟
+    // 按钮对不上（说一句 443 条、按钮却不带数字，是最容易出的那种不一致）。
+    function usageNote(catalogue) {
+      const data = catalogue || {};
+      const published = Number(data.published_questions) || 0;
+      const tagged = Number(data.tagged_questions) || 0;
+      const pending = Number(data.pending_suggestions) || 0;
+      // 标签都贴完了，或者题库里还没有题，这句话没有内容可说 —— 别摆一条空框。
+      if (!published || published - tagged <= 0) return null;
+      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
+      if (pending) {
+        return {
+          text: lead + `另有 ${pending} 条 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
+          button: `回题库核对这 ${pending} 条 AI 标签建议`,
+          title: "回到题库，按「AI 建议待核对」筛选，逐题看过再采纳。"
+            + "建议是 AI 已经拟好的，采纳这一步不再调用 AI，也不消耗额度。"
+        };
+      }
+      return {
+        text: lead + "在题库里选中一道题，就能在右侧「标签」里给它贴标签。",
+        button: "回题库给题目贴标签",
+        title: "回到题库，选中一道题，在右侧「标签」里挑标签贴上去。"
+      };
+    }
+    function renderUsageNote() {
+      const note = usageNote(state.catalogue);
+      usageNoteBox.hidden = !note;
+      if (!note) return;
+      usageNoteText.textContent = note.text;
+      goReview.textContent = note.button;
+      goReview.title = note.title;
+    }
     function renderList() {
       const scroll = list.scrollTop, query = normalized(state.query.trim());
       state.shown = (state.catalogue.tags || []).filter((tag) => {
@@ -310,6 +356,7 @@
         return !query || query.split(/\s+/).every((part) => searchText.includes(part));
       }).sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN", { numeric: true }));
       list.replaceChildren(); count.textContent = state.shown.length + " 个标签";
+      renderUsageNote();
       selectAll.checked = state.shown.length > 0 && state.shown.every((tag) => state.selected.has(String(tag.id)));
       selectAll.indeterminate = !selectAll.checked && state.shown.some((tag) => state.selected.has(String(tag.id))); selectAll.disabled = !state.shown.length;
       if (!state.shown.length) {

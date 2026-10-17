@@ -2020,7 +2020,14 @@
         const item = state.catalog.get(context.publicationId), attempt = inlineTagStates.get(context.publicationId)?.attempt;
         return item && attempt ? submitInlineTagAttempt(item, attempt) : false;
       },
-      onClose: () => { void load({ quiet: true }); void refreshOpenTagPicker(); }
+      onClose: () => { void load({ quiet: true }); void refreshOpenTagPicker(); },
+      // 1.25.12：标签管理页发现自己这 299 个标签几乎全是「0 题」时，会把人送回题库
+      // 并直接筛出待核对的那一批 —— 少走一步「回来再找筛选」的路。
+      onReviewSuggestions: () => {
+        state.tag = ""; state.tagAll = ""; state.tagNot = ""; state.tagAny = "";
+        state.tagMode = ""; state.tagReview = true; state.untaggedKnowledge = false;
+        syncUrl(); void load();
+      }
     });
     const retry = node("button", "button button-small", "核实上次目录操作"); retry.id = "tagCatalogueRetry"; retry.type = "button"; retry.hidden = !catalogueUnknown;
     retry.addEventListener("click", async () => {
