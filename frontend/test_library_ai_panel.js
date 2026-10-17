@@ -52,18 +52,32 @@ assert.match(libraryJs, /未标知识点 · \$\{missingCount\} 题/,
 // 用户以为卡死。现在必须：按钮先自己变样，再发请求；并且面板上留一行
 // 「正在处理多少道」，让排完队之后也不用一直盯着。
 assert.match(libraryJs, /label\.nodeValue = "正在排队…"/,
-  "the pressed button changes its own wording before the request is even sent");
-assert.match(libraryJs, /queueBusy = true;\s*applyBatchButtonState\(\)/,
-  "every batch button is locked while one is queueing");
+  "the shared state applier writes the queueing wording onto the button text node");
+assert.match(libraryJs, /if \(queueBusy && control\.dataset\.queueAction === queueAction\) markQueueing\(control\);\s*else unmarkQueueing\(control\);/,
+  "the queueing wording follows the shared state and only ever lands on the pressed button");
+// 认「刚才点的是哪一个」靠的是渲染时就写死的标记，不是节点也不是名字（名字里
+// 带着题数，重画后会变；节点重画一次就被换掉了）。
+assert.match(libraryJs, /tags\.dataset\.queueAction = "tags";/,
+  "each batch button carries a stable identity that survives a re-render");
+assert.match(libraryJs, /current\.dataset\.queueAction = "tags-current";/,
+  "the current-filter batch button is distinguishable from the whole-library one");
+assert.match(libraryJs, /answers\.dataset\.queueAction = "answer";/,
+  "the answer batch button carries its own identity too");
+assert.match(libraryJs, /queueBusy = true;\s*queueAction = action \|\| "";\s*applyBatchButtonState\(\)/,
+  "starting a queue records which button was pressed and immediately runs the one shared rule");
 assert.match(libraryJs, /control\.disabled = queueBusy \|\| selectedView \|\| control\.dataset\.disabledInSelectedView === "true"/,
   "locking and unlocking share one rule, so an API-less button is not re-enabled by mistake");
 assert.match(libraryJs, /已等 \$\{spent\} 秒/,
   "the queueing line counts the seconds so a slow press still looks alive");
 assert.match(libraryJs, /AI 正在处理：/,
   "the batch panel keeps saying how many questions are still being processed");
-assert.match(libraryJs, /confirmBulkTags\(tags, readyCount, missingCount\)/,
+// 重画之后，面板上那一行也必须接着说「正在登记…」。它每次重画都是新节点，
+// 内容只能按当下的状态算，不能永远只写「AI 还在跑多少道」那一套。
+assert.match(libraryJs, /stateLine\.textContent = queueBusy \? queueingText\(queueCount, 0\) : workingSummary\(queuedTags, queuedAnswers\);/,
+  "a rebuilt panel line still reports the queueing in progress");
+assert.match(libraryJs, /confirmBulkTags\(readyCount, missingCount\)/,
   "the whole-library tag button asks before spending quota");
-assert.match(libraryJs, /confirmBulkAnswers\(answers, answerCount\)/,
+assert.match(libraryJs, /confirmBulkAnswers\(answerCount\)/,
   "the whole-library answer button asks before spending quota");
 assert.match(libraryJs, /AI 建议待核对/,
   "generated candidates are labeled as pending human review");

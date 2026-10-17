@@ -16,6 +16,15 @@ from pathlib import Path
 import subprocess
 import sys
 
+# Windows 控制台默认 cp1252，而每条结果都要打印「挡住 ✓ / 漏过 ✗」。以前它在
+# 第一条结果上就崩了，退出码变成 1 —— 于是「变异全被挡住」和「脚本自己坏了」
+# 在外面看一模一样，这个门禁自己开始说谎。先把输出编码定死。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 PYTHON = ROOT / "packaging" / ".build" / "venv" / "Scripts" / "python.exe"
@@ -60,8 +69,8 @@ MUTATIONS = [
 
     ("frontend/library.js",
      "the pressed button stops changing its own wording",
-     'if (label) label.nodeValue = "正在排队…";',
-     'if (label && false) label.nodeValue = "正在排队…";',
+     "    if (!label) return;",
+     "    if (label) return;",
      [NODE, "test_library_api_only.js"]),
 
     ("frontend/library.js",
@@ -78,14 +87,14 @@ MUTATIONS = [
 
     ("frontend/library.js",
      "a failed queue leaves the button stuck on its queueing wording",
-     "if (label && trigger.isConnected) label.nodeValue = original;",
-     "if (label && trigger.isConnected && false) label.nodeValue = original;",
+     "    if (label && control.dataset.queueOriginal) label.nodeValue = control.dataset.queueOriginal;",
+     "    if (label && control.dataset.queueOriginal && false) label.nodeValue = control.dataset.queueOriginal;",
      [NODE, "test_library_api_only.js"]),
 
     ("frontend/library.js",
      "the whole-library tag button skips the confirmation and spends quota at once",
-     'confirmBulkTags(tags, readyCount, missingCount);',
-     'queueJobs("tags", { missing: true }, tags, readyCount);',
+     'confirmBulkTags(readyCount, missingCount);',
+     'queueJobs("tags", { missing: true }, readyCount);',
      [NODE, "test_library_ai_panel.js"]),
 
     ("frontend/library.js",
@@ -103,9 +112,9 @@ MUTATIONS = [
     ("frontend/library-reading.css",
      "the type filters are allowed to wrap onto a second row again",
      ".library-page .library-facet > #typeFilters {\n"
-     "    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 10px;",
+     "    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 15px;",
      ".library-page .library-facet > #typeFilters {\n"
-     "    display: flex; flex-wrap: wrap; min-width: 0; gap: 0 10px;",
+     "    display: flex; flex-wrap: wrap; min-width: 0; gap: 0 15px;",
      [NODE, "test_library_context_sidebar.js"]),
 
     ("frontend/library-reading.css",
@@ -113,6 +122,72 @@ MUTATIONS = [
      ".library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }",
      ".library-page .library-filterbar > .library-facet { min-width: 0; }",
      [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library.css",
+     "the batch entry goes back to being permanently loud, the most expensive button on the page",
+     "  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);\n"
+     "  color: var(--ink-2); font-size: 12.5px; font-weight: 400; white-space: nowrap; cursor: pointer;",
+     "  border: 1px solid var(--accent); border-radius: 8px; background: var(--accent);\n"
+     "  color: #fff; font-size: 12.5px; font-weight: 650; white-space: nowrap; cursor: pointer;",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library.css",
+     "the batch entry stops lighting up while AI is actually working",
+     ".library-batch-toolbar .library-batch-ai[data-working] > summary {",
+     ".library-batch-toolbar .library-batch-ai[data-never] > summary {",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library-reading.css",
+     "the type filter buttons go back to claiming an equal slice of the row each",
+     "    flex: 0 1 auto; justify-content: flex-start; min-width: 0;",
+     "    flex: 1 1 0; justify-content: center; min-width: 0;",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    ("frontend/library.js",
+     "the pending-work filters put their search icon back",
+     "`AI 建议待核对 · ${pendingCount} 题`",
+     "`AI 建议待核对 · ${pendingCount} 题`, \"search\"",
+     [NODE, "test_library_context_sidebar.js"]),
+
+    # 下面四条盯的是「排队反馈扛得住重画」。原来那几句「正在排队…」只写在
+    # 点下去那一个节点上，登记途中界面一重画，按钮就变回原名却仍然点不动 ——
+    # 而且只有排队那几秒才偶发，平时怎么测都测不出来。
+    ("frontend/library.js",
+     "a re-render mid-queue leaves a silently disabled button again",
+     "      if (queueBusy && control.dataset.queueAction === queueAction) markQueueing(control);\n"
+     "      else unmarkQueueing(control);",
+     "      unmarkQueueing(control);",
+     [NODE, "test_library_api_only.js", "test_library_ai_panel.js"]),
+
+    ("frontend/library.js",
+     "every batch button claims to be queueing, not just the pressed one",
+     "      if (queueBusy && control.dataset.queueAction === queueAction) markQueueing(control);",
+     "      if (queueBusy) markQueueing(control);",
+     [NODE, "test_library_api_only.js", "test_library_ai_panel.js"]),
+
+    ("frontend/library.js",
+     "the batch buttons stop carrying a stable identity",
+     '      current.dataset.queueAction = "tags-current";',
+     '      current.dataset.queueAction = "tags";',
+     [NODE, "test_library_ai_panel.js"]),
+
+    ("frontend/library.js",
+     "the queueing wording stops following the shared state",
+     '    label.nodeValue = "正在排队…";',
+     '    label.nodeValue = "处理中…";',
+     [NODE, "test_library_api_only.js", "test_library_ai_panel.js"]),
+
+    ("frontend/library.js",
+     "the seconds ticker writes into a node the re-render already threw away",
+     '      const stateLine = document.querySelector("#aiBatchTools .library-batch-state");',
+     '      const stateLine = null;',
+     [NODE, "test_library_api_only.js"]),
+
+    ("frontend/library.js",
+     "the rebuilt panel line forgets it is queueing",
+     "      stateLine.textContent = queueBusy ? queueingText(queueCount, 0) : workingSummary(queuedTags, queuedAnswers);",
+     "      stateLine.textContent = workingSummary(queuedTags, queuedAnswers);",
+     [NODE, "test_library_ai_panel.js"]),
 ]
 
 

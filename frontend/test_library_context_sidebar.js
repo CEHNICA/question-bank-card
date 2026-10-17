@@ -86,10 +86,19 @@ assert.match(js, /node\("span", "library-batch-cost", "要花额度"\)/,
   "the batch entry says on its face that it costs quota");
 assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} 道`\)/,
   "while AI is working, the entry itself says how many questions are left");
-assert.match(css.concat(readingCss), /\.library-batch-toolbar \.library-batch-ai > summary\s*\{[^}]*background:\s*var\(--accent\)/,
-  "the batch entry is a solid accent button, not a quiet grey one that gets missed");
+// 这个按钮的显眼程度走了个来回，正好说明单看「显不显眼」判断不了对错：
+// 原来太低调、贴右边没人点；改成实心主色又成了全场视觉焦点 —— 可它恰恰是
+// 一屏里最贵、最不该随手点的那个（每题花一次额度）。
+// 现在的规矩是：平时和「更多筛选」一样低调，只有 AI 真的在逐题处理时才亮成主色。
+// 两条都要钉住，只钉一条的话，另一条一定会被人「顺手改回去」。
+assert.doesNotMatch(css, /\.library-batch-toolbar \.library-batch-ai > summary\s*\{[^}]*background:\s*var\(--accent\)/,
+  "the batch entry stays quiet while nothing is running — it is the most expensive button on the page");
+assert.match(css, /\.library-batch-toolbar \.library-batch-ai\[data-working\] > summary\s*\{[^}]*background:\s*var\(--accent\)/,
+  "the batch entry lights up exactly while AI is working through the queue");
+assert.match(js, /if \(working\) batch\.dataset\.working = "true"/,
+  "the entry is marked as working from the same number that drives 处理中 N 道");
 // 题型筛选项以前会换行：窗口稍窄一点，最后一个「解答题」就被挤到第二行，
-// 一眼看去像两排选项；左边「题型」两个字还被挤成一字一行。锁成一行、六个平分宽度。
+// 一眼看去像两排选项；左边「题型」两个字还被挤成一字一行。
 // 选择器必须对得上真实结构：题型那组是 .library-facet 的孙节点。写成
 // 「.library-filterbar > #typeFilters」的话规则从头到尾没生效过，而上面两条
 // 断言照样是绿的 —— 排版坏了，没有任何一条会响。
@@ -99,8 +108,18 @@ assert.match(readingCss, /\.library-filterbar > \.library-facet \{ grid-area: ty
   "the type facet is placed in the reserved full-width row instead of being auto-placed");
 assert.match(readingCss, /\.library-facet > #typeFilters\s*\{[^}]*flex-wrap:\s*nowrap/,
   "the type filter never wraps to a second row");
-assert.match(readingCss, /\.library-facet > #typeFilters \.draft-filter\s*\{[^}]*flex:\s*1 1 0/,
-  "the type filter buttons share one row evenly instead of wrapping");
+// 但也不能平分整行：平分会让「判断题 0」这种一格里空着一大片，一屏 12 个数字
+// 再配上大片留白，扫不出重点，只觉得乱。宽度必须跟着内容走。
+assert.match(readingCss, /\.library-facet > #typeFilters \.draft-filter\s*\{[^}]*flex:\s*0 1 auto/,
+  "type filter buttons take only the width they need instead of each claiming an equal slice");
+// 待办入口和题型是同一种东西（点了就筛一遍），以前却挂放大镜图标、长得和题型
+// 不一样，一屏里出现三种筛选长相。图标要去掉，外观要和题型统一。
+assert.doesNotMatch(js, /AI 建议待核对 · \$\{pendingCount\} 题[`'",\s][^)]*"search"/,
+  "the pending-review filter no longer wears a search icon that makes it look like a lookup");
+assert.doesNotMatch(js, /未标知识点 · \$\{missingCount\} 题[`'",\s][^)]*"search"/,
+  "the untagged filter no longer wears a search icon either");
+assert.match(readingCss, /\.library-extra-tools \.button\s*\{[^}]*border-bottom:\s*2px solid transparent/,
+  "pending-work filters now look like the type filters instead of a third style");
 assert.doesNotMatch(css.concat(readingCss), /\.library-filterbar > #typeFilters/,
   "no rule still targets the type filter as a direct child of the filter bar");
 assert.match(js, /batch\.open = aiBatchToolsOpen/, "batch tasks are folded by default and restore their in-page state");

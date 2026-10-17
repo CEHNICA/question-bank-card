@@ -23,6 +23,17 @@ from urllib.parse import urlparse
 import check_library_tags_browser as regression
 
 
+# Windows 控制台默认是 cp1252，而这个脚本最后要打印的通过清单里带着「正在排队」
+# 这样的中文。以前它在最后一行崩溃，退出码变成 1 —— 于是「所有检查都过了」
+# 在外面看却和「界面坏了」长得一模一样，验收门自己开始说谎。
+# 这里先把输出编码定死：写到文件是 UTF-8，写到控制台也不会因为一个字就崩。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # 被重定向成不可配置的对象时就算了
+        pass
+
+
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "tmp" / "tag-redesign-browser"
 DRAFT_NAME = "未提交的中点专项标签123（隔离验收）"
@@ -300,8 +311,21 @@ def check(base):
         # 入口的名字必须自己说清「补什么、要不要花钱」。它以前只有「AI 批量处理」
         # 四个字，看不出代价、几乎不会被点开；改成「AI 批量处理题目」之后仍然
         # 有人问「批量处理啥呀」，所以真正被补的两样东西必须出现在名字里。
-        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("批量补标签和答案")
-        expect(page.locator("#aiBatchTools .library-batch-ai > summary")).to_contain_text("要花额度")
+        summary_node = page.locator("#aiBatchTools .library-batch-ai > summary")
+        expect(summary_node).to_contain_text("批量补标签和答案")
+        expect(summary_node).to_contain_text("要花额度")
+        # 显不显眼走过一个来回：太低调没人点，改成实心主色又成了全场焦点 ——
+        # 而它恰恰是一屏里最贵、最不该随手点的按钮。所以量的是「有没有活干」：
+        # 没活干时必须和「更多筛选」一样是安静的白底描边。
+        idle_bg = summary_node.evaluate("node => getComputedStyle(node).backgroundColor")
+        more_filters_bg = page.locator("#advancedFilters > summary").evaluate(
+            "node => getComputedStyle(node).backgroundColor")
+        assert idle_bg == more_filters_bg, f"没有活干时批量入口不该抢眼：{idle_bg} vs {more_filters_bg}"
+        # 待办入口和题型是同一种东西（点了就筛一遍），以前却挂着放大镜图标，
+        # 一眼像「去搜索」，一屏里出现三种筛选长相。
+        assert page.locator("#tagQuickTools svg.icon").count() == 0, "待办入口上的放大镜图标还没去掉"
+        assert page.locator("#typeFilters svg.icon").count() == 0, "题型筛选上不该有图标"
+        report["checks"].append("The batch entry names its cost, stays quiet while nothing is running, and pending-work filters look like type filters instead of a search")
 
         # These tests deliberately retain all four checked questions. The
         # inspector must still act on only the context question.
@@ -568,12 +592,27 @@ def check(base):
         expect(batch_panel.locator(".library-batch-state")).to_be_visible()
         expect(batch_panel.get_by_role("button", name=re.compile("只处理当前这批"))).to_be_disabled()
         assert batch_panel.get_by_role("button", name=re.compile("正在排队")).count() == 1, "整个面板只应有一个按钮在排队"
+
+        # 登记的这几秒里界面会自己重画（题数回来、定时刷新），按钮节点会被换掉。
+        # 以前「正在排队…」只写在点下去那一个节点上，于是重画之后按钮变回原名、
+        # 却仍然点不动 —— 正是「点了以为卡死」的老样子，而且只有排队途中才偶发。
+        # 这里不赌它一定重画，而是整段时间不停取样：只要有一刻按钮不说话了就算失败。
+        quiet_moment = None
+        deadline = time.monotonic() + 2.2
+        while time.monotonic() < deadline:
+            sample = batch_panel.get_by_role("button", name=re.compile("正在排队")).count()
+            state_visible = batch_panel.locator(".library-batch-state").is_visible()
+            if sample != 1 or not state_visible:
+                quiet_moment = f"按钮在排队途中不说话了（{sample} 个在排队，面板提示行可见={state_visible}）"
+                break
+            page.wait_for_timeout(80)
+        assert quiet_moment is None, quiet_moment
         # 回话之后必须一样样还原，不能把按钮永久卡在「正在排队…」。
         expect(batch_panel.get_by_role("button", name=re.compile("正在排队"))).to_have_count(0)
         assert len(queued_requests) == before + 1, "确认之后应当恰好排一次队"
         if batch_panel.evaluate("node => node.open"):
             batch_panel.locator("summary").click()
-        report["checks"].append("The batch entry names its cost on its face, asks before spending quota, and the pressed button shows 正在排队 while the request is still in flight, then restores")
+        report["checks"].append("The batch entry names its cost on its face, asks before spending quota, and the pressed button keeps saying 正在排队 for the whole in-flight window — including across a re-render — then restores")
 
         first.locator(".paper").click()
         assert inspector.locator(".question-inspector-tags").evaluate("""element => {

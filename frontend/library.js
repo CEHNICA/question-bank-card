@@ -336,14 +336,48 @@
     applyBatchButtonState();
   }
 
-  // 「AI 批量处理」里每个按钮能不能点，只由这一处说了算。排队时统一禁用、
-  // 结束后恢复，都走同一条判据 —— 各自写一遍的话，恢复时会把本来就不该
-  // 能点的按钮（比如没配 API、当前筛选为空）顺手放开。
+  // 「AI 批量处理」里每个按钮能不能点、排队时显示什么，都只由这一处说了算。
+  // 排队时统一禁用、结束后恢复，都走同一条判据 —— 各自写一遍的话，恢复时会把
+  // 本来就不该能点的按钮（比如没配 API、当前筛选为空）顺手放开。
+  //
+  // 「排队时显示什么」也必须放在这里，不能在点下去那一刻改一下按钮就算完：
+  // 登记要好几秒，这期间界面会自己重画（题数回来了、定时刷新），按钮节点会被
+  // 换成新的。原来只把「正在排队…」写在那一个节点上，一重画就没了 —— 按钮重新
+  // 变回原名却仍然点不动，正是「点了以为卡死」的老样子，白改。
   let queueBusy = false;
+  let queueCount = 0;
+  // 刚才点的是哪一个 —— 认的是这个，不是那个节点。节点重画一次就没了，名字里
+  // 还带着题数、重画后也可能变，只有这个标记是渲染时就写死在按钮上的。
+  // 认错了的后果很具体：两个按钮一起显示「正在排队…」，用户会以为排了两队。
+  let queueAction = "";
+  // 按钮的文字是 iconButton 追加的一个文本节点，换文案时只能换它，
+  // 直接改 textContent 会把图标一起抹掉。
+  function queueLabelNode(control) {
+    return Array.from(control.childNodes || []).find((child) => child.nodeType === 3) || null;
+  }
+  function markQueueing(control) {
+    const label = queueLabelNode(control);
+    if (!label) return;
+    // 原话先存一份，结束后照原样还回去。重画出来的新节点本来就没有这份记录，
+    // 存的也一定是它自己刚渲染出来的名字。
+    if (!control.dataset.queueOriginal) control.dataset.queueOriginal = label.nodeValue;
+    label.nodeValue = "正在排队…";
+    control.setAttribute("aria-busy", "true");
+  }
+  function unmarkQueueing(control) {
+    const label = queueLabelNode(control);
+    if (label && control.dataset.queueOriginal) label.nodeValue = control.dataset.queueOriginal;
+    delete control.dataset.queueOriginal;
+    control.removeAttribute("aria-busy");
+  }
   function applyBatchButtonState() {
     const selectedView = state.view === "selected";
     for (const control of document.querySelectorAll("#aiBatchTools button")) {
       control.disabled = queueBusy || selectedView || control.dataset.disabledInSelectedView === "true";
+      // 排队期间要改名的只有刚才被点的那一个；别的按钮保持自己的名字，
+      // 只是被锁住 —— 让它们也跟着说「正在排队」是在骗用户，以为他排了两队。
+      if (queueBusy && control.dataset.queueAction === queueAction) markQueueing(control);
+      else unmarkQueueing(control);
     }
   }
 
@@ -424,9 +458,12 @@
     const batchActions = [];
     const quickActions = [];
 
+    // 待办入口和题型其实是同一种东西：点了就把列表筛一遍。它们以前挂着放大镜图标，
+    // 一眼像「去搜索」，和下面那排纯文字的题型对不上，一屏里出现三种筛选长相。
+    // 图标去掉，改成和题型同一套文字筛选；字号小一点、数字淡一点，别抢题面。
     if (pendingCount || state.tagReview) {
       const pending = iconButton("button", `button button-quiet button-small library-tool-action${state.tagReview ? " active" : ""}`,
-        `AI 建议待核对 · ${pendingCount} 题`, "search");
+        `AI 建议待核对 · ${pendingCount} 题`);
       // 这个数字原来把「现在就能采纳」和「旧版遗留、对不上现在的标签库」混在一起，
       // 看上去是一堆待办，点进去却几乎一步都走不了。分开说清楚，数目才不作假。
       pending.title = outdatedCount
@@ -439,7 +476,8 @@
     }
     if (missingCount || state.untaggedKnowledge) {
       const untagged = iconButton("button", `button button-quiet button-small library-tool-action${state.untaggedKnowledge ? " active" : ""}`,
-        `未标知识点 · ${missingCount} 题`, "search");
+        `未标知识点 · ${missingCount} 题`);
+      untagged.title = `整个题库里还没打上正式知识点标签的 ${missingCount} 道题。点一下只看这些题。`;
       untagged.setAttribute("aria-pressed", String(state.untaggedKnowledge));
       untagged.addEventListener("click", () => { state.untaggedKnowledge = !state.untaggedKnowledge; syncUrl(); load(); });
       quickActions.push(untagged);
@@ -456,6 +494,9 @@
       const tags = iconButton("button", "button button-quiet button-small library-tool-action",
         `补齐缺的知识点标签 · ${readyCount} 题`, "plus");
       tags.dataset.disabledInSelectedView = String(!apiReady || readyCount === 0);
+      // 排队时要改名的只有被点的那个，靠这个标记认。名字里带着题数、重画后会变，
+      // 按钮节点本身也会被换掉，只有它是渲染时就写死的。
+      tags.dataset.queueAction = "tags";
       tags.title = !apiReady
         ? "需要先到「设置 → API 配置」里配置并测试通过。"
         : readyCount
@@ -466,7 +507,7 @@
             + "现在没有需要新排队的。看完上面的待核对入口，或等 AI 做完再看。";
       tags.addEventListener("click", () => {
         if (!readyCount) { toast("现在没有需要新排队的题。", ""); return; }
-        confirmBulkTags(tags, readyCount, missingCount);
+        confirmBulkTags(readyCount, missingCount);
       });
       batchActions.push(tags);
       const current = iconButton("button", "button button-quiet button-small library-tool-action",
@@ -477,6 +518,7 @@
           + "生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
         : "需要先到「设置 → API 配置」里配置并测试通过。";
       current.dataset.disabledInSelectedView = String(!apiReady || Number(state.total) === 0);
+      current.dataset.queueAction = "tags-current";
       current.addEventListener("click", async () => {
         const count = Number(state.total) || 0;
         const filters = currentFilterPayload();
@@ -488,7 +530,7 @@
             + "开始之后再改筛选，也不会扩大这次的范围。",
           ok: "开始生成"
         });
-        if (confirmed) queueJobs("tags", { scope: "current_filter", filters }, current, count);
+        if (confirmed) queueJobs("tags", { scope: "current_filter", filters }, "tags-current", count);
       });
       batchActions.push(current);
     }
@@ -496,6 +538,7 @@
       const answers = iconButton("button", "button button-quiet button-small library-tool-action",
         `补齐缺的参考答案 · ${answerCount} 题`, "plus");
       answers.dataset.disabledInSelectedView = String(!apiReady || answerCount === 0);
+      answers.dataset.queueAction = "answer";
       answers.title = !apiReady
         ? "需要先到「设置 → API 配置」里配置并测试通过。"
         : answerCount
@@ -504,7 +547,7 @@
           : "题库里每一道题都已经有答案或 AI 参考答案了，不用再补。";
       answers.addEventListener("click", () => {
         if (!answerCount) { toast("题库里的答案已经齐了。", ""); return; }
-        confirmBulkAnswers(answers, answerCount);
+        confirmBulkAnswers(answerCount);
       });
       batchActions.push(answers);
     }
@@ -523,7 +566,11 @@
       // 之后还是有人问「批量处理啥呀」——名字里必须出现真正被处理的那两样东西，
       // 而且要和下面两条按钮用同一个动作词（都是「补齐缺…」），一眼能对上。
       // 要不要花钱挂在按钮上；有活干的时候直接显示还剩多少。
+      //
+      // 颜色也跟着这个思路走：它是最贵、最不该随手点的按钮，所以平时和「更多筛选」
+      // 一样低调，只有 AI 真的在逐题处理时才亮成主色 —— 该看它的时候才显眼。
       const working = queuedTags + queuedAnswers;
+      if (working) batch.dataset.working = "true";
       const summary = node("summary", "", "批量补标签和答案");
       summary.append(node("span", "library-batch-cost", "要花额度"));
       summary.append(working
@@ -542,9 +589,12 @@
       // 排队中、以及「已经在处理多少道」都写在这里。按钮上方、正对着按钮，
       // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
       const stateLine = node("p", "library-batch-state");
-      stateLine.hidden = !working;
+      // 排队中这一行也要占住，而且必须能扛住重画：登记途中界面会重画，
+      // 这一行每次都是新节点，所以排队文案要能按需重填，不能抱着旧节点不放。
       stateLine.dataset.tone = "working";
-      stateLine.textContent = workingSummary(queuedTags, queuedAnswers);
+      stateLine.hidden = queueBusy ? false : !working;
+      stateLine.textContent = queueBusy ? queueingText(queueCount, 0) : workingSummary(queuedTags, queuedAnswers);
+      if (queueBusy) stateLine.dataset.queueing = "true"; else delete stateLine.dataset.queueing;
       body.append(stateLine);
       const actions = node("div", "library-tool-actions");
       actions.append(...batchActions);
@@ -573,28 +623,33 @@
   // 不变样、也没有任何提示，屏幕上一动不动，看着就像卡死。
   // 所以点下去的第一件事就是让按钮本身说「我在动」，并把已等秒数打出来。
   let queueTick = null;
+  let queueStartedAt = 0;
 
-  function beginQueueFeedback(trigger, count) {
-    const panel = trigger ? trigger.closest(".library-batch-ai") : null;
-    const stateLine = panel ? panel.querySelector(".library-batch-state") : null;
-    // 按钮的文字是 iconButton 追加的一个文本节点，换文案时只能换它，
-    // 直接改 textContent 会把图标一起抹掉。
-    const label = trigger ? Array.from(trigger.childNodes).find((child) => child.nodeType === 3) : null;
-    const original = label ? label.nodeValue : "";
-    const started = Date.now();
+  function queueingText(count, spent) {
+    const tail = spent ? `，已等 ${spent} 秒` : "";
+    return count
+      ? `正在登记 ${count} 道题${tail}。软件要一道一道记下来，题越多等得越久，这期间别重复点。`
+      : `正在登记${tail}。软件要一道一道记下来，题越多等得越久，这期间别重复点。`;
+  }
+
+  function beginQueueFeedback(action, count) {
+    queueStartedAt = Date.now();
+    // 按钮长什么样交给 applyBatchButtonState：重画多少次都会重新写上，
+    // 不用在这里单独照顾「刚才被点的那个节点」—— 它随时会被换掉。
     queueBusy = true;
+    queueAction = action || "";
     applyBatchButtonState();
-    if (label) label.nodeValue = "正在排队…";
-    if (trigger) trigger.setAttribute("aria-busy", "true");
+    queueCount = count;
     const tick = () => {
-      const spent = Math.round((Date.now() - started) / 1000);
-      const tail = spent ? `，已等 ${spent} 秒` : "";
+      const spent = Math.round((Date.now() - queueStartedAt) / 1000);
+      // 每秒都重新找这一行：登记途中界面会重画，按住开始时那个节点，
+      // 等于对着已经不在页面上的元素写字，写了也没人看得见。
+      const stateLine = document.querySelector("#aiBatchTools .library-batch-state");
       if (stateLine) {
         stateLine.hidden = false;
         stateLine.dataset.tone = "working";
-        stateLine.textContent = count
-          ? `正在登记 ${count} 道题${tail}。软件要一道一道记下来，题越多等得越久，这期间别重复点。`
-          : `正在登记${tail}。软件要一道一道记下来，题越多等得越久，这期间别重复点。`;
+        stateLine.dataset.queueing = "true";
+        stateLine.textContent = queueingText(count, spent);
       }
       setStatus(count ? `正在排队 ${count} 道题…` : "正在排队…", "working");
     };
@@ -605,16 +660,21 @@
       window.clearInterval(queueTick);
       queueTick = null;
       queueBusy = false;
+      queueAction = "";
+      queueCount = 0;
+      // 还原也走同一条路：现在页面上不管是哪一个按钮节点，都会被改回它自己的名字。
       applyBatchButtonState();
-      // 这一行刚才写的是「正在登记…」。登记已经结束了，留着会说谎；
+      // 刚才写的是「正在登记…」。登记已经结束了，留着会说谎；
       // 紧接着的刷新会把它换成真实的「AI 正在处理：还有多少道」。
-      if (stateLine) stateLine.hidden = true;
-      if (trigger) trigger.removeAttribute("aria-busy");
-      if (label && trigger.isConnected) label.nodeValue = original;
+      const stateLine = document.querySelector("#aiBatchTools .library-batch-state");
+      if (stateLine && stateLine.dataset.queueing === "true") {
+        delete stateLine.dataset.queueing;
+        stateLine.hidden = true;
+      }
     };
   }
 
-  function confirmBulkTags(trigger, count, untaggedTotal) {
+  function confirmBulkTags(count, untaggedTotal) {
     confirmDialog({
       title: `给整个题库的 ${count} 道题生成标签建议？`,
       text: `这 ${count} 道题还没有生成过标签建议，现在一起交给 AI。`
@@ -624,21 +684,21 @@
         + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，不会直接贴到题目上，要你逐条核对。"
         + "登记时要一道一道写进去，点下去后按钮会立刻变成「正在排队…」，几十秒内不会白等。",
       ok: "开始生成"
-    }).then((confirmed) => { if (confirmed) queueJobs("tags", { missing: true }, trigger, count); });
+    }).then((confirmed) => { if (confirmed) queueJobs("tags", { missing: true }, "tags", count); });
   }
 
-  function confirmBulkAnswers(trigger, count) {
+  function confirmBulkAnswers(count) {
     confirmDialog({
       title: `给整个题库里 ${count} 道缺答案的题生成 AI 参考答案？`,
       text: `这 ${count} 道题原卷里没有答案，也没有 AI 参考答案，现在一起交给 AI。`
         + "每道题调用一次 AI，会消耗额度。生成的答案标着「AI 参考 · 未核对」，和原卷答案分开存放。"
         + "登记时要一道一道写进去，点下去后按钮会立刻变成「正在排队…」，几十秒内不会白等。",
       ok: "开始生成"
-    }).then((confirmed) => { if (confirmed) queueJobs("answer", { missing: true }, trigger, count); });
+    }).then((confirmed) => { if (confirmed) queueJobs("answer", { missing: true }, "answer", count); });
   }
 
-  async function queueJobs(kind, target, trigger, count = 0) {
-    const stop = beginQueueFeedback(trigger, count);
+  async function queueJobs(kind, target, action, count = 0) {
+    const stop = beginQueueFeedback(action, count);
     try {
       const configurationResponse = await fetch("/api/settings/library-ai", { cache: "no-store" });
       const configuration = await configurationResponse.json();

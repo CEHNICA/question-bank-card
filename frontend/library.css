@@ -203,20 +203,26 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-batch-ai[open] > summary::after { content: "▴"; }
 .library-batch-ai > summary:hover { background: var(--accent-soft); color: var(--accent-dark); }
 .library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
+/* 这个入口以前是个贴在右边缘的浅灰小按钮、名字又只有四个字，几乎不会被点开；
+   后来改成实心主色按钮，解决了「藏得深」，却又在一屏浅灰细线里成了最扎眼的
+   焦点 —— 而它恰恰是最贵、最不该随手点的那个（每题花一次额度）。
+   现在折中：平时和「更多筛选」一样低调，只有 AI 真的在逐题处理时才亮起来，
+   也就是「该看它」的时候它才显眼。 */
 .library-batch-toolbar:not([hidden]) { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; position: relative; }
 .library-batch-toolbar .library-batch-ai { overflow: visible; border: 0; background: transparent; }
-/* 这个入口以前是个贴在右边缘的浅灰小按钮，名字又只有「AI 批量处理」四个字，
-   看不出要花钱、也不知道会动多少题，于是几乎不会被点开。改成主色的实心按钮，
-   把「要花额度」直接写在按钮上。 */
 .library-batch-toolbar .library-batch-ai > summary {
-  display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 5px 11px;
-  border: 1px solid var(--accent); border-radius: 9px; background: var(--accent);
-  color: #fff; font-size: 12.5px; font-weight: 650; white-space: nowrap; cursor: pointer;
+  display: flex; min-height: 31px; align-items: center; gap: 7px; padding: 4px 10px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+  color: var(--ink-2); font-size: 12.5px; font-weight: 400; white-space: nowrap; cursor: pointer;
 }
-.library-batch-toolbar .library-batch-ai > summary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
-.library-batch-toolbar .library-batch-ai[open] > summary { background: var(--accent-dark); border-color: var(--accent-dark); }
-.library-batch-toolbar .library-batch-ai > summary::after { color: rgba(255, 255, 255, .8); }
-.library-batch-toolbar .library-batch-cost { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .2); font-size: 11px; font-weight: 600; }
+.library-batch-toolbar .library-batch-ai > summary:hover { border-color: var(--accent); color: var(--accent-dark); }
+.library-batch-toolbar .library-batch-ai[data-working] > summary {
+  border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 650;
+}
+.library-batch-toolbar .library-batch-ai[data-working] > summary:hover { background: var(--accent-dark); color: #fff; }
+.library-batch-toolbar .library-batch-ai[data-working] > summary::after { color: rgba(255, 255, 255, .8); }
+.library-batch-toolbar .library-batch-cost { padding: 1px 6px; border-radius: 99px; background: var(--bg-sunken); color: var(--muted); font-size: 11px; font-weight: 600; }
+.library-batch-toolbar .library-batch-ai[data-working] .library-batch-cost { background: rgba(255, 255, 255, .2); color: #fff; }
 .library-batch-toolbar .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); font-size: 11px; font-weight: 700; }
 .library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
 .library-batch-toolbar .library-batch-ai-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }

@@ -45,18 +45,22 @@
   .library-page.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: minmax(0, 1fr); }
   .library-page.library-focus-mode.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
 
-  /* 待办入口（待核对、未标知识点）常驻在筛选栏第一行，紧挨「更多筛选」。
-     它原来住在「更多筛选」浮层里，而那个浮层在三组筛选都为空时会把整个折叠板
-     一起隐藏，于是「有 87 题待核对」这种提示跟着从页面上消失，用户完全不知道
-     还有活要干。这里改成一排紧凑小按钮，只在真有数字时出现，不占题面宽度。
-     [hidden] 必须显式写 display:none —— 上面那条 display:flex 的特异性更高，
-     会盖掉浏览器默认的 [hidden]{display:none}，结果没活的时候也占着一个空格子。 */
-  .library-page .library-filterbar > .library-extra-tools { grid-area: quick; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+  /* 待办入口（待核对、未标知识点）和题型是**同一种东西** —— 都是点了就把列表
+     筛一遍。两组以前长得完全不一样：待办挂个放大镜图标（像搜索），题型是纯文字
+     加下划线。结果一屏里出现三种筛选长相，扫不出哪个是筛哪个是做事。
+     现在统一成和题型一样的文字筛选：有数字才出现，选中才加粗 + 下划线。 */
+  .library-page .library-filterbar > .library-extra-tools { grid-area: quick; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 14px; }
   .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }
   /* width:auto 不能省：按钮本身带着「占满父容器」的设定（那套是给侧栏和浮层
      设计的），不覆盖掉的话每个按钮都撑满整行，两个就被迫竖着摞，筛选栏凭空
      高出一行，右边还空一大片。 */
-  .library-page .library-filterbar > .library-extra-tools .button { width: auto; justify-content: flex-start; padding: 5px 10px; line-height: 1.5; white-space: nowrap; }
+  .library-page .library-filterbar > .library-extra-tools .button {
+    width: auto; justify-content: flex-start; gap: 5px; padding: 0 1px 10px; line-height: 1.5;
+    border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+    box-shadow: none; color: var(--muted); font-size: 12px; white-space: nowrap;
+  }
+  .library-page .library-filterbar > .library-extra-tools .button:hover { background: none; color: var(--ink-2); }
+  .library-page .library-filterbar > .library-extra-tools .button.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
   .library-page .active-filters { margin: -6px 0 18px; }
 
   /* An intentional two-row filter area, followed by its selection strip. */
@@ -76,16 +80,18 @@
      「筛选栏的直接子节点」—— 条件对不上，规则从来没生效过，于是这一组被自动
      排版塞进第一列那个窄格子：标签「题型」被挤成一字一行，六个题型按钮也放不下、
      后面几个折到第二行，看着像两排选项。
-     现在明确把它放进第二行、占满整行，六个平分宽度，永远不会折行；
-     窄屏另有三列网格那条规则兜底。 */
+     现在明确把它放进第二行、占满整行，永远不会折行；
+     窄屏另有三列网格那条规则兜底。
+     按钮按内容宽度排，不要平分：平分会让「判断题 0」这种一格里空着一大片，
+     一眼扫过去全是留白，噪音比信息还多。 */
   .library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }
   .library-page .library-facet-label { padding-top: 3px; white-space: nowrap; }
   .library-page .library-facet > #typeFilters {
-    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 10px;
+    display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 15px;
     padding: 0; border-radius: 0; background: none;
   }
   .library-page .library-facet > #typeFilters .draft-filter {
-    flex: 1 1 0; justify-content: center; min-width: 0;
+    flex: 0 1 auto; justify-content: flex-start; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     gap: 5px; padding: 0 1px 10px; border-bottom: 2px solid transparent; border-radius: 0;
     background: none; color: var(--muted); box-shadow: none; font-size: 12px;

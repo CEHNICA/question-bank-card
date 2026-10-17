@@ -7,23 +7,28 @@ assert(begin >= 0 && end > begin, "Exercise the actual shared ordinary queue act
 
 // 一个够用的假按钮和假状态行：只实现排队反馈真正用到的那几个成员。
 // 真实按钮的文字是一个文本节点，换文案时不能碰 textContent（会把图标抹掉）。
-function fakeButton(label, stateLine) {
+function fakeButton(label, action) {
   const text = { nodeType: 3, nodeValue: label };
-  return { childNodes: [text], dataset: {}, attributes: {}, isConnected: true, text,
+  return { childNodes: [text], dataset: { queueAction: action }, attributes: {}, disabled: false, text,
     setAttribute(key, value) { this.attributes[key] = value; },
-    removeAttribute(key) { delete this.attributes[key]; },
-    closest() { return { querySelector: () => stateLine || null }; } };
+    removeAttribute(key) { delete this.attributes[key]; } };
 }
 function fakeStateLine() { return { hidden: true, dataset: {}, textContent: "" }; }
 
 function setup({ checked = { mode: "api", api_ready: true }, posted = checked, getOkay = true, hold = false } = {}) {
   const calls = [], jobs = [], notices = [], loads = [], statuses = [];
   const stateLine = fakeStateLine();
-  // 两个批量按钮：一个是正常可点的，一个本来就因为没配 API 而不可点。
-  // 排队结束后那个本来不可点的必须仍然不可点 —— 恢复时顺手把它放开，
-  // 等于把一个点了只会报错的按钮重新摆到用户面前。
-  const batchButtons = [{ dataset: {}, disabled: false },
-    { dataset: { disabledInSelectedView: "true" }, disabled: true }];
+  // 被点的那个按钮必须在下面这张列表里。真实页面上它就在 #aiBatchTools 内部，
+  // 而界面每次重画后重新同步的也正是这张列表。把被点的按钮放在列表外面，
+  // 等于把「排队期间界面会重画」这件事从测试里抹掉了 —— 真实代码里的那个 bug
+  // 正是从这个缝里漏过去的：排队文案只写在点下去那一个、随时会被换掉的节点上。
+  // 三个按钮各带一个渲染时就写死的身份，排队时只有身份对得上的那个改名。
+  const button = fakeButton("补齐缺的参考答案 · 7 题", "answer");
+  const other = fakeButton("补齐缺的知识点标签 · 1 题", "tags");
+  const locked = fakeButton("只处理当前这批 · 4 题", "tags-current");
+  locked.dataset.disabledInSelectedView = "true";
+  locked.disabled = true;
+  const batchButtons = [button, other, locked];
   // 把排队请求按在手里不放，才量得到「服务端还没回话时界面长什么样」。
   // 直接 await 一个立刻 resolve 的假响应，量到的只是结束后的样子。
   let release = null;
@@ -46,13 +51,18 @@ function setup({ checked = { mode: "api", api_ready: true }, posted = checked, g
   confirmDialog: () => Promise.resolve(false),
   // 真正的 disable 判据就让它自己算：这里只提供它要用的 state 和 querySelectorAll。
   state: { view: "all" },
-  document: { querySelectorAll: selector => (selector === "#aiBatchTools button" ? batchButtons : []) },
+  document: {
+    querySelectorAll: selector => (selector === "#aiBatchTools button" ? batchButtons : []),
+    querySelector: selector => (selector === "#aiBatchTools .library-batch-state" ? stateLine : null)
+  },
   // 抓住每秒回调而不是自己造一个，这样量到的就是代码里那条真的那句。
   window: { setInterval: (fn) => { tick = fn; ticking = true; return 0; },
             clearInterval: () => { tick = null; ticking = false; } } };
   vm.createContext(context); vm.runInContext(source.slice(begin, end), context);
   return { queue: context.queueJobs, calls, jobs, notices, loads, statuses, batchButtons, stateLine,
-    button: fakeButton("补齐缺的参考答案 · 7 题", stateLine),
+    button, other, locked,
+    // 界面重画之后就是拿这张列表重新同步的，所以测试要能自己按一次那处同步。
+    rerender: () => context.applyBatchButtonState(),
     release: () => { if (release) release(); },
     tickNow: () => { if (ticking && tick) tick(); }, isTicking: () => ticking };
 }
@@ -93,16 +103,33 @@ function setup({ checked = { mode: "api", api_ready: true }, posted = checked, g
   // 面板上必须已经有一行字并且会打秒数。请求结束以后再一样样还原。
   {
     const h = setup({ hold: true });
-    const pending = h.queue("tags", { missing: true }, h.button, 368);
+    const pending = h.queue("answer", { missing: true }, "answer", 7);
 
     // 请求还在飞，此刻就应该已经看得见变化了。
     assert.equal(h.button.text.nodeValue, "正在排队…", "the pressed button says so before the server replies");
     assert.equal(h.button.attributes["aria-busy"], "true", "the pressed button is announced as busy");
-    assert.equal(h.batchButtons[0].disabled, true, "the other batch buttons are locked while one is queueing");
-    assert.equal(h.batchButtons[1].disabled, true);
+    assert.equal(h.other.text.nodeValue, "补齐缺的知识点标签 · 1 题",
+      "only the pressed button changes its wording — two buttons claiming to queue means the user thinks he queued twice");
+    assert.equal(h.locked.text.nodeValue, "只处理当前这批 · 4 题", "the locked button keeps its own name too");
+    assert.equal(h.other.disabled, true, "the other batch buttons are locked while one is queueing");
+    assert.equal(h.locked.disabled, true);
     assert.equal(h.stateLine.hidden, false, "the batch panel already says something");
-    assert.match(h.stateLine.textContent, /正在登记 368 道题/);
-    assert.match(h.statuses[0].text, /正在排队 368 道题/, "the status line reports the queueing immediately");
+    assert.match(h.stateLine.textContent, /正在登记 7 道题/);
+    assert.match(h.statuses[0].text, /正在排队 7 道题/, "the status line reports the queueing immediately");
+
+    // 登记要好几秒，这期间界面会自己重画（题数回来了、定时刷新），按钮节点会被
+    // 换成新的。「正在排队…」如果只写在点下去那一个节点上，重画之后按钮就变回
+    // 原名、却仍然点不动 —— 正是「点了以为卡死」的老样子。
+    // 这里换上一个全新的按钮节点（身份照旧，和真实重画一样），再走一次重画必经的那处同步。
+    const rebuilt = fakeButton("补齐缺的参考答案 · 7 题", "answer");
+    h.batchButtons[0] = rebuilt;
+    h.rerender();
+    assert.equal(rebuilt.text.nodeValue, "正在排队…",
+      "a re-render mid-queue must not leave a silently disabled button behind");
+    assert.equal(rebuilt.attributes["aria-busy"], "true", "the rebuilt button is still announced as busy");
+    assert.equal(rebuilt.disabled, true, "the rebuilt button is still locked while queueing");
+    assert.equal(h.stateLine.hidden, false, "the panel still says something after a re-render");
+
     // 秒数只能靠代码里那条每秒回调自己打出来，测试不自己造一个假的。
     await new Promise(resolve => setTimeout(resolve, 1050));
     h.tickNow();
@@ -110,23 +137,39 @@ function setup({ checked = { mode: "api", api_ready: true }, posted = checked, g
 
     h.release();
     await pending;
-    assert.equal(h.button.text.nodeValue, "补齐缺的参考答案 · 7 题", "the button goes back to its own name");
-    assert.equal(h.button.attributes["aria-busy"], undefined, "the busy marker is cleared");
+    // 屏幕上那个（中途被重画换过的）必须已经改回自己的名字。
+    // 点下去那一个已经被丢掉、没人看得见，就不必再管它。
+    assert.equal(rebuilt.text.nodeValue, "补齐缺的参考答案 · 7 题",
+      "the button left on screen after a re-render goes back to its own name");
+    assert.equal(rebuilt.attributes["aria-busy"], undefined, "the rebuilt button stops being announced as busy");
     assert.equal(h.stateLine.hidden, true, "the panel stops claiming it is still queueing");
-    assert.equal(h.batchButtons[0].disabled, false, "the buttons are unlocked again");
-    assert.equal(h.batchButtons[1].disabled, true,
+    assert.equal(h.other.disabled, false, "the buttons are unlocked again");
+    assert.equal(h.locked.disabled, true,
       "a button that was never clickable (no API configured) must not be re-enabled by the restore");
     assert.equal(h.isTicking(), false, "the seconds ticker is stopped, not left running");
     assert.match(h.statuses[h.statuses.length - 1].text, /已排队 1 道/, "the status line ends on the real result");
   }
 
+  // 没有重画的那条路也要一样还原：按钮得回到自己的名字，不能永久停在「正在排队…」。
+  {
+    const h = setup({ hold: true });
+    const pending = h.queue("answer", { missing: true }, "answer", 12);
+    assert.equal(h.button.text.nodeValue, "正在排队…", "the pressed button says so before the server replies");
+    h.release();
+    await pending;
+    assert.equal(h.button.text.nodeValue, "补齐缺的参考答案 · 7 题", "the button goes back to its own name");
+    assert.equal(h.button.attributes["aria-busy"], undefined, "the busy marker is cleared");
+    assert.equal(h.button.disabled, false, "the button is clickable again");
+    assert.equal(h.locked.disabled, true);
+  }
+
   // 排不上队的时候也必须还原，不能把按钮永久卡在「正在排队…」。
   {
     const h = setup({ getOkay: false });
-    await h.queue("tags", { ids: ["pub-1"] }, h.button, 5);
+    await h.queue("tags", { ids: ["pub-1"] }, "answer", 5);
     assert.equal(h.button.text.nodeValue, "补齐缺的参考答案 · 7 题", "a failed queue still restores the button");
-    assert.equal(h.batchButtons[0].disabled, false, "a failed queue still unlocks the batch buttons");
-    assert.equal(h.batchButtons[1].disabled, true);
+    assert.equal(h.other.disabled, false, "a failed queue still unlocks the batch buttons");
+    assert.equal(h.locked.disabled, true);
   }
   console.log("Ordinary library API generation: explicit API-only POST, feature scope preserved, settings races rejected without assistant fallback, and the pressed button reacts before the reply: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
