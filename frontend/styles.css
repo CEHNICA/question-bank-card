@@ -1227,6 +1227,11 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .api-setup-entry { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .api-setup-entry .settings-description { margin-bottom: 0; }
 .api-setup-entry > .button { flex: none; }
+/* 页首那句「现在这台电脑是什么情况」：来设置页的人问的就是这个，答案要在原地，
+   不是在另一个窗口里。颜色跟密钥窗口里那两档状态一样：齐了是绿的，缺了是琥珀色。 */
+.settings-readiness { margin: 0 0 8px; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.settings-readiness.ready { color: var(--green); }
+.settings-readiness.missing { color: var(--amber); }
 .credential-step-number { display: inline-grid; place-items: center; width: 25px; height: 25px; margin-right: 5px; border-radius: 50%; color: #fff; background: var(--accent); font-size: 13px; }
 .credential-required { color: var(--accent); }
 .credential-purpose { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.65; }

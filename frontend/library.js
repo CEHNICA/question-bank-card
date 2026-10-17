@@ -1057,7 +1057,7 @@
     target?.setAttribute("aria-current", "true");
     renderInspector(item);
     if (!window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(true);
-    else ui.inspectorToggle?.setAttribute("aria-expanded", String(document.body.classList.contains("library-inspector-open")));
+    else markInspectorToggle(document.body.classList.contains("library-inspector-open"));
   }
 
   function locateInspectorQuestion(item) {
@@ -1131,6 +1131,8 @@
       empty.append(node("strong", "", "选择一道题"), node("p", "helper", "点击中间的题卡，这里会显示题目来源、标签和核对信息。"));
       content.append(empty);
       if (ui.inspectorToggle) ui.inspectorToggle.disabled = true;
+      // 禁用时也要说清为什么，否则只看到一个灰按钮，读者只能猜是自己哪里做错了。
+      markInspectorToggle(document.body.classList.contains("library-inspector-open"), { disabled: true });
       return;
     }
     if (ui.inspectorToggle) ui.inspectorToggle.disabled = false;
@@ -1174,8 +1176,23 @@
     previewDetails.append(node("summary", "", "查看当前题面"), preview);
     content.append(previewDetails, info);
     content.scrollTop = inspectorScrolls.get(item.id) || 0;
-    ui.inspectorToggle?.setAttribute("aria-expanded", String(window.matchMedia("(max-width: 979px)").matches
-      ? document.body.classList.contains("library-inspector-open") : !document.body.classList.contains("library-inspector-collapsed")));
+    markInspectorToggle(window.matchMedia("(max-width: 979px)").matches
+      ? document.body.classList.contains("library-inspector-open") : !document.body.classList.contains("library-inspector-collapsed"));
+  }
+
+  // 这个按钮是个开关（开合一直跟着面板走），但字面只有「题目详情」四个字：不写现在
+  // 是开着还是收着，也不说按了会发生什么。同一个页面上另一个收侧栏的开关就写着
+  // 「收起筛选栏」—— 两个开关两套说法，读者只能猜哪一个是干什么的。
+  // 状态和说法必须一起改，所以收在一处，别再散着写 aria-expanded。
+  function markInspectorToggle(open, { disabled = false } = {}) {
+    const toggle = ui.inspectorToggle;
+    if (!toggle) return;
+    const on = Boolean(open) && !disabled;
+    toggle.setAttribute("aria-expanded", String(on));
+    const label = disabled ? "先选中一道题" : (on ? "收起右侧详情" : "展开右侧详情");
+    toggle.title = disabled ? "先在左边点一道题，这里才有它的来源、标签和待核对建议"
+      : `${label}：当前题目的来源、标签和待核对建议都写在这一栏`;
+    toggle.setAttribute("aria-label", label);
   }
 
   function setInspectorOpen(open) {
@@ -1188,7 +1205,7 @@
     document.body.classList.toggle("library-inspector-open", mobile && next);
     if (!mobile) document.body.classList.toggle("library-inspector-collapsed", !next);
     const scrim = $("inspectorScrim"); if (scrim) scrim.hidden = !mobile || !next;
-    ui.inspectorToggle?.setAttribute("aria-expanded", String(next));
+    markInspectorToggle(next, { disabled: Boolean(ui.inspectorToggle?.disabled) });
   }
 
   function draftLink(item, extra = "") {
@@ -4775,7 +4792,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("inspectorScrim").addEventListener("click", () => setInspectorOpen(false));
   window.matchMedia("(max-width: 979px)").addEventListener("change", () => {
     document.body.classList.remove("library-inspector-open"); $("inspectorScrim").hidden = true;
-    ui.inspectorToggle?.setAttribute("aria-expanded", String(!window.matchMedia("(max-width: 979px)").matches && !document.body.classList.contains("library-inspector-collapsed")));
+    markInspectorToggle(!window.matchMedia("(max-width: 979px)").matches && !document.body.classList.contains("library-inspector-collapsed"));
   });
   $("libraryTagManager").addEventListener("click", openTagManager);
   $("editSelectedTags").addEventListener("click", () => openTagEditor(null));

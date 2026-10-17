@@ -3,6 +3,7 @@
 // Context selection stays separate from the checkbox selection used by batch actions.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const vm = require("node:vm");
 
 const html = fs.readFileSync(require.resolve("./library.html"), "utf8");
 const js = fs.readFileSync(require.resolve("./library.js"), "utf8");
@@ -26,6 +27,30 @@ assert.match(js, /function selectInspectorQuestion\(item, article = null\)/, "cl
 assert.match(js, /event\.target\.closest\("button, a, input, select, textarea, summary, details, label/, "card actions and batch checkboxes do not hijack the context click");
 assert.match(js, /function renderInspector\(item\)[\s\S]*?extrasNode\(item\)/, "tags and pending AI suggestions follow the selected question");
 assert.match(js, /renderInspector\(state\.catalog\.get\(state\.inspectorId\)/, "background refreshes keep the panel in sync with the selected question");
+
+// 「题目详情」这个按钮是个开关，但字面只有四个字的���称：不写现在开着还是收着，也不说
+// 按了会发生什么。同一个页面上另一个收侧栏的开关就写着「收起筛选栏」。这里跑真的那个
+// 函数，确认「状态」和「说法」是同一个动作一起变的 —— 只改其中一个，正则查不出来。
+const toggleCode = js.slice(js.indexOf("  function markInspectorToggle("), js.indexOf('  function setInspectorOpen('));
+assert.notEqual(toggleCode.indexOf("markInspectorToggle"), -1, "markInspectorToggle was renamed or moved; update this slice");
+const toggleNode = { attrs: {}, title: "", setAttribute(name, value) { this.attrs[name] = String(value); }, getAttribute(name) { return this.attrs[name]; } };
+const sandbox = { ui: { inspectorToggle: toggleNode } };
+vm.runInNewContext(toggleCode, sandbox);
+sandbox.markInspectorToggle(true);
+assert.equal(toggleNode.getAttribute("aria-expanded"), "true");
+assert.equal(toggleNode.getAttribute("aria-label"), "收起右侧详情");
+assert.match(toggleNode.title, /来源、标签和待核对建议/, "the hover line says what lives in that panel");
+sandbox.markInspectorToggle(false);
+assert.equal(toggleNode.getAttribute("aria-expanded"), "false");
+assert.equal(toggleNode.getAttribute("aria-label"), "展开右侧详情", "a collapsed panel offers to bring it back");
+assert.match(toggleNode.title, /来源、标签和待核对建议/);
+sandbox.markInspectorToggle(true, { disabled: true });
+assert.equal(toggleNode.getAttribute("aria-expanded"), "false", "a disabled toggle is not reported as open");
+assert.match(toggleNode.title, /先在左边点一道题/, "a greyed-out control says why it is grey, not just that it is grey");
+vm.runInNewContext(toggleCode, { ui: { inspectorToggle: null } });
+// 「查看当前题面」和「题目信息」是同一种东西。以前一条 30px、一条 18px，18px 那条点不准。
+assert.match(readingCss, /\.question-inspector-preview > summary,\s*\n?\s*\.library-page \.question-inspector-info > summary \{ display: flex; align-items: center; min-height: 30px; \}/,
+  "both panel disclosure rows get the same clickable height");
 assert.match(readingCss, /\.library-page \.library-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) 288px;/, "desktop dedicates space only to the results and right inspector");
 assert.match(css, /body\.library-inspector-open \.question-inspector \{ transform: none; \}/, "the details panel opens as a drawer on narrow screens");
 assert.match(js, /setInspectorOpen\(false\);[\s\S]*?state\.basketVisible = next;/, "the basket and question inspector do not cover each other on narrow screens");

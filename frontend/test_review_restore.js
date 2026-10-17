@@ -8,7 +8,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
+// 切源码之前把行尾统一成 LF：切不到时 indexOf 返回 -1，slice 会**悄悄**给出一段
+// 空串或少切一段，而不是报错。文件被存成 CRLF 时这种门禁会毫无征兆地失灵。
+const source = fs.readFileSync(require.resolve("./app.js"), "utf8").replace(/\r\n/g, "\n");
 const cut = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
 const helpers = cut('  const REVIEW_STATE_KEY = "qb-review-state";', "  function el(tag, className, text)");
 const setFilter = cut("  function setFilter(key)", "  function renderFilters(");

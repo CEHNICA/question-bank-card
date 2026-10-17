@@ -1319,6 +1319,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("m3Button").hidden = !s.m3_available;
     if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}（本机安装）`;
     renderSettingsModels();
+    renderServiceReadiness();
     return true;
   }
 
@@ -8259,6 +8260,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (cloudCutReady()) { note.hidden = true; note.textContent = ""; return; }
     note.hidden = false;
     note.textContent = "自动判断资料，先在本机切题；未切出的题可以从原卷选取，无需密钥。";
+  }
+
+  // 「设置 → API 配置」以前整页只有一句说明和一个「配置 API」按钮：走进来的人
+  // 问的是「这台电脑现在能不能上传、缺哪家的密钥」，页面一个字都不答，只能自己
+  // 点进那个窗口去猜。直接把答案写在页首 —— 就地回答，别让人点进去才发现。
+  function serviceReadiness(status = state.status) {
+    if (!status) return { tone: "plain", text: "正在查看这台电脑的配置…" };
+    const reading = status.reader_readiness;
+    const sentences = [status.upload_enabled
+      ? (status.automatic_parse_ready ? "现在可以直接上传 PDF、Word 或照片，程序先在本机切题。"
+        : "现在可以上传资料，但还没有可用的自动处理服务，只能自己整理。")
+      : "现在还不能上传资料。"];
+    sentences.push(status.mineru ? "自动切题用 MinerU，已经配好。" : "自动切题还没配 MinerU，上传后需要手工切题。");
+    sentences.push(reading && reading.ready
+      ? `识读和生成答案用 ${reading.label || status.reader || "已配置的服务"}，可以用。`
+      : `识读和生成答案还没配服务${reading && reading.label ? `（现在选的是「${reading.label}」但没有密钥）` : ""}，不影响上传和手工切题。`);
+    return { tone: status.mineru && reading && reading.ready ? "ready" : "missing", text: sentences.join("") };
+  }
+
+  function renderServiceReadiness() {
+    const node = $("settingsServiceReadiness");
+    if (!node) return;
+    const { tone, text } = serviceReadiness();
+    node.textContent = text;
+    node.className = `settings-readiness ${tone}`;
   }
 
   function materialTypeLabel() {

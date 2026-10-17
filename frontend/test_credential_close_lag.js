@@ -15,7 +15,11 @@ const path = require("node:path");
 const vm = require("node:vm");
 const dom = require("./credential-test-dom.js");
 
-const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8").replace(/\r\n/g, "\n");
+// 下面几段是用源码的起止标记切出来丢进 vm 跑的，切之前先把行尾统一成 LF。
+// 以前这里直接用 "\n  }\n" 当结束标记：文件一旦被存成 CRLF，这个串一次都匹配不上，
+// slice(起点, -1 + 4) 会**悄悄**切出一段空字符串 —— 少了一个函数，测试照样往下跑，
+// 直到哪天那个函数真的被调用才炸，而那时看起来像是新改动弄坏了旧东西。
 const credentialCode = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"),
   js.indexOf("  function renderSettingsTask("));
 const modelCode = js.slice(js.indexOf("  let modelSaving = Promise.resolve();"),
@@ -23,6 +27,8 @@ const modelCode = js.slice(js.indexOf("  let modelSaving = Promise.resolve();"),
   + "\n" + js.slice(js.indexOf("  async function saveModelSettingsNow("),
     js.indexOf("\n  }\n", js.indexOf("  async function saveModelSettingsNow(")) + 4);
 assert.ok(credentialCode.length > 0 && modelCode.length > 0);
+assert.ok(modelCode.includes("function saveModelSettingsNow("),
+  "saveModelSettingsNow must actually be inside the slice; a -1 end marker yields an empty string, not a failure");
 assert.ok(js.indexOf("  const CREDENTIAL_FIELDS = {") < js.indexOf("  let modelSaving"));
 
 const providers = ["mineru", "modelscope", "minimax", "siliconflow"];

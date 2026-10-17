@@ -28,6 +28,34 @@ for (const id of ["settingsGeneral", "settingsDisplay", "settingsReview", "setti
   assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
 }
 assert.match(html, /id="settingsInterface"/);
+
+// 「设置 → API 配置」以前整页只有一句说明和一个「配置 API」按钮。走进来的人问的
+// 是「这台电脑现在能不能用、缺哪家的密钥」，页面一个字都不答。这里跑的是真的那个
+// 函数，不是去正则查它写了哪句话 —— 换了措辞但答案仍然是空的，断言要照样失败。
+assert.match(html, /id="settingsServiceReadiness"[^>]*role="status"/, "the API tab answers the readiness question in place");
+const readinessSource = js.slice(js.indexOf("  function serviceReadiness("), js.indexOf("  function renderServiceReadiness("));
+assert.notEqual(readinessSource.indexOf("function serviceReadiness("), -1, "serviceReadiness was moved; update this slice");
+const readiness = require("node:vm").runInNewContext(
+  readinessSource + "\n;({ serviceReadiness, get: () => null });",
+  { state: { status: null } });
+const full = readiness.serviceReadiness({
+  upload_enabled: true, automatic_parse_ready: true, mineru: true,
+  reader: "MiniMax-M3", reader_readiness: { ready: true, label: "MiniMax-M3" } });
+assert.equal(full.tone, "ready");
+assert.match(full.text, /可以直接上传/, "all services ready still says what you can do");
+assert.match(full.text, /自动切题用 MinerU/, "and which service is doing the cutting");
+assert.match(full.text, /MiniMax-M3/, "and which one is doing the reading");
+const noMineru = readiness.serviceReadiness({
+  upload_enabled: true, automatic_parse_ready: true, mineru: false,
+  reader_readiness: { ready: false, label: "Qwen3-VL" } });
+assert.equal(noMineru.tone, "missing");
+assert.match(noMineru.text, /还没配 MinerU/, "a missing key is named, not just flagged");
+assert.match(noMineru.text, /Qwen3-VL/, "the chosen-but-keyless service is named too");
+assert.match(noMineru.text, /不影响上传/, "and the reader is told what still works without it");
+assert.match(readiness.serviceReadiness({ upload_enabled: false, mineru: false, reader_readiness: { ready: false } }).text,
+  /还不能上传资料/, "the page says so when uploading itself is off");
+assert.equal(readiness.serviceReadiness(null).tone, "plain", "before the status arrives the page waits instead of guessing");
+assert.match(js, /renderServiceReadiness\(\);/, "refreshing the status refreshes that line");
 assert.match(js, /function showSettingsTab\(id, \{ updateHash = true \} = \{\}\)/);
 assert.match(html, /<section id="settingsDialog" class="settings-panel"/);
 assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);

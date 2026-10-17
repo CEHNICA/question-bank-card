@@ -169,6 +169,10 @@
   .library-page .question-inspector-preview { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
   .library-page .question-inspector-preview > summary { padding: 12px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); }
   .library-page .question-inspector-info > summary { padding: 0; font-size: 12px; }
+  /* 「查看当前题面」和「题目信息」是同一种东西：点一下展开一段。以前一条 30px、
+     一条 18px —— 两条并排看得出差一半，18px 那条手指头都点不准。 */
+  .library-page .question-inspector-preview > summary,
+  .library-page .question-inspector-info > summary { display: flex; align-items: center; min-height: 30px; }
   .library-page .question-inspector-tags .tag-suggestion-card { background: var(--surface-2); border-color: var(--line); border-radius: 7px; }
 
   @media (max-width: 1200px) and (min-width: 980px) {
