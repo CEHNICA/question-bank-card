@@ -34,7 +34,7 @@ VIEWER = ["node", "test_library_question_viewer.js"]
 LIBRARY = ["node", "test_shortcut_help.js"]
 HELP = ["node", "test_shortcut_help.js"]
 
-SPACE_LINE = 'if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 25); return; }'
+SPACE_LINE = 'if (event.key === " " || event.code === "Space") { event.preventDefault(); close(); return; }'
 LIST_SPACE = ('    if (ordinary && !event.shiftKey && (event.key === " " || event.code === "Space")\n'
               '        && ui.sheet.hidden && !document.querySelector("dialog[open]")) {')
 LIST_CURRENT = '      const current = state.inspectorId ? state.catalog.get(state.inspectorId) : null;'
@@ -51,21 +51,21 @@ RESET = "      if (!options.navigationStep) controls.answerBox.open = false;"
 # (file, description, original, mutation, command)
 MUTATIONS = [
     ("frontend/library-question-viewer.js",
-     "pressing space stops enlarging the question",
+     "pressing space inside full screen no longer leaves",
      f"          {SPACE_LINE}",
-     '          if (false) { event.preventDefault(); setZoom(zoom + 25); return; }',
+     '          if (false) { event.preventDefault(); close(); return; }',
      VIEWER),
 
     ("frontend/library-question-viewer.js",
-     "enlarging no longer holds the page still, so the reader scrolls away",
+     "leaving by space lets the page scroll away underneath",
      f"          {SPACE_LINE}",
-     '          if (event.key === " " || event.code === "Space") { setZoom(zoom + 25); return; }',
+     '          if (event.key === " " || event.code === "Space") { close(); return; }',
      VIEWER),
 
     ("frontend/library-question-viewer.js",
-     "space enlarges by a different step than the on-screen plus button",
+     "space enlarges the question instead of leaving it",
      f"          {SPACE_LINE}",
-     '          if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 5); return; }',
+     '          if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 25); return; }',
      VIEWER),
 
     ("frontend/library-question-viewer.js",
@@ -87,9 +87,9 @@ MUTATIONS = [
      VIEWER),
 
     ("frontend/library-question-viewer.js",
-     "the toolbar stops saying that space enlarges the question",
+     "the toolbar claims space is how you enlarge the question",
+     'more.title = "放大题目（也可以按住 Ctrl 再滚滚轮）";',
      'more.title = "放大题目（快捷键：空格）";',
-     'more.title = "放大题目";',
      VIEWER),
 
     ("frontend/library-question-viewer.js",
@@ -99,7 +99,13 @@ MUTATIONS = [
      VIEWER),
 
     ("frontend/library-question-viewer.js",
-     "opening a question leaves focus on the return button, so the first space closes the window",
+     "the return button stops saying that space also gets you out",
+     'button("返回题库 · Esc / 空格", "questionViewerClose", close)',
+     'button("返回题库 · Esc", "questionViewerClose", close)',
+     VIEWER),
+
+    ("frontend/library-question-viewer.js",
+     "opening a question leaves focus on the return button, so space presses that button instead of leaving",
      "      if (!options.navigationStep) controls.viewport.focus({ preventScroll: true });",
      "      if (!options.navigationStep) controls.exit.focus({ preventScroll: true });",
      VIEWER),
@@ -147,15 +153,9 @@ MUTATIONS = [
      VIEWER),
 
     ("frontend/shortcut-help.js",
-     "the shortcut panel stops telling the reader that space enlarges",
-     'row("放大题目", "空格")',
-     'row("放大题目", "Space")',
-     HELP),
-
-    ("frontend/shortcut-help.js",
      "the shortcut panel stops saying that the answer waits until asked for",
-     'extra: "空格在题库页打开当前选中题的全屏看题；进了全屏看题，空格放大题目、0 回到适合宽度，答案默认收在「看答案」里，点一下才显示。" + ',
-     'extra: "空格在题库页打开当前选中题的全屏看题。" + ',
+     'extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。放大用工具栏的＋／－、Ctrl＋滚轮或 0。答案默认收在「看答案」里，点一下才显示。" + ',
+     'extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。" + ',
      HELP),
 
     # 下面几条盯的是「在题库页按空格进全屏看题」。以前这一页只认「/」和「?」，
@@ -204,16 +204,28 @@ MUTATIONS = [
 
     ("frontend/shortcut-help.js",
      "the question list claims space is not a shortcut at all",
-     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("放大题目", "空格"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]\n'
+     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc", "空格"), row("看题缩放", "Ctrl+滚轮"), row("适合宽度", "0")]\n'
      '        : [row("搜索题目", "/"), row("全屏看题（当前选中题）", "空格"),',
-     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("放大题目", "空格"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]\n'
+     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc", "空格"), row("看题缩放", "Ctrl+滚轮"), row("适合宽度", "0")]\n'
      '        : [row("搜索题目", "/"),',
      HELP),
 
     ("frontend/shortcut-help.js",
+     "the shortcut panel stops telling the reader that space gets you back out",
+     'row("返回题库", "Esc", "空格")',
+     'row("返回题库", "Esc")',
+     HELP),
+
+    ("frontend/shortcut-help.js",
      "the shortcut panel stops offering 0 to go back to fit width",
-     'more: options.fullScreen ? [row("适合宽度", "0")] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],',
-     'more: options.fullScreen ? [] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],',
+     'row("看题缩放", "Ctrl+滚轮"), row("适合宽度", "0")]',
+     'row("看题缩放", "Ctrl+滚轮")]',
+     HELP),
+
+    ("frontend/shortcut-help.js",
+     "the shortcut panel stops calling space a toggle",
+     'extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。',
+     'extra: "题库页和全屏看题里可以按空格。',
      HELP),
 ]
 

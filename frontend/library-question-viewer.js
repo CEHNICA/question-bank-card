@@ -27,7 +27,7 @@
       const title = node("h2"); title.id = "questionViewerTitle";
       const source = node("p", "question-viewer-source"), detail = node("p", "question-viewer-detail");
       metadata.append(title, source, detail);
-      const exit = button("返回题库 · Esc", "questionViewerClose", close);
+      const exit = button("返回题库 · Esc / 空格", "questionViewerClose", close);
       const navigationBar = node("div", "question-viewer-navigation"); navigationBar.setAttribute("role", "group"); navigationBar.setAttribute("aria-label", "按当前结果逐题浏览");
       const previous = button("← 上一题", "questionViewerPrevious", () => navigate(-1));
       const next = button("下一题 →", "questionViewerNext", () => navigate(1));
@@ -43,12 +43,12 @@
       // 全屏看题以前在缩放条后面挂着一条快捷键提示，占掉整条工具栏的宽度。
       // 这些键在设置里查得到，工具栏只留缩放本身。
       tools.append(fit, native, less, percent, more);
-      // 不想找那排小按钮时也有键盘的路：空格放大、0 回到适合宽度。写在按钮的
+      // 不想找那排小按钮时也有键盘的路：0 回到适合宽度。写在按钮的
       // 悬停说明里，不另加一条常驻提示把工具栏撑宽。
       fit.title = "适合宽度：题目缩到刚好铺满版心（快捷键 0）";
       native.title = "图片原尺寸：配图不再缩到版心以内，按原图大小看";
-      less.title = "缩小题目";
-      more.title = "放大题目（快捷键：空格）";
+      less.title = "缩小题目（也可以按住 Ctrl 再滚滚轮）";
+      more.title = "放大题目（也可以按住 Ctrl 再滚滚轮）";
       const viewport = node("div", "question-viewer-viewport"); viewport.tabIndex = 0; viewport.setAttribute("aria-label", "完整题目与答案");
       const content = node("div", "question-viewer-content");
       const question = node("article", "paper question-viewer-question");
@@ -70,11 +70,13 @@
         if (!dialog.open || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat
             || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
         if (event.target?.closest?.("input, textarea, select, [contenteditable], [role='textbox']")) return;
-        // 1.25.7：以前全屏看题只有 Ctrl+滚轮能缩放，按空格什么都不会发生。
-        // 但空格在按钮和「看答案」那条折叠上本义就是「按一下就执行」，焦点在那儿
-        // 时必须留给它们本身，否则 Tab 到「返回题库」再按空格会先把窗口关掉。
+        // 1.25.7：以前全屏看题只有 Ctrl+滚轮能缩放。1.25.9 又把空格从「放大」改回
+        // 「退出去」——空格在这套软件里本义就是「打开／关掉那个对照窗口」，审核界面
+        // 对照原卷就是空格。放大留给 ＋／－、Ctrl+滚轮和 0。
+        // 但空格在按钮和「看答案」那条折叠上本义是「按一下就执行」，焦点在那儿
+        // 时必须留给它们本身，否则 Tab 到按钮再按空格会把它按下去。
         if (!event.target?.closest?.("button, a[href], summary, [role='button']")) {
-          if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 25); return; }
+          if (event.key === " " || event.code === "Space") { event.preventDefault(); close(); return; }
           if (event.key === "0") {
             event.preventDefault(); controls.content.classList.remove("native-images"); setZoom(100); return;
           }
@@ -195,7 +197,9 @@
       renderAnswers(item);
       controls.native.hidden = !(item.content?.figures?.length || item.content?.question_images?.length || item.solution?.figures?.length);
       controls.status.textContent = "正在检查已有参考答案…";
-      // 焦点给题面而不是「返回题库」：一打开就按空格要能放大，而不是先把窗口关掉。
+      // 焦点给题面而不是「返回题库」：一打开就按空格要能直接退出去；焦点留在
+      // 那个按钮上的话，同一个空格会去按它，效果碰巧一样，但读者看见的是
+      // 「空格＝点这个按钮」，不是「空格＝出去」。
       if (!options.navigationStep) controls.viewport.focus({ preventScroll: true });
       const controller = new root.AbortController(); reading = controller; let timedOut = false;
       const timer = root.setTimeout(() => { timedOut = true; controller.abort(); }, 15000); readTimer = timer;

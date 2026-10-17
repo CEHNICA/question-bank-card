@@ -15,13 +15,14 @@ assert(keys(help.reference("crop", { mode: "view" })).includes("Ctrl+Enter"));
 assert(keys(help.reference("crop", { mode: "view" })).includes("Shift+Enter"));
 assert(!keys(help.reference("crop", { mode: "read", practiceRead: true })).includes("Ctrl+Enter"));
 assert(keys(help.reference("answers")).includes("Ctrl+S")); assert(!keys(help.reference("answers")).includes("Ctrl+Enter"));
-assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "空格", "Esc", "Ctrl+滚轮", "0"]);
+assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "Esc", "空格", "Ctrl+滚轮", "0"]);
 assert(keys(help.reference("library")).includes("/"));
 assert(keys(help.reference("library")).includes("空格"), "题库页要说得清空格是打开全屏看题");
 assert(!keys(help.reference("library")).includes("0"), "0 只在全屏看题里有意义，题库页不占这个键");
 assert(!keys(help.reference("library")).some(key => ["N", "J", "K", "E", "W", "−", "+"].includes(key)));
 assert(help.reference("library", { fullScreen: true }).extra.includes("看答案"), "全屏看题默认收起答案这件事要写在快捷键说明里");
 assert(help.reference("library").extra.includes("当前选中题"), "空格开的是当前选中题，说明里要写出来，不能让人猜是哪一道");
+assert(help.reference("library", { fullScreen: true }).extra.includes("开关"), "空格是开关而不是放大，说明里必须说清楚");
 assert.equal(help.reference("print").primary[0].keys[0], "Esc");
 
 class Element {

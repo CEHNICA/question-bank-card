@@ -79,37 +79,22 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
     ["question-viewer-question", "question-viewer-answer-box", "question-viewer-no-answer", "question-viewer-status"],
     "「看答案」紧跟在题面后面，就在看题的那块白底里");
   assert.equal(document.activeElement, byClass("question-viewer-viewport"), "打开后焦点落在题面，不在「返回题库」上");
-  assert.equal(byId("questionViewerZoomIn").title, "放大题目（快捷键：空格）", "放大键的悬停说明里要写明空格也能放大");
+  assert(byId("questionViewerZoomIn").title.includes("Ctrl"), "放大键的悬停说明里要写明还有别的办法放大");
+  assert(!byId("questionViewerZoomIn").title.includes("空格"), "空格已经是退出，不再占用来放大");
   assert(byId("questionViewerFit").title.includes("0"), "适合宽度也要写明 0 键，免得以为只有鼠标能缩放");
+  assert(byId("questionViewerClose").textContent.includes("空格"), "返回按钮上要写明空格也退得出去");
 
-  // 按空格以前什么都不会发生：只有 Ctrl+滚轮能缩放。
   const press = async (key, target, blocked = {}) => {
     const seen = { consumed: false };
     await byId("libraryQuestionViewer").emit("keydown", { key, target, preventDefault() { seen.consumed = true; }, ...blocked });
     return seen;
   };
-  const firstSpace = await press(" ", byClass("question-viewer-viewport"));
-  assert(firstSpace.consumed, "放大时顺带挡住页面跟着滚动");
-  assert.equal(byClass("question-viewer-percent").textContent, "125%", "空格放大题目");
-  await press(" ", byClass("question-viewer-viewport"), { code: "Space" }); assert.equal(byClass("question-viewer-percent").textContent, "150%");
   const fit = await press("0", byClass("question-viewer-viewport"));
   assert(fit.consumed); assert.equal(byClass("question-viewer-percent").textContent, "100%", "0 回到适合宽度");
   byId("questionViewerNative").emit("click");
   await press("0", byClass("question-viewer-viewport"));
   assert.equal(byClass("question-viewer-percent").textContent, "100%");
   assert(!byClass("question-viewer-content").classList.contains("native-images"), "0 回到适合宽度，图片也跟着回到版心以内");
-  // 焦点落在按钮或「看答案」折叠上时，空格本义就是「按一下就执行」，不能被抢去放大。
-  const focusOn = needle => ({ closest: query => query.includes(needle) ? { tagName: needle } : null });
-  for (const [why, target] of [["按钮", focusOn("button")], ["「看答案」折叠", focusOn("summary")], ["链接", focusOn("a[href]")]]) {
-    const onControl = await press(" ", target);
-    assert(!onControl.consumed, `焦点在${why}上时，空格留给${why}本身，不能被抢去放大`);
-    assert.equal(byClass("question-viewer-percent").textContent, "100%");
-  }
-  for (const blocked of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { shiftKey: true }]) {
-    const guard = await press(" ", byClass("question-viewer-viewport"), blocked);
-    assert(!guard.consumed, "中文输入法和组合键不触发放大");
-    assert.equal(byClass("question-viewer-percent").textContent, "100%");
-  }
 
   // Native dialog cancel is the actual Esc path and only closes this viewer.
   byId("libraryQuestionViewer").emit("cancel"); assert(!viewer.isOpen());
@@ -117,6 +102,35 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   assert.deepEqual(scrolls.at(-1), [15, 980]); assert.equal(document.body.style.overflow, "");
   assert(byClass("question-viewer-question").children.length, "Large content is not synchronously destroyed during close");
   runFrames(); runFrames(); runTasks(0); assert.equal(byClass("question-viewer-question").children.length, 0);
+
+  // 1.25.9：进了全屏看题按空格是退出去，不是放大。空格在这套软件里本义就是
+  // 「打开／关掉那个对照窗口」，审核界面对照原卷也是空格。
+  await viewer.open(item, { returnFocus: caller });
+  const spaceExit = await press(" ", byClass("question-viewer-viewport"));
+  assert(spaceExit.consumed, "退出时顺带挡住页面跟着滚动");
+  assert(!viewer.isOpen(), "全屏看题里按空格退出去");
+  assert.equal(byClass("question-viewer-percent").textContent, "100%", "空格不再放大");
+  assert.equal(document.activeElement, caller, "退出去以后焦点回到刚才那道题的题卡");
+  assert.deepEqual(scrolls.at(-1), [15, 980]); assert.equal(document.body.style.overflow, "");
+
+  // 反过来也要成立：空格是「开关」，题库页按它进去，这里按它出来。
+  await viewer.open(item, { returnFocus: caller });
+  await byId("libraryQuestionViewer").emit("keydown", { key: " ", code: "Space", target: byClass("question-viewer-viewport") });
+  assert(!viewer.isOpen(), "code 为 Space 的那次按键也一样退出去");
+
+  await viewer.open(item, { returnFocus: caller });
+  const focusOn = needle => ({ closest: query => query.includes(needle) ? { tagName: needle } : null });
+  for (const [why, target] of [["按钮", focusOn("button")], ["「看答案」折叠", focusOn("summary")], ["链接", focusOn("a[href]")]]) {
+    const onControl = await press(" ", target);
+    assert(!onControl.consumed, `焦点在${why}上时，空格留给${why}本身，不能被抢去退出`);
+    assert(viewer.isOpen(), `焦点在${why}上时按空格不能把全屏看题关掉`);
+  }
+  for (const blocked of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { shiftKey: true }, { repeat: true }]) {
+    const guard = await press(" ", byClass("question-viewer-viewport"), blocked);
+    assert(!guard.consumed, "中文输入法和组合键不触发退出");
+    assert(viewer.isOpen(), "中文输入法和组合键不能把全屏看题关掉");
+  }
+  viewer.close();
 
   await viewer.open({ ...item, content: { ...item.content, answer: "", analysis: "" } });
   assert(!byClass("question-viewer-answers").textContent.includes("原卷答案与解析"), "A diagram-only question with no answer has no original-answer panel");
@@ -311,5 +325,6 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   assert(css.includes(".question-viewer-answer-box { margin-top: 22px; }"), "「看答案」在版心里留出与题面的间距");
   assert(css.includes(".question-viewer-viewport:focus-visible"), "题面可用键盘走到，但鼠标点开不画焦点框");
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
-  console.log("Question viewer: complete content, original image order/zoom, space-bar zoom and fit-to-width, answers collapsed until asked for, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");
+  assert(library.includes("openQuestionViewer(current,"), "题库页按空格也走同一个入口，不是另开一条路");
+  console.log("Question viewer: complete content, original image order/zoom, space bar opens and leaves, 0 fits to width, answers collapsed until asked for, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
