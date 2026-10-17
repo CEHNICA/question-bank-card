@@ -17,10 +17,11 @@ assert(!keys(help.reference("crop", { mode: "read", practiceRead: true })).inclu
 assert(keys(help.reference("answers")).includes("Ctrl+S")); assert(!keys(help.reference("answers")).includes("Ctrl+Enter"));
 assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "空格", "Esc", "Ctrl+滚轮", "0"]);
 assert(keys(help.reference("library")).includes("/"));
-assert(keys(help.reference("library")).includes("空格") && keys(help.reference("library")).includes("0"),
-  "题库页也得说清全屏看题里怎么放大，不然只能等他自己试出来");
+assert(keys(help.reference("library")).includes("空格"), "题库页要说得清空格是打开全屏看题");
+assert(!keys(help.reference("library")).includes("0"), "0 只在全屏看题里有意义，题库页不占这个键");
 assert(!keys(help.reference("library")).some(key => ["N", "J", "K", "E", "W", "−", "+"].includes(key)));
 assert(help.reference("library", { fullScreen: true }).extra.includes("看答案"), "全屏看题默认收起答案这件事要写在快捷键说明里");
+assert(help.reference("library").extra.includes("当前选中题"), "空格开的是当前选中题，说明里要写出来，不能让人猜是哪一道");
 assert.equal(help.reference("print").primary[0].keys[0], "Esc");
 
 class Element {
@@ -109,8 +110,14 @@ function libraryChecks() {
   const source = read("library.js"), start = source.lastIndexOf('  document.addEventListener("keydown", (event) => {');
   const code = source.slice(start, source.indexOf("  if (state.document)", start));
   let handler, searches = 0, helps = 0, dialog = false; const search = { disabled: false, focus() { searches++; } };
-  const context = { document: { activeElement: target(), addEventListener(type, callback) { handler = callback; }, querySelector() { return dialog ? {} : null; } },
-    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {}, tagManagerDialog: null };
+  // 1.25.8：题库页按空格打开当前选中题的全屏看题。以前这一页只认「/」和「?」，
+  // 空格什么也不做，按下去像软件没反应。这里量的是「空格到底有没有把全屏看题叫起来」，
+  // 以及不该抢的时候有没有把空格还给浏览器和按钮。
+  const opened = [], catalog = new Map([["pub-7", { id: "pub-7", number: 7 }]]);
+  const context = { document: { activeElement: target(), addEventListener(type, callback) { handler = callback; }, querySelector() { return dialog ? {} : null; },
+      getElementById(id) { return { id, querySelector: selector => ({ focusReturn: selector }) }; } },
+    ui: { sheet: { hidden: true }, search }, window: { QBShortcutHelp: { open: () => helps++ } }, handlePrintEscape() {}, tagManagerDialog: null,
+    state: { inspectorId: "pub-7", catalog }, openQuestionViewer: (item, focusReturn) => opened.push([item.id, focusReturn]) };
   vm.runInNewContext(code, context); handler(event("/")); assert.equal(searches, 1); handler(event("?", { shiftKey: true })); assert.equal(helps, 1);
   for (const extra of [{ defaultPrevented: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { target: target("input") }, { target: target("contenteditable") }, { target: target('role="textbox"') }]) handler(event("/", extra));
   dialog = true; handler(event("/")); assert.equal(searches, 1, "Search cannot steal input, IME, modified browser shortcuts or a modal's focus");
@@ -118,6 +125,28 @@ function libraryChecks() {
   handler(event("/")); handler(event("?", { shiftKey: true }));
   assert.equal(searches, 1, "The independent tag manager keeps shortcuts from focusing the hidden question search");
   assert.equal(helps, 1, "The manager handles its own keys rather than opening hidden question-list help");
+  context.tagManagerDialog = null;
+
+  const space = event(" "); handler(space);
+  assert.equal(opened.length, 1, "空格在题库页打开当前选中题的全屏看题");
+  assert.equal(opened[0][0], "pub-7");
+  assert.equal(opened[0][1].focusReturn, ".library-full-button", "返回时焦点回到这道题自己的「全屏看题」按钮，而不是随便一个元素");
+  assert.equal(space.prevented, true, "打开全屏看题时挡住页面跟着往下翻");
+  for (const [why, extra] of [["中文输入法", { isComposing: true }], ["组合输入", { keyCode: 229 }], ["按住不放", { repeat: true }],
+    ["浏览器组合键", { ctrlKey: true }], ["Shift+空格（翻上一屏）", { shiftKey: true }],
+    ["焦点在按钮上", { target: target("button") }], ["焦点在「更多」折叠上", { target: target("summary") }],
+    ["焦点在搜索框里", { target: target("input") }], ["已经在标签管理窗口里", { tagManagerDialog: { open: true } }]]) {
+    const before = opened.length;
+    context.tagManagerDialog = extra.tagManagerDialog || null;
+    handler(event(" ", extra)); context.tagManagerDialog = null;
+    assert.equal(opened.length, before, `${why}时空格不能被拿去打开全屏看题`);
+  }
+  const scrolled = event(" "); handler(scrolled);
+  assert.equal(scrolled.prevented, true);
+  context.state.inspectorId = "";
+  const bare = event(" "); handler(bare);
+  assert.equal(opened.length, 2, "没有选中题时不该替人挑一道");
+  assert.equal(bare.prevented, undefined, "没有选中题时空格还给浏览器，接着是往下翻页");
   const editor = read("library-answer-editor.js"), marker = editor.indexOf('      dialog.addEventListener("keydown", event => {'); let saveHandler, saves = 0;
   vm.runInNewContext(editor.slice(marker, editor.indexOf('      cropSurface.addEventListener("click"', marker)), { dialog: { addEventListener: (_, callback) => saveHandler = callback }, saveCurrent: () => saves++ });
   saveHandler(event("s", { ctrlKey: true, target: target("textarea") })); assert.equal(saves, 1, "Answer saving remains available while typing");

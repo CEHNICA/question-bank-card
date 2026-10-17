@@ -31,9 +31,16 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 NODE = "node"
 VIEWER = ["node", "test_library_question_viewer.js"]
+LIBRARY = ["node", "test_shortcut_help.js"]
 HELP = ["node", "test_shortcut_help.js"]
 
 SPACE_LINE = 'if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 25); return; }'
+LIST_SPACE = ('    if (ordinary && !event.shiftKey && (event.key === " " || event.code === "Space")\n'
+              '        && ui.sheet.hidden && !document.querySelector("dialog[open]")) {')
+LIST_CURRENT = '      const current = state.inspectorId ? state.catalog.get(state.inspectorId) : null;'
+LIST_OPEN = '        openQuestionViewer(current, document.getElementById(`q-${current.id}`)?.querySelector(".library-full-button"));'
+LIST_TARGET = "if (current && !event.target?.closest?.(\"button, a[href], summary, [role='button']\")) {"
+LIST_BLOCK = LIST_SPACE + "\n" + LIST_CURRENT + '\n      if (current && !event.target?.closest?.("button, a[href], summary, [role=\'button\']")) {\n        event.preventDefault();\n' + LIST_OPEN + "\n      }"
 FIT_LINE = ('          if (event.key === "0") {\n'
             '            event.preventDefault(); controls.content.classList.remove("native-images"); setZoom(100); return;\n'
             '          }')
@@ -146,15 +153,67 @@ MUTATIONS = [
      HELP),
 
     ("frontend/shortcut-help.js",
-     "the question list stops saying how to zoom inside full screen",
-     'more: options.fullScreen ? [row("适合宽度", "0")] : [row("全屏看题放大 / 适合宽度", "空格", "0"), row("打开快捷键说明", "?")],',
-     'more: options.fullScreen ? [row("适合宽度", "0")] : [row("打开快捷键说明", "?")],',
+     "the shortcut panel stops saying that the answer waits until asked for",
+     'extra: "空格在题库页打开当前选中题的全屏看题；进了全屏看题，空格放大题目、0 回到适合宽度，答案默认收在「看答案」里，点一下才显示。" + ',
+     'extra: "空格在题库页打开当前选中题的全屏看题。" + ',
+     HELP),
+
+    # 下面几条盯的是「在题库页按空格进全屏看题」。以前这一页只认「/」和「?」，
+    # 空格按下去什么也不会发生，看着像软件没反应。
+    ("frontend/library.js",
+     "pressing space on the question list no longer opens full screen",
+     LIST_BLOCK,
+     LIST_SPACE.replace('event.key === " "', 'event.key === "\\u000b"') + "\n" + LIST_CURRENT + "\n      return;\n    }",
+     LIBRARY),
+
+    ("frontend/library.js",
+     "space opens full screen for some question other than the selected one",
+     LIST_CURRENT,
+     '      const current = state.items?.[0] ? state.catalog.get(state.items[0].id) : null;',
+     LIBRARY),
+
+    ("frontend/library.js",
+     "space opens full screen even when nothing is selected, picking for the reader",
+     LIST_TARGET,
+     '      if (current) {',
+     LIBRARY),
+
+    ("frontend/library.js",
+     "space is stolen from buttons and from the card's own More menu",
+     LIST_TARGET,
+     '      if (current || true) {',
+     LIBRARY),
+
+    ("frontend/library.js",
+     "opening full screen by space lets the list scroll away underneath",
+     "        event.preventDefault();\n" + LIST_OPEN,
+     LIST_OPEN,
+     LIBRARY),
+
+    ("frontend/library.js",
+     "space ignores the modifier keys and reaches for full screen during typing",
+     LIST_SPACE,
+     '    if (ordinary && (event.key === " " || event.code === "Space")\n        && ui.sheet.hidden && !document.querySelector("dialog[open]")) {',
+     LIBRARY),
+
+    ("frontend/shortcut-help.js",
+     "the question list stops saying that space opens full screen",
+     'row("全屏看题（当前选中题）", "空格")',
+     'row("全屏看题（当前选中题）", "Space")',
      HELP),
 
     ("frontend/shortcut-help.js",
-     "the shortcut panel stops saying that the answer waits until asked for",
-     'extra: "全屏看题默认把答案收在「看答案」里，点一下才显示；空格放大、0 回到适合宽度。" + ',
-     'extra: "全屏看题里可以用键盘切题。" + ',
+     "the question list claims space is not a shortcut at all",
+     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("放大题目", "空格"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]\n'
+     '        : [row("搜索题目", "/"), row("全屏看题（当前选中题）", "空格"),',
+     'primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("放大题目", "空格"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]\n'
+     '        : [row("搜索题目", "/"),',
+     HELP),
+
+    ("frontend/shortcut-help.js",
+     "the shortcut panel stops offering 0 to go back to fit width",
+     'more: options.fullScreen ? [row("适合宽度", "0")] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],',
+     'more: options.fullScreen ? [] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],',
      HELP),
 ]
 

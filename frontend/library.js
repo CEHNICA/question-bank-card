@@ -4810,6 +4810,17 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     if (ordinary && event.key === "?" && ui.sheet.hidden && !document.querySelector("dialog[open]")) {
       event.preventDefault(); window.QBShortcutHelp?.open("library");
     }
+    // 1.25.8：题库页按空格打开当前选中题的全屏看题。以前这一页只认「/」和「?」，
+    // 空格什么也不做 —— 按下去像软件没反应。焦点在按钮或折叠上时，空格仍然是
+    // 「按一下就执行」，不能让路；一道题也没选中时也不拦，那时空格照旧往下翻页。
+    if (ordinary && !event.shiftKey && (event.key === " " || event.code === "Space")
+        && ui.sheet.hidden && !document.querySelector("dialog[open]")) {
+      const current = state.inspectorId ? state.catalog.get(state.inspectorId) : null;
+      if (current && !event.target?.closest?.("button, a[href], summary, [role='button']")) {
+        event.preventDefault();
+        openQuestionViewer(current, document.getElementById(`q-${current.id}`)?.querySelector(".library-full-button"));
+      }
+    }
     handlePrintEscape(event);
   });
 
