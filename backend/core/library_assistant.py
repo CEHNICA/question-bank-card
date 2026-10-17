@@ -174,7 +174,7 @@ def prepare(payload):
         from . import library_tagging
         points = library_tagging.knowledge_directory()
         catalogue = list(LibraryTag.objects.filter(active=True,
-            kind__in=[LibraryTag.Kind.KNOWLEDGE, LibraryTag.Kind.METHOD]).prefetch_related("groups"))
+            kind__in=[LibraryTag.Kind.KNOWLEDGE, LibraryTag.Kind.METHOD]))
         jobs = []
         for kind in kinds:
             bound = LibraryJob.objects.select_for_update().filter(pk=job_id).first() if job_id else None

@@ -15,7 +15,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import path
 
 from core import knowledge
-from core.models import LibraryTag, LibraryTagGroup
+from core.models import LibraryTag, LibraryTagRelation
 from core.views import knowledge_catalogue
 
 urlpatterns = [path("api/settings/knowledge", knowledge_catalogue)]
@@ -30,9 +30,12 @@ class KnowledgeCatalogueTests(TestCase):
         settings.enable()
         self.addCleanup(settings.disable)
         self.client = Client()
-        group = LibraryTagGroup.objects.create(name="正式数学目录")
+        # A chapter is a top-level parent tag now, so the chapter a knowledge
+        # point belongs to is read by walking up the hierarchy.
+        chapter = LibraryTag.objects.create(name="正式数学目录", kind="knowledge", levels=["高中"])
         tag = LibraryTag.objects.create(name="题库知识点", kind="knowledge", levels=["高中"])
-        tag.groups.add(group)
+        LibraryTagRelation.objects.create(parent=chapter, child=tag,
+                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
 
     def body(self):
         response = self.client.get("/api/settings/knowledge", headers={"x-qb-request": "1"})
@@ -41,9 +44,10 @@ class KnowledgeCatalogueTests(TestCase):
     def test_the_catalogue_is_the_one_tagging_picks_from(self):
         response, body = self.body()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(body["total"], 1)
-        self.assertEqual(body["points"][0]["point"], "题库知识点")
-        self.assertEqual(body["points"][0]["chapter"], "正式数学目录")
+        points = {item["point"]: item for item in body["points"]}
+        self.assertEqual(set(points), {"正式数学目录", "题库知识点"})
+        self.assertEqual(points["题库知识点"]["chapter"], "正式数学目录")
+        self.assertEqual(body["total"], 2)
         self.assertEqual(body["chapters"], 1)
         self.assertEqual(body["source"], "正式题库标签目录")
 
@@ -51,8 +55,35 @@ class KnowledgeCatalogueTests(TestCase):
         knowledge.ensure_file().write_text(
             "# 第一章 自己的章\n甲\n乙\n\n# 第二章 另一个章\n丙\n", encoding="utf-8")
         _, body = self.body()
-        self.assertEqual([item["point"] for item in body["points"]], ["题库知识点"])
-        self.assertEqual((body["total"], body["chapters"]), (1, 1))
+        self.assertEqual({item["point"] for item in body["points"]}, {"正式数学目录", "题库知识点"})
+        self.assertEqual((body["total"], body["chapters"]), (2, 1))
+
+    def test_the_reported_chapter_is_the_topmost_one(self):
+        """A point sits under a concept, and the concept under a chapter.
+
+        Reporting the immediate parent would file every point of one chapter
+        under a different concept name. A point shared by 初中 and 高中 has to
+        offer both chapters, or half of the questions that use it cannot be
+        found from the stage they are taught in.
+        """
+        concept = LibraryTag.objects.create(name="函数的概念", kind="knowledge", levels=["高中"])
+        LibraryTagRelation.objects.create(parent=LibraryTag.objects.get(name="正式数学目录"), child=concept,
+                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        deep = LibraryTag.objects.create(name="函数的单调性", kind="knowledge", levels=["高中"])
+        LibraryTagRelation.objects.create(parent=concept, child=deep,
+                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        junior = LibraryTag.objects.create(name="初中 · 函数", kind="knowledge", levels=["初中"])
+        shared = LibraryTag.objects.create(name="函数图象", kind="knowledge", levels=["初中", "高中"])
+        LibraryTagRelation.objects.create(parent=deep, child=shared,
+                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(parent=junior, child=shared,
+                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+
+        _, body = self.body()
+        points = {item["point"]: item for item in body["points"]}
+        self.assertEqual(points["函数的单调性"]["chapter"], "正式数学目录")
+        self.assertEqual(points["函数的概念"]["chapter"], "正式数学目录")
+        self.assertEqual(points["函数图象"]["chapter"], "初中 · 函数、正式数学目录")
 
     def test_requests_without_the_local_page_header_are_refused(self):
         response = self.client.get("/api/settings/knowledge")

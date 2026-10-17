@@ -80,8 +80,17 @@ assert.match(managerJs, /tagManagerWorkspace/, "tag management has an independen
 assert.match(libraryJs, /window\.QBLibraryTagManager\.create\(/, "the question list integrates the independent manager");
 assert.match(libraryHtml, /library-tag-manager\.js[\s\S]*?library\.js/, "the manager module loads before its consumer");
 assert.match(managerCss, /\.tag-directory-body \{[^}]*grid-template-columns:/,
-  "directory groups, results and selected-tag details have distinct layout regions");
-assert.match(managerJs, /group_membership_batch[\s\S]*?tag_ids:/, "manager grouping preserves explicit selected tag identities");
+  "sidebar, results and selected-tag details have distinct layout regions");
+assert.doesNotMatch(managerJs, /group_membership|create_group|update_group|delete_group|groupSelect/,
+  "the manager offers no group folder; chapters are parent tags");
+assert.doesNotMatch(managerJs, /memberships\(|所属分组|未分组|个人分组/,
+  "group wording is gone from the tag manager");
+assert.match(managerJs, /tagManagerTreeNav/, "the manager browses top-level tags as a hierarchy");
+assert.match(managerJs, /for \(const kind of \["knowledge", "method", "custom", "legacy"\]\) \{[\s\S]*?entry\(hierarchyNav/,
+  "custom and legacy tags have their own level entry");
+assert.doesNotMatch(libraryJs, /tagCatalogue\.groups|tagActiveGroup|tagManagerGroup|group_keys|group_ids|所属分组|导入所选分组/,
+  "the question tag picker and templates read chapters, not groups");
+assert.match(libraryJs, /tagSubtree\(/, "the picker filters by a chapter and everything under it");
 assert.match(managerJs, /impact\?action=delete_tags[\s\S]*?impact_token: impact\.token/,
   "bulk deletion checks impact before submitting the confirmed mutation");
 assert.match(managerJs, /impact\?action=merge_tags_batch[\s\S]*?impact_token: impact\.token/,

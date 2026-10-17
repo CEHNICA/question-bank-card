@@ -1049,7 +1049,7 @@
   }
 
   // Stable tag identities are managed separately from immutable question text.
-  let tagDialog = null, tagManagerDialog = null, tagCatalogueEditorDialog = null, tagTemplateDialog = null, tagCatalogue = { revision: 1, groups: [], tags: [] };
+  let tagDialog = null, tagManagerDialog = null, tagCatalogueEditorDialog = null, tagTemplateDialog = null, tagCatalogue = { revision: 1, tags: [] };
   let inspectorRenderedKey = null;
   const inspectorScrolls = new Map(), inlineTagStates = new Map(), inlineTagLocks = new Set(), suggestionLocks = new Set(), suggestionAttempts = new Map();
   let tagHover = null, tagHoverPanel = null, tagHoverOpenTimer = null, tagHoverCloseTimer = null, tagHoverSequence = 0, tagHoverSuppressFocus = false;
@@ -1059,8 +1059,8 @@
   try { Object.entries(JSON.parse(sessionStorage.getItem(suggestionDraftKey + ":requests") || "{}")).forEach(([id, attempt]) => suggestionAttempts.set(id, attempt)); } catch (_) {}
   function suggestionDraft(item, suggestion) { return suggestionDrafts[item.id + ":" + suggestion.id] ||= {}; }
   function saveSuggestionDrafts() { try { sessionStorage.setItem(suggestionDraftKey, JSON.stringify(suggestionDrafts)); sessionStorage.setItem(suggestionDraftKey + ":requests", JSON.stringify(Object.fromEntries(suggestionAttempts))); } catch (_) {} }
-  let tagManagerGroup = "all", tagManagerQuery = "";
-  let tagTargetIds = [], tagRevisions = {}, tagMemberships = {}, tagActiveGroup = "all", tagPickerView = "all", tagUndoId = "", tagOperationHistory = [];
+  let tagManagerQuery = "";
+  let tagTargetIds = [], tagRevisions = {}, tagMemberships = {}, tagActiveSection = "all", tagPickerView = "all", tagUndoId = "", tagOperationHistory = [];
   const catalogueAttempts = new Map();
   let catalogueUnknown = null;
   let pickerAttempt = null;
@@ -1286,7 +1286,7 @@
     const close = node("button", "button", "关闭"); close.type = "button"; close.addEventListener("click", function() { tagDialog.close(); });
     header.append(title, close);
     const tools = node("div", "tag-picker-tools");
-    [["tagPickerCreateTag", "新建标签", () => openTagCatalogueEditor("tag", null, true)]].forEach(function(entry) {
+    [["tagPickerCreateTag", "新建标签", () => openTagCatalogueEditor(null, true)]].forEach(function(entry) {
       const button = node("button", "button button-small", entry[1]); button.id = entry[0]; button.type = "button";
       button.addEventListener("click", entry[2]); tools.append(button);
     });
@@ -1324,7 +1324,7 @@
         tagRevisions[entry[0]] = entry[1].revision;
         tagMemberships[entry[0]] = new Set(entry[1].assignments.filter(function(row) { return !row.needs_review; }).map(function(row) { return row.tag.id; }));
       });
-      tagActiveGroup = "all"; tagPickerView = "all"; tagUndoId = ""; $("tagPickerSearch").value = options.query || "";
+      tagActiveSection = "all"; tagPickerView = "all"; tagUndoId = ""; $("tagPickerSearch").value = options.query || "";
       $("tagPickerStatus").textContent = tagTargetIds.length === 1 ? "单题" : "已选 " + tagTargetIds.length + " 题"; $("tagPickerUndo").hidden = true;
       $("tagPickerRetry").hidden = !pickerAttempt;
       renderTagPicker(); if (!dialog.open) dialog.showModal(); $("tagPickerSearch").focus();
@@ -1370,6 +1370,31 @@
     aiTitle.append(node("b", "", "AI 建议的"), node("small", "", note));
     ai.append(aiTitle, card); box.append(ai);
   }
+  const kindLabels = { knowledge: "知识点", method: "解题方法", custom: "自定义", legacy: "历史标签" };
+  function tagChildrenIndex() {
+    const children = new Map();
+    (tagCatalogue.tags || []).forEach(function(tag) {
+      (tag.parent_ids || []).forEach(function(pid) {
+        if (!children.has(pid)) children.set(pid, []);
+        children.get(pid).push(tag.id);
+      });
+    });
+    return children;
+  }
+  function tagSubtree(id, children) {
+    const seen = new Set([id]), todo = [id];
+    while (todo.length) (children.get(todo.pop()) || []).forEach(function(child) { if (!seen.has(child)) { seen.add(child); todo.push(child); } });
+    return seen;
+  }
+  function tagTrail(tag, byId) {
+    const names = [], seen = new Set([tag.id]), todo = [...(tag.parent_ids || [])];
+    while (todo.length) {
+      const parent = byId.get(String(todo.pop()));
+      if (!parent || seen.has(parent.id)) continue;
+      seen.add(parent.id); names.unshift(parent.name); todo.push(...(parent.parent_ids || []));
+    }
+    return names;
+  }
   function renderTagPicker() {
     renderTagPickerNow();
     if (!tagDialog) return;
@@ -1378,23 +1403,35 @@
     quick.replaceChildren();
     [{ id: "all", name: "全部标签" }, { id: "favorite", name: "收藏" }, { id: "recent", name: "最近使用" }].forEach(function(view) {
       const button = node("button", "tag-group-button" + (tagPickerView === view.id ? " active" : ""), view.name);
-      button.type = "button"; button.addEventListener("click", function() { tagPickerView = view.id; tagActiveGroup = "all"; renderTagPicker(); }); quick.append(button);
+      button.type = "button"; button.addEventListener("click", function() { tagPickerView = view.id; tagActiveSection = "all"; renderTagPicker(); }); quick.append(button);
     });
+    const byId = new Map((tagCatalogue.tags || []).map(function(tag) { return [String(tag.id), tag]; }));
+    const children = tagChildrenIndex();
     groupBox.replaceChildren();
-    [{ id: "all", name: "全部分组" }, ...(tagCatalogue.groups || [])].forEach(function(group) {
-      const button = node("button", "tag-group-button" + (tagActiveGroup === String(group.id) ? " active" : ""), group.name);
-      button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveGroup = String(group.id); renderTagPicker(); }); groupBox.append(button);
+    const allButton = node("button", "tag-group-button" + (tagActiveSection === "all" ? " active" : ""), "全部章节");
+    allButton.type = "button"; allButton.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = "all"; renderTagPicker(); }); groupBox.append(allButton);
+    (tagCatalogue.tags || []).filter(function(tag) {
+      return tag.active !== false && !(tag.parent_ids || []).some(function(pid) { return byId.has(String(pid)); });
+    }).sort(function(left, right) {
+      return (kindLabels[left.kind] || "").localeCompare(kindLabels[right.kind] || "", "zh-CN")
+        || left.name.localeCompare(right.name, "zh-CN");
+    }).forEach(function(tag) {
+      const button = node("button", "tag-group-button" + (tagActiveSection === String(tag.id) ? " active" : ""), tag.name);
+      button.title = (kindLabels[tag.kind] || "标签") + " · 连同下面 " + (tagSubtree(String(tag.id), children).size - 1) + " 个下级标签";
+      button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = String(tag.id); renderTagPicker(); }); groupBox.append(button);
     });
     groupBox.scrollTop = groupScrollTop; groupBox.scrollLeft = groupScrollLeft;
     const query = String($("tagPickerSearch").value || "").trim().normalize("NFKC").toLocaleLowerCase();
     let recentIds = [];
     try { recentIds = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]"); } catch (_) {}
+    const active = tagActiveSection === "all" ? null : tagSubtree(tagActiveSection, children);
     const rows = (tagCatalogue.tags || []).filter(function(tag) {
       if (!tag.active) return false;
       if (tagPickerView === "favorite" && !tag.favorite) return false;
       if (tagPickerView === "recent" && !recentIds.includes(tag.id)) return false;
-      if (!query && tagPickerView === "all" && tagActiveGroup !== "all" && !tag.groups.some(function(group) { return group.id === tagActiveGroup; })) return false;
-      const text = [tag.name, tag.description, tag.conditions, ...(tag.aliases || []), ...tag.groups.map(function(group) { return group.name; })].join(" ").normalize("NFKC").toLocaleLowerCase();
+      if (!query && tagPickerView === "all" && active && !active.has(String(tag.id))) return false;
+      const trail = tagTrail(tag, byId).join(" ");
+      const text = [tag.name, tag.description, tag.conditions, ...(tag.aliases || []), trail].join(" ").normalize("NFKC").toLocaleLowerCase();
       return !query || text.includes(query);
     });
     if (tagPickerView === "recent") rows.sort(function(left, right) { return recentIds.indexOf(right.id) - recentIds.indexOf(left.id); });
@@ -1402,7 +1439,7 @@
     list.replaceChildren(); if (!rows.length) {
       list.append(node("p", "library-empty", query ? "没有找到这个标签。" : "还没有可用标签。"));
       const create = node("button", "button button-small", query ? `创建「${$("tagPickerSearch").value.trim()}」并添加` : "新建标签"); create.type = "button";
-      create.addEventListener("click", () => openTagCatalogueEditor("tag", null, true)); list.append(create);
+      create.addEventListener("click", () => openTagCatalogueEditor(null, true)); list.append(create);
       list.scrollTop = scrollTop; return;
     }
     rows.forEach(function(tag) {
@@ -1413,7 +1450,7 @@
       if (tag.color) button.style.setProperty("--tag-color", tag.color);
       button.type = "button"; button.disabled = tagDialog.classList.contains("saving");
       const title = node("span", "tag-picker-row-title");
-      title.append(node("strong", "", tag.name), node("small", "", (tag.kind === "knowledge" ? "知识点" : tag.kind === "method" ? "解题方法" : "自定义") + " · " + tag.groups.map(function(group) { return group.name; }).join("、")));
+      title.append(node("strong", "", tag.name), node("small", "", (kindLabels[tag.kind] || "标签") + (tagTrail(tag, byId).length ? " · " + tagTrail(tag, byId).join(" › ") : "")));
       button.append(title, node("span", "tag-picker-row-detail", tag.description || tag.conditions || ""), node("span", "tag-picker-row-state", text));
       button.addEventListener("click", function() { void toggleTag(tag, count === tagTargetIds.length); });
       if (!single && count > 0 && count < tagTargetIds.length) {
@@ -1510,9 +1547,9 @@
     try {
       const impact = await tagRequest("/api/library/tags/impact?action=reset_empty");
       const details = impact.question_count || impact.historical_count
-        ? `\n将清除 ${impact.tag_count} 个标签、${impact.group_count} 个分组和 ${impact.question_count} 道当前题目的 ${impact.assignment_count} 条关联；另有 ${impact.historical_count} 道历史版本受影响。操作可撤销。`
+        ? `\n将清除 ${impact.tag_count} 个标签和 ${impact.question_count} 道当前题目的 ${impact.assignment_count} 条关联；另有 ${impact.historical_count} 道历史版本受影响。操作可撤销。`
         : "\n当前目录为空。确认后会标记为已初始化，不会自动导入系统标签。";
-      if (!window.confirm((impact.tag_count || impact.group_count ? "清空标签目录？" : "从空白目录开始？") + details)) return false;
+      if (!window.confirm((impact.tag_count ? "清空标签目录？" : "从空白目录开始？") + details)) return false;
       const result = await catalogueAction("reset_empty", { impact_token: impact.token, confirmed: true });
       if (tagDialog?.open) { renderTagPicker(); }
       if (tagManagerDialog?.open) { renderTagManager(); await loadTagOperationHistory(); }
@@ -1526,10 +1563,10 @@
       const data = await tagRequest("/api/library/tags/templates");
       const dialog = node("dialog", "tag-picker-dialog tag-template-dialog"); tagTemplateDialog = dialog;
       const header = node("header", "tag-picker-head"), intro = node("div");
-      intro.append(node("h2", "", "系统模板"), node("p", "tag-picker-subtitle", "预览不会修改目录。导入会增补所选模板的层级关系，保留现有改名、分组和父级；需要的上级会一并导入。"));
+      intro.append(node("h2", "", "系统模板"), node("p", "tag-picker-subtitle", "预览不会修改目录。导入会增补所选章节的层级关系，保留现有改名和上下级；需要的上级会一并导入。"));
       const close = node("button", "button", "关闭"); close.type = "button"; header.append(intro, close);
       const packages = node("nav", "tag-template-packages");
-      const groupChecks = new Map();
+      const sectionChecks = new Map();
       const blueprint = new Map((data.tags || []).map(tag => [tag.key, tag]));
       const templatePaths = tag => {
         const paths = [], todo = [{ tag, trail: [] }];
@@ -1543,8 +1580,8 @@
       };
       const dependencies = node("section", "tag-template-dependencies"); dependencies.id = "tagTemplateDependencies";
       const updateTemplatePreview = () => {
-        const groups = new Set(Array.from(groupChecks.entries()).filter(([, check]) => check.checked).map(([key]) => key));
-        const direct = new Set((data.tags || []).filter(tag => tag.group_keys.some(key => groups.has(key))).map(tag => tag.key));
+        const sections = new Set(Array.from(sectionChecks.entries()).filter(([, check]) => check.checked).map(([key]) => key));
+        const direct = new Set((data.tags || []).filter(tag => tag.section_keys.some(key => sections.has(key))).map(tag => tag.key));
         const included = new Set(direct), todo = Array.from(direct);
         while (todo.length) {
           const tag = blueprint.get(todo.pop());
@@ -1552,31 +1589,31 @@
         }
         const extra = Array.from(included).filter(key => !direct.has(key)).map(key => blueprint.get(key));
         dependencies.replaceChildren();
-        if (!groups.size) { dependencies.append(node("p", "helper", "勾选分组后，这里会显示同时导入的必要上级。")); return; }
-        dependencies.append(node("h4", "", `所选分组 ${direct.size} 个标签；必要上级 ${extra.length} 个`));
+        if (!sections.size) { dependencies.append(node("p", "helper", "勾选章节后，这里会显示同时导入的必要上级。")); return; }
+        dependencies.append(node("h4", "", `所选章节 ${direct.size} 个标签；必要上级 ${extra.length} 个`));
         if (extra.length) {
           const names = node("div", "tag-template-parent-list");
           extra.forEach(tag => { const chip = node("span", "", tag.name); chip.title = templatePaths(tag).join("\n"); names.append(chip); }); dependencies.append(names);
-          dependencies.append(node("p", "helper", "这些上级标签会一并导入；不会额外导入它们所在的未选分组。"));
+          dependencies.append(node("p", "helper", "这些上级标签会一并导入；不会额外导入它们所在的未选章节。"));
         }
       };
       (data.packages || []).forEach(function(pkg) {
         const button = node("button", "button button-small", pkg.name + "（" + pkg.tag_count + " 个标签）"); button.type = "button";
-        button.addEventListener("click", function() { pkg.group_keys.forEach(function(key) { if (groupChecks.has(key)) groupChecks.get(key).checked = true; }); updateTemplatePreview(); }); packages.append(button);
+        button.addEventListener("click", function() { pkg.section_keys.forEach(function(key) { if (sectionChecks.has(key)) sectionChecks.get(key).checked = true; }); updateTemplatePreview(); }); packages.append(button);
       });
       const allRow = node("label", "tag-template-all"), all = node("input"); all.type = "checkbox";
-      all.addEventListener("change", function() { groupChecks.forEach(function(check) { check.checked = all.checked; }); updateTemplatePreview(); });
-      allRow.append(all, node("span", "", "全选所有分组"));
+      all.addEventListener("change", function() { sectionChecks.forEach(function(check) { check.checked = all.checked; }); updateTemplatePreview(); });
+      allRow.append(all, node("span", "", "全选所有章节"));
       const list = node("div", "tag-template-list");
-      (data.groups || []).forEach(function(group) {
+      (data.sections || []).forEach(function(section) {
         const detail = node("details", "tag-template-group"), summary = node("summary"), check = node("input"); check.type = "checkbox";
         check.addEventListener("click", function(event) { event.stopPropagation(); });
         check.addEventListener("change", updateTemplatePreview);
-        const groupTags = (data.tags || []).filter(function(tag) { return tag.group_keys.includes(group.key); });
-        summary.append(check, node("strong", "", group.name), node("small", "", groupTags.length + " 个标签"));
-        groupChecks.set(group.key, check);
+        const sectionTags = (data.tags || []).filter(function(tag) { return tag.section_keys.includes(section.key); });
+        summary.append(check, node("strong", "", section.name), node("small", "", sectionTags.length + " 个标签"));
+        sectionChecks.set(section.key, check);
         const preview = node("div", "tag-template-preview");
-        groupTags.forEach(function(tag) {
+        sectionTags.forEach(function(tag) {
           const row = node("p"); row.append(node("b", "", tag.name), node("small", "tag-template-path", templatePaths(tag).join("；")), node("span", "", tag.description || ""));
           const methods = (tag.related_method_keys || []).map(key => blueprint.get(key)?.name).filter(Boolean);
           if (methods.length) row.append(node("small", "tag-template-related", "相关方法：" + methods.join("、") + "（只连接目录中已有或本次选中的方法）"));
@@ -1585,18 +1622,18 @@
         detail.append(summary, preview); list.append(detail);
       });
       const body = node("div", "tag-template-body"); body.append(packages, allRow, dependencies, list); updateTemplatePreview();
-      const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "模板未勾选。"), cancel = node("button", "button", "取消"), apply = node("button", "button button-primary", "导入所选分组");
+      const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "模板未勾选。"), cancel = node("button", "button", "取消"), apply = node("button", "button button-primary", "导入所选章节");
       cancel.type = "button"; apply.type = "button"; footer.append(status, cancel, apply);
       dialog.append(header, body, footer); document.body.append(dialog);
       const closeDialog = function() { dialog.close(); };
       close.addEventListener("click", closeDialog); cancel.addEventListener("click", closeDialog);
       dialog.addEventListener("close", function() { dialog.remove(); if (tagTemplateDialog === dialog) tagTemplateDialog = null; });
       apply.addEventListener("click", async function() {
-        const keys = Array.from(groupChecks.entries()).filter(([, input]) => input.checked).map(([key]) => key);
-        if (!keys.length) { status.textContent = "先选择一个或多个分组。"; return; }
+        const keys = Array.from(sectionChecks.entries()).filter(([, input]) => input.checked).map(([key]) => key);
+        if (!keys.length) { status.textContent = "先选择一个或多个章节。"; return; }
         apply.disabled = true; status.textContent = "正在导入所选模板…";
         try {
-          await catalogueAction("apply_template", { group_keys: keys });
+          await catalogueAction("apply_template", { section_keys: keys });
           closeDialog(); await loadTagCatalogue(); renderTagPicker(); if (tagManagerDialog?.open) { renderTagManager(); await loadTagOperationHistory(); }
           toast("已把所选模板加入当前目录。", "success");
         } catch (error) { status.textContent = error.message + "；选择仍保留。"; apply.disabled = false; }
@@ -1604,16 +1641,16 @@
       dialog.showModal();
     } catch (error) { toast(error.message, "error"); }
   }
-  function openTagCatalogueEditor(entity, record = null, fromPicker = false) {
+  function openTagCatalogueEditor(record = null, fromPicker = false) {
     const defaults = typeof fromPicker === "object" ? fromPicker : {};
     fromPicker = fromPicker === true;
     if (tagCatalogueEditorDialog?.open || tagDialog?.classList.contains("saving")) return;
-    const isTag = entity === "tag", editing = Boolean(record), label = isTag ? "标签" : "分组";
+    const editing = Boolean(record), label = "标签";
     const dialog = node("dialog", "tag-catalogue-editor-dialog"); dialog.id = "tagCatalogueEditorDialog";
     tagCatalogueEditorDialog = dialog;
     const header = node("header", "tag-picker-head"), heading = node("div");
     heading.append(node("h2", "", (editing ? "编辑" : "新建") + label), node("p", "tag-picker-subtitle",
-      isTag ? "自己建立标签，按分组整理；同一标签可以放进多个分组。" : "分组用于整理标签，不会改变题目已经贴上的标签。"));
+      "自己建立标签，用上级和下级分层；一个标签可以有多个上级，也可以没有上级。"));
     const close = node("button", "button", "关闭"); close.type = "button"; header.append(heading, close);
     const form = node("form", "tag-catalogue-editor-form"); form.id = "tagCatalogueEditorForm";
     const body = node("div", "tag-catalogue-editor-body");
@@ -1623,63 +1660,49 @@
     };
     const name = field(label + "名称", "tagCatalogueName", node("input"), true);
     name.required = true; name.maxLength = 80; name.value = record?.name || (fromPicker ? $("tagPickerSearch")?.value.trim() : "") || "";
-    name.placeholder = isTag ? "例如：课堂例题、易错题" : "例如：我的教学标签";
-    let kind, description, aliases, conditions, scope, groupChoices, levelChoices, parentChoices, relatedChoices;
-    if (isTag) {
-      kind = field("标签类型", "tagCatalogueKind", node("select"));
-      [["custom", "自定义标签"], ["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(entry) { kind.add(new Option(entry[1], entry[0])); });
-      if (record?.kind === "legacy") kind.add(new Option("历史标签", "legacy"));
-      kind.value = record?.kind || defaults.kind || "custom"; kind.disabled = editing;
-    }
+    name.placeholder = "例如：课堂例题、易错题";
+    let kind, description, aliases, conditions, scope, levelChoices, parentChoices, relatedChoices;
+    kind = field("标签类型", "tagCatalogueKind", node("select"));
+    [["custom", "自定义标签"], ["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(entry) { kind.add(new Option(entry[1], entry[0])); });
+    if (record?.kind === "legacy") kind.add(new Option("历史标签", "legacy"));
+    kind.value = record?.kind || defaults.kind || "custom"; kind.disabled = editing;
     const color = field("颜色（可选）", "tagCatalogueColor", node("select"));
     [["", "默认"], ["#bb575d", "红色"], ["#4f8278", "绿色"], ["#477a9e", "蓝色"], ["#8965a5", "紫色"], ["#bf8545", "橙色"], ["#438b94", "青色"]].forEach(function(entry) { color.add(new Option(entry[1], entry[0])); });
     if (record?.color && !Array.from(color.options).some(function(option) { return option.value === record.color; })) color.add(new Option("当前颜色", record.color));
     color.value = record?.color || "";
-    if (isTag) {
-      description = field("简短说明（可选）", "tagCatalogueDescription", node("textarea"), true);
-      description.rows = 2; description.maxLength = 300; description.value = record?.description || "";
-      const groupField = node("fieldset", "tag-catalogue-wide"); groupField.append(node("legend", "", "所属分组（可多选）"));
-      groupChoices = node("div", "tag-catalogue-group-choices"); groupChoices.id = "tagCatalogueGroups";
-      const activeGroup = fromPicker ? tagActiveGroup : tagManagerGroup;
-      const selectedGroups = record ? (record.groups || []).map(function(group) { return group.id; }) : defaults.group_id ? [defaults.group_id] : activeGroup !== "all" ? [activeGroup] : [];
-      (tagCatalogue.groups || []).forEach(function(group) {
-        const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = group.id;
-        check.checked = selectedGroups.includes(group.id); row.append(check, node("span", "", group.name)); groupChoices.append(row);
+    description = field("简短说明（可选）", "tagCatalogueDescription", node("textarea"), true);
+    description.rows = 2; description.maxLength = 300; description.value = record?.description || "";
+    parentChoices = field("上级标签（可多选；留空作为顶级）", "tagCatalogueParents", node("select"), true); parentChoices.multiple = true; parentChoices.size = 5;
+    const chosenParents = record?.parent_ids || defaults.parent_ids || [];
+    const renderParents = () => {
+      const selected = parentChoices.options.length ? Array.from(parentChoices.selectedOptions).map(option => option.value) : chosenParents;
+      parentChoices.replaceChildren();
+      (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === kind.value && tag.id !== record?.id).forEach(tag => {
+        const option = new Option(tag.name, tag.id); option.selected = selected.includes(tag.id); parentChoices.append(option);
       });
-      if (!groupChoices.childNodes.length) groupChoices.append(node("p", "helper", "尚无分组，可先创建标签，再新建分组整理。"));
-      groupField.append(groupChoices); body.append(groupField);
-      parentChoices = field("上级标签（可多选；留空作为顶级）", "tagCatalogueParents", node("select"), true); parentChoices.multiple = true; parentChoices.size = 5;
-      const chosenParents = record?.parent_ids || defaults.parent_ids || [];
-      const renderParents = () => {
-        const selected = parentChoices.options.length ? Array.from(parentChoices.selectedOptions).map(option => option.value) : chosenParents;
-        parentChoices.replaceChildren();
-        (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === kind.value && tag.id !== record?.id).forEach(tag => {
-          const option = new Option(tag.name, tag.id); option.selected = selected.includes(tag.id); parentChoices.append(option);
-        });
-      };
-      renderParents(); kind.addEventListener("change", renderParents);
-      relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
-      (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === "method").forEach(tag => {
-        const option = new Option(tag.name, tag.id); option.selected = (record?.related_method_ids || []).includes(tag.id); relatedChoices.append(option);
-      });
-      const syncRelated = () => { relatedChoices.parentElement.hidden = kind.value !== "knowledge"; };
-      kind.addEventListener("change", syncRelated); syncRelated();
-      scope = field("适用小问（留空表示整题）", "tagCatalogueScope", node("input"), true); scope.placeholder = "例如：1,2";
-      const syncScope = function() { scope.parentElement.hidden = !(fromPicker && !editing && kind.value === "method"); };
-      kind.addEventListener("change", syncScope); syncScope();
-      const advanced = node("details", "tag-catalogue-wide"); advanced.append(node("summary", "", "别名、学段与适用条件"));
-      const advancedFields = node("div", "tag-catalogue-editor-body");
-      const extra = function(title, control) { const row = node("label", "tag-catalogue-field tag-catalogue-wide"); row.append(node("span", "", title), control); advancedFields.append(row); return control; };
-      aliases = extra("别名（用逗号分隔）", node("input")); aliases.value = (record?.aliases || []).join("，");
-      conditions = extra("适用条件（可选）", node("textarea")); conditions.rows = 2; conditions.maxLength = 2000; conditions.value = record?.conditions || "";
-      levelChoices = node("fieldset", "tag-catalogue-wide"); levelChoices.append(node("legend", "", "适用学段"));
-      ["初中", "高中"].forEach(function(level) { const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = level; check.checked = (record?.levels || ["初中", "高中"]).includes(level); row.append(check, node("span", "", level)); levelChoices.append(row); });
-      advancedFields.append(levelChoices); advanced.append(advancedFields); body.append(advanced);
-    }
+    };
+    renderParents(); kind.addEventListener("change", renderParents);
+    relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
+    (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === "method").forEach(tag => {
+      const option = new Option(tag.name, tag.id); option.selected = (record?.related_method_ids || []).includes(tag.id); relatedChoices.append(option);
+    });
+    const syncRelated = () => { relatedChoices.parentElement.hidden = kind.value !== "knowledge"; };
+    kind.addEventListener("change", syncRelated); syncRelated();
+    scope = field("适用小问（留空表示整题）", "tagCatalogueScope", node("input"), true); scope.placeholder = "例如：1,2";
+    const syncScope = function() { scope.parentElement.hidden = !(fromPicker && !editing && kind.value === "method"); };
+    kind.addEventListener("change", syncScope); syncScope();
+    const advanced = node("details", "tag-catalogue-wide"); advanced.append(node("summary", "", "别名、学段与适用条件"));
+    const advancedFields = node("div", "tag-catalogue-editor-body");
+    const extra = function(title, control) { const row = node("label", "tag-catalogue-field tag-catalogue-wide"); row.append(node("span", "", title), control); advancedFields.append(row); return control; };
+    aliases = extra("别名（用逗号分隔）", node("input")); aliases.value = (record?.aliases || []).join("，");
+    conditions = extra("适用条件（可选）", node("textarea")); conditions.rows = 2; conditions.maxLength = 2000; conditions.value = record?.conditions || "";
+    levelChoices = node("fieldset", "tag-catalogue-wide"); levelChoices.append(node("legend", "", "适用学段"));
+    ["初中", "高中"].forEach(function(level) { const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = level; check.checked = (record?.levels || ["初中", "高中"]).includes(level); row.append(check, node("span", "", level)); levelChoices.append(row); });
+    advancedFields.append(levelChoices); advanced.append(advancedFields); body.append(advanced);
     const status = node("p", "tag-catalogue-status"); status.id = "tagCatalogueStatus"; status.setAttribute("role", "status");
-    const footer = node("footer", "tag-picker-foot"), cancel = node("button", "button", "取消"), save = node("button", "button button-primary", editing ? "保存修改" : fromPicker && isTag ? "创建并添加" : "创建" + label);
-    cancel.type = "button"; save.type = "submit"; save.id = "tagCatalogueSave"; save.value = fromPicker && isTag && !editing ? "apply" : "save";
-    const createOnly = node("button", "button", "仅创建标签"); createOnly.type = "submit"; createOnly.id = "tagCatalogueCreateOnly"; createOnly.value = "save"; createOnly.hidden = !(fromPicker && isTag && !editing);
+    const footer = node("footer", "tag-picker-foot"), cancel = node("button", "button", "取消"), save = node("button", "button button-primary", editing ? "保存修改" : fromPicker ? "创建并添加" : "创建" + label);
+    cancel.type = "button"; save.type = "submit"; save.id = "tagCatalogueSave"; save.value = fromPicker && !editing ? "apply" : "save";
+    const createOnly = node("button", "button", "仅创建标签"); createOnly.type = "submit"; createOnly.id = "tagCatalogueCreateOnly"; createOnly.value = "save"; createOnly.hidden = !(fromPicker && !editing);
     footer.append(cancel, save, createOnly); form.append(body, status, footer); dialog.append(header, form); document.body.append(dialog);
     let saving = false, created = null, attempt = null, applyAttempt = {}, composing = false;
     form.addEventListener("compositionstart", function() { composing = true; });
@@ -1689,12 +1712,8 @@
     dialog.addEventListener("cancel", function(event) { if (saving) event.preventDefault(); });
     dialog.addEventListener("close", function() { dialog.remove(); if (tagCatalogueEditorDialog === dialog) tagCatalogueEditorDialog = null; });
     const finish = function(savedRecord) {
-      if (fromPicker) {
-        if (!isTag) { tagActiveGroup = savedRecord.id; tagPickerView = "all"; $("tagPickerSearch").value = ""; }
-        else { tagPickerView = "all"; $("tagPickerSearch").value = savedRecord.name; }
-        renderTagPicker();
-      }
-      if (tagManagerDialog?.open) { if (!isTag && !editing) tagManagerGroup = savedRecord.id; renderTagManager(); }
+      if (fromPicker) { tagPickerView = "all"; $("tagPickerSearch").value = savedRecord.name; renderTagPicker(); }
+      if (tagManagerDialog?.open) renderTagManager();
       if (tagManagerDialog) void loadTagOperationHistory();
       void load({ quiet: true }); dialog.close();
     };
@@ -1707,16 +1726,14 @@
         if (parts.length > 12 || parts.some(function(part) { return !/^[1-9][0-9]?$/.test(part); }) || new Set(parts).size !== parts.length) { status.textContent = "请输入不重复的 1 到 99 小问编号，最多十二项。"; return; }
         methodScope = { subquestions: parts };
       }
-      const fields = isTag ? { name: name.value.trim(), color: color.value, description: description.value.trim(),
+      const fields = { name: name.value.trim(), color: color.value, description: description.value.trim(),
         aliases: aliases.value.split(/[，,]/).map(function(value) { return value.trim(); }).filter(Boolean), conditions: conditions.value.trim(),
         levels: Array.from(levelChoices.querySelectorAll("input:checked")).map(function(input) { return input.value; }),
-        group_ids: Array.from(groupChoices.querySelectorAll("input:checked")).map(function(input) { return input.value; }),
         parent_ids: Array.from(parentChoices.selectedOptions).map(option => option.value),
-        related_method_ids: kind.value === "knowledge" ? Array.from(relatedChoices.selectedOptions).map(option => option.value) : [] }
-        : { name: name.value.trim(), color: color.value };
-      if (isTag && editing && fields.name.normalize("NFKC") !== record.name && !fields.aliases.includes(record.name)) fields.aliases.push(record.name);
-      if (editing) fields[isTag ? "tag_id" : "group_id"] = record.id; else if (isTag) fields.kind = kind.value;
-      const action = (editing ? "update_" : "create_") + entity;
+        related_method_ids: kind.value === "knowledge" ? Array.from(relatedChoices.selectedOptions).map(option => option.value) : [] };
+      if (editing && fields.name.normalize("NFKC") !== record.name && !fields.aliases.includes(record.name)) fields.aliases.push(record.name);
+      if (editing) fields.tag_id = record.id; else fields.kind = kind.value;
+      const action = editing ? "update_tag" : "create_tag";
       const fingerprint = JSON.stringify([action, fields]);
       if (!attempt || attempt.fingerprint !== fingerprint) attempt = { fingerprint, payload: { action, ...fields, revision: tagCatalogue.revision, request_id: tagRequestId() } };
       saving = true; close.disabled = cancel.disabled = save.disabled = createOnly.disabled = true;
@@ -1726,7 +1743,7 @@
           const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify(attempt.payload) });
           tagCatalogue = result.catalogue || await loadTagCatalogue();
           const normalizedName = fields.name.normalize("NFKC");
-          created = (isTag ? tagCatalogue.tags : tagCatalogue.groups).find(function(value) { return editing ? value.id === record.id : value.name === normalizedName && (!isTag || value.kind === fields.kind); });
+          created = tagCatalogue.tags.find(function(value) { return editing ? value.id === record.id : value.name === normalizedName && value.kind === fields.kind; });
           if (!created) throw new Error("目录已保存，但结果尚未载入，请刷新后查看。");
         }
         if (shouldApply) {
@@ -1768,10 +1785,7 @@
     if (tagManagerDialog) return tagManagerDialog;
     tagManagerDialog = window.QBLibraryTagManager.create({
       mount: document.querySelector(".library-main"), loadCatalogue: loadTagCatalogue, action: catalogueAction,
-      request: async (url, options) => { const result = await tagRequest(url, options); if (result.catalogue) tagCatalogue = result.catalogue; return result; }, editEntity: (entity, record, defaults = {}) => {
-        tagManagerGroup = defaults.group_id || tagManagerDialog.activeGroup;
-        return openTagCatalogueEditor(entity, record, defaults);
-      }, openTemplates: openTagTemplates, clearCatalogue: startEmptyTagCatalogue,
+      request: async (url, options) => { const result = await tagRequest(url, options); if (result.catalogue) tagCatalogue = result.catalogue; return result; }, editEntity: (_entity, record, defaults = {}) => openTagCatalogueEditor(record, defaults), openTemplates: openTagTemplates, clearCatalogue: startEmptyTagCatalogue,
       deleteTag: deleteCatalogueTag, browseTag,
       contextValid: context => Boolean(state.catalog.get(context.publicationId)?.tag_assignments?.some(link => link.tag.id === context.tagId && !link.needs_review)),
       replaceForQuestion: (context, tag) => replaceInlineTag(context.publicationId, context.tagId, tag),
@@ -1797,7 +1811,7 @@
     $("tagManagerWorkspace").querySelector(".tag-directory-toolbar").append(retry);
     return tagManagerDialog;
   }
-  function renderTagManager() { if (tagManagerDialog) { tagManagerDialog.render(tagCatalogue); tagManagerGroup = tagManagerDialog.activeGroup; } }
+  function renderTagManager() { if (tagManagerDialog) tagManagerDialog.render(tagCatalogue); }
   async function loadTagOperationHistory() {
     if (!tagManagerDialog) return;
     try { const result = await tagRequest("/api/library/tags/operations"); tagOperationHistory = result.operations || []; tagManagerDialog.renderHistory(tagOperationHistory); }
@@ -1832,7 +1846,7 @@
     if (!retryOriginal) selected.forEach(index => {
       const entry = suggestion.suggestions[index], fields = draft[index] || {};
       if (entry.new_name) newTags[String(index)] = { name: String(fields.name ?? entry.new_name).trim() || entry.new_name,
-        kind: fields.kind || entry.kind, group_ids: fields.groups || entry.group_ids || [],
+        kind: fields.kind || entry.kind,
         parent_ids: fields.parent_ids ?? entry.parent_ids ?? [], top_level: fields.top_level === true,
         ...(entry.retired_tag ? { levels: fields.levels || [] } : {}) };
     });
@@ -1972,7 +1986,7 @@
         // 实际上它一直躺在你的库里，只是当年没启用。说出来，才不用你做那个选择。
         const known = node("p", "tag-suggestion-rationale");
         known.append(node("b", "", "你的库里已经有「" + entry.retired_tag.name + "」了"),
-          document.createTextNode("，只是以前没启用，AI 才当成了新标签。采纳就会把它重新启用；点「修改名称、上级或分组」仍可以改别的。"));
+          document.createTextNode("，只是以前没启用，AI 才当成了新标签。采纳就会把它重新启用；点「修改名称或上级」仍可以改别的。"));
         block.append(known);
         const levels = node("fieldset", "tag-suggestion-groups");
         levels.append(node("legend", "", "重新启用后适用哪一学段（必须选）"));
@@ -1997,7 +2011,7 @@
         evidence.append(node("summary", "", "查看依据"), node("p", "", entry.evidence)); block.append(evidence);
       }
       if (entry.new_name) {
-        const edit = node("details", "tag-suggestion-edit"); edit.append(node("summary", "", "修改名称、上级或分组"));
+        const edit = node("details", "tag-suggestion-edit"); edit.append(node("summary", "", "修改名称或上级"));
         edit.open = entryDraft.expanded === true;
         const fields = node("div", "tag-suggestion-fields");
         const nameLabel = node("label", "tag-suggestion-field"), input = node("input", "tag-suggestion-new-name");
@@ -2025,32 +2039,15 @@
           entryDraft.top_level = top.checked; if (top.checked) entryDraft.parent_ids = [];
           renderParents(); saveSuggestionDrafts();
         }); renderParents();
-        const groups = node("fieldset", "tag-suggestion-groups"); groups.append(node("legend", "", "所属分组（可多选）"));
-        const choices = node("div", "tag-suggestion-group-list"); groups.append(choices);
-        let loaded = false, loading = false;
-        const loadGroups = async function() {
-          if (loaded || loading || !edit.open) return;
-          loading = true; choices.replaceChildren(node("span", "helper", "正在载入分组…"));
-          try {
-            if (!(tagCatalogue.groups || []).length) await loadTagCatalogue();
-            renderParents();
-            choices.replaceChildren();
-            (tagCatalogue.groups || []).forEach(function(group) {
-              const row = node("label"), choice = node("input"); choice.type = "checkbox"; choice.value = group.id;
-              choice.dataset.newTagGroup = suggestion.id + "-" + index;
-              choice.checked = (entryDraft.groups || entry.group_ids || []).includes(group.id); choice.disabled = suggestionLocks.has(suggestion.id);
-              choice.addEventListener("change", () => { entryDraft.groups = Array.from(choices.querySelectorAll("input:checked")).map(option => option.value); saveSuggestionDrafts(); });
-              row.append(choice, node("span", "", group.name)); choices.append(row);
-            });
-            if (!choices.childNodes.length) choices.append(node("span", "helper", "尚无分组，可先创建标签，再到标签管理整理。"));
-            loaded = true;
-          } catch (error) {
-            const retry = node("button", "button button-small", "重试载入分组"); retry.type = "button";
-            retry.addEventListener("click", loadGroups); choices.replaceChildren(node("span", "helper", error.message), retry);
-          } finally { loading = false; }
+        let loaded = false;
+        const ensureCatalogue = async function() {
+          if (loaded || !edit.open) return;
+          try { await loadTagCatalogue(); renderParents(); loaded = true; }
+          catch (error) { const retry = node("button", "button button-small", "重试载入标签"); retry.type = "button";
+            retry.addEventListener("click", ensureCatalogue); top.after(retry); }
         };
-        edit.addEventListener("toggle", () => { entryDraft.expanded = edit.open; saveSuggestionDrafts(); void loadGroups(); });
-        fields.append(nameLabel, kindLabel, parentLabel, topLabel, groups); edit.append(fields); block.append(edit);
+        edit.addEventListener("toggle", () => { entryDraft.expanded = edit.open; saveSuggestionDrafts(); void ensureCatalogue(); });
+        fields.append(nameLabel, kindLabel, parentLabel, topLabel); edit.append(fields); block.append(edit);
       }
       const entryActions = node("div", "tag-suggestion-entry-actions"), acceptOne = node("button", "button button-small tag-suggestion-accept", "采纳"), rejectOne = node("button", "button button-quiet button-small tag-suggestion-reject", "拒绝");
       acceptOne.type = rejectOne.type = "button";

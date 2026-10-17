@@ -5,9 +5,7 @@
   const historyNames = { assign: "人工贴标", replace: "校正题目标签", "suggestion:accept": "采纳 AI 建议", "suggestion:reject": "拒绝 AI 建议",
     "catalogue:create_tag": "新建标签", "catalogue:update_tag": "修改标签", "catalogue:favorite_tag": "收藏调整",
     "catalogue:activate_tag": "启用标签", "catalogue:deactivate_tag": "停用标签", "catalogue:merge_tags": "合并标签",
-    "catalogue:merge_tags_batch": "批量合并标签", "catalogue:create_group": "新建分组", "catalogue:update_group": "修改分组",
-    "catalogue:group_membership": "调整标签分组", "catalogue:group_membership_batch": "批量调整分组",
-    "catalogue:delete_group": "删除分组（保留标签）", "catalogue:delete_tag": "删除标签", "catalogue:delete_tags": "批量删除标签",
+    "catalogue:merge_tags_batch": "批量合并标签", "catalogue:delete_tag": "删除标签", "catalogue:delete_tags": "批量删除标签",
     "catalogue:reset_empty": "清空标签目录", "catalogue:apply_template": "追加模板",
     "catalogue:set_parents": "设置标签父级", "catalogue:add_parent": "增加标签父级",
     "catalogue:remove_parent": "移除标签父级", "catalogue:move_parent": "移动标签父级",
@@ -24,15 +22,14 @@
     return value;
   }
   function normalized(text) { return String(text || "").normalize("NFKC").toLocaleLowerCase(); }
-  function memberships(tag) { return (tag.groups || []).map((group) => typeof group === "string" ? group : String(group.id)); }
   function compatible(source, target) { return source.kind === target.kind || (source.kind === "legacy" && ["knowledge", "custom"].includes(target.kind)); }
 
   function create(options) {
     const mount = options.mount;
     if (!mount) throw new Error("标签管理缺少页面容器");
-    const state = { open: false, busy: false, group: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
+    const state = { open: false, busy: false, scope: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
       relations: new Map(), relationLoads: new Map(),
-      catalogue: { groups: [], tags: [] }, shown: [], history: [], notice: "", error: false, scroll: 0, original: null, originalDisplay: "", originalHidden: false,
+      catalogue: { tags: [] }, shown: [], history: [], notice: "", error: false, scroll: 0, original: null, originalDisplay: "", originalHidden: false,
       view: "list", mapKind: "knowledge", questionContext: null };
     const page = element("section", "tag-directory-workspace"); page.id = "tagManagerWorkspace"; page.hidden = true; page.tabIndex = -1;
     page.setAttribute("aria-labelledby", "tagManagerHeading");
@@ -43,7 +40,7 @@
     const toolbar = element("div", "tag-directory-toolbar"), searchBox = element("label", "tag-directory-search"), searchLabel = element("span", "sr-only", "搜索标签");
     const search = element("input"); search.id = "tagManagerSearch"; search.type = "search"; search.placeholder = "搜索标签、别名或说明"; search.setAttribute("aria-label", "搜索标签、别名或说明");
     searchBox.append(searchLabel, search);
-    const newTag = button("＋ 新建标签", () => options.editEntity("tag", null, state.view === "map" ? { kind: state.mapKind } : { group_id: currentGroup()?.id,
+    const newTag = button("＋ 新建标签", () => options.editEntity("tag", null, state.view === "map" ? { kind: state.mapKind } : {
       ...(state.hierarchyKind ? { kind: state.hierarchyKind } : {}), ...(state.hierarchyNode ? { parent_ids: [state.hierarchyNode] } : {}) }), "button button-primary"); newTag.id = "tagManagerCreateTag";
     const templates = button("追加模板", () => options.openTemplates()); templates.id = "tagManagerTemplates";
     const advanced = element("details", "tag-directory-advanced"), advancedTitle = element("summary", "button button-small", "更多"), advancedMenu = element("div", "tag-directory-menu");
@@ -60,34 +57,31 @@
     mapType.addEventListener("change", () => { state.mapKind = mapType.value; state.focused = ""; state.selected.clear(); render(); });
     toolbar.append(views, searchBox, mapType, newTag, templates, advanced);
     const status = element("p", "tag-directory-status"); status.id = "tagManagerStatus"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-    const body = element("div", "tag-directory-body"), groupsPanel = element("aside", "tag-directory-groups"), groups = element("nav", "tag-directory-group-list");
-    groups.id = "tagManagerGroups"; groups.setAttribute("aria-label", "标签分组");
-    const groupActions = element("div", "tag-directory-group-actions"); groupActions.id = "tagManagerGroupActions";
-    const hierarchyHeading = element("h2", "tag-directory-nav-heading", "标签层级"), hierarchyNav = element("nav", "tag-directory-hierarchy-nav");
-    hierarchyNav.id = "tagManagerHierarchyNav"; hierarchyNav.setAttribute("aria-label", "知识点和方法层级");
-    const hierarchyHint = element("p", "tag-directory-nav-hint", "父级和子级都能贴题，点击箭头逐层浏览。");
-    const groupHeading = element("div", "tag-directory-group-heading"); groupHeading.append(element("span", "", "个人分组"), button("＋", () => options.editEntity("group"), "tag-directory-add-group"));
-    groupHeading.lastChild.title = "新建分组"; groupHeading.lastChild.setAttribute("aria-label", "新建分组"); groupHeading.lastChild.id = "tagManagerCreateGroup";
-    groupsPanel.append(hierarchyHeading, hierarchyNav, hierarchyHint, groupHeading, groups, groupActions,
-      element("p", "tag-directory-nav-hint", "分组只用于个人整理，不代表知识上下级。"));
+    const body = element("div", "tag-directory-body"), sidebar = element("aside", "tag-directory-groups");
+    const scopeNav = element("nav", "tag-directory-group-list");
+    scopeNav.id = "tagManagerScopes"; scopeNav.setAttribute("aria-label", "标签范围");
+    const hierarchyNav = element("nav", "tag-directory-hierarchy-nav");
+    hierarchyNav.id = "tagManagerHierarchyNav"; hierarchyNav.setAttribute("aria-label", "按类型浏览标签层级");
+    const treeNav = element("nav", "tag-directory-tree-nav");
+    treeNav.id = "tagManagerTreeNav"; treeNav.setAttribute("aria-label", "顶层标签");
+    const hierarchyHint = element("p", "tag-directory-nav-hint", "每一级都能贴题，点右侧箭头逐层往下看。");
+    sidebar.append(hierarchyNav, treeNav, hierarchyHint, scopeNav);
     const results = element("section", "tag-directory-results"), listHeading = element("div", "tag-directory-list-heading"), selectAll = element("input"); selectAll.type = "checkbox";
     selectAll.id = "tagManagerSelectAll"; selectAll.setAttribute("aria-label", "选择当前显示的全部标签");
     const selectAllLabel = element("label", "tag-directory-select-all"); selectAllLabel.append(selectAll, element("span", "", "全选当前结果"));
     const count = element("span", "tag-directory-visible-count"); count.id = "tagManagerVisibleCount"; listHeading.append(selectAllLabel, count);
     const bulk = element("div", "tag-directory-bulk"); bulk.id = "tagManagerBulk"; bulk.hidden = true;
-    const selectedCount = element("strong"), hiddenSelection = element("small", "tag-directory-hidden-selection"), groupSelect = element("select"); groupSelect.id = "tagManagerBulkGroup"; groupSelect.setAttribute("aria-label", "批量整理的目标分组");
-    const addToGroup = button("加入分组", () => changeMembership("add")), removeFromGroup = button("移出分组", () => changeMembership("remove"));
-    addToGroup.id = "tagManagerBulkAdd"; removeFromGroup.id = "tagManagerBulkRemove";
+    const selectedCount = element("strong"), hiddenSelection = element("small", "tag-directory-hidden-selection");
     const merge = button("合并标签", openMergeDialog), remove = button("删除标签", deleteSelected, "button button-small button-danger");
     merge.id = "tagManagerBulkMerge"; remove.id = "tagManagerBulkDelete";
     const clearSelection = button("取消选择", () => { state.selected.clear(); state.focused = ""; render(); }, "button button-quiet button-small");
-    bulk.append(selectedCount, hiddenSelection, groupSelect, addToGroup, removeFromGroup, merge, remove, clearSelection);
+    bulk.append(selectedCount, hiddenSelection, merge, remove, clearSelection);
     const location = element("div", "tag-directory-location"); location.id = "tagManagerLocation";
     const list = element("div", "tag-directory-list"); list.id = "tagManagerList"; list.setAttribute("aria-label", "标签列表");
     const mapHost = element("div", "tag-directory-map-host"); mapHost.id = "tagManagerMap"; mapHost.hidden = true;
     results.append(location, listHeading, bulk, list, mapHost);
     const detail = element("aside", "tag-directory-detail"); detail.id = "tagManagerDetail"; detail.setAttribute("aria-label", "选中标签的信息");
-    body.append(groupsPanel, results, detail);
+    body.append(sidebar, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
     historyList.id = "tagManagerHistoryList"; history.append(historySummary, historyList);
     page.append(header, toolbar, status, body, history); mount.append(page);
@@ -119,16 +113,16 @@
         else requestAnimationFrame(() => { if (state.open && state.view === "map") map.fit(); });
       }
     }
+    function inHierarchy() { return Boolean(state.hierarchyKind) && state.scope === "all"; }
     function renderView() {
       const mapped = state.view === "map";
-      page.classList.toggle("tag-directory-map-view", mapped); groupsPanel.hidden = mapped;
-      location.hidden = mapped || !state.hierarchyKind; listHeading.hidden = list.hidden = mapped;
+      page.classList.toggle("tag-directory-map-view", mapped); sidebar.hidden = mapped;
+      location.hidden = mapped || !inHierarchy(); listHeading.hidden = list.hidden = mapped;
       bulk.hidden = mapped || !state.selected.size; mapHost.hidden = !mapped; mapType.hidden = !mapped; mapType.value = state.mapKind;
       listView.setAttribute("aria-pressed", String(!mapped)); mapView.setAttribute("aria-pressed", String(mapped));
       if (mapped) ensureMap()?.update({ catalogue: state.catalogue, kind: state.mapKind, focusId: state.focused, query: state.query, busy: state.busy });
     }
 
-    function currentGroup() { return (state.catalogue.groups || []).find((group) => String(group.id) === state.group); }
     function selectedTags() { return (state.catalogue.tags || []).filter((tag) => state.selected.has(String(tag.id))); }
     function tagById(id) { return (state.catalogue.tags || []).find((tag) => String(tag.id) === String(id)); }
     function relationIds(tag, field) { return (tag[field] || []).map((value) => String(typeof value === "object" ? value.id : value)); }
@@ -153,13 +147,13 @@
     function directCount(tag) { return tag.direct_count ?? tag.count ?? 0; }
     function subtreeCount(tag) { return tag.subtree_count ?? directCount(tag); }
     function browseHierarchy(tag) {
-      if (state.busy || !["knowledge", "method"].includes(tag.kind)) return;
+      if (state.busy || !tag.kind) return;
       if (state.view === "map") { state.focused = String(tag.id); state.selected = new Set([String(tag.id)]); state.mapKind = tag.kind; state.query = ""; search.value = ""; render(); map?.focus(String(tag.id), { local: true }); return; }
-      state.hierarchyKind = tag.kind; state.hierarchyNode = String(tag.id); state.group = "all"; state.query = ""; search.value = "";
+      state.hierarchyKind = tag.kind; state.hierarchyNode = String(tag.id); state.scope = "all"; state.query = ""; search.value = "";
       render(); list.scrollTop = 0; location.querySelector("button")?.focus({ preventScroll: true });
     }
     async function ensureRelations(tag) {
-      if (!["knowledge", "method"].includes(tag.kind) || !options.request) return;
+      if (!options.request || !tag.kind) return;
       const id = String(tag.id), revision = state.catalogue.revision, key = revision + ":" + id;
       if (state.relations.has(key) || state.relationLoads.has(key)) return;
       const loading = options.request("/api/library/tags/" + encodeURIComponent(id) + "/relations"); state.relationLoads.set(key, loading);
@@ -230,36 +224,61 @@
       void ensureRelations(tag);
       if (state.view === "list") page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] .tag-directory-name')?.focus({ preventScroll: true });
     }
-    function renderGroups() {
-      const scroll = groups.scrollTop, tags = state.catalogue.tags || []; groups.replaceChildren();
-      hierarchyNav.replaceChildren();
-      for (const kind of ["knowledge", "method"]) {
-        const control = button("", () => { state.hierarchyKind = kind; state.hierarchyNode = ""; state.group = "all"; render(); list.scrollTop = 0; },
-          "tag-directory-group" + (state.hierarchyKind === kind ? " active" : ""));
-        control.dataset.hierarchyKind = kind; control.setAttribute("aria-pressed", String(state.hierarchyKind === kind));
-        control.append(element("span", "", kinds[kind]), element("small", "", tags.filter((tag) => tag.kind === kind).length)); hierarchyNav.append(control);
-      }
-      const add = (id, name, number) => {
-        const control = button("", () => { state.group = id; state.hierarchyKind = ""; state.hierarchyNode = ""; render(); groups.querySelector('[data-group-id="' + CSS.escape(id) + '"]')?.focus({ preventScroll: true }); }, "tag-directory-group" + (state.group === id && !state.hierarchyKind ? " active" : ""));
-        control.dataset.groupId = id; control.setAttribute("aria-pressed", String(state.group === id && !state.hierarchyKind));
-        control.append(element("span", "", name), element("small", "", number)); groups.append(control);
+    function renderSidebar() {
+      const scroll = sidebar.scrollTop, tags = state.catalogue.tags || [];
+      hierarchyNav.replaceChildren(); treeNav.replaceChildren(); scopeNav.replaceChildren();
+      const entry = (nav, id, label, number, active, onPick, extra) => {
+        const control = button("", onPick, "tag-directory-group" + (active ? " active" : ""));
+        control.dataset.navId = id; control.setAttribute("aria-pressed", String(active));
+        control.append(element("span", "", label), element("small", "", number));
+        if (extra) Object.assign(control.dataset, extra);
+        nav.append(control);
       };
-      add("all", "全部标签", tags.length); add("ungrouped", "未分组", tags.filter((tag) => !memberships(tag).length).length); add("favorite", "收藏", tags.filter((tag) => tag.favorite).length);
-      if ((state.catalogue.groups || []).length) groups.append(element("div", "tag-directory-group-divider"));
-      (state.catalogue.groups || []).forEach((group) => add(String(group.id), group.name, tags.filter((tag) => memberships(tag).includes(String(group.id))).length));
-      groups.scrollTop = scroll; groupActions.replaceChildren();
-      const current = currentGroup();
-      if (current) {
-        groupActions.append(element("strong", "", current.name), button("编辑分组", () => options.editEntity("group", current), "button button-quiet button-small"),
-          button("删除分组（保留标签）", () => {
-            if (!window.confirm("删除分组「" + current.name + "」？标签和题目关联会保留；没有其他分组的标签进入“未分组”。")) return;
-            void run(async () => { const result = await options.action("delete_group", { group_id: current.id }); state.group = "all"; return result; });
-          }, "button button-quiet button-small"));
+      for (const kind of ["knowledge", "method", "custom", "legacy"]) {
+        // Clicking the level you are already in steps up one notch: first out of
+        // the tag being read, then out of the level entirely.
+        entry(hierarchyNav, kind, kinds[kind], tags.filter((tag) => tag.kind === kind).length,
+          state.hierarchyKind === kind && state.scope === "all",
+          () => {
+            const inside = state.hierarchyKind === kind && state.scope === "all";
+            if (!inside) { state.hierarchyKind = kind; state.hierarchyNode = ""; }
+            else if (state.hierarchyNode) state.hierarchyNode = "";
+            else state.hierarchyKind = "";
+            render();
+          });
       }
+      // Only the branch that leads to the tag being read stays open, so the
+      // sidebar stays a short "where am I" map instead of a second full tree.
+      const onPath = new Set();
+      const current = state.hierarchyNode ? tagById(state.hierarchyNode) : null;
+      if (current) parentPaths(current).forEach((path) => path.forEach((node) => onPath.add(String(node.id))));
+      if (state.hierarchyKind && state.scope === "all") {
+        const roots = tags.filter((tag) => tag.kind === state.hierarchyKind
+          && !parentsOf(tag).some((parent) => parent.kind === tag.kind))
+          .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
+        treeNav.append(element("h2", "tag-directory-nav-heading", "顶层标签"));
+        const branch = (tag, depth) => {
+          const row = element("div", "tag-directory-tree-row");
+          row.dataset.treeTagId = tag.id;
+          const name = button(tag.name, () => browseHierarchy(tag), "tag-directory-tree-name"
+            + (String(tag.id) === String(state.hierarchyNode) ? " current" : ""));
+          name.title = "查看「" + tag.name + "」下面的标签";
+          row.append(name, element("small", "", directCount(tag) + " 题"));
+          treeNav.append(row);
+          if (onPath.has(String(tag.id))) childrenOf(tag).forEach((child) => branch(child, depth + 1));
+        };
+        roots.forEach((tag) => branch(tag, 0));
+        if (!roots.length) treeNav.append(element("p", "tag-directory-nav-hint", "这一类还没有标签。"));
+      }
+      scopeNav.append(element("h2", "tag-directory-nav-heading", "快速查看"));
+      const flat = (target) => () => { state.scope = target; state.hierarchyKind = ""; state.hierarchyNode = ""; render(); };
+      entry(scopeNav, "all", "全部标签", tags.length, state.scope === "all", flat("all"));
+      entry(scopeNav, "favorite", "收藏", tags.filter((tag) => tag.favorite).length, state.scope === "favorite", flat("favorite"));
+      sidebar.scrollTop = scroll;
     }
     function renderLocation() {
-      location.replaceChildren(); location.hidden = !state.hierarchyKind;
-      if (!state.hierarchyKind) return;
+      location.replaceChildren(); location.hidden = !inHierarchy();
+      if (!inHierarchy()) return;
       const current = tagById(state.hierarchyNode), home = button(kinds[state.hierarchyKind] + " · 顶级", () => { state.hierarchyNode = ""; render(); }, "tag-directory-path-button");
       location.append(home);
       if (current) {
@@ -278,18 +297,15 @@
     function renderList() {
       const scroll = list.scrollTop, query = normalized(state.query.trim());
       state.shown = (state.catalogue.tags || []).filter((tag) => {
-        if (state.hierarchyKind) {
+        if (state.hierarchyKind && state.scope === "all") {
           if (tag.kind !== state.hierarchyKind) return false;
           if (!query) {
             if (state.hierarchyNode && !relationIds(tag, "parent_ids").includes(String(state.hierarchyNode))) return false;
             if (!state.hierarchyNode && parentsOf(tag).some((parent) => parent.kind === tag.kind)) return false;
           }
         }
-        const memberIds = memberships(tag);
-        if (state.group === "ungrouped" && memberIds.length) return false;
-        if (state.group === "favorite" && !tag.favorite) return false;
-        if (!["all", "ungrouped", "favorite"].includes(state.group) && !memberIds.includes(state.group)) return false;
-        const searchText = normalized([tag.name, tag.description, tag.conditions, ...(tag.aliases || []), ...(tag.groups || []).map((group) => group.name || ""),
+        if (state.scope === "favorite" && !tag.favorite) return false;
+        const searchText = normalized([tag.name, tag.description, tag.conditions, ...(tag.aliases || []),
           ...parentPaths(tag).map((path) => path.map((node) => node.name).join(" "))].join(" "));
         return !query || query.split(/\s+/).every((part) => searchText.includes(part));
       }).sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN", { numeric: true }));
@@ -317,17 +333,12 @@
       bulk.hidden = !state.selected.size; selectedCount.textContent = "已选 " + state.selected.size + " 个";
       const hiddenCount = state.selected.size - state.shown.filter((tag) => state.selected.has(String(tag.id))).length;
       hiddenSelection.textContent = hiddenCount ? "其中 " + hiddenCount + " 个不在当前结果中" : "";
-      const previousGroup = groupSelect.value; groupSelect.replaceChildren(new Option("选择分组…", ""));
-      (state.catalogue.groups || []).forEach((group) => groupSelect.add(new Option(group.name, group.id)));
-      if ((state.catalogue.groups || []).some((group) => String(group.id) === previousGroup)) groupSelect.value = previousGroup;
-      else if (currentGroup()) groupSelect.value = currentGroup().id;
-      addToGroup.disabled = removeFromGroup.disabled = !groupSelect.value;
       merge.disabled = selectedTags().length < 1;
     }
     function info(title, text) { const row = element("div", "tag-directory-info"); row.append(element("span", "", title), element("p", "", text || "—")); return row; }
     function renderRelations(tag) {
       const block = element("section", "tag-directory-relations"); block.id = "tagManagerRelations";
-      const heading = element("div", "tag-directory-relation-heading"); heading.append(element("h3", "", tag.kind === "method" ? "方法上下级" : "知识上下级"),
+      const heading = element("div", "tag-directory-relation-heading"); heading.append(element("h3", "", (tag.kind === "method" ? "方法" : tag.kind === "legacy" ? "历史标签" : tag.kind === "custom" ? "自定义标签" : "知识") + "上下级"),
         button("查看层级", () => browseHierarchy(tag), "button button-quiet button-small"));
       block.append(heading, element("p", "tag-directory-hint", "当前标签和上下级都可以贴题；增加子标签不会改变已经贴好的题目。"));
       const parentHeading = element("div", "tag-directory-relation-heading"); parentHeading.append(element("h4", "", "父标签"),
@@ -345,8 +356,8 @@
       });
       const addParent = button("＋ 再增加父级", () => openRelationDialog(tag, "add"), "button button-small"); addParent.id = "tagManagerAddParent"; block.append(addParent);
       const childHeading = element("div", "tag-directory-relation-heading"); childHeading.append(element("h4", "", "子标签"));
-      const addChild = button("＋ 添加子标签", () => options.editEntity("tag", null, { parent_ids: [tag.id], kind: tag.kind,
-        ...(currentGroup() ? { group_id: currentGroup().id } : {}) }), "button button-small");
+      const addChild = button("＋ 添加子标签", () => options.editEntity("tag", null, { parent_ids: [tag.id], kind: tag.kind }),
+        "button button-small");
       addChild.id = "tagManagerCreateChild"; childHeading.append(addChild); block.append(childHeading);
       const children = childrenOf(tag), childList = element("div", "tag-directory-relation-children");
       children.forEach((child) => { const control = button(child.name, () => { choose(child); browseHierarchy(child); }, "tag-directory-group-chip"); control.dataset.childId = child.id; childList.append(control); });
@@ -374,7 +385,7 @@
       const selected = new Set(multiple ? existingIds : []), dialog = element("dialog", "tag-directory-relation-dialog"),
         title = element("h2", "", { parents: "设置父标签", add: "再增加一个父标签", move: "移动这条父级关系", methods: "设置相关方法" }[mode]);
       const caption = element("p", "tag-directory-hint", "正在整理「" + tag.name + "」" + (fromParent ? "：将父级「" + fromParent.name + "」换成下面的一个标签，其他父级保留。" :
-        methodMode ? "。相关方法独立于知识上下级，不会自动给题目添加标签。" : "。个人分组保持独立；自己和后代不能作为父级。"));
+        methodMode ? "。相关方法独立于知识上下级，不会自动给题目添加标签。" : "。父标签可以有多个；自己和后代不能作为父级。"));
       const relationSearch = element("input", "tag-directory-relation-search"); relationSearch.type = "search"; relationSearch.placeholder = "搜索名称、别名或说明"; relationSearch.setAttribute("aria-label", "搜索可选择的标签");
       const candidatesList = element("div", "tag-directory-relation-options"), message = element("p", "tag-directory-hint"); message.setAttribute("role", "status");
       const controls = element("footer"), cancel = button("取消", () => dialog.close()), save = button("保存", async () => {
@@ -412,13 +423,15 @@
     function renderDetail() {
       detail.replaceChildren();
       const selected = selectedTags(), tag = selected.find((value) => String(value.id) === state.focused) || selected[0];
-      if (!tag) { detail.append(element("h2", "", "标签信息"), element("p", "tag-directory-hint", "点一个标签查看说明和所属分组；勾选多个标签可以一起整理。")); return; }
+      if (!tag) { detail.append(element("h2", "", "标签信息"), element("p", "tag-directory-hint", "点一个标签查看说明和上下级；勾选多个标签可以一起整理。")); return; }
       if (selected.length > 1) {
-        detail.append(element("h2", "", "已选 " + selected.length + " 个标签"), element("p", "tag-directory-hint", "上方操作只作用于已选标签。加入分组会保留原分组，移出分组不会删除标签。"));
-        const groupInfo = element("div", "tag-directory-shared-groups"); groupInfo.append(element("h3", "", "所属分组"));
-        (state.catalogue.groups || []).forEach((group) => { const number = selected.filter((value) => memberships(value).includes(String(group.id))).length; if (number) groupInfo.append(info(group.name, number === selected.length ? "全部都有" : number + " / " + selected.length + " 个标签")); });
-        if (groupInfo.childElementCount === 1) groupInfo.append(element("p", "tag-directory-hint", "所选标签均未分组。"));
-        detail.append(groupInfo); return;
+        detail.append(element("h2", "", "已选 " + selected.length + " 个标签"), element("p", "tag-directory-hint", "上方的合并、删除只作用于已选标签。"));
+        const parents = new Map();
+        selected.forEach((value) => parentsOf(value).forEach((parent) => parents.set(String(parent.id), parent.name)));
+        const block = element("div", "tag-directory-shared-groups"); block.append(element("h3", "", "共同的上级标签"));
+        if (parents.size) parents.forEach((name) => block.append(info(name, "所选标签挂在它下面")));
+        else block.append(element("p", "tag-directory-hint", "所选标签都没有上级标签。"));
+        detail.append(block); return;
       }
       const title = element("div", "tag-directory-detail-title"); title.append(element("h2", "", tag.name), element("small", "", kinds[tag.kind] || "标签")); detail.append(title);
       if (state.questionContext) {
@@ -449,11 +462,7 @@
       const edit = button("编辑标签", () => options.editEntity("tag", tag), "button button-primary"); edit.id = "tagManagerEditTag";
       const usage = button("本级 " + directCount(tag) + " 题 · 含下级 " + subtreeCount(tag) + " 题 →", () => { close(); options.browseTag(tag); }, "tag-directory-detail-usage");
       detail.append(edit, usage, info("说明", tag.description), info("别名", (tag.aliases || []).join("、")));
-      if (["knowledge", "method"].includes(tag.kind)) renderRelations(tag);
-      const groupBlock = element("div", "tag-directory-detail-groups"); groupBlock.append(element("h3", "", "所属分组"));
-      if (!memberships(tag).length) groupBlock.append(element("p", "tag-directory-hint", "未分组"));
-      (state.catalogue.groups || []).filter((group) => memberships(tag).includes(String(group.id))).forEach((group) => groupBlock.append(button(group.name, () => { state.group = String(group.id); render(); }, "tag-directory-group-chip")));
-      detail.append(groupBlock);
+      renderRelations(tag);
       if ((tag.levels || []).length) detail.append(info("适用学段", tag.levels.join("、")));
       if (tag.conditions) detail.append(info("适用条件", tag.conditions));
       const actions = element("div", "tag-directory-detail-actions");
@@ -469,10 +478,9 @@
       state.selected.forEach((id) => { if (!existing.has(id)) state.selected.delete(id); });
       if (state.focused && !existing.has(state.focused)) state.focused = "";
       if (state.hierarchyNode && !existing.has(state.hierarchyNode)) state.hierarchyNode = "";
-      if (!["all", "ungrouped", "favorite"].includes(state.group) && !currentGroup()) state.group = "all";
       const busy = state.busy; if (busy) setBusy(false);
       total.textContent = (state.catalogue.tags || []).length + " 个标签";
-      if (state.view === "list") { renderGroups(); renderLocation(); renderList(); }
+      if (state.view === "list") { renderSidebar(); renderLocation(); renderList(); }
       else state.shown = [];
       renderDetail(); renderView(); status.textContent = state.notice; status.classList.toggle("error", state.error);
       if (focusedId && !busy) (page.querySelector('[data-tag-id="' + CSS.escape(focusedId) + '"] ' + focusedControl) || page).focus({ preventScroll: true });
@@ -488,10 +496,6 @@
         undo.disabled = !operation.can_undo; if (!operation.can_undo && !operation.undone) undo.title = "后续已有修改，当前不能撤销覆盖";
         row.append(description, undo); historyList.append(row);
       }); if (state.busy) historyList.querySelectorAll("button").forEach((control) => { control.dataset.busyWasDisabled = control.disabled ? "1" : "0"; control.disabled = true; });
-    }
-    function changeMembership(mode) {
-      const groupId = groupSelect.value, tagIds = [...state.selected]; if (!groupId || !tagIds.length) return;
-      void run(() => options.action("group_membership_batch", { tag_ids: tagIds, group_id: groupId, mode }), mode === "add" ? "已加入分组，原有分组保留" : "已移出分组，标签和题目关联保留");
     }
     async function deleteSelected() {
       const tagIds = [...state.selected], names = selectedTags().slice(0, 6).map((tag) => tag.name).join("、") + (tagIds.length > 6 ? "等" : ""); if (!tagIds.length) return;
@@ -517,7 +521,7 @@
         const succeeded = await run(async () => {
           const impact = await options.request("/api/library/tags/impact?action=merge_tags_batch&source_ids=" + encodeURIComponent(sourceIds.join(",")) + "&target_id=" + encodeURIComponent(targetId));
           const targetTag = (state.catalogue.tags || []).find((tag) => String(tag.id) === targetId);
-          if (!window.confirm("把 " + sourceIds.length + " 个标签合并到「" + targetTag.name + "」？\n影响 " + (impact.question_count || 0) + " 道当前题和 " + (impact.historical_count || 0) + " 道历史版本。原标签名称、分组和来源会保留在历史中，操作可撤销。")) return false;
+          if (!window.confirm("把 " + sourceIds.length + " 个标签合并到「" + targetTag.name + "」？\n影响 " + (impact.question_count || 0) + " 道当前题和 " + (impact.historical_count || 0) + " 道历史版本。原标签名称和来源会保留在历史中，操作可撤销。")) return false;
           const result = await options.action("merge_tags_batch", { source_ids: sourceIds, target_id: targetId, impact_token: impact.token, confirmed: true });
           state.selected.clear(); state.selected.add(targetId); state.focused = targetId; return result;
         }, "已合并标签，可在操作记录中撤销");
@@ -530,7 +534,6 @@
     search.addEventListener("input", (event) => { if (event.isComposing) return; state.query = search.value; render(); });
     search.addEventListener("compositionend", () => { state.query = search.value; render(); });
     selectAll.addEventListener("change", () => { state.shown.forEach((tag) => { if (selectAll.checked) state.selected.add(String(tag.id)); else state.selected.delete(String(tag.id)); }); state.focused = state.shown.find((tag) => state.selected.has(String(tag.id)))?.id || ""; render(); });
-    groupSelect.addEventListener("change", () => { addToGroup.disabled = removeFromGroup.disabled = !groupSelect.value; });
     page.addEventListener("keydown", (event) => {
       if (!state.open || state.busy || event.isComposing || document.querySelector("dialog[open]") || event.target.closest("input, textarea, select, [contenteditable=true]")) return;
       if (state.view === "map" && event.key !== "Escape" && event.target.closest(".tag-map-viewport")) return;
@@ -551,7 +554,7 @@
       }
     });
     render(); renderHistory([]);
-    return { get open() { return state.open; }, get activeGroup() { return state.group; }, show, close, render, renderHistory };
+    return { get open() { return state.open; }, show, close, render, renderHistory };
   }
   root.QBLibraryTagManager = Object.freeze({ create });
 })(window);

@@ -118,10 +118,6 @@ def _clean_scope(tag, value):
     return {"subquestions": subquestions}
 
 
-def _groups(tag: LibraryTag) -> list[LibraryTagGroup]:
-    return list(tag.groups.all())
-
-
 def _relation_snapshot():
     return [{"parent_id": str(parent), "child_id": str(child), "relation_type": kind}
             for parent, child, kind in LibraryTagRelation.objects.order_by("relation_type", "parent_id", "child_id")
@@ -236,9 +232,7 @@ def tag_json(tag: LibraryTag, *, count=None, context=None) -> dict:
     row = {"id": str(tag.pk), "name": tag.name, "kind": tag.kind,
            "description": tag.description, "color": tag.color, "aliases": tag.aliases or [],
            "levels": tag.levels or [], "conditions": tag.conditions,
-           "active": tag.active, "favorite": tag.favorite, "system_key": tag.system_key,
-           "groups": [{"id": str(group.pk), "name": group.name, "color": group.color}
-                      for group in _groups(tag)]}
+           "active": tag.active, "favorite": tag.favorite, "system_key": tag.system_key}
     context = relation_context() if context is None else context
     neighbors = context.get(str(tag.pk), {})
     row.update(parent_ids=neighbors.get("parents", []), child_ids=neighbors.get("children", []),
@@ -260,16 +254,10 @@ def relations_view(request, tag_id):
     context = relation_context()
     neighbors = context.get(str(tag.pk), {})
     def tags(values):
-        return [tag_json(item, context=context) for item in LibraryTag.objects.filter(pk__in=values).prefetch_related("groups")]
+        return [tag_json(item, context=context) for item in LibraryTag.objects.filter(pk__in=values)]
     return JsonResponse({"revision": catalogue_state().revision, "tag": tag_json(tag, context=context),
         "parents": tags(neighbors.get("parents", [])), "children": tags(neighbors.get("children", [])),
         "related_methods": tags(neighbors.get("methods", []))})
-
-
-def group_json(group: LibraryTagGroup, counts: dict | None = None) -> dict:
-    total = sum((counts or {}).get(str(tag_id), 0) for tag_id in group.tags.values_list("id", flat=True))
-    return {"id": str(group.pk), "name": group.name, "color": group.color,
-            "position": group.position, "tag_count": group.tags.count(), "question_count": total}
 
 
 def formal_assignments(publication: PublishedQuestion):
@@ -282,15 +270,31 @@ def formal_tag_names(publication: PublishedQuestion) -> list[str]:
     return list(formal_assignments(publication).order_by("created_at", "id").values_list("tag__name", flat=True))
 
 
+def _chapter_names(tag, context, by_id, seen=frozenset()):
+    """The chapters of a knowledge point are its topmost ancestors.
+
+    Chapter used to be read from a stored group; the hierarchy carries it now,
+    so a point listed under two school stages still offers both chapters.
+    """
+    parents = [by_id[value] for value in context.get(str(tag.pk), {}).get("parents", [])
+               if value in by_id and value not in seen]
+    if not parents:
+        return {tag.name}
+    nested = seen | {str(tag.pk)}
+    return set().union(*(_chapter_names(parent, context, by_id, nested) for parent in parents))
+
+
 def knowledge_directory(*, include_inactive=False) -> list[dict]:
+    every = {str(tag.pk): tag for tag in LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE)}
+    context = relation_context()
     rows = LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE)
     if not include_inactive:
         rows = rows.filter(active=True)
     result = []
-    for tag in rows.prefetch_related("groups"):
-        groups = list(tag.groups.all())
+    for tag in rows:
+        chapters = sorted(_chapter_names(tag, context, every))
         result.append({"id": str(tag.pk), "point": tag.name,
-            "chapter": groups[0].name if groups else "未分组", "description": tag.description,
+            "chapter": "、".join(chapters), "description": tag.description,
             "aliases": tag.aliases or [], "levels": tag.levels or [], "active": tag.active})
     return result
 
@@ -591,33 +595,30 @@ def _catalogue_rows():
     counts = {str(row["tag_id"]): row["count"] for row in LibraryTagAssignment.objects.filter(
         publication__status=PublishedQuestion.Status.PUBLISHED, needs_review=False
     ).values("tag_id").annotate(count=Count("publication_id", distinct=True))}
-    groups = [group_json(group, counts) for group in LibraryTagGroup.objects.all()]
     context = relation_context()
     publications_by_tag = {}
     for tag_id, publication_id in LibraryTagAssignment.objects.filter(
             publication__status=PublishedQuestion.Status.PUBLISHED, needs_review=False).values_list("tag_id", "publication_id"):
         publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
     tags = []
-    for tag in LibraryTag.objects.all().prefetch_related("groups"):
+    for tag in LibraryTag.objects.all():
         row = tag_json(tag, count=counts.get(str(tag.pk), 0), context=context)
         publications = set()
         for key in descendant_ids([tag.pk], context=context):
             publications.update(publications_by_tag.get(key, set()))
         row["subtree_count"] = len(publications)
         tags.append(row)
-    return {"revision": state.revision, "groups": groups, "tags": tags,
+    return {"revision": state.revision, "tags": tags,
             "total": len(tags), "max_name": MAX_NAME, "initialized": state.initialized}
 
 
 def template_rows():
     from .tag_catalogue_seed import template_blueprint
     blueprint = template_blueprint()
-    current_groups = {group.system_key: group for group in LibraryTagGroup.objects.exclude(system_key=None)}
     current_tags = {tag.system_key: tag for tag in LibraryTag.objects.exclude(system_key=None)}
-    for group in blueprint["groups"]:
-        live = current_groups.get(group["key"])
-        group["already_imported"] = bool(live)
-        group["tag_count"] = sum(1 for tag in blueprint["tags"] if group["key"] in tag["group_keys"])
+    for section in blueprint["sections"]:
+        section["already_imported"] = bool(current_tags.get(section["key"]))
+        section["tag_count"] = sum(1 for tag in blueprint["tags"] if section["key"] in tag["section_keys"])
     for tag in blueprint["tags"]:
         tag["already_imported"] = bool(current_tags.get(tag["key"]) or
             LibraryTag.objects.filter(kind=tag["kind"], name__iexact=tag["name"]).exists())
@@ -625,9 +626,9 @@ def template_rows():
     for key, label, prefix in (("middle", "初中数学", "初中 · "),
                                ("high", "高中数学", "高中 · "),
                                ("methods", "解题方法", "方法 · ")):
-        group_keys = [item["key"] for item in blueprint["groups"] if item["name"].startswith(prefix)]
-        packages.append({"key": key, "name": label, "group_keys": group_keys,
-                         "tag_count": sum(1 for tag in blueprint["tags"] if set(tag["group_keys"]) & set(group_keys))})
+        section_keys = [item["key"] for item in blueprint["sections"] if item["name"].startswith(prefix)]
+        packages.append({"key": key, "name": label, "section_keys": section_keys,
+                         "tag_count": sum(1 for tag in blueprint["tags"] if set(tag["section_keys"]) & set(section_keys))})
     return {"packages": packages, **blueprint}
 
 
@@ -713,7 +714,7 @@ def _tag_ids(value, label="标签"):
 
 def _selected_tags(value):
     ids = _tag_ids(value)
-    tags = list(LibraryTag.objects.filter(pk__in=ids).prefetch_related("groups").order_by("id"))
+    tags = list(LibraryTag.objects.filter(pk__in=ids).order_by("id"))
     if len(tags) != len(ids):
         raise TaggingError("所选标签已变化，请刷新后重试", 409)
     return tags
@@ -725,7 +726,7 @@ def _merge_tags_selection(source_ids, target_id):
         target_id = uuid.UUID(str(target_id))
     except (ValueError, TypeError, AttributeError):
         raise TaggingError("合并目标编号格式不正确") from None
-    target = LibraryTag.objects.filter(pk=target_id).prefetch_related("groups").first()
+    target = LibraryTag.objects.filter(pk=target_id).first()
     if target is None:
         raise TaggingError("合并目标已不存在，请刷新后重试", 409)
     for source in sources:
@@ -868,7 +869,6 @@ def _merge_catalogue_tags(source_ids, target_id):
     alias_candidates = [*(target.aliases or [])]
     for source in sources:
         alias_candidates.extend([source.name, *(source.aliases or [])])
-        target.groups.add(*source.groups.all())
     aliases, seen = [], {normalized(target.name)}
     for alias in alias_candidates:
         if normalized(alias) not in seen:
@@ -921,9 +921,6 @@ def catalogue_mutation(payload: dict) -> dict:
             kind = payload.get("kind")
             if kind not in {LibraryTag.Kind.KNOWLEDGE, LibraryTag.Kind.METHOD, LibraryTag.Kind.CUSTOM}:
                 raise TaggingError("请选择知识点、解题方法或自定义标签")
-            group_ids = payload.get("group_ids", [])
-            if not isinstance(group_ids, list) or len(group_ids) > 20:
-                raise TaggingError("标签分组选择不正确")
             levels = payload.get("levels", [])
             if not isinstance(levels, list) or len(levels) > 2 or any(level not in {"初中", "高中"} for level in levels):
                 raise TaggingError("适用学段应选择初中或高中")
@@ -933,10 +930,6 @@ def catalogue_mutation(payload: dict) -> dict:
                 aliases=_clean_aliases(payload.get("aliases", [])),
                 levels=levels,
                 conditions=str(payload.get("conditions") or "").strip()[:2000])
-            groups = list(LibraryTagGroup.objects.filter(pk__in=group_ids))
-            if len(groups) != len(set(str(value) for value in group_ids)):
-                raise TaggingError("所选分组已变化，请刷新后重试", 409)
-            tag.groups.set(groups)
             if "parent_ids" in payload:
                 _set_relation_neighbors(tag, payload["parent_ids"], LibraryTagRelation.Type.HIERARCHY)
             if "related_method_ids" in payload:
@@ -991,13 +984,6 @@ def catalogue_mutation(payload: dict) -> dict:
                     if not isinstance(payload["levels"], list):
                         raise TaggingError("適用學段應為列表")
                     tag.levels = payload["levels"][:8]
-                if "group_ids" in payload:
-                    if not isinstance(payload["group_ids"], list) or len(payload["group_ids"]) > 20:
-                        raise TaggingError("分組选择不正确")
-                    groups = list(LibraryTagGroup.objects.filter(pk__in=payload["group_ids"]))
-                    if len(groups) != len(set(map(str, payload["group_ids"]))):
-                        raise TaggingError("所选分组已变化，请刷新后重试", 409)
-                    tag.groups.set(groups)
                 tag.save()
                 if "parent_ids" in payload:
                     _set_relation_neighbors(tag, payload["parent_ids"], LibraryTagRelation.Type.HIERARCHY)
@@ -1024,8 +1010,6 @@ def catalogue_mutation(payload: dict) -> dict:
                 raise TaggingError("历史标签不能直接映射为解题方法；请先核对解析和小问范围")
             _redirect_relations([source.pk], target.pk)
             before = {"source": tag_json(source), "target": tag_json(target),
-                      "source_group_ids": list(source.groups.values_list("id", flat=True)),
-                      "target_group_ids": list(target.groups.values_list("id", flat=True)),
                       "assignments": []}
             rows = list(LibraryTagAssignment.objects.filter(tag=source,
                 publication__status=PublishedQuestion.Status.PUBLISHED).select_related("publication"))
@@ -1061,7 +1045,6 @@ def catalogue_mutation(payload: dict) -> dict:
                     raise TaggingError("合并期间题目标签版本发生变化，请刷新后重试", 409)
                 _sync_projection(assignment.publication_id)
             target.aliases = _clean_aliases([*(target.aliases or []), source.name, *(source.aliases or [])])
-            target.groups.add(*source.groups.all())
             target.save(update_fields=["aliases", "updated_at"])
             source.active = False
             source.save(update_fields=["active", "updated_at"])
@@ -1072,96 +1055,62 @@ def catalogue_mutation(payload: dict) -> dict:
         elif action == "merge_tags_batch":
             before, after = _merge_catalogue_tags(payload.get("source_ids"), payload.get("target_id"))
             after["affected"] = impact_preview
-        elif action == "create_group":
-            name = _clean_name(payload.get("name"), "分组名")
-            color = str(payload.get("color") or "")
-            if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-                raise TaggingError("颜色格式不正确")
-            group = LibraryTagGroup.objects.create(name=name, color=color[:16],
-                position=max(0, int(payload.get("position", 0))))
-            after = {"group": group_json(group)}
-        elif action == "update_group":
-            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
-            before = {"group": group_json(group)}
-            if "name" in payload:
-                group.name = _clean_name(payload["name"], "分组名")
-            if "color" in payload:
-                color = str(payload["color"] or "")
-                if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-                    raise TaggingError("颜色格式不正确")
-                group.color = color
-            if "position" in payload:
-                group.position = max(0, min(1000, int(payload["position"])))
-            group.save()
-            after = {"group": group_json(group)}
-        elif action == "group_membership":
-            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
-            tag = get_object_or_404(LibraryTag, pk=payload.get("tag_id"))
-            before = {"group_id": str(group.pk), "tag_id": str(tag.pk),
-                      "present": group.tags.filter(pk=tag.pk).exists()}
-            if payload.get("present") is True:
-                group.tags.add(tag)
-            elif payload.get("present") is False:
-                group.tags.remove(tag)
-            else:
-                raise TaggingError("请明确添加或移出分组")
-            after = {"group_id": str(group.pk), "tag_id": str(tag.pk),
-                     "present": group.tags.filter(pk=tag.pk).exists()}
-        elif action == "group_membership_batch":
-            tags = _selected_tags(payload.get("tag_ids"))
-            try:
-                group_id = uuid.UUID(str(payload.get("group_id")))
-            except (ValueError, TypeError, AttributeError):
-                raise TaggingError("分组编号格式不正确") from None
-            group = LibraryTagGroup.objects.filter(pk=group_id).first()
-            if group is None:
-                raise TaggingError("所选分组已变化，请刷新后重试", 409)
-            mode = payload.get("mode")
-            if mode not in {"add", "remove"}:
-                raise TaggingError("请明确添加或移出分组")
-            existing = {str(value) for value in group.tags.filter(pk__in=[tag.pk for tag in tags])
-                        .values_list("id", flat=True)}
-            before = {"group_id": str(group.pk), "memberships":
-                [{"tag_id": str(tag.pk), "present": str(tag.pk) in existing} for tag in tags]}
-            group.tags.add(*tags) if mode == "add" else group.tags.remove(*tags)
-            after = {"group_id": str(group.pk), "tag_ids": [str(tag.pk) for tag in tags], "mode": mode}
-        elif action == "delete_group":
-            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
-            before = {"group": {"id": str(group.pk), "name": group.name, "color": group.color,
-                "position": group.position, "system_key": group.system_key},
-                "tag_ids": [str(value) for value in group.tags.values_list("id", flat=True)]}
-            group.delete()
-            after = {"deleted_group_id": before["group"]["id"]}
         elif action == "apply_template":
-            from .tag_catalogue_seed import template_blueprint
+            from .tag_catalogue_seed import blueprint_parents, template_blueprint
             was_initialized = catalogue_state().initialized
-            keys = payload.get("group_keys")
+            # `group_keys` was the pre-1.25 name; a page opened before the
+            # upgrade still sends it, and the chapters it meant are the same.
+            keys = payload.get("section_keys", payload.get("group_keys"))
             blueprint = template_blueprint()
-            if not isinstance(keys, list) or not keys or len(keys) > len(blueprint["groups"]):
-                raise TaggingError("请选择要导入的模板分组")
+            if not isinstance(keys, list) or not keys or len(keys) > len(blueprint["sections"]):
+                raise TaggingError("请选择要导入的模板章节")
             keys = list(dict.fromkeys(str(value) for value in keys))
-            group_by_key = {row["key"]: row for row in blueprint["groups"]}
-            if any(key not in group_by_key for key in keys):
+            section_by_key = {row["key"]: row for row in blueprint["sections"]}
+            if any(key not in section_by_key for key in keys):
                 raise TaggingError("所选系统模板不存在，请刷新后重试", 409)
-            live_groups = {}
-            group_created = 0
-            created_group_ids = []
-            for key in keys:
-                spec = group_by_key[key]
-                group = LibraryTagGroup.objects.filter(system_key=key).first()
-                if group is None:
-                    group = LibraryTagGroup.objects.filter(name=spec["name"]).first()
-                if group is None:
-                    group = LibraryTagGroup.objects.create(name=spec["name"], color=spec["color"],
-                        position=spec["position"], system_key=key)
-                    group_created += 1
-                    created_group_ids.append(str(group.pk))
-                live_groups[key] = group
             created, linked = 0, 0
-            created_tag_ids, memberships_added, template_bindings_added = [], [], []
+            created_tag_ids, template_bindings_added = [], []
+            live_tags, live_sections = {}, {}
+
+            def bind(spec, *, levels=None, description=None):
+                """Find or create the tag for one blueprint row and remember it."""
+                nonlocal created
+                tag = LibraryTag.objects.filter(system_key=spec["key"]).first()
+                if tag is None:
+                    tag = LibraryTag.objects.filter(kind=spec["kind"], name__iexact=spec["name"]).first()
+                if tag is None:
+                    defaults = {"name": spec["name"], "kind": spec["kind"],
+                                "description": description or spec.get("description", ""),
+                                "color": spec.get("color", ""), "aliases": spec.get("aliases", []),
+                                "levels": levels if levels is not None else spec.get("levels", []),
+                                "system_key": spec["key"]}
+                    if "conditions" in spec:
+                        defaults["conditions"] = spec["conditions"]
+                    tag = LibraryTag.objects.create(**defaults)
+                    created += 1
+                    created_tag_ids.append(str(tag.pk))
+                elif tag.system_key is None:
+                    # Explicit import can reuse a manually created concept.
+                    # Bind its identity so a later rename is still recognized
+                    # on repeat import; preserve and undo this metadata change.
+                    template_bindings_added.append({"tag_id": str(tag.pk), "before": None, "after": spec["key"]})
+                    tag.system_key = spec["key"]
+                    tag.save(update_fields=["system_key", "updated_at"])
+                return tag
+
+            for key in keys:
+                spec = section_by_key[key]
+                name = spec["name"]
+                if name.startswith("方法 · "):
+                    levels = ["初中", "高中"]
+                else:
+                    levels = ["初中"] if name.startswith("初中") else ["高中"]
+                section_tag = bind(spec, levels=levels, description="教材章节，用来给标签目录分层。")
+                live_sections[key] = section_tag
+                live_tags[key] = section_tag
             chosen = set(keys)
             spec_by_key = {spec["key"]: spec for spec in blueprint["tags"]}
-            selected_keys = {spec["key"] for spec in blueprint["tags"] if chosen.intersection(spec["group_keys"])}
+            selected_keys = {spec["key"] for spec in blueprint["tags"] if chosen.intersection(spec["section_keys"])}
             direct_selection = set(selected_keys)
             todo = list(selected_keys)
             while todo:
@@ -1172,43 +1121,21 @@ def catalogue_mutation(payload: dict) -> dict:
                     if parent_key not in selected_keys:
                         selected_keys.add(parent_key)
                         todo.append(parent_key)
-            live_tags = {}
             for spec in blueprint["tags"]:
-                applicable = chosen.intersection(spec["group_keys"])
                 if spec["key"] not in selected_keys:
                     continue
-                tag = LibraryTag.objects.filter(system_key=spec["key"]).first()
-                if tag is None:
-                    tag = LibraryTag.objects.filter(kind=spec["kind"], name__iexact=spec["name"]).first()
-                if tag is None:
-                    defaults = {field: spec[field] for field in
-                                ("name", "kind", "description", "aliases", "levels") if field in spec}
-                    if "conditions" in spec:
-                        defaults["conditions"] = spec["conditions"]
-                    tag = LibraryTag.objects.create(**defaults, system_key=spec["key"])
-                    created += 1
-                    created_tag_ids.append(str(tag.pk))
-                elif tag.system_key is None:
-                    # Explicit import can reuse a manually created concept.
-                    # Bind its identity so a later rename is still recognized
-                    # on repeat import; preserve and undo this metadata change.
-                    template_bindings_added.append({"tag_id": str(tag.pk), "before": None, "after": spec["key"]})
-                    tag.system_key = spec["key"]
-                    tag.save(update_fields=["system_key", "updated_at"])
-                live_tags[spec["key"]] = tag
-                for group_key in applicable:
-                    group = live_groups[group_key]
-                    if not tag.groups.filter(pk=group.pk).exists():
-                        tag.groups.add(group)
-                        linked += 1
-                        memberships_added.append([str(group.pk), str(tag.pk)])
+                live_tags[spec["key"]] = bind(spec)
             relation_rows = _relation_snapshot()
+            wanted_parents = blueprint_parents()
             for spec_key, tag in live_tags.items():
-                spec = spec_by_key[spec_key]
-                for parent_key in spec.get("parent_keys", []):
+                if spec_key in live_sections:
+                    continue
+                for parent_key in wanted_parents[spec_key]:
+                    if parent_key not in live_tags:
+                        continue
                     relation_rows.append({"parent_id": str(live_tags[parent_key].pk), "child_id": str(tag.pk),
                                           "relation_type": LibraryTagRelation.Type.HIERARCHY})
-                for method_key in spec.get("related_method_keys", []):
+                for method_key in spec_by_key[spec_key].get("related_method_keys", []):
                     method = live_tags.get(method_key) or LibraryTag.objects.filter(system_key=method_key).first()
                     if method:
                         relation_rows.append({"parent_id": str(tag.pk), "child_id": str(method.pk),
@@ -1219,17 +1146,18 @@ def catalogue_mutation(payload: dict) -> dict:
                 for parent, child, kind in sorted({(row["parent_id"], row["child_id"], row["relation_type"])
                                                   for row in relation_rows})]
             _restore_relations(relation_rows)
+            linked = sum(1 for row in relation_rows
+                         if row["relation_type"] == LibraryTagRelation.Type.HIERARCHY)
             before = {"initialized": was_initialized}
-            after = {"created_tags": created, "created_groups": group_created,
-                     "membership_count": linked, "group_keys": keys,
-                     "created_tag_ids": created_tag_ids, "created_group_ids": created_group_ids,
+            after = {"created_tags": created, "created_sections": len(live_sections),
+                     "hierarchy_count": linked, "section_keys": keys,
+                     "created_tag_ids": created_tag_ids,
                      "dependency_tag_count": len(selected_keys - direct_selection),
-                     "template_bindings_added": template_bindings_added,
-                     "memberships_added": memberships_added}
+                     "template_bindings_added": template_bindings_added}
         elif action in {"delete_tag", "delete_tags", "reset_empty"}:
             target_id = payload.get("tag_id") if action == "delete_tag" else None
             preview = impact_preview
-            tags_query = LibraryTag.objects.prefetch_related("groups")
+            tags_query = LibraryTag.objects.all()
             if action == "delete_tag":
                 tags = list(tags_query.filter(pk=target_id))
             elif action == "delete_tags":
@@ -1410,12 +1338,11 @@ def _legacy_data(publication):
     data = {"publication": str(publication.pk), "tags": formal_tag_names(publication),
             "catalogue": [], "max": None, "source": str((publication.extras or {}).get("tags_source") or ""),
             "at": str((publication.extras or {}).get("tags_at") or ""), "revision": publication.tag_revision}
-    for tag in LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE).prefetch_related("groups"):
-        if tag.groups.exists():
-            chapter = tag.groups.first().name
-        else:
-            chapter = ""
-        data["catalogue"].append({"point": tag.name, "chapter": chapter})
+    every = {str(tag.pk): tag for tag in LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE)}
+    context = relation_context()
+    for tag in every.values():
+        data["catalogue"].append({"point": tag.name,
+                                  "chapter": "、".join(sorted(_chapter_names(tag, context, every)))})
     return data
 
 
@@ -1673,7 +1600,9 @@ def undo_catalogue_operation(operation):
                 group.tags.add(tag) if membership["present"] else group.tags.remove(tag)
         elif action == "apply_template":
             # Assignment edits do not change the catalogue revision, so guard
-            # newly created template tags explicitly before removal.
+            # newly created template tags explicitly before removal.  Chapters
+            # are ordinary tags now, so deleting created_tag_ids removes them
+            # too; the hierarchy itself is restored from before["relations"].
             created_ids = after.get("created_tag_ids", [])
             if LibraryTagAssignment.objects.filter(tag_id__in=created_ids).exists():
                 raise TaggingError("模板中的新标签已经用于题目，不能直接撤销", 409)
@@ -1683,21 +1612,14 @@ def undo_catalogue_operation(operation):
                     raise TaggingError("模板身份关联后来有变化，不能直接撤销覆盖", 409)
                 tag.system_key = binding["before"]
                 tag.save(update_fields=["system_key", "updated_at"])
-            for group_id, tag_id in after.get("memberships_added", []):
-                group = LibraryTagGroup.objects.filter(pk=group_id).first()
-                tag = LibraryTag.objects.filter(pk=tag_id).first()
-                if group and tag:
-                    group.tags.remove(tag)
             for tag_id in after.get("created_tag_ids", []):
                 LibraryTag.objects.filter(pk=tag_id).delete()
-            for group_id in after.get("created_group_ids", []):
-                group = LibraryTagGroup.objects.filter(pk=group_id).first()
-                if group and not group.tags.exists():
-                    group.delete()
             state = catalogue_state()
             state.initialized = before.get("initialized", False)
             state.save(update_fields=["initialized"])
         elif action == "delete_group":
+            # Pre-1.25 operations only.  Groups can no longer be created, so
+            # this branch exists purely to repair an old operation record.
             group_data = before["group"]
             if LibraryTagGroup.objects.filter(pk=group_data["id"]).exists():
                 raise TaggingError("同一分组编号已被重新使用，不能安全撤销", 409)
@@ -2006,14 +1928,6 @@ def resolve_suggestion(suggestion_id, payload):
                             if len(parent_rows) != len(parent_ids):
                                 raise TaggingError("新标签上级须为同类型的在用标签", 409)
                             _set_relation_neighbors(tag, parent_ids, LibraryTagRelation.Type.HIERARCHY)
-                        group_ids = override.get("group_ids", [])
-                        if not isinstance(group_ids, list) or len(group_ids) > 20:
-                            raise TaggingError("新标签分组选择不正确")
-                        groups = list(LibraryTagGroup.objects.filter(pk__in=group_ids))
-                        if len(groups) != len(set(map(str, group_ids))):
-                            raise TaggingError("所选分组不存在", 409)
-                        if groups:
-                            tag.groups.add(*groups)
                         item["scope"] = scope
                 if not tag:
                     raise TaggingError("建议中的标签已停用或不存在，请改选后重试", 409)

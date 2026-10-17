@@ -38,10 +38,46 @@ class HierarchyTemplateTests(TestCase):
         self.assertEqual({tags[p]["name"] for p in square["parent_keys"]}, {"矩形", "菱形"})
         self.assertEqual(len([t for t in tags.values() if t["name"] == "二次函数"]), 1)
         self.assertTrue(any(t["name"] == "二次函数在闭区间上的最值" for t in tags.values()))
-        # The legacy migration seed stays frozen in meaning: no graph writes.
-        seed_catalogue()
+        # Reading the blueprint writes nothing; the live seed builds the tree.
+        self.assertEqual(LibraryTag.objects.count(), 0)
         self.assertEqual(LibraryTagRelation.objects.count(), 0)
-        self.assertFalse(LibraryTag.objects.filter(name="二次函数在闭区间上的最值").exists())
+        seed_catalogue()
+        chapters = LibraryTag.objects.filter(description="教材章节，用来给标签目录分层。")
+        self.assertGreater(chapters.count(), 10)
+        self.assertTrue(LibraryTagRelation.objects.exists())
+        self.assertTrue(LibraryTag.objects.filter(name="二次函数在闭区间上的最值").exists())
+        # Re-seeding the same blueprint must not duplicate a single row.
+        before = (LibraryTag.objects.count(), LibraryTagRelation.objects.count())
+        seed_catalogue()
+        self.assertEqual((LibraryTag.objects.count(), LibraryTagRelation.objects.count()), before)
+
+    def test_a_point_taught_in_both_stages_reaches_both_chapters(self):
+        """A concept written under one chapter is still taught under another.
+
+        The point keeps the concept it belongs to, and additionally gets an
+        edge to the chapter its concept chain does not already reach. Without
+        that edge the 初中 copy of the point disappears from the 初中 chapter,
+        and a teacher browsing that chapter would not find it.
+        """
+        seed_catalogue()
+        parents = {}
+        for edge in LibraryTagRelation.objects.filter(relation_type=LibraryTagRelation.Type.HIERARCHY):
+            parents.setdefault(str(edge.child_id), []).append(str(edge.parent_id))
+        names = {str(tag.pk): tag.name for tag in LibraryTag.objects.all()}
+
+        def chapters_above(tag_id, seen=frozenset()):
+            if tag_id in seen:
+                return set()
+            above = parents.get(tag_id, [])
+            if not above:
+                return {names[tag_id]}
+            return set().union(*(chapters_above(parent, seen | {tag_id}) for parent in above))
+
+        for name in ("函数图象", "平面直角坐标系", "统计图表"):
+            point = LibraryTag.objects.get(name=name)
+            above = chapters_above(str(point.pk))
+            self.assertTrue(any(item.startswith("初中 · ") for item in above), (name, above))
+            self.assertTrue(any(item.startswith("高中 · ") for item in above), (name, above))
 
     def test_generation_snapshot_survives_later_graph_and_name_edits(self):
         library_tagging.catalogue_state()

@@ -43,11 +43,10 @@ def seed():
     from django.core.management import call_command
     from core import features, library, library_tagging
     from core.models import (LibraryTag, LibraryTagAssignment, LibraryTagCatalogue,
-                             LibraryTagGroup, LibraryTagRelation, Paper, PublishedQuestion, Question)
+                             LibraryTagRelation, Paper, PublishedQuestion, Question)
     call_command("migrate", verbosity=0)
     features.save({"knowledge_tags": True, "ai_answer": False})
     LibraryTagCatalogue.objects.update_or_create(pk=1, defaults={"initialized": True, "revision": 1})
-    group = LibraryTagGroup.objects.create(name="验收·个人整理")
     tags = {}
     definitions = (
         ("quadrilaterals", "四边形", "knowledge", "有四条边的平面多边形。"),
@@ -70,7 +69,6 @@ def seed():
     for key, name, kind, description in definitions:
         tags[key] = LibraryTag.objects.create(name=name, kind=kind, description=description,
                                                aliases=["正四边形"] if key == "square" else [])
-        tags[key].groups.add(group)
     for parent, child in (("quadrilaterals", "parallelogram"), ("parallelogram", "rectangle"),
                           ("parallelogram", "rhombus"), ("rectangle", "square"), ("rhombus", "square"),
                           ("square", "diagonal"), ("triangle", "midline"), ("functions", "quadratic"),
@@ -100,7 +98,7 @@ def seed():
         publication_ids.append(str(publication.pk))
     OUTPUT.mkdir(parents=True, exist_ok=True)
     (OUTPUT / "fixture.json").write_text(json.dumps({"ids": publication_ids,
-        "tags": {key: str(tag.pk) for key, tag in tags.items()}, "group": str(group.pk)}, ensure_ascii=False), encoding="utf-8")
+        "tags": {key: str(tag.pk) for key, tag in tags.items()}}, ensure_ascii=False), encoding="utf-8")
     print("Synthetic tag-map fixture ready", flush=True)
 
 
@@ -362,8 +360,8 @@ def check(base):
         assert cycle.status == 409 and "环" in cycle.json().get("error", ""), (cycle.status, cycle.text())
         assert read("/api/library/tags")["revision"] == directory["revision"]
         original = next(tag for tag in read("/api/library/tags")["tags"] if tag["id"] == tags["square"])
-        assert [group["id"] for group in original["groups"]] == [fixture["group"]]
-        report["checks"].append("Map child/parent edits reuse existing atomic services and history; undo removes only the new edge and cycles are rejected without touching personal groups")
+        assert "groups" not in original and set(original["parent_ids"]) == {tags["rectangle"], tags["rhombus"]}
+        report["checks"].append("Map child/parent edits reuse existing atomic services and history; undo removes only the new edge and cycles are rejected without touching the rest of the tree")
 
         search.fill("正方形")
         choose("square")
@@ -383,7 +381,7 @@ def check(base):
             const host = document.createElement('div'); host.id = 'emptyMapAcceptance';
             document.body.append(host);
             const instance = QBLibraryTagMap.create({host});
-            instance.update({catalogue:{revision:1,tags:[],groups:[]},kind:'knowledge'});
+            instance.update({catalogue:{revision:1,tags:[]},kind:'knowledge'});
             const result = {nodes:host.querySelectorAll('.tag-map-node').length,text:host.textContent};
             instance.destroy(); host.remove(); return result;
         }""")

@@ -42,11 +42,12 @@ def seed():
     from django.core.management import call_command
     from core import features, library, library_tagging
     from core.models import (LibraryTag, LibraryTagAssignment, LibraryTagCatalogue,
-                             LibraryTagGroup, LibraryTagRelation, Paper, PublishedQuestion, Question)
+                             LibraryTagRelation, Paper, PublishedQuestion, Question)
     call_command("migrate", verbosity=0)
     features.save({"knowledge_tags": True, "ai_answer": False})
     LibraryTagCatalogue.objects.update_or_create(pk=1, defaults={"initialized": True, "revision": 1})
-    group = LibraryTagGroup.objects.create(name="验收·个人收藏")
+    chapter = LibraryTag.objects.create(name="验收 · 高中函数", kind="knowledge", levels=["高中"],
+        description="教材章节，用来给标签目录分层。")
     tags = {}
     for key, name, kind in (
         ("functions", "函数", "knowledge"), ("equations", "代数", "knowledge"),
@@ -54,7 +55,8 @@ def seed():
         ("minimum", "二次函数的最值", "knowledge"), ("proofs", "代数方法", "method"),
         ("completing", "配方法", "method")):
         tags[key] = LibraryTag.objects.create(name=name, kind=kind, description="仅用于本机分级标签验收")
-        tags[key].groups.add(group)
+    LibraryTagRelation.objects.create(parent=chapter, child=tags["functions"])
+    LibraryTagRelation.objects.create(parent=chapter, child=tags["equations"])
     for parent, child in (("functions", "quadratic"), ("equations", "quadratic"),
                           ("quadratic", "minimum"), ("proofs", "completing")):
         LibraryTagRelation.objects.create(parent=tags[parent], child=tags[child])
@@ -76,7 +78,7 @@ def seed():
         publication_ids.append(str(publication.pk))
     OUTPUT.mkdir(parents=True, exist_ok=True)
     (OUTPUT / "fixture.json").write_text(json.dumps({"ids": publication_ids,
-        "tags": {key: str(tag.pk) for key, tag in tags.items()}, "group": str(group.pk)}, ensure_ascii=False), encoding="utf-8")
+        "tags": {key: str(tag.pk) for key, tag in tags.items()}, "chapter": str(chapter.pk)}, ensure_ascii=False), encoding="utf-8")
     print("Synthetic hierarchy browser fixture ready", flush=True)
 
 
@@ -242,13 +244,16 @@ def check(base):
         expect(page.locator("#q-" + ids[0])).to_have_count(0)
         report["checks"].append("Upward replace retains a now-unmatched card and updates match count; explicit refresh removes it")
 
-        # Manage real relation edges, retaining personal group membership throughout.
+        # Manage real relation edges; grouping no longer exists, so the parent
+        # tree is the only way to place a tag.
         page.goto(base + "/library")
         page.wait_for_load_state("networkidle")
         page.locator("#libraryTagManager").click()
         manager = page.locator("#tagManagerWorkspace")
         expect(manager).to_be_visible()
-        page.locator('[data-hierarchy-kind="knowledge"]').click()
+        page.locator('#tagManagerHierarchyNav [data-nav-id="knowledge"]').click()
+        # 按类型浏览时先看到的是顶层标签，章节要先展开才看得到它下面的标签。
+        page.locator(f'[data-expand-tag-id="{fixture["chapter"]}"]').click()
         page.locator(f'[data-expand-tag-id="{tags["functions"]}"]').click()
         page.locator(f'[data-tag-id="{tags["quadratic"]}"] .tag-directory-name').click()
         expect(page.locator("#tagManagerRelations [data-parent-id]")).to_have_count(2)
@@ -285,7 +290,8 @@ def check(base):
         assert cycle.status == 409 and "环" in cycle.json().get("error", ""), (cycle.status, cycle.text())
         assert read("/api/library/tags")["revision"] == directory["revision"]
         unchanged = next(tag for tag in directory["tags"] if tag["id"] == tags["quadratic"])
-        assert [group["id"] for group in unchanged["groups"]] == [fixture["group"]]
+        assert "groups" not in unchanged
+        assert set(unchanged["parent_ids"]) == {tags["functions"], tags["equations"]}
         page.evaluate("window.scrollTo(0,0)")
         capture("hierarchy-manager-desktop.png")
         page.set_viewport_size({"width": 390, "height": 844})
@@ -294,7 +300,7 @@ def check(base):
         capture("hierarchy-manager-mobile.png")
         manager.locator("#tagManagerDetail").scroll_into_view_if_needed()
         capture("hierarchy-manager-mobile-details.png")
-        report["checks"].append("Real manager creates a same-kind child, retains old parent assignments, edits multiple parents, undoes one edge, preserves groups and rejects cycles atomically")
+        report["checks"].append("Real manager creates a same-kind child, retains old parent assignments, edits multiple parents, undoes one edge, leaves the rest of the tree alone and rejects cycles atomically")
         page.locator("#tagManagerBack").click()
 
         # A touch-only client can open and dismiss the same hierarchy without hovering.

@@ -27,6 +27,7 @@ urlpatterns = [
     path("api/library/tags/operations", library_tagging.operations_view),
     path("api/library/tags/suggestions", library_tagging.suggestions_view),
     path("api/library/tags/migration-report", library_tagging.migration_report_view),
+    path("api/library/tags/<uuid:tag_id>/relations", library_tagging.relations_view),
     path("api/library/tags/undo", library_tagging.undo_view),
     path("api/library/tags/assignments/batch", library_tagging.batch_assignments_view),
     path("api/library/<uuid:publication_id>/tags", library_tagging.legacy_tags_view),
@@ -83,18 +84,39 @@ class FormalLibraryTaggingTests(TestCase):
             assignment_revision=publication.tag_revision, method_source={}, suggestions=proposals,
             status=LibraryTagSuggestion.Status.PENDING, message="逐条核对 AI 候选。", generation_source="隔离测试模型")
 
-    def test_directory_has_curriculum_and_method_groups_with_stable_tags(self):
+    def test_directory_has_chapters_and_method_roots_with_stable_tags(self):
         body = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
-        self.assertGreater(len(body["groups"]), 10)
+        chapters = [tag for tag in body["tags"] if tag["description"] == "教材章节，用来给标签目录分层。"]
+        self.assertGreater(len(chapters), 10)
+        self.assertEqual({tag["kind"] for tag in chapters}, {"knowledge", "method"})
+        self.assertTrue(all(not tag["parent_ids"] for tag in chapters))
         self.assertTrue(any(tag["kind"] == "knowledge" for tag in body["tags"]))
         self.assertTrue(any(tag["kind"] == "method" for tag in body["tags"]))
         self.assertTrue(any(tag["name"] == "构造中位线" and tag["conditions"] for tag in body["tags"]))
         self.assertTrue(all("id" in tag for tag in body["tags"]))
+        by_id = {tag["id"]: tag for tag in body["tags"]}
+        section_ids = {tag["id"] for tag in chapters}
+        chapter_names = {tag["name"] for tag in chapters}
+
+        def chapters_above(tag, seen=None):
+            """Topmost ancestors of a tag, the same walk the AI chapter lookup does."""
+            seen = seen or set()
+            parents = [by_id[pid] for pid in tag["parent_ids"] if pid in by_id and pid not in seen]
+            if not parents:
+                return {tag["name"]}
+            nested = seen | {tag["id"]}
+            return set().union(*(chapters_above(parent, nested) for parent in parents))
+
         for name in ("函数图象", "平面直角坐标系", "统计图表"):
             shared = [tag for tag in body["tags"] if tag["name"] == name]
             self.assertEqual(len(shared), 1)
             self.assertEqual(set(shared[0]["levels"]), {"初中", "高中"})
-            self.assertGreaterEqual(len(shared[0]["groups"]), 2)
+            self.assertTrue(shared[0]["parent_ids"])
+            self.assertTrue(set(shared[0]["parent_ids"]) & section_ids or chapters_above(shared[0]) & chapter_names)
+            # Shared points reach both school stages, whichever level they hang at.
+            above = chapters_above(shared[0])
+            self.assertTrue(any(item.startswith("初中 · ") for item in above), above)
+            self.assertTrue(any(item.startswith("高中 · ") for item in above), above)
 
     def test_blank_directory_stays_blank_until_explicit_template_import(self):
         LibraryTagAssignment.objects.all().delete()
@@ -110,18 +132,41 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(LibraryTag.objects.count(), before)
         blank = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
         self.assertEqual(blank["tags"], [])
-        self.assertEqual(blank["groups"], [])
+        self.assertNotIn("groups", blank)
         self.assertFalse(blank["initialized"])
-        key = templates["packages"][0]["group_keys"][0]
+        key = templates["packages"][0]["section_keys"][0]
         applied = self.post_json("/api/library/tags", {"action": "apply_template",
-            "group_keys": [key], "revision": blank["revision"], "request_id": str(uuid.uuid4())})
+            "section_keys": [key], "revision": blank["revision"], "request_id": str(uuid.uuid4())})
         self.assertEqual(applied.status_code, 200, applied.content)
         self.assertTrue(applied.json()["catalogue"]["initialized"])
         imported = LibraryTag.objects.count()
         again = self.post_json("/api/library/tags", {"action": "apply_template",
-            "group_keys": [key], "revision": applied.json()["revision"], "request_id": str(uuid.uuid4())})
+            "section_keys": [key], "revision": applied.json()["revision"], "request_id": str(uuid.uuid4())})
         self.assertEqual(again.status_code, 200, again.content)
         self.assertEqual(LibraryTag.objects.count(), imported)
+
+    def test_the_catalogue_never_carries_groups_any_more(self):
+        body = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
+        self.assertNotIn("groups", body)
+        self.assertTrue(body["tags"])
+        self.assertFalse(any("groups" in tag for tag in body["tags"]))
+        detail = self.client.get("/api/library/tags/%s/relations" % body["tags"][0]["id"],
+                                 HTTP_X_QB_REQUEST="1").json()
+        self.assertNotIn("groups", detail["tag"])
+
+    def test_group_actions_are_refused_and_leave_the_catalogue_untouched(self):
+        tag = self.tag("拒绝分组操作的标签")
+        revision = library_tagging.catalogue_state().revision
+        for action, extra in (("create_group", {"name": "新的分组"}),
+                              ("update_group", {"group_id": str(uuid.uuid4())}),
+                              ("group_membership", {"group_id": str(uuid.uuid4()), "tag_id": str(tag.pk), "present": True}),
+                              ("group_membership_batch", {"group_id": str(uuid.uuid4()), "tag_ids": [str(tag.pk)], "mode": "add"}),
+                              ("delete_group", {"group_id": str(uuid.uuid4())})):
+            result = self.post_json("/api/library/tags", {"action": action,
+                "revision": revision, "request_id": str(uuid.uuid4()), **extra})
+            self.assertEqual(result.status_code, 400, action + ": " + result.content.decode())
+        self.assertEqual(library_tagging.catalogue_state().revision, revision)
+        self.assertFalse(LibraryTagGroup.objects.filter(name="新的分组").exists())
 
     def test_delete_tag_removes_all_links_and_guarded_undo_restores_them(self):
         publication = self.publication()
@@ -150,46 +195,35 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertTrue(LibraryTagAssignment.objects.filter(publication=historical, tag_id=tag.pk).exists())
         self.assertEqual(list(library_tagging.formal_tag_names(publication)), [tag.name])
 
-    def test_batch_group_membership_is_atomic_idempotent_and_restores_mixed_membership(self):
-        first, second = self.tag("批量分组甲"), self.tag("批量分组乙")
-        group = LibraryTagGroup.objects.create(name="批量目标组")
-        group.tags.add(first)
-        publication = self.publication()
-        self.assertEqual(self.tag_request(publication, add=[first]).status_code, 200)
-        request = {"action": "group_membership_batch", "tag_ids": [str(first.pk), str(second.pk)],
-            "group_id": str(group.pk), "mode": "add", "revision": library_tagging.catalogue_state().revision,
-            "request_id": str(uuid.uuid4())}
+    def test_batch_parent_change_is_atomic_idempotent_and_restores_the_previous_tree(self):
+        first, second, chapter = self.tag("层级甲"), self.tag("层级乙"), self.tag("章节")
+        library_tagging.catalogue_mutation({"action": "add_parent", "tag_id": str(first.pk),
+            "parent_id": str(chapter.pk), "revision": library_tagging.catalogue_state().revision,
+            "request_id": str(uuid.uuid4())})
+        request = {"action": "set_parents", "tag_id": str(second.pk), "parent_ids": [str(chapter.pk)],
+            "revision": library_tagging.catalogue_state().revision, "request_id": str(uuid.uuid4())}
         saved = self.post_json("/api/library/tags", request)
         self.assertEqual(saved.status_code, 200, saved.content)
-        self.assertEqual(set(group.tags.values_list("id", flat=True)), {first.pk, second.pk})
+        self.assertEqual(list(second.incoming_relations.values_list("parent_id", flat=True)), [chapter.pk])
         replay = self.post_json("/api/library/tags", request)
         self.assertEqual(replay.status_code, 200, replay.content)
         self.assertTrue(replay.json()["replayed"])
         self.assertEqual(LibraryTagOperation.objects.filter(client_request_id=request["request_id"]).count(), 1)
-        changed_request = {**request, "mode": "remove"}
+        changed_request = {**request, "parent_ids": [str(first.pk)]}
         self.assertEqual(self.post_json("/api/library/tags", changed_request).status_code, 409)
-        publication.refresh_from_db()
-        self.assertEqual(publication.tag_revision, 1)
         undo = self.post_json("/api/library/tags/undo", {"operation_id": saved.json()["operation_id"]})
         self.assertEqual(undo.status_code, 200, undo.content)
-        self.assertEqual(list(group.tags.values_list("id", flat=True)), [first.pk])
-        remove = self.post_json("/api/library/tags", {**request, "mode": "remove",
-            "revision": undo.json()["revision"], "request_id": str(uuid.uuid4())})
-        self.assertEqual(remove.status_code, 200, remove.content)
-        self.assertFalse(group.tags.exists())
-        restored = self.post_json("/api/library/tags/undo", {"operation_id": remove.json()["operation_id"]})
-        self.assertEqual(restored.status_code, 200, restored.content)
-        self.assertEqual(list(group.tags.values_list("id", flat=True)), [first.pk])
+        self.assertEqual(list(second.incoming_relations.values_list("parent_id", flat=True)), [])
+        self.assertEqual(list(first.incoming_relations.values_list("parent_id", flat=True)), [chapter.pk])
 
-    def test_batch_group_membership_rejects_missing_tag_without_partial_change(self):
-        tag = self.tag("分组失败回滚")
-        group = LibraryTagGroup.objects.create(name="失败目标组")
+    def test_parent_change_rejects_a_missing_tag_without_partial_change(self):
+        tag = self.tag("层级失败回滚")
         revision = library_tagging.catalogue_state().revision
-        result = self.post_json("/api/library/tags", {"action": "group_membership_batch",
-            "tag_ids": [str(tag.pk), str(uuid.uuid4())], "group_id": str(group.pk), "mode": "add",
+        result = self.post_json("/api/library/tags", {"action": "add_parent",
+            "tag_id": str(tag.pk), "parent_id": str(uuid.uuid4()),
             "revision": revision, "request_id": str(uuid.uuid4())})
         self.assertEqual(result.status_code, 409, result.content)
-        self.assertFalse(group.tags.exists())
+        self.assertFalse(tag.incoming_relations.exists())
         self.assertEqual(library_tagging.catalogue_state().revision, revision)
 
     def test_batch_delete_counts_unique_questions_and_restores_all_historical_links(self):
@@ -243,9 +277,7 @@ class FormalLibraryTaggingTests(TestCase):
         historical.status = PublishedQuestion.Status.WITHDRAWN
         historical.save(update_fields=["status"])
         first, second, target = self.tag("合并方法甲", "method"), self.tag("合并方法乙", "method"), self.tag("合并目标", "method")
-        first_group = LibraryTagGroup.objects.create(name="合并来源组")
-        target_group = LibraryTagGroup.objects.create(name="合并目标组")
-        first.groups.add(first_group); target.groups.add(target_group)
+        chapter = self.tag("合并章节", "method")
         original_ids = []
         for pub, tag, part in ((publication, first, "1"), (publication, second, "2"),
                                (publication, target, "3"), (historical, first, "1"), (historical, second, "2")):
@@ -270,7 +302,8 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(merged.scope, {"subquestions": ["1", "2", "3"]})
         self.assertEqual(merged.generation_source, "虚构模型")
         self.assertEqual(len(merged.source_snapshot["merged_assignments"]), 3)
-        self.assertEqual(set(target.groups.values_list("id", flat=True)), {first_group.pk, target_group.pk})
+        # The merged tag keeps the parents it had; nothing about the merge invents a new level.
+        self.assertEqual(list(target.incoming_relations.values_list("parent_id", flat=True)), [])
         replay = self.post_json("/api/library/tags", request)
         self.assertEqual(replay.status_code, 200, replay.content)
         self.assertTrue(replay.json()["replayed"])
@@ -282,7 +315,7 @@ class FormalLibraryTaggingTests(TestCase):
         restored = LibraryTagAssignment.objects.get(publication=publication, tag=first)
         self.assertEqual((restored.scope, restored.source_snapshot), ({"subquestions": ["1"]}, {"part": "1"}))
         target.refresh_from_db()
-        self.assertEqual(list(target.groups.values_list("id", flat=True)), [target_group.pk])
+        self.assertEqual(list(target.incoming_relations.values_list("parent_id", flat=True)), [])
         self.assertEqual(target.aliases, [])
 
     def test_batch_merge_conflicts_on_changed_answer_and_undo_is_atomic(self):
@@ -344,21 +377,17 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(len(body["items"]), 1)
         self.assertFalse(body["has_more"])
 
-    def test_group_delete_keeps_tag_and_question_assignment(self):
-        publication = self.publication()
-        from core.models import LibraryTagGroup
-        group = LibraryTagGroup.objects.create(name="仅组织的分组")
-        tag = self.tag("分组删除保留标签")
-        tag.groups.add(group)
-        self.tag_request(publication, add=[tag])
-        response = self.post_json("/api/library/tags", {"action": "delete_group", "group_id": str(group.pk),
-            "revision": LibraryTagCatalogue.objects.get(pk=1).revision, "request_id": str(uuid.uuid4())})
+    def test_undo_of_a_pre_upgrade_group_operation_still_repairs_the_old_record(self):
+        # Groups cannot be created any more, but a catalogue operation recorded
+        # before the upgrade must stay undoable instead of becoming unrepairable.
+        group = LibraryTagGroup.objects.create(name="升级前的分组")
+        operation = LibraryTagOperation.objects.create(client_request_id=str(uuid.uuid4()),
+            request_hash="", action="catalogue:create_group",
+            before_snapshot={}, after_snapshot={"group": {"id": str(group.pk)}},
+            catalogue_revision=LibraryTagCatalogue.objects.get(pk=1).revision)
+        response = self.post_json("/api/library/tags/undo", {"operation_id": str(operation.pk)})
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertTrue(LibraryTag.objects.filter(pk=tag.pk).exists())
-        self.assertTrue(LibraryTagAssignment.objects.filter(publication=publication, tag=tag).exists())
-        undo = self.post_json("/api/library/tags/undo", {"operation_id": response.json()["operation_id"]})
-        self.assertEqual(undo.status_code, 200, undo.content)
-        self.assertTrue(tag.groups.filter(pk=group.pk).exists())
+        self.assertFalse(LibraryTagGroup.objects.filter(pk=group.pk).exists())
 
     def test_reset_empty_stales_tag_suggestions_and_is_undoable_without_restarting_them(self):
         publication = self.publication()
@@ -489,7 +518,7 @@ class FormalLibraryTaggingTests(TestCase):
         human.save(update_fields=["extras"])
 
         broad = self.publication()
-        broad.extras = {"tags": ["函数"], "tags_source": "human"}
+        broad.extras = {"tags": ["来源明确的旧词"], "tags_source": "human"}
         broad.save(update_fields=["extras"])
 
         unknown = self.publication()
@@ -511,7 +540,7 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(human.content, original_content)
         self.assertEqual(human.version, original_version)
         self.assertTrue(LibraryTagAssignment.objects.filter(publication=broad, tag__kind=LibraryTag.Kind.LEGACY,
-            tag__name="函数", needs_review=False).exists())
+            tag__name="来源明确的旧词", needs_review=False).exists())
         self.assertTrue(LibraryTagAssignment.objects.filter(publication=unknown, tag__kind=LibraryTag.Kind.LEGACY,
             tag__name="来源不明旧词", source=LibraryTagAssignment.Source.LEGACY_UNKNOWN, needs_review=True).exists())
         self.assertFalse(ai.tag_assignments.exists())
@@ -664,17 +693,17 @@ class FormalLibraryTaggingTests(TestCase):
 
     def test_new_ai_tag_is_created_only_when_human_accepts_and_can_be_undone(self):
         publication = self.publication()
-        group = LibraryTag.objects.filter(kind=LibraryTag.Kind.KNOWLEDGE).first().groups.first()
+        chapter = self.tag("新建候选的上级", "knowledge")
         proposal = {"kind": "knowledge", "new_name": "新概念候选", "name": "新概念候选", "levels": ["高中"],
             "rationale": "题目使用该概念。", "evidence": "题干中的条件", "scope": {"whole": True}}
         suggestion = self.suggestion(publication, [proposal])
         self.assertFalse(LibraryTag.objects.filter(name="新概念候选").exists())
         response = self.post_json("/api/library/tag-suggestions/%s/resolve" % suggestion.pk,
-            {"action": "accept", "indices": [0], "expected_revision": 0, "new_tags": {"0": {"name": "新概念候选", "kind": "knowledge", "levels": ["高中"], "group_ids": [str(group.pk)], "top_level": True}}, "request_id": str(uuid.uuid4())})
+            {"action": "accept", "indices": [0], "expected_revision": 0, "new_tags": {"0": {"name": "新概念候选", "kind": "knowledge", "levels": ["高中"], "parent_ids": [str(chapter.pk)], "top_level": False}}, "request_id": str(uuid.uuid4())})
         self.assertEqual(response.status_code, 200, response.content)
         created = LibraryTag.objects.get(name="新概念候选")
         self.assertTrue(LibraryTagAssignment.objects.filter(publication=publication, tag=created).exists())
-        self.assertTrue(created.groups.filter(pk=group.pk).exists())
+        self.assertEqual(list(created.incoming_relations.values_list("parent_id", flat=True)), [chapter.pk])
         undo = self.post_json("/api/library/tags/undo", {"operation_id": response.json()["operation_id"]})
         self.assertEqual(undo.status_code, 200, undo.content)
         self.assertFalse(LibraryTag.objects.filter(pk=created.pk).exists())
@@ -776,7 +805,7 @@ class FormalLibraryTaggingTests(TestCase):
         with self.assertRaises(library_tagging.TaggingError): library_tagging.normalize_ai_output(bad, [knowledge])
 
     def test_ai_reproposing_an_active_tag_by_name_binds_it_and_asks_for_no_parent(self):
-        existing = self.tag("椭圆", "knowledge")
+        existing = LibraryTag.objects.get(kind=LibraryTag.Kind.KNOWLEDGE, name="椭圆")
         raw = {"status": "ok", "suggestions": [{"kind": "knowledge", "new_name": "椭圆",
             "levels": ["高中"], "scope": {"whole": True}, "rationale": "题面给出椭圆定义。", "evidence": "题干中的标准方程"}]}
         item = library_tagging.normalize_ai_output(raw, [existing])["suggestions"][0]

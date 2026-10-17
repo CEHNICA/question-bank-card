@@ -10,11 +10,14 @@ from __future__ import annotations
 import re
 import uuid
 
-from .models import LibraryTag, LibraryTagCatalogue, LibraryTagGroup
+from .models import LibraryTag, LibraryTagCatalogue
 
 NAMESPACE = uuid.UUID("af741797-6b18-46c3-86d3-3aef949c2894")
 
-GROUPS = [
+# Textbook chapters.  `template_blueprint` imports each as a top-level tag;
+# `seed_catalogue` is the historical path used by migration 0022 and still
+# writes the retired LibraryTagGroup rows that migration 0028 converts.
+SECTIONS = [
     ("初中 · 数与式", "#477a9e"),
     ("初中 · 方程与不等式", "#477a9e"),
     ("初中 · 函数", "#477a9e"),
@@ -34,8 +37,8 @@ GROUPS = [
     ("方法 · 统计与概率", "#8069a3"),
 ]
 
-# Each row is (name, alias words, one-sentence guide).  A tag can be placed in
-# more than one group without duplicating its identity.
+# Each row is (name, alias words, one-sentence guide).  A tag can belong to
+# more than one chapter without duplicating its identity.
 KNOWLEDGE = {
     "初中 · 数与式": [
         ("正数与负数", "相反数", "区分具有相反意义的量并进行符号运算。"),
@@ -330,7 +333,7 @@ ALIASES = {
     "空间向量法": ["建系法", "向量建系"],
 }
 
-# A single stable tag may appear in more than one course group.  These are
+# A single stable tag may appear in more than one chapter.  These are
 # concepts taught and reused across the two stages, so search and assignment
 # do not create duplicate identities for the same idea.
 SHARED_KNOWLEDGE = {
@@ -340,6 +343,42 @@ SHARED_KNOWLEDGE = {
 }
 
 
+def blueprint_parents():
+    """Parent keys for every blueprint tag.
+
+    A tag keeps the concept node it is written under, and additionally gets a
+    chapter edge for each chapter it is listed in that its own parents do not
+    already reach.  That is what keeps a point shared by both school stages
+    findable from both without listing it twice under the same branch.
+    """
+    specs = {row["key"]: row for row in template_blueprint()["tags"]}
+    reachable = {}
+
+    def covered(key, active=frozenset()):
+        if key in reachable:
+            return reachable[key]
+        if key in active:
+            return set()
+        parents = [item for item in specs[key].get("parent_keys", []) if item in specs]
+        nested = active | {key}
+        result = set()
+        for parent in parents:
+            result |= covered(parent, nested)
+        if not parents:
+            result = set(specs[key]["section_keys"])
+        reachable[key] = result
+        return result
+
+    result = {}
+    for key, row in specs.items():
+        parents = [item for item in row.get("parent_keys", []) if item in specs]
+        inherited = set()
+        for parent in parents:
+            inherited |= covered(parent)
+        result[key] = parents + [section for section in row["section_keys"] if section not in inherited]
+    return result
+
+
 def _key(value: str) -> str:
     return re.sub(r"[\s（）()·，,。:：]", "", value).casefold()
 
@@ -347,17 +386,24 @@ def _key(value: str) -> str:
 def seed_catalogue(*, apps=None):
     """Apply the bundled blueprint explicitly.
 
-    ``apps`` is supplied only by the historical migration. Keeping the model
-    lookup here makes that migration independent of future live model fields.
+    ``apps`` is supplied only by the historical migration 0022, which ran
+    before a chapter became a tag.  That path still writes the retired
+    LibraryTagGroup rows that migration 0028 converts; every other caller
+    gets the same tree the live template import builds, so a test fixture
+    looks like the catalogue a user actually ends up with.
     """
-    if apps is None:
-        GroupModel, TagModel, CatalogueModel = LibraryTagGroup, LibraryTag, LibraryTagCatalogue
-    else:
-        GroupModel = apps.get_model("core", "LibraryTagGroup")
-        TagModel = apps.get_model("core", "LibraryTag")
-        CatalogueModel = apps.get_model("core", "LibraryTagCatalogue")
+    if apps is not None:
+        _seed_chapter_groups(apps)
+        return
+    _seed_hierarchy()
+
+
+def _seed_chapter_groups(apps):
+    """The pre-1.25 shape: chapters as LibraryTagGroup rows.  Migration 0022 only."""
+    GroupModel, TagModel, CatalogueModel = (apps.get_model("core", name) for name in
+                                            ("LibraryTagGroup", "LibraryTag", "LibraryTagCatalogue"))
     groups = {}
-    for position, (name, color) in enumerate(GROUPS):
+    for position, (name, color) in enumerate(SECTIONS):
         groups[name], _ = GroupModel.objects.get_or_create(
             system_key=f"seed-group:{position + 1}",
             defaults={"name": name, "color": color, "position": position},
@@ -388,63 +434,113 @@ def seed_catalogue(*, apps=None):
             )
             tag.groups.add(groups[group_name])
     state, _ = CatalogueModel.objects.get_or_create(pk=1, defaults={"revision": 1})
-    if apps is None and hasattr(state, "initialized") and not state.initialized:
+    if hasattr(state, "initialized") and not state.initialized:
+        state.initialized = True
+        state.save(update_fields=["initialized"])
+
+
+def _seed_hierarchy():
+    """Import every blueprint row as tags: a chapter is the parent of what it covers."""
+    from .models import LibraryTagRelation
+
+    blueprint = template_blueprint()
+    live = {}
+
+    def bind(spec, *, levels=None, description=None):
+        tag = LibraryTag.objects.filter(system_key=spec["key"]).first()
+        if tag is None:
+            tag = LibraryTag.objects.filter(kind=spec["kind"], name__iexact=spec["name"]).first()
+        if tag is None:
+            defaults = {"name": spec["name"], "kind": spec["kind"],
+                        "description": description or spec.get("description", ""),
+                        "color": spec.get("color", ""), "aliases": spec.get("aliases", []),
+                        "levels": spec.get("levels", []) if levels is None else levels,
+                        "system_key": spec["key"]}
+            if "conditions" in spec:
+                defaults["conditions"] = spec["conditions"]
+            tag = LibraryTag.objects.create(**defaults)
+        return tag
+
+    for spec in blueprint["sections"]:
+        name = spec["name"]
+        levels = ["初中", "高中"] if name.startswith("方法 · ") else (
+            ["初中"] if name.startswith("初中") else ["高中"])
+        live[spec["key"]] = bind(spec, levels=levels, description="教材章节，用来给标签目录分层。")
+    for spec in blueprint["tags"]:
+        live[spec["key"]] = bind(spec)
+    rows = []
+    wanted = blueprint_parents()
+    for spec in blueprint["tags"]:
+        rows.extend(LibraryTagRelation(parent_id=live[parent].pk, child_id=live[spec["key"]].pk,
+                                      relation_type=LibraryTagRelation.Type.HIERARCHY)
+                    for parent in wanted[spec["key"]] if parent in live)
+        rows.extend(LibraryTagRelation(parent_id=live[spec["key"]].pk, child_id=live[method].pk,
+                                      relation_type=LibraryTagRelation.Type.RELATED_METHOD)
+                    for method in spec.get("related_method_keys", []) if method in live)
+    LibraryTagRelation.objects.bulk_create(rows, ignore_conflicts=True)
+    state, _ = LibraryTagCatalogue.objects.get_or_create(pk=1, defaults={"revision": 1})
+    if hasattr(state, "initialized") and not state.initialized:
         state.initialized = True
         state.save(update_fields=["initialized"])
 
 
 def template_blueprint():
-    """Return read-only template data; this function never touches the DB."""
-    groups = [{"key": f"seed-group:{position + 1}", "name": name,
-               "color": color, "position": position}
-              for position, (name, color) in enumerate(GROUPS)]
-    group_keys = {group["name"]: group["key"] for group in groups}
+    """Return read-only template data; this function never touches the DB.
+
+    A section is a textbook chapter.  It is imported as a top-level tag so the
+    catalogue has one organising idea: parent tag and child tag.
+    """
+    sections = [{"key": f"section:seed-group:{position + 1}", "name": name,
+                 "kind": "method" if name.startswith("方法 · ") else "knowledge",
+                 "color": color, "position": position}
+                for position, (name, color) in enumerate(SECTIONS)]
+    section_keys = {section["name"]: section["key"] for section in sections}
     tags = {}
-    for group_name, rows in KNOWLEDGE.items():
+    for section_name, rows in KNOWLEDGE.items():
         for name, _related_terms, description in rows:
             key = f"knowledge:{_key(name)}"
             row = tags.setdefault(key, {"key": key, "name": name, "kind": "knowledge",
                 "aliases": ALIASES.get(name, []), "description": description,
-                "levels": ["初中"] if group_name.startswith("初中") else ["高中"],
-                "group_keys": []})
-            if group_keys[group_name] not in row["group_keys"]:
-                row["group_keys"].append(group_keys[group_name])
-    for name, extra_groups in SHARED_KNOWLEDGE.items():
+                "levels": ["初中"] if section_name.startswith("初中") else ["高中"],
+                "section_keys": []})
+            if section_keys[section_name] not in row["section_keys"]:
+                row["section_keys"].append(section_keys[section_name])
+    for name, extra_sections in SHARED_KNOWLEDGE.items():
         row = tags[f"knowledge:{_key(name)}"]
         row["levels"] = ["初中", "高中"]
-        for group_name in extra_groups:
-            if group_keys[group_name] not in row["group_keys"]:
-                row["group_keys"].append(group_keys[group_name])
-    for group_name, rows in METHODS.items():
+        for section_name in extra_sections:
+            if section_keys[section_name] not in row["section_keys"]:
+                row["section_keys"].append(section_keys[section_name])
+    for section_name, rows in METHODS.items():
         for name, conditions in rows:
             key = f"method:{_key(name)}"
             row = tags.setdefault(key, {"key": key, "name": name, "kind": "method",
                 "aliases": ALIASES.get(name, []), "description": conditions,
-                "conditions": conditions, "levels": ["初中", "高中"], "group_keys": []})
-            if group_keys[group_name] not in row["group_keys"]:
-                row["group_keys"].append(group_keys[group_name])
-    _hierarchical_template(tags, group_keys)
-    return {"groups": groups, "tags": list(tags.values())}
+                "conditions": conditions, "levels": ["初中", "高中"], "section_keys": []})
+            if section_keys[section_name] not in row["section_keys"]:
+                row["section_keys"].append(section_keys[section_name])
+    _hierarchical_template(tags, section_keys)
+    return {"sections": sections, "tags": list(tags.values())}
 
 
-def _hierarchical_template(tags, group_keys):
+def _hierarchical_template(tags, section_keys):
     """Extend only the explicit template, never a migration or a live catalogue.
 
-    Personal groups and mathematical containment remain separate. Keys reuse
-    earlier concept identities, including concepts shared by school stages.
+    A chapter and a mathematical containment are both parent-child links now.
+    Keys reuse earlier concept identities, including concepts shared by stages.
     """
     def key(name, kind="knowledge"):
         return f"{kind}:{_key(name)}"
 
-    def add(name, description, groups, parents=(), kind="knowledge", levels=None):
+    def add(name, description, sections, parents=(), kind="knowledge", levels=None):
         identity = key(name, kind)
         row = tags.setdefault(identity, {"key": identity, "name": name, "kind": kind,
             "aliases": ALIASES.get(name, []), "description": description,
             "conditions": description if kind == "method" else "",
-            "levels": levels or ["初中", "高中"], "group_keys": []})
-        for group in groups:
-            if group_keys[group] not in row["group_keys"]:
-                row["group_keys"].append(group_keys[group])
+            "levels": levels or ["初中", "高中"], "section_keys": []})
+        for section in sections:
+            if section_keys[section] not in row["section_keys"]:
+                row["section_keys"].append(section_keys[section])
         row["parent_keys"] = [key(parent, kind) for parent in parents]
         row.setdefault("related_method_keys", [])
         return row
@@ -472,7 +568,7 @@ def _hierarchical_template(tags, group_keys):
         add(name, description, memberships,
             levels=["高中"] if name in {"向量", "立体几何", "解析几何", "数列", "导数", "集合与逻辑", "复数"} else None)
 
-    group_default = {name: parent for name, parent in [
+    section_default = {name: parent for name, parent in [
         ("初中 · 数与式", "数与式"), ("初中 · 方程与不等式", "方程"),
         ("初中 · 函数", "函数"), ("初中 · 图形与几何", "平面几何"),
         ("初中 · 坐标与变化", "坐标与变换"), ("初中 · 统计与概率", "统计"),
@@ -480,18 +576,18 @@ def _hierarchical_template(tags, group_keys):
         ("高中 · 三角函数与向量", "向量"), ("高中 · 立体几何", "立体几何"),
         ("高中 · 解析几何", "解析几何"), ("高中 · 数列与导数", "数列"),
         ("高中 · 计数、概率与统计", "概率")]}
-    group_by_key = {value: name for name, value in group_keys.items()}
+    section_by_key = {value: name for name, value in section_keys.items()}
     for row in existing:
         if row["kind"] != "knowledge":
             continue
         name = row["name"]
-        group = group_by_key[row["group_keys"][0]]
-        parent = group_default[group]
+        section = section_by_key[row["section_keys"][0]]
+        parent = section_default[section]
         if "不等式" in name: parent = "不等式"
         elif "复数" in name: parent = "复数"
         elif "导数" in name or "导函数" in name: parent = "导数"
         elif "概率" in name or "事件" in name or name == "列举法求概率": parent = "概率"
-        elif group == "高中 · 计数、概率与统计" and any(word in name for word in ("统计", "抽样", "数据", "回归", "列联表")): parent = "统计"
+        elif section == "高中 · 计数、概率与统计" and any(word in name for word in ("统计", "抽样", "数据", "回归", "列联表")): parent = "统计"
         row["parent_keys"] = [key(parent)]
         row["related_method_keys"] = []
 
@@ -509,8 +605,8 @@ def _hierarchical_template(tags, group_keys):
         ("双曲线", "双曲线的定义、标准方程与几何性质。", "圆锥曲线", "高中 · 解析几何"),
         ("抛物线", "焦点、准线及抛物线的方程和性质。", "圆锥曲线", "高中 · 解析几何"),
     ]
-    for name, description, parent, group in branches:
-        add(name, description, [group], [parent], levels=["高中"] if group.startswith("高中") else None)
+    for name, description, parent, section in branches:
+        add(name, description, [section], [parent], levels=["高中"] if section.startswith("高中") else None)
     add("三角函数", "三角函数的定义、关系、图象与性质。",
         ["初中 · 坐标与变化", "高中 · 函数与方程"], ["函数"])
 
@@ -605,7 +701,7 @@ def _hierarchical_template(tags, group_keys):
     }
     for parent, children in details.items():
         parent_row = tags[key(parent)]
-        memberships = [group_by_key[g] for g in parent_row["group_keys"]]
+        memberships = [section_by_key[g] for g in parent_row["section_keys"]]
         for name, description in children:
             add(name, description, memberships, [parent], levels=parent_row["levels"])
 
@@ -614,14 +710,14 @@ def _hierarchical_template(tags, group_keys):
         "函数分析": "方法 · 代数与函数", "几何构造": "方法 · 几何与构造",
         "坐标化": "方法 · 坐标与向量", "向量计算": "方法 · 坐标与向量",
         "概率计算": "方法 · 统计与概率", "统计分析": "方法 · 统计与概率"}
-    for name, group in method_roots.items():
-        add(name, "仅在当前采用的解析实际使用该类方法时贴标；注明整题或适用小问。", [group], kind="method")
+    for name, section in method_roots.items():
+        add(name, "仅在当前采用的解析实际使用该类方法时贴标；注明整题或适用小问。", [section], kind="method")
     defaults = {"方法 · 代数与函数": "代数变形", "方法 · 几何与构造": "几何构造",
         "方法 · 坐标与向量": "坐标化", "方法 · 统计与概率": "概率计算"}
     for row in existing:
         if row["kind"] != "method": continue
         name = row["name"]
-        parent = defaults[group_by_key[row["group_keys"][0]]]
+        parent = defaults[section_by_key[row["section_keys"][0]]]
         if name in {"分类讨论", "反证法", "数学归纳证明", "放缩法"}: parent = "推理与证明"
         elif name in {"构造函数", "数形结合", "参数分离", "图象平移与变换", "同构变换", "定义域优先"}: parent = "函数分析"
         elif name in {"向量法", "投影法"}: parent = "向量计算"

@@ -21,9 +21,10 @@ def main():
         page.add_script_tag(path=str(ROOT / "library-tag-manager.js"))
         page.evaluate("""() => {
           window.calls=[]; window.failNext=false;
-          window.catalogue={revision:10,groups:[{id:'g1',name:'我的课堂'}],tags:[
-            {id:'functions',name:'函数',kind:'knowledge',parent_ids:[],direct_count:2,subtree_count:6},
-            {id:'equations',name:'方程',kind:'knowledge',parent_ids:[],direct_count:1,subtree_count:4},
+          window.catalogue={revision:10,tags:[
+            {id:'chapter',name:'高中 · 函数与方程',kind:'knowledge',description:'教材章节，用来给标签目录分层。',parent_ids:[],direct_count:0,subtree_count:8},
+            {id:'functions',name:'函数',kind:'knowledge',parent_ids:['chapter'],direct_count:2,subtree_count:6},
+            {id:'equations',name:'方程',kind:'knowledge',parent_ids:['chapter'],direct_count:1,subtree_count:4},
             {id:'geometry',name:'几何',kind:'knowledge',parent_ids:[],direct_count:0,subtree_count:0},
             {id:'quadratic',name:'二次函数与方程',kind:'knowledge',parent_ids:['functions','equations'],direct_count:1,subtree_count:3,related_method_ids:['completing']},
             {id:'minimum',name:'二次函数最小值',kind:'knowledge',parent_ids:['quadratic'],direct_count:2,subtree_count:2},
@@ -31,7 +32,7 @@ def main():
             {id:'completing',name:'配方法',kind:'method',parent_ids:['proofs'],direct_count:1,subtree_count:1},
             {id:'lesson',name:'周末练习',kind:'custom',parent_ids:[],direct_count:0,subtree_count:0}
           ]};
-          catalogue.tags.forEach(t=>{t.active=true;t.groups=[{id:'g1',name:'我的课堂'}];});
+          catalogue.tags.forEach(t=>{t.active=true;});
           window.manager=QBLibraryTagManager.create({mount:document.getElementById('mount'),
             loadCatalogue:async()=>structuredClone(catalogue),
             request:async(url,options)=>{calls.push({url,options});
@@ -51,13 +52,15 @@ def main():
             openTemplates:()=>{},clearCatalogue:async()=>false,deleteTag:async()=>false,browseTag:tag=>calls.push({browse:tag.id})});
           return manager.show();
         }""")
-        # A personal group is flat and never creates parent/child relationships.
-        page.locator('[data-group-id="g1"]').click()
-        assert page.locator("#tagManagerList .tag-directory-row").count() == 8
+        # Every tag sits under a parent tag or a chapter; there is no flat folder.
+        assert page.locator("#tagManagerGroups").count() == 0
+        assert page.locator("#tagManagerList .tag-directory-row").count() == 9
         assert page.locator("#tagManagerLocation").is_hidden()
-        page.locator('[data-hierarchy-kind="knowledge"]').click()
+        page.locator('[data-nav-id="knowledge"]').click()
         roots = page.locator("#tagManagerList .tag-directory-row").evaluate_all("rows=>rows.map(row=>row.dataset.tagId)")
-        assert set(roots) == {"functions", "equations", "geometry"}
+        assert set(roots) == {"chapter", "geometry"}
+        page.locator('[data-expand-tag-id="chapter"]').click()
+        assert set(page.locator("#tagManagerList .tag-directory-row").evaluate_all("rows=>rows.map(row=>row.dataset.tagId)")) == {"functions", "equations"}
         page.locator('[data-tag-id="functions"] .tag-directory-usage').evaluate("el=>window.usageTitle=el.title")
         assert "本级 2 题" in page.evaluate("usageTitle") and "包含下级 6 题" in page.evaluate("usageTitle")
         before = page.evaluate("calls.filter(c=>c.action).length")
@@ -85,7 +88,6 @@ def main():
         page.locator("#tagManagerRelationSave").click()
         page.wait_for_function("!document.querySelector('.tag-directory-relation-dialog')")
         assert page.evaluate("catalogue.tags.find(t=>t.id==='quadratic').parent_ids") == ["functions", "equations", "geometry"]
-        assert page.evaluate("catalogue.tags.find(t=>t.id==='quadratic').groups[0].id") == "g1"
         # Remove one edge without removing a label or its other parent edges.
         page.locator('[data-parent-id="geometry"]').get_by_role("button", name="移除", exact=True).click()
         page.wait_for_function("!document.querySelector('#tagManagerWorkspace').getAttribute('aria-busy') || document.querySelector('#tagManagerWorkspace').getAttribute('aria-busy')==='false'")
@@ -110,15 +112,15 @@ def main():
         assert page.evaluate("calls.filter(c=>c.action==='set_related_methods').at(-1).fields") == {"tag_id": "quadratic", "related_method_ids": ["completing", "proofs"]}
         # Search a whole kind even when located on a branch, while ignoring IME composition.
         page.locator("#tagManagerSearch").fill("函数")
-        assert page.locator("#tagManagerList .tag-directory-row").count() == 3
+        assert page.locator("#tagManagerList .tag-directory-row").count() == 5
         page.locator("#tagManagerSearch").evaluate("el=>{el.value='配方';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));}")
-        assert page.locator("#tagManagerList .tag-directory-row").count() == 3
+        assert page.locator("#tagManagerList .tag-directory-row").count() == 5
         page.locator("#tagManagerSearch").evaluate("el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))")
         assert page.locator("#tagManagerList .tag-directory-row").count() == 0
         page.locator("#tagManagerSearch").fill("函数")
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        page.locator('[data-group-id="all"]').click()
+        page.locator('[data-nav-id="all"]').click()
         page.locator("#tagManagerSearch").fill("")
         page.locator('[data-tag-id="geometry"] .tag-directory-name').click()
         page.locator("#tagManagerAddParent").click()
@@ -128,7 +130,7 @@ def main():
         assert page.locator(".tag-directory-relation-dialog").count() == 0
         assert not errors, json.dumps(errors, ensure_ascii=False)
         browser.close()
-    print("Hierarchy manager browser checks passed: independent groups, DAG paths, any-level tags, explicit relation saves, cycle prevention, conflict retention, exact-edge move, related methods, counts, IME-safe search, and narrow layout.")
+    print("Hierarchy manager browser checks passed: no group folder, chapter parents, DAG paths, any-level tags, explicit relation saves, cycle prevention, conflict retention, exact-edge move, related methods, counts, IME-safe search, and narrow layout.")
 
 
 if __name__ == "__main__":

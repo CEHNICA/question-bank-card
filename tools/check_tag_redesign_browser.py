@@ -181,17 +181,22 @@ def check(base):
         mobile.close()
         report["screenshots"].extend([str(OUTPUT / "question-filterbar-desktop.png"), str(OUTPUT / "question-filterbar-mobile.png")])
         report["checks"].append("Source, question type, sort, and advanced filters live above the list; mobile controls wrap without horizontal overflow and More Filters does not shift cards")
+        # 「标签快速查看」住在「更多筛选」里面，所以要先把折叠板展开再断言里面的
+        # 按钮——对着关着的折叠板断言可见，永远不会通过。
         extra_tools = page.locator("#tagQuickTools")
+        page.locator("#advancedFilters > summary").click()
         expect(extra_tools).to_be_visible()
         expect(page.locator("#libraryTagManager")).to_be_visible()
         expect(extra_tools.get_by_role("button", name="标签管理")).to_have_count(0)
+        expect(extra_tools.get_by_role("button", name=re.compile("AI 建议待核对"))).to_be_visible()
+        expect(extra_tools.get_by_role("button", name=re.compile("未标知识点"))).to_be_visible()
+        page.locator("#advancedFilters > summary").click()
+        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, "Closing More Filters must not shift the question list"
         batch_container = page.locator("#aiBatchTools")
         expect(batch_container).to_be_visible()
         batch_tools = batch_container.locator("details.library-batch-ai")
         expect(batch_tools).to_have_count(1)
         expect(batch_tools).not_to_have_attribute("open", "")
-        expect(extra_tools.get_by_role("button", name=re.compile("AI 建议待核对"))).to_be_visible()
-        expect(extra_tools.get_by_role("button", name=re.compile("未标知识点"))).to_be_visible()
         inspector = page.locator("#questionInspector")
         first = page.locator("#q-" + fixture["ids"][0])
         second = page.locator("#q-" + fixture["ids"][1])
@@ -205,6 +210,13 @@ def check(base):
 
         def read_api(path):
             response = page.request.get(base.rstrip("/") + path, headers={"X-QB-Request": "1"})
+            assert response.ok, response.text()
+            return response.json()
+
+        def post_api(payload):
+            response = page.request.post(base.rstrip("/") + "/api/library/tags",
+                                         headers={"X-QB-Request": "1", "Content-Type": "application/json"},
+                                         data=json.dumps(payload))
             assert response.ok, response.text()
             return response.json()
 
@@ -232,21 +244,26 @@ def check(base):
         fixture_api_ready["value"] = False
         page.reload()
         page.wait_for_load_state("networkidle")
+        # 快速查看住在「更多筛选」里，断言前得先把折叠板展开。
+        page.locator("#advancedFilters > summary").click()
         expect(page.locator("#tagQuickTools .library-tool-quick")).to_be_visible()
         expect(page.locator("#aiBatchTools .library-batch-ai")).to_be_visible()
         expect(page.locator("#aiBatchTools .library-batch-ai button")).to_have_count(2)
         expect(page.locator("#aiBatchTools .library-batch-ai button").nth(0)).to_be_disabled()
         expect(page.locator("#aiBatchTools .library-batch-ai button").nth(1)).to_be_disabled()
+        page.locator("#advancedFilters > summary").click()
         assert queued_requests == [], queued_requests
         fixture_api_ready["value"] = True
         page.reload()
         page.wait_for_load_state("networkidle")
-        report["checks"].append("Quick tag filters stay visible outside More Filters; API-consuming batch actions are folded and expanding them makes no request")
+        report["checks"].append("Quick tag filters open with More Filters and need no request; API-consuming batch actions are folded and expanding them makes no request")
         report["checks"].append("API batch actions stay disabled when local readiness is false, while quick filters remain available")
 
         # These tests deliberately retain all four checked questions. The
         # inspector must still act on only the context question.
         first.locator(".paper").click()
+        # 右侧还没切过来就点「＋ 添加标签」，打开的会是上一道题的窗口。
+        expect(inspector).to_contain_text("第 1 题")
         page.locator("#selectVisible").check()
         before_second = assignment_ids(fixture["ids"][1])
         inspector.locator(".library-tags-edit").click()
@@ -256,7 +273,7 @@ def check(base):
         expect(picker.locator("#tagPickerTemplates")).to_have_count(0)
         expect(picker.locator("#tagPickerStartEmpty")).to_have_count(0)
         picker.locator("#tagPickerSearch").fill(regression.TAG_NAME)
-        row = picker.locator(".tag-picker-row").filter(has_text=regression.TAG_NAME).first
+        row = picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=regression.TAG_NAME)).first
         expect(row.locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
         with page.expect_response(lambda response: urlparse(response.url).path ==
                 "/api/library/tags/assignments/batch" and response.request.method == "POST") as single:
@@ -292,7 +309,12 @@ def check(base):
         # the same operation and revision even though no pending panel remains.
         fourth = page.locator("#q-" + fixture["lost_reply_id"])
         fourth.locator(".paper").click()
-        lost_panel = inspector.locator("aside.tag-suggestion-card")
+        # 待核对的建议只在标签窗口里处理，题卡和右侧都只留一个「去核对」的入口。
+        tag_window = page.locator("#tagPickerDialog")
+        inspector.locator(".tag-suggestion-open").click()
+        expect(tag_window).to_be_visible()
+        lost_panel = tag_window.locator("aside.tag-suggestion-card")
+        expect(lost_panel).to_have_count(1)
         prior_operations = {operation["id"] for operation in read_api("/api/library/tags/operations")["operations"]}
         committed, replay_requests = [], []
 
@@ -335,31 +357,42 @@ def check(base):
         report["checks"].append("Real committed AI acceptance with lost reply recovers after reload without duplicate operation or revision")
 
         # Saved AI candidates remain drafts while users inspect other cards.
-        # The same tab's reload must preserve names, group choice and selection.
+        # The same tab's reload must preserve names, the chosen parent and the
+        # checkbox. The parent tree is the only grouping mechanism left.
         second.locator(".paper").click()
-        proposal = inspector.locator("aside.tag-suggestion-card")
+        inspector.locator(".tag-suggestion-open").click()
+        expect(tag_window).to_be_visible()
+        proposal = tag_window.locator("aside.tag-suggestion-card")
         entry = proposal.locator('.tag-suggestion-entry[data-suggestion-index="1"]')
         editor = entry.locator("details.tag-suggestion-edit")
         editor.locator("summary").click()
         name = editor.locator("input[data-new-tag-name]")
         name.fill(DRAFT_NAME)
-        groups = editor.locator("input[data-new-tag-group]")
-        expect(groups.first).to_be_visible()
-        groups.first.check()
-        draft_group_id = groups.first.input_value()
+        expect(editor.locator("input[data-new-tag-group]")).to_have_count(0)
+        parents = editor.locator("select[data-new-tag-parent]")
+        page.wait_for_function("() => { const box = document.querySelector('[data-new-tag-parent]');"
+            " return !!box && box.options.length > 0; }")
+        draft_parent_id = parents.locator("option").first.get_attribute("value")
+        parents.select_option([draft_parent_id])
         entry.locator("input[data-tag-suggestion]").check()
+        # 看别的题再回来：草稿必须还在，刷新页面也必须还在。
+        tag_window.get_by_role("button", name="关闭", exact=True).click()
         first.locator(".paper").click()
         second.locator(".paper").click()
+        inspector.locator(".tag-suggestion-open").click()
+        expect(tag_window).to_be_visible()
         expect(name).to_have_value(DRAFT_NAME)
-        expect(groups.first).to_be_checked()
+        expect(parents).to_have_values([draft_parent_id])
         expect(entry.locator("input[data-tag-suggestion]")).to_be_checked()
         page.reload()
         page.wait_for_load_state("networkidle")
         second.locator(".paper").click()
+        inspector.locator(".tag-suggestion-open").click()
+        expect(tag_window).to_be_visible()
         expect(name).to_have_value(DRAFT_NAME)
-        expect(groups.first).to_be_checked()
+        expect(parents).to_have_values([draft_parent_id])
         expect(entry.locator("input[data-tag-suggestion]")).to_be_checked()
-        report["checks"].append("AI candidate draft name, groups and checkboxes survive question switching and reload")
+        report["checks"].append("AI candidate draft name, chosen parent and checkboxes survive question switching and reload")
 
         # Hold a local request in-flight to check locking, then inject a failed
         # reply. Retrying must use the exact same request, not a second action.
@@ -381,7 +414,7 @@ def check(base):
             body=json.dumps({"error": "本机验收：采纳返回暂时失败，保留草稿。"}, ensure_ascii=False))
         expect(entry.locator(".tag-suggestion-accept")).to_be_enabled()
         expect(name).to_have_value(DRAFT_NAME)
-        expect(groups.first).to_be_checked()
+        expect(parents).to_have_values([draft_parent_id])
         page.unroute(resolve_pattern, hold_resolution)
         page.set_viewport_size({"width": 1440, "height": 640})
         page.evaluate("window.scrollTo(0, Math.max(1, document.documentElement.scrollHeight / 3))")
@@ -395,8 +428,11 @@ def check(base):
         after_accept_position = second.evaluate("element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})")
         assert abs(after_accept_position["top"] - before_accept_position["top"]) < 12, (before_accept_position, after_accept_position)
         assert after_accept_position["scrollY"] > 0, after_accept_position
+        # 采纳之后窗口关上，题目列表原地不动，右侧定位也要能把题卡点亮。
+        tag_window.get_by_role("button", name="关闭", exact=True).click()
         assert "inspector-active" in (second.get_attribute("class") or "")
-        expect(inspector.locator(".question-inspector-target")).to_contain_text("右侧信息对应绿色高亮题卡")
+        expect(inspector.locator(".question-inspector-target span")).to_have_attribute(
+            "title", "右侧信息对应绿色高亮题卡")
         page.evaluate("window.scrollTo(0, 0)")
         inspector.locator(".question-inspector-locate").click()
         expect(second).to_have_class(re.compile("inspector-focus-pulse"))
@@ -407,15 +443,22 @@ def check(base):
         assert accepted_payload == resolve_payloads[0], (accepted_payload, resolve_payloads)
         assert accepted_payload["indices"] == [1]
         assert accepted_payload["new_tags"]["1"]["name"] == DRAFT_NAME
-        assert accepted_payload["new_tags"]["1"]["group_ids"] == [draft_group_id]
-        expect(proposal.locator('.tag-suggestion-entry[data-suggestion-index="1"]')).to_have_count(0)
+        assert accepted_payload["new_tags"]["1"]["parent_ids"] == [draft_parent_id]
+        assert "group_ids" not in accepted_payload["new_tags"]["1"], accepted_payload
+        # 采纳后窗口已关，重新打开时那条已消失，另一条还能单独处理。
+        inspector.locator(".tag-suggestion-open").click()
+        expect(tag_window).to_be_visible()
+        expect(tag_window.locator('.tag-suggestion-entry[data-suggestion-index="1"]')).to_have_count(0)
         expect(inspector.locator(".library-tags")).to_contain_text("未提交的中点专项标签123")
-        remaining = proposal.locator('.tag-suggestion-entry[data-suggestion-index="0"]')
+        remaining = tag_window.locator('.tag-suggestion-entry[data-suggestion-index="0"]')
         with page.expect_response(lambda response: urlparse(response.url).path.endswith("/resolve")
                 and response.request.method == "POST") as rejected:
             remaining.locator(".tag-suggestion-reject").click()
         assert rejected.value.ok, rejected.value.text()
         assert rejected.value.request.post_data_json["indices"] == [0]
+        expect(tag_window.locator("aside.tag-suggestion-card")).to_have_count(0)
+        if tag_window.is_visible():
+            tag_window.get_by_role("button", name="关闭", exact=True).click()
         expect(inspector.locator("aside.tag-suggestion-card")).to_have_count(0)
         inspector.get_by_role("button", name="AI 标签记录", exact=True).click()
         history = page.locator(".tag-history-dialog")
@@ -496,7 +539,7 @@ def check(base):
         source_row = manager.locator(f'.tag-directory-row[data-tag-id="{source_id}"]')
         target_row.locator(".tag-directory-name").click()
         expect(manager.locator("#tagManagerDetail")).to_contain_text(regression.TAG_NAME)
-        expect(manager.locator("#tagManagerDetail")).to_contain_text("2 道题")
+        expect(manager.locator("#tagManagerDetail")).to_contain_text("本级 2 题")
         capture("tag-manager-desktop.png")
         target_row.locator(".tag-directory-usage").click()
         expect(manager).to_be_hidden()
@@ -506,52 +549,38 @@ def check(base):
         expect(page.locator(".library-card")).to_have_count(4)
         report["checks"].append("Tag manager is a standalone page; selected-tag details and usage counts open exact matching questions")
 
-        # Two explicit checkboxes establish multi-tag scope. Adding a group
-        # preserves all existing memberships; removing it preserves tags and
-        # question assignments. Real server replies are inspected each time.
+        # Grouping is gone for good: parents are the only hierarchy, so the
+        # manager must expose no group bar, no group picker and no group
+        # wording. Creating a tag still round-trips through the real server,
+        # and neither the request nor the answer carries a group field.
         page.locator("#libraryTagManager").click()
-        manager.locator("#tagManagerCreateGroup").click()
+        for selector in ("#tagManagerGroups", "#tagManagerBulkGroup", "#tagManagerGroupActions",
+                         "#tagManagerCreateGroup", "#tagManagerBulkAdd", "#tagManagerBulkRemove"):
+            expect(page.locator(selector)).to_have_count(0)
+        assert "分组" not in manager.inner_text()
+        manager.locator("#tagManagerCreateTag").click()
         catalogue_editor = page.locator("#tagCatalogueEditorDialog")
         expect(catalogue_editor).to_be_visible()
-        group_name = "专项验收临时分组ABC123"
-        catalogue_editor.locator("#tagCatalogueName").press_sequentially(group_name, delay=3)
-        expect(catalogue_editor.locator("#tagCatalogueName")).to_have_value(group_name)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as group_created:
-            catalogue_editor.locator("#tagCatalogueSave").click()
-        assert group_created.value.ok, group_created.value.text()
-        created_group = next(group for group in group_created.value.json()["catalogue"]["groups"]
-            if group["name"] == group_name)
-        manager.locator('#tagManagerGroups button[data-group-id="all"]').click()
-        target_row.locator('input[type="checkbox"]').check()
-        source_row.locator('input[type="checkbox"]').check()
-        expect(manager.locator("#tagManagerBulk")).to_contain_text("已选 2 个")
-        manager.locator("#tagManagerBulkGroup").select_option(created_group["id"])
-        capture("tag-manager-bulk.png")
-        before_memberships = {tag["id"]: {group["id"] for group in tag["groups"]}
-            for tag in read_api("/api/library/tags")["tags"] if tag["id"] in {target_id, source_id}}
+        new_tag_name = "专项验收临时标签ABC123"
+        catalogue_editor.locator("#tagCatalogueName").press_sequentially(new_tag_name, delay=3)
+        expect(catalogue_editor.locator("#tagCatalogueName")).to_have_value(new_tag_name)
+        expect(catalogue_editor.locator("#tagCatalogueParents")).to_be_visible()
         publication_ids = [*fixture["ids"], fixture["lost_reply_id"]]
+        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
+                and response.request.method == "POST") as tag_created:
+            catalogue_editor.locator("#tagCatalogueSave").click()
+        assert tag_created.value.ok, tag_created.value.text()
+        tag_payload = tag_created.value.request.post_data_json
+        assert tag_payload["action"] == "create_tag" and "group_ids" not in tag_payload, tag_payload
+        assert "groups" not in tag_created.value.json()["catalogue"]
+        created_tag = next(tag for tag in tag_created.value.json()["catalogue"]["tags"]
+            if tag["name"] == new_tag_name)
+        assert created_tag["parent_ids"] == [], created_tag
+        expect(manager.locator(f'.tag-directory-row[data-tag-id="{created_tag["id"]}"]')).to_have_count(1)
         before_assignments = {publication_id: assignment_ids(publication_id) for publication_id in publication_ids}
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as grouped:
-            manager.locator("#tagManagerBulkAdd").click()
-        assert grouped.value.ok, grouped.value.text()
-        payload = grouped.value.request.post_data_json
-        assert payload["action"] == "group_membership_batch" and payload["mode"] == "add"
-        assert set(payload["tag_ids"]) == {target_id, source_id}
-        for tag in grouped.value.json()["catalogue"]["tags"]:
-            if tag["id"] in before_memberships:
-                assert {group["id"] for group in tag["groups"]} == before_memberships[tag["id"]] | {created_group["id"]}
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as ungrouped:
-            manager.locator("#tagManagerBulkRemove").click()
-        assert ungrouped.value.ok, ungrouped.value.text()
-        assert ungrouped.value.request.post_data_json["mode"] == "remove"
-        for tag in ungrouped.value.json()["catalogue"]["tags"]:
-            if tag["id"] in before_memberships:
-                assert {group["id"] for group in tag["groups"]} == before_memberships[tag["id"]]
+        capture("tag-manager-bulk.png")
         assert {publication_id: assignment_ids(publication_id) for publication_id in publication_ids} == before_assignments
-        report["checks"].append("Multi-tag add/remove group is atomic and retains original groups and question associations")
+        report["checks"].append("Manager exposes no group controls and creates a tag through the real server without group fields")
 
         history_section = manager.locator("details.tag-directory-history")
 
@@ -566,6 +595,9 @@ def check(base):
 
         # Used tags merge only after one explicit scope confirmation, and undo
         # restores the stable identities and assignments of both source tags.
+        target_row.locator('input[type="checkbox"]').check()
+        source_row.locator('input[type="checkbox"]').check()
+        expect(manager.locator("#tagManagerBulk")).to_contain_text("已选 2 个")
         manager.locator("#tagManagerBulkMerge").click()
         merge_dialog = page.locator(".tag-directory-merge-dialog")
         expect(merge_dialog).to_be_visible()
@@ -612,16 +644,16 @@ def check(base):
         assert {publication_id: assignment_ids(publication_id) for publication_id in publication_ids} == before_assignments
         report["checks"].append("Batch delete previews full-library impact; persistent undo restores every association")
 
-        # Delete the now-unused group separately: no tag is deleted or hidden.
-        manager.locator('#tagManagerGroups button[data-group-id="' + created_group["id"] + '"]').click()
-        page.once("dialog", accept_confirm)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as group_deleted:
-            manager.locator("#tagManagerGroupActions").get_by_role("button", name="删除分组（保留标签）", exact=True).click()
-        assert group_deleted.value.ok, group_deleted.value.text()
-        assert group_deleted.value.request.post_data_json["action"] == "delete_group"
+        # After every merge/delete and its undo, the directory is intact: both
+        # labels are back, the freshly created one was never touched, and no
+        # group control has reappeared.
+        if manager.locator("#tagManagerBulk").is_visible():
+            manager.locator('#tagManagerBulk button:has-text("取消选择")').click()
         expect(target_row).to_have_count(1)
         expect(source_row).to_have_count(1)
+        expect(manager.locator(f'.tag-directory-row[data-tag-id="{created_tag["id"]}"]')).to_have_count(1)
+        for selector in ("#tagManagerGroups", "#tagManagerBulkGroup", "#tagManagerGroupActions"):
+            expect(page.locator(selector)).to_have_count(0)
         capture("tag-manager-after-operations.png")
         page.set_viewport_size({"width": 390, "height": 844})
         expect(manager).to_be_visible()
@@ -633,7 +665,7 @@ def check(base):
         manager.locator("#tagManagerBack").click()
         expect(page.locator(".library-workspace")).to_be_visible()
         expect(page.locator(".library-card")).to_have_count(4)
-        report["checks"].append("Group delete preserves labels; standalone manager fits 390px and returns to unchanged question list")
+        report["checks"].append("Undo restores every label and no group control returns; standalone manager fits 390px")
 
         page.wait_for_load_state("networkidle")
         page.unroute_all(behavior="wait")
