@@ -314,16 +314,24 @@
       const data = catalogue || {};
       const published = Number(data.published_questions) || 0;
       const tagged = Number(data.tagged_questions) || 0;
-      const pending = Number(data.pending_suggestions) || 0;
+      const pending = Number(data.questions_pending_review) || 0;
+      const actionable = Number(data.questions_pending_actionable) || 0;
       // 标签都贴完了，或者题库里还没有题，这句话没有内容可说 —— 别摆一条空框。
       if (!published || published - tagged <= 0) return null;
       const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
       if (pending) {
+        // 1.25.13：这里数的是「有多少道题等你核对」，和题库页那个「AI 建议待核对」筛
+        // 选是同一个数、同一套算法。上一版这里数的是建议条数（一道题可能挂两条），
+        // 两个数字摆在两个页面上，人来回一看只会以为有一个算错了。
+        const unreachable = pending - actionable;
         return {
-          text: lead + `另有 ${pending} 条 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
-          button: `回题库核对这 ${pending} 条 AI 标签建议`,
+          text: lead + `另有 ${pending} 道题有 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
+          button: `回题库核对这 ${pending} 道题的 AI 标签建议`,
           title: "回到题库，按「AI 建议待核对」筛选，逐题看过再采纳。"
             + "建议是 AI 已经拟好的，采纳这一步不再调用 AI，也不消耗额度。"
+            + (unreachable > 0
+              ? `其中 ${actionable} 道现在就能采纳，另外 ${unreachable} 道对不上现在的标签库，需要重新生成。`
+              : `这 ${pending} 道题现在都能采纳。`)
         };
       }
       return {

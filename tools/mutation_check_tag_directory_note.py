@@ -37,11 +37,13 @@ MANAGER = "frontend/library-tag-manager.js"
 LIBRARY = "frontend/library.js"
 SERVICE = "backend/core/library_tagging.py"
 
-NOTE_BODY = """      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
-      if (pending) {
-        return {
-          text: lead + `另有 ${pending} 条 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
-          button: `回题库核对这 ${pending} 条 AI 标签建议`,"""
+NOTE_TEXT = ("          text: lead + `另有 ${pending} 道题有 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,")
+NOTE_BUTTON = "          button: `回题库核对这 ${pending} 道题的 AI 标签建议`,"
+NOTE_LEAD = "      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;"
+NOTE_FIELDS = """      const pending = Number(data.questions_pending_review) || 0;
+      const actionable = Number(data.questions_pending_actionable) || 0;"""
+NOTE_UNREACHABLE = """        const unreachable = pending - actionable;"""
+NOTE_TITLE = """              ? `其中 ${actionable} 道现在就能采纳，另外 ${unreachable} 道对不上现在的标签库，需要重新生成。`"""
 
 NOTE_GUARD = "      if (!published || published - tagged <= 0) return null;"
 NOTE_EXHAUSTED = """        button: "回题库给题目贴标签","""
@@ -56,8 +58,11 @@ CSS_HIDDEN = ".tag-directory-usage-note[hidden] { display: none; }"
 SERVICE_COUNTS = """            "published_questions": PublishedQuestion.objects.filter(
                 status=PublishedQuestion.Status.PUBLISHED).count(),
             "tagged_questions": tagged_questions,
-            "pending_suggestions": LibraryTagSuggestion.objects.filter(
-                status=LibraryTagSuggestion.Status.PENDING).count()}"""
+            "questions_pending_review": tag_work["pending_review"],
+            "questions_pending_actionable": tag_work["pending_actionable"]}"""
+SERVICE_FETCH = "    from .library_browse import tag_work_counts"
+BASKET_EMPTY = ('      : !state.basket.length ? "篮子是空的。在左边任意一道题的右下角点「加入试题篮」，就会出现在这里；'
+                '跨试卷、跨筛选都保留。"')
 LIBRARY_HANDLER = """      onReviewSuggestions: () => {
         state.tag = ""; state.tagAll = ""; state.tagNot = ""; state.tagAny = "";
         state.tagMode = ""; state.tagReview = true; state.untaggedKnowledge = false;
@@ -67,40 +72,44 @@ LIBRARY_HANDLER = """      onReviewSuggestions: () => {
 # (relative, description, original, mutation)
 MUTATIONS = [
     (MANAGER,
-     "the sentence no longer counts the waiting proposals",
-     NOTE_BODY,
-     """      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
-      if (pending) {
-        return {
-          text: lead + "还有 AI 标签建议等你核对。",
-          button: `回题库核对这 ${pending} 条 AI 标签建议`,"""),
+     "the sentence no longer counts the waiting questions",
+     NOTE_TEXT,
+     "          text: lead + \"还有题有 AI 标签建议等你核对。\","),
 
     (MANAGER,
      "the button stops naming what it acts on",
-     NOTE_BODY,
-     """      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
-      if (pending) {
-        return {
-          text: lead + `另有 ${pending} 条 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
-          button: "去核对","""),
+     NOTE_BUTTON,
+     '          button: "去核对",'),
+
+    (MANAGER,
+     "the button counts proposals instead of questions, next to the library's question count",
+     NOTE_BUTTON,
+     "          button: `回题库核对这 ${pending} 条 AI 标签建议`,"),
+
+    (MANAGER,
+     "the note counts proposal rows again",
+     NOTE_FIELDS,
+     '      const pending = Number(data.questions_pending_review) || 0;\n      const actionable = 0;'),
+
+    (MANAGER,
+     "the note stops saying which questions can be accepted right now",
+     NOTE_UNREACHABLE,
+     "        const unreachable = 0;"),
+
+    (MANAGER,
+     "the hover stops separating the unreachable ones",
+     NOTE_TITLE,
+     '              ? `另外 ${unreachable} 道对不上现在的标签库，需要重新生成。`'),
 
     (MANAGER,
      "the note drops the part explaining what the counts are",
-     NOTE_BODY,
-     """      const lead = "下面这些标签大部分还没贴到题上。";
-      if (pending) {
-        return {
-          text: lead + `另有 ${pending} 条 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
-          button: `回题库核对这 ${pending} 条 AI 标签建议`,"""),
+     NOTE_LEAD,
+     '      const lead = "下面这些标签大部分还没贴到题上。";'),
 
     (MANAGER,
      "the cost of reviewing is quietly added to a step that is free",
-     NOTE_BODY,
-     """      const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
-      if (pending) {
-        return {
-          text: lead + `另有 ${pending} 条 AI 标签建议等你核对。`,
-          button: `回题库核对这 ${pending} 条 AI 标签建议`,"""),
+     NOTE_TEXT,
+     "          text: lead + `另有 ${pending} 道题有 AI 标签建议等你核对。`,"),
 
     (MANAGER,
      "a fully tagged library still claims nothing is tagged",
@@ -115,7 +124,7 @@ MUTATIONS = [
     (MANAGER,
      "with nothing left to review the button still offers to review",
      NOTE_EXHAUSTED,
-     '        button: "回题库核对 AI 标签建议",'),
+     '        button: "回题库核对这 439 道题的 AI 标签建议",'),
 
     (MANAGER,
      "the exit leaves the directory open behind it",
@@ -144,21 +153,36 @@ MUTATIONS = [
      "/* nothing: hidden bars still reserve a row */"),
 
     ("frontend/library-tag-manager.css",
-     "the note loses the rule that puts the exit beside the text",
+     "the note loses the rule that puts the exit under the text",
      CSS_RULE,
      "/* no rule at all: the bar stacks into an unstyled block */"),
 
     (SERVICE,
-     "the page stops being told how many proposals are waiting",
+     "the page stops being told how many questions are waiting",
      SERVICE_COUNTS,
      """            "published_questions": PublishedQuestion.objects.filter(
                 status=PublishedQuestion.Status.PUBLISHED).count(),
             "tagged_questions": tagged_questions}"""),
 
     (SERVICE,
+     "the directory counts the backlog on its own instead of sharing the library's number",
+     SERVICE_FETCH,
+     "    # counted here as well, which is how 443 turned up next to 439"),
+
+    (SERVICE,
      "the tagged count stops counting questions once each",
      "    tagged_questions = len({publication_id for ids in publications_by_tag.values() for publication_id in ids})",
      "    tagged_questions = sum(len(ids) for ids in publications_by_tag.values())"),
+
+    (LIBRARY,
+     "the empty basket stops saying where to press",
+     BASKET_EMPTY,
+     '      : !state.basket.length ? "把需要的题加入这里，跨试卷、跨筛选保留。"'),
+
+    (LIBRARY,
+     "the instruction names a button that does not exist on the cards",
+     BASKET_EMPTY,
+     '      : !state.basket.length ? "篮子是空的。在左边任意一道题的右下角点「加入选题」，就会出现在这里；跨试卷、跨筛选都保留。"'),
 
     (LIBRARY,
      "arriving from the tag page no longer filters to pending proposals",

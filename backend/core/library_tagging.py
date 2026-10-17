@@ -612,16 +612,22 @@ def _catalogue_rows():
         tags.append(row)
     # 1.25.12：标签管理页以前只说「299 个标签」，然后每行自己写「0 题」。走进来的人
     # 只看见一整屏 0，既不知道题库里到底有多少道题，也不知道其实只有两道贴过标签 ——
-    # 更不知道后台已经攒着几百条能直接采纳的 AI 建议（采纳不花钱）。这三个数和标签
-    # 目录本来就是同一件事，所以放在这一次请求里一起给，别让页面自己再去拼一遍。
+    # 更不知道后台已经攒着几百条能直接采纳的 AI 建议（采纳不花钱）。
+    #
+    # 1.25.13：「待核对」这个数不能在这里另数一遍。原来数的是建议条数（443），而题库
+    # 页那个筛选数的是有建议的题目数（439）—— 一道题可能挂两条建议。两个数摆在两个
+    # 页面上，人来回一看只会以为其中一个算错了。所以直接取题库页用的那个函数，
+    # 同一个函数算两遍也不会漂。
+    from .library_browse import tag_work_counts
+    tag_work = tag_work_counts()
     tagged_questions = len({publication_id for ids in publications_by_tag.values() for publication_id in ids})
     return {"revision": state.revision, "tags": tags,
             "total": len(tags), "max_name": MAX_NAME, "initialized": state.initialized,
             "published_questions": PublishedQuestion.objects.filter(
                 status=PublishedQuestion.Status.PUBLISHED).count(),
             "tagged_questions": tagged_questions,
-            "pending_suggestions": LibraryTagSuggestion.objects.filter(
-                status=LibraryTagSuggestion.Status.PENDING).count()}
+            "questions_pending_review": tag_work["pending_review"],
+            "questions_pending_actionable": tag_work["pending_actionable"]}
 
 
 def template_rows():

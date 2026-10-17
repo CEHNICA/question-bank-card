@@ -2866,8 +2866,11 @@ $("selectedViewCount").textContent = String(state.basket.length);
       row.append(remove);
       list.append(row);
     });
+    // 1.25.13：篮子空的时候，这句话以前只叫人来把题放进来，却没说在哪儿放——面板里
+    // 没有，题卡右下角那个按钮也没被提到过。走进空篮子的人除了关掉面板没有第二条路。
+    // 现在把按钮的名字原样说出来，和题卡上写的是同一套话。
     $("basketSummary").textContent = state.basketLoading ? "正在核对选题的入库版本…"
-      : !state.basket.length ? "把需要的题加入这里，跨试卷、跨筛选保留。"
+      : !state.basket.length ? "篮子是空的。在左边任意一道题的右下角点「加入试题篮」，就会出现在这里；跨试卷、跨筛选都保留。"
       : `${Object.entries(counts).map(([type, count]) => `${QB.TYPE_NAMES[type] || "其他"} ${count} 题`).join(" · ") || "选题尚未载入"}${sources.size ? ` · 来自 ${sources.size} 份资料` : ""}`;
     const error = $("basketLoadError");
     error.replaceChildren();
