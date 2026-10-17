@@ -15,9 +15,12 @@ assert(keys(help.reference("crop", { mode: "view" })).includes("Ctrl+Enter"));
 assert(keys(help.reference("crop", { mode: "view" })).includes("Shift+Enter"));
 assert(!keys(help.reference("crop", { mode: "read", practiceRead: true })).includes("Ctrl+Enter"));
 assert(keys(help.reference("answers")).includes("Ctrl+S")); assert(!keys(help.reference("answers")).includes("Ctrl+Enter"));
-assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "Esc", "Ctrl+滚轮"]);
+assert.deepEqual(keys(help.reference("library", { fullScreen: true })), ["←", "→", "空格", "Esc", "Ctrl+滚轮", "0"]);
 assert(keys(help.reference("library")).includes("/"));
-assert(!keys(help.reference("library")).some(key => ["N", "J", "K", "E", "0", "W", "−", "+"].includes(key)));
+assert(keys(help.reference("library")).includes("空格") && keys(help.reference("library")).includes("0"),
+  "题库页也得说清全屏看题里怎么放大，不然只能等他自己试出来");
+assert(!keys(help.reference("library")).some(key => ["N", "J", "K", "E", "W", "−", "+"].includes(key)));
+assert(help.reference("library", { fullScreen: true }).extra.includes("看答案"), "全屏看题默认收起答案这件事要写在快捷键说明里");
 assert.equal(help.reference("print").primary[0].keys[0], "Esc");
 
 class Element {

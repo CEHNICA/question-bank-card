@@ -66,6 +66,51 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   assert.equal(byClass("question-viewer-percent").textContent, "100%");
   byId("questionViewerFit").emit("click"); assert(!byClass("question-viewer-content").classList.contains("native-images"));
 
+  // 1.25.7：全屏看题一打开就把答案摊在题面正下面，看题的功夫全花在答案上。
+  // 现在收进「看答案」里，和题卡同一套外观；一点答案都没有时不摆那个按钮。
+  const answerBox = byClass("question-viewer-answer-box");
+  assert.equal(answerBox.tagName, "DETAILS", "答案收在一个可收起的折叠里");
+  assert.equal(answerBox.open, false, "新打开一道题时答案默认收起，不自己摊开");
+  assert.equal(answerBox.hidden, false, "有答案时才摆「看答案」");
+  assert.equal(byClass("question-viewer-no-answer").hidden, true);
+  assert.deepEqual(byClass("library-answer-toggle").children.map(child => child.textContent), ["看答案", "收起答案"],
+    "折叠条沿用题卡那套说法的两个样子：收起时写「看答案」，展开时写「收起答案」");
+  assert.deepEqual(byClass("question-viewer-content").children.map(child => child.className.split(" ").pop()),
+    ["question-viewer-question", "question-viewer-answer-box", "question-viewer-no-answer", "question-viewer-status"],
+    "「看答案」紧跟在题面后面，就在看题的那块白底里");
+  assert.equal(document.activeElement, byClass("question-viewer-viewport"), "打开后焦点落在题面，不在「返回题库」上");
+  assert.equal(byId("questionViewerZoomIn").title, "放大题目（快捷键：空格）", "放大键的悬停说明里要写明空格也能放大");
+  assert(byId("questionViewerFit").title.includes("0"), "适合宽度也要写明 0 键，免得以为只有鼠标能缩放");
+
+  // 按空格以前什么都不会发生：只有 Ctrl+滚轮能缩放。
+  const press = async (key, target, blocked = {}) => {
+    const seen = { consumed: false };
+    await byId("libraryQuestionViewer").emit("keydown", { key, target, preventDefault() { seen.consumed = true; }, ...blocked });
+    return seen;
+  };
+  const firstSpace = await press(" ", byClass("question-viewer-viewport"));
+  assert(firstSpace.consumed, "放大时顺带挡住页面跟着滚动");
+  assert.equal(byClass("question-viewer-percent").textContent, "125%", "空格放大题目");
+  await press(" ", byClass("question-viewer-viewport"), { code: "Space" }); assert.equal(byClass("question-viewer-percent").textContent, "150%");
+  const fit = await press("0", byClass("question-viewer-viewport"));
+  assert(fit.consumed); assert.equal(byClass("question-viewer-percent").textContent, "100%", "0 回到适合宽度");
+  byId("questionViewerNative").emit("click");
+  await press("0", byClass("question-viewer-viewport"));
+  assert.equal(byClass("question-viewer-percent").textContent, "100%");
+  assert(!byClass("question-viewer-content").classList.contains("native-images"), "0 回到适合宽度，图片也跟着回到版心以内");
+  // 焦点落在按钮或「看答案」折叠上时，空格本义就是「按一下就执行」，不能被抢去放大。
+  const focusOn = needle => ({ closest: query => query.includes(needle) ? { tagName: needle } : null });
+  for (const [why, target] of [["按钮", focusOn("button")], ["「看答案」折叠", focusOn("summary")], ["链接", focusOn("a[href]")]]) {
+    const onControl = await press(" ", target);
+    assert(!onControl.consumed, `焦点在${why}上时，空格留给${why}本身，不能被抢去放大`);
+    assert.equal(byClass("question-viewer-percent").textContent, "100%");
+  }
+  for (const blocked of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { shiftKey: true }]) {
+    const guard = await press(" ", byClass("question-viewer-viewport"), blocked);
+    assert(!guard.consumed, "中文输入法和组合键不触发放大");
+    assert.equal(byClass("question-viewer-percent").textContent, "100%");
+  }
+
   // Native dialog cancel is the actual Esc path and only closes this viewer.
   byId("libraryQuestionViewer").emit("cancel"); assert(!viewer.isOpen());
   assert.equal(document.activeElement, caller); assert.equal(caller.focusOptions.preventScroll, true);
@@ -76,9 +121,13 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   await viewer.open({ ...item, content: { ...item.content, answer: "", analysis: "" } });
   assert(!byClass("question-viewer-answers").textContent.includes("原卷答案与解析"), "A diagram-only question with no answer has no original-answer panel");
   assert.equal(descend(byClass("question-viewer-answers")).filter(value => value.tagName === "IMG").length, 0);
+  assert.equal(answerBox.hidden, true, "一点答案都没有时不摆那个「看答案」——点开是空的，比不点更像出了故障");
+  assert.equal(byClass("question-viewer-no-answer").hidden, false, "改由一句话说明这道题没有答案");
   viewer.close();
   response = { solution: { answer: "人工 C", analysis: "人工保存版本", figures: [] }, ai_answer: { answer: "AI D", analysis: "有效未核对参考" } };
   await viewer.open(item);
+  assert.equal(answerBox.hidden, false, "核对回来的参考答案也算答案，「看答案」要重新出现");
+  assert.equal(answerBox.open, false, "换一道题重新打开，答案又是收起的");
   const text = byClass("question-viewer-answers").textContent;
   assert(text.includes("原卷推导") && text.includes("人工保存版本") && text.includes("有效未核对参考") && text.includes("未核对"));
   const answerHistory = byClass("question-viewer-answer-history");
@@ -173,6 +222,13 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
   const closingRead = byId("questionViewerNext").emit("click"); const closedSignal = navCalls.at(-1).signal;
   viewer.close(); assert(closedSignal.aborted); navGate = null; await viewer.open(item, { navigation: nav });
   releaseClose(); await closingRead; await settle(); assert.equal(byClass("question-viewer-position").textContent, "第 1/3 题");
+  // 答案既然要自己点开，就不该每翻一题再点一次：这一轮浏览里点开的，切过去仍开着。
+  answerBox.open = true;
+  await byId("questionViewerNext").emit("click"); await settle();
+  assert.equal(byClass("question-viewer-position").textContent, "第 2/3 题");
+  assert.equal(answerBox.open, true, "切到下一题不把已经点开的答案又合上");
+  await viewer.open(item, { navigation: nav });
+  assert.equal(answerBox.open, false, "从题库重新打开一道题，答案重新收起");
   viewer.close();
   const closedCount = navCalls.length; await byId("libraryQuestionViewer").emit("keydown", { key: "ArrowRight" }); assert.equal(navCalls.length, closedCount);
 
@@ -252,6 +308,8 @@ const settle = async () => { for (let count = 0; count < 12; count++) await Prom
     "全屏看题的缩放条后面不再挂快捷键提示");
   assert.deepEqual(byClass("question-viewer-tools").children.map(child => child.textContent), ["适合宽度", "图片原尺寸", "−", "100%", "＋"], "工具栏只剩缩放本身");
   assert(css.includes(".question-viewer-content.native-images .qb-question-image img"));
+  assert(css.includes(".question-viewer-answer-box { margin-top: 22px; }"), "「看答案」在版心里留出与题面的间距");
+  assert(css.includes(".question-viewer-viewport:focus-visible"), "题面可用键盘走到，但鼠标点开不画焦点框");
   assert(library.includes('"全屏看题"') && library.includes("openQuestionViewer(item, full)"));
-  console.log("Question viewer: complete content, original image order/zoom, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");
+  console.log("Question viewer: complete content, original image order/zoom, space-bar zoom and fit-to-width, answers collapsed until asked for, validated references, bounded navigation/keyboard/focus, Esc return, read abort and pure focus mode: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

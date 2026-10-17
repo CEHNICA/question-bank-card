@@ -1232,6 +1232,14 @@ body.printing { overflow: hidden; }
 .question-viewer-answer { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); }
 .question-viewer-answer h3 { margin: 0 0 10px; font: 650 15px/1.5 var(--ui-font); color: var(--accent); }
 .question-viewer-ai h3 { color: #835813; }
+/* 1.25.7：答案收进「看答案」折叠条，直接复用题卡那套外观，两处一个样子。
+   一点答案都没有时由上面那句顶上，不再摆一个点开是空的按钮。 */
+.question-viewer-answer-box { margin-top: 22px; }
+.question-viewer-no-answer { margin: 22px 0 0; }
+/* 焦点现在给题面：一打开就按空格要能放大，所以整个版心可聚焦。但平时点开
+   不该在整块白底上留一圈线，只在键盘走过来时才画。 */
+.question-viewer-viewport:focus { outline: none; }
+.question-viewer-viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .question-viewer-status { margin: 14px 0 0; font: 13px/1.6 var(--ui-font); color: #6b552f; }
 .question-viewer-status:empty { display: none; }
 /* 专注模式藏筛选栏和批量条，题目详情仍留在右侧，便于检查当前题。 */

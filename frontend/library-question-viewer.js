@@ -43,20 +43,43 @@
       // 全屏看题以前在缩放条后面挂着一条快捷键提示，占掉整条工具栏的宽度。
       // 这些键在设置里查得到，工具栏只留缩放本身。
       tools.append(fit, native, less, percent, more);
+      // 不想找那排小按钮时也有键盘的路：空格放大、0 回到适合宽度。写在按钮的
+      // 悬停说明里，不另加一条常驻提示把工具栏撑宽。
+      fit.title = "适合宽度：题目缩到刚好铺满版心（快捷键 0）";
+      native.title = "图片原尺寸：配图不再缩到版心以内，按原图大小看";
+      less.title = "缩小题目";
+      more.title = "放大题目（快捷键：空格）";
       const viewport = node("div", "question-viewer-viewport"); viewport.tabIndex = 0; viewport.setAttribute("aria-label", "完整题目与答案");
       const content = node("div", "question-viewer-content");
       const question = node("article", "paper question-viewer-question");
       const answers = node("section", "question-viewer-answers"); answers.setAttribute("aria-label", "答案与解析");
+      // 1.25.7：全屏看题以前一摊开就把答案摆在题面正下面，看题的功夫全花在答案上。
+      // 现在和题卡一样收进「看答案」里：自己点一下才显示。
+      const answerBox = node("details", "library-answer question-viewer-answer-box");
+      const answerToggle = node("summary", "library-answer-toggle");
+      answerToggle.append(node("span", "when-closed", "看答案"), node("span", "when-open", "收起答案"));
+      answerBox.append(answerToggle, answers);
+      const noAnswer = node("p", "helper question-viewer-no-answer", "原卷未提供答案与解析。"); noAnswer.hidden = true;
       const status = node("p", "question-viewer-status"); status.id = "questionViewerStatus"; status.setAttribute("role", "status");
-      content.append(question, answers, status); viewport.append(content); dialog.append(head, tools, viewport); doc.body.append(dialog);
-      controls = { title, source, detail, exit, percent, native, less, more, viewport, content, question, answers, status, navigationBar, previous, next, place, navStatus };
+      content.append(question, answerBox, noAnswer, status); viewport.append(content); dialog.append(head, tools, viewport); doc.body.append(dialog);
+      controls = { title, source, detail, exit, percent, native, less, more, viewport, content, question, answers, answerBox, noAnswer, status, navigationBar, previous, next, place, navStatus };
       dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
       dialog.addEventListener("click", event => { if (event.target === dialog) close(); });
       dialog.addEventListener("close", finishClose);
       dialog.addEventListener("keydown", event => {
         if (!dialog.open || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat
-            || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+            || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
         if (event.target?.closest?.("input, textarea, select, [contenteditable], [role='textbox']")) return;
+        // 1.25.7：以前全屏看题只有 Ctrl+滚轮能缩放，按空格什么都不会发生。
+        // 但空格在按钮和「看答案」那条折叠上本义就是「按一下就执行」，焦点在那儿
+        // 时必须留给它们本身，否则 Tab 到「返回题库」再按空格会先把窗口关掉。
+        if (!event.target?.closest?.("button, a[href], summary, [role='button']")) {
+          if (event.key === " " || event.code === "Space") { event.preventDefault(); setZoom(zoom + 25); return; }
+          if (event.key === "0") {
+            event.preventDefault(); controls.content.classList.remove("native-images"); setZoom(100); return;
+          }
+        }
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
         const scrolling = event.target?.closest?.(".qb-stem-body, .qb-option-body, .qb-analysis");
         if (scrolling && scrolling.scrollWidth > scrolling.clientWidth + 2) return;
         if (!navigation) return;
@@ -141,7 +164,10 @@
       // read-only solution endpoint validates an existing AI draft.
       if (ai) addAnswer("AI 参考答案与解析 · 未核对", ai, "question-viewer-ai", history || controls.answers);
       if (history) controls.answers.append(history);
-      if (!controls.answers.children.length) controls.answers.append(node("p", "helper", "原卷未提供答案与解析。"));
+      // 一道题都没有答案时不摆那个「看答案」：点开是空的，比压根不点更像出了故障。
+      // 题库给的原卷答案先摆上，后台核对回来的 AI 初稿随后可能把这条换掉。
+      const hasAnswer = controls.answers.children.length > 0;
+      controls.answerBox.hidden = !hasAnswer; controls.noAnswer.hidden = hasAnswer;
     }
     async function open(item, options = {}) {
       build();
@@ -163,10 +189,14 @@
       controls.content.classList.remove("native-images"); setZoom(100);
       controls.viewport.scrollTop = controls.viewport.scrollLeft = 0;
       QB.renderQuestion(controls.question, item.content || {}, { showNumber: false, showAnswer: "none", imageLoading: "eager" });
+      // 从题库新打开一道题，答案重新收起；本轮浏览里已经点开的，切到下一题不再让他
+      // 点第二次。答案校验回来只换内容，不动这条折叠本身。
+      if (!options.navigationStep) controls.answerBox.open = false;
       renderAnswers(item);
       controls.native.hidden = !(item.content?.figures?.length || item.content?.question_images?.length || item.solution?.figures?.length);
       controls.status.textContent = "正在检查已有参考答案…";
-      if (!options.navigationStep) controls.exit.focus({ preventScroll: true });
+      // 焦点给题面而不是「返回题库」：一打开就按空格要能放大，而不是先把窗口关掉。
+      if (!options.navigationStep) controls.viewport.focus({ preventScroll: true });
       const controller = new root.AbortController(); reading = controller; let timedOut = false;
       const timer = root.setTimeout(() => { timedOut = true; controller.abort(); }, 15000); readTimer = timer;
       try {

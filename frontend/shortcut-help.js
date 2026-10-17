@@ -44,10 +44,10 @@
         extra: layoutWorkspace || mode === "new" ? "新增题画框时光标变为十字；两次点击固定范围后可直接调整。双击已保存题框返回对应审核卡。普通调整直接保存，拆题和合题会先显示影响并让你确认；保存和返回都不会自动识读。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
     }
     if (scene === "library") return { scene, title: TITLES[scene], note,
-      primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]
+      primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("放大题目", "空格"), row("返回题库", "Esc"), row("看题缩放", "Ctrl+滚轮")]
         : [row("搜索题目", "/"), row("全屏上一题 / 下一题", "←", "→"), row("全屏返回题库", "Esc")],
-      more: options.fullScreen ? [] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
-      extra: "左右键仅在全屏看题中切题，按打开时的筛选或试题篮顺序浏览。宽公式正在横向滚动时，左右键保留给公式。标签可悬停、聚焦或点击浏览上下级；箭头只浏览，点击名称替换当前标签。Esc 关闭标签浮层，Tab 切换操作，Enter 执行。" };
+      more: options.fullScreen ? [row("适合宽度", "0")] : [row("全屏看题放大 / 适合宽度", "空格", "0"), row("打开快捷键说明", "?")],
+      extra: "全屏看题默认把答案收在「看答案」里，点一下才显示；空格放大、0 回到适合宽度。" + "左右键仅在全屏看题中切题，按打开时的筛选或试题篮顺序浏览。宽公式正在横向滚动时，左右键保留给公式。标签可悬停、聚焦或点击浏览上下级；箭头只浏览，点击名称替换当前标签。Esc 关闭标签浮层，Tab 切换操作，Enter 执行。" };
     if (scene === "answers") return { scene, title: TITLES[scene], note,
       primary: [row("保存答案解析", "Ctrl+S"), row("返回 / 先取消未完成的框", "Esc")],
       more: [row("粘贴解析图片", "Ctrl+V"), row("文字框中换行", "Enter")],
