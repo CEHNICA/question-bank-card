@@ -428,10 +428,33 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-advanced > summary::-webkit-details-marker { display: none; }
 .library-advanced > summary::before { content: "+"; margin-right: 6px; color: var(--accent); }
 .library-advanced[open] > summary::before { content: "−"; }
+/* 1.25.18：这里原来是 display: flex 换行挤在一起。量出来七块的高度是
+   30 / 61 / 35 / 105 / 61 / 96 —— 没有节奏；题型那排标签的最后一个右边紧贴着
+   「排序」两个字，排序的下拉框又孤零零飘到下一行右端。改成卡片栅格：
+   每个筛选项一张卡，标题在上、控件在下、间距一致。题型最宽，独占一行。 */
 .library-advanced[open] > .library-filters { position: absolute; z-index: 25; top: calc(100% + 7px); right: 0;
-  display: flex; align-items: flex-start; gap: 10px 14px; width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); align-items: start; gap: 12px;
+  width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
 .library-advanced .library-select { align-items: flex-start; flex-direction: column; gap: 5px; }
+/* 1.25.18：「更多筛选」原来是一排 flex 换行挤在一起的，题型那排标签的最后一个
+   右边紧贴着「排序」两个字，排序的下拉框又孤零零飘到下一行右端。上面那条已经把它
+   改成栅格；这里只管每张卡片长什么样。 */
+.library-advanced[open] > .library-filters > * {
+  display: flex; min-width: 0; flex-direction: column; gap: 7px; align-items: stretch;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+}
+.library-advanced[open] > .library-filters > .library-facet,
+.library-advanced[open] > .library-filters > .tag-saved-filter-box { grid-column: 1 / -1; }
+.library-advanced[open] > .library-filters .library-facet,
+.library-advanced[open] > .library-filters .library-filter-group { flex-direction: column; align-items: stretch; gap: 7px; }
+.library-advanced[open] > .library-filters select { width: 100%; max-width: none; }
+/* 标签那个多选框是系统灰列表框，撑满卡片才不像从别的系统贴过来的 */
+.library-advanced[open] > .library-filters #tagSelect { width: 100%; max-width: none; min-height: 104px; border-radius: 8px; }
+.library-advanced[open] > .library-filters .tag-saved-filter-actions { display: flex; gap: 8px; }
+/* 这个维度没数据时，标题跟着控件一起消失，不留一个空壳。
+   选择器里 `.library-filters` 这一层不能少：卡片是它的子元素，不是 <details> 的直接子元素。 */
+.library-advanced[open] > .library-filters > .library-filter-group:has([hidden]) { display: none; }
 .library-advanced #tagFilterBox select { min-width: 170px; }
 /* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。
    1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了。吸在顶栏下面，

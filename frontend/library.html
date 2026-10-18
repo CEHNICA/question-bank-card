@@ -99,8 +99,17 @@
                   <div id="typeFilters" class="draft-filters" role="group" aria-labelledby="typeFacetLabel"></div>
                 </div>
                 <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
-                <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
-                <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
+                <!-- 1.25.18：这两个维度原来只有给读屏用的名字，屏幕上没有标题，
+                     夹在有标题的控件中间，看着像低一档的东西。补上可见标题；
+                     标题跟着控件一起消失（见 .library-filter-group:has([hidden])）。 -->
+                <div class="library-filter-group">
+                  <span class="library-filter-group-label">谁审核的</span>
+                  <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
+                </div>
+                <div class="library-filter-group">
+                  <span class="library-filter-group-label">有没有答案</span>
+                  <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
+                </div>
                 <label id="tagFilterBox" class="library-select" hidden>
                   <span>标签</span>
                   <select id="tagSelect" aria-label="标签" multiple size="4"></select>
