@@ -51,6 +51,10 @@ from .textnorm import fix_reading_symbols, fix_symbols, witness_key
 
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
+# 自动判断「卷」还是「书」的分界。单份试卷极少超过 40 页；教材、讲义、合订资料都远超。
+# 40 页以上不自动切题（书每章重新编题号，硬切会把不同章节的题并成一条），
+# 原页完整保留，由老师框题；判错了可以在「试卷操作」里按教材重试或改回。
+AUTO_BOOK_MIN_PAGES = 40
 TYPES = set(qtypes.TYPES)
 SLOTS = {"stem", "A", "B", "C", "D", "E"}
 
@@ -972,9 +976,9 @@ def papers(request):
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
-    material_type = request.POST.get("material_type", Paper.MaterialType.EXAM)
-    if material_type not in Paper.MaterialType.values:
-        return _error("请选择“一份试卷”或“一本书”")
+    material_type = request.POST.get("material_type", "auto")
+    if material_type not in (*Paper.MaterialType.values, "auto"):
+        return _error("资料类型只能是自动判断、一份试卷或一本书")
     kinds = []
     for item in uploads:
         kind = UPLOAD_KINDS.get(Path(item.name).suffix.lower())
@@ -988,22 +992,22 @@ def papers(request):
     if kinds[0] == "image" or len(uploads) > 1:
         if any(kind != "image" for kind in kinds):
             return _error("几个文件一起上传时只能都是照片（合成一份试卷）；PDF 和 Word 请一份一份上传")
-        return _upload_photos(request, uploads, material_type=material_type, parse_mode=mode)
+        photo_type = Paper.MaterialType.EXAM if material_type == "auto" else material_type
+        return _upload_photos(request, uploads, material_type=photo_type, parse_mode=mode)
     upload = uploads[0]
     suffix = Path(upload.name).suffix.lower()
     kind = kinds[0]
     digest = hashlib.sha256()
     for chunk in upload.chunks():
         digest.update(chunk)
-    existing = _find_duplicate(digest.hexdigest(), material_type)
-    if existing and not (existing.archived and request.POST.get("force") == "1"):
-        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
-                             "archived": bool(existing.archived)})
     filename = Path(upload.name).name[:255]
+    # 1.25.36：不再让老师先选「试卷」还是「书」——先把文件落到临时目录、量出页数，
+    # 再决定：40 页以上按书/讲义（本机不自动切题，避免各章重复题号被合并），其余按试卷。
+    # 判断写在试卷上（材料的类型和未切题的原因都会显示），判错了还能在「试卷操作」改。
     paper = Paper(
         filename=filename, kind=kind, sha256=digest.hexdigest(),
-        material_type=material_type,
-        task_name=_distinct_task_name(filename) if existing else "",
+        material_type=Paper.MaterialType.EXAM if material_type == "auto" else material_type,
+        task_name="",
         processing_plan={"schema": 1, "mode": mode, "revision": 0},
         status=Paper.Status.READY if mode != "mineru" else Paper.Status.QUEUED,
     )
@@ -1030,6 +1034,20 @@ def papers(request):
                 return _error(str(exc))
             return _error("这份 PDF 无法打开或没有有效页面，请检查文件后重试")
         paper.pages = pages
+    # 页数出来了再决定：40 页以上不自动切题（书/讲义每章重排题号）。
+    if material_type == "auto":
+        paper.material_type = (
+            Paper.MaterialType.BOOK
+            if kind == "pdf" and len(paper.pages) >= AUTO_BOOK_MIN_PAGES
+            else Paper.MaterialType.EXAM
+        )
+    existing = _find_duplicate(digest.hexdigest(), paper.material_type)
+    if existing and not (existing.archived and request.POST.get("force") == "1"):
+        shutil.rmtree(staged, ignore_errors=True)
+        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
+                             "archived": bool(existing.archived)})
+    if existing:
+        paper.task_name = _distinct_task_name(filename)
     try:
         staged.replace(folder)
         paper.source_path = str(folder / target.name)

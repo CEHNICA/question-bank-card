@@ -266,12 +266,12 @@ const QBProgress = (() => {
   // being read belong to neither: nobody has looked at them yet.
   //
   // 这两个数只用来画颜色和算宽度。对外说的时候必须用屏幕上的词：卷名那行写的是
-  // 「已入库 N · M 张要看」，所以别再让悬停改口叫「不用再看 N」——同一份卷子同
+  // 「已入库 N · M 题待核对」，所以别再让悬停改口叫「不用再看 N」——同一份卷子同
   // 一个数字换名字，读的人只会以为程序算错了。
   //
   // These two numbers come from the server, the same ones the review page's
   // “需要核查” tab counts.  Deriving them here from green/yellow/red is what
-  // produced “列表说 4 张要看、点进去却是 25 张要看”.
+  // produced “列表说 4 题待核对、点进去却是 25 题待核对”.
   function paperProgress(counts) {
     const c = counts || {};
     const total = c.total || 0;
@@ -433,7 +433,8 @@ const QBNotify = (() => {
     const { todo } = QBProgress.paperProgress(c);
     if (paper.status === "failed") return paper.stopped ? `“${name}”已停止` : `“${name}”处理失败`;
     if (paper.status === "needs_grouping") return `“${name}”需要确认资料结构`;
-    return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 张要看` : "，全部识读完成"}`;
+    // 数的是题，单位就写「题」：原来这里写「张」，一份卷 12 道题会说成「12 张要看」。
+    return `“${name}”已读完：${c.total || 0} 题${todo ? `，${todo} 题待核对` : "，全部识读完成"}`;
   }
 
   function title(base, unseen) {
@@ -1334,7 +1335,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     brandNotice("");
     renderUploadAvailability();
     $("m3Button").hidden = !s.m3_available;
-    if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}（本机安装）`;
+    if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}`;
     renderSettingsModels();
     renderServiceReadiness();
     return true;
@@ -1348,10 +1349,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? (paper.status_label || "额度不足，已暂停") : paper.stopped ? "已停止" : "处理失败";
     if (paper.status === "needs_grouping") return "等待确认资料结构";
     const c = paper.counts || {};
-    const parts = [paper.demo ? `练习用 · ${c.total || 0} 题` : `${c.total || 0} 题`];
     // 同一个口径：和条子、和审核页的「需要核查」必须是同一个数。
     const { todo } = QBProgress.paperProgress(c);
-    if (todo) parts.push(`${todo} 张要看`);
+    const total = c.total || 0;
+    const lead = paper.demo ? "练习用 · " : "";
+    // 全都还没核对时别把同一个数说两遍：「12 题 · 12 题待核对」读起来像两件事。
+    const allPending = Boolean(todo) && todo === total;
+    const parts = [allPending ? `${lead}${total} 题待核对` : `${lead}${total} 题`];
+    if (todo && !allPending) parts.push(`${todo} 题待核对`);
     const settled = c.settled || 0;
     if (settled && settled >= (c.approved || 0)) parts.push(`已入库 ${settled}`);
     else if (c.approved) parts.push(`通过 ${c.approved}${settled ? ` · 入库 ${settled}` : ""}`);
@@ -1701,7 +1706,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (next) {
       const c2 = next.counts || {};
       const { todo } = QBProgress.paperProgress(c2);
-      actions.append(button(`下一份：${paperDisplayName(next)}${todo ? `（${todo} 张要看）` : ""}`,
+      actions.append(button(`下一份：${paperDisplayName(next)}${todo ? `（${todo} 题待核对）` : ""}`,
         c.unpublished ? "" : "primary", () => selectPaper(next.id), "打开下一份还有题卡没通过的试卷"));
     }
     banner.append(actions);
@@ -4184,7 +4189,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!waiting) { toast("这一卷没有待通过的题", "error"); return; }
     if (!(await confirmDialog({
       title: "批量审核这份试卷？",
-      text: `把这一卷里能通过的题一次入库，还有 ${waiting} 道要看。过不了的题不会被硬标通过，会在结果里逐条说明原因。`,
+      text: `把这一卷里能通过的题一次入库，还有 ${waiting} 题待核对。过不了的题不会被硬标通过，会在结果里逐条说明原因。`,
       ok: "通过能通过的题"
     }))) return;
     $("paperMenu").open = false;
@@ -4340,7 +4345,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("approveAllGreen").hidden = !state.paper;
       $("approveAllGreen").disabled = !ready || !waiting || state.approveAllBusy;
       $("approveAllGreen").title = ready
-        ? (waiting ? `把这一卷里能通过的题一次入库（还有 ${waiting} 道要看）；过不了的会逐条说明原因` : "这一卷没有待通过的题")
+        ? (waiting ? `把这一卷里能通过的题一次入库（还有 ${waiting} 题待核对）；过不了的会逐条说明原因` : "这一卷没有待通过的题")
         : "任务处理完成后才能标记通过";
     }
     if ($("questionTrash")) {
@@ -8248,8 +8253,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const photoUpload = { files: [], urls: [], policy: Object.freeze({ parseMode: "auto", allowCloud: false }), materialType: "exam" };
   const pasteUpload = { batch: null, resolve: null };
 
+  // 1.25.36：不再让人先选「试卷」还是「书」。交给后端按页数判断：
+  // 40 页以上按书/讲义处理（不自动切题），其余按试卷自动切。
   function selectedMaterialType() {
-    return document.querySelector('input[name="materialType"]:checked')?.value === "book" ? "book" : "exam";
+    return "auto";
   }
 
   function automaticParseReady() {
@@ -8294,17 +8301,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 「设置 → API 配置」以前整页只有一句说明和一个「配置 API」按钮：走进来的人
   // 问的是「这台电脑现在能不能上传、缺哪家的密钥」，页面一个字都不答，只能自己
   // 点进那个窗口去猜。直接把答案写在页首 —— 就地回答，别让人点进去才发现。
+  // 1.25.29：这一行原来三句话各说一遍「没配服务」，还都跟着一句「不影响上传」。
+  // 现在先说现在能干什么，再说两个服务各自的状态；缺哪一样才解释哪一样。
   function serviceReadiness(status = state.status) {
     if (!status) return { tone: "plain", text: "正在查看这台电脑的配置…" };
     const reading = status.reader_readiness;
-    const sentences = [status.upload_enabled
-      ? (status.automatic_parse_ready ? "现在可以直接上传 PDF、Word 或照片，程序先在本机切题。"
-        : "现在可以上传资料，但还没有可用的自动处理服务，只能自己整理。")
-      : "现在还不能上传资料。"];
-    sentences.push(status.mineru ? "自动切题用 MinerU，已经配好。" : "自动切题还没配 MinerU，上传后需要手工切题。");
+    if (!status.upload_enabled) return { tone: "missing", text: "现在还不能上传资料。" };
+    const sentences = [];
+    if (status.automatic_parse_ready) {
+      sentences.push("现在可以直接上传，程序先在本机切题。");
+      sentences.push(status.mineru ? "自动切题用 MinerU。" : "自动切题还没配 MinerU。");
+    } else {
+      sentences.push("现在可以上传，但自动切题还没配 MinerU，上传后需要手工切题。");
+    }
     sentences.push(reading && reading.ready
-      ? `识读和生成答案用 ${reading.label || status.reader || "已配置的服务"}，可以用。`
-      : `识读和生成答案还没配服务${reading && reading.label ? `（现在选的是「${reading.label}」但没有密钥）` : ""}，不影响上传和手工切题。`);
+      ? `识读和生成答案用 ${reading.label || status.reader || "已配置的服务"}。`
+      : `识读和生成答案还没配服务${reading && reading.label ? `（选的是「${reading.label}」，还没有密钥）` : ""}，不影响上传和手工切题。`);
     return { tone: status.mineru && reading && reading.ready ? "ready" : "missing", text: sentences.join("") };
   }
 
@@ -8314,10 +8326,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const { tone, text } = serviceReadiness();
     node.textContent = text;
     node.className = `settings-readiness ${tone}`;
-  }
-
-  function materialTypeLabel() {
-    return selectedMaterialType() === "book" ? "一本书 / 讲义" : "一份试卷";
   }
 
   async function sendUpload(form, label) {
@@ -8380,7 +8388,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (last) { await loadPapers(); selectPaper(last.id); }
     if (pictures.length > MAX_PHOTOS) toast(`一份试卷最多 ${MAX_PHOTOS} 张照片，这次选了 ${pictures.length} 张`, "error");
-    else if (pictures.length) openPhotoDialog(pictures, { policy, materialType });
+    else if (pictures.length) openPhotoDialog(pictures, { policy, materialType: "exam" });
   }
 
   function fileSizeLabel(bytes) {
@@ -8400,7 +8408,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const skipped = batch.unsupported.length ? `；${batch.unsupported.length} 个不支持的文件不会上传` : "";
     $("pasteTitle").textContent = `粘贴 ${batch.items.length} 个文件`;
     $("pasteSummary").textContent = `可上传 ${batch.accepted.length} 个${kinds ? `（${kinds}）` : ""}${skipped}`;
-    $("pasteNote").textContent = `当前按“${materialTypeLabel()}”上传。请核对文件和顺序；PDF、Word 会分别建立任务，照片会保持下列顺序进入照片确认。`;
+    $("pasteNote").textContent = "请核对文件和顺序；PDF、Word 会分别建立任务，照片会保持下列顺序进入照片确认。试卷和整本书由程序自动判断。";
     $("pasteUpload").textContent = `继续上传（${batch.accepted.length}）`;
     $("pasteUpload").disabled = !batch.accepted.length;
     $("pasteList").replaceChildren(...batch.items.map((item) => {
@@ -8435,7 +8443,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     photoUpload.policy = policy;
     photoUpload.materialType = materialType;
     photoUpload.urls = files.map((file) => URL.createObjectURL(file));
-    $("photoHint").textContent = `这些照片按下列顺序合成${materialType === "book" ? "一本书 / 讲义" : "一份试卷"}。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
+    $("photoHint").textContent = `这些照片按下列顺序合成一份试卷。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
     $("photoTitle").textContent = files.length > 1 ? `上传 ${files.length} 张照片` : "上传 1 张照片";
     $("photoUpload").textContent = files.length > 1 ? `上传（${files.length} 张合成一份试卷）` : "上传";
     $("photoUpload").disabled = false;
@@ -8493,11 +8501,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
   const showDropOverlay = (show) => {
     $("dropOverlay").hidden = !show;
-    if (show) {
-      $("dropOverlayType").textContent = selectedMaterialType() === "book"
-        ? "作为“一本书 / 讲义”上传（可在左侧改成“一份试卷”）"
-        : "作为“一份试卷”上传；几张照片会合成一份（可在左侧改成“一本书 / 讲义”）";
-    }
+    if (show) $("dropOverlayType").textContent = "试卷和整本书由程序自动判断";
   };
   window.addEventListener("dragenter", (event) => {
     if (!carriesFiles(event) || anyDialogOpen()) return;
@@ -9395,8 +9399,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (confirmed) await startTeaching({ reset: true });
   });
   document.querySelectorAll("[data-teach-task]").forEach((button) => button.addEventListener("click", () => startTeaching({ task: button.dataset.teachTask })));
-  $("settingsHelpFaq").addEventListener("click", () => { $("settingsFaq").open = true; $("settingsFaq").scrollIntoView({ block: "start", behavior: "smooth" }); });
-  $("settingsHelpKeys").addEventListener("click", () => closeSettingsThen(() => openShortcutHelp()));
   renderLearningEntry();
   $("emptyLearn").addEventListener("click", () => startTeaching());
 
@@ -9415,7 +9417,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const previous = new URL(document.referrer);
         if (previous.origin === window.location.origin && ["/", "/library"].includes(previous.pathname)) {
           $("settingsReturn").href = previous.pathname + previous.search;
-          $("settingsReturn").textContent = previous.pathname === "/" ? "返回录入终审" : "返回题库";
+          $("settingsReturn").textContent = previous.pathname === "/" ? "返回核对题目" : "返回题库";
         }
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();

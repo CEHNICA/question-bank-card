@@ -24,6 +24,9 @@ _SOURCE_ANCHOR = models.F("question__source_anchor_seq").asc(nulls_last=True)
 SORTS = {
     "recent": ("-published_at", "-id"),
     "source": ("source_filename", _SOURCE_ANCHOR, "number", "-version", "id"),
+    # 1.25.31：按题号。跨资料的题号本来会重号，所以第二排序键仍是资料名，
+    # 同一份卷里才是真正的「按题号」。
+    "number": ("number", "source_filename", "-published_at", "id"),
 }
 
 
@@ -312,11 +315,30 @@ def library_list(request):
         return JsonResponse({"error": "limit 与 offset 必须是整数"}, status=400)
     sort = request.GET.get("sort", "recent")
     if sort not in SORTS:
-        return JsonResponse({"error": "sort 只能是 recent 或 source"}, status=400)
+        return JsonResponse({"error": "sort 只能是 recent、source 或 number"}, status=400)
     rows = library_rows(request.GET).order_by(*SORTS[sort])
+    # 1.25.31：只取指定的几道题。后台刷新任务进度时用它，只读有任务的那几行，
+    # 不再把屏上几百道题整屏重读一遍。编号先校验，非法值直接 400，不交给 ORM。
+    wanted_param = request.GET.get("ids", "").strip()
+    if wanted_param:
+        try:
+            wanted = normalize_ids([part for part in wanted_param.split(",") if part])
+        except BrowseError as error:
+            return JsonResponse({"error": str(error)}, status=400)
+        rows = rows.filter(id__in=wanted)
+    if request.GET.get("ids_only") == "1":
+        # 「选中当前筛选的全部」：只回编号，不受分页限制。
+        ids = [str(pk) for pk in rows.values_list("id", flat=True)]
+        return JsonResponse({"total": len(ids), "ids": ids})
     total = rows.count()
     items = serialize_items(rows[offset:offset + limit])
     next_offset = offset + len(items)
+    if wanted_param:
+        # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。
+        return JsonResponse({
+            "total": total, "items": items, "sort": sort, "limit": limit, "offset": offset,
+            "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
+        })
     ai_status = library_ai_settings.public_status()
     tag_work = tag_work_counts()
     return JsonResponse({

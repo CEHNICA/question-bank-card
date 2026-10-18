@@ -189,7 +189,7 @@ assert.match(js, /未标知识点 · \$\{missingCount\} 题/, "the button says �
 // 认不出这个入口是干什么的 —— 现在挪进展开后的第一行和每颗按钮的悬停说明。
 assert.doesNotMatch(js, /function renderTodos\(\)[\s\S]*?node\("span", "library-batch-cost"/,
   "the cost warning no longer takes up room in the entry's name");
-assert.match(js, /node\("p", "library-todo-note", apiReady[\s\S]*?消耗额度/,
+assert.match(js, /node\("p", "library-todo-note", paidActions[\s\S]*?消耗额度/,
   "the cost warning still appears inside the panel, just not in the name");
 assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} 道`\)/,
   "while AI is working, the entry itself says how many questions are left");

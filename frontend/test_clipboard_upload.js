@@ -64,17 +64,12 @@ assert.equal(screenshots[2].name, "已有名称.webp");
   assert.equal(uploaded, true);
   assert.equal(received, accepted);
 
-  // 所有上传入口共用同一个资料类型选择；文档和照片表单都会把它交给后端。
+  // 所有上传入口共用同一个资料类型；1.25.36 起不再让人先选，交给后端按页数判断。
   const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
   const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-  const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
-  assert.match(html, /name="materialType" value="exam" checked/);
-  assert.match(html, /name="materialType" value="book"/);
-  assert.match(html, /id="bookChunkHint"[\s\S]*?每 100 页稳定分片[\s\S]*?原文件不会改动/);
-  assert.match(css, /\.material-hint\s*\{/);
-  // Capture permission/type when opening the photo preview: changing settings
-  // afterwards must never quietly dispatch a cloud upload.
-  assert.match(js, /const materialType = selectedMaterialType\(\)/);
+  assert.doesNotMatch(html, /name="materialType"/, "不再让人先选「试卷」还是「书」");
+  assert.match(html, /自动判断是试卷还是整本书/, "上传区说清现在由程序判断");
+  assert.match(js, /function selectedMaterialType\(\) \{\s*return "auto";/, "上传时交给后端自动判断");
   assert.match(js, /form\.append\("material_type", materialType\)/);
   assert.match(js, /form\.append\("material_type", photoUpload\.materialType\)/);
   assert.match(js, /photoUpload\.policy = policy/);

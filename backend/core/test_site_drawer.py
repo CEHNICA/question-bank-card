@@ -33,4 +33,7 @@ class SiteDrawerRouteTests(SimpleTestCase):
         self.assertNotIn('class="source-link"', html)
         drawer = (FRONTEND / "site-drawer.js").read_text(encoding="utf-8")
         self.assertNotIn('name: "hint"', drawer, "抽屉里不再有「操作说明」组")
-        self.assertIn('name: "tools"', drawer)
+        # 1.25.29：抽屉只剩「去哪一页」这一组。组卷草稿进了试题篮，快捷键归设置 → 帮助。
+        self.assertIn('name: "nav"', drawer)
+        self.assertNotIn('name: "tools"', drawer, "抽屉里不再有「工具」组")
+        self.assertNotIn('name: "library"', drawer, "抽屉里不再有「题库」组")

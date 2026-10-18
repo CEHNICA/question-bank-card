@@ -130,7 +130,12 @@
   .library-page .library-type { border-radius: 4px; padding: 3px 6px; font-size: 10px; font-weight: 500; }
   .library-page .library-card .paper,
   .library-page .library-card.compact .paper { padding: 17px 24px 12px; font-size: 17px; line-height: 1.85; }
-  .library-page .library-card .qb-stem-body { max-width: min(100%, 76ch); }
+  /* 1.25.32：题干原来卡在 76 个字宽，卡片右侧会空出一大截。列表已经收窄到一列
+     舒服的宽度，题干直接占满卡片，不再留一条空白。 */
+  .library-page .library-card .qb-stem-body { max-width: 100%; }
+  /* 1.25.26：折叠卡片上直接显示的短选项。字号和行距比题面收一点，
+     两列排开，别把「一屏能看几道题」还回去。 */
+  .library-page .library-card.compact .qb-options { margin-top: 5px; padding-left: 0; font-size: 15px; line-height: 1.55; row-gap: 2px; column-gap: 1.6em; }
   .library-page .library-card.compact .qb-figures { margin: 14px 0 4px; }
   .library-page .library-card.compact .qb-figures img { max-height: 145px; max-width: min(260px, 100%); }
   .library-page .library-preview-note { margin-top: 9px; font-size: 11px; color: var(--muted); }

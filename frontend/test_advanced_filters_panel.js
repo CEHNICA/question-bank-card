@@ -10,6 +10,7 @@ const path = require("node:path");
 
 const markup = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "library.css"), "utf8");
+const js = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 
 const panel = markup.slice(markup.indexOf('<details id="advancedFilters"'),
                            markup.indexOf('</details>', markup.indexOf('<details id="advancedFilters"')));
@@ -64,11 +65,35 @@ const hideSelf = css.match(/\.library-advanced\[open\] > \.library-filters > \[h
 assert.ok(hideSelf, "卡片自己标着先藏起来的时候也要藏住");
 assert.match(hideSelf[1], /display:\s*none/);
 
-// ── 五、标签那个多选框得撑满卡片，否则还是系统灰列表框的样子 ──
+// ── 五、标签筛选是一排勾选框，不是系统灰列表框（1.25.27）──
+// 1.25.18 只把它撑满了卡片，实机上仍然是一个「点一下选中、按住 Ctrl 才能多选、
+// 鼠标划过留一条深色高亮」的系统列表框。老师原话是这个界面「感觉有 bug」。
 const tagSelect = css.match(/\.library-advanced\[open\] > \.library-filters #tagSelect \{([^}]*)\}/);
-assert.ok(tagSelect, "多选框有专门样式");
+assert.ok(tagSelect, "标签筛选那一块有专门样式");
 assert.match(tagSelect[1], /width:\s*100%/);
 assert.match(tagSelect[1], /border-radius/);
+assert.match(tagSelect[1], /max-height:\s*158px/, "标签多了在框里滚，不把面板撑高");
+assert.doesNotMatch(markup, /<select id="tagSelect"[^>]*multiple/,
+  "系统多选框已经换掉：多选靠勾选框，不靠按住 Ctrl");
+assert.match(markup, /<div id="tagSelect" class="library-tag-choices" role="group"/,
+  "换成一组勾选框，仍然是一个有名字的组");
+assert.match(css, /\.library-tag-choice \{ display: flex;/, "每一行是「勾选框 + 标签名」");
+assert.match(css, /\.library-tag-choice-box \{[^}]*accent-color/, "勾选框跟界面同色，不是系统默认蓝");
+// 选中的判定必须读勾选框；还读 selectedOptions 的话，换掉控件之后筛选就永远空了。
+const tagFilter = js.slice(js.indexOf("  function tagChoice("), js.indexOf("  function savedTagFilters("));
+assert.match(tagFilter, /function selectedTagIds\(\)[\s\S]*?input\[type="checkbox"\]:checked/,
+  "「选中了哪几个」从勾选框读");
+assert.match(tagFilter, /box\.checked = Boolean\(checked\)/, "重建列表时把勾选状态放回去");
+assert.match(tagFilter, /ui\.tagSelect\.scrollTop = scrollTop/, "勾一个标签后重新读题库，滚动位置要留住");
+assert.doesNotMatch(js, /tagSelect\.selectedOptions/, "系统多选框的读法要清干净");
+
+// 1.25.27：这一格原来只有「常用筛选 / 保存当前条件」几个字，没人知道它到底存什么。
+// 实话是：只存上面勾的标签和「标签关系」，来源、题型、搜索词一概不存。
+assert.match(markup, /tag-saved-filter-note">把勾好的标签和「标签关系」存成一条/,
+  "先一句话说清它干什么");
+assert.match(markup, /只记标签，不记来源、题型和搜索词/, "把它不记的东西也写明，别让人以为存了整页条件");
+assert.match(markup, /记住这次勾的标签/, "按钮说它真做的事，不是含糊的「保存当前条件」");
+assert.match(markup, /删除这一条/, "删除按钮说清删的是下拉框里那一条");
 
 // 窄屏规则里那条把下拉标题全藏掉的，不能又把「更多筛选」里的一起藏了（1.25.17 修过）。
 assert.doesNotMatch(css, /\.library-filterbar \.library-select span \{ display: none; \}/,

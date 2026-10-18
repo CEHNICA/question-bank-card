@@ -21,7 +21,7 @@ const papers = [
   { id: "d", status: "parsing", counts: {} },
 ];
 assert.deepEqual(App.justFinished(previous, papers, "b").map((paper) => paper.id), ["a"]);
-assert.equal(App.finishedMessage(papers[0], "gaokao"), "“gaokao”已读完：23 题，1 张要看");
+assert.equal(App.finishedMessage(papers[0], "gaokao"), "“gaokao”已读完：23 题，1 题待核对");
 assert.equal(App.finishedMessage(papers[1], "lingxing"), "“lingxing”已读完：20 题，全部识读完成");
 assert.equal(App.finishedMessage({ status: "failed" }, "x"), "“x”处理失败");
 assert.equal(App.title("题有据", 2), "（2 份读完）题有据");
@@ -56,8 +56,9 @@ assert.match(js, /if \(event\.detail > 0\) \{\s*const first = state\.questions\.
 assert.match(html, /id="dropOverlay"/);
 assert.match(js, /window\.addEventListener\("drop", \(event\) => \{[\s\S]*handleFiles\(event\.dataTransfer\.files\)/);
 assert.match(js, /const carriesFiles = \(event\) =>/);
-assert.match(html, /class="material-options"/);
-assert.match(css, /\.material-type:has\(input\[value="book"\]:checked\) \.material-hint \{ display: block; \}/);
+// 1.25.36：上传前不再让人选资料类型，拖进来的东西由后端按页数判断。
+assert.doesNotMatch(html, /class="material-options"/, "资料类型选择已撤掉");
+assert.doesNotMatch(css, /\.material-type/, "对应的样式也删干净");
 
 // Figure owners by key; the viewer offers editing.
 assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant", j: "join" \}/);

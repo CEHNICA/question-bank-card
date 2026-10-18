@@ -24,8 +24,15 @@ assert.ok(!libraryJs.includes("--basket-top"), "篮子不吸顶了，不必再�
 
 // ---- 导航与工具折进抽屉，但类名一个字没改
 assert.match(libraryHtml, /<nav class="topnav header-nav"[^>]*data-drawer="nav">/);
-assert.match(libraryHtml, /<a class="header-link" href="\/">录入终审<\/a>/, "导航字面保留，教学巡演和未保存拦截都按它定位");
-assert.match(libraryHtml, /id="libraryKeysButton"[^>]*data-drawer="tools"/, "快捷键按钮留在抽屉的工具组");
+assert.match(libraryHtml, /<a class="header-link" href="\/">[\s\S]*?核对题目<\/a>/,
+  "入口改成老师读得懂的名字：核对题目（原「录入终审」）；教学巡演按 href 定位，不受影响");
+// 1.25.29：抽屉里只留「去哪一页」。组卷草稿搬进试题篮，快捷键交给设置 → 帮助和「?」键。
+assert.doesNotMatch(libraryHtml, /id="openDrafts"[^>]*data-drawer/,
+  "组卷草稿不再挂在抽屉里");
+assert.match(libraryHtml, /basket-panel-head[\s\S]*?id="openDrafts"/,
+  "它搬到了试题篮标题旁：选题、组卷、接着上次的草稿是同一件事");
+assert.ok(!libraryHtml.includes("libraryKeysButton"),
+  "抽屉里不再有第二颗快捷键入口（设置 → 帮助、题库页按「?」都能打开）");
 // 1.12.7：抽屉里三样东西删了 —— 源码链接、整个「操作说明」组、还有「恢复操作提示」。
 // 源码在设置 → 关于里（AGPL 义务由那一栏和发布页承担），操作说明在设置里，
 // 顶到第一道题之前的横条能少一条是一条。
@@ -40,7 +47,7 @@ assert.ok(!libraryHtml.includes('id="libraryShortcutHint"') && !libraryHtml.incl
   "题库页不再常驻两条快捷键提示条");
 assert.ok(!libraryJs.includes("mountHint"), "提示条搬去了设置，题库页一个都不挂");
 assert.ok(!libraryJs.includes("syncRestoreHints"), "没有在这里关掉的提示，就没有「恢复」要同步");
-assert.match(libraryHtml, /id="openDrafts"[^>]*data-drawer="library"/, "组卷草稿和专注浏览同在题库组");
+assert.ok(!libraryHtml.includes("drawer-staging"), "抽屉的搬运暂存位空了，整块删掉");
 // 1.12.7：篮回到题库页自己身上 —— 右边缘一条常驻把手 + 一个抽屉面板。
 // 顶栏那两个按钮撤掉了，导航抽屉（☰）里也不再有一份。
 assert.match(libraryHtml, /id="basketHandle"[^>]*class="basket-handle"|class="basket-handle"[^>]*id="basketHandle"/, "右边缘有一条常驻把手");
@@ -128,8 +135,12 @@ const railRule = libraryCssCode.slice(libraryCssCode.indexOf(".library-rail {"),
 assert.ok(!railRule.includes("overflow-x: hidden"),
   "不能靠 hidden 遮掉筛选栏的溢出：那会让 scrollWidth == clientWidth 的断言永远为真，回归测试就瞎了");
 
-// 1.12.10：批量条吸顶。四条一起钉 —— 少钉任何一条，下一轮都会退化回去。
-assert.match(libraryCss, /\.library-bulk \{[^}]*position: sticky; top: var\(--topbar-h\); z-index: 20;/);
+// 1.12.10：批量条吸顶。1.25.33：只有批量条吸，筛选行留在最上面跟着页面滚走；
+// 想换筛选用右下角的「回到顶部」，不再在滚动时挂一个「筛选」入口。
+assert.match(libraryCss, /\.library-bulk \{[^}]*position: sticky; top: var\(--topbar-h\); z-index: 20;/,
+  "批量条吸在顶栏下面");
+assert.doesNotMatch(libraryCss, /\.library-sticky-tools/,
+  "合成整块吸顶的那一层已经撤掉");
 assert.match(libraryCss, /\.library-bulk\.stuck \{[^}]*box-shadow:/);
 // 跳题的预留必须跟着条的真实高度走，不能写死 —— 窄屏上条会排成两行。
 assert.match(libraryCss, /\.library-card \{[^}]*scroll-margin-top: calc\(var\(--topbar-h\) \+ var\(--library-bulk-h, 0px\) \+ 12px\);/);
@@ -226,5 +237,77 @@ assert.ok(!libraryCss.includes(".library-toolbar"), "library-toolbar 已整体�
 // ---- 抽屉的 Esc 不能抢原生对话框的 Esc
 const drawerJs = fs.readFileSync(require.resolve("./site-drawer.js"), "utf8");
 assert.match(drawerJs, /event\.key === "Escape" && ui\.doc\.querySelector\?\.\("dialog\[open\]"\)/);
+
+// ---- 折叠卡片上直接显示短选项（1.25.26）
+// 选择题的题干常常只有一句「下列正确的是」，认得出是哪道题全靠选项。以前卡片上把选项
+// 整组藏掉、只留一句「含选项 · 预览」，挑题时得逐张点开。现在短的直接排出来，长的和
+// 带图的仍然留给「展开题面」——不然一张卡能占掉半屏，反而更慢。
+const readingCss = fs.readFileSync(require.resolve("./library-reading.css"), "utf8");
+const optionsSrc = libraryJs.slice(libraryJs.indexOf("  const OPTION_PREVIEW_LIMIT"),
+  libraryJs.indexOf("  function card(item)"));
+assert.notEqual(optionsSrc.indexOf("function previewOptions"), -1,
+  "previewOptions was renamed or moved; update this slice");
+const previewOptions = new Function(`${optionsSrc}\nreturn previewOptions;`)();
+const shortFour = { A: "2", B: "3", C: "4", D: "8" };
+assert.equal(previewOptions({ options: shortFour }), shortFour, "四个短选项整组显示");
+assert.equal(Object.keys(previewOptions({ options: {} })).length, 0, "没有选项就什么都不显示");
+const shortMath = { A: "0", B: "$\\varnothing\\subseteq\\{0\\}$" };
+assert.equal(previewOptions({ options: shortMath }), shortMath, "短公式照样显示：$ 和反斜杠不占纸面宽度");
+const longText = "甲、乙两地相距 120 千米，一辆汽车从甲地开往乙地，速度是每小时 60 千米，问需要多少小时";
+assert.equal(Object.keys(previewOptions({ options: { A: longText, B: "2" } })).length, 0,
+  "长选项整组折叠，不能把一屏塞成一张卡");
+assert.equal(Object.keys(previewOptions({ options: { A: "", B: "2" }, figures: [{ slot: "A" }] })).length, 0,
+  "选项里带图的也折叠：卡片这一份只画题干配图");
+// 卡片得真的用上它，而且选项显示出来以后不再重复写「含选项」。
+assert.match(libraryJs, /const shownOptions = expanded \? \{\} : previewOptions\(item\.content\)/,
+  "折叠状态用预览选项，展开状态用完整题面");
+assert.match(libraryJs, /options: shownOptions/);
+assert.match(libraryJs, /!Object\.keys\(shownOptions\)\.length\) notes\.push\("含选项"\)/,
+  "选项已经看得见时，就别再挂一句「含选项」");
+assert.match(readingCss, /\.library-card\.compact \.qb-options \{[^}]*font-size: 15px/,
+  "卡片上的选项收小一号，把「一屏能看几道题」还回去");
+
+// 1.25.33：滚动时不再挂「筛选」入口。筛选就放在最上面，回去靠右下角那颗按钮。
+assert.ok(!libraryHtml.includes('id="compactFilters"'), "批量条里不再有「筛选」两个字");
+assert.ok(!libraryJs.includes("syncCompactFilters"), "收起/展开那套逻辑整段撤掉");
+assert.ok(!libraryCss.includes(".library-compact-filters"), "对应的样式也删干净");
+assert.match(libraryHtml, /id="backToTop"/, "右下角留着「回到顶部」");
+assert.match(libraryJs, /window\.scrollTo\(\{ top: 0, behavior: "smooth" \}\)/, "点它一下回到最上面，再筛选");
+
+// ── 1.25.31：题多起来以后的手感 ──
+// ① 后台刷新只读有任务的那几行。以前每 4 秒把屏上几百道题整屏重读一遍。
+assert.match(libraryJs, /async function refreshPendingJobs\(/, "后台刷新走单独的轻量路径");
+assert.match(libraryJs, /\/api\/library\?ids=\$\{encodeURIComponent\(ids\)\}&limit=100/,
+  "按编号只取有任务的那几道");
+assert.doesNotMatch(libraryJs, /setTimeout\(\(\) => load\(\{ quiet: true \}\)/,
+  "任务刷新不再触发整屏重读");
+assert.match(libraryJs, /if \(!pendingJobItems\(\)\.length\) \{ load\(\{ quiet: true \}\); return; \}/,
+  "最后一道做完时仍要完整刷新一次，把「还有活没干」的数字对上");
+
+// ② 滚到底自动接着加载。
+assert.match(libraryJs, /new IntersectionObserver\([\s\S]{0,220}load\(\{ append: true \}\)/,
+  "滚到底自动加载；按钮留着兜底");
+assert.match(libraryJs, /rootMargin: "600px 0px"/, "提前一屏开始取，不用等真的看到按钮");
+
+// ③ 选中当前筛选的全部。
+assert.match(libraryHtml, /id="selectAllFiltered"/, "批量条上有「选中全部 N 道」");
+assert.match(libraryJs, /query\.set\("ids_only", "1"\)/, "只跟后端要编号，不拉全量内容");
+assert.match(libraryJs, /ids\.slice\(0, 500\)\.forEach/, "和试题篮一样，一次最多 500 道");
+
+// ④ 回到顶部。
+assert.match(libraryHtml, /id="backToTop"/, "滚深了以后有回顶部的按钮");
+assert.match(libraryJs, /scrollTo\(\{ top: 0, behavior: "smooth" \}\)/, "点了平滑滚回去");
+assert.match(libraryJs, /top_button\.hidden = window\.scrollY < 900/, "滚过几屏才露出来");
+
+// ⑤ 排序多一个「按题号」。
+assert.match(libraryHtml, /<option value="number">按题号<\/option>/);
+assert.match(libraryJs, /\["source", "number"\]\.includes\(params\.get\("sort"\)\)/, "URL 里的按题号也认");
+
+// ⑥ 列表列宽有上限：右侧详情收起或窗口很宽时，卡片不再被拉到窗口边缘，
+//    题干也不会缩在左边、右边空一大片。
+assert.match(libraryCss, /\.library-workspace > \.library-results \{ width: min\(100%, 1040px\); justify-self: center; \}/,
+  "题目列最宽 1040，居中");
+assert.match(readingCss, /\.library-page \.library-card \.qb-stem-body \{ max-width: 100%; \}/,
+  "题干占满卡片，不再卡在 76 个字宽");
 
 console.log("Library layout: results-head folded in, basket and status ride the bulk row, nav tucked into the drawer: OK");

@@ -137,6 +137,10 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
 .window-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; }
 .window-button:hover { background: var(--bg-sunken); color: var(--ink); }
 .window-button.window-close:hover { background: #c42b1c; color: #fff; }
+/* 1.25.34：关窗之前先淡出，不要一点「×」画面就瞬间消失。 */
+body.window-exiting { opacity: 0; transform: scale(.985); pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease; }
+@media (prefers-reduced-motion: reduce) { body.window-exiting { transition: none; } }
 .topbar-basket { display: inline-flex; align-items: center; gap: 6px; }
 .topbar-basket-icon { display: inline-flex; }
 .topbar-basket-count { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
@@ -186,13 +190,22 @@ body.drawer-open { overflow: hidden; }
    justify-self: stretch 是必须的：窄屏那条 @media 会给 .topnav 加 justify-self: center，
    收进抽屉之后菜单项就不该再居中缩成一小条。 */
 .site-drawer .topnav { display: grid; gap: 2px; height: auto; justify-self: stretch; }
-.site-drawer .topnav a { min-height: 38px; padding: 0 10px 0 12px; border-radius: 8px; color: var(--ink-2); }
+.site-drawer .topnav a { min-height: 38px; padding: 0 10px 0 12px; border-radius: 8px; color: var(--ink-2); gap: 10px; }
+.site-drawer .topnav a .icon { width: 17px; height: 17px; color: var(--muted); }
 .site-drawer .topnav a:hover { background: var(--bg-sunken); color: var(--ink); }
+.site-drawer .topnav a:hover .icon { color: var(--ink); }
 .site-drawer .topnav a.active { background: var(--accent-soft); color: var(--accent-dark); box-shadow: inset 3px 0 0 var(--accent); }
-.site-drawer .topnav a.active::after { content: none; }
+.site-drawer .topnav a.active .icon { color: var(--accent-dark); }
+/* 当前页原来只靠浅绿底和左边一条绿条；右边再写一个「当前」，色觉不敏感的人也分得清。
+   这一条替换掉原来只用来关掉下划线的 content:none。 */
+.site-drawer .topnav a.active::after {
+  content: "当前"; position: static; margin-left: auto; height: auto; background: none; border-radius: 0;
+  font-size: 11px; font-weight: 700; letter-spacing: 0; color: var(--accent);
+}
 /* 只给菜单行本身整幅宽。用后代选择器会把篮里的「移出」也撑满整行，
    把题名挤成一列字。 */
-.site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; }
+.site-drawer-slot > .button { width: 100%; min-height: 36px; justify-content: flex-start; gap: 10px; }
+.site-drawer-slot > .button .icon { color: var(--muted); }
 /* 篮不再住在导航抽屉里：它是干活的面，不是菜单项。☰ 留给导航和工具。 */
 .site-drawer .basket-panel { position: static; max-height: none; padding: 2px 2px 0; border: 0; border-radius: 0; box-shadow: none; background: none; }
 @media (max-width: 560px) {
@@ -273,18 +286,6 @@ body.drawer-open { overflow: hidden; }
 .drop-zone:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .drop-zone.disabled { opacity: .6; cursor: not-allowed; }
 .drop-zone.disabled:hover { background: var(--surface-2); border-color: #c9c4b6; }
-.material-type { margin: -4px 0 0; padding: 0; border: 0; }
-.material-type legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-/* Two segments instead of a boxed radio group: the choice stays one click
-   away but takes one line of the sidebar instead of four. */
-.material-options { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 10px; background: var(--bg-sunken); }
-.material-type label { position: relative; display: flex; align-items: center; justify-content: center; min-height: 30px; border-radius: 8px; color: var(--ink-2); font-size: 12.5px; cursor: pointer; }
-.material-type input { position: absolute; opacity: 0; pointer-events: none; }
-.material-type input:checked + span { color: var(--accent); font-weight: 700; }
-.material-type label:has(input:checked) { background: var(--surface); box-shadow: 0 1px 3px rgba(22, 44, 39, .14); }
-.material-type label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--accent-ring); }
-.material-hint { display: none; margin-top: 6px; padding: 0 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.material-type:has(input[value="book"]:checked) .material-hint { display: block; }
 .drop-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(22, 44, 39, .32); backdrop-filter: blur(2px); pointer-events: none; }
 .drop-overlay[hidden] { display: none; }
 .drop-overlay-card { display: grid; justify-items: center; gap: 8px; padding: 30px 46px; border: 2px dashed var(--accent); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-pop); color: var(--ink); }
@@ -1201,6 +1202,11 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .settings-switch small { color: var(--muted); font-size: 11.5px; }
 .settings-switch input { flex: none; width: 18px; height: 18px; accent-color: var(--accent); }
 .about-row { margin-top: 8px; }
+/* 1.25.29：隐私说明原来是一段四行的长句，几个生词挤在一起。拆成三条短句，
+   一条只说一件事：原卷、截图、个人信息。 */
+.settings-privacy { display: grid; gap: 6px; margin: 10px 0 4px; padding-left: 18px; color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.settings-privacy li { list-style: disc; }
+.settings-privacy strong { color: var(--ink); }
 .settings-section#settingsAbout .button { margin-top: 12px; }
 
 /* 已保存密钥与新输入分开：默认星号，眼睛临时查看，输入永不预填。 */
@@ -1631,7 +1637,6 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
 .help-path h4 { margin: 0 0 8px; font-size: 16px; }
 .help-path p { margin: 0 0 14px; color: var(--ink-2); line-height: 1.75; }
 .help-path small { display: block; margin-top: 10px; color: var(--muted); }
-.help-secondary { display: flex; align-items: center; gap: 12px; margin-bottom: 0; }
 .automatic-guide-dialog { width: min(740px, 94vw); max-height: 90dvh; }
 .automatic-guide-steps { display: grid; gap: 18px; list-style: none; padding: 20px 24px; margin: 0; }
 .automatic-guide-steps li { display: flex; align-items: start; gap: 14px; }

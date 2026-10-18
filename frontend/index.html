@@ -15,6 +15,8 @@
     <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14h9"/></symbol>
     <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2M11 8.5v5M8.5 11h5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-review" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.2 2.6 2.6 5-5.2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.6C10.4 5.1 8.2 4.4 5 4.6v13c3.2-.2 5.4.5 7 2 1.6-1.5 3.8-2.2 7-2v-13c-3.2-.2-5.4.5-7 2Z"/><path d="M12 6.6v13"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></symbol>
     <symbol id="i-tools" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></symbol>
@@ -43,9 +45,9 @@
       </span>
     </div>
     <nav class="topnav" aria-label="页面" data-drawer="nav">
-      <a class="active" href="/" aria-current="page">录入终审</a>
-      <a href="/library">正式题库</a>
-      <a id="settingsButton" href="/settings">设置</a>
+      <a class="active" href="/" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-review"/></svg>核对题目</a>
+      <a href="/library"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>正式题库</a>
+      <a id="settingsButton" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
     </nav>
     <div class="topbar-tools">
       <span id="engineLine" class="engine-line" hidden></span>
@@ -65,7 +67,7 @@
 
   <main id="settingsHome" class="settings-home" hidden>
     <header class="settings-head">
-      <div><h1 id="settingsTitle" tabindex="-1">设置</h1><p class="settings-description">录入终审与正式题库共用。</p></div>
+      <div><h1 id="settingsTitle" tabindex="-1">设置</h1><p class="settings-description">核对题目与正式题库共用。</p></div>
       <a id="settingsReturn" class="button quiet" href="/library">返回题库</a>
     </header>
     <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
@@ -109,7 +111,6 @@
               <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后核对，通过即入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
               <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
             </div>
-            <p class="help-secondary"><button id="settingsHelpFaq" class="link-button" type="button">常见问题</button><span aria-hidden="true">·</span><button id="settingsHelpKeys" class="link-button" type="button">快捷键</button></p>
           </section>
           <section class="settings-section help-tasks" aria-labelledby="helpTasksTitle">
             <h3 id="helpTasksTitle">遇到问题时再看</h3>
@@ -162,8 +163,12 @@
         <div id="settingsAbout" class="settings-page" role="tabpanel" hidden>
           <section class="settings-section" aria-labelledby="settingsAboutTitle">
             <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
-            <p class="settings-description">导入资料先在本机处理。只有允许本次云处理、已配置服务且本机无法切题时，才会把原稿发送给 MinerU；切出的题目截图会按读题设置交给视觉模型或 AI 助手。主动框选识读使用“自动推荐”时，还会发送当前题干和选项文字。系统不会预先擦除姓名、手写或批改痕迹，请确认你有权处理这些内容。</p>
-            <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据（本机安装）</strong></div>
+            <ul class="settings-privacy">
+              <li><strong>原卷</strong>先留在本机。只有你明确允许本次云处理、已经配好服务、而且本机确实切不出题时，才会把原卷发给 MinerU。</li>
+              <li><strong>题目截图</strong>只在你用 AI 读题或补答案时才发给你选的那家服务。主动框选识读选「自动推荐」时，会连当前题干和选项文字一起发。</li>
+              <li><strong>个人信息</strong>不会被预先擦掉：姓名、手写、批改痕迹都还在图上。请先确认你有权处理这些资料。</li>
+            </ul>
+            <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据</strong></div>
             <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
             <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
           </section>
@@ -181,15 +186,9 @@
         <strong>上传资料</strong>
         <span>PDF、Word 或照片；拖进窗口任意处，或复制后按 Ctrl+V</span>
       </label>
-      <fieldset class="material-type" aria-label="上传资料类型">
-        <legend>这次上传的是</legend>
-        <div class="material-options">
-          <label><input type="radio" name="materialType" value="exam" checked><span>一份试卷</span></label>
-          <label><input type="radio" name="materialType" value="book"><span>一本书 / 讲义</span></label>
-        </div>
-        <small id="bookChunkHint" class="material-hint">原卷先保存在本机。使用云解析书籍 PDF 时，每 100 页稳定分片；原文件不会改动。</small>
-      </fieldset>
-      <p id="uploadNote" class="side-note">自动判断资料，先在本机切题；未切出的题可以从原卷选取。</p>
+      <!-- 1.25.36：不再让人先选「试卷」还是「书」——40 页以上自动按书/讲义处理
+           （不自动切题，避免各章题号被并成一条），其余按试卷自动切。 -->
+      <p id="uploadNote" class="side-note">自动判断是试卷还是整本书：试卷先在本机切题，整本书保留原页由你框题。</p>
       <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
       <div class="side-footer">

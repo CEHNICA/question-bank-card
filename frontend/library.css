@@ -273,6 +273,10 @@ body.library-basket-open .library-workspace { grid-template-columns: 212px minma
    自动排布会把侧栏挤走，题目反而被塞进 212px 那条窄列。 */
 .library-workspace > .library-rail { grid-column: 1; grid-row: 1; }
 .library-workspace > .library-results { grid-column: 2; grid-row: 1; min-width: 0; }
+/* 1.25.32：右侧详情收起以后，题目列会一直长到窗口边缘（1535 宽时一张卡 1477），
+   而题干按阅读宽度停在 76 个字，卡片右半边就空出一大片。给列表一个上限并居中：
+   读起来是正常的一列，空白落在页面两侧而不是每张卡里面。 */
+.library-workspace > .library-results { width: min(100%, 1040px); justify-self: center; }
 .library-workspace > .question-inspector { grid-column: 3; grid-row: 1; }
 .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
 body.library-basket-open .question-inspector { display: none; }
@@ -461,9 +465,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-advanced[open] > .library-filters .library-facet,
 .library-advanced[open] > .library-filters .library-filter-group { flex-direction: column; align-items: stretch; gap: 7px; }
 .library-advanced[open] > .library-filters select { width: 100%; max-width: none; }
-/* 标签那个多选框是系统灰列表框，撑满卡片才不像从别的系统贴过来的 */
-.library-advanced[open] > .library-filters #tagSelect { width: 100%; max-width: none; min-height: 104px; border-radius: 8px; }
+/* 1.25.27：标签筛选改成一排勾选框。原来那个系统多选列表框，点一下选中、按住 Ctrl
+   才能多选，鼠标划过还会留下一条深色高亮 —— 老师看到的是一个灰盒子，点一下题目就少一半。
+   勾选框能多选、看得见选了哪几个，再点一下就取消。 */
+.library-advanced[open] > .library-filters #tagSelect { width: 100%; max-width: none; min-height: 104px;
+  max-height: 158px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.library-tag-choice { display: flex; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 5px;
+  font-size: 13px; line-height: 1.45; cursor: pointer; }
+.library-tag-choice:hover { background: var(--surface-2); }
+.library-tag-choice-box { flex: none; margin: 0; accent-color: var(--accent); }
+.library-tag-choice-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-tag-empty { margin: 0; padding: 6px 7px; color: var(--muted); font-size: 12.5px; }
 .library-advanced[open] > .library-filters .tag-saved-filter-actions { display: flex; gap: 8px; }
+.tag-saved-filter-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 /* 这个维度没数据时，标题跟着控件一起消失，不留一个空壳。
    选择器里 `.library-filters` 这一层不能少：卡片是它的子元素，不是 <details> 的直接子元素。 */
 .library-advanced[open] > .library-filters > .library-filter-group:has([hidden]) { display: none; }
@@ -471,13 +486,12 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    上面把每个孩子都写成 display:flex，而作者样式压得住 [hidden] 自带的 display:none，
    于是「标签」「常用筛选」在一个标签都还没有的新库里照样露出来，两张空壳卡片挂在面板上。 */
 .library-advanced[open] > .library-filters > [hidden] { display: none; }
-.library-advanced #tagFilterBox select { min-width: 170px; }
 /* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。
-   1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了。吸在顶栏下面，
-   top 用 var(--topbar-h) —— 顶栏在 ≤760px 时会变成 52px，跟着走就行。
+   1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了 —— 吸在顶栏下面。
    z-index 20 是照终审页那条工具条（styles.css:383）取的：压在顶栏（40）和
    侧栏接缝按钮（30）之下，题卡和篮子把手（都是 4）之上。侧栏是另一条栅格列，
-   窄屏时它是 61 的浮层，两边都不会盖到它。 */
+   窄屏时它是 61 的浮层，两边都不会盖到它。
+   1.25.33：筛选行不再跟着吸顶，只留在最上面；想换筛选按右下角的「回到顶部」。 */
 .library-bulk { position: sticky; top: var(--topbar-h); z-index: 20;
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; font-size: 12.5px; }
 .library-filterbar { position: relative; z-index: 21; display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 8px;
@@ -544,6 +558,11 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    题会在菜单里留一个半透明的进度条，点「更多」时它会抢走点击。 */
 .library-card-more:not([open]) > .library-card-menu { display: none; }
 .library-card-menu .button { justify-content: flex-start; }
+/* 1.25.31：滚到几百道题以后，回顶部不必再拖滚动条。 */
+.back-to-top { position: fixed; right: 18px; bottom: 18px; z-index: 15; border-radius: 999px;
+  padding: 7px 14px; border: 1px solid var(--line-strong); background: var(--surface);
+  color: var(--ink-2); box-shadow: var(--shadow-sm); font-size: 12.5px; cursor: pointer; }
+.back-to-top:hover { background: var(--bg-sunken); color: var(--ink); }
 /* 篮在右边，收起时只占一条把手，展开时占第三列。跟着题库一起滚，不固定在视口上 ——
    固定的话题目一长它就悬在半空。 */
 .basket-panel { display: flex; flex-direction: column; min-height: 0;
@@ -554,6 +573,8 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .basket-panel-head, .basket-panel > .helper, .basket-preview { flex: none; }
 .basket-panel > .helper { overflow-wrap: anywhere; }
 .basket-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+/* 1.25.29：组卷草稿从抽屉搬到这里 —— 它和选题、组卷是同一件事。 */
+.basket-panel-tools { display: flex; align-items: center; gap: 4px; }
 .basket-panel h2 { margin: 0; font: 600 16px/1.5 var(--ui-font); }
 .basket-panel h2 span { color: var(--accent); font-variant-numeric: tabular-nums; }
 .basket-list { list-style: none; margin: 13px 0 0; padding: 0; min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }

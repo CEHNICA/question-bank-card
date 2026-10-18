@@ -78,6 +78,35 @@ class LibraryBrowseDraftTests(TestCase):
         expected = sorted((first, second, third), key=lambda item: (item.source_filename, item.number))
         self.assertEqual([item["id"] for item in by_source["items"]], [str(item.id) for item in expected])
 
+    def test_ids_and_ids_only_fetch_exactly_what_was_asked_for(self):
+        # 1.25.31：后台刷新任务进度时只读有任务的那几行；「选中当前筛选的全部」
+        # 只要编号。两条都不能把别的题带回来，也不能因为非法编号把整页打成 500。
+        first = self.publication(source="a卷.pdf", number=1)
+        second = self.publication(source="b卷.pdf", number=2)
+        third = self.publication(source="c卷.pdf", number=3)
+        picked = self.client.get("/api/library", {"ids": f"{third.id},{first.id}"}).json()
+        self.assertEqual({item["id"] for item in picked["items"]}, {str(third.id), str(first.id)})
+        self.assertEqual(picked["total"], 2)
+        # 只为刷新：不带全库统计这些重活，前端也不读它们。
+        self.assertNotIn("facets", picked)
+        self.assertNotIn("tag_work", picked)
+        only = self.client.get("/api/library", {"ids_only": "1"}).json()
+        self.assertEqual(only["total"], 3)
+        self.assertEqual({*only["ids"]}, {str(first.id), str(second.id), str(third.id)})
+        self.assertEqual(self.client.get("/api/library", {"ids": "not-a-uuid"}).status_code, 400)
+        # 撤回的题不会因为点了编号就回来。
+        PublishedQuestion.objects.filter(pk=second.id).update(status="withdrawn")
+        self.assertEqual(self.client.get("/api/library", {"ids": str(second.id)}).json()["total"], 0)
+
+    def test_number_sort_orders_by_printed_number(self):
+        later = self.publication(source="b卷.pdf", number=2)
+        early = self.publication(source="a卷.pdf", number=1)
+        other = self.publication(source="c卷.pdf", number=1)
+        body = self.client.get("/api/library", {"sort": "number"}).json()
+        self.assertEqual([item["id"] for item in body["items"]],
+                         [str(early.id), str(other.id), str(later.id)])
+        self.assertEqual(body["sort"], "number")
+
     def test_a_book_is_ordered_by_where_it_prints_not_by_its_number(self):
         # 「原卷顺序」承诺的是这份资料上印出来的先后。教材每章的习题都从 1 重新
         # 编——真库两本教材里「第 1 题」各有 94 / 82 张，按题号排等于把各章的第

@@ -86,11 +86,12 @@ nav.setAttribute("data-drawer", "nav");
 nav.append(new Element("a"));
 const pageLink = nav.children[0];
 pageLink.setAttribute("href", "/library");
-const sourceLink = new Element("a");
-sourceLink.setAttribute("data-drawer", "tools");
+// 1.25.29：抽屉只剩「去哪一页」这一组，标着别的组名的东西不会被搬进去。
+const outsider = new Element("button");
+outsider.setAttribute("data-drawer", "tools");
 const basketPanel = new Element("aside");
 basketPanel.setAttribute("data-drawer", "basket");
-body.append(topbar, topbarTools, nav, sourceLink, basketPanel, openDialog);
+body.append(topbar, topbarTools, nav, outsider, basketPanel, openDialog);
 
 const sandbox = { document: doc, module: undefined };
 sandbox.window = sandbox;
@@ -109,10 +110,10 @@ assert.equal(scrim.hidden, true, "关闭时遮罩不可见");
 assert.equal(trigger.getAttribute("aria-expanded"), "false");
 assert.ok(trigger.classList.contains("drawer-trigger"), "顶栏最前面是触发器");
 assert.ok(trigger.classList.contains("icon-button"));
-assert.equal(nav.parentNode.getAttribute("data-slot"), "nav", "导航被搬进抽屉的「页面」组");
-assert.equal(sourceLink.parentNode.getAttribute("data-slot"), "tools", "工具按钮被搬进抽屉的「工具」组");
+assert.equal(nav.parentNode.getAttribute("data-slot"), "nav", "导航被搬进抽屉");
+assert.equal(outsider.parentNode, body, "没有对应组名的按钮就留在原地，不会被搬进抽屉");
 // 1.12.7：篮不住在这个抽屉里了。它是题库页右边缘一条常驻把手 + 一个抽屉面板，
-// 干活的面不是菜单项；☰ 留给导航和工具。
+// 干活的面不是菜单项；☰ 只留给「去哪一页」。
 assert.equal(drawer.slot("basket"), null, "抽屉里没有试题篮这一组了");
 
 // ---- 打开：焦点进抽屉，背景锁滚

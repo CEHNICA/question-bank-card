@@ -58,8 +58,12 @@ assert.match(html, /id="settingsLearn"[^>]*>开始手工练习/);
 assert.match(html, /id="settingsAutomaticGuide"[^>]*>自动切题入门/);
 assert.match(html, /手工示例没有经过 MinerU 或 AI 处理/);
 assert.match(html, /明确允许本次云处理/);
-assert.match(html, /id="settingsHelpFaq"/);
-assert.match(html, /id="settingsHelpKeys"/);
+// 1.25.29：帮助页里原来还挂着「常见问题 · 快捷键」两个链接：
+// 常见问题就在下面一张卡片里，快捷键在「显示与导出 → 审核界面」和「?」键都有。
+// 同一件事三个入口，删掉最不像的那一个。
+assert.doesNotMatch(html, /id="settingsHelpFaq"|id="settingsHelpKeys"/);
+assert.match(html, /id="keysButton"[\s\S]*?查看全部快捷键/, "快捷键仍然留着一个明确入口");
+assert.match(html, /<details id="settingsFaq"[^>]*>/, "常见问题就摆在帮助页里，不用再跳一次");
 assert.doesNotMatch(html, /只看新版功能|用示例试卷重新学一遍|重新看一遍新手引导/);
 assert.match(html, /<details class="teaching-help"><summary>题卡上的标记说明/);
 assert.match(html, /<summary>重新练习与提示设置/);

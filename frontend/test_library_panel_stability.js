@@ -70,8 +70,8 @@ assert.match(tagFilter, /\|\| state\.tagAll \|\| state\.tagAny \|\| state\.tagNo
 
 // ── 四、筛不到标签时别留一个空盒子 ──
 // 卡片留下是为了格局稳定，不是因为该留一个空的多选框。写一句人话说明。
-assert.match(tagFilter, /if \(!tags\.length\) ui\.tagSelect\.append\(new Option\("当前筛选下没有可用的标签", ""\)\)/,
-  "当前筛不到标签时，多选框里写清是筛选的问题，不是没有标签这回事");
+assert.match(tagFilter, /if \(!tags\.length && !selected\.length && !state\.tag\) \{[\s\S]*?当前筛选下没有可用的标签/,
+  "当前筛不到标签时，框里写清是筛选的问题，不是没有标签这回事");
 
 // ── 四之二、筛到 0 时手上那几个标签，还得看得见名字 ──
 // 装好 1.25.24 复验时拍到的：标签框里写「已选标签 · 531aebeb6」——
@@ -84,7 +84,7 @@ assert.match(js, /if \(body\.selected_tag_names\) state\.selectedTagNames = body
 assert.match(js, /selectedTagNames: \{\},/, "初始值是个空表，别让它是 undefined");
 assert.match(tagFilter, /const known = state\.selectedTagNames\?\.\[id\];/,
   "标签那一项先查后端给的名字");
-assert.match(tagFilter, /new Option\(known \? known : `标签已被删除 · \$\{id\.slice\(0, 8\)\}`, id, true, true\)/,
+assert.match(tagFilter, /tagChoice\(id, known \|\| `标签已被删除 · \$\{id\.slice\(0, 8\)\}`, true\)/,
   "查不到名字就说「标签已被删除」，不能拿编号冒充标签名");
 assert.doesNotMatch(js, /"已选标签 · " \+ id\.slice/,
   "不能再拿编号前 8 位当标签名给老师看");

@@ -111,8 +111,16 @@ assert.match(todos, /bits\.push\(`\$\{pendingCount\} 题等你核对`\)/);
 assert.match(todos, /bits\.push\(`\$\{missingCount\} 题没知识点`\)/);
 assert.match(todos, /bits\.push\(`\$\{answerCount\} 题没答案`\)/);
 assert.match(summary, /summary\.title = working[\s\S]*?点开看：/, "悬停说明也要把三样说全");
-assert.match(summary, /按「标签」和「答案」分了两栏；没带「AI」标记的只筛一遍、不花钱/,
-  "悬停里说清分了栏、以及哪几项不花钱");
+assert.match(summary, /按「标签」和「答案」分了两栏；/,
+  "悬停里说清分了栏");
+assert.match(summary, /没带「AI」标记的只筛一遍、不花钱/,
+  "悬停里说清哪几项不花钱");
+// 1.25.26：只有一栏时不能说「分了两栏」，面板里没有花钱的按钮时也不用讲额度。
+// 这两句都得挂在条件上，不能是每次都照说的固定句子。
+assert.match(summary, /answerActions\.length \? "按「标签」和「答案」分了两栏；" : ""/,
+  "第二栏不存在时，别提「分了两栏」");
+assert.match(summary, /paidActions[\s\S]*?这里只有筛选，点一下只是把题库筛一遍，不花钱/,
+  "没有花钱的按钮时，说明改成「只是筛一遍」");
 
 // ── 二之一、1.25.23：按「它动的是什么」分栏 ──
 // 老师原话：「这么多按钮无非分成两类，一个是处理答案的，一个是处理标签的。给它分为
@@ -246,6 +254,55 @@ for (const dead of ["library-batch-ai", "library-batch-cost", "library-batch-cou
   assert.doesNotMatch(js + markup, new RegExp(dead), `${dead} 在代码里已经不存在了`);
 }
 
+// ── 五、功能关着的时候也要画得出来（1.25.26）──
+// 出事那天屏幕上的样子：知识点标签功能没开（这是默认值），题库里又有没打标签的题
+// （几乎每个用过一阵的题库都有）。分栏时把 null 交给 column()，它直接读
+// group.children，于是整个题库页白屏，只剩一行英文
+// "Cannot read properties of null (reading 'children')"。
+// 前面那些检查全是"源码里有没有这句话"，它们一条都跑不到这里，所以全绿也没拦住。
+// 这一节真的把那一段函数跑起来。
+const nodeSrc = js.slice(js.indexOf("  function node(tag"), js.indexOf("  function icon(name)"));
+const columnSrc = js.slice(js.indexOf("    const column = (title, groups) =>"),
+  js.indexOf("    const freeGroup ="));
+assert.notEqual(columnSrc.indexOf("groups"), -1, "column was renamed or moved; update this slice");
+const element = () => ({ children: [], className: "", textContent: "",
+  append(...kids) { this.children.push(...kids); } });
+const column = new Function("document", nodeSrc + columnSrc + "\nreturn column;")({ createElement: element });
+
+const kept = element();
+kept.textContent = "未标知识点 · 5 题";
+kept.children.push(element());  // 真实的分组里装着按钮；空分组才不会进来
+const built = column("标签", [null, kept]);
+assert.equal(built.children.length, 2, "一栏就是「标题 + 一组内容」");
+assert.equal(built.children[1].children.length, 1, "只进去那一个有内容的分组");
+assert.equal(built.children[1].children[0], kept, "空的那一类不进列表，更不能拿 null 当节点读");
+assert.doesNotThrow(() => column("标签", [null, null]), "整栏都没有东西时也只是空着，不抛错");
+// 触发条件本身也要钉住：功能关着、还有没打标签的题，这一栏确实只有一个非空分组。
+assert.match(todos, /\]\.filter\(Boolean\)\)\);/, "传给 column() 的分组先把 null 滤掉再进去");
+
+// 报错也不能把英文原文摔在页面上。读完这一页要能知道：现在怎么了、下一步点哪里。
+const problemSrc = js.slice(js.indexOf("  function problemText(error)"),
+  js.indexOf("  // 提示条只做一件事"));
+assert.notEqual(problemSrc.indexOf("function problemText"), -1,
+  "problemText was renamed or moved; update this slice");
+const logged = [];
+const problemText = new Function("console", `${problemSrc}\nreturn problemText;`)({
+  error: (value) => logged.push(value),
+});
+assert.match(problemText(new TypeError("Failed to fetch")), /连不上本机服务/,
+  "连不上时说连不上");
+assert.match(problemText(new TypeError("Failed to fetch")), /重试读取/, "说清下一步点哪里");
+const brokenRender = problemText(new TypeError("Cannot read properties of null (reading 'children')"));
+assert.doesNotMatch(brokenRender, /Cannot read|properties|Failed to fetch|undefined|null/,
+  "页面上不出现英文异常原文");
+assert.match(brokenRender, /题目、标签和答案都还在/, "先说清数据没丢，免得老师以为题库坏了");
+assert.equal(logged.length, 3, "每问一次就把原始报错原样送进控制台，给开发者看");
+// 提示条那句不能直接拿 error.message 拼；拼了就等于把控制台的话印到屏幕上。
+const loadCatch = js.slice(js.indexOf("    } catch (error) {"), js.indexOf("  function scheduleJobRefresh("));
+assert.doesNotMatch(loadCatch, /node\("span", "", error\.message/,
+  "提示条的文字要经过 problemText，不能直接打印 error.message");
+
 console.log("Pending work is one named entry, the filter row is down to two controls, "
   + "AI tag suggestions are always findable, the free filters survive an AI run, "
-  + "and spending money looks different from just looking: OK");
+  + "spending money looks different from just looking, and the page still draws "
+  + "with the tag feature switched off: OK");

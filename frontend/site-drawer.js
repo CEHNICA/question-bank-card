@@ -21,10 +21,12 @@
   // 1.12.7：篮不住在这个抽屉里了。它是题库页右边缘一条常驻把手 + 一个抽屉面板 ——
   // 干活的面，不是菜单项。抽屉里也只剩老师真会用的东西：源码在设置 → 关于，
   // 操作说明搬到了设置 → 帮助，这个抽屉不重复摆。这个文件只管导航和工具。
+  //
+  // 1.25.29：抽屉里只剩「去哪一页」这一组（核对题目 / 正式题库 / 设置）。
+  // 组卷草稿搬进了试题篮（组卷时接着备课的地方）；快捷键设置 → 帮助里已有，
+  // 这一页按「?」也能打开。既然只剩一组，就不摆组标题。
   const GROUPS = [
-    { name: "nav", title: "页面" },
-    { name: "library", title: "题库" },
-    { name: "tools", title: "工具" }
+    { name: "nav", title: "" }
   ];
 
   let ui = null;
@@ -125,7 +127,8 @@
       slot.setAttribute("data-slot", group.name);
       const title = element(document, "h2", "site-drawer-title", group.title);
       groups[group.name] = { section, slot, title };
-      section.append(title, slot);
+      // 只有一组时不留一个空标题。
+      section.append(...(group.title ? [title, slot] : [slot]));
       body.append(section);
     }
     panel.append(head, body);

@@ -19,6 +19,9 @@
     <symbol id="i-basket" viewBox="0 0 24 24"><path d="M4 9h16l-1.6 9.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8L4 9Z"/><path d="m8.5 9 3.5-5 3.5 5M9.5 13v3M14.5 13v3"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-review" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.2 2.6 2.6 5-5.2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.6C10.4 5.1 8.2 4.4 5 4.6v13c3.2-.2 5.4.5 7 2 1.6-1.5 3.8-2.2 7-2v-13c-3.2-.2-5.4.5-7 2Z"/><path d="M12 6.6v13"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
     <symbol id="i-source" viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="2"/><rect x="7.5" y="7.5" width="9" height="5" rx="1"/><path d="M7.5 16h9"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
     <symbol id="i-undo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12h7"/></symbol>
@@ -38,9 +41,9 @@
       </span>
     </div>
     <nav class="topnav header-nav" aria-label="页面" data-drawer="nav">
-      <a class="header-link" href="/">录入终审</a>
-      <a class="header-link active" href="/library" aria-current="page">正式题库</a>
-      <a class="header-link" href="/settings">设置</a>
+      <a class="header-link" href="/"><svg class="icon" aria-hidden="true"><use href="#i-review"/></svg>核对题目</a>
+      <a class="header-link active" href="/library" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>正式题库</a>
+      <a class="header-link" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
     </nav>
     <!-- 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭/最小化只能从这里来。
          标题栏不再显示浏览器残留的标题文字，点图标也不再跳回首页。 -->
@@ -65,14 +68,11 @@
       <button id="basketViewButton" class="library-basket-enter" type="button" hidden>只看篮里的 <span id="selectedViewCount" class="count">0</span> 题</button>
       <button id="libraryTagManager" class="library-tag-manager-entry" type="button" title="标签管理" aria-label="标签管理"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>标签管理</span></button>
     </nav>
-    <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false" hidden>查找</button><button id="inspectorToggle" class="button quiet small inspector-toggle" type="button" aria-controls="questionInspector" aria-expanded="false" disabled>题目详情</button><button id="libraryKeysButton" class="button quiet small" type="button" data-drawer="tools">快捷键</button></div>
+    <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false" hidden>查找</button><button id="inspectorToggle" class="button quiet small inspector-toggle" type="button" aria-controls="questionInspector" aria-expanded="false" disabled>题目详情</button></div>
   </header>
 
-  <!-- 抽屉的搬运暂存位：下面这些按钮平时不出现在页面上，site-drawer.js 启动时
-       把它们按 data-drawer 搬进抽屉对应分组，id 不变、事件照旧。 -->
-  <div class="drawer-staging" hidden>
-    <button id="openDrafts" class="button button-quiet button-small" type="button" data-drawer="library">组卷草稿</button>
-  </div>
+  <!-- 抽屉只放「去哪一页」。「组卷草稿」是组卷时接着备课的入口，搬进了试题篮
+       （就在选题和组卷旁边）；「快捷键」设置 → 帮助里已有，不在这里重复一份。 -->
 
   <main class="library-main">
     <div class="library-workspace">
@@ -83,6 +83,8 @@
         <svg class="icon" aria-hidden="true"><use href="#i-chev-left"/></svg>
       </button>
       <section class="library-results" aria-label="题目列表">
+        <!-- 1.25.33：筛选行只放在最上面，跟着页面滚走；批量条照旧吸顶。
+             想换筛选时用右下角的「回到顶部」一下回去，不再在滚动时挂一个「筛选」入口。 -->
         <div id="libraryFilterBar" class="library-filterbar" aria-label="筛选与排序">
             <label class="library-select">
               <span>来源</span>
@@ -98,7 +100,7 @@
                   <span class="library-facet-label" id="typeFacetLabel">题型</span>
                   <div id="typeFilters" class="draft-filters" role="group" aria-labelledby="typeFacetLabel"></div>
                 </div>
-                <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
+                <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option><option value="number">按题号</option></select></label>
                 <!-- 1.25.18：这两个维度原来只有给读屏用的名字，屏幕上没有标题，
                      夹在有标题的控件中间，看着像低一档的东西。补上可见标题；
                      标题跟着控件一起消失（见 .library-filter-group:has([hidden])）。 -->
@@ -110,16 +112,20 @@
                   <span class="library-filter-group-label">有没有答案</span>
                   <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
                 </div>
-                <label id="tagFilterBox" class="library-select" hidden>
-                  <span>标签</span>
-                  <select id="tagSelect" aria-label="标签" multiple size="4"></select>
-                </label>
+                <div id="tagFilterBox" class="library-filter-group" hidden>
+                  <span class="library-filter-group-label">标签</span>
+                  <div id="tagSelect" class="library-tag-choices" role="group" aria-label="可选标签"></div>
+                </div>
                 <label class="library-select"><span>标签关系</span><select id="tagMatchMode" aria-label="标签匹配方式"><option value="all">包含全部</option><option value="any">包含任一</option><option value="not">排除这些</option></select></label>
                 <div id="tagSavedFilterBox" class="tag-saved-filter-box" hidden>
-                  <label class="library-select"><span>常用筛选</span><select id="tagSavedFilterSelect" aria-label="保存的标签筛选"><option value="">选择常用筛选</option></select></label>
-                  <div class="tag-saved-filter-actions" role="group" aria-label="管理常用筛选">
-                    <button id="saveTagFilter" class="button button-small" type="button" title="把当前筛选条件保存为常用筛选">保存当前条件</button>
-                    <button id="deleteTagFilter" class="button button-small" type="button" title="删除当前选中的常用筛选" disabled>删除已选项</button>
+                  <span class="library-filter-group-label">常用标签组合</span>
+                  <!-- 1.25.27：这一格原来只有「常用筛选 + 保存当前条件」几个字，没人知道它存的是什么。
+                       实话是：它只存上面勾的标签和「标签关系」，来源、题型、搜索词一概不存。 -->
+                  <p class="tag-saved-filter-note">把勾好的标签和「标签关系」存成一条，下次从这里一键找回。只记标签，不记来源、题型和搜索词。</p>
+                  <label class="library-select"><span>已保存的</span><select id="tagSavedFilterSelect" aria-label="保存过的标签组合"><option value="">选择一条</option></select></label>
+                  <div class="tag-saved-filter-actions" role="group" aria-label="管理保存的标签组合">
+                    <button id="saveTagFilter" class="button button-small" type="button" title="把现在勾好的标签和关系存成一条，下次一键找回">记住这次勾的标签</button>
+                    <button id="deleteTagFilter" class="button button-small" type="button" title="删除下拉框里选中的那一条" disabled>删除这一条</button>
                   </div>
                 </div>
               </div>
@@ -133,6 +139,9 @@
         </div>
         <div class="library-bulk" aria-label="题目列表操作">
           <label><input id="selectVisible" type="checkbox">全选本页</label>
+          <!-- 1.25.31：800 道题时「全选本页」只有 40 道，想选当前筛选的全部得点十几次。 -->
+          <button id="selectAllFiltered" class="button button-quiet button-small" type="button" hidden
+            title="把当前筛选出来的题全部勾上，包括还没显示在屏幕上的">选中全部</button>
           <span id="selectionCount" role="status" aria-live="polite">已勾选 0 题</span>
           <span id="libraryStatus" class="library-status" role="status" aria-live="polite" data-tone="plain">正在读取题库…</span>
           <!-- 1.25.20：「AI 建议标签」原来藏在勾选之后，不勾题就一个按钮都没有，
@@ -167,13 +176,15 @@
         </header>
         <div id="questionInspectorContent" class="question-inspector-content" aria-live="polite"></div>
       </aside>
+      <!-- 1.25.31：滚到几百道题以后，回顶部不用再拖滚动条。 -->
+      <button id="backToTop" class="back-to-top" type="button" hidden title="回到题目列表最上面">回到顶部</button>
       <button id="basketHandle" class="basket-handle" type="button" aria-controls="basketPanel"
         aria-expanded="false" title="展开试题篮">
         <svg class="icon" aria-hidden="true"><use href="#i-basket"/></svg>
         <span id="basketHandleCount" class="basket-handle-count">0</span>
       </button>
       <aside id="basketPanel" class="basket-panel" aria-label="试题篮">
-        <div class="basket-panel-head"><h2>试题篮 <span id="basketPanelCount">0</span></h2><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></div>
+        <div class="basket-panel-head"><h2>试题篮 <span id="basketPanelCount">0</span></h2><span class="basket-panel-tools"><button id="openDrafts" class="button button-quiet button-small" type="button">组卷草稿</button><button id="clearBasketPanel" class="button button-quiet button-small" type="button">清空</button></span></div>
         <p id="basketSummary" class="helper">先找到题目，再加入试题篮。</p>
         <div id="basketLoadError" class="library-load-error" role="alert" hidden></div>
         <ol id="basketList" class="basket-list"></ol>

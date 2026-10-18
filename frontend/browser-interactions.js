@@ -26,8 +26,12 @@
     const askHost = action => root.fetch?.(`/api/window/${action}`, {
       method: "POST", headers: { "X-QB-Request": "1" }
     })?.catch?.(() => {});
+    const leave = () => { try { root.close(); } catch { /* 标签页关不了自己 */ } };
     close?.addEventListener("click", () => {
-      askHost("close") || (() => { try { root.close(); } catch { /* 标签页关不了自己 */ } })();
+      // 1.25.34：关窗之前先淡出，不要瞬间消失。
+      root.document?.body?.classList?.add?.("window-exiting");
+      const finish = () => { if (!askHost("close")) leave(); };
+      if (root.setTimeout) root.setTimeout(finish, 160); else finish();
     });
     minimize?.addEventListener("click", () => { askHost("minimize"); });
   }

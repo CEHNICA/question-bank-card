@@ -35,7 +35,7 @@
     tagMode: ["all", "any", "not"].includes(params.get("tag_mode")) ? params.get("tag_mode") : "all",
     untaggedKnowledge: params.get("untagged_knowledge") === "true",
     tagReview: params.get("tag_review") === "true",
-    sort: params.get("sort") === "source" ? "source" : "recent",
+    sort: ["source", "number"].includes(params.get("sort")) ? params.get("sort") : "recent",
     view: "all",
     selected: new Set(),
     expanded: new Set(),
@@ -114,6 +114,31 @@
     toastTimer = window.setTimeout(() => show(false), kind === "error" ? 6000 : 3500);
   }
 
+  // 页面出问题时，屏幕上要写人能看懂的话。异常原文（"Failed to fetch"、
+  // "Cannot read properties of null"）只进控制台给开发者看，不往老师脸上贴。
+  function problemText(error) {
+    if (error) console.error(error);
+    const raw = String((error && error.message) || "");
+    if (/failed to fetch|networkerror|load failed|network request/i.test(raw)) {
+      return "连不上本机服务。请先确认题有据还开着，再点「重试读取」。";
+    }
+    return "题库这一页没能显示出来，你已有的题目、标签和答案都还在。"
+      + "可以先点「重试读取」；还是一样的话，关掉题有据重新打开再试。";
+  }
+
+  // 提示条只做一件事：说清现在怎么了、下一步点哪里。
+  function showLibraryProblem(message, retry) {
+    const box = $("libraryLoadError");
+    if (!box) return;
+    const button = node("button", "button button-small", "重试读取");
+    button.id = "retryLibraryLoad";
+    button.type = "button";
+    button.addEventListener("click", retry || (() => load()));
+    box.replaceChildren(node("span", "", message), button);
+    box.hidden = false;
+    ui.more.hidden = true;
+  }
+
   function confirmDialog({ title, text = "", ok = "确定", danger = false, focusCancel = false }) {
     const dialog = $("confirmDialog");
     $("confirmTitle").textContent = title;
@@ -174,7 +199,7 @@
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
-    if (state.sort === "source") url.searchParams.set("sort", "source");
+    if (state.sort === "source" || state.sort === "number") url.searchParams.set("sort", state.sort);
     else url.searchParams.delete("sort");
     url.searchParams.delete("focus");
     window.history.replaceState(null, "", url);
@@ -247,31 +272,65 @@
       body.items.forEach(item => state.retainedTagItems.delete(item.id));
       markLibraryResult(query);
       state.items.forEach((item) => state.catalog.set(item.id, item));
-      render();
+      try {
+        render();
+      } catch (error) {
+        // 画界面的错和读数据的错是两件事：不能把「Cannot read properties…」当成
+        // 「读取失败」写进提示条，也不能让整页停在空白。
+        setStatus("这一页没能显示出来。", "warn");
+        showLibraryProblem(problemText(error), () => load());
+        return;
+      }
       // 助手任务只等待工具写回；API 任务由后台处理。两种结果都刷新显示。
       scheduleJobRefresh();
     } catch (error) {
       if (token === state.token) {
         setStatus(state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。", "warn");
-        const box = $("libraryLoadError");
-        const retry = node("button", "button button-small", "重试读取");
-        retry.id = "retryLibraryLoad";
-        retry.type = "button";
-        retry.addEventListener("click", () => load({ append, quiet }));
-        box.replaceChildren(node("span", "", error.message || "读取题库失败。"), retry);
-        box.hidden = false;
-        ui.more.hidden = true;
+        showLibraryProblem(problemText(error), () => load({ append, quiet }));
       }
     } finally {
       if (token === state.token) state.loading = false;
     }
   }
 
+  function pendingJobItems() {
+    return visibleItems().filter((item) => (item.job_details || [])
+      .some((job) => (job.kind === "tags" ? true : state.features.ai_answer)));
+  }
+
+  // 1.25.31：后台刷新只读「有任务的那几道题」。
+  // 以前每 4 秒把屏上显示的题整屏重读一遍（一次 100 道，显示 400 道就是 4 次请求、
+  // 约 1.3 秒），AI 一跑起来页面就一直在这上面打转。现在按编号只取那几行，
+  // 合并回列表；等最后一道也做完时，再做一次完整刷新，把「还有活没干」的数字对上。
+  async function refreshPendingJobs() {
+    const pending = pendingJobItems();
+    if (!pending.length) { scheduleJobRefresh(); return; }
+    const ids = pending.slice(0, 100).map((item) => item.id).join(",");
+    try {
+      const response = await fetch(`/api/library?ids=${encodeURIComponent(ids)}&limit=100`, { cache: "no-store" });
+      if (response.ok) {
+        const body = await response.json();
+        const fresh = new Map((body.items || []).map((item) => [item.id, item]));
+        let changed = false;
+        state.items = state.items.map((item) => {
+          const next = fresh.get(item.id);
+          if (!next) return item;
+          changed = true;
+          return next;
+        });
+        if (changed) render();
+      }
+    } catch (_) { /* 网络抖一下：等下一轮，不清空已有内容 */ }
+    // 最后一道也做完了：完整刷新一次，把「还有活没干」的数字和排队状态对上。
+    if (!pendingJobItems().length) { load({ quiet: true }); return; }
+    scheduleJobRefresh();
+  }
+
   function scheduleJobRefresh() {
-    const pending = visibleItems().flatMap((item) => item.job_details || [])
-      .filter((job) => job.kind === "tags" ? true : state.features.ai_answer);
-    if (pending.length) state.poll = window.setTimeout(() => load({ quiet: true }),
-      pending.some((job) => job.executor === "api") ? 4000 : 10000);
+    const pending = pendingJobItems();
+    if (!pending.length) return;
+    state.poll = window.setTimeout(refreshPendingJobs,
+      pending.some((item) => (item.job_details || []).some((job) => job.executor === "api")) ? 4000 : 10000);
   }
 
   function renderFacets() {
@@ -421,6 +480,25 @@
     });
   }
 
+  // 1.25.27：标签筛选用一排带勾选框的行，不再用系统的多选列表框。
+  // 原来那个 <select multiple> 要点一下选中、按住 Ctrl 才能多选，鼠标划过还会留下一条
+  // 深色高亮 —— 老师看到的就是一个「灰盒子，点一下题目就少了一半」。
+  // 勾选框的好处是：能多选、看得见选了哪几个、取消就是再点一下。
+  function tagChoice(id, text, checked) {
+    const row = node("label", "library-tag-choice");
+    const box = node("input", "library-tag-choice-box");
+    box.type = "checkbox";
+    box.value = id;
+    box.checked = Boolean(checked);
+    row.append(box, node("span", "library-tag-choice-name", text));
+    return row;
+  }
+
+  function selectedTagIds() {
+    return [...ui.tagSelect.querySelectorAll('input[type="checkbox"]:checked')]
+      .map((box) => box.value).filter(Boolean);
+  }
+
   function renderTagFilter(tags) {
     // 题库里打过正式标签就一直有这张卡；当前筛选下筛不到标签了，
     // 那是「这里没有」的问题，不是「这一维不存在」—— 用一行说明讲清楚，不收卡片。
@@ -428,17 +506,34 @@
       || state.tagAll || state.tagAny || state.tagNot || state.tag);
     if (ui.tagBox.hidden) return;
     const selected = String(state.tagMode === "not" ? state.tagNot : state.tagMode === "any" ? state.tagAny : state.tagAll).split(",").filter(Boolean);
+    // 勾一个标签就要重新读一次题库，列表跟着重建；不记住滚动位置的话，
+    // 勾到列表靠下的标签就会跳回顶部，再想勾旁边那个又得往下翻一次。
+    const scrollTop = ui.tagSelect.scrollTop;
+    // 用键盘勾选的人，重建列表后焦点会掉回页面顶部；记住是哪一个，建完再还回去。
+    const focused = ui.tagSelect.contains(document.activeElement) ? document.activeElement.value : null;
     ui.tagSelect.replaceChildren();
-    if (!tags.length) ui.tagSelect.append(new Option("当前筛选下没有可用的标签", ""));
-    tags.forEach((item) => { const option = new Option(`${item.tag}（${item.count}）`, item.id); option.selected = selected.includes(item.id); ui.tagSelect.append(option); });
+    if (!tags.length && !selected.length && !state.tag) {
+      ui.tagSelect.append(node("p", "library-tag-empty", "当前筛选下没有可用的标签"));
+    }
+    const shown = new Set();
+    tags.forEach((item) => {
+      shown.add(item.id);
+      ui.tagSelect.append(tagChoice(item.id, `${item.tag}（${item.count}）`, selected.includes(item.id)));
+    });
     // 筛到 0 道题时，可选列表里一个标签都不剩，但老师手上那几个还得看得见、还得能取消。
     // 显示标签的名字；名字也查不到（标签被删了）才退回编号，并且说清这是什么。
     selected.forEach((id) => {
-      if (Array.from(ui.tagSelect.options).some((option) => option.value === id)) return;
+      if (shown.has(id)) return;
       const known = state.selectedTagNames?.[id];
-      ui.tagSelect.add(new Option(known ? known : `标签已被删除 · ${id.slice(0, 8)}`, id, true, true));
+      ui.tagSelect.append(tagChoice(id, known || `标签已被删除 · ${id.slice(0, 8)}`, true));
     });
-    if (state.tag) ui.tagSelect.append(new Option(state.tag, state.tag));
+    if (state.tag) ui.tagSelect.append(tagChoice("", state.tag, true));
+    ui.tagSelect.scrollTop = scrollTop;
+    if (focused !== null) {
+      const again = [...ui.tagSelect.querySelectorAll('input[type="checkbox"]')]
+        .find((box) => box.value === focused);
+      if (again) again.focus({ preventScroll: true });
+    }
     const mode = $("tagMatchMode"); if (mode) mode.value = state.tagMode;
     renderSavedTagFilters();
   }
@@ -450,7 +545,7 @@
   function renderSavedTagFilters() {
     const box = $("tagSavedFilterBox"), select = $("tagSavedFilterSelect"); if (!box || !select) return;
     const saved = savedTagFilters(); box.hidden = ui.tagBox.hidden;
-    const current = select.value; select.replaceChildren(new Option("选择常用筛选", ""));
+    const current = select.value; select.replaceChildren(new Option("选择一条", ""));
     saved.forEach((item, index) => select.add(new Option(item.name, String(index))));
     if (saved.some((_item, index) => String(index) === current)) select.value = current;
     $("deleteTagFilter").disabled = !select.value;
@@ -610,13 +705,22 @@
     const bits = [];
     if (pendingCount) bits.push(`${pendingCount} 题等你核对`);
     if (missingCount) bits.push(`${missingCount} 题没知识点`);
-    if (answerCount) bits.push(`${answerCount} 题没答案`);
+    // 1.25.26：没开「AI 参考答案」时，面板里根本没有处理答案的入口。折叠条上先把
+    // 「1 题没答案」写出来，点开却找不到任何能处理它的地方 —— 等于把老师引到死路。
+    // 有入口才报这个数。
+    if (answerCount && answerActions.length) bits.push(`${answerCount} 题没答案`);
+    const paidActions = tagActions.length + answerActions.length;
     summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));
     summary.append(node("span", "library-todo-bits", bits.join(" · ")));
     if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
     summary.title = working
       ? `AI 正在逐题处理，还剩 ${working} 道。做完会自动显示，不用一直点着看。`
-      : `点开看：${bits.join("；")}。按「标签」和「答案」分了两栏；没带「AI」标记的只筛一遍、不花钱，带「AI」的会让 AI 逐题处理、消耗额度。`;
+      : `点开看：${bits.join("；")}。`
+        // 只有一栏时别提「分了两栏」：屏幕上并没有第二栏。
+        + (answerActions.length ? "按「标签」和「答案」分了两栏；" : "")
+        + (paidActions
+          ? "没带「AI」标记的只筛一遍、不花钱，带「AI」的会让 AI 逐题处理、消耗额度。"
+          : "这里只有筛选，点一下只是把题库筛一遍，不花钱，也不会调用任何服务。");
     menu.append(summary);
 
     const body = node("div", "library-todo-body");
@@ -628,10 +732,13 @@
     // 每栏内部仍然是筛选在前、AI 在后 —— 先看不花钱的，再看要花钱的。
     // 筛选组挂自己的 class，不挂 library-tool-actions：applyBatchButtonState 按那个
     // class 圈按钮，挂了它，AI 一登记这两个免费的筛选就会跟着变灰（1.25.21 的毛病）。
-    body.append(node("p", "library-todo-note", apiReady
-      ? "没带「AI」标记的只是筛一遍，不花钱；带「AI」的会让 AI 逐题处理，每题消耗一次额度。"
-        + "标签只是建议，要你逐条核对确认后才贴到题目上。"
-      : "到「设置 → API 配置」里配置并测试通过，才能用带「AI」标记的那几项。"));
+    body.append(node("p", "library-todo-note", paidActions
+      ? (apiReady
+        ? "没带「AI」标记的只是筛一遍，不花钱；带「AI」的会让 AI 逐题处理，每题消耗一次额度。"
+          + "标签只是建议，要你逐条核对确认后才贴到题目上。"
+        : "到「设置 → API 配置」里配置并测试通过，才能用带「AI」标记的那几项。")
+      // 面板里一颗花钱的按钮都没有时，不必讲额度：这里点的每一下都只是筛选。
+      : "这里只有筛选，点一下只是把题库筛一遍，不花钱，也不会调用任何服务。"));
     // 排队中、以及「还在处理多少道」都写在这一行，正对着下面两栏。
     // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
     const stateLine = node("p", "library-batch-state");
@@ -650,7 +757,10 @@
       const col = node("div", "library-todo-col");
       col.append(node("h4", "library-todo-col-title", title));
       const items = node("div", "library-todo-col-items");
-      for (const group of groups) if (group.children.length) items.append(group);
+      // 1.25.26：某一类没有东西时，上面传下来的是 null。这里以前直接读 group.children，
+      // 于是「知识点标签」功能关着、而题库里又有没打标签的题时（默认就是这个状态），
+      // 整个题库页白屏，只剩一行英文报错。没有东西可放就跳过，不要拿 null 当节点用。
+      for (const group of groups) if (group && group.children.length) items.append(group);
       col.append(items);
       return col;
     };
@@ -667,7 +777,7 @@
     cols.append(column("标签", [
       quickActions.length ? freeGroup() : null,
       tagActions.length ? paidGroup(tagActions) : null,
-    ]));
+    ].filter(Boolean)));
     if (answerActions.length) {
       cols.append(column("答案", [paidGroup(answerActions)]));
     }
@@ -974,6 +1084,20 @@
     if (label) label.hidden = Boolean(prevItem) && prevItem.source_filename === item.source_filename;
   }
 
+  // 1.25.26：选择题的题干常常只有一句「下列正确的是」，真正让人认出这道题的是选项。
+  // 折叠的卡片上直接显示短选项，扫一眼就知道是哪道题；选项很长、或选项本身带图时仍然
+  // 交给「展开题面」——不然一张卡能占掉半屏，挑题反而更慢。
+  const OPTION_PREVIEW_LIMIT = 28;
+  function previewOptions(content) {
+    const options = content?.options || {};
+    const keys = ["A", "B", "C", "D", "E"].filter((key) => String(options[key] ?? "").trim());
+    if (!keys.length) return {};
+    if ((content?.figures || []).some((figure) => ["A", "B", "C", "D", "E"].includes(figure.slot))) return {};
+    // 去掉 $ \ { } 再量长短：公式记号不占纸面宽度。
+    const widest = Math.max(...keys.map((key) => String(options[key]).replace(/[$\\{}]/g, "").length));
+    return widest <= OPTION_PREVIEW_LIMIT ? options : {};
+  }
+
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}${state.inspectorId === item.id ? " inspector-active" : ""}`);
     article.id = `q-${item.id}`;
@@ -1049,8 +1173,9 @@
     const paper = node("div", "paper");
     const summary = workspace.summaryStem(item.content?.stem, QB);
     const expanded = state.expanded.has(item.id);
+    const shownOptions = expanded ? {} : previewOptions(item.content);
     if (expanded) QB.renderQuestion(paper, item.content, { showNumber: false, showAnswer: "none" });
-    else QB.renderQuestion(paper, { ...item.content, stem: summary.text, options: {}, figures: (item.content?.figures || []).filter((figure) => figure.slot === "stem").slice(0, 2),
+    else QB.renderQuestion(paper, { ...item.content, stem: summary.text, options: shownOptions, figures: (item.content?.figures || []).filter((figure) => figure.slot === "stem").slice(0, 2),
       question_images: (item.content?.question_images || []).slice(0, 1) }, { showNumber: false, showAnswer: "none" });
     article.classList.toggle("compact", !expanded);
     article.classList.toggle("is-selected", state.selected.has(item.id));
@@ -1058,7 +1183,8 @@
       const notes = [];
       if (item.content?.body_mode === "source_image") notes.push(`原卷截图 ${(item.content.question_images || []).length} 段`);
       if (summary.folded) notes.push("还有题干与小问");
-      if (Object.keys(item.content?.options || {}).length) notes.push("含选项");
+      // 选项已经在卡片上看得见时就不再提它；长选项、选项带图仍然折叠。
+      if (Object.keys(item.content?.options || {}).length && !Object.keys(shownOptions).length) notes.push("含选项");
       if ((item.content?.figures || []).length > 2) notes.push(`含 ${(item.content.figures || []).length} 张配图`);
       // The repeated "点全屏看题查看" nudge can be permanently switched off.
       // The facts about what was folded stay, and the button below the card is
@@ -2800,6 +2926,13 @@
     $("selectVisible").checked = Boolean(shown.length && count === shown.length);
     $("selectVisible").indeterminate = count > 0 && count < shown.length;
     $("selectVisible").disabled = !shown.length;
+    // 1.25.31：加载的只是前几十道，还想全选当前筛选结果时，用这一颗。
+    const selectAll = $("selectAllFiltered");
+    if (selectAll) {
+      const more = state.view !== "selected" && Number(state.total) > shown.length;
+      selectAll.hidden = !more;
+      if (more) selectAll.textContent = `选中全部 ${Number(state.total)} 道`;
+    }
     $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
     document.querySelector(".library-bulk")?.classList.toggle("has-selection", state.selected.size > 0);
     for (const [id, feature] of [["generateSelectedAnswers", "ai_answer"]]) {
@@ -2992,6 +3125,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
   // ② 它吸住了没有，吸住了加个 .stuck（阴影在 CSS 里）。
   // 用 ResizeObserver 量高度：勾选变化会让按钮出现/消失、窄屏会排成两行、
   // 窗口变窄会重新折行 —— 这三种情况滚动监听都看不见，只有观察尺寸能跟上。
+  // 1.25.33：筛选行不再吸顶，批量条仍是唯一吸住的那一条，所以量它自己就够了。
   const bulkBar = document.querySelector(".library-bulk");
   const measureBulkBar = () => {
     if (!bulkBar) return;
@@ -3009,7 +3143,11 @@ $("selectedViewCount").textContent = String(state.basket.length);
       bulkFrame = 0;
       if (!bulkBar) return;
       const top = document.querySelector(".topbar")?.offsetHeight || 56;
-      bulkBar.classList.toggle("stuck", bulkBar.getBoundingClientRect().top <= top + 1 && window.scrollY > 0);
+      const stuck = bulkBar.getBoundingClientRect().top <= top + 1 && window.scrollY > 0;
+      bulkBar.classList.toggle("stuck", stuck);
+      // 1.25.31：滚过几屏以后才露「回到顶部」，免得刚打开就挡着题。
+      const top_button = $("backToTop");
+      if (top_button) top_button.hidden = window.scrollY < 900;
       measureBulkBar();
     });
   };
@@ -4716,9 +4854,28 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("basketHandle").addEventListener("click", () => setBasketPanel(!state.basketVisible));
   $("allQuestionsButton").addEventListener("click", () => { state.view = "all"; render(); });
   $("basketViewButton").addEventListener("click", async () => { state.view = "selected"; render(); await refreshBasket({ force: true }); });
-  $("selectVisible").addEventListener("change", () => {
-    visibleItems().forEach((item) => { if ($("selectVisible").checked) state.selected.add(item.id); else state.selected.delete(item.id); });
+  $("selectVisible").addEventListener("change", () => {    visibleItems().forEach((item) => { if ($("selectVisible").checked) state.selected.add(item.id); else state.selected.delete(item.id); });
     render();
+  });
+  // 1.25.31：「选中全部 N 道」——按当前筛选去后端只取编号，一次勾上（最多 500 道，
+  // 和试题篮的上限一致；不弹任何确认，勾选本身不改任何东西，取消是「取消勾选」）。
+  $("selectAllFiltered").addEventListener("click", async () => {
+    const button = $("selectAllFiltered");
+    const query = libraryQuery(state, { limit: 1, offset: 0 });
+    query.delete("limit"); query.delete("offset");
+    query.set("ids_only", "1");
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/library?${query}`, { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "读取题库失败");
+      const ids = body.ids || [];
+      ids.slice(0, 500).forEach((id) => state.selected.add(id));
+      if (ids.length > 500) toast(`一次最多勾选 500 道，已勾上前 500 道。`, "");
+      render();
+    } catch (error) {
+      toast(problemText(error), "error");
+    } finally { button.disabled = false; }
   });
   $("clearSelection").addEventListener("click", () => { state.selected.clear(); render(); });
   $("withdrawSelected").addEventListener("click", () => withdrawSelected());
@@ -4746,6 +4903,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       (button || ui.search).focus({ preventScroll: true });
     }
   });
+  // 1.25.29：快捷键不再在抽屉里单独摆一颗按钮 —— 设置 → 帮助里有，题库页按「?」
+  // 也能打开。同一个东西三个入口，抽屉里那颗反而像是「另一个页面」。
   $("openDrafts").addEventListener("click", openDrafts);
   $("closeDrafts").addEventListener("click", () => $("draftsDialog").close());
   $("saveDraft").addEventListener("click", () => saveDraft());
@@ -4756,6 +4915,16 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     if (event?.detail?.category === "reading-overflow" && ui.sheet.open) updateOverflowHints();
   });
   ui.more.addEventListener("click", () => load({ append: true }));
+  // 1.25.31：滚到底自动接着加载。800 道题原来要点 19 次「加载更多」，每次 0.3 秒，
+  // 一路点下来像卡住。提前一屏就开始取，按钮留着兜底（老浏览器没有观察器时照旧）。
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && !ui.more.hidden && !state.loading) {
+        load({ append: true });
+      }
+    }, { rootMargin: "600px 0px" }).observe(ui.more);
+  }
+  $("backToTop").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => exportPaper("print"));
   $("exportWord").addEventListener("click", () => exportPaper("docx"));
@@ -4862,7 +5031,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   window.addEventListener("beforeunload", protectLibraryBeforeUnload);
   document.addEventListener("click", handleLibraryNavigation);
   ui.tagSelect.addEventListener("change", () => {
-    const ids = Array.from(ui.tagSelect.selectedOptions).map((option) => option.value).filter(Boolean).join(",");
+    const ids = selectedTagIds().join(",");
     state.tag = ""; state.tagAll = state.tagAny = state.tagNot = "";
     if (state.tagMode === "not") state.tagNot = ids;
     else if (state.tagMode === "any") state.tagAny = ids;
@@ -4870,18 +5039,23 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     syncUrl(); load();
   });
   $("tagMatchMode")?.addEventListener("change", () => {
-    const selected = Array.from(ui.tagSelect.selectedOptions).map((option) => option.value).filter(Boolean).join(",");
+    const selected = selectedTagIds().join(",");
     state.tagMode = $("tagMatchMode").value; state.tag = ""; state.tagAll = state.tagAny = state.tagNot = "";
     if (state.tagMode === "not") state.tagNot = selected; else if (state.tagMode === "any") state.tagAny = selected; else state.tagAll = selected;
     syncUrl(); load();
   });
   $("saveTagFilter")?.addEventListener("click", () => {
     const filter = currentTagFilter();
-    if (!filter.legacy && !filter.all && !filter.any && !filter.not) { toast("先选择一个或多个标签，再保存常用筛选。", "error"); return; }
-    const name = window.prompt("给这个标签筛选起个名字"); if (!name || !name.trim()) return;
+    if (!filter.legacy && !filter.all && !filter.any && !filter.not) {
+      toast("先在「标签」里勾一个标签，再存。", "error");
+      return;
+    }
+    // 起的名字只在本机用，说明把它能记住的范围写清楚：只存标签和关系。
+    const name = window.prompt("给这组标签起个名字（例如「期中高频」）：", "");
+    if (!name || !name.trim()) return;
     const saved = savedTagFilters().filter((item) => item.name !== name.trim()); saved.push({ name: name.trim(), filter: filter });
-    try { localStorage.setItem("qb-library-saved-tag-filters", JSON.stringify(saved.slice(-30))); renderSavedTagFilters(); toast("常用筛选已保存。", "success"); }
-    catch (_) { toast("浏览器无法保存常用筛选。", "error"); }
+    try { localStorage.setItem("qb-library-saved-tag-filters", JSON.stringify(saved.slice(-30))); renderSavedTagFilters(); toast(`已记住「${name.trim()}」，以后在「已保存的」里选它。`, "success"); }
+    catch (_) { toast("没能记住。关掉题有据重新打开再试一次。", "error"); }
   });
   $("tagSavedFilterSelect")?.addEventListener("change", () => {
     const index = Number($("tagSavedFilterSelect").value), saved = savedTagFilters();
@@ -4978,7 +5152,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     setInspectorOpen(false);
     ui.inspectorToggle?.focus({ preventScroll: true });
   });
-  $("libraryKeysButton").addEventListener("click", () => window.QBShortcutHelp?.open("library"));
+  // 1.25.29：快捷键不再在抽屉里单独摆一颗按钮 —— 设置 → 帮助里有，这一页按「?」
+  // 也能打开。同一个东西三个入口，抽屉里那颗反而像是「另一个页面」。
   // 原来这里常驻两条提示条（题库快捷键、打印快捷键）外加一个「恢复操作提示」按钮。
   // 三样加起来是横在题目上方的一整条，眼睛得先扫过它才看得到题。提示内容都在
   // 设置里那一栏（快捷键按钮 / ? 键），这页不再挂常驻提示，也不再需要「恢复」——

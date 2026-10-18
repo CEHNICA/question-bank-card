@@ -247,7 +247,10 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
             plan["pages"] = [{**page, "mode": "manual"} for page in plan.get("pages", [])]
         paper.processing_plan = plan
         paper.save(update_fields=["processing_plan", "status", "updated_at"])
-    if plan.get("mode") != "mineru":
+    # 1.25.36：书 / 讲义「保留原页、不自动切题」是预期结果，不该记成失败。
+    # 它本来就等着人一题一题框；标成「处理失败」只会让人以为文件有问题。
+    book_kept_manual = bool(plan.get("native_book_fallback"))
+    if plan.get("mode") != "mineru" and not book_kept_manual:
         # Nothing will be queued for this run, so the worker never comes back to
         # check it.  The reason the local attempt gave up is the sentence the
         # teacher actually needs, so it is not overwritten by the generic one.

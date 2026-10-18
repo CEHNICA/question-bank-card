@@ -2177,7 +2177,10 @@ class ApiTests(TestCase):
         upload.name = "200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
+            # 先选「试卷」：这条量的是试卷按 200 页上限一次交给云。
+            response = self.client.post(
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
+                HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="200页.pdf")
         self.assertEqual(len(paper.pages), 200)
@@ -2268,7 +2271,10 @@ class ApiTests(TestCase):
         upload.name = "201页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
+            # 先选「试卷」：200 页上限的分片规则属于试卷。
+            response = self.client.post(
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
+                HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="201页.pdf")
         chunks = list(ImportChunk.objects.filter(paper=paper).order_by("sequence"))
@@ -2284,7 +2290,10 @@ class ApiTests(TestCase):
         upload.name = "1200页.pdf"
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
                 mock.patch("core.views.imaging.page_sizes", return_value=pages):
-            response = self.client.post("/api/papers", {"file": upload, "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
+            # 先选「试卷」：这条量的是试卷按 200 页一片、完整覆盖 1200 页。
+            response = self.client.post(
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
+                HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="1200页.pdf")
         chunks = list(paper.import_chunks.order_by("sequence"))

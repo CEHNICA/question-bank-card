@@ -101,8 +101,9 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
                 mock.patch.object(pipeline, "read_card", side_effect=AssertionError("unexpected reading")), \
                 mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected exam segmentation")):
             paper = intake.prepare_auto(paper, cloud_ready=True)
-        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("failed", "manual"))
-        self.assertIn("自动切题没有切出", paper.error)
+        # 1.25.36：书保留原页、不自动切题是预期结果，记成「待你终审」而不是失败。
+        self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
+        self.assertEqual(paper.error, "")
         self.assertFalse(paper.questions.exists())
         self.assertEqual(len(paper.pages), 2)
         self.assertEqual(source_images.source_identity(paper), original)
@@ -123,7 +124,7 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
             with self.subTest(allow_cloud=allow_cloud, cloud_ready=cloud_ready):
                 paper = intake.prepare_auto(self.book(), allow_cloud=allow_cloud, cloud_ready=cloud_ready)
                 self.assertEqual(paper.processing_plan["mode"], expected)
-                self.assertEqual(paper.status, "queued" if expected == "mineru" else "failed")
+                self.assertEqual(paper.status, "queued" if expected == "mineru" else "ready")
                 self.assertEqual(paper.processing_plan["cloud_authorized"], allow_cloud)
                 self.assertFalse(paper.questions.exists())
                 self.assertEqual(len(paper.pages), 2)

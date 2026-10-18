@@ -109,6 +109,43 @@ class LocalIntakeTests(TestCase):
         self.assertFalse(paper.import_chunks.exists())
         cloud.assert_not_called()
 
+    def test_upload_auto_detects_a_book_by_page_count(self):
+        # 1.25.36：不再让人先选「试卷 / 书」。40 页以上自动按书处理：不自动切题，
+        # 原页整页保留，避免各章的「第 1 题」被并成一条。
+        source = self.folder / "book.pdf"
+        with fitz.open() as pdf:
+            for index in range(45):
+                page = pdf.new_page(width=400, height=600)
+                page.insert_text((30, 55), f"第 {index + 1} 页 习题 1. 求 x。")
+            pdf.save(source)
+        upload = io.BytesIO(source.read_bytes())
+        upload.name = "book.pdf"
+        request = self.factory.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+        with mock.patch("core.views.readers.configured", return_value=False), \
+                mock.patch("core.views._reading_ready", return_value=False), \
+                mock.patch("core.pipeline.request_extract_file_from_pool") as cloud:
+            response = views.papers(request)
+        self.assertEqual(response.status_code, 201, response.content)
+        body = json.loads(response.content)
+        self.assertEqual(body["paper"]["material_type"], "book")
+        paper = Paper.objects.get(pk=body["paper"]["id"])
+        self.assertEqual(paper.material_type, "book")
+        self.assertEqual(paper.processing_plan["mode"], "manual", "书不自动切题")
+        self.assertEqual(paper.status, "ready", "保留原页等人框题，不是处理失败")
+        self.assertIn("题号可能按章节重新开始", paper.processing_plan["fallback_reason"])
+        self.assertEqual(len(paper.pages), 45)
+        cloud.assert_not_called()
+
+    def test_upload_auto_keeps_a_short_pdf_as_an_exam(self):
+        upload = io.BytesIO(self.pdf().read_bytes())
+        upload.name = "a.pdf"
+        request = self.factory.post("/api/papers", {"file": upload}, HTTP_X_QB_REQUEST="1")
+        with mock.patch("core.views.readers.configured", return_value=False), \
+                mock.patch("core.views._reading_ready", return_value=False):
+            response = views.papers(request)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(json.loads(response.content)["paper"]["material_type"], "exam")
+
     def test_explicit_mineru_still_requires_configuration(self):
         upload = io.BytesIO(self.pdf().read_bytes())
         upload.name = "a.pdf"
