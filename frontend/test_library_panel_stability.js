@@ -73,6 +73,22 @@ assert.match(tagFilter, /\|\| state\.tagAll \|\| state\.tagAny \|\| state\.tagNo
 assert.match(tagFilter, /if \(!tags\.length\) ui\.tagSelect\.append\(new Option\("当前筛选下没有可用的标签", ""\)\)/,
   "当前筛不到标签时，多选框里写清是筛选的问题，不是没有标签这回事");
 
+// ── 四之二、筛到 0 时手上那几个标签，还得看得见名字 ──
+// 装好 1.25.24 复验时拍到的：标签框里写「已选标签 · 531aebeb6」——
+// 那是数据库里的内部编号，老师看不懂也说不出口。
+// 所以名字必须由后端给（前端那张标签表是懒加载的，不一定在），并且两处刷新都要接。
+assert.match(js, /state\.selectedTagNames = body\.selected_tag_names \|\| \{\};/,
+  "首屏就把选中的标签名字存下来");
+assert.match(js, /if \(body\.selected_tag_names\) state\.selectedTagNames = body\.selected_tag_names;/,
+  "局部刷新回来的标签名字也得跟上，不能只在首屏取一次");
+assert.match(js, /selectedTagNames: \{\},/, "初始值是个空表，别让它是 undefined");
+assert.match(tagFilter, /const known = state\.selectedTagNames\?\.\[id\];/,
+  "标签那一项先查后端给的名字");
+assert.match(tagFilter, /new Option\(known \? known : `标签已被删除 · \$\{id\.slice\(0, 8\)\}`, id, true, true\)/,
+  "查不到名字就说「标签已被删除」，不能拿编号冒充标签名");
+assert.doesNotMatch(js, /"已选标签 · " \+ id\.slice/,
+  "不能再拿编号前 8 位当标签名给老师看");
+
 // ── 五、布局本身也不能因为少一张卡片就重排 ──
 // 上面的规则保证卡片集合不再变化；这条保证就算集合真的变了（比如题库是空的），
 // 剩下的卡片也不会在行与行之间乱跳。

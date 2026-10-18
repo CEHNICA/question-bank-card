@@ -277,6 +277,31 @@ def dimension_presence() -> dict:
     }
 
 
+def selected_tag_names(params) -> dict:
+    """当前正选着的标签，各自叫什么名字 —— 不受筛选影响。
+
+    筛到 0 道题时，可选列表里一个标签都不剩，但老师手上那几个标签还得看得见、
+    还得能取消。以前这里退而显示编号前 8 位（「已选标签 · 531aebeb6」），
+    那是数据库里的内部编号，老师看不懂也说不出口。
+
+    只看 tag_all / tag_any / tag_not 这三个按编号筛的键。`tag` 是按名字筛的老写法，
+    前端那边本来就握着那个名字（它直接拿名字当选项显示），不需要这里查；
+    而且它要是塞进 pk__in，会把整个列表页打成 500。
+    """
+    from .models import LibraryTag
+    ids = []
+    for key in ("tag_all", "tag_any", "tag_not"):
+        for value in str(params.get(key, "") or "").split(","):
+            try:
+                ids.append(str(uuid.UUID(str(value))))
+            except (ValueError, TypeError, AttributeError):
+                continue
+    if not ids:
+        return {}
+    names = {str(pk): name for pk, name in LibraryTag.objects.filter(pk__in=ids).values_list("pk", "name")}
+    return {tag_id: names[tag_id] for tag_id in dict.fromkeys(ids) if tag_id in names}
+
+
 def library_list(request):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -297,6 +322,7 @@ def library_list(request):
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
         "presence": dimension_presence(),
+        "selected_tag_names": selected_tag_names(request.GET),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
         "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready")},
         "sort": sort, "limit": limit, "offset": offset,

@@ -64,6 +64,7 @@
     // 出不出现只看这个，不看当前筛选下的数字 —— 1.25.24 的原话是「我选择了两三个
     // 标签之后，这个界面就变了，格局就变了」。
     presence: { review_ai: 0, answer_missing: 0, tags: 0 },
+    selectedTagNames: {},
     loading: false,
     token: 0,
     basket: loadBasket()
@@ -238,6 +239,7 @@
       state.total = body.total;
       state.facets = body.facets;
       state.presence = body.presence || state.presence;
+      state.selectedTagNames = body.selected_tag_names || {};
       state.tagWork = body.tag_work || state.tagWork;
       state.features = body.features || {};
       state.ai = body.ai || { mode: "assistant" };
@@ -429,7 +431,13 @@
     ui.tagSelect.replaceChildren();
     if (!tags.length) ui.tagSelect.append(new Option("当前筛选下没有可用的标签", ""));
     tags.forEach((item) => { const option = new Option(`${item.tag}（${item.count}）`, item.id); option.selected = selected.includes(item.id); ui.tagSelect.append(option); });
-    selected.forEach((id) => { if (!Array.from(ui.tagSelect.options).some((option) => option.value === id)) ui.tagSelect.add(new Option("已选标签 · " + id.slice(0, 8), id, true, true)); });
+    // 筛到 0 道题时，可选列表里一个标签都不剩，但老师手上那几个还得看得见、还得能取消。
+    // 显示标签的名字；名字也查不到（标签被删了）才退回编号，并且说清这是什么。
+    selected.forEach((id) => {
+      if (Array.from(ui.tagSelect.options).some((option) => option.value === id)) return;
+      const known = state.selectedTagNames?.[id];
+      ui.tagSelect.add(new Option(known ? known : `标签已被删除 · ${id.slice(0, 8)}`, id, true, true));
+    });
     if (state.tag) ui.tagSelect.append(new Option(state.tag, state.tag));
     const mode = $("tagMatchMode"); if (mode) mode.value = state.tagMode;
     renderSavedTagFilters();
@@ -2433,6 +2441,7 @@
     if (view === "all" && state.view === view && JSON.stringify(currentFilterPayload()) === filterKey && Number.isInteger(body.total)) {
       state.total = body.total; state.facets = body.facets || state.facets; state.tagWork = body.tag_work || state.tagWork;
       if (body.presence) state.presence = body.presence;
+      if (body.selected_tag_names) state.selectedTagNames = body.selected_tag_names;
       renderFacets(); renderActiveFilters();
     }
     patchTagPresentation(ids);

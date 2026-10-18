@@ -74,6 +74,25 @@ TAG_RULE_NO_PRESENCE = "ui.tagBox.hidden = !(tags.length"
 PLACEHOLDER = 'if (!tags.length) ui.tagSelect.append(new Option("当前筛选下没有可用的标签", ""));'
 PLACEHOLDER_GONE = ""
 
+# ── 筛到 0 时，手上的标签得显示名字，不是数据库编号 ──
+# 装好 1.25.24 复验时拍到的：标签框里写「已选标签 · 531aebeb6」。那是内部编号。
+NAME_LOOKUP = "    names = {str(pk): name for pk, name in LibraryTag.objects.filter(pk__in=ids).values_list(\"pk\", \"name\")}"
+NAME_LOOKUP_IDS = "    names = {tag_id: tag_id for tag_id in ids}"
+NAME_LOOKUP_DROP = ""
+# 少了这个 UUID 兜底，按名字筛的老写法（`tag` 传进来的是「集合间的基本关系」这种中文）
+# 会把整个列表页打成 500 —— 真出过：两条既有测试当场报 badly formed UUID。
+UUID_GUARD = '                ids.append(str(uuid.UUID(str(value))))'
+UUID_GUARD_RAW = '                ids.append(str(value))'
+NAME_KEY = '        "selected_tag_names": selected_tag_names(request.GET),'
+NAME_KEY_GONE = ""
+NAME_STORE = "state.selectedTagNames = body.selected_tag_names || {};"
+NAME_STORE_GONE = ""
+NAME_PATCH = "if (body.selected_tag_names) state.selectedTagNames = body.selected_tag_names;"
+NAME_PATCH_GONE = ""
+NAME_OPTION = "new Option(known ? known : `标签已被删除 · ${id.slice(0, 8)}`, id, true, true)"
+NAME_OPTION_RAW_ID = "new Option('已选标签 · ' + id.slice(0, 8), id, true, true)"
+NAME_OPTION_HIDDEN = "new Option(known, id, true, true)"
+
 # (relative, runner, description, original, mutation)
 MUTATIONS = [
     (LIBRARY_BROWSE, DJANGO_RUNS,
@@ -128,6 +147,43 @@ MUTATIONS = [
     (LIBRARY_JS, NODE_RUNS,
      "presence starts undefined instead of a defined shape",
      INITIAL, INITIAL_GONE),
+
+    (LIBRARY_BROWSE, DJANGO_RUNS,
+     "selected_tag_names hands back the ids instead of the names, so the teacher sees "
+     "「已选标签 · 531aebeb6」 — the internal id, not the tag they picked",
+     NAME_LOOKUP, NAME_LOOKUP_IDS),
+
+    (LIBRARY_BROWSE, DJANGO_RUNS,
+     "the name lookup is dropped entirely",
+     NAME_LOOKUP, NAME_LOOKUP_DROP),
+
+    (LIBRARY_BROWSE, DJANGO_RUNS,
+     "the UUID guard is dropped, so filtering by tag name (a legacy `tag` parameter that "
+     "carries Chinese text, not an id) turns the whole listing into a 500",
+     UUID_GUARD, UUID_GUARD_RAW),
+
+    (LIBRARY_BROWSE, DJANGO_RUNS,
+     "the listing stops carrying the selected tags' names, so the frontend has no way to "
+     "label them",
+     NAME_KEY, NAME_KEY_GONE),
+
+    (LIBRARY_JS, NODE_RUNS,
+     "the frontend stops storing the selected tags' names",
+     NAME_STORE, NAME_STORE_GONE),
+
+    (LIBRARY_JS, NODE_RUNS,
+     "a partial refresh no longer updates the names — renaming a tag never shows up",
+     NAME_PATCH, NAME_PATCH_GONE),
+
+    (LIBRARY_JS, NODE_RUNS,
+     "the picker falls back to showing the raw id again when a name is unavailable, instead "
+     "of saying the tag was deleted",
+     NAME_OPTION, NAME_OPTION_RAW_ID),
+
+    (LIBRARY_JS, NODE_RUNS,
+     "a selected tag whose name is unknown renders as an empty row, so the teacher cannot "
+     "tell what is selected or cancel it",
+     NAME_OPTION, NAME_OPTION_HIDDEN),
 ]
 
 

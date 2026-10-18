@@ -80,3 +80,61 @@ class PanelStabilityTests(TempDataMixin, TransactionTestCase):
         filtered = self.listing(review="human")
         self.assertEqual(filtered["facets"]["answers"]["no"], 1)
         self.assertEqual(filtered["presence"]["answer_missing"], 1)
+
+    def test_selected_tags_keep_their_names_when_the_result_is_empty(self):
+        """筛到 0 道题时，可选列表空了，但手上那几个标签还得显示名字。
+
+        老师看得见、点得掉，才算数。以前这里显示的是数据库内部编号前 8 位
+        （「已选标签 · 531aebeb6」）—— 那是给程序看的，不是给老师看的。
+        """
+        kept = self.publication(1, answer="42")
+        other = self.publication(2)
+        geometry = LibraryTag.objects.create(name="平行四边形", kind="knowledge", levels=["初中"])
+        quadratic = LibraryTag.objects.create(name="一元二次方程", kind="knowledge", levels=["初中"])
+        LibraryTagAssignment.objects.create(publication=kept, tag=geometry, source="human", needs_review=False)
+        LibraryTagAssignment.objects.create(publication=other, tag=quadratic, source="human", needs_review=False)
+
+        # 两个标签同时选，本来就凑不到一起 —— 也就是老师截图里那个 0 的状态。
+        both = self.listing(tag_all=f"{geometry.pk},{quadratic.pk}")["selected_tag_names"]
+        self.assertEqual(both, {str(geometry.pk): "平行四边形", str(quadratic.pk): "一元二次方程"})
+
+        # 名字不受筛选影响：换个筛法，选中的标签还是那几个名字。
+        narrowed = self.listing(tag_all=f"{geometry.pk},{quadratic.pk}", type="single_choice")
+        self.assertEqual(narrowed["total"], 0, "这一组本来就该是 0 题，否则这个用例没在测那个状态")
+        self.assertEqual(narrowed["selected_tag_names"], both)
+
+        # 没选标签时不该凭空造出一堆名字。
+        self.assertEqual(self.listing()["selected_tag_names"], {})
+
+    def test_a_selected_tag_that_no_longer_exists_is_labelled_as_deleted(self):
+        """标签被删掉后还挂在筛选上，得说清是「已被删除」，不能拿编号冒充名字。"""
+        self.publication(1)
+        gone = LibraryTag.objects.create(name="临时标签", kind="custom", levels=["初中"])
+        tag_id = str(gone.pk)
+        gone.delete()
+        names = self.listing(tag_all=tag_id)["selected_tag_names"]
+        self.assertEqual(names, {}, "查不到名字就是查不到，前端据此显示「标签已被删除」")
+
+    def test_filtering_by_tag_name_still_works(self):
+        """`tag` 是按名字筛的老写法，不是编号。
+
+        查名字那一步要是把这个值也塞进编号列表里，整个列表页会直接 500 ——
+        「集合间的基本关系」不是个能当编号用的字符串。这条把它钉住。
+        """
+        kept = self.publication(1, answer="42")
+        other = self.publication(2)
+        geometry = LibraryTag.objects.create(name="平行四边形", kind="knowledge", levels=["初中"])
+        LibraryTagAssignment.objects.create(publication=kept, tag=geometry, source="human", needs_review=False)
+        LibraryTagAssignment.objects.create(
+            publication=other, tag=LibraryTag.objects.create(name="二次函数", kind="knowledge", levels=["初中"]),
+            source="human", needs_review=False)
+
+        body = self.listing(tag="平行四边形")
+        self.assertIn("total", body)
+        self.assertEqual(body["selected_tag_names"], {},
+                         "按名字筛的老写法没有编号要查名字，也不该因此报错")
+
+        # 名字里带非 UUID 的字符、空格、逗号，一个都不能把这一页打成 500。
+        for value in ["集合间的基本关系", "a,b", "  ", "平行四边形,二次函数", "12345"]:
+            with self.subTest(tag=value):
+                self.assertIn("selected_tag_names", self.listing(tag=value))
