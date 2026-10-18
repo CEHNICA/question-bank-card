@@ -60,6 +60,10 @@
     total: 0,
     facets: null,
     tagWork: { untagged_knowledge: 0, pending_review: 0 },
+    // 题库里到底有没有 AI 审核的题 / 缺答案的题 / 打过标签的题。面板里一张卡片
+    // 出不出现只看这个，不看当前筛选下的数字 —— 1.25.24 的原话是「我选择了两三个
+    // 标签之后，这个界面就变了，格局就变了」。
+    presence: { review_ai: 0, answer_missing: 0, tags: 0 },
     loading: false,
     token: 0,
     basket: loadBasket()
@@ -233,6 +237,7 @@
       if (token !== state.token) return;
       state.total = body.total;
       state.facets = body.facets;
+      state.presence = body.presence || state.presence;
       state.tagWork = body.tag_work || state.tagWork;
       state.features = body.features || {};
       state.ai = body.ai || { mode: "assistant" };
@@ -312,11 +317,13 @@
         button.addEventListener("click", () => { state.type = key; syncUrl(); load(); });
         ui.types.append(button);
       });
-    // 一个筛选把结果清空时，别把「这里本来还有什么」也一起收走：这时候保留
-    // 全部分组（数字如实是 0），用户才看得见题库里还有哪些东西可筛。
-    const emptied = !(Number(state.total) || 0);
-    renderReviewFilters(facets.reviews || {}, emptied);
-    renderAnswerFilters(facets.answers || {}, emptied);
+    // 一张卡片出不出现，看的是题库里有没有这类数据（state.presence），不是当前筛选
+    // 下还剩多少。原来在这里用 emptied 兜底：别的筛选把结果清空时把整组顶出来，
+    // 而那一维在题库里本来就一道都没有 —— 面板于是重排。老师选两三个标签、
+    // 筛到 0 道题就能看见「谁审核的」凭空冒出来。1.25.24 修。
+    // 当前正选着的那一维永远留着，不然筛着筛着把自己的控件筛没了。
+    renderReviewFilters(facets.reviews || {});
+    renderAnswerFilters(facets.answers || {});
     renderTagFilter(facets.tags || []);
     renderTodos();
     // 「更多筛选」里三组都空时，点开了也是一片空白 —— 那就不出现。
@@ -389,13 +396,13 @@
   }
 
   // 有没有答案：挑出原卷没给答案的题（补答案或做 AI 参考答案时用）。
-  function renderAnswerFilters(answers, emptied = false) {
+  // 这张卡片看不看题库有没有缺答案的题（state.presence），不看当前筛选下还剩几道
+  // 没答案的 —— 后者一筛到 0 卡片就会消失，下面的全顶上去，格局跟着变。
+  function renderAnswerFilters(answers) {
     const box = ui.answerFilters;
     const yes = Number(answers.yes) || 0;
     const no = Number(answers.no) || 0;
-    // emptied：别的筛选把结果清空了。这时候保留整组（数字如实是 0），
-    // 用户才知道「有答案」这一档本来存在、只是这次一道都没有。
-    box.hidden = !emptied && !no && !state.answer;
+    box.hidden = !Number(state.presence?.answer_missing) && !state.answer;
     box.replaceChildren();
     if (box.hidden) return;
     [["", "全部", yes + no], ["yes", "有答案", yes], ["no", "无答案", no]].forEach(([key, label, count]) => {
@@ -413,10 +420,14 @@
   }
 
   function renderTagFilter(tags) {
-    ui.tagBox.hidden = !(tags.length || state.tagAll || state.tagAny || state.tagNot || state.tag);
+    // 题库里打过正式标签就一直有这张卡；当前筛选下筛不到标签了，
+    // 那是「这里没有」的问题，不是「这一维不存在」—— 用一行说明讲清楚，不收卡片。
+    ui.tagBox.hidden = !(tags.length || Number(state.presence?.tags)
+      || state.tagAll || state.tagAny || state.tagNot || state.tag);
     if (ui.tagBox.hidden) return;
     const selected = String(state.tagMode === "not" ? state.tagNot : state.tagMode === "any" ? state.tagAny : state.tagAll).split(",").filter(Boolean);
     ui.tagSelect.replaceChildren();
+    if (!tags.length) ui.tagSelect.append(new Option("当前筛选下没有可用的标签", ""));
     tags.forEach((item) => { const option = new Option(`${item.tag}（${item.count}）`, item.id); option.selected = selected.includes(item.id); ui.tagSelect.append(option); });
     selected.forEach((id) => { if (!Array.from(ui.tagSelect.options).some((option) => option.value === id)) ui.tagSelect.add(new Option("已选标签 · " + id.slice(0, 8), id, true, true)); });
     if (state.tag) ui.tagSelect.append(new Option(state.tag, state.tag));
@@ -777,11 +788,12 @@
   }
 
   // 只在题库里有 AI 审核入库的题时出现：可以只看人工核对过的，或把 AI 审核的挑出来抽查。
-  function renderReviewFilters(reviews, emptied = false) {
+  // 同上，看的是题库里有没有（state.presence），不是当前筛选下还剩几道。
+  function renderReviewFilters(reviews) {
     const box = $("reviewFilters");
     const ai = Number(reviews.ai) || 0;
     const human = Number(reviews.human) || 0;
-    box.hidden = !emptied && !ai && !state.review;
+    box.hidden = !Number(state.presence?.review_ai) && !state.review;
     box.replaceChildren();
     if (box.hidden) return;
     [["", "全部", ai + human], ["human", "人工核对", human], ["ai", "AI 审核", ai]].forEach(([key, label, count]) => {
@@ -2420,6 +2432,7 @@
     }
     if (view === "all" && state.view === view && JSON.stringify(currentFilterPayload()) === filterKey && Number.isInteger(body.total)) {
       state.total = body.total; state.facets = body.facets || state.facets; state.tagWork = body.tag_work || state.tagWork;
+      if (body.presence) state.presence = body.presence;
       renderFacets(); renderActiveFilters();
     }
     patchTagPresentation(ids);

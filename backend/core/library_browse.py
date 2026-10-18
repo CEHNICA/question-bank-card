@@ -254,6 +254,29 @@ def tag_work_counts() -> dict:
             "outdated_suggestions": len(waiting - reachable)}
 
 
+def dimension_presence() -> dict:
+    """这几个维度在题库里到底有没有数据 —— 不受任何筛选影响。
+
+    「更多筛选」里一张卡片出不出现，必须看这个，不能看当前筛选下的数字。
+    facet_counts 每一维都是「换到这个维度后还剩多少题」，所以老师选两三个标签、
+    筛到 0 道题时，这些数字会一起变 0；更糟的是 emptied 那条兜底会把本来该藏起来的
+    卡片也顶出来（这一维在题库里从来就没有过数据），面板于是重排。老师的原话是
+    「我选择了两三个标签之后，这个界面就变了，格局就变了」。
+
+    这里返回的是题库的事实：有没有 AI 审核入库的题、有没有缺答案的题、
+    有没有打上正式标签的题。改筛选动不了它。
+    """
+    papers = library_rows({})
+    missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+    from .models import LibraryTagAssignment
+    return {
+        "review_ai": papers.filter(review_source="ai").count(),
+        "answer_missing": papers.filter(missing).count(),
+        "tags": (LibraryTagAssignment.objects.filter(needs_review=False)
+                 .values("tag_id").distinct().count()),
+    }
+
+
 def library_list(request):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -273,6 +296,7 @@ def library_list(request):
     tag_work = tag_work_counts()
     return JsonResponse({
         "total": total, "items": items, "facets": facet_counts(request.GET),
+        "presence": dimension_presence(),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
         "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready")},
         "sort": sort, "limit": limit, "offset": offset,
