@@ -75,12 +75,26 @@ assert.match(backTopCss, /\.back-to-top:hover, \.back-to-top:focus-visible \{ op
 
 // ── 三、搜索框别再独吞整条顶栏 ──
 // 量过：1520 宽的屏上它一个人占 1077 像素，顶栏里只剩一颗标签管理按钮。
-assert.match(css, /\.library-search \{ position: relative; max-width: 560px; \}/,
-  "搜索框有上限了 —— 宽屏不再撑满");
-assert.match(css, /\.library-search input \{ width: 100%;/,
-  "窄屏仍旧靠 width:100% 撑满，那边本来就不够分，不能一起砍掉");
-assert.doesNotMatch(css, /\.library-search \{ position: relative; \}/,
-  "原来那行没有上限的写法已经换掉了");
+//
+// 这里是这一版踩过的坑：上限先写在 library.css 里，测试照样全绿，实机一量还是 1077。
+// 因为 library-reading.css 在 library.css **之后**加载，里面有一条更具体的
+// `.library-top-navigation .library-search { max-width: none }` 把封顶抹了。
+//
+// 教训：静态断言只能证明「我写了 max-width」，证不了「它生效了」。
+// 真正决定渲染的是**级联结果**，所以断言必须锚在最后生效的那条规则上。
+const readingCss = fs.readFileSync(require.resolve("./library-reading.css"), "utf8");
+// 注意不能整份文件扫 `max-width: none` —— 窄屏那条（搜索框独占一行）是合法的，
+// 一起判掉就是误报。只盯顶栏那条：它后面必须跟 560，不是 none。
+assert.match(readingCss,
+  /\.library-top-navigation \.library-search \{ flex: 0 1 560px; min-width: 140px; max-width: 560px; \}/,
+  "真正生效的那条规则上必须有上限（library-reading.css 后加载，它说了算）");
+
+// 窄屏那条是搜索框独占一行，撑满是对的，不能一起砍掉。
+assert.match(readingCss, /\.library-top-navigation \.library-search \{ min-width: 90px; max-width: none; \}/,
+  "窄屏那条保留撑满 —— 那一行只有搜索框，本来就不够分");
+assert.match(readingCss, /\.library-top-navigation \{ display: flex;[^}]*justify-content: flex-start/,
+  "标签管理贴着搜索框右边排，中间不再留一大片空白");
+assert.match(css, /\.library-search input \{ width: 100%;/, "输入框跟着容器走");
 
 console.log("The library page's locate button, back-to-top icon and shorter search box "
   + "are all in place: OK");

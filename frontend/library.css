@@ -47,11 +47,10 @@
 .rail-collapse:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; opacity: 1; }
 body.library-focus-mode .rail-collapse { justify-self: start; margin-right: 0; opacity: .55; }
 body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-collapse:focus-visible { opacity: 1; }
-/* 1.25.37：搜索框原来靠 width:100% 撑满，顶栏里除了它只剩一颗标签管理按钮。
-   1520 宽的屏上它一个人占 1077 像素、九成地方，搜两个字用不着这么宽；
-   老师的原话是「搜索框太长」。给它一个上限，宽屏不再独吞整条顶栏，
-   窄屏仍然撑满（那儿本来就不够分）。 */
-.library-search { position: relative; max-width: 560px; }
+/* 1.25.37：搜索框的宽度上限写在 library-reading.css 的
+   `.library-top-navigation .library-search` 那条上 —— 那个文件后加载、选择器更具体，
+   在这里写上限会被它整个盖掉（本版真踩过：写了 max-width，测试全绿，实机一量还是 1077）。 */
+.library-search { position: relative; }
 .library-search .search-icon { position: absolute; left: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .library-search input { width: 100%; min-height: 34px; padding: 5px 30px 5px 32px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--surface); font-size: 14.5px; color: var(--ink); box-shadow: none; transition: border-color .15s, box-shadow .15s; }

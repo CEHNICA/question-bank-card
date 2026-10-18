@@ -23,11 +23,12 @@
      顶栏这份是同一份 .topnav 的搬运源，宽屏再摆一份只是重复 ——
      页面上看不到自己在哪一节，全靠抽屉里的高亮。 */
   .library-page .topbar > .topnav { display: none; }
-  /* 顶栏按内容排布，不再让搜索框顶到 560px 就停：篮子两个动作默认隐藏时，
-     原来会在搜索框和标签管理之间留下一大片空白。搜索框吃掉剩余宽度，
-     上限放宽，标签管理紧贴在它右边。 */
+  /* 1.25.37：这里的 max-width 曾经被特意改成 none（想让搜索框吃掉剩余宽度），
+     老师看了说「搜索框太长」——量过是 1077 像素，顶栏里只剩标签管理一颗按钮。
+     现在封顶 560，标签管理贴着它右边排，中间不再是一大片空白。
+     注意这条比 library.css 里那条更具体、且这个文件后加载，所以上限必须写在这里才生效。 */
   .library-top-navigation { display: flex; min-width: 0; align-items: center; justify-content: flex-start; gap: 14px; }
-  .library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: none; }
+  .library-top-navigation .library-search { flex: 0 1 560px; min-width: 140px; max-width: 560px; }
   .library-top-navigation .library-search input { min-height: 34px; border-radius: 6px; font-size: 13px; }
   .library-top-navigation .library-tag-manager-entry { flex: none; width: auto; min-height: 32px; padding: 6px 9px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: none; font-size: 12px; }
   .library-top-navigation .library-tag-manager-entry:hover { border-left-color: var(--line); background: var(--accent-soft); }

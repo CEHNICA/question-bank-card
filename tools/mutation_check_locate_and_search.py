@@ -69,8 +69,13 @@ HOVER = ".back-to-top:hover, .back-to-top:focus-visible { opacity: 1"
 HOVER_MOUSE_ONLY = ".back-to-top:hover { opacity: 1"
 
 # ── 三、搜索框别再独吞整条顶栏 ──
-SEARCH_MAX = ".library-search { position: relative; max-width: 560px; }"
-SEARCH_MAX_NONE = ".library-search { position: relative; }"
+# 注意锚点在 library-reading.css，不在 library.css。
+# 本版真踩过：上限先写在 library.css，静态断言全绿，实机一量还是 1077 —— 因为
+# library-reading.css 后加载，里面一条更具体的 `max-width: none` 把它整个盖掉了。
+# 教训：决定渲染的是级联结果，锚必须落在**真正生效的那条**上。
+READING_CSS = "frontend/library-reading.css"
+SEARCH_MAX = ".library-top-navigation .library-search { flex: 0 1 560px; min-width: 140px; max-width: 560px; }"
+SEARCH_MAX_NONE = ".library-top-navigation .library-search { flex: 1 1 260px; min-width: 140px; max-width: none; }"
 SEARCH_FILL = ".library-search input { width: 100%;"
 SEARCH_FILL_GONE = ".library-search input { width: 100% !important; min-width: 0;"
 
@@ -124,7 +129,7 @@ MUTATIONS = [
      HOVER, HOVER_MOUSE_ONLY),
 
     # 搜索框回到独吞整条顶栏
-    (LIBRARY_CSS, NODE_RUNS,
+    (READING_CSS, NODE_RUNS,
      "the search box goes back to filling the whole topbar (1077px on a 1520px screen)",
      SEARCH_MAX, SEARCH_MAX_NONE),
     (LIBRARY_CSS, NODE_RUNS,
