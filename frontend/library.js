@@ -459,7 +459,12 @@
     const outdatedCount = Number(state.tagWork?.outdated_suggestions) || 0;
     const apiReady = state.ai.mode === "api" && state.ai.api_ready === true;
     const tagsEnabled = state.features.knowledge_tags === true;
-    const batchActions = [];
+    // 1.25.23：原来只有一组 batchActions，五颗按钮平铺在一列里。老师说这些按钮
+    // 「无非分成两类，一个处理答案，一个处理标签」—— 是的，按"它动的是什么"分开才
+    // 看得出差别，因为平铺时「补齐缺的参考答案」和「补齐缺的知识点标签」长得一样，
+    // 而「只处理当前这批 · 807 题」根本看不出它动的是标签。
+    const tagActions = [];      // 标签这一类：两个筛选 + 两个 AI 动作
+    const answerActions = [];   // 答案这一类：一个 AI 动作
     const quickActions = [];
 
     // 待办入口和题型其实是同一种东西：点了就把列表筛一遍。它们以前挂着放大镜图标，
@@ -501,6 +506,9 @@
       // 排队时要改名的只有被点的那个，靠这个标记认。名字里带着题数、重画后会变，
       // 按钮节点本身也会被换掉，只有它是渲染时就写死的。
       tags.dataset.queueAction = "tags";
+      // 1.25.23：标了 data-cost 的按钮，界面上会多一枚「AI」小标 —— 花钱这件事写在
+      // 按钮自己身上，而不是只写在面板顶上那一行说明里（说明只写一次，扫过去容易漏）。
+      tags.dataset.cost = "ai";
       tags.title = !apiReady
         ? "需要先到「设置 → API 配置」里配置并测试通过。"
         : readyCount
@@ -513,7 +521,7 @@
         if (!readyCount) { toast("现在没有需要新排队的题。", ""); return; }
         confirmBulkTags(readyCount, missingCount);
       });
-      batchActions.push(tags);
+      tagActions.push(tags);
       const current = iconButton("button", "button button-quiet button-small library-tool-action",
         `只处理当前这批 · ${Number(state.total) || 0} 题`, "plus");
       // 1.25.21：原来只写「每道题调用一次 AI，会消耗额度」。没筛任何东西时这一下就是
@@ -526,6 +534,7 @@
         : "需要先到「设置 → API 配置」里配置并测试通过。";
       current.dataset.disabledInSelectedView = String(!apiReady || Number(state.total) === 0);
       current.dataset.queueAction = "tags-current";
+      current.dataset.cost = "ai";
       current.addEventListener("click", async () => {
         const count = Number(state.total) || 0;
         const filters = currentFilterPayload();
@@ -539,13 +548,14 @@
         });
         if (confirmed) queueJobs("tags", { scope: "current_filter", filters }, "tags-current", count);
       });
-      batchActions.push(current);
+      tagActions.push(current);
     }
     if (state.features.ai_answer) {
       const answers = iconButton("button", "button button-quiet button-small library-tool-action",
         `补齐缺的参考答案 · ${answerCount} 题`, "plus");
       answers.dataset.disabledInSelectedView = String(!apiReady || answerCount === 0);
       answers.dataset.queueAction = "answer";
+      answers.dataset.cost = "ai";
       answers.title = !apiReady
         ? "需要先到「设置 → API 配置」里配置并测试通过。"
         : answerCount
@@ -556,7 +566,7 @@
         if (!answerCount) { toast("题库里的答案已经齐了。", ""); return; }
         confirmBulkAnswers(answerCount);
       });
-      batchActions.push(answers);
+      answerActions.push(answers);
     }
     // 1.25.20：两个筛选入口（建议待核对、没打标签）和三个 AI 动作（补标签、补当前
     // 这批、补答案）合成一处。它们本来就是同一件事——「还有活没干」，只是原来分在
@@ -566,7 +576,9 @@
     // 折叠起来的东西要让人看得见里面有什么，所以名字上直接把三样都数出来。
     // 「要不要花钱」从名字里挪走 —— 那是警告，不是动作，挤在名字里只会让人认不出
     // 这是干什么的；挪到展开后的第一行和每颗按钮的悬停说明里。
-    if (!quickActions.length && !batchActions.length) { box.replaceChildren(); box.hidden = true; return; }
+    if (!quickActions.length && !tagActions.length && !answerActions.length) {
+      box.replaceChildren(); box.hidden = true; return;
+    }
     box.hidden = false;
     const menu = node("details", "library-todo-menu");
     menu.open = todoMenuOpen;
@@ -585,45 +597,62 @@
     if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
     summary.title = working
       ? `AI 正在逐题处理，还剩 ${working} 道。做完会自动显示，不用一直点着看。`
-      : `点开看：${bits.join("；")}。上面几项点一下只看这些题、不花钱；下面几项会让 AI 逐题处理、消耗额度。`;
+      : `点开看：${bits.join("；")}。按「标签」和「答案」分了两栏；没带「AI」标记的只筛一遍、不花钱，带「AI」的会让 AI 逐题处理、消耗额度。`;
     menu.append(summary);
 
     const body = node("div", "library-todo-body");
-    // 筛选入口排在前面：它们不花钱，先看这些。
+    // 1.25.23：按「它动的是什么」分成两栏 —— 标签一栏、答案一栏。老师原话是这些
+    // 按钮「无非分成两类，一个处理答案，一个处理标签」。平铺时确实看不出：
+    // 「补齐缺的参考答案」和「补齐缺的知识点标签」长得一模一样，
+    // 而「只处理当前这批 · 807 题」根本看不出它动的是标签。
     //
-    // 1.25.21：这个容器原来同时挂着 library-tool-actions，于是 applyBatchButtonState
-    // 那句 `#libraryTodos .library-tool-actions button` 会把这两个筛选一起圈进去 ——
-    // AI 一登记，它们跟着一起变灰，老师在 AI 干活时连"看看哪些题等着我核对"都点不了，
-    // 而那正是 AI 干活时最该做的事。筛选组改挂自己的 class，那个选择器自然只管 AI 动作。
-    if (quickActions.length) {
-      const look = node("div", "library-todo-look");
-      look.append(...quickActions);
-      body.append(node("p", "library-todo-head library-todo-head-free", "只看这些题 · 不花钱"), look);
+    // 每栏内部仍然是筛选在前、AI 在后 —— 先看不花钱的，再看要花钱的。
+    // 筛选组挂自己的 class，不挂 library-tool-actions：applyBatchButtonState 按那个
+    // class 圈按钮，挂了它，AI 一登记这两个免费的筛选就会跟着变灰（1.25.21 的毛病）。
+    body.append(node("p", "library-todo-note", apiReady
+      ? "没带「AI」标记的只是筛一遍，不花钱；带「AI」的会让 AI 逐题处理，每题消耗一次额度。"
+        + "标签只是建议，要你逐条核对确认后才贴到题目上。"
+      : "到「设置 → API 配置」里配置并测试通过，才能用带「AI」标记的那几项。"));
+    // 排队中、以及「还在处理多少道」都写在这一行，正对着下面两栏。
+    // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
+    const stateLine = node("p", "library-batch-state");
+    // 排队中这一行也要占住，而且必须能扛住重画：登记途中界面会重画，
+    // 这一行每次都是新节点，所以排队文案要能按需重填，不能抱着旧节点不放。
+    stateLine.dataset.tone = "working";
+    stateLine.hidden = queueBusy ? false : !working;
+    stateLine.textContent = queueBusy ? queueingText(queueCount, 0) : workingSummary(queuedTags, queuedAnswers);
+    if (queueBusy) stateLine.dataset.queueing = "true"; else delete stateLine.dataset.queueing;
+    body.append(stateLine);
+
+    const cols = node("div", "library-todo-cols");
+    // 只有标签这一栏有东西时（比如没开答案功能），别留一整列空白。
+    if (!answerActions.length) cols.classList.add("library-todo-cols-solo");
+    const column = (title, groups) => {
+      const col = node("div", "library-todo-col");
+      col.append(node("h4", "library-todo-col-title", title));
+      const items = node("div", "library-todo-col-items");
+      for (const group of groups) if (group.children.length) items.append(group);
+      col.append(items);
+      return col;
+    };
+    const freeGroup = () => {
+      const g = node("div", "library-todo-look");
+      g.append(...quickActions);
+      return g;
+    };
+    const paidGroup = (actions) => {
+      const g = node("div", "library-tool-actions");
+      g.append(...actions);
+      return g;
+    };
+    cols.append(column("标签", [
+      quickActions.length ? freeGroup() : null,
+      tagActions.length ? paidGroup(tagActions) : null,
+    ]));
+    if (answerActions.length) {
+      cols.append(column("答案", [paidGroup(answerActions)]));
     }
-    if (batchActions.length) {
-      // 1.25.21：花钱的和不花钱的五颗按钮原来连边框颜色都一样，唯一的区别是 AI 那三颗
-      // 前面多了个「+」—— 最该多点两下的看着最不像按钮，最该慎的却最像能随手点。
-      // 代价从一行小字提到小标题上、跟着按钮走；下面三颗另给一道实线边框（见 CSS）。
-      body.append(node("p", "library-todo-head library-todo-head-cost", apiReady
-        ? "让 AI 逐题处理 · 每题消耗一次额度"
-        : "让 AI 逐题处理 · 需要先配置 API"));
-      body.append(node("p", "library-todo-note", apiReady
-        ? "生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
-        : "到「设置 → API 配置」里配置并测试通过，才能用下面这几项。"));
-      // 排队中、以及「已经在处理多少道」都写在这里。按钮上方、正对着按钮，
-      // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
-      const stateLine = node("p", "library-batch-state");
-      // 排队中这一行也要占住，而且必须能扛住重画：登记途中界面会重画，
-      // 这一行每次都是新节点，所以排队文案要能按需重填，不能抱着旧节点不放。
-      stateLine.dataset.tone = "working";
-      stateLine.hidden = queueBusy ? false : !working;
-      stateLine.textContent = queueBusy ? queueingText(queueCount, 0) : workingSummary(queuedTags, queuedAnswers);
-      if (queueBusy) stateLine.dataset.queueing = "true"; else delete stateLine.dataset.queueing;
-      body.append(stateLine);
-      const actions = node("div", "library-tool-actions");
-      actions.append(...batchActions);
-      body.append(actions);
-    }
+    body.append(cols);
     menu.append(body);
     menu.addEventListener("toggle", () => { todoMenuOpen = menu.open; });
     box.append(menu);

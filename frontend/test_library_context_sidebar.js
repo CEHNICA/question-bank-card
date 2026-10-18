@@ -144,8 +144,28 @@ assert.doesNotMatch(readingCss, /\.library-filterbar > \.library-facet \{[^}]*gr
   "no slot is reserved for a type facet that lives one level deeper, inside the panel");
 assert.match(css.concat(readingCss), /\.library-todos:not\(\[hidden\]\)[^{]*\{[^}]*display:\s*flex/,
   "the pending-work entry is shown whenever there is something pending");
-assert.match(js, /function renderTodos\(\)[\s\S]*?look\.append\(\.\.\.quickActions\)/,
+assert.match(js, /function renderTodos\(\)[\s\S]*?g\.append\(\.\.\.quickActions\)/,
   "pending-work buttons are rendered into the always-visible container");
+// 1.25.23：「更多筛选」面板的定位基准从按钮换成了整条筛选行。
+// 1.25.22 把这个按钮从最右边挪到「来源」旁边，面板还锚在按钮的右边缘（right: 0），
+// 于是整个甩到屏幕左边 —— 实测面板落在 x=-276，题型/排序/答案/标签关系全被切掉一半。
+// 这两条要一起看：只把 right 改成 left 而不改定位基准，面板会跟着按钮跑到右边去；
+// 只去掉定位基准而不写 left，它会退回按静态位置摆，哪儿都不靠。
+assert.doesNotMatch(css, /^\.library-advanced \{[^}]*position: relative/m,
+  "「更多筛选」自己不再是定位基准，否则面板会跟着这个按钮跑出屏幕");
+const advPanel = css.match(/\.library-advanced\[open\] > \.library-filters \{[^}]*\}/);
+assert.ok(advPanel, "find the panel rule; update this slice when its anchor changes");
+assert.match(advPanel[0], /left: 0; right: auto/, "面板贴筛选行左边缘开，不再贴着按钮");
+assert.match(advPanel[0], /width: min\(680px, 100%\)/,
+  "宽度跟着筛选行走 —— 无论按钮挪到哪、窗口多窄，都出不了屏幕");
+assert.match(css, /^\.library-filterbar \{[^}]*position: relative/m,
+  "筛选行才是定位基准，它得真的 relative（sticky 的 .library-bulk 只是备选）");
+// 窄屏那条覆盖也得跟着改。它原来写的是 calc(100vw - 24px) —— 那是"相对于窗口"，
+// 面板却贴在一个跟着布局走的锚点上，两套参照系对不上，窄屏一样会甩出去。
+const narrowPanel = css.match(/@media \(max-width: 560px\) \{[^@]*?\.library-advanced\[open\] > \.library-filters \{[^}]*\}/s);
+assert.ok(narrowPanel, "find the narrow-screen panel rule; update this slice when its anchor changes");
+assert.match(narrowPanel[0], /width: min\(520px, 100%\)/,
+  "窄屏的面板宽度也以筛选行为准，不是以窗口为准");
 // 1.25.20：三样「还有活没干」合成一处折叠条。折叠起来的东西要让人看得见里面有什么，
 // 所以名字上直接把那三样数出来 —— 「让 AI 提标签建议」这句话整屏都没出现过，
 // 老师因此以为这个功能不存在。

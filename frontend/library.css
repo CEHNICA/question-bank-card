@@ -211,27 +211,35 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-todo-bits { color: var(--muted); }
 .library-todos .library-todo-menu[data-working] .library-todo-bits { color: rgba(255, 255, 255, .85); }
 .library-todos .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); color: inherit; font-size: 11px; font-weight: 700; }
-.library-todo-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
-.library-todo-note { margin: 0 0 7px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
-/* 1.25.21：两组各带一个看得见的小标题。代价原来只藏在一行 11.5px 的灰字里，
-   而两组的按钮又长得一模一样 —— 现在先把「不花钱」和「要花钱」写成标题，
-   再靠下面那道实线边框把花钱那三颗压出重量。 */
-.library-todo-head { margin: 0 0 7px; display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
-.library-todo-head-free { color: var(--ink-2); }
-.library-todo-head-cost { color: var(--ink); }
+.library-todo-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(560px, calc(100vw - 32px)); max-height: min(60vh, 460px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
+.library-todo-note { margin: 0 0 9px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 1.25.23：按「它动的是什么」分两栏 —— 标签一栏、答案一栏。平铺时看不出差别：
+   「补齐缺的参考答案」和「补齐缺的知识点标签」长得一模一样，
+   而「只处理当前这批」根本看不出它动的是标签。 */
+.library-todo-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.library-todo-cols-solo { grid-template-columns: minmax(0, 1fr); }
+.library-todo-col { min-width: 0; }
+.library-todo-col + .library-todo-col { padding-left: 14px; border-left: 1px solid var(--line); }
+.library-todo-col-title { margin: 0 0 7px; font-size: 12px; font-weight: 700; color: var(--ink); }
+.library-todo-col-items { display: grid; gap: 6px; }
 /* 筛选组只挂自己的 class（见 library.js 的 renderTodos）：它既不参与
    applyBatchButtonState 的锁定，也不该长得像一颗可以去点的按钮 —— 保持纯文字，
-   和下面那排题型筛选是同一套长相。grid 自己撑开，不再借 .library-tool-actions。 */
-.library-todo-look { display: grid; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+   和题型筛选是同一套长相。 */
+.library-todo-look { display: grid; gap: 6px; }
 .library-todos .library-tool-actions { gap: 6px; }
 .library-todos .library-tool-action { min-height: 36px; padding: 7px 9px; }
-/* 这五颗原来连边框都一样（1px solid transparent，等于没有边框），全靠一个「+」号
-   分出「只看」和「让 AI 去干」。反过来就变成了最该多点两下的看着最不像按钮、
-   最该慎的却最像能随手点。筛选那两颗保持无边框，下面三颗给一道实线。 */
+/* 1.25.21：这两组原来连边框都一样（1px solid transparent，等于没有边框），全靠一个
+   「+」号分出「只看」和「让 AI 去干」。1.25.23 那道实线边框继续留着。
+   1.25.23 再加一枚「AI」小标：光靠边框，"要花钱"这件事仍然只写在面板顶上那行说明里，
+   而说明只写一次，一列排下来很容易漏。标记落在按钮自己身上，扫一列都在。 */
 .library-todo-look .library-tool-action { border-color: transparent; }
-.library-todo-body > .library-tool-actions > .library-tool-action { border-color: var(--line-strong); }
-.library-todo-body > .library-tool-actions > .library-tool-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
-.library-todo-body > .library-tool-actions > .library-tool-action:disabled { border-color: var(--line); }
+.library-todo-body .library-tool-actions > .library-tool-action { border-color: var(--line-strong); }
+.library-todo-body .library-tool-actions > .library-tool-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
+.library-todo-body .library-tool-actions > .library-tool-action:disabled { border-color: var(--line); }
+.library-todo-body .library-tool-action[data-cost="ai"]::after {
+  content: "AI"; flex: 0 0 auto; margin-left: auto; padding: 1px 6px; border-radius: 99px;
+  background: var(--accent-soft); color: var(--accent-dark); font-size: 10.5px; font-weight: 700; line-height: 1.6;
+}
 /* 排队中、以及「还在处理多少道」都写在这一行，正对着按钮。
    按钮点下去以后用户盯着的就是这几颗，这一行不写清楚就等于没反应。 */
 .library-batch-state:not([hidden]) { margin: 8px 0; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent-dark); font-size: 12px; line-height: 1.55; }
@@ -418,7 +426,13 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    infinite 动画仍会以 0.01ms 的周期一直转。
    这条要 !important：上面那条状态选择器带了三个类，比这条具体，不加就会被它盖住。 */
 @media (prefers-reduced-motion: reduce) { .basket-handle::after { animation: none !important; } }
-.library-advanced { position: relative; flex: none; font-size: 13px; color: var(--ink-2); }
+/* 1.25.23：原来这里是 position: relative，面板因此按「更多筛选」这个按钮的右边缘
+   锚定（下面那条 right: 0）。1.25.22 把这个按钮从最右边挪到「来源」旁边之后，
+   按钮往左走了 700 多像素，面板跟着甩出去 —— 实测面板落在 x=-276，左边 276 像素
+   在屏幕外，题型、排序、答案、标签关系几组全被切掉一半。
+   现在把定位基准交给整条筛选行（.library-filterbar，本来就是 relative），
+   面板贴筛选行左边缘开，宽度不超过筛选行 —— 无论按钮挪到哪、窗口多窄，都出不了屏幕。 */
+.library-advanced { flex: none; font-size: 13px; color: var(--ink-2); }
 .library-advanced > summary { width: max-content; cursor: pointer; list-style: none; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink-2); font-weight: 600; }
 .library-advanced > summary::-webkit-details-marker { display: none; }
@@ -428,9 +442,11 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    30 / 61 / 35 / 105 / 61 / 96 —— 没有节奏；题型那排标签的最后一个右边紧贴着
    「排序」两个字，排序的下拉框又孤零零飘到下一行右端。改成卡片栅格：
    每个筛选项一张卡，标题在上、控件在下、间距一致。题型最宽，独占一行。 */
-.library-advanced[open] > .library-filters { position: absolute; z-index: 25; top: calc(100% + 7px); right: 0;
+/* 1.25.23：left: 0 + 宽度不超过筛选行（100%）—— 原来写的是 right: 0，锚在按钮上，
+   见上面 .library-advanced 那条注释。宽度跟着筛选行走，任何窗口宽度下都落在页面里。 */
+.library-advanced[open] > .library-filters { position: absolute; z-index: 25; top: calc(100% + 7px); left: 0; right: auto;
   display: grid; grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); align-items: start; gap: 12px;
-  width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;
+  width: min(680px, 100%); margin: 0; padding: 14px;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
 .library-advanced .library-select { align-items: flex-start; flex-direction: column; gap: 5px; }
 /* 1.25.18：「更多筛选」原来是一排 flex 换行挤在一起的，题型那排标签的最后一个
@@ -619,7 +635,7 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   .library-filterbar { gap: 6px; }
   .library-filterbar > .library-select > span { display: none; }
   .library-filterbar .library-select select { max-width: min(155px, 42vw); padding-left: 8px; }
-  .library-advanced[open] > .library-filters { width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }
+  .library-advanced[open] > .library-filters { width: min(520px, 100%); padding: 11px; flex-wrap: wrap; }
   .library-card-meta { gap: 6px; }
   .library-source { white-space: normal; overflow-wrap: anywhere; flex-basis: calc(100% - 28px); }
   .library-card-meta > span::before { display: none; }

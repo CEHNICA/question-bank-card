@@ -99,28 +99,61 @@ assert.doesNotMatch(todos, /bits\.push\(`AI 能补/, "不能用「下面有几�
 assert.match(todos, /\$\{answerCount\} 题没答案/, "折叠条上写出还没答案的真数字");
 
 // 「要花额度」是警告不是动作。挤在名字里，认出来的就不是"这是干什么的"；
-// 但它也不能丢 —— 挪到看得见的组标题上，不是挪进悬停里等人发现。
+// 但它也不能丢 —— 1.25.23 起它跟着每一颗会花钱的按钮走（data-cost="ai" → 界面上的
+// 「AI」小标），面板顶上另有一行说明讲清规矩。
 const summary = todos.slice(todos.indexOf("const summary = node("), todos.indexOf("menu.append(body);"));
 assert.doesNotMatch(summary, /要花额度/, "「要花额度」不能占入口的名字");
-assert.match(todos, /library-todo-head-cost", apiReady[\s\S]*?让 AI 逐题处理 · 每题消耗一次额度/,
-  "花费的警告提成看得见的组标题，跟着按钮走，没有丢");
+assert.match(todos, /没带「AI」标记的只是筛一遍，不花钱；带「AI」的会让 AI 逐题处理，每题消耗一次额度/,
+  "花费的规矩写在展开后看得见的那一行，没有丢");
 
 // 折叠起来的东西要让人看得见里面有什么：三样都要合成一句话，缺一样就少一件事。
 assert.match(todos, /bits\.push\(`\$\{pendingCount\} 题等你核对`\)/);
 assert.match(todos, /bits\.push\(`\$\{missingCount\} 题没知识点`\)/);
 assert.match(todos, /bits\.push\(`\$\{answerCount\} 题没答案`\)/);
 assert.match(summary, /summary\.title = working[\s\S]*?点开看：/, "悬停说明也要把三样说全");
-assert.match(summary, /上面几项点一下只看这些题、不花钱；下面几项会让 AI 逐题处理、消耗额度/,
-  "悬停里说清哪几项不花钱");
+assert.match(summary, /按「标签」和「答案」分了两栏；没带「AI」标记的只筛一遍、不花钱/,
+  "悬停里说清分了栏、以及哪几项不花钱");
 
-// 1.25.21（本版最重要的一条）：五颗按钮原来连边框都一样，唯一区别是 AI 那三颗
-// 前面多个「+」号 —— 最该多点两下的看着最不像按钮，最该慎的最像能随手点。
-// 现在靠两样东西分开：看得见的组标题，和付费那三颗的实线边框。
-assert.match(todos, /library-todo-head-free", "只看这些题 · 不花钱"/, "免费的自己有一个看得见的组标题");
+// ── 二之一、1.25.23：按「它动的是什么」分栏 ──
+// 老师原话：「这么多按钮无非分成两类，一个是处理答案的，一个是处理标签的。给它分为
+// 别类，放清楚好不好？」平铺时确实看不出：「补齐缺的参考答案」和「补齐缺的知识点标签」
+// 长得一模一样，而「只处理当前这批 · 807 题」根本看不出它动的是标签。
+assert.match(todos, /const tagActions = \[\];\s*\/\/ 标签这一类/, "标签那一类单独收");
+assert.match(todos, /const answerActions = \[\];\s*\/\/ 答案这一类/, "答案这一类单独收");
+// 锚在代码上（声明和 push），别用裸词：解释这次改动的注释里原样写着一遍那个名字，
+// 裸词会把注释一起判掉，然后下一个人为了让测试变绿把注释删了。
+assert.doesNotMatch(todos, /const batchActions|batchActions\.push/,
+  "原来那个混装两组的一维数组已经拆掉了");
+// 分栏必须真的落到界面上：两栏都有内容时并排，只有一栏时不留半列空白。
+assert.match(todos, /node\("div", "library-todo-cols"\)/, "面板里有一块专门放分栏");
+assert.match(todos, /column\("标签", \[/, "标签这一栏");
+assert.match(todos, /column\("答案", \[paidGroup\(answerActions\)\]\)/, "答案那一栏");
+assert.match(todos, /if \(!answerActions\.length\) cols\.classList\.add\("library-todo-cols-solo"\)/,
+  "只有标签有内容时不留一整列空白");
+assert.match(css, /\.library-todo-cols \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/,
+  "两栏并排");
+assert.match(css, /\.library-todo-cols-solo \{ grid-template-columns: minmax\(0, 1fr\); \}/,
+  "一栏时占满整行");
+// 两栏之间要有条线，不然两栏并排看着像一栏里多了一行。
+assert.match(css, /\.library-todo-col \+ \.library-todo-col \{[^}]*border-left: 1px solid var\(--line\);/,
+  "两栏之间有一道分隔线");
+// 「要花钱」这件事 1.25.23 落到按钮自己身上：那三颗各带 data-cost="ai"，
+// 界面上多一枚小标。光靠面板顶上那一行说明，扫过一列就漏了。
+for (const [name, text] of [["tags", "补齐缺的知识点标签"], ["current", "只处理当前这批"],
+  ["answers", "补齐缺的参考答案"]]) {
+  assert.match(todos, new RegExp(`${name}\\.dataset\\.cost = "ai";`),
+    `${text} 这颗标了 data-cost="ai"，界面会多一枚「AI」小标`);
+}
+assert.match(css, /\.library-todo-body \.library-tool-action\[data-cost="ai"\]::after \{/,
+  "那枚小标是画出来的，不是每颗按钮手写一段标签");
+
+// 1.25.21 留下的那道实线边框继续留着 —— 分栏之后它仍然管"哪几颗要花钱"。
 assert.match(css, /\.library-todo-look \.library-tool-action \{ border-color: transparent; \}/,
   "筛选那两颗保持无边框的纯文字，和题型筛选同一套长相");
-assert.match(css, /\.library-todo-body > \.library-tool-actions > \.library-tool-action \{ border-color: var\(--line-strong\); \}/,
+assert.match(css, /\.library-todo-body \.library-tool-actions > \.library-tool-action \{ border-color: var\(--line-strong\); \}/,
   "要花钱的那三颗给一道实线边框，不能和免费的只差一个「+」");
+assert.doesNotMatch(css + todos, /library-todo-head/,
+  "1.25.21 那两个组标题（只看这些题 / 让 AI 逐题处理）已经换成「AI」小标，别留死样式和死 class");
 
 // ── 二之二、免费的两个筛选不能被"AI 正在排队"锁死 ──
 // 这一条上一版就写错了：当时只断言"那行单独锁筛选的代码存在"，可它后面紧接着又调
@@ -128,7 +161,7 @@ assert.match(css, /\.library-todo-body > \.library-tool-actions > \.library-tool
 // AI 一登记它们就跟着灰。断言通过，毛病照旧。根子在于 applyBatchButtonState 是按
 // .library-tool-actions 这个 class 圈按钮的，所以它圈没圈到筛选，只看筛选组挂没挂
 // 那个 class。这条就钉它本身。
-const lookContainer = todos.match(/const look = node\("div", "([^"]+)"\)/);
+const lookContainer = todos.match(/node\("div", "([^"]*library-todo-look[^"]*)"\)/);
 assert.ok(lookContainer, "找得到筛选组的容器；改版时 update this slice");
 assert.ok(!lookContainer[1].trim().split(/\s+/).includes("library-tool-actions"),
   "筛选组不能挂 library-tool-actions：applyBatchButtonState 就是按这个 class 圈按钮的，"

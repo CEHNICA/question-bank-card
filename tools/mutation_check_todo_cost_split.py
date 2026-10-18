@@ -50,8 +50,8 @@ LIBRARY_JS = "frontend/library.js"
 LIBRARY_CSS = "frontend/library.css"
 LIBRARY_READING_CSS = "frontend/library-reading.css"
 
-LOOK_CONTAINER = '      const look = node("div", "library-todo-look");'
-LOOK_CONTAINER_BUG = '      const look = node("div", "library-tool-actions library-todo-look");'
+LOOK_CONTAINER = '      const g = node("div", "library-todo-look");\r\n'
+LOOK_CONTAINER_BUG = '      const g = node("div", "library-tool-actions library-todo-look");\r\n'
 
 LOOK_LOCK = ('    for (const control of document.querySelectorAll("#libraryTodos '
              '.library-todo-look button")) control.disabled = selectedView;\r\n')
@@ -64,10 +64,6 @@ UNTAGGED_BIT = '    if (missingCount) bits.push(`${missingCount} 题没知识点
 UNTAGGED_BIT_OLD = '    if (missingCount) bits.push(`${missingCount} 题没打标签`);\r\n'
 ANSWER_BIT = '    if (answerCount) bits.push(`${answerCount} 题没答案`);\r\n'
 
-FREE_HEAD = '      body.append(node("p", "library-todo-head library-todo-head-free", "只看这些题 · 不花钱"), look);'
-FREE_HEAD_GONE = '      body.append(look);'
-COST_HEAD = '        ? "让 AI 逐题处理 · 每题消耗一次额度"\r\n'
-COST_HEAD_BARE = '        ? "让 AI 逐题处理"\r\n'
 
 HOVER_COST = '          + `点下去会调用 AI ${Number(state.total) || 0} 次（每道题一次），会消耗额度。`\r\n'
 HOVER_COST_VAGUE = '          + "每道题调用一次 AI，会消耗额度。"\r\n'
@@ -75,10 +71,17 @@ CONFIRM_COST = '            + `这一次会调用 AI ${count} 次（每道题一
 CONFIRM_COST_VAGUE = '            + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，不会直接贴到题目上。"\r\n'
 
 FREE_BORDER = '.library-todo-look .library-tool-action { border-color: transparent; }\n'
-PAID_BORDER = ('.library-todo-body > .library-tool-actions > .library-tool-action '
-               '{ border-color: var(--line-strong); }\n')
-PAID_BORDER_FLAT = ('.library-todo-body > .library-tool-actions > .library-tool-action '
-                    '{ border-color: transparent; }\n')
+
+# 1.25.23 起，下面这四条锚点已经过期，不是这个脚本坏了，是那一版把同一件事做得更严了
+# （面板改按「标签 / 答案」分栏，筛选组挪进了 freeGroup()，付费按钮的选择器多了一层）。
+# 连同它们一起搬到了 tools\mutation_check_panel_anchor_split.py 的末尾。
+# 留着常量会让人以为它们还在被检查；删掉又看不出是迁移而不是遗忘 —— 所以留注释，
+# 再加一条硬约束，防止以后又写回同一个名字。
+RETIRED_IN_1_25_23 = ("FREE_HEAD", "FREE_HEAD_GONE", "COST_HEAD", "COST_HEAD_BARE",
+                      "PAID_BORDER", "PAID_BORDER_FLAT")
+assert not any(name in globals() for name in RETIRED_IN_1_25_23), (
+    "these anchors belong to 1.25.23 now — they are checked by "
+    "tools/mutation_check_panel_anchor_split.py")
 
 FILTER_COLUMNS = ('    display: grid; grid-template-columns: max-content max-content; '
                   'justify-content: start;\n')
@@ -133,24 +136,12 @@ MUTATIONS = [
      UNTAGGED_BIT, ''),
 
     (LIBRARY_JS,
-     "the free group loses its visible heading, so nothing on screen says these cost nothing",
-     FREE_HEAD, FREE_HEAD_GONE),
-
-    (LIBRARY_JS,
-     "the spending heading drops the cost, leaving a warning nobody sees without hovering",
-     COST_HEAD, COST_HEAD_BARE),
-
-    (LIBRARY_JS,
      "the hover stops counting AI calls — 807 calls reads like a small job again",
      HOVER_COST, HOVER_COST_VAGUE),
 
     (LIBRARY_JS,
      "the confirmation, the last chance to catch a mistake, stops counting AI calls",
      CONFIRM_COST, CONFIRM_COST_VAGUE),
-
-    (LIBRARY_CSS,
-     "the paying buttons lose their solid border and all five look identical again",
-     PAID_BORDER, PAID_BORDER_FLAT),
 
     (LIBRARY_CSS,
      "the free filters stop being borderless text and match the paying buttons",
