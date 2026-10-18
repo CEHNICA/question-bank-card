@@ -80,7 +80,13 @@ PAID_BORDER = ('.library-todo-body > .library-tool-actions > .library-tool-actio
 PAID_BORDER_FLAT = ('.library-todo-body > .library-tool-actions > .library-tool-action '
                     '{ border-color: transparent; }\n')
 
-FILTER_COLUMNS = '    display: grid; grid-template-columns: auto auto;\n'
+FILTER_COLUMNS = ('    display: grid; grid-template-columns: max-content max-content; '
+                  'justify-content: start;\n')
+# 这一条不是假想：第一版就是这么发的。auto 轨道的最大值虽然是 max-content，
+# 可它同时是能被 justify-content: stretch 撑大的那种轨道，所以只把 1fr 换成 auto
+# 之后两个控件之间仍有 395px。断言当时写的是「auto auto」，量到的正是这一版，
+# 于是它绿着发出去了 —— 装上实测才发现没生效。
+FILTER_COLUMNS_STRETCHED = '    display: grid; grid-template-columns: auto auto;\n'
 FILTER_COLUMNS_GAP = '    display: grid; grid-template-columns: minmax(0, 1fr) auto;\n'
 FILTER_COLUMNS_GAP_AREAS = (FILTER_COLUMNS_GAP
                             + '    grid-template-areas: "source advanced" "types types";\n')
@@ -153,6 +159,12 @@ MUTATIONS = [
     (LIBRARY_READING_CSS,
      "the first column goes back to 1fr: 来源 and 更多筛选 drift 777px apart again",
      FILTER_COLUMNS, FILTER_COLUMNS_GAP),
+
+    (LIBRARY_READING_CSS,
+     "the columns go back to auto without justify-content: start — this is the exact "
+     "version that shipped first and still left a 395px hole, because auto tracks can be "
+     "stretched by justify-content: normal",
+     FILTER_COLUMNS, FILTER_COLUMNS_STRETCHED),
 
     (LIBRARY_READING_CSS,
      "the dead 'types types' row comes back and the filter bar silently regains 15px of nothing",

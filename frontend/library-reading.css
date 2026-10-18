@@ -52,8 +52,15 @@
 
   /* 1.25.21：这一行只剩「来源」和「更多筛选」两样东西，却摆成一头一尾 ——
      第一列是 1fr，被撑到 1028px，下拉只占 230px，中间空着 777px，看着像少了
-     什么东西。改成两列都按内容宽度，两个控件挨在一起靠左；右边空出来的地方
-     读起来就是「这一行没那么长」，不是「控件被拆散了」。
+     什么东西。现在两列都按内容的实际宽度摆，两个控件挨在一起靠左；右边空出来的
+     地方读起来就是「这一行没那么长」，不是「控件被拆散了」。
+
+     两处都要写，只写一处不管用（1.25.21 装上后实测）：
+       · 列宽写 auto 还是会被拉伸 —— auto 轨道的最大值虽是 max-content，可它同时
+         是可以被 justify-content: stretch 撑大的那种轨道。1.25.21 第一版只把
+         1fr 换成 auto，两个控件之间仍有 395px。
+       · 所以列宽写 max-content（这种轨道不参与拉伸），再加 justify-content: start
+         把内容贴到行首。两条一起才是"挨在一起"。
 
      顺带清掉一样一直没人发现的东西：模板里 "source advanced" "types types"
      那个 types 行。题型 1.25.17 就搬进了折叠板，而且是 .library-filters 的
@@ -61,7 +68,7 @@
      可行高照样算，筛选行下面因此永远空着 15px（实测整行 65px，其中 15px 是它）。
      这一层不再给它留格子，它在折叠板里自己怎么排是那边的事。 */
   .library-page .library-filterbar {
-    display: grid; grid-template-columns: auto auto;
+    display: grid; grid-template-columns: max-content max-content; justify-content: start;
     gap: 15px 12px; margin-bottom: 0; padding: 15px 16px 0;
     border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface);
   }

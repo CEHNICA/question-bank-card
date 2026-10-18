@@ -54,10 +54,16 @@ assert.doesNotMatch(advancedBlock, /libraryTodos/, "待办不能住进「更多�
 // 1.25.21：两个控件挨在一起靠左，不是一头一尾。
 // 原来第一列是 1fr，被撑到 1028px，下拉只占 230px，中间空 777px，看着像少了东西。
 // 量这一条规则本身，别只查"没有 quick/sort"——那是上一版的检查，它对 1fr 一点办法没有。
+//
+// 两条都要钉。第一版只把 1fr 换成 auto，测试也是绿的，装上实测两个控件之间仍有
+// 395px —— 因为 auto 轨道的最大值虽然是 max-content，可它同时是能被
+// justify-content: stretch 撑大的那种轨道。只量列宽那一半，会把这个坑放过去。
 const filterbarRule = readingCss.match(/\.library-page \.library-filterbar \{[^}]*\}/);
 assert.ok(filterbarRule, "找得到筛选行那条栅格规则；改版时 update this slice");
-assert.match(filterbarRule[0], /grid-template-columns:\s*auto auto/,
-  "两列都按内容宽度，「来源」和「更多筛选」才会挨在一起");
+assert.match(filterbarRule[0], /grid-template-columns:\s*max-content max-content/,
+  "两列都按内容的实际宽度，不吃剩余空间");
+assert.match(filterbarRule[0], /justify-content:\s*start/,
+  "轨道不拉伸还不够，内容还得贴到行首");
 assert.doesNotMatch(filterbarRule[0], /grid-template-areas/,
   "命名区域已经用不上了");
 for (const dead of ["quick", "sort", "types"]) {

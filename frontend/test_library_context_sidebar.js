@@ -136,8 +136,10 @@ assert.doesNotMatch(readingCss, /grid-template-areas:/,
   "the filter bar no longer names grid areas at all — every one of them was a leftover slot");
 const filterbarRule = readingCss.match(/\.library-page \.library-filterbar \{[^}]*\}/);
 assert.ok(filterbarRule, "find the filter-bar grid rule; update this slice when the layout changes");
-assert.match(filterbarRule[0], /grid-template-columns:\s*auto auto/,
+assert.match(filterbarRule[0], /grid-template-columns:\s*max-content max-content/,
   "both columns are content-width, so 来源 and 更多筛选 sit next to each other");
+assert.match(filterbarRule[0], /justify-content:\s*start/,
+  "and the content is pinned to the start of the row");
 assert.doesNotMatch(readingCss, /\.library-filterbar > \.library-facet \{[^}]*grid-area/,
   "no slot is reserved for a type facet that lives one level deeper, inside the panel");
 assert.match(css.concat(readingCss), /\.library-todos:not\(\[hidden\]\)[^{]*\{[^}]*display:\s*flex/,
