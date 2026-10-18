@@ -88,14 +88,17 @@
               <span>来源</span>
               <select id="sourceSelect" aria-label="来源试卷"><option value="">全部试卷</option></select>
             </label>
-            <div class="library-facet">
-              <span class="library-facet-label" id="typeFacetLabel">题型</span>
-              <div id="typeFilters" class="draft-filters" role="group" aria-labelledby="typeFacetLabel"></div>
-            </div>
-            <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
             <details id="advancedFilters" class="library-advanced">
               <summary>更多筛选</summary>
               <div class="library-filters">
+                <!-- 1.25.17：题型和排序原来各占一整行，看到第一道题之前屏幕上已经有三行控件。
+                     现在收进「更多筛选」，明面只留一行。题型筛选用着的时候本来就会在下面
+                     那行显示成「题型：单选题」，搬进来不会丢。 -->
+                <div class="library-facet">
+                  <span class="library-facet-label" id="typeFacetLabel">题型</span>
+                  <div id="typeFilters" class="draft-filters" role="group" aria-labelledby="typeFacetLabel"></div>
+                </div>
+                <label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序"><option value="recent">最近入库</option><option value="source">原卷顺序</option></select></label>
                 <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>
                 <div id="answerFilters" class="draft-filters" role="group" aria-label="有没有答案" hidden></div>
                 <label id="tagFilterBox" class="library-select" hidden>

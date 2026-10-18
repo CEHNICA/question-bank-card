@@ -175,7 +175,13 @@ assert.ok(libraryHtml.indexOf('id="allQuestionsButton"') < libraryHtml.indexOf('
 assert.match(libraryHtml, /id="allQuestionsButton"[^>]*\bhidden\b/, "返回条默认隐藏，切到篮内视图才出现");
 const rail = libraryHtml.slice(libraryHtml.indexOf('id="libraryRail"'), libraryHtml.indexOf('id="libraryRailToggle"'));
 assert.doesNotMatch(rail, /sourceSelect|typeFilters|sortSelect|advancedFilters/, "来源、题型、排序和更多筛选已从侧栏移出");
-assert.match(libraryHtml, /id="libraryFilterBar"[\s\S]*?id="sourceSelect"[\s\S]*?id="typeFilters"[\s\S]*?id="sortSelect"[\s\S]*?id="advancedFilters"/, "所有常用筛选都在列表顶部工具栏");
+// 1.25.17：题型和排序搬进了「更多筛选」。原来那条断言查的是四个控件的先后顺序，
+// 顺序一变就红，可它真正要说的是「这四个都在题目上方的筛选条里、不在侧栏」——
+// 搬进折叠板之后这句话照样成立。改成查归属，不查先后。
+const filterBar = libraryHtml.slice(libraryHtml.indexOf('id="libraryFilterBar"'), libraryHtml.indexOf('id="libraryList"'));
+for (const id of ["sourceSelect", "typeFilters", "sortSelect", "advancedFilters"]) {
+  assert.ok(filterBar.includes(`id="${id}"`), `${id} 还在题目上方的筛选条里`);
+}
 assert.match(libraryHtml, /id="typeFacetLabel"[^>]*>题型/, "题型有可见的维度标签，不再和「来源」的「全部」并排混淆");
 assert.ok(libraryHtml.indexOf('id="libraryRail"') < libraryHtml.indexOf('id="activeFilters"'),
   "当前筛选那行搬进了侧栏");

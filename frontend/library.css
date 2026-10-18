@@ -300,6 +300,11 @@ body.library-basket-open .question-inspector { display: none; }
 .question-inspector-empty { display: grid; justify-items: start; gap: 4px; padding: 12px 3px; }
 .question-inspector-empty strong { color: var(--ink-2); font-size: 14px; }
 .inspector-toggle, .inspector-close { display: inline-flex; }
+/* 1.25.17：宽屏上右边那块默认开着，而且点任何一张题卡都会自动弹回来
+   （selectInspectorQuestion 里写死的 setInspectorOpen(true)）—— 顶栏再摆一个
+   开关，同一件事两个入口，按它关掉也关不住。面板里已经有一个「收起」。
+   窄屏上它是唯一能打开浮层的入口，所以只在宽屏藏。 */
+@media (min-width: 980px) { .inspector-toggle { display: none; } }
 .inspector-scrim { display: none; }
 .question-inspector-source { margin: -5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .question-inspector-info > summary { color: var(--muted); font-size: 12px; cursor: pointer; padding-block: 5px; }
@@ -450,7 +455,6 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-basket-return:hover, .library-basket-enter:hover { border-color: var(--accent); color: var(--ink); }
 .library-basket-return:focus-visible, .library-basket-enter:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
 .library-basket-enter .count { font-variant-numeric: tabular-nums; }
-.library-filterbar > .library-facet { flex: 1 1 300px; min-width: min(100%, 300px); }
 .library-filterbar #typeFilters { gap: 2px; padding: 3px; }
 .library-filterbar #typeFilters .draft-filter { flex: none; padding: 5px 8px; white-space: nowrap; }
 .library-filterbar .library-select { gap: 6px; white-space: nowrap; }
@@ -585,10 +589,8 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   .library-search input { font-size: 14px; padding-left: 38px; }
   .library-filters { gap: 8px; }
   .library-filterbar { gap: 6px; }
-  .library-filterbar .library-select span { display: none; }
+  .library-filterbar > .library-select > span { display: none; }
   .library-filterbar .library-select select { max-width: min(155px, 42vw); padding-left: 8px; }
-  .library-filterbar > .library-facet { min-width: 100%; }
-  .library-filterbar > .library-facet .library-facet-label { display: none; }
   .library-advanced[open] > .library-filters { width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }
   .library-card-meta { gap: 6px; }
   .library-source { white-space: normal; overflow-wrap: anywhere; flex-basis: calc(100% - 28px); }

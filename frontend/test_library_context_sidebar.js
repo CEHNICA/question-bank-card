@@ -12,8 +12,13 @@ const readingCss = fs.readFileSync(require.resolve("./library-reading.css"), "ut
 
 assert.match(html, /id="questionInspector"/, "the library has a dedicated question details panel");
 assert.match(html, /<button[^>]*id="libraryTagManager"[^>]*>[\s\S]*?<span>标签管理<\/span>[\s\S]*?<\/button>/, "tag management is directly accessible from the library header");
-assert.match(html, /<div id="libraryFilterBar" class="library-filterbar"[\s\S]*?id="sourceSelect"[\s\S]*?id="typeFilters"[\s\S]*?id="sortSelect"[\s\S]*?<details id="advancedFilters"[\s\S]*?<\/details>/,
-  "source, type, sort, and advanced filters share the toolbar above the questions");
+// 1.25.17：题型和排序搬进了「更多筛选」。这条断言原来查的是四个控件的先后顺序，
+// 而它真正要说的是「这四个都在题目上方的筛选条里」—— 搬进折叠板之后照样成立。
+// 改成查归属，不查先后。
+const filterBar = html.slice(html.indexOf('id="libraryFilterBar"'), html.indexOf('id="libraryList"'));
+for (const id of ["sourceSelect", "typeFilters", "sortSelect", "advancedFilters"]) {
+  assert.ok(filterBar.includes(`id="${id}"`), `${id} is still in the toolbar above the questions`);
+}
 const rail = html.slice(html.indexOf('id="libraryRail"'), html.indexOf('id="libraryRailToggle"'));
 assert.doesNotMatch(rail, /sourceSelect|typeFilters|sortSelect|advancedFilters/, "filter and sort controls no longer occupy the side rail");
 assert.match(rail, /hidden inert/, "the former rail is inert and cannot occupy space or receive focus");
