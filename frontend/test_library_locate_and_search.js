@@ -47,10 +47,22 @@ assert.match(js, /function initLocateQuestion\(\) \{[\s\S]*?addEventListener\("c
 // 题还在眼前时，这颗按钮不该占地方；滚远了要出来。
 assert.match(js, /function syncLocateButton\(item\) \{[\s\S]*?button\.hidden = !item \|\| inView\(/,
   "没选题时藏起来；这道题就在屏上时也藏起来；滚出屏幕才出现");
+// inView 第一版是 selectInspectorQuestion 里的局部常量，syncLocateButton 够不到它，
+// 运行时抛 ReferenceError，按钮就一直藏着 —— 而静态断言只查得到那句调用存在。
+// 所以要断言它在模块层（有独立的顶层定义），不是被圈在别的函数里。
+const inViewDefs = (js.match(/const inView = element =>/g) || []).length;
+assert.equal(inViewDefs, 1,
+  "inView 只能在模块层定义一次；被圈在别的函数里，syncLocateButton 就够不到它");
+const inspectStart = js.indexOf("  function selectInspectorQuestion(");
+const inspectSrc = js.slice(inspectStart, js.indexOf("\n  const inView = element =>", inspectStart));
+assert.doesNotMatch(inspectSrc, /const inView = element =>/,
+  "旧的局部定义已经拿掉了，留着两份会让顺序决定用哪份");
+assert.match(js, /\n {2}const inView = element => \{/,
+  "inView 提到模块层了（两格缩进，和别的顶层辅助函数一致）");
 // 这两条调用必须真的在执行路径上 —— 同样是「字符串存在」不等于「会被调用」。
 //
 // 切片的坑（踩了两次）：结束锚点 inspectorFact 定义在 renderInspector **之前**
-// （1303 行 vs 1350 行），所以 indexOf(end) 必须从 start 往后找，不能全文件找 ——
+// （1301 行 vs 1355 行），所以 indexOf(end) 必须从 start 往后找，不能全文件找 ——
 // 否则切出来是空串，断言失败的原因和真正的问题毫无关系。
 const renderInsStart = js.indexOf("  function renderInspector(item)");
 const renderInsSrc = js.slice(renderInsStart, js.indexOf("  function ", renderInsStart + 10));

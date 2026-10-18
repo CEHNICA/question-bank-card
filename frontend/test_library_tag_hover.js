@@ -29,9 +29,16 @@ assert.equal(hierarchy.tagAncestorPaths("d119").paths[0].length, 120, "valid dee
 const offscreenInspector = { id: "q-first", getBoundingClientRect: () => ({ top: -2332, bottom: -2000 }) };
 const visibleSource = { id: "q-source", getBoundingClientRect: () => ({ top: 580, bottom: 850 }) };
 const scroller = { scrollTop: 2332, scrollLeft: 0 };
-const viewport = vm.createContext({ state: { inspectorId: "first" }, tagHover: { publicationId: "source" }, window: { innerHeight: 900 },
+// 1.25.37：inView 从 selectInspectorQuestion 内部提到了模块层（syncLocateButton
+// 在别的函数里要用它，够不到局部常量），所以这段单跑时它不在切片里了。
+// 注意它在文件里的位置（1351 行）比 captureLibraryViewport（1275 行）**靠后**，
+// 所以只能先切它、单独跑一次，不能按源码顺序拼在前面 —— const 靠后定义会拿到 undefined。
+const inViewCtx = vm.createContext({ window: { innerHeight: 900 } });
+vm.runInContext(section("const inView = element =>", "function renderInspector("), inViewCtx);
+const viewport = Object.assign(inViewCtx, vm.createContext({ state: { inspectorId: "first" }, tagHover: { publicationId: "source" },
+  window: { innerHeight: 900 },
   document: { scrollingElement: scroller, getElementById: id => id === "q-first" ? offscreenInspector : id === "q-source" ? visibleSource : null },
-  ui: { list: { querySelectorAll: () => [offscreenInspector, visibleSource] } }, requestAnimationFrame: callback => callback() });
+  ui: { list: { querySelectorAll: () => [offscreenInspector, visibleSource] } }, requestAnimationFrame: callback => callback() }));
 vm.runInContext(section("function captureLibraryViewport(", "function inspectorFact("), viewport);
 const position = viewport.captureLibraryViewport(); assert.equal(position.anchorId, "q-source", "an offscreen inspector cannot anchor a correction on another visible card");
 viewport.restoreLibraryViewport(position); assert.equal(scroller.scrollTop, 2332, "restoring a correction never scrolls back to the offscreen inspector");

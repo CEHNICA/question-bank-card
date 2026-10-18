@@ -1274,9 +1274,7 @@
 
   function captureLibraryViewport() {
     const scroller = document.scrollingElement || document.documentElement;
-    const inView = element => {
-      const rect = element?.getBoundingClientRect(); return rect && rect.bottom > 0 && rect.top < window.innerHeight;
-    };
+    // inView 现在在模块层（见 renderInspector 上面那条），这里不再重复定义。
     // Hover correction can belong to a different card than the inspector. An
     // offscreen inspector card must never pull the reader back to that card.
     const hovered = document.getElementById(`q-${tagHover?.publicationId || ""}`), inspected = document.getElementById(`q-${state.inspectorId}`);
@@ -1346,6 +1344,13 @@
       window.setTimeout(() => card.classList.remove("locate-flash"), 1200);
     });
   }
+
+  // 1.25.37：把 inView 从 selectInspectorQuestion 里提到模块层。
+  // 它本来是个局部常量，syncLocateButton（在别的函数里）用不到它 —— 第一版
+  // 直接照抄了那句调用，运行时抛 ReferenceError，按钮就一直是藏着的。
+  const inView = element => {
+    const rect = element?.getBoundingClientRect(); return rect && rect.bottom > 0 && rect.top < window.innerHeight;
+  };
 
   function renderInspector(item) {
     if (!ui.inspectorContent) return;

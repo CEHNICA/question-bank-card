@@ -53,6 +53,10 @@ LOCATE_TIP = 'toast("这道题还没加载出来，滚到底或点「加载更�
 LOCATE_TIP_VAGUE = 'toast("找不到这道题。", "error");'
 LOCATE_INIT = "  initLocateQuestion();\n"
 LOCATE_INIT_GONE = ""
+# inView 第一版是 selectInspectorQuestion 里的局部常量，syncLocateButton 够不到它，
+# 运行时抛 ReferenceError，按钮一直藏着。把它按回函数里，这条变异就该被测试抓到。
+IN_VIEW_TOP = "\n  const inView = element => {\n"
+IN_VIEW_IN_FUNCTION = "\n  function selectInspectorQuestion(item, article = null) {\n    const inView = element => {\n"
 LOCATE_CSS = ".library-card.locate-flash { animation: library-locate-flash"
 LOCATE_CSS_GONE = ".library-card.locate-removed { animation: none"
 
@@ -112,7 +116,11 @@ MUTATIONS = [
      LOCATE_SYNC, LOCATE_SYNC_GONE),
     (LIBRARY_JS, NODE_RUNS,
      "the click handler is never registered, so the button is decorative",
-     LOCATE_INIT, LOCATE_INIT_GONE),    (LIBRARY_JS, NODE_RUNS,
+     LOCATE_INIT, LOCATE_INIT_GONE),
+    (LIBRARY_JS, NODE_RUNS,
+     "inView goes back inside selectInspectorQuestion, where syncLocateButton cannot reach it — "
+     "the button then stays hidden forever at runtime",
+     IN_VIEW_TOP, IN_VIEW_IN_FUNCTION),    (LIBRARY_JS, NODE_RUNS,
      "an unloaded question now just says 「找不到」, with no hint that it loads further down",
      LOCATE_TIP, LOCATE_TIP_VAGUE),
 
