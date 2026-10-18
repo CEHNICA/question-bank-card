@@ -128,12 +128,18 @@ assert.doesNotMatch(js, /\$\("advancedFilters"\)\.hidden = \[[^\]]*ui\.todos/,
 // 1.25.20：筛选行现在只剩「来源」和「更多筛选」。原来那四列里的 sort（1.25.17
 // 就空了）和 quick（这轮空了）必须一起从栅格里拿掉 —— 空着的 auto 列会变成两道
 // 空隙，把「更多筛选」推离来源，看着像中间漏了一块。
-assert.doesNotMatch(readingCss, /grid-template-areas:[^;]*"[^"]*\bquick\b[^"]*"/,
-  "the filter bar grid no longer reserves a slot for a pending-work entry that moved away");
-assert.doesNotMatch(readingCss, /grid-template-areas:[^;]*"[^"]*\bsort\b[^"]*"/,
-  "the empty sort slot is gone too");
-assert.match(readingCss, /grid-template-areas:\s*"source advanced"/,
-  "the filter bar grid is exactly the two things that are still there");
+// 1.25.21：最后那道 1fr 也一起去掉。1fr 撑出来的空地比空列还大 —— 第一列被撑到
+// 1028px、下拉只占 230px，两个控件隔了 777px。两列都按内容宽度才会挨在一起。
+// 同一次清掉的还有那个 types 行：题型是折叠板里的孙节点，从来没落进去过，
+// 可行高照样算，筛选行下面因此永远空着 15px。
+assert.doesNotMatch(readingCss, /grid-template-areas:/,
+  "the filter bar no longer names grid areas at all — every one of them was a leftover slot");
+const filterbarRule = readingCss.match(/\.library-page \.library-filterbar \{[^}]*\}/);
+assert.ok(filterbarRule, "find the filter-bar grid rule; update this slice when the layout changes");
+assert.match(filterbarRule[0], /grid-template-columns:\s*auto auto/,
+  "both columns are content-width, so 来源 and 更多筛选 sit next to each other");
+assert.doesNotMatch(readingCss, /\.library-filterbar > \.library-facet \{[^}]*grid-area/,
+  "no slot is reserved for a type facet that lives one level deeper, inside the panel");
 assert.match(css.concat(readingCss), /\.library-todos:not\(\[hidden\]\)[^{]*\{[^}]*display:\s*flex/,
   "the pending-work entry is shown whenever there is something pending");
 assert.match(js, /function renderTodos\(\)[\s\S]*?look\.append\(\.\.\.quickActions\)/,
@@ -143,14 +149,20 @@ assert.match(js, /function renderTodos\(\)[\s\S]*?look\.append\(\.\.\.quickActio
 // 老师因此以为这个功能不存在。
 assert.match(js, /function renderTodos\(\)[\s\S]*?const menu = node\("details", "library-todo-menu"\)/,
   "the pending-work filters and the AI jobs share one container");
-assert.match(js, /`\$\{pendingCount\} 题建议待采纳`/,
-  "the entry counts how many tag suggestions are waiting to be accepted");
-assert.match(js, /`\$\{missingCount\} 题没打标签`/,
+assert.match(js, /`\$\{pendingCount\} 题等你核对`/,
+  "the entry counts how many tag suggestions are waiting to be checked");
+assert.match(js, /`\$\{missingCount\} 题没知识点`/,
   "the entry counts how many questions have no knowledge tag yet");
-assert.match(js, /`AI 能补 \$\{batchActions\.length\} 项`/,
-  "the entry says how many jobs AI can fill in, instead of hiding them behind a ▾");
+// 1.25.21：第三样原来是「AI 能补 N 项」，说的是下面有几颗按钮，不是有多少活干。
+// 锚在 bits.push( 上，别用裸词 —— 那几个字在解释这次改动的注释里也有一份。
+assert.doesNotMatch(js, /bits\.push\(`AI 能补/, "the entry must not report how many buttons sit below it");
+assert.match(js, /`\$\{answerCount\} 题没答案`/,
+  "the third number is real work — how many questions still have no answer");
 assert.match(js, /node\("span", "library-todo-lead", working \? "AI 正在处理" : "还有活没干"\)/,
   "the entry says what it is, in the teacher's words");
+// 折叠条上的话和展开后按钮上的话必须一致：同一件事不能隔着 30 像素叫两个名字。
+assert.match(js, /AI 建议待核对 · \$\{pendingCount\} 题/, "the button says 你核对, like the summary does");
+assert.match(js, /未标知识点 · \$\{missingCount\} 题/, "the button says 知识点, like the summary does");
 // 「要花额度」原来占着入口的名字的一半。它是警告不是动作，挤在名字里只会让人
 // 认不出这个入口是干什么的 —— 现在挪进展开后的第一行和每颗按钮的悬停说明。
 assert.doesNotMatch(js, /function renderTodos\(\)[\s\S]*?node\("span", "library-batch-cost"/,
@@ -172,13 +184,14 @@ assert.match(js, /if \(working\) menu\.dataset\.working = "true"/,
   "the entry is marked as working from the same number that drives 处理中 N 道");
 // 题型筛选项以前会换行：窗口稍窄一点，最后一个「解答题」就被挤到第二行，
 // 一眼看去像两排选项；左边「题型」两个字还被挤成一字一行。
-// 选择器必须对得上真实结构：题型那组是 .library-facet 的孙节点。写成
-// 「.library-filterbar > #typeFilters」的话规则从头到尾没生效过，而上面两条
-// 断言照样是绿的 —— 排版坏了，没有任何一条会响。
+// 1.25.21：上一版这里断言「题型那组被放进预留的整行」。可那个预留从一开始就是空的
+// —— 题型是 .library-facet 的孙节点，而筛选栏这一层只认自己的直接子节点，规则一次
+// 都没生效过。空着的行照样算高度，于是筛选行下面永远多出 15px。断言是绿的，排版是坏的。
+// 现在不再给一个不在这层的元素留格子；题型整组住在折叠板里，由那边的规则排。
 assert.match(html, /<div class="library-facet">[\s\S]*?id="typeFilters"/,
   "the type filter really is a grandchild of the filter bar, not a direct child");
-assert.match(readingCss, /\.library-filterbar > \.library-facet \{ grid-area: types/,
-  "the type facet is placed in the reserved full-width row instead of being auto-placed");
+assert.doesNotMatch(readingCss, /\.library-filterbar > \.library-facet \{[^}]*grid-area/,
+  "the filter bar no longer reserves a full-width row for a facet it cannot reach");
 assert.match(readingCss, /\.library-facet > #typeFilters\s*\{[^}]*flex-wrap:\s*nowrap/,
   "the type filter never wraps to a second row");
 // 但也不能平分整行：平分会让「判断题 0」这种一格里空着一大片，一屏 12 个数字

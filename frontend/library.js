@@ -375,8 +375,10 @@
   }
   function applyBatchButtonState() {
     const selectedView = state.view === "selected";
-    // 只管真正会排队的那些 —— 1.25.20 把两个筛选入口也放进了同一个待办区，
-    // 用 #libraryTodos button 一网全会把它们一起锁掉，筛选就再也点不动了。
+    // 只管真正会排队的那些。这个选择器能不能只圈到 AI 动作，取决于筛选组那一个
+    // div 挂没挂 library-tool-actions —— 1.25.20 两边都挂了，于是这里把两个免费的
+    // 筛选也一起锁掉，AI 一登记它们就变灰；1.25.21 把筛选组挪回自己的 class。
+    // 改这两处时必须一起验：把 class 加回去，AI 排队时那两个筛选还点不动。
     for (const control of document.querySelectorAll("#libraryTodos .library-tool-actions button")) {
       control.disabled = queueBusy || selectedView || control.dataset.disabledInSelectedView === "true";
       // 排队期间要改名的只有刚才被点的那一个；别的按钮保持自己的名字，
@@ -514,9 +516,12 @@
       batchActions.push(tags);
       const current = iconButton("button", "button button-quiet button-small library-tool-action",
         `只处理当前这批 · ${Number(state.total) || 0} 题`, "plus");
+      // 1.25.21：原来只写「每道题调用一次 AI，会消耗额度」。没筛任何东西时这一下就是
+      // 807 次调用 —— 代价没写成数字，看着像个小动作。把次数直接说出来。
       current.title = apiReady
         ? `只处理你现在筛选出来的这 ${Number(state.total) || 0} 道题，包括还没加载到屏幕上的。`
-          + "想补整个题库请用上面那条。每道题调用一次 AI，会消耗额度。"
+          + `点下去会调用 AI ${Number(state.total) || 0} 次（每道题一次），会消耗额度。`
+          + "想补整个题库里还没提过建议的题，请用上面那条，那条只排真正没排过队的。"
           + "生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
         : "需要先到「设置 → API 配置」里配置并测试通过。";
       current.dataset.disabledInSelectedView = String(!apiReady || Number(state.total) === 0);
@@ -528,7 +533,7 @@
         const confirmed = await confirmDialog({
           title: `给当前这批 ${count} 道题生成标签建议？`,
           text: `只处理当前筛选出来的 ${count} 道题，包括还没显示在屏幕上的；想补整个题库请用上面那条。`
-            + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，不会直接贴到题目上。"
+            + `这一次会调用 AI ${count} 次（每道题一次），会消耗额度。生成的标签只是建议，不会直接贴到题目上。`
             + "开始之后再改筛选，也不会扩大这次的范围。",
           ok: "开始生成"
         });
@@ -568,29 +573,43 @@
     const working = queuedTags + queuedAnswers;
     if (working) menu.dataset.working = "true";
     const summary = node("summary", "library-todo-summary");
+    // 1.25.21：这三样和展开后的按钮名用同一套说法。原来折叠条写「建议待采纳」「没打标签」，
+    // 按钮写「AI 建议待核对」「未标知识点」—— 同一件事、隔着 30 像素两个名字。
+    // 第三样原来是「AI 能补 3 项」，说的是下面有几颗按钮、不是有多少活干；换成真数字。
     const bits = [];
-    if (pendingCount) bits.push(`${pendingCount} 题建议待采纳`);
-    if (missingCount) bits.push(`${missingCount} 题没打标签`);
-    if (batchActions.length) bits.push(`AI 能补 ${batchActions.length} 项`);
+    if (pendingCount) bits.push(`${pendingCount} 题等你核对`);
+    if (missingCount) bits.push(`${missingCount} 题没知识点`);
+    if (answerCount) bits.push(`${answerCount} 题没答案`);
     summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));
     summary.append(node("span", "library-todo-bits", bits.join(" · ")));
     if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
     summary.title = working
       ? `AI 正在逐题处理，还剩 ${working} 道。做完会自动显示，不用一直点着看。`
-      : `点开看这三项：${bits.join("；")}。前两项点一下只看这些题，最后一项会让 AI 逐题处理、消耗额度。`;
+      : `点开看：${bits.join("；")}。上面几项点一下只看这些题、不花钱；下面几项会让 AI 逐题处理、消耗额度。`;
     menu.append(summary);
 
     const body = node("div", "library-todo-body");
     // 筛选入口排在前面：它们不花钱，先看这些。
+    //
+    // 1.25.21：这个容器原来同时挂着 library-tool-actions，于是 applyBatchButtonState
+    // 那句 `#libraryTodos .library-tool-actions button` 会把这两个筛选一起圈进去 ——
+    // AI 一登记，它们跟着一起变灰，老师在 AI 干活时连"看看哪些题等着我核对"都点不了，
+    // 而那正是 AI 干活时最该做的事。筛选组改挂自己的 class，那个选择器自然只管 AI 动作。
     if (quickActions.length) {
-      const look = node("div", "library-tool-actions library-todo-look");
+      const look = node("div", "library-todo-look");
       look.append(...quickActions);
-      body.append(node("p", "library-todo-note", "这两项只是筛选，不花钱。"), look);
+      body.append(node("p", "library-todo-head library-todo-head-free", "只看这些题 · 不花钱"), look);
     }
     if (batchActions.length) {
+      // 1.25.21：花钱的和不花钱的五颗按钮原来连边框颜色都一样，唯一的区别是 AI 那三颗
+      // 前面多了个「+」—— 最该多点两下的看着最不像按钮，最该慎的却最像能随手点。
+      // 代价从一行小字提到小标题上、跟着按钮走；下面三颗另给一道实线边框（见 CSS）。
+      body.append(node("p", "library-todo-head library-todo-head-cost", apiReady
+        ? "让 AI 逐题处理 · 每题消耗一次额度"
+        : "让 AI 逐题处理 · 需要先配置 API"));
       body.append(node("p", "library-todo-note", apiReady
-        ? "下面这几项会让 AI 逐题处理、消耗额度。生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
-        : "需要先到「设置 → API 配置」里配置并测试通过，才能用下面这几项。"));
+        ? "生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
+        : "到「设置 → API 配置」里配置并测试通过，才能用下面这几项。"));
       // 排队中、以及「已经在处理多少道」都写在这里。按钮上方、正对着按钮，
       // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
       const stateLine = node("p", "library-batch-state");

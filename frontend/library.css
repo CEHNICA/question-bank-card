@@ -213,9 +213,25 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-todos .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); color: inherit; font-size: 11px; font-weight: 700; }
 .library-todo-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
 .library-todo-note { margin: 0 0 7px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
-.library-todo-look { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+/* 1.25.21：两组各带一个看得见的小标题。代价原来只藏在一行 11.5px 的灰字里，
+   而两组的按钮又长得一模一样 —— 现在先把「不花钱」和「要花钱」写成标题，
+   再靠下面那道实线边框把花钱那三颗压出重量。 */
+.library-todo-head { margin: 0 0 7px; display: flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.library-todo-head-free { color: var(--ink-2); }
+.library-todo-head-cost { color: var(--ink); }
+/* 筛选组只挂自己的 class（见 library.js 的 renderTodos）：它既不参与
+   applyBatchButtonState 的锁定，也不该长得像一颗可以去点的按钮 —— 保持纯文字，
+   和下面那排题型筛选是同一套长相。grid 自己撑开，不再借 .library-tool-actions。 */
+.library-todo-look { display: grid; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .library-todos .library-tool-actions { gap: 6px; }
 .library-todos .library-tool-action { min-height: 36px; padding: 7px 9px; }
+/* 这五颗原来连边框都一样（1px solid transparent，等于没有边框），全靠一个「+」号
+   分出「只看」和「让 AI 去干」。反过来就变成了最该多点两下的看着最不像按钮、
+   最该慎的却最像能随手点。筛选那两颗保持无边框，下面三颗给一道实线。 */
+.library-todo-look .library-tool-action { border-color: transparent; }
+.library-todo-body > .library-tool-actions > .library-tool-action { border-color: var(--line-strong); }
+.library-todo-body > .library-tool-actions > .library-tool-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
+.library-todo-body > .library-tool-actions > .library-tool-action:disabled { border-color: var(--line); }
 /* 排队中、以及「还在处理多少道」都写在这一行，正对着按钮。
    按钮点下去以后用户盯着的就是这几颗，这一行不写清楚就等于没反应。 */
 .library-batch-state:not([hidden]) { margin: 8px 0; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent-dark); font-size: 12px; line-height: 1.55; }

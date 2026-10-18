@@ -50,30 +50,28 @@
      现在收进待办折叠区里，展开后仍然是那套文字筛选的长相。 */
   .library-page .active-filters { margin: -6px 0 18px; }
 
-  /* 1.25.20：待办搬去批量行以后，这一行只剩「来源」和「更多筛选」两样东西。
-     原来是四列（来源 / 排序 / 待办 / 更多筛选），其中排序在 1.25.17 就搬进折叠板了，
-     待办这轮又搬走了 —— 两列空着的 auto 会变成两道空隙，把「更多筛选」推离来源。
-     死掉的 grid-area 一起清掉，别留着让人以为那一格还有东西。 */
+  /* 1.25.21：这一行只剩「来源」和「更多筛选」两样东西，却摆成一头一尾 ——
+     第一列是 1fr，被撑到 1028px，下拉只占 230px，中间空着 777px，看着像少了
+     什么东西。改成两列都按内容宽度，两个控件挨在一起靠左；右边空出来的地方
+     读起来就是「这一行没那么长」，不是「控件被拆散了」。
+
+     顺带清掉一样一直没人发现的东西：模板里 "source advanced" "types types"
+     那个 types 行。题型 1.25.17 就搬进了折叠板，而且是 .library-filters 的
+     子节点、不是筛选栏这一层的子节点，所以那一行从来没有东西落进去 ——
+     可行高照样算，筛选行下面因此永远空着 15px（实测整行 65px，其中 15px 是它）。
+     这一层不再给它留格子，它在折叠板里自己怎么排是那边的事。 */
   .library-page .library-filterbar {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "source advanced" "types types";
+    display: grid; grid-template-columns: auto auto;
     gap: 15px 12px; margin-bottom: 0; padding: 15px 16px 0;
     border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface);
   }
-  .library-page .library-filterbar > .library-select:first-child { grid-area: source; min-width: 0; }
-  .library-page .library-filterbar > .library-advanced { grid-area: advanced; margin: 0; }
+  .library-page .library-filterbar > .library-select:first-child { min-width: 0; }
+  .library-page .library-filterbar > .library-advanced { margin: 0; }
   .library-page .library-filterbar .library-select { gap: 8px; font-weight: 400; }
   .library-page .library-filterbar .library-select select { min-height: 34px; border-radius: 6px; }
   .library-page .library-filterbar #sourceSelect { width: min(230px, 100%); min-width: 0; max-width: 230px; }
-  /* 题型这一组在 DOM 里是「.library-facet 的孙节点」，而这些老规则写的是
-     「筛选栏的直接子节点」—— 条件对不上，规则从来没生效过，于是这一组被自动
-     排版塞进第一列那个窄格子：标签「题型」被挤成一字一行，六个题型按钮也放不下、
-     后面几个折到第二行，看着像两排选项。
-     现在明确把它放进第二行、占满整行，永远不会折行；
-     窄屏另有三列网格那条规则兜底。
-     按钮按内容宽度排，不要平分：平分会让「判断题 0」这种一格里空着一大片，
+  /* 题型按钮按内容宽度排，不要平分：平分会让「判断题 0」这种一格里空着一大片，
      一眼扫过去全是留白，噪音比信息还多。 */
-  .library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }
   .library-page .library-facet-label { padding-top: 3px; white-space: nowrap; }
   .library-page .library-facet > #typeFilters {
     display: flex; flex-wrap: nowrap; min-width: 0; gap: 0 15px;
@@ -187,10 +185,9 @@
     .library-page .question-inspector { top: calc(var(--topbar-h) + 10px); height: calc(100dvh - var(--topbar-h) - 20px); max-height: none; }
     .library-page .library-workspace > .library-results { grid-column: 1; }
     .library-page .library-workspace > .question-inspector { grid-column: 1; }
-    .library-page .library-filterbar {
-      grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-areas: "source advanced" "types types";
-    }
+    /* 窄屏上「来源」该占满剩下的宽度，别缩成内容宽度；模板里那个 types 行
+       1.25.21 起已经没有了，这里跟着去掉，否则又凭空多出一条 0px 的空行。 */
+    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) auto; }
   }
   @media (max-width: 559px) {
     .library-page .library-main { padding-inline: 10px; }
@@ -198,7 +195,7 @@
     .library-top-navigation .library-tag-manager-entry > span { display: none; }
     .library-top-navigation .library-search input { padding-left: 30px; padding-right: 8px; font-size: 12px; }
     .library-top-navigation .search-kbd { display: none; }
-    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px 6px; padding: 10px 10px 0; }
+    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 6px; padding: 10px 10px 0; }
     .library-page .library-filterbar .library-select > span { display: none; }
     .library-page .library-filterbar #sourceSelect { width: 100%; max-width: 135px; font-size: 12px; }
     .library-page .library-filterbar #sortSelect { max-width: 102px; font-size: 12px; }

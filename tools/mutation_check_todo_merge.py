@@ -53,9 +53,17 @@ SUGGEST_NO_TITLE = ('            <button id="generateSelectedTags" class="button
 SYNC_SHOW = '    suggest.hidden = false;'
 COST_BADGE = '    summary.append(node("span", "library-batch-cost", "要花额度"));\n'
 LEAD_LINE = '    summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));\n'
-PENDING_BIT = '    if (pendingCount) bits.push(`${pendingCount} 题建议待采纳`);\n'
-UNTAGGED_BIT = '    if (missingCount) bits.push(`${missingCount} 题没打标签`);\n'
-AI_BIT = '    if (batchActions.length) bits.push(`AI 能补 ${batchActions.length} 项`);\n'
+# 1.25.21 起，下面五条锚点已经过期，不是这个脚本坏了，是那一版把它们做得更严了。
+# 它们连同 1.25.21 新加的「整行删掉」变体，都搬到了 tools\mutation_check_todo_cost_split.py：
+#   · 折叠条上那三样数字的措辞（现在要求折叠条和展开后的按钮用同一套说法）
+#   · 第三样从「下面有几颗按钮」改成「还有多少题没答案」
+#   · 筛选行那两列（现在是 auto auto，不再是 1fr + 命名区域）
+# 留着这几个常量会让人以为它们还在被检查；删掉又看不出是迁移而不是遗忘 —— 所以留注释。
+# 再加一条硬约束：这个脚本里不允许出现 RETIRED 里的名字，忘了搬会被当场抓住。
+RETIRED_IN_1_25_21 = ("PENDING_BIT", "UNTAGGED_BIT", "AI_BIT", "AREAS", "AREAS_DEAD")
+assert not any(name in globals() for name in RETIRED_IN_1_25_21), (
+    "these anchors belong to 1.25.21 now — they are checked by "
+    "tools/mutation_check_todo_cost_split.py")
 BATCH_SELECTOR = 'document.querySelectorAll("#libraryTodos .library-tool-actions button")'
 BATCH_SELECTOR_ALL = 'document.querySelectorAll("#libraryTodos button")'
 TITLE_OFF = '题库里没有开启「AI 建议标签」这项功能，要到「设置」里打开才能用。'
@@ -64,8 +72,6 @@ TITLE_COUNTED = '      ? `让 AI 给勾选的 ${count} 道题生成标签建议�
 TITLE_UNCOUNTED = '      ? "让 AI 给勾选的题目生成标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。"'
 READY_LINE = '    return state.features.knowledge_tags === true && state.ai.mode === "api" && state.ai.api_ready === true;'
 READY_LOOSE = '    return state.features.knowledge_tags === true;'
-AREAS = '    grid-template-areas: "source advanced" "types types";'
-AREAS_DEAD = '    grid-template-areas: "source sort quick advanced" "types types types types";'
 
 # (relative, description, original, mutation)
 MUTATIONS = [
@@ -99,18 +105,6 @@ MUTATIONS = [
      LEAD_LINE, LEAD_LINE + COST_BADGE),
 
     (LIBRARY_JS,
-     "the entry stops counting how many suggestions are waiting",
-     PENDING_BIT, ""),
-
-    (LIBRARY_JS,
-     "the entry stops counting how many questions have no tag",
-     UNTAGGED_BIT, ""),
-
-    (LIBRARY_JS,
-     "the entry stops saying how many jobs AI can fill in — the very thing being hunted for",
-     AI_BIT, ""),
-
-    (LIBRARY_JS,
      "locking the batch buttons one-size-fits-all also locks the two filters, and they stop responding",
      BATCH_SELECTOR, BATCH_SELECTOR_ALL),
 
@@ -125,10 +119,6 @@ MUTATIONS = [
     (LIBRARY_JS,
      "the button turns clickable even though the API was never configured",
      READY_LINE, READY_LOOSE),
-
-    (LIBRARY_READING_CSS,
-     "the two vacated grid columns come back and leave a gap between 来源 and 更多筛选",
-     AREAS, AREAS_DEAD),
 ]
 
 
