@@ -45,11 +45,14 @@ const before = bar.slice(0, advAt);
 assert.match(before, /id="sourceSelect"/, "来源留在明面上");
 assert.doesNotMatch(before, /typeFilters|sortSelect/, "折叠板之前只该有来源");
 
-// 待办入口必须还在折叠板外面：整个折叠板在筛选项都为空时会藏起来，
+// ── 二之二、1.25.20：待办整块搬到批量行，筛选行只剩来源和更多筛选 ──
+// 它必须还在折叠板外面：整个折叠板在筛选项都为空时会藏起来，
 // 待办要是跟着进去，页面上就没人知道还有活没干了。
-assert.equal(bar.split('id="tagQuickTools"').length - 1, 1, "待办入口只能有一处，别在折叠板里另留一份");
-assert.ok(bar.indexOf('id="tagQuickTools"') > bar.indexOf('</details>'),
-  "待办入口留在折叠板外面");
+assert.equal(markup.split('id="libraryTodos"').length - 1, 1, "待办入口只能有一处");
+assert.doesNotMatch(bar, /libraryTodos/, "待办已经不在筛选行里了");
+const bulk = markup.slice(markup.indexOf('<div class="library-bulk"'), markup.indexOf('id="libraryList"'));
+assert.ok(bulk.includes('id="libraryTodos"'), "待办住在批量行上");
+assert.doesNotMatch(markup, /id="tagQuickTools"|id="aiBatchTools"/, "旧的两个待办容器都该没了");
 
 // ── 三、题型搬进去不会「丢了」：筛选用着的时候它会在标签行里显示出来 ──
 const chip = libraryJs.match(/"type", state\.type \? `([^`]+)`/);

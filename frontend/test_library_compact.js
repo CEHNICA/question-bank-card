@@ -113,7 +113,12 @@ assert.ok(!/(?<![.\w$])api\s*\(/.test(libraryJsCode), "代码里没有 api 这�
 
 // 1.13：「更多筛选」一展开就冒出横向滚动条。两条都要钉：只钉 white-space: normal，
 // 下一个长标签还会把这一栏顶宽。
-assert.match(libraryCss, /\.library-extra-tools \.button \{ white-space: normal; \}/);
+// 1.25.20：那条规则原来挂在 .library-extra-tools 上，待办搬走时一起失效了。
+// 同一件事现在由 .library-tool-action 负责（待办区里那几颗按钮用的就是它），
+// 断言跟着换主人，不跟着消失。
+assert.match(libraryCss, /\.library-tool-action \{[^}]*white-space: normal;/);
+assert.doesNotMatch(libraryCss, /\.library-extra-tools/,
+  "待办搬去批量行以后，这条挂错了主人的规则不该留在原地");
 assert.match(libraryCss, /\.library-rail > \* \{ min-width: 0; \}/);
 // 只盯侧栏自己那一处：文件里本来就有几处正当的 overflow-x: hidden
 // （题干、编辑器列表横向滚动），不能一刀切。判之前先剥注释 ——
@@ -151,9 +156,16 @@ for (const id of ["selectVisible", "selectionCount", "addSelected", "withdrawSel
   assert.ok(bulk.includes(`id="${id}"`), `批量条里应有 ${id}`);
 }
 assert.match(bulk, /id="libraryStatus"[^>]*role="status"[^>]*aria-live="polite"/, "状态行还得是会播报的 status，不能为了塞进一行就丢掉");
-for (const id of ["addSelected", "withdrawSelected", "clearSelection", "generateSelectedTags", "generateSelectedAnswers"]) {
+for (const id of ["addSelected", "withdrawSelected", "clearSelection", "generateSelectedAnswers"]) {
   assert.ok(bulk.slice(bulk.indexOf('class="bulk-actions"')).includes(`id="${id}"`), `${id} 归到批量按钮组`);
 }
+// 1.25.20：「AI 建议标签」被请出了这一组。.bulk-actions 整组是 display:none、
+// 勾了题才显示；留在里面的话，「让它常驻」写在标记里也不作数 —— 不勾题时
+// 页面上仍然一个入口都没有，那正是老师找不到它的原因。
+assert.ok(bulk.includes('id="generateSelectedTags"'), "批量条里还得有「AI 建议标签」");
+assert.doesNotMatch(bulk.slice(bulk.indexOf('class="bulk-actions"')), /generateSelectedTags/,
+  "它不能待在「勾了题才出现」的那一组里");
+assert.match(libraryCss, /\.library-suggest-slot \{[^}]*display: flex/, "它自己占的那一格任何时候都显示");
 assert.match(libraryCss, /\.library-bulk\.has-selection \.bulk-actions \{ display: flex; \}/, "全选入口常驻，三个批量按钮勾了才出现");
 assert.match(libraryJs, /classList\.toggle\("has-selection", state\.selected\.size > 0\)/, "勾选状态要真的驱动那一行");
 

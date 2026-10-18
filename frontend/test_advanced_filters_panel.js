@@ -12,7 +12,7 @@ const markup = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "library.css"), "utf8");
 
 const panel = markup.slice(markup.indexOf('<details id="advancedFilters"'),
-                           markup.indexOf('<div id="tagQuickTools"'));
+                           markup.indexOf('</details>', markup.indexOf('<details id="advancedFilters"')));
 assert.ok(panel.length > 0, "找得到「更多筛选」那块");
 
 // ── 一、面板是一张卡片一张卡片排的，不是一排 flex 换行挤在一起的 ──

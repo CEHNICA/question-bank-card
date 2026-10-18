@@ -45,33 +45,22 @@
   .library-page.library-focus-mode.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: minmax(0, 1fr); }
   .library-page.library-focus-mode.library-basket-open .library-workspace { grid-template-columns: minmax(0, 1fr) 300px; }
 
-  /* 待办入口（待核对、未标知识点）和题型是**同一种东西** —— 都是点了就把列表
-     筛一遍。两组以前长得完全不一样：待办挂个放大镜图标（像搜索），题型是纯文字
-     加下划线。结果一屏里出现三种筛选长相，扫不出哪个是筛哪个是做事。
-     现在统一成和题型一样的文字筛选：有数字才出现，选中才加粗 + 下划线。 */
-  .library-page .library-filterbar > .library-extra-tools { grid-area: quick; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 14px; }
-  .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }
-  /* width:auto 不能省：按钮本身带着「占满父容器」的设定（那套是给侧栏和浮层
-     设计的），不覆盖掉的话每个按钮都撑满整行，两个就被迫竖着摞，筛选栏凭空
-     高出一行，右边还空一大片。 */
-  .library-page .library-filterbar > .library-extra-tools .button {
-    width: auto; justify-content: flex-start; gap: 5px; padding: 0 1px 10px; line-height: 1.5;
-    border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
-    box-shadow: none; color: var(--muted); font-size: 12px; white-space: nowrap;
-  }
-  .library-page .library-filterbar > .library-extra-tools .button:hover { background: none; color: var(--ink-2); }
-  .library-page .library-filterbar > .library-extra-tools .button.active { border-bottom-color: var(--accent); color: var(--accent-dark); font-weight: 600; }
+  /* 待办入口（待核对、未标知识点）已经搬去批量行，1.25.20 起这一行只有来源和
+     「更多筛选」。原来挂在这里的两颗数字和题型是同一种东西（点了筛一遍），
+     现在收进待办折叠区里，展开后仍然是那套文字筛选的长相。 */
   .library-page .active-filters { margin: -6px 0 18px; }
 
-  /* An intentional two-row filter area, followed by its selection strip. */
+  /* 1.25.20：待办搬去批量行以后，这一行只剩「来源」和「更多筛选」两样东西。
+     原来是四列（来源 / 排序 / 待办 / 更多筛选），其中排序在 1.25.17 就搬进折叠板了，
+     待办这轮又搬走了 —— 两列空着的 auto 会变成两道空隙，把「更多筛选」推离来源。
+     死掉的 grid-area 一起清掉，别留着让人以为那一格还有东西。 */
   .library-page .library-filterbar {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto;
-    grid-template-areas: "source sort quick advanced" "types types types types";
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "source advanced" "types types";
     gap: 15px 12px; margin-bottom: 0; padding: 15px 16px 0;
     border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface);
   }
   .library-page .library-filterbar > .library-select:first-child { grid-area: source; min-width: 0; }
-  .library-page .library-filterbar > .library-select:nth-of-type(2) { grid-area: sort; }
   .library-page .library-filterbar > .library-advanced { grid-area: advanced; margin: 0; }
   .library-page .library-filterbar .library-select { gap: 8px; font-weight: 400; }
   .library-page .library-filterbar .library-select select { min-height: 34px; border-radius: 6px; }
@@ -109,7 +98,7 @@
   .library-page.library-focus-mode .library-filterbar { margin-bottom: 18px; border-bottom: 1px solid var(--line); border-radius: 10px; }
   .library-page .library-bulk #selectionCount { font-size: 11px; }
   .library-page .library-status { font-size: 11px; }
-  .library-page .library-batch-ai > summary { padding: 5px 8px; border-radius: 6px; font-size: 12px; }
+  .library-page .library-todos .library-todo-summary { padding: 5px 8px; border-radius: 6px; font-size: 12px; }
   .library-page .bulk-actions { flex-wrap: wrap; }
 
   /* The question number and paper form a title; provenance remains secondary. */
@@ -198,13 +187,10 @@
     .library-page .question-inspector { top: calc(var(--topbar-h) + 10px); height: calc(100dvh - var(--topbar-h) - 20px); max-height: none; }
     .library-page .library-workspace > .library-results { grid-column: 1; }
     .library-page .library-workspace > .question-inspector { grid-column: 1; }
-    /* 窄屏第一行放不下四样东西，待办入口改占一整行放在题型上面。
-       不这么排的话 auto 列不肯缩，按钮文字会把筛选栏撑破、整页横向滚动。 */
     .library-page .library-filterbar {
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      grid-template-areas: "source sort advanced" "quick quick quick" "types types types";
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "source advanced" "types types";
     }
-    .library-page .library-filterbar > .library-extra-tools { justify-content: flex-start; }
   }
   @media (max-width: 559px) {
     .library-page .library-main { padding-inline: 10px; }

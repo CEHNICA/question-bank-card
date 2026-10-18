@@ -15,7 +15,7 @@
     sourceZoomIn: $("sourceZoomIn"), sourceZoom: $("sourceZoom"), sourceFit: $("sourceFit"), sourceRelated: $("sourceRelated"),
     sheet: $("printSheet"), paper: $("printPaper"), printTitle: $("printTitle"), printAnswers: $("printAnswers"),
     printOrigin: $("printOrigin"), printAi: $("printAiAnswers"), printAiBox: $("printAiBox"),
-    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), extraTools: $("tagQuickTools"), batchTools: $("aiBatchTools")
+    answerFilters: $("answerFilters"), tagBox: $("tagFilterBox"), tagSelect: $("tagSelect"), todos: $("libraryTodos")
   };
   const params = new URL(window.location.href).searchParams;
   // 筛选栏里题型固定的排列顺序。题库里没有的也要占一个位置（数字 0、置灰），
@@ -65,7 +65,7 @@
     basket: loadBasket()
   };
   // 筛选刷新会重建这个区域，但展开状态应在当前浏览过程中保留。
-  let aiBatchToolsOpen = false;
+  let todoMenuOpen = false;
 
   function node(tag, className = "", text) {
     const element = document.createElement(tag);
@@ -318,7 +318,7 @@
     renderReviewFilters(facets.reviews || {}, emptied);
     renderAnswerFilters(facets.answers || {}, emptied);
     renderTagFilter(facets.tags || []);
-    renderExtraTools();
+    renderTodos();
     // 「更多筛选」里三组都空时，点开了也是一片空白 —— 那就不出现。
     // 只能拿这三组判断：标签待办入口已经挪到折叠板外面常驻，它是「有活要干」
     // 的提示，跟着这组一起隐藏就等于有活也不吭声（1.25.0 之前就是这样丢的）。
@@ -332,7 +332,10 @@
     // 用标记而不是 disabled 反推：从 disabled 反推读的是上一次渲染留下的值，
     // 「已选题」锁过的搜索框和来源就再也解不开了。
     for (const control of controls) control.disabled = selectedView || control.dataset.emptyFacet === "1";
-    for (const control of document.querySelectorAll(".library-extra-tools button")) control.disabled = selectedView;
+    // 1.25.20：这两个筛选入口搬进了待办折叠区，class 也跟着换了。锁不锁它们
+    // 仍然是「已选题」视图的事 —— 只锁上面那批会把它们漏掉，筛选在这个视图里
+    // 一点都点不动。
+    for (const control of document.querySelectorAll("#libraryTodos .library-todo-look button")) control.disabled = selectedView;
     applyBatchButtonState();
   }
 
@@ -372,7 +375,9 @@
   }
   function applyBatchButtonState() {
     const selectedView = state.view === "selected";
-    for (const control of document.querySelectorAll("#aiBatchTools button")) {
+    // 只管真正会排队的那些 —— 1.25.20 把两个筛选入口也放进了同一个待办区，
+    // 用 #libraryTodos button 一网全会把它们一起锁掉，筛选就再也点不动了。
+    for (const control of document.querySelectorAll("#libraryTodos .library-tool-actions button")) {
       control.disabled = queueBusy || selectedView || control.dataset.disabledInSelectedView === "true";
       // 排队期间要改名的只有刚才被点的那一个；别的按钮保持自己的名字，
       // 只是被锁住 —— 让它们也跟着说「正在排队」是在骗用户，以为他排了两队。
@@ -438,13 +443,10 @@
     state.untaggedKnowledge = false; state.tagReview = false; syncUrl(); load();
   }
 
-  // 普通待处理入口常驻在筛选栏上；会调用 API 的批量任务放进单独折叠区。
-  // 两者都是按钮，靠「要不要花钱」和「要不要点开」区分，不靠藏起来。
-  function renderExtraTools() {
-    const box = ui.extraTools;
+  // 1.25.20：三样「还有活没干」合成一处，跟着题目列表那一行走，筛选行只留来源和更多筛选。
+  function renderTodos() {
+    const box = ui.todos;
     box.replaceChildren();
-    const batchBox = ui.batchTools;
-    batchBox.replaceChildren();
     const missingCount = Number(state.tagWork?.untagged_knowledge) || 0;
     const readyCount = Number(state.tagWork?.untagged_ready) || 0;
     const answerCount = Number(state.tagWork?.missing_answer) || 0;
@@ -551,41 +553,44 @@
       });
       batchActions.push(answers);
     }
-    box.hidden = !quickActions.length;
-    batchBox.hidden = !batchActions.length || state.view === "selected";
+    // 1.25.20：两个筛选入口（建议待核对、没打标签）和三个 AI 动作（补标签、补当前
+    // 这批、补答案）合成一处。它们本来就是同一件事——「还有活没干」，只是原来分在
+    // 筛选行和批量行两处、两种长相，没有一样写着「让 AI 提标签建议」，老师因此以为
+    // 这个功能不存在。筛选行现在只剩「来源」和「更多筛选」。
+    //
+    // 折叠起来的东西要让人看得见里面有什么，所以名字上直接把三样都数出来。
+    // 「要不要花钱」从名字里挪走 —— 那是警告，不是动作，挤在名字里只会让人认不出
+    // 这是干什么的；挪到展开后的第一行和每颗按钮的悬停说明里。
+    if (!quickActions.length && !batchActions.length) { box.replaceChildren(); box.hidden = true; return; }
+    box.hidden = false;
+    const menu = node("details", "library-todo-menu");
+    menu.open = todoMenuOpen;
+    const working = queuedTags + queuedAnswers;
+    if (working) menu.dataset.working = "true";
+    const summary = node("summary", "library-todo-summary");
+    const bits = [];
+    if (pendingCount) bits.push(`${pendingCount} 题建议待采纳`);
+    if (missingCount) bits.push(`${missingCount} 题没打标签`);
+    if (batchActions.length) bits.push(`AI 能补 ${batchActions.length} 项`);
+    summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));
+    summary.append(node("span", "library-todo-bits", bits.join(" · ")));
+    if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
+    summary.title = working
+      ? `AI 正在逐题处理，还剩 ${working} 道。做完会自动显示，不用一直点着看。`
+      : `点开看这三项：${bits.join("；")}。前两项点一下只看这些题，最后一项会让 AI 逐题处理、消耗额度。`;
+    menu.append(summary);
 
-    // 常驻的一排小按钮，不再套一层「快速查看」标题。筛选栏里来源、题型、排序
-    // 都没有小标题，按钮名本身已经说清是做什么的，多套一层只占地方；
-    // 分组名留给 aria-label，读屏用户仍然听得到这一组的用途。
-    box.append(...quickActions);
+    const body = node("div", "library-todo-body");
+    // 筛选入口排在前面：它们不花钱，先看这些。
+    if (quickActions.length) {
+      const look = node("div", "library-tool-actions library-todo-look");
+      look.append(...quickActions);
+      body.append(node("p", "library-todo-note", "这两项只是筛选，不花钱。"), look);
+    }
     if (batchActions.length) {
-      const batch = node("details", "library-batch-ai");
-      batch.open = aiBatchToolsOpen;
-      // 入口名字原来只写「AI 批量处理」，看不出它要花钱、也不知道会动多少题，
-      // 又是个贴在右边缘的小灰按钮，很容易整天没被看见。改成「AI 批量处理题目」
-      // 之后还是有人问「批量处理啥呀」——名字里必须出现真正被处理的那两样东西，
-      // 而且要和下面两条按钮用同一个动作词（都是「补齐缺…」），一眼能对上。
-      // 要不要花钱挂在按钮上；有活干的时候直接显示还剩多少。
-      //
-      // 颜色也跟着这个思路走：它是最贵、最不该随手点的按钮，所以平时和「更多筛选」
-      // 一样低调，只有 AI 真的在逐题处理时才亮成主色 —— 该看它的时候才显眼。
-      const working = queuedTags + queuedAnswers;
-      if (working) batch.dataset.working = "true";
-      const summary = node("summary", "", "批量补标签和答案");
-      summary.append(node("span", "library-batch-cost", "要花额度"));
-      summary.append(working
-        ? node("span", "library-batch-live", `处理中 ${working} 道`)
-        : node("span", "library-batch-count", `${batchActions.length} 项`));
-      summary.title = working
-        ? `AI 正在逐题处理，还剩 ${working} 道。做完会自动显示，不用一直点着看。`
-        : "一次让 AI 处理很多题：补齐缺的知识点标签、生成缺的参考答案。每道题调用一次 AI，会消耗额度。"
-          + "点开看具体是哪几项、分别多少道题。";
-      batch.append(summary);
-      const body = node("div", "library-batch-ai-body");
-      body.append(node("p", "helper", apiReady
-        ? "这几项都会让 AI 逐题处理、消耗额度。生成的知识点标签只是建议，要你逐条核对确认后才贴到题目上；"
-          + "鼠标放在按钮上会说明它处理哪些题。点之前建议先看一眼题数。"
-        : "需要先到「设置 → API 配置」里配置并测试通过，才能用这几项。"));
+      body.append(node("p", "library-todo-note", apiReady
+        ? "下面这几项会让 AI 逐题处理、消耗额度。生成的标签只是建议，要你逐条核对确认后才贴到题目上。"
+        : "需要先到「设置 → API 配置」里配置并测试通过，才能用下面这几项。"));
       // 排队中、以及「已经在处理多少道」都写在这里。按钮上方、正对着按钮，
       // 用户盯着按钮时一眼就能看见；只靠一闪而过的提示条必然会被错过。
       const stateLine = node("p", "library-batch-state");
@@ -599,10 +604,10 @@
       const actions = node("div", "library-tool-actions");
       actions.append(...batchActions);
       body.append(actions);
-      batch.append(body);
-      batch.addEventListener("toggle", () => { aiBatchToolsOpen = batch.open; });
-      batchBox.append(batch);
     }
+    menu.append(body);
+    menu.addEventListener("toggle", () => { todoMenuOpen = menu.open; });
+    box.append(menu);
   }
 
   function currentFilterPayload() {
@@ -644,7 +649,7 @@
       const spent = Math.round((Date.now() - queueStartedAt) / 1000);
       // 每秒都重新找这一行：登记途中界面会重画，按住开始时那个节点，
       // 等于对着已经不在页面上的元素写字，写了也没人看得见。
-      const stateLine = document.querySelector("#aiBatchTools .library-batch-state");
+      const stateLine = document.querySelector("#libraryTodos .library-batch-state");
       if (stateLine) {
         stateLine.hidden = false;
         stateLine.dataset.tone = "working";
@@ -666,7 +671,7 @@
       applyBatchButtonState();
       // 刚才写的是「正在登记…」。登记已经结束了，留着会说谎；
       // 紧接着的刷新会把它换成真实的「AI 正在处理：还有多少道」。
-      const stateLine = document.querySelector("#aiBatchTools .library-batch-state");
+      const stateLine = document.querySelector("#libraryTodos .library-batch-state");
       if (stateLine && stateLine.dataset.queueing === "true") {
         delete stateLine.dataset.queueing;
         stateLine.hidden = true;
@@ -2702,6 +2707,23 @@
     box.append(clear);
   }
 
+  // 「AI 建议标签」什么时候能用：功能开了、并且 API 配好测过了。
+  // 单独抽出来是因为 syncSelection 里既要拿它决定灰不灰，又要拿它写悬停说明，
+  // 两处各写一遍的话，改了一处忘了另一处就会说一套做一套。
+  function suggestTagsReady() {
+    return state.features.knowledge_tags === true && state.ai.mode === "api" && state.ai.api_ready === true;
+  }
+  // 灰着的按钮必须说清「为什么灰、接下来该怎么办」。只写「功能未开启」而不写
+  // 「先去哪开」，用户还是不知道该做什么。
+  function suggestTagsTitle() {
+    if (state.features.knowledge_tags !== true) return "题库里没有开启「AI 建议标签」这项功能，要到「设置」里打开才能用。";
+    if (state.ai.mode !== "api" || state.ai.api_ready !== true) return "需要先到「设置 → API 配置」里配置并测试通过，才能用这一项。";
+    const count = state.selected.size;
+    return count
+      ? `让 AI 给勾选的 ${count} 道题生成标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。`
+      : "先在左边勾几道题，再点这个让 AI 给它们提标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。";
+  }
+
   function syncSelection() {
     const shown = visibleItems();
     const count = shown.filter((item) => state.selected.has(item.id)).length;
@@ -2710,11 +2732,19 @@
     $("selectVisible").disabled = !shown.length;
     $("selectionCount").textContent = `已勾选 ${state.selected.size} 题`;
     document.querySelector(".library-bulk")?.classList.toggle("has-selection", state.selected.size > 0);
-    for (const [id, feature] of [["generateSelectedTags", "knowledge_tags"], ["generateSelectedAnswers", "ai_answer"]]) {
+    for (const [id, feature] of [["generateSelectedAnswers", "ai_answer"]]) {
       const button = $(id);
       button.hidden = !state.features[feature] || state.ai.mode !== "api" || state.ai.api_ready !== true;
       button.disabled = !state.selected.size;
     }
+    // 1.25.20：「AI 建议标签」原来跟着另一颗一起藏，条件是「功能开了、API 配了、
+    // 而且你已经勾了题」。老师什么都没勾的时候页面上一个入口都没有，于是以为这个
+    // 功能不存在。改成常驻：任何时候都在，只是没勾题时灰着；灰着的时候要说清
+    // 是要先勾题、还是要去开功能配 API —— 只看到一个灰按钮，等于没有入口。
+    const suggest = $("generateSelectedTags");
+    suggest.hidden = false;
+    suggest.disabled = !state.selected.size || !suggestTagsReady();
+    suggest.title = suggestTagsTitle();
     $("addSelected").disabled = !state.selected.size;
     $("withdrawSelected").disabled = !state.selected.size;
     $("clearSelection").disabled = !state.selected.size;

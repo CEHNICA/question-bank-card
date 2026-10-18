@@ -18,10 +18,12 @@ function fakeStateLine() { return { hidden: true, dataset: {}, textContent: "" }
 function setup({ checked = { mode: "api", api_ready: true }, posted = checked, getOkay = true, hold = false } = {}) {
   const calls = [], jobs = [], notices = [], loads = [], statuses = [];
   const stateLine = fakeStateLine();
-  // 被点的那个按钮必须在下面这张列表里。真实页面上它就在 #aiBatchTools 内部，
+  // 被点的那个按钮必须在下面这张列表里。真实页面上它就在待办区里，
   // 而界面每次重画后重新同步的也正是这张列表。把被点的按钮放在列表外面，
   // 等于把「排队期间界面会重画」这件事从测试里抹掉了 —— 真实代码里的那个 bug
   // 正是从这个缝里漏过去的：排队文案只写在点下去那一个、随时会被换掉的节点上。
+  // 1.25.20：选择器也跟着改了。现在待办区里还有两个筛选按钮，用一网切的
+  // #libraryTodos button 会把它们一起锁掉 —— 筛选在「已选题」视图里就再也点不动。
   // 三个按钮各带一个渲染时就写死的身份，排队时只有身份对得上的那个改名。
   const button = fakeButton("补齐缺的参考答案 · 7 题", "answer");
   const other = fakeButton("补齐缺的知识点标签 · 1 题", "tags");
@@ -52,8 +54,8 @@ function setup({ checked = { mode: "api", api_ready: true }, posted = checked, g
   // 真正的 disable 判据就让它自己算：这里只提供它要用的 state 和 querySelectorAll。
   state: { view: "all" },
   document: {
-    querySelectorAll: selector => (selector === "#aiBatchTools button" ? batchButtons : []),
-    querySelector: selector => (selector === "#aiBatchTools .library-batch-state" ? stateLine : null)
+    querySelectorAll: selector => (selector === "#libraryTodos .library-tool-actions button" ? batchButtons : []),
+    querySelector: selector => (selector === "#libraryTodos .library-batch-state" ? stateLine : null)
   },
   // 抓住每秒回调而不是自己造一个，这样量到的就是代码里那条真的那句。
   window: { setInterval: (fn) => { tick = fn; ticking = true; return 0; },

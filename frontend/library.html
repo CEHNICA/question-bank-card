@@ -124,24 +124,33 @@
                 </div>
               </div>
             </details>
-            <!-- 待办入口常驻，不放进「更多筛选」。原来它住在折叠板里，
-                 而折叠板在三组筛选都为空时会整个隐藏，于是「有 87 题待核对」
-                 这类提示跟着一起从页面上消失，用户完全不知道有待办。
-                 常驻后它与来源、题型、排序并列，只在真有数字时出现。 -->
-            <div id="tagQuickTools" class="library-extra-tools" role="group" aria-label="标签待办" hidden></div>
+            <!-- 1.25.20：待办从筛选行搬走了。原来这里挂着「AI 建议待核对 · 439 题」
+                 「未标知识点 · 805 题」两颗数字，和下面批量行里那个折叠着的
+                 「批量补标签和答案」是同一件事——都是「还有活没干」，却分在两行、
+                 两种长相。老师问「让 AI 提标签建议的按钮在哪」，这三样里没有一样
+                 写着这句话。现在合成一处，放在批量行右边，只在真有活时出现。
+                 仍然放在「更多筛选」外面：折叠板在三组筛选都为空时会整个藏起来。 -->
         </div>
         <div class="library-bulk" aria-label="题目列表操作">
           <label><input id="selectVisible" type="checkbox">全选本页</label>
           <span id="selectionCount" role="status" aria-live="polite">已勾选 0 题</span>
           <span id="libraryStatus" class="library-status" role="status" aria-live="polite" data-tone="plain">正在读取题库…</span>
-          <div id="aiBatchTools" class="library-batch-toolbar" role="group" aria-label="批量补标签和答案（要消耗额度）" hidden></div>
+          <!-- 1.25.20：「AI 建议标签」原来藏在勾选之后，不勾题就一个按钮都没有，
+               老师因此以为这个功能不存在。改成常驻：没勾题时灰着，鼠标放上去
+               说清要先勾什么。功能没开或没配 API 时同样留着按钮，说清去哪开。
+               它必须自己占一个位置，不能跟着 .bulk-actions 一起藏 ——
+               那一组是「勾了题才出现」的，进去就等于还是没露出来。 -->
+          <div id="suggestTagsSlot" class="library-suggest-slot">
+            <button id="generateSelectedTags" class="button button-quiet button-small" type="button" disabled
+              title="先在左边勾几道题，再点这个让 AI 给它们提标签建议">AI 建议标签</button>
+          </div>
+          <div id="libraryTodos" class="library-todos" role="group" aria-label="还有活没干" hidden></div>
           <div class="bulk-actions">
             <button id="addSelected" class="button button-small" type="button" disabled>加入试题篮</button>
             <button id="withdrawSelected" class="button button-quiet button-small" type="button" disabled
               title="把勾选的题从正式题库撤下；题卡和原卷都保留，可以重新入库">撤回所选</button>
             <button id="clearSelection" class="button button-quiet button-small" type="button" disabled>取消勾选</button>
             <button id="editSelectedTags" class="button button-quiet button-small" type="button" disabled>整理勾选题的标签</button>
-            <button id="generateSelectedTags" class="button button-quiet button-small" type="button" hidden disabled>AI 建议标签</button>
             <button id="generateSelectedAnswers" class="button button-quiet button-small" type="button" hidden disabled>生成参考答案</button>
           </div>
         </div>

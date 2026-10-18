@@ -25,7 +25,7 @@ assert.match(rail, /hidden inert/, "the former rail is inert and cannot occupy s
 const header = html.slice(html.indexOf('<header class="topbar'), html.indexOf('</header>'));
 assert.match(header, /library-top-navigation[\s\S]*?id="searchInput"[\s\S]*?id="allQuestionsButton"[\s\S]*?id="basketViewButton"[\s\S]*?id="libraryTagManager"/, "the real search, scope and tag-manager controls share the top navigation");
 assert.doesNotMatch(header.slice(header.indexOf('library-top-navigation')), /data-drawer="library"/, "frequent library controls are not silently moved into the global drawer");
-assert.match(html, /<div class="library-bulk"[\s\S]*?<div id="aiBatchTools" class="library-batch-toolbar"/, "AI batch operations use the empty question-list toolbar area");
+assert.match(html, /<div class="library-bulk"[\s\S]*?<div id="libraryTodos" class="library-todos"/, "AI batch operations use the empty question-list toolbar area");
 assert.match(html, /class="tag-saved-filter-actions"[\s\S]*?id="saveTagFilter"[\s\S]*?id="deleteTagFilter"/, "saved-filter actions are grouped together below their selector");
 assert.match(html, /id="inspectorToggle"[^>]*aria-controls="questionInspector"/, "narrow screens have a visible details-panel control");
 assert.match(js, /function selectInspectorQuestion\(item, article = null\)/, "clicking a question updates the contextual panel");
@@ -114,35 +114,49 @@ assert.doesNotMatch(js, /已经贴上的、AI 建议的、想加的，都在这�
 // 它以前就住在那个浮层里，而浮层在三组筛选都为空时会把整个折叠板一起隐藏 ——
 // 于是「有 87 题待核对」这种提示跟着从页面上消失，用户完全不知道还有活要干。
 // 下面几条各自钉住一个环节：落在哪、隐藏判断算不算它、有没有格子、该消失时是不是真消失。
+// 1.25.20：待办从筛选行搬到了批量行，量的还是原来那件事 —— 它绝不能住进
+// 「更多筛选」那个折叠板。那个折叠板在三组筛选都为空时会整个藏起来，
+// 待办跟着进去的话，「有 439 题建议待采纳」就会一起从页面上消失。
 const advancedBlock = html.match(/<details id="advancedFilters"[\s\S]*?<\/details>/)?.[0] || "";
-assert.doesNotMatch(advancedBlock, /id="tagQuickTools"/,
+assert.doesNotMatch(advancedBlock, /id="libraryTodos"/,
   "the pending-work entry is not parked inside the More Filters disclosure");
-assert.ok(html.indexOf('id="tagQuickTools"')
+assert.ok(html.indexOf('id="libraryTodos"')
     > html.indexOf("</details>", html.indexOf('<details id="advancedFilters"')),
-  "the pending-work entry sits in the filter bar, after More Filters");
-assert.doesNotMatch(js, /\$\("advancedFilters"\)\.hidden = \[[^\]]*extraTools/,
+  "the pending-work entry sits after More Filters, on the question-list row");
+assert.doesNotMatch(js, /\$\("advancedFilters"\)\.hidden = \[[^\]]*ui\.todos/,
   "hiding More Filters never depends on the pending-work entry");
-assert.match(readingCss, /grid-template-areas:[^;]*"[^"]*quick[^"]*"/,
-  "the filter bar grid reserves a slot for the pending-work entry");
-// 上一条只查得到「排版里提到了 quick」，元素本身没被放进格子它照样会过。
-// 少了这一行，待办入口会被自动排到第二行跟题型抢格子，所以两条要钉在一起。
-assert.match(readingCss, /\.library-extra-tools\s*\{\s*grid-area:\s*quick/,
-  "the pending-work entry is actually placed in its reserved slot");
-assert.match(css.concat(readingCss), /\.library-extra-tools\[hidden\][^{]*\{[^}]*display:\s*none/,
-  "the pending-work entry really disappears when nothing is pending");
-assert.match(js, /function renderExtraTools\(\)[\s\S]*?box\.append\(\.\.\.quickActions\)/,
+// 1.25.20：筛选行现在只剩「来源」和「更多筛选」。原来那四列里的 sort（1.25.17
+// 就空了）和 quick（这轮空了）必须一起从栅格里拿掉 —— 空着的 auto 列会变成两道
+// 空隙，把「更多筛选」推离来源，看着像中间漏了一块。
+assert.doesNotMatch(readingCss, /grid-template-areas:[^;]*"[^"]*\bquick\b[^"]*"/,
+  "the filter bar grid no longer reserves a slot for a pending-work entry that moved away");
+assert.doesNotMatch(readingCss, /grid-template-areas:[^;]*"[^"]*\bsort\b[^"]*"/,
+  "the empty sort slot is gone too");
+assert.match(readingCss, /grid-template-areas:\s*"source advanced"/,
+  "the filter bar grid is exactly the two things that are still there");
+assert.match(css.concat(readingCss), /\.library-todos:not\(\[hidden\]\)[^{]*\{[^}]*display:\s*flex/,
+  "the pending-work entry is shown whenever there is something pending");
+assert.match(js, /function renderTodos\(\)[\s\S]*?look\.append\(\.\.\.quickActions\)/,
   "pending-work buttons are rendered into the always-visible container");
-// 「AI 批量处理」这个入口以前只有四个字，看不出要花钱、也不知道会动多少题，
-// 又贴在右边缘像个小灰按钮，于是几乎没人点。名字、代价提示、以及有活干时
-// 直接显示「还剩多少道」，三样都要钉住，缺一样又会退回成一个藏起来的入口。
-// 名字本身还必须说清「处理什么」：改成「AI 批量处理题目」之后仍然有人问
-// 「批量处理啥呀」——真正被补的就是标签和答案，必须出现在名字里。
-assert.match(js, /function renderExtraTools\(\)[\s\S]*?const batch = node\("details", "library-batch-ai"\)[\s\S]*?批量补标签和答案[\s\S]*?batchBox\.append\(batch\)/,
-  "quick browsing and API-consuming batch tasks have separate destinations");
-assert.match(js, /node\("summary", "", "批量补标签和答案"\)/,
-  "the batch entry names the two things it actually fills in");
-assert.match(js, /node\("span", "library-batch-cost", "要花额度"\)/,
-  "the batch entry says on its face that it costs quota");
+// 1.25.20：三样「还有活没干」合成一处折叠条。折叠起来的东西要让人看得见里面有什么，
+// 所以名字上直接把那三样数出来 —— 「让 AI 提标签建议」这句话整屏都没出现过，
+// 老师因此以为这个功能不存在。
+assert.match(js, /function renderTodos\(\)[\s\S]*?const menu = node\("details", "library-todo-menu"\)/,
+  "the pending-work filters and the AI jobs share one container");
+assert.match(js, /`\$\{pendingCount\} 题建议待采纳`/,
+  "the entry counts how many tag suggestions are waiting to be accepted");
+assert.match(js, /`\$\{missingCount\} 题没打标签`/,
+  "the entry counts how many questions have no knowledge tag yet");
+assert.match(js, /`AI 能补 \$\{batchActions\.length\} 项`/,
+  "the entry says how many jobs AI can fill in, instead of hiding them behind a ▾");
+assert.match(js, /node\("span", "library-todo-lead", working \? "AI 正在处理" : "还有活没干"\)/,
+  "the entry says what it is, in the teacher's words");
+// 「要花额度」原来占着入口的名字的一半。它是警告不是动作，挤在名字里只会让人
+// 认不出这个入口是干什么的 —— 现在挪进展开后的第一行和每颗按钮的悬停说明。
+assert.doesNotMatch(js, /function renderTodos\(\)[\s\S]*?node\("span", "library-batch-cost"/,
+  "the cost warning no longer takes up room in the entry's name");
+assert.match(js, /node\("p", "library-todo-note", apiReady[\s\S]*?消耗额度/,
+  "the cost warning still appears inside the panel, just not in the name");
 assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} 道`\)/,
   "while AI is working, the entry itself says how many questions are left");
 // 这个按钮的显眼程度走了个来回，正好说明单看「显不显眼」判断不了对错：
@@ -150,11 +164,11 @@ assert.match(js, /node\("span", "library-batch-live", `处理中 \$\{working\} �
 // 一屏里最贵、最不该随手点的那个（每题花一次额度）。
 // 现在的规矩是：平时和「更多筛选」一样低调，只有 AI 真的在逐题处理时才亮成主色。
 // 两条都要钉住，只钉一条的话，另一条一定会被人「顺手改回去」。
-assert.doesNotMatch(css, /\.library-batch-toolbar \.library-batch-ai > summary\s*\{[^}]*background:\s*var\(--accent\)/,
+assert.doesNotMatch(css, /\.library-todos \.library-todo-summary\s*\{[^}]*background:\s*var\(--accent\)/,
   "the batch entry stays quiet while nothing is running — it is the most expensive button on the page");
-assert.match(css, /\.library-batch-toolbar \.library-batch-ai\[data-working\] > summary\s*\{[^}]*background:\s*var\(--accent\)/,
+assert.match(css, /\.library-todos \.library-todo-menu\[data-working\] > \.library-todo-summary\s*\{[^}]*background:\s*var\(--accent\)/,
   "the batch entry lights up exactly while AI is working through the queue");
-assert.match(js, /if \(working\) batch\.dataset\.working = "true"/,
+assert.match(js, /if \(working\) menu\.dataset\.working = "true"/,
   "the entry is marked as working from the same number that drives 处理中 N 道");
 // 题型筛选项以前会换行：窗口稍窄一点，最后一个「解答题」就被挤到第二行，
 // 一眼看去像两排选项；左边「题型」两个字还被挤成一字一行。
@@ -177,13 +191,18 @@ assert.doesNotMatch(js, /AI 建议待核对 · \$\{pendingCount\} 题[`'",\s][^)
   "the pending-review filter no longer wears a search icon that makes it look like a lookup");
 assert.doesNotMatch(js, /未标知识点 · \$\{missingCount\} 题[`'",\s][^)]*"search"/,
   "the untagged filter no longer wears a search icon either");
-assert.match(readingCss, /\.library-extra-tools \.button\s*\{[^}]*border-bottom:\s*2px solid transparent/,
-  "pending-work filters now look like the type filters instead of a third style");
+// 1.25.20：待办搬去批量行以后，筛选行那套「贴着下划线、和题型一个长相」的规则
+// 一起失效了。图标不在这条上管，但下划线长相要留着 —— 它现在是折叠区里的筛选，
+// 展开后仍然得一眼看得出「这是筛选，不是做事」。
+assert.doesNotMatch(css.concat(readingCss), /\.library-filterbar > \.library-extra-tools/,
+  "the old filter-bar pending-work rules can no longer match anything");
+assert.doesNotMatch(css.concat(readingCss), /\.library-extra-tools \.button/,
+  "the pending-work button styling moved with the control");
 assert.doesNotMatch(css.concat(readingCss), /\.library-filterbar > #typeFilters/,
   "no rule still targets the type filter as a direct child of the filter bar");
-assert.match(js, /batch\.open = aiBatchToolsOpen/, "batch tasks are folded by default and restore their in-page state");
-assert.match(js, /batch\.addEventListener\("toggle", \(\) => \{ aiBatchToolsOpen = batch\.open; \}\)/, "the batch disclosure stays in its chosen state during in-page filter refreshes");
-assert.doesNotMatch(js.match(/function renderExtraTools\(\)[\s\S]*?\n  function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");
+assert.match(js, /menu\.open = todoMenuOpen/, "batch tasks are folded by default and restore their in-page state");
+assert.match(js, /menu\.addEventListener\("toggle", \(\) => \{ todoMenuOpen = menu\.open; \}\)/, "the batch disclosure stays in its chosen state during in-page filter refreshes");
+assert.doesNotMatch(js.match(/function renderTodos\(\)[\s\S]*?\n  function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");
 assert.doesNotMatch(js, /\$\{message\}。请到“设置 → API 配置”检查服务商、密钥和模型/,
   "unknown worker failures do not falsely blame API configuration");
 

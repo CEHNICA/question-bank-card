@@ -32,8 +32,6 @@
 .library-tag-manager-entry:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
 .library-rail .library-filters { flex-direction: column; align-items: stretch; gap: 10px; }
 .library-rail .active-filters { flex-direction: column; align-items: flex-start; margin: 0; }
-/* 侧栏窄，标签快捷入口允许换行，避免把搜索与题卡列撑宽。 */
-.library-extra-tools .button { white-space: normal; }
 .rail-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(22,44,39,.34); backdrop-filter: blur(2px); }
 .rail-toggle { display: none; }
 /* 1.12.7：收侧栏的开关就一个按钮，骑在侧栏右边那道缝上、视口正中。
@@ -185,47 +183,43 @@ a.library-type.undecided:hover { text-decoration: underline; }
    这里只保证即使那份没加载也不会竖成一长条。
    原来还有 .library-tool-group / .library-tool-heading / .helper 三条，
    跟着「快速查看」小标题一起去掉了 —— 现在按钮名本身就说是做什么的。 */
-.library-extra-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .library-tool-actions { display: grid; gap: 5px; }
 .library-tool-action { display: flex; width: 100%; min-height: 34px; justify-content: flex-start; gap: 7px; white-space: normal; text-align: left; line-height: 1.35; }
 .library-tool-action .icon { flex: 0 0 auto; width: 14px; height: 14px; }
 .library-tool-action.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
-.library-batch-ai { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
-.library-batch-ai > summary { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; color: var(--ink-2); font-size: 12.5px; font-weight: 650; cursor: pointer; list-style: none; }
-.library-batch-ai > summary::-webkit-details-marker { display: none; }
-.library-batch-ai > summary::after { content: "▾"; color: var(--muted); font-size: 11px; font-weight: 500; }
-.library-batch-ai[open] > summary::after { content: "▴"; }
-.library-batch-ai > summary:hover { background: var(--accent-soft); color: var(--accent-dark); }
-.library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
-/* 这个入口以前是个贴在右边缘的浅灰小按钮、名字又只有四个字，几乎不会被点开；
-   后来改成实心主色按钮，解决了「藏得深」，却又在一屏浅灰细线里成了最扎眼的
-   焦点 —— 而它恰恰是最贵、最不该随手点的那个（每题花一次额度）。
-   现在折中：平时和「更多筛选」一样低调，只有 AI 真的在逐题处理时才亮起来，
-   也就是「该看它」的时候它才显眼。 */
-.library-batch-toolbar:not([hidden]) { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; position: relative; }
-.library-batch-toolbar .library-batch-ai { overflow: visible; border: 0; background: transparent; }
-.library-batch-toolbar .library-batch-ai > summary {
+/* 1.25.20：待办合成一处，跟着题目列表那一行走。入口名字上直接把三样都数出来，
+   折叠起来的东西要让人看得见里面有什么。
+   颜色还是那个思路：它是最贵、最不该随手点的入口，平时和「更多筛选」一样低调，
+   只有 AI 真的在逐题处理时才亮成主色 —— 该看它的时候才显眼。 */
+.library-todos:not([hidden]) { display: flex; flex: 0 0 auto; align-items: center; position: relative; }
+.library-todo-menu { overflow: visible; }
+.library-todos .library-todo-summary {
   display: flex; min-height: 31px; align-items: center; gap: 7px; padding: 4px 10px;
   border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
-  color: var(--ink-2); font-size: 12.5px; font-weight: 400; white-space: nowrap; cursor: pointer;
+  color: var(--ink-2); font-size: 12.5px; white-space: nowrap; cursor: pointer; list-style: none;
 }
-.library-batch-toolbar .library-batch-ai > summary:hover { border-color: var(--accent); color: var(--accent-dark); }
-.library-batch-toolbar .library-batch-ai[data-working] > summary {
+.library-todos .library-todo-summary::-webkit-details-marker { display: none; }
+.library-todos .library-todo-summary::after { content: "▾"; color: var(--muted); font-size: 11px; }
+.library-todo-menu[open] > .library-todo-summary::after { content: "▴"; }
+.library-todos .library-todo-summary:hover { border-color: var(--accent); color: var(--accent-dark); }
+.library-todos .library-todo-menu[data-working] > .library-todo-summary {
   border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 650;
 }
-.library-batch-toolbar .library-batch-ai[data-working] > summary:hover { background: var(--accent-dark); color: #fff; }
-.library-batch-toolbar .library-batch-ai[data-working] > summary::after { color: rgba(255, 255, 255, .8); }
-.library-batch-toolbar .library-batch-cost { padding: 1px 6px; border-radius: 99px; background: var(--bg-sunken); color: var(--muted); font-size: 11px; font-weight: 600; }
-.library-batch-toolbar .library-batch-ai[data-working] .library-batch-cost { background: rgba(255, 255, 255, .2); color: #fff; }
-.library-batch-toolbar .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); font-size: 11px; font-weight: 700; }
-.library-batch-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
-.library-batch-toolbar .library-batch-ai-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
-.library-batch-toolbar .library-tool-actions { gap: 6px; }
-.library-batch-toolbar .library-tool-action { min-height: 36px; padding: 7px 9px; }
+.library-todos .library-todo-menu[data-working] > .library-todo-summary:hover { background: var(--accent-dark); color: #fff; }
+.library-todos .library-todo-menu[data-working] > .library-todo-summary::after { color: rgba(255, 255, 255, .8); }
+.library-todo-lead { font-weight: 600; }
+.library-todo-bits { color: var(--muted); }
+.library-todos .library-todo-menu[data-working] .library-todo-bits { color: rgba(255, 255, 255, .85); }
+.library-todos .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); color: inherit; font-size: 11px; font-weight: 700; }
+.library-todo-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: min(60vh, 420px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
+.library-todo-note { margin: 0 0 7px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.library-todo-look { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.library-todos .library-tool-actions { gap: 6px; }
+.library-todos .library-tool-action { min-height: 36px; padding: 7px 9px; }
 /* 排队中、以及「还在处理多少道」都写在这一行，正对着按钮。
    按钮点下去以后用户盯着的就是这几颗，这一行不写清楚就等于没反应。 */
 .library-batch-state:not([hidden]) { margin: 8px 0; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent-dark); font-size: 12px; line-height: 1.55; }
-.library-batch-ai-body .library-tool-action[aria-busy="true"] { opacity: .75; font-weight: 650; }
+.library-todo-body .library-tool-action[aria-busy="true"] { opacity: .75; font-weight: 650; }
 .tag-saved-filter-box { display: grid; gap: 7px; }
 .tag-saved-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .tag-saved-filter-actions .button { min-width: 0; padding-inline: 7px; white-space: normal; }
@@ -481,6 +475,11 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-bulk #selectionCount { color: var(--muted); }
 .bulk-actions { display: none; align-items: center; gap: 6px; margin-left: auto; }
 .library-bulk.has-selection .bulk-actions { display: flex; }
+/* 「AI 建议标签」自己占一格，不进 .bulk-actions —— 那一组整组只在勾了题时才显示，
+   「让它常驻」写在标记里也没用：只要它还在那一组里，不勾题就照样看不见。
+   右边那点空隙原来由 .bulk-actions 的 margin-left:auto 顶着，改由这一格顶，
+   两组的顺序也跟着它：建议 → 待办 → 勾了题才有的那几颗。 */
+.library-suggest-slot { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; }
 /* 窄屏（≤760px，和 styles.css:1192 顶栏变高的那个断点对齐）：批量条排不下两行。
    收掉「已显示 X / 共 Y 题」这段 —— 它最长也最不常用。上面那几个批量按钮不用动，
    它们本来就在 .library-bulk.has-selection 时才出现。实测 390px：没勾选 59→34px，
@@ -489,7 +488,7 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    整条 display:none 会让手机上的用户完全不知道自己看的是旧数据。 */
 @media (max-width: 760px) {
   .library-bulk #libraryStatus[data-tone="plain"] { display: none; }
-  .library-batch-toolbar:not([hidden]) { margin-left: 0; }
+  .library-suggest-slot { margin-left: 0; }
   .library-filterbar > .library-advanced { margin-left: auto; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }

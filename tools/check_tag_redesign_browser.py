@@ -192,36 +192,48 @@ def check(base):
         mobile.close()
         report["screenshots"].extend([str(OUTPUT / "question-filterbar-desktop.png"), str(OUTPUT / "question-filterbar-mobile.png")])
         report["checks"].append("Source, question type, sort, and advanced filters live above the list; mobile controls wrap without horizontal overflow and More Filters does not shift cards")
-        # 待办入口常驻在筛选栏上：不展开「更多筛选」也要看得见。
-        # 以前它住在那个浮层里，对着关着的折叠板断言可见永远不会通过 ——
-        # 而那个浮层在三组筛选都为空时还会整个隐藏，于是「有 87 题待核对」跟着一起消失。
-        extra_tools = page.locator("#tagQuickTools")
+        # 待办入口常驻在批量行上（1.25.20 从筛选行搬过来，和「让 AI 补标签和答案」
+        # 合成一处）：不展开任何折叠板也要看得见。折叠板在三组筛选都为空时还会整个
+        # 隐藏，待办跟着进去的话「有 87 题待核对」就会一起消失。
+        extra_tools = page.locator("#libraryTodos")
         expect(extra_tools).to_be_visible()
         expect(page.locator("#libraryTagManager")).to_be_visible()
+        # 1.25.20：筛选行现在只剩「来源」和「更多筛选」—— 待办那两颗数字不在那儿了。
+        filter_bar = page.locator("#libraryFilterBar")
+        expect(filter_bar.get_by_role("button", name=re.compile("AI 建议待核对"))).to_have_count(0)
+        expect(filter_bar.get_by_role("button", name=re.compile("未标知识点"))).to_have_count(0)
+        expect(filter_bar.locator("#sourceSelect")).to_be_visible()
+        expect(filter_bar.locator("#advancedFilters")).to_be_visible()
+        # 待办折叠起来，但名字上必须已经写着里面有什么 —— 否则用户不知道该点开它，
+        # 也无从知道「让 AI 提标签建议」这件事到底在哪儿。
+        expect(extra_tools.locator("summary.library-todo-summary")).to_contain_text(re.compile(r"AI 能补 \d+ 项"))
         expect(extra_tools.get_by_role("button", name="标签管理")).to_have_count(0)
-        expect(extra_tools.get_by_role("button", name=re.compile("AI 建议待核对"))).to_be_visible()
-        expect(extra_tools.get_by_role("button", name=re.compile("未标知识点"))).to_be_visible()
         # 「没有待办时不占位置」以前只有一条代码层面的断言盯着。这次把它变成
-        # 真的量一次：容器藏起来，筛选栏的高度不该变 —— 变了就是它还占着位置。
-        filter_bar_height = page.locator("#libraryFilterBar").evaluate("node => node.offsetHeight")
-        page.evaluate("document.getElementById('tagQuickTools').hidden = true")
-        expect(page.locator("#tagQuickTools")).to_be_hidden()
-        assert page.locator("#libraryFilterBar").evaluate(
-            "node => node.offsetHeight") == filter_bar_height, \
-            "待办入口在没有任何待办时仍然占着筛选栏的位置"
-        page.evaluate("document.getElementById('tagQuickTools').hidden = false")
-        expect(page.locator("#tagQuickTools")).to_be_visible()
+        # 真的量一次：容器藏起来，批量行的高度不该变 —— 变了就是它还占着位置。
+        bulk_height = page.locator(".library-bulk").evaluate("node => node.offsetHeight")
+        page.evaluate("document.getElementById('libraryTodos').hidden = true")
+        expect(page.locator("#libraryTodos")).to_be_hidden()
+        assert page.locator(".library-bulk").evaluate(
+            "node => node.offsetHeight") == bulk_height, \
+            "待办入口在没有任何待办时仍然占着批量行的位置"
+        page.evaluate("document.getElementById('libraryTodos').hidden = false")
+        expect(page.locator("#libraryTodos")).to_be_visible()
         # 折叠板仍然要展开成浮层、不推动题卡 —— 这条和待办入口无关，单独测。
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")
         expect(extra_tools).to_be_visible()
         page.locator("#advancedFilters > summary").click()
         assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, "Closing More Filters must not shift the question list"
-        batch_container = page.locator("#aiBatchTools")
+        batch_container = page.locator("#libraryTodos")
         expect(batch_container).to_be_visible()
-        batch_tools = batch_container.locator("details.library-batch-ai")
+        batch_tools = batch_container.locator("details.library-todo-menu")
         expect(batch_tools).to_have_count(1)
         expect(batch_tools).not_to_have_attribute("open", "")
+        # 「AI 建议标签」改成常驻：什么都不勾的时候按钮要在，只是灰着（1.25.20）。
+        expect(page.locator("#generateSelectedTags")).to_be_visible()
+        expect(page.locator("#generateSelectedTags")).to_be_disabled()
+        assert page.locator("#generateSelectedTags").get_attribute("title"), \
+            "灰着的「AI 建议标签」必须说清要先勾题"
         inspector = page.locator("#questionInspector")
         first = page.locator("#q-" + fixture["ids"][0])
         second = page.locator("#q-" + fixture["ids"][1])
@@ -269,24 +281,26 @@ def check(base):
         fixture_api_ready["value"] = False
         page.reload()
         page.wait_for_load_state("networkidle")
-        # 待办入口常驻在筛选栏上，不点开「更多筛选」也要看得见。
-        quick_tools = page.locator("#tagQuickTools")
+        # 待办入口常驻在批量行上，不点开任何折叠板也要看得见（1.25.20）。
+        quick_tools = page.locator("#libraryTodos")
         expect(quick_tools).to_be_visible()
         expect(page.locator("#advancedFilters")).not_to_have_attribute("open", "")
-        quick_buttons = quick_tools.locator(".library-tool-action")
+        # 折叠着的时候里面的筛选看不见，得先展开 —— 展开后再量。
+        page.locator("#libraryTodos > details > summary").click()
+        quick_buttons = quick_tools.locator(".library-todo-look .library-tool-action")
         assert quick_buttons.count() >= 1, "待办入口一个按钮都没渲染"
         for index in range(quick_buttons.count()):
             expect(quick_buttons.nth(index)).to_be_visible()
         # 直接复现原来的故障：把「更多筛选」隐藏掉，待办入口必须照样看得见。
         # 它以前就住在那个浮层里，浮层一隐藏就跟着一起没了，于是有活也不吭声。
         page.evaluate("document.getElementById('advancedFilters').hidden = true")
-        expect(page.locator("#tagQuickTools")).to_be_visible()
-        expect(page.locator("#tagQuickTools .library-tool-action").first).to_be_visible()
+        expect(page.locator("#libraryTodos")).to_be_visible()
+        expect(page.locator("#libraryTodos .library-todo-look .library-tool-action").first).to_be_visible()
         page.evaluate("document.getElementById('advancedFilters').hidden = false")
-        expect(page.locator("#aiBatchTools .library-batch-ai")).to_be_visible()
-        expect(page.locator("#aiBatchTools .library-batch-ai button")).to_have_count(2)
-        expect(page.locator("#aiBatchTools .library-batch-ai button").nth(0)).to_be_disabled()
-        expect(page.locator("#aiBatchTools .library-batch-ai button").nth(1)).to_be_disabled()
+        batch_buttons = page.locator("#libraryTodos .library-todo-body .library-tool-actions button")
+        expect(batch_buttons).to_have_count(2)
+        expect(batch_buttons.nth(0)).to_be_disabled()
+        expect(batch_buttons.nth(1)).to_be_disabled()
         assert queued_requests == [], queued_requests
         fixture_api_ready["value"] = True
         page.reload()
@@ -308,24 +322,28 @@ def check(base):
         page.wait_for_timeout(120)
         report["checks"].append("Question type filters stay on one row from 768px to 1440px instead of wrapping the last type onto a second line")
 
-        # 入口的名字必须自己说清「补什么、要不要花钱」。它以前只有「AI 批量处理」
-        # 四个字，看不出代价、几乎不会被点开；改成「AI 批量处理题目」之后仍然
-        # 有人问「批量处理啥呀」，所以真正被补的两样东西必须出现在名字里。
-        summary_node = page.locator("#aiBatchTools .library-batch-ai > summary")
-        expect(summary_node).to_contain_text("批量补标签和答案")
-        expect(summary_node).to_contain_text("要花额度")
+        # 入口的名字必须自己说清「里面有什么、要不要花钱」（1.25.20 改成三样一起数出来）。
+        # 它以前只写「批量补标签和答案 要花额度」——「要花额度」是警告不是动作，
+        # 挤在名字里只会让人认不出这是干什么的；而「让 AI 提标签建议」这句话整屏都
+        # 没出现过，于是老师以为这个功能不存在。
+        summary_node = page.locator("#libraryTodos .library-todo-summary")
+        expect(summary_node).to_contain_text("还有活没干")
+        expect(summary_node).to_contain_text(re.compile(r"题建议待采纳"))
+        expect(summary_node).to_contain_text(re.compile(r"AI 能补 \d+ 项"))
+        assert "要花额度" not in (summary_node.inner_text() or ""), \
+            "「要花额度」是警告，不该占入口的名字"
         # 显不显眼走过一个来回：太低调没人点，改成实心主色又成了全场焦点 ——
         # 而它恰恰是一屏里最贵、最不该随手点的按钮。所以量的是「有没有活干」：
         # 没活干时必须和「更多筛选」一样是安静的白底描边。
         idle_bg = summary_node.evaluate("node => getComputedStyle(node).backgroundColor")
         more_filters_bg = page.locator("#advancedFilters > summary").evaluate(
             "node => getComputedStyle(node).backgroundColor")
-        assert idle_bg == more_filters_bg, f"没有活干时批量入口不该抢眼：{idle_bg} vs {more_filters_bg}"
+        assert idle_bg == more_filters_bg, f"没有活干时待办入口不该抢眼：{idle_bg} vs {more_filters_bg}"
         # 待办入口和题型是同一种东西（点了就筛一遍），以前却挂着放大镜图标，
         # 一眼像「去搜索」，一屏里出现三种筛选长相。
-        assert page.locator("#tagQuickTools svg.icon").count() == 0, "待办入口上的放大镜图标还没去掉"
+        assert page.locator("#libraryTodos .library-todo-look svg.icon").count() == 0, "待办入口上的放大镜图标还没去掉"
         assert page.locator("#typeFilters svg.icon").count() == 0, "题型筛选上不该有图标"
-        report["checks"].append("The batch entry names its cost, stays quiet while nothing is running, and pending-work filters look like type filters instead of a search")
+        report["checks"].append("The pending-work entry counts all three jobs in its name, keeps the cost warning out of the label, and stays quiet while nothing is running")
 
         # These tests deliberately retain all four checked questions. The
         # inspector must still act on only the context question.
@@ -600,7 +618,7 @@ def check(base):
             return original(...args);
           };
         }""")
-        batch_panel = page.locator("#aiBatchTools .library-batch-ai")
+        batch_panel = page.locator("#libraryTodos .library-todo-menu")
         if not batch_panel.evaluate("node => node.open"):
             batch_panel.locator("summary").click()
         queue_button = batch_panel.get_by_role("button", name=re.compile("补齐缺的知识点标签"))
