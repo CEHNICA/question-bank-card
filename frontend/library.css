@@ -47,7 +47,11 @@
 .rail-collapse:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; opacity: 1; }
 body.library-focus-mode .rail-collapse { justify-self: start; margin-right: 0; opacity: .55; }
 body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-collapse:focus-visible { opacity: 1; }
-.library-search { position: relative; }
+/* 1.25.37：搜索框原来靠 width:100% 撑满，顶栏里除了它只剩一颗标签管理按钮。
+   1520 宽的屏上它一个人占 1077 像素、九成地方，搜两个字用不着这么宽；
+   老师的原话是「搜索框太长」。给它一个上限，宽屏不再独吞整条顶栏，
+   窄屏仍然撑满（那儿本来就不够分）。 */
+.library-search { position: relative; max-width: 560px; }
 .library-search .search-icon { position: absolute; left: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .library-search input { width: 100%; min-height: 34px; padding: 5px 30px 5px 32px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--surface); font-size: 14.5px; color: var(--ink); box-shadow: none; transition: border-color .15s, box-shadow .15s; }
@@ -305,6 +309,15 @@ body.library-basket-open .question-inspector { display: none; }
 .question-inspector-tags .tag-suggestion-card { margin: 0; padding: 11px; }
 .question-inspector-tags .tag-suggestion-name { font-size: 13px; }
 .question-inspector-tags .tag-suggestion-rationale { margin-left: 24px; }
+/* 1.25.37：面板上的「定位题目」。标题栏是 flex，标题在左、这颗在右；
+   题卡本来就在眼前时它自己藏起来，所以不用为它留固定位置。 */
+.inspector-locate { margin-left: auto; min-height: 24px; padding: 1px 9px; font-size: 11.5px; }
+/* 定位过去以后让那道题亮一下，不然滑过去的一瞬间看不出停在哪。 */
+.library-card.locate-flash { animation: library-locate-flash 1.2s ease-out; }
+@keyframes library-locate-flash {
+  0%, 40% { box-shadow: 0 0 0 3px var(--accent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .question-inspector-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .question-inspector-empty { display: grid; justify-items: start; gap: 4px; padding: 12px 3px; }
 .question-inspector-empty strong { color: var(--ink-2); font-size: 14px; }
@@ -559,10 +572,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-card-more:not([open]) > .library-card-menu { display: none; }
 .library-card-menu .button { justify-content: flex-start; }
 /* 1.25.31：滚到几百道题以后，回顶部不必再拖滚动条。 */
-.back-to-top { position: fixed; right: 18px; bottom: 18px; z-index: 15; border-radius: 999px;
-  padding: 7px 14px; border: 1px solid var(--line-strong); background: var(--surface);
-  color: var(--ink-2); box-shadow: var(--shadow-sm); font-size: 12.5px; cursor: pointer; }
-.back-to-top:hover { background: var(--bg-sunken); color: var(--ink); }
+/* 1.25.37：改成审核界面那颗一样的圆形图标钮，并且默认看不见。
+   原来是右边一个写着「回到顶部」的胶囊，滚过 900 像素就一直杵在右下角。
+   老师的原话是「鼠标移动过去，他才会显示出来」——所以默认给一点透明度，
+   鼠标进到这一块才实起来；键盘 Tab 到它也必须看得见，不能只剩一个空壳。 */
+.back-to-top { position: fixed; right: 24px; bottom: 24px; z-index: 15; display: grid;
+  place-items: center; width: 42px; height: 42px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  box-shadow: var(--shadow); cursor: pointer;
+  opacity: .3; transform: translateY(4px); transition: opacity .16s, transform .16s, color .16s, border-color .16s; }
+.back-to-top:hover, .back-to-top:focus-visible { opacity: 1; transform: translateY(0); color: var(--accent); border-color: #9cc2b5; }
+.back-to-top .icon { width: 18px; height: 18px; }
+/* 题库页的卡片是白底，浅字号的按钮贴在上面太轻。 */
+.back-to-top { color: var(--ink); }
+@media (max-width: 700px) { .back-to-top { right: 12px; bottom: 12px; } }
 /* 篮在右边，收起时只占一条把手，展开时占第三列。跟着题库一起滚，不固定在视口上 ——
    固定的话题目一长它就悬在半空。 */
 .basket-panel { display: flex; flex-direction: column; min-height: 0;

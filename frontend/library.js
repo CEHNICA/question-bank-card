@@ -1318,6 +1318,27 @@
     if (card) card.scrollIntoView({ block: "nearest" });
   }
 
+  // 1.25.37：面板上的「定位题目」——把左边列表滚回这道题的位置。
+  // 这题现在多半不在屏幕上时才有意义；在屏幕上时颗按钮自己藏起来，不占地方。
+  function locateQuestionButton(item) {
+    const button = node("button", "button button-small inspector-locate", "定位题目");
+    button.type = "button";
+    button.hidden = inView(document.getElementById(`q-${item.id}`));
+    button.title = "左边列表滚回这道题的位置；看不到这道题时才需要";
+    button.addEventListener("click", () => {
+      const card = document.getElementById(`q-${item.id}`);
+      if (!card) {
+        // 题还在库里，只是没加载出来（比如还在后面几页）。说清去哪拿，别只弹一句「找不到」。
+        toast("这道题还没加载出来，滚到底或点「加载更多」再找。", "error");
+        return;
+      }
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.add("locate-flash");
+      window.setTimeout(() => card.classList.remove("locate-flash"), 1200);
+    });
+    return button;
+  }
+
   function renderInspector(item) {
     if (!ui.inspectorContent) return;
     const renderKey = item ? JSON.stringify([item, state.features]) : "empty";
@@ -1349,6 +1370,11 @@
       sectionTitle.append(node("h4", "", "标签"));
       const history = extras.querySelector(".library-tag-history-link");
       if (history) sectionTitle.append(history);
+      // 1.25.37：老师在这面板上核对标签，核对完往往想回到左边那道题接着挑。
+      // 1.25.19 把「定位题卡」当废话删了——那时候卡片就在眼前，伸手能点。
+      // 可现在这面板是用来干活的（核对 AI 建议），干完活眼睛已经在面板上了，
+      // 左边那道题可能已经滚出屏幕。这个场景是真的，所以加回来，但换个位置和说法。
+      sectionTitle.append(locateQuestionButton(item));
       section.append(sectionTitle, extras);
       content.append(section);
     }
