@@ -35,18 +35,24 @@ LIBRARY_CSS = "frontend/library.css"
 NODE_RUNS = (FRONTEND, NODE)
 
 # ── 一、面板上的「定位题目」 ──
-LOCATE_MOUNT = "      sectionTitle.append(locateQuestionButton(item));\n"
-LOCATE_MOUNT_GONE = ""
-LOCATE_LABEL = 'node("button", "button button-small inspector-locate", "定位题目")'
-LOCATE_LABEL_EMPTY = 'node("button", "button button-small inspector-locate", "")'
+# 锚在 HTML 的常驻按钮上，不在 JS 里 —— 第一版建在「标签」区，
+# 那一区只有题打过标签才渲染，实机一验按钮根本不出现。
+LOCATE_MOUNT = '<button id="locateQuestion"'
+LOCATE_MOUNT_GONE = '<button id="locateRemoved"'
+LOCATE_LABEL = ">定位题目</button>"
+LOCATE_LABEL_EMPTY = "></button>"
 LOCATE_SCROLL = 'card.scrollIntoView({ behavior: "smooth", block: "center" });'
 LOCATE_SCROLL_TOP = 'card.scrollIntoView({ block: "nearest" });'
 LOCATE_FLASH = 'card.classList.add("locate-flash");'
 LOCATE_FLASH_GONE = ""
-LOCATE_HIDE = "button.hidden = inView(document.getElementById(`q-${item.id}`));\n"
-LOCATE_HIDE_GONE = ""
+LOCATE_HIDE = "button.hidden = !item || inView(document.getElementById(`q-${item.id}`));"
+LOCATE_HIDE_GONE = "button.hidden = false;"
+LOCATE_SYNC = "    syncLocateButton(item);\n"
+LOCATE_SYNC_GONE = ""
 LOCATE_TIP = 'toast("这道题还没加载出来，滚到底或点「加载更多」再找。", "error");'
 LOCATE_TIP_VAGUE = 'toast("找不到这道题。", "error");'
+LOCATE_INIT = "  initLocateQuestion();\n"
+LOCATE_INIT_GONE = ""
 LOCATE_CSS = ".library-card.locate-flash { animation: library-locate-flash"
 LOCATE_CSS_GONE = ".library-card.locate-removed { animation: none"
 
@@ -82,11 +88,11 @@ SEARCH_FILL_GONE = ".library-search input { width: 100% !important; min-width: 0
 
 MUTATIONS = [
     # 「定位题目」没了
-    (LIBRARY_JS, NODE_RUNS,
-     "the panel no longer mounts the locate button, so the teacher's first ask is undone",
+    (LIBRARY_HTML, NODE_RUNS,
+     "the locate button is gone from the panel header, so the teacher's first ask is undone",
      LOCATE_MOUNT, LOCATE_MOUNT_GONE),
-    (LIBRARY_JS, NODE_RUNS,
-     "the locate button has no label — an icon-less button that says nothing",
+    (LIBRARY_HTML, NODE_RUNS,
+     "the locate button has no label — a button that says nothing",
      LOCATE_LABEL, LOCATE_LABEL_EMPTY),
     (LIBRARY_JS, NODE_RUNS,
      "locating scrolls the card to the nearest edge instead of the middle, so the question can "
@@ -99,9 +105,14 @@ MUTATIONS = [
      "the flash has no styling left, so adding the class does nothing",
      LOCATE_CSS, LOCATE_CSS_GONE),
     (LIBRARY_JS, NODE_RUNS,
-     "the locate button shows even when the question is already on screen",
+     "the locate button now stays visible even when the question is already on screen",
      LOCATE_HIDE, LOCATE_HIDE_GONE),
     (LIBRARY_JS, NODE_RUNS,
+     "picking a question no longer refreshes the locate button — it keeps the previous question's state",
+     LOCATE_SYNC, LOCATE_SYNC_GONE),
+    (LIBRARY_JS, NODE_RUNS,
+     "the click handler is never registered, so the button is decorative",
+     LOCATE_INIT, LOCATE_INIT_GONE),    (LIBRARY_JS, NODE_RUNS,
      "an unloaded question now just says 「找不到」, with no hint that it loads further down",
      LOCATE_TIP, LOCATE_TIP_VAGUE),
 

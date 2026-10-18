@@ -1320,13 +1320,22 @@
 
   // 1.25.37：面板上的「定位题目」——把左边列表滚回这道题的位置。
   // 这题现在多半不在屏幕上时才有意义；在屏幕上时颗按钮自己藏起来，不占地方。
-  function locateQuestionButton(item) {
-    const button = node("button", "button button-small inspector-locate", "定位题目");
-    button.type = "button";
-    button.hidden = inView(document.getElementById(`q-${item.id}`));
-    button.title = "左边列表滚回这道题的位置；看不到这道题时才需要";
+  //
+  // 按钮是 HTML 里常驻的那一颗，不随题卡重建：第一版把它建在「标签」区标题栏上，
+  // 而那一区只有题打过标签才渲染 —— 实机一验，没标签的题上这颗根本不出现。
+  // 「面板顶部 + 与「收起」并排」才是每道题都在的位置。
+  function syncLocateButton(item) {
+    const button = $("locateQuestion");
+    if (!button) return;
+    button.hidden = !item || inView(document.getElementById(`q-${item.id}`));
+  }
+
+  function initLocateQuestion() {
+    const button = $("locateQuestion");
+    if (!button) return;
     button.addEventListener("click", () => {
-      const card = document.getElementById(`q-${item.id}`);
+      const id = state.inspectorId;
+      const card = id ? document.getElementById(`q-${id}`) : null;
       if (!card) {
         // 题还在库里，只是没加载出来（比如还在后面几页）。说清去哪拿，别只弹一句「找不到」。
         toast("这道题还没加载出来，滚到底或点「加载更多」再找。", "error");
@@ -1336,7 +1345,6 @@
       card.classList.add("locate-flash");
       window.setTimeout(() => card.classList.remove("locate-flash"), 1200);
     });
-    return button;
   }
 
   function renderInspector(item) {
@@ -1348,6 +1356,7 @@
     if (item && content.dataset.questionId === item.id) inspectorScrolls.set(item.id, content.scrollTop);
     content.dataset.questionId = item?.id || "";
     content.replaceChildren();
+    syncLocateButton(item);
     if (!item) {
       const empty = node("div", "question-inspector-empty");
       empty.append(node("strong", "", "选择一道题"), node("p", "helper", "点击中间的题卡，这里可以给这道题整理标签。"));
@@ -1370,11 +1379,6 @@
       sectionTitle.append(node("h4", "", "标签"));
       const history = extras.querySelector(".library-tag-history-link");
       if (history) sectionTitle.append(history);
-      // 1.25.37：老师在这面板上核对标签，核对完往往想回到左边那道题接着挑。
-      // 1.25.19 把「定位题卡」当废话删了——那时候卡片就在眼前，伸手能点。
-      // 可现在这面板是用来干活的（核对 AI 建议），干完活眼睛已经在面板上了，
-      // 左边那道题可能已经滚出屏幕。这个场景是真的，所以加回来，但换个位置和说法。
-      sectionTitle.append(locateQuestionButton(item));
       section.append(sectionTitle, extras);
       content.append(section);
     }
@@ -3174,6 +3178,8 @@ $("selectedViewCount").textContent = String(state.basket.length);
       // 1.25.31：滚过几屏以后才露「回到顶部」，免得刚打开就挡着题。
       const top_button = $("backToTop");
       if (top_button) top_button.hidden = window.scrollY < 900;
+      // 当前那道题滚出屏幕时，「定位题目」才有意义（它在面板顶部，每道题都在）。
+      syncLocateButton(state.inspectorId ? state.catalog.get(state.inspectorId) : null);
       measureBulkBar();
     });
   };
@@ -5157,6 +5163,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("inspectorToggle").addEventListener("click", () => setInspectorOpen(window.matchMedia("(max-width: 979px)").matches
     ? !document.body.classList.contains("library-inspector-open") : document.body.classList.contains("library-inspector-collapsed")));
   $("closeInspector").addEventListener("click", () => setInspectorOpen(false));
+  initLocateQuestion();
   $("inspectorScrim").addEventListener("click", () => setInspectorOpen(false));
   window.matchMedia("(max-width: 979px)").addEventListener("change", () => {
     document.body.classList.remove("library-inspector-open"); $("inspectorScrim").hidden = true;

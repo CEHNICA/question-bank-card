@@ -22,23 +22,58 @@ const indexHtml = fs.readFileSync(require.resolve("./index.html"), "utf8");
 // 1.25.19 把「定位题卡」当废话删了 —— 那时卡片就在眼前，伸手能点。
 // 现在这面板是用来核对 AI 标签的，干完活眼睛已经在面板上，
 // 左边那道题往往已经滚出屏幕。所以加回来，但换个位置和说法。
-assert.match(html, /<svg viewBox="0 0 12 12"/, "顶栏结构没变，这条不用改");
-assert.match(js, /sectionTitle\.append\(locateQuestionButton\(item\)\)/,
-  "「定位题目」挂在标签区标题栏右侧 —— 和「修改记录」那一条并排");
-assert.match(js, /node\("button", "button button-small inspector-locate", "定位题目"\)/,
-  "按钮名写清做什么：定位题目，不是「回到」也不是「跳转」");
-assert.match(js, /card\.scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/,
-  "点一下把左边列表滚到这道题，并且停在这道题正中间，不要滚到边缘");
-assert.match(js, /card\.classList\.add\("locate-flash"\)/,
-  "滚过去要让那道题亮一下，否则滑过去的一瞬间看不出停在哪");
+//
+// 位置踩过一次坑：第一版建在「标签」区标题栏里，而那一区**只有题打过标签才渲染** ——
+// 实机一验，没标签的题上这颗按钮根本不出现（静态断言查不出来）。
+// 所以它必须是面板头部那颗常驻按钮，跟「收起」并排。
+assert.match(html, /<button id="locateQuestion"[^>]*class="[^"]*inspector-locate[^"]*"[^>]*>定位题目<\/button>/,
+  "「定位题目」在面板头部、跟「收起」并排 —— 每道题都在，不挑题");
+assert.match(html, /<div><h2>当前题目<\/h2><\/div>[\s\S]{0,400}?<button id="locateQuestion"/,
+  "它紧跟在「当前题目」标题后面（收起按钮之前），不是藏在下面某个分区里");
+assert.doesNotMatch(js, /sectionTitle\.append\(locateQuestionButton/,
+  "不能再挂到「标签」区 —— 那一区没标签就不渲染，按钮等于不存在");
+assert.match(js, /initLocateQuestion\(\);/, "按钮是常驻元素，事件在启动时挂一次");
+// 上面两条只证明「代码里有 initLocateQuestion() 这个调用」，证不了它真的被执行了。
+// 它在文件末尾那一大串事件绑定里 —— 万一被包在某个永远不进的分支里（或者后面那句
+// 渲染成注释），测试照样全绿。所以要把它所在的那一段切出来单独看。
+const bootStart = js.indexOf('  $("closeInspector").addEventListener("click"');
+const bootSrc = js.slice(bootStart, js.indexOf('  $("inspectorScrim").addEventListener("click"', bootStart));
+assert.notEqual(bootSrc.length, 0, "没切到面板按钮的启动那段；写法改了就把这里一并更新");
+assert.match(bootSrc, /initLocateQuestion\(\);/,
+  "它就挂在「收起」按钮旁边，必须真在启动时执行 —— 只是字符串存在不算数");
+assert.match(js, /function initLocateQuestion\(\) \{[\s\S]*?addEventListener\("click"/,
+  "点击确实挂上了");
 
-// 题还在眼前时，这颗按钮不该占地方。
-assert.match(js, /button\.hidden = inView\(document\.getElementById\(`q-\$\{item\.id\}`\)\)/,
-  "这道题本来就看得见时，按钮自己藏起来");
+// 题还在眼前时，这颗按钮不该占地方；滚远了要出来。
+assert.match(js, /function syncLocateButton\(item\) \{[\s\S]*?button\.hidden = !item \|\| inView\(/,
+  "没选题时藏起来；这道题就在屏上时也藏起来；滚出屏幕才出现");
+// 这两条调用必须真的在执行路径上 —— 同样是「字符串存在」不等于「会被调用」。
+//
+// 切片的坑（踩了两次）：结束锚点 inspectorFact 定义在 renderInspector **之前**
+// （1303 行 vs 1350 行），所以 indexOf(end) 必须从 start 往后找，不能全文件找 ——
+// 否则切出来是空串，断言失败的原因和真正的问题毫无关系。
+const renderInsStart = js.indexOf("  function renderInspector(item)");
+const renderInsSrc = js.slice(renderInsStart, js.indexOf("  function ", renderInsStart + 10));
+assert.notEqual(renderInsSrc.length, 0, "没切到 renderInspector；写法改了就把这里一并更新");
+assert.match(renderInsSrc, /syncLocateButton\(item\)/,
+  "每渲染一次面板就要同步一次按钮 —— 换一道题，它得跟着换");
+// 滚动时要跟着更新 —— 题滚出屏口，这颗按钮才有意义。
+// 起点按它真实的写法找：syncBulkBar 是 `const … = () => {` 的箭头函数，
+// 不是 `function` 声明。第一版按 `function syncBulkBar()` 切，indexOf 返回 -1，
+// 拿到空串 —— 断言失败的原因和真正的问题毫无关系。
+const scrollSyncSrc = js.slice(js.indexOf("  const syncBulkBar = () => {"),
+  js.indexOf('window.addEventListener("scroll", syncBulkBar'));
+assert.notEqual(scrollSyncSrc.length, 0, "syncBulkBar 那一段没切到；函数写法改了就把这里一并更新");
+assert.match(scrollSyncSrc, /syncLocateButton\(/,
+  "滚动时要跟着更新 —— 题滚出屏口，这颗按钮才有意义（否则它会一直显示/一直藏着）");
 
 // 找不到时要说清下一步去哪，别只弹一句「找不到」。
 assert.match(js, /还没加载出来[\s\S]*?加载更多/,
   "题还没加载出来时，写清要滚到底或点「加载更多」，而不是干说找不到");
+assert.match(js, /card\.scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/,
+  "点一下把左边列表滚到这道题正中间，不要滚到边缘");
+assert.match(js, /card\.classList\.add\("locate-flash"\)/,
+  "滚过去要让那道题亮一下，否则滑过去的一瞬间看不出停在哪");
 assert.match(css, /\.library-card\.locate-flash \{ animation: library-locate-flash/,
   "亮一下的效果得有样式，否则那行 class 加了等于没加");
 

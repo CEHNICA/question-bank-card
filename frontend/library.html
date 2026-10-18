@@ -175,6 +175,11 @@
       <aside id="questionInspector" class="question-inspector" aria-label="当前题目详情">
         <header class="question-inspector-head">
           <div><h2>当前题目</h2></div>
+          <!-- 1.25.37：原来挂在下面的「标签」区标题栏上，可那一区只有题打过标签才渲染 ——
+               实机一验，没标签的题上这颗按钮根本不出现。挪到这里跟「收起」并排：
+               面板顶部每道题都在，不挑题。 -->
+          <button id="locateQuestion" class="button button-quiet button-small inspector-locate" type="button" hidden
+                  title="左边列表滚回这道题的位置；看不到这道题时才需要">定位题目</button>
           <button id="closeInspector" class="button button-quiet button-small inspector-close" type="button">收起</button>
         </header>
         <div id="questionInspectorContent" class="question-inspector-content" aria-live="polite"></div>

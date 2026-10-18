@@ -308,9 +308,10 @@ body.library-basket-open .question-inspector { display: none; }
 .question-inspector-tags .tag-suggestion-card { margin: 0; padding: 11px; }
 .question-inspector-tags .tag-suggestion-name { font-size: 13px; }
 .question-inspector-tags .tag-suggestion-rationale { margin-left: 24px; }
-/* 1.25.37：面板上的「定位题目」。标题栏是 flex，标题在左、这颗在右；
-   题卡本来就在眼前时它自己藏起来，所以不用为它留固定位置。 */
-.inspector-locate { margin-left: auto; min-height: 24px; padding: 1px 9px; font-size: 11.5px; }
+/* 1.25.37：面板上的「定位题目」。它在面板头部、跟「收起」并排
+   （第一版挂在下面的「标签」区，可那一区只有题打过标签才渲染，实机一验不出现）。
+   面板头部是 flex，这里只给它一个间距，位置由后面的「收起」顶着。 */
+.inspector-locate { flex: none; }
 /* 定位过去以后让那道题亮一下，不然滑过去的一瞬间看不出停在哪。 */
 .library-card.locate-flash { animation: library-locate-flash 1.2s ease-out; }
 @keyframes library-locate-flash {
