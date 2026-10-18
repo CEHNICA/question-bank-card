@@ -176,16 +176,24 @@ class WindowTests(unittest.TestCase):
             # 少了这个线程，页面右上角那两个按钮点了没反应，窗口就关不掉了。
             self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
 
-    def test_the_app_window_is_the_biggest_one_not_the_first_in_z_order(self):
-        # 这些浏览器进程同时还开着「无法更新 Microsoft Edge」之类的小气泡窗。按 Z 序
-        # 取第一个会挑中它们，最小化和关闭就作用到了错的窗口上。
+    def test_the_app_window_is_picked_by_title_not_by_size(self):
+        # 这些浏览器进程同时还开着「无法更新 Microsoft Edge」之类的小气泡窗、
+        # 加载期的空白窗口，甚至还有一个比题有据窗口还大的临时窗口（上一次运行没
+        # 退干净时会留下）。按面积取最大的，早就因此挑中过错的窗口：那个窗口随后
+        # 自己消失，程序就以为用户已经关了窗，当场停服务退出去，把真正开着、又连着
+        # 一个死服务的题有据窗口留在屏幕上 —— 老师看到的就是「点了退出反而白屏」。
+        # 标题才靠得住：题有据窗口的标题永远带「题有据」三个字。
         with tempfile.TemporaryDirectory() as tmp:
             import ctypes
 
             profile = Path(tmp)
-            bubbles = [(1234, (0, 0, 506, 202)), (5678, (0, 0, 1024, 700))]
-            app = (9012, (0, 0, 1938, 1038))
-            rects = dict(bubbles + [app])
+            # 气泡窗小、临时窗大、题有据窗口居中：只有标题能把后两者分开。
+            windows = {
+                1234: ("", (0, 0, 506, 202)),
+                5678: ("", (0, 0, 1024, 700)),
+                9012: ("题有据 · 逐题核对", (0, 0, 1440, 900)),
+                3456: ("", (0, 0, 1600, 1000)),
+            }
 
             class FakeRect(ctypes.Structure):
                 _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
@@ -193,28 +201,41 @@ class WindowTests(unittest.TestCase):
 
             class FakeUser32:
                 def IsWindowVisible(self, handle):
-                    return handle in rects
+                    return handle in windows
 
                 def GetWindowThreadProcessId(self, handle, byref):
                     byref._obj.value = 7
                     return 1
 
                 def GetWindowRect(self, handle, byref):
-                    left, top, right, bottom = rects[handle]
+                    left, top, right, bottom = windows[handle][1]
                     byref._obj.left, byref._obj.top = left, top
                     byref._obj.right, byref._obj.bottom = right, bottom
                     return True
 
+                def GetWindowTextLengthW(self, handle):
+                    return len(windows[handle][0])
+
+                def GetWindowTextW(self, handle, buffer, _limit):
+                    buffer.value = windows[handle][0]
+
                 def EnumWindows(self, callback, _):
                     # 真实的 EnumWindows 在回调返回 False 时就停。
-                    for handle in (bubbles[0][0], bubbles[1][0], app[0]):
+                    for handle in windows:
                         if not callback(handle, 0):
                             break
                     return True
 
             fake = FakeUser32()
             with patch.object(app_window, "_browser_pids", return_value={7}):
-                self.assertEqual(app_window._app_window(fake, profile), app[0])
+                self.assertEqual(app_window._app_window(fake, profile), 9012,
+                                 "按面积取会挑中那个 1600x1000 的空白临时窗")
+                # 只认标题时，那个空白窗不算数：宁可等题有据窗口真正出现。
+                self.assertEqual(app_window._app_window(fake, profile, require_title=True), 9012)
+                # 题目窗口还没加载出标题（标题是网页给的），此时只认标题就找不到 ——
+                # 这正是要等的那个阶段，而不是随便抓一个窗口回来。
+                del windows[9012]
+                self.assertEqual(app_window._app_window(fake, profile, require_title=True), 0)
 
     def test_a_control_file_left_by_the_previous_run_is_not_replayed(self):
         # 上一次运行留下的控制文件必须当成「已处理」。否则新窗口一打开就会被
@@ -230,7 +251,7 @@ class WindowTests(unittest.TestCase):
             alive = iter([True, False])
             fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
 
-            def fake_app_window(user32, profile):
+            def fake_app_window(user32, profile, **_options):
                 return next(windows, 0)
 
             def fake_read_control():
@@ -263,7 +284,7 @@ class WindowTests(unittest.TestCase):
             fake_user32 = Mock()
             fake_user32.IsWindow.side_effect = lambda hwnd: _record(alive, alive_sequence)
 
-            def fake_app_window(user32, profile):
+            def fake_app_window(user32, profile, **_options):
                 # 句柄明明还有效却又定位了一次 —— 这正是原来一秒多一轮的来源。
                 if alive[0]:
                     looked_up_while_alive.append(1)
@@ -292,6 +313,31 @@ class WindowTests(unittest.TestCase):
             for call in sleep.call_args_list:
                 self.assertLessEqual(call[0][0], 0.25, "轮询间隔太大会让页面按钮看起来没反应")
 
+    def test_the_window_is_not_looked_up_every_round_while_it_has_not_appeared(self):
+        # 定位一次窗口要起一个 PowerShell 去查进程号，冷启动实测三五百毫秒，比 100ms
+        # 的轮询还贵。窗口还没出现时每一轮都去查，守护线程自己就被拖垮了 —— 老师点
+        # 一下最小化，还得先等这些 PowerShell 排完队。
+        fake_user32 = Mock()
+        fake_user32.IsWindow.return_value = False
+        lookup = Mock(return_value=0)
+        clock = [0.0]
+
+        def advance(seconds):
+            clock[0] += seconds
+
+        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
+             patch.object(app_window, "_app_window", lookup), \
+             patch.object(app_window, "_WINDOW_GRACE", 3.0), \
+             patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 1.0), \
+             patch.object(app_window.time, "monotonic", lambda: clock[0]), \
+             patch.object(app_window.time, "sleep", Mock(side_effect=advance)):
+            app_window.watch_window(Path("profile"), interval=0.1)
+        # 3 秒宽限、1 秒退避 → 最多查四次。每一轮都查的话是三十一次。
+        self.assertLessEqual(lookup.call_count, 5,
+                             "窗口还没出现时，不该每一轮都去重新定位一次")
+        self.assertGreaterEqual(lookup.call_count, 3,
+                                "宽限期内还是要隔一会儿就找一次，别彻底不找")
+
     def test_the_window_is_looked_up_again_once_it_is_gone(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -303,7 +349,7 @@ class WindowTests(unittest.TestCase):
             clock = itertools.count(0, 1)
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=lambda u, p: handles_used.append(next(handles, 0)) or handles_used[-1]), \
+                 patch.object(app_window, "_app_window", side_effect=lambda u, p, **kw: handles_used.append(next(handles, 0)) or handles_used[-1]), \
                  patch.object(app_window, "_read_control", return_value=None), \
                  patch.object(app_window.time, "sleep"), \
                  patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
@@ -423,26 +469,73 @@ class MainFlowTests(unittest.TestCase):
         waited.assert_called_once_with(opened.return_value)
 
     def test_a_reattached_window_is_waited_for_without_a_server_handle(self):
+        # 判据是窗口句柄本身：窗口还开着就一直陪着，窗口一关立刻收工。
+        # 这个进程没有启动服务，所以只需要陪着窗口，不需要别的收尾。
         window = Mock()
-        window.poll.side_effect = [None, None, 0]
-        with patch.object(app_window.time, "sleep", Mock()), \
-             patch.object(app_window, "_profile_still_open", Mock(return_value=False)):
+        alive = iter([True, True, False])
+        fake_user32 = Mock()
+        fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
+        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
+             patch.object(app_window, "_app_window", Mock(return_value=1234)), \
+             patch.object(app_window.time, "sleep", Mock()):
             app_window.wait_for_reattached_window(window)
-        self.assertEqual(window.poll.call_count, 3,
+        self.assertEqual(fake_user32.IsWindow.call_count, 3,
                          "it keeps watching the window instead of returning at once")
 
-    def test_a_reattached_window_handed_to_a_running_browser_is_followed_by_profile(self):
-        # The browser reuses a process it already has and returns at once, so the
-        # window outlives its handle. Only the profile directory still says so.
+    def test_a_reattached_window_that_appears_late_is_still_waited_for(self):
+        # Edge 冷启动时窗口可能要过一会儿才出现。这一瞬间找不到，不能当作「没有
+        # 窗口」直接返回 —— 返回之后，页面上的最小化/关闭就没���人执行了。
+        handed_out = [0, 0, 2468]          # 前两次还没出现
+        fake_user32 = Mock()
+        fake_user32.IsWindow.return_value = False
+        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
+             patch.object(app_window, "_app_window", Mock(side_effect=lambda u, p, **kw: handed_out.pop(0))), \
+             patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 0), \
+             patch.object(app_window.time, "sleep", Mock()):
+            app_window.wait_for_reattached_window(Mock())
+        self.assertEqual(handed_out, [],
+                         "a window that turns up late is waited for, not given up on")
+
+    def test_closing_the_window_stops_at_once_without_its_background_processes(self):
+        # 一个题有据窗口背后挂着 8 个 Edge 进程（1 个管窗口 + 崩溃收集器/显卡/工具/
+        # 页面），它们比窗口晚退好几句。以前的判据是「这个配置目录下还剩几个进程」，
+        # 于是点关闭要陪后台进程一起等，碰上残留就是永远等下去 —— 服务不杀、运行
+        # 记录不清，下次重开撞上半死服务，页面就白了。
+        # 现在只看窗口：句柄一失效就收工，后台进程退得再慢也不拖住软件。
         window = Mock()
-        window.poll.return_value = 0
-        still_open = Mock(side_effect=[True, False])
-        with patch.object(app_window.time, "sleep", Mock()), \
-             patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 1.0, 10.0])), \
-             patch.object(app_window, "_profile_still_open", still_open):
-            app_window.wait_for_reattached_window(window)
-        self.assertEqual(still_open.call_count, 2,
-                         "a window that outlived its handle is followed until it goes")
+        fake_user32 = Mock()
+        fake_user32.IsWindow.side_effect = [True, False]     # 窗口消失的那一刻
+        profile_check = Mock(return_value=True)              # 那些后台进程还在
+        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
+             patch.object(app_window, "_app_window", Mock(return_value=1234)), \
+             patch.object(app_window, "_profile_still_open", profile_check), \
+             patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))), \
+             patch.object(app_window.time, "sleep", Mock()):
+            how = app_window.wait_for_window(window, Mock(**{"poll.return_value": None}))
+        self.assertEqual(how, "closed")
+        profile_check.assert_not_called()
+
+    def test_exit_gives_up_instead_of_waiting_forever_for_stuck_browser_processes(self):
+        # 拿不到窗口句柄时只能按配置目录判断。这条路以前没有上限，一个卡住的崩溃
+        # 收集器就能让退出永远停在这里。现在有兜底：到点就收手，照样停服务。
+        still_open = Mock(return_value=True)
+        with patch.object(app_window, "_user32", Mock(return_value=None)), \
+             patch.object(app_window, "_CLOSE_BACKSTOP", 5.0), \
+             patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))), \
+             patch.object(app_window.time, "sleep", Mock()), \
+             patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 9.9, 10.1])):
+            how = app_window.wait_for_window(Mock(), Mock(**{"poll.return_value": None}))
+        self.assertEqual(how, "closed-slow",
+                         "a browser that never finishes quitting must not block exit forever")
+
+    def test_quitting_removes_the_control_file_it_no_longer_listens_to(self):
+        # 退出时那条控制请求已经没人执行了。留着它，下一次启动还得先读一遍才知道
+        # 该跳过，得不偿失。
+        control = Path(tempfile.mkdtemp()) / "window-control.json"
+        control.write_text('{"action": "close", "nonce": "abc"}', encoding="utf-8")
+        with patch.object(app_window, "control_file", Mock(return_value=control)):
+            app_window._clear_control()
+        self.assertFalse(control.exists(), "the stale control request is cleaned up on exit")
 
     def test_first_install_is_handed_to_console(self):
         handoff = Mock(return_value=0)

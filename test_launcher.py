@@ -7,6 +7,8 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -281,6 +283,90 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher.urllib.request, "urlopen", return_value=Response()) as urlopen:
             self.assertEqual(launcher._running_instance(), "http://127.0.0.1:49152")
         self.assertEqual(urlopen.call_args.args[0], "http://127.0.0.1:49152/api/health")
+
+    def test_a_process_that_has_already_exited_is_not_reported_as_alive(self):
+        # 这一条特意不许 mock _process_alive 自己。
+        # 上面那条「退出卡住后不连半死服务」把它整个 mock 掉了，于是它内部就算把
+        # 一个早就退出的进程也说成活着，那条测试照样全绿 —— 断言量的对象必须就是
+        # 它声称量的那个东西。所以这里用一个真的、真的已经退掉的进程来问。
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait(timeout=60)
+        self.assertFalse(launcher._process_alive(child.pid),
+                         "一个已经退出的进程不能被说成还活着，否则永远连着一个死端口")
+
+    def test_the_process_that_is_running_right_now_is_reported_as_alive(self):
+        # 拿自己当样本：此刻这个进程当然还活着。反过来一刀切说「都不在了」也不行 ——
+        # 那会把好端端开着的软件判死，重新起一份去抢同一个数据库。
+        self.assertTrue(launcher._process_alive(os.getpid()))
+
+    def test_a_record_left_by_a_stuck_exit_is_not_connected_to(self):
+        # 退出卡住时运行记录留在原处，而那时服务往往正被半路截断。原来只按端口
+        # 试，于是双击图标会打开一个连不上的窗口 —— 用户看到的就是白屏。现在先
+        # 核对登着的那个进程还在不在：人不在了，这条记录就不作数。
+        instance_file = Mock()
+        instance_file.is_file.return_value = True
+        instance_file.read_text.return_value = '{"pid": 999999, "port": 8768}'
+        with patch.object(launcher, "INSTANCE_FILE", instance_file), \
+                patch.object(launcher, "_process_alive", Mock(return_value=False)) as alive, \
+                patch.object(launcher.urllib.request, "urlopen", side_effect=OSError("refused")) as urlopen:
+            self.assertIsNone(launcher._running_instance())
+        alive.assert_called_once_with(999999)
+        instance_file.unlink.assert_called_once()
+        self.assertEqual(urlopen.call_count, 1,
+                         "登着的那个端口一次都不该碰，只试默认端口")
+        self.assertEqual(urlopen.call_args.args[0], "http://127.0.0.1:8768/api/health")
+
+    def test_a_live_record_is_reused_and_the_record_is_kept(self):
+        instance_file = Mock()
+        instance_file.is_file.return_value = True
+        instance_file.read_text.return_value = '{"pid": 4321, "port": 8769}'
+
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit):
+                return b'{"app":"question-bank-card"}'
+
+        with patch.object(launcher, "INSTANCE_FILE", instance_file), \
+                patch.object(launcher, "_process_alive", Mock(return_value=True)), \
+                patch.object(launcher.urllib.request, "urlopen", return_value=Response()):
+            self.assertEqual(launcher._running_instance(), "http://127.0.0.1:8769")
+        instance_file.unlink.assert_not_called()
+
+    def test_a_still_alive_service_that_is_closing_is_given_a_second_chance(self):
+        # 登着的进程还在，健康检查第一次不应答：多半是正在收尾。这时候直接当没在
+        # 运行、重新起一份，是两套服务抢同一个数据库 —— 最坏的结果就是数据库被
+        # 锁住，首页一直转圈。所以再宽限地试一次。
+        instance_file = Mock()
+        instance_file.is_file.return_value = True
+        instance_file.read_text.return_value = '{"pid": 4321, "port": 8768}'
+        refused, then_ok = OSError("refused"), None
+
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit):
+                return b'{"app":"question-bank-card"}'
+
+        with patch.object(launcher, "INSTANCE_FILE", instance_file), \
+                patch.object(launcher, "_process_alive", Mock(return_value=True)), \
+                patch.object(launcher.urllib.request, "urlopen",
+                             side_effect=[refused, Response()]) as urlopen:
+            self.assertEqual(launcher._running_instance(), "http://127.0.0.1:8768")
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertGreaterEqual(urlopen.call_args_list[1].kwargs["timeout"], 3.0)
 
     def test_staged_storage_is_restored_or_cleaned_from_database_state(self):
         with tempfile.TemporaryDirectory() as directory:

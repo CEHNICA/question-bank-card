@@ -293,6 +293,29 @@ _CONTROL_NAME = "window-control.json"
 _CONTROL_POLL = 0.1
 # 窗口迟迟不出现就放弃守候，不拖住退出。
 _WINDOW_GRACE = 60.0
+# 窗口还没出现时，别每轮都去重新定位：定位要起一个 PowerShell 查进程号，冷启动
+# 三四百毫秒，比 _CONTROL_POLL 还贵，密集重查只会把守护线程自己拖垮。
+_WINDOW_LOOKUP_BACKOFF = 1.0
+# 句柄失效后，重查也不是一下一下地查。
+_WINDOW_LOOKUP_INTERVAL = 0.5
+# 兜底：拿不到窗口句柄、只能按配置目录判断时，最多再等这么久就强行收尾。
+# 以前这里没有上限，浏览器残留一个崩溃收集器就能让退出永远停在这一行。
+_CLOSE_BACKSTOP = 20.0
+
+
+def _window_alive(user32, hwnd: int) -> bool:
+    """应用窗口的句柄还有效吗。
+
+    这是纯 Win32 调用，不查进程、不起子进程，微秒级，所以可以放在等退出的主
+    循环里反复问。
+
+    之所以不拿「这个配置目录下还剩几个浏览器进程」当判据：一个应用窗口背后挂
+    着崩溃收集器、显卡进程、三个工具进程和两个页面进程，它们比窗口晚退好几秒
+    —— 崩溃收集器是 Edge 故意留着的，要把崩溃记录写完才走。按进程数等，等到的是
+    它们而不是用户等的那扇窗；碰上残留就是永远等下去，服务不杀、运行记录不清，
+    下次双击会撞上一个半死不活的服务，页面就白了。
+    """
+    return bool(hwnd) and bool(user32.IsWindow(hwnd))
 
 
 def control_file() -> Path:
@@ -326,12 +349,33 @@ def _browser_pids(profile: Path) -> set[int]:
     return {int(line) for line in (result.stdout or "").split() if line.strip().isdigit()}
 
 
-def _app_window(user32, profile: Path) -> int:
+def _window_title(user32, handle) -> str:
+    import ctypes
+
+    length = user32.GetWindowTextLengthW(handle)
+    if not length:
+        return ""
+    buffer = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(handle, buffer, length + 1)
+    return buffer.value
+
+
+def _app_window(user32, profile: Path, *, require_title: bool = False) -> int:
     """应用窗口的句柄；还没出现就返回 0。
 
-    取面积最大的那个可见窗口，而不是 Z 序里的第一个：这些浏览器进程同时还开着
-    「无法更新 Microsoft Edge」之类的小气泡窗，按 Z 序取会挑中它们，最小化和关闭
-    就作用到了错的窗口上。
+    先按标题认窗口，认不出再退回面积最大的那个。
+
+    只看面积踩过两次坑。同一组浏览器进程里除了题有据窗口，还挂着「无法更新
+    Microsoft Edge」的气泡、加载期的空白窗口、宽度为零的辅助窗口。前一次是按
+    Z 序取，挑中了气泡窗；改成面积最大也不牢靠 —— 上一次运行没退干净时，进程组
+    里会多出一个比题有据窗口还大的临时窗口，挑中它之后它自己消失了，于是程序
+    认为「用户已经把窗关了」，当场停服务退出去，把真正开着、又连着一个死服务的
+    题有据窗口留在屏幕上。老师看到的就是：点了退出，窗口还在，页面白了。
+
+    标题最靠得住：题有据窗口的标题永远带「题有据」三个字，气泡窗和临时窗没有。
+
+    require_title=True 时只认标题对得上的窗口。等着应用窗口出现的那段路要用它：
+    上一次运行没退干净时，进程组里可能先冒出别的窗口，抢在题有据窗口之前被找到。
     """
     import ctypes
     import ctypes.wintypes
@@ -339,7 +383,8 @@ def _app_window(user32, profile: Path) -> int:
     pids = _browser_pids(profile)
     if not pids:
         return 0
-    found: list[tuple[int, int]] = []
+    named: list[tuple[int, int]] = []
+    fallback: list[tuple[int, int]] = []
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_size_t)
     def collect(handle, _):
@@ -350,11 +395,19 @@ def _app_window(user32, profile: Path) -> int:
             if user32.GetWindowRect(handle, ctypes.byref(rect)):
                 area = (rect.right - rect.left) * (rect.bottom - rect.top)
                 if area > 0:
-                    found.append((area, int(handle)))
+                    entry = (area, int(handle))
+                    if APP_TITLE in _window_title(user32, handle):
+                        named.append(entry)
+                    else:
+                        fallback.append(entry)
         return True
 
     user32.EnumWindows(collect, 0)
-    return max(found)[1] if found else 0
+    if named:
+        return max(named)[1]
+    if require_title:
+        return 0
+    return max(fallback)[1] if fallback else 0
 
 
 def _read_control() -> tuple[str, str] | None:
@@ -381,12 +434,19 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
     stale = _read_control()
     seen: str | None = stale[1] if stale else None
     deadline = time.monotonic() + _WINDOW_GRACE
+    strict_until = time.monotonic() + _WINDOW_GRACE / 2
     hwnd = 0
+    next_lookup = 0.0
     while True:
-        # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号，每轮都做的话
-        # 一个循环要一秒多，点「最小化」就得等一秒才动。句柄缓存住，只在它失效时才重找。
-        if not hwnd or not user32.IsWindow(hwnd):
-            hwnd = _app_window(user32, profile)
+        # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号。句柄缓存住，
+        # 只在它失效时才重找，而且重找之间留出间隔 —— 否则每轮 100ms 都去起一次
+        # PowerShell，点「最小化」得先等它排完队。
+        if not _window_alive(user32, hwnd) and time.monotonic() >= next_lookup:
+            hwnd = _app_window(user32, profile,
+                               require_title=time.monotonic() < strict_until)
+            next_lookup = time.monotonic() + (
+                _WINDOW_LOOKUP_BACKOFF if not hwnd else _WINDOW_LOOKUP_INTERVAL
+            )
         if not hwnd:
             if time.monotonic() > deadline:
                 return
@@ -428,30 +488,81 @@ def _profile_still_open(profile: Path) -> bool:
         return False
 
 
+def _clear_control() -> None:
+    """退出时把控制文件删掉。
+
+    留着也无害（每次请求都带一次性编号，启动时会跳过上一次留下的那条），但一个
+    没人再听的请求摊在那里，下一次启动还得先把它读一遍才知道该跳过。
+    """
+    with contextlib.suppress(OSError):
+        control_file().unlink(missing_ok=True)
+
+
+def _wait_until_window_closed(web: subprocess.Popen, profile: Path, user32) -> str:
+    """等窗口出现，再守到它关闭。
+
+    「关好了」的判据是窗口本身：句柄一失效就是用户已经把窗关了，立刻收工去停服
+    务。浏览器那些后台进程（崩溃收集器等）随后自己退，退得慢也不会拖住软件。
+    """
+    deadline = time.monotonic() + _WINDOW_GRACE
+    # 前一半的宽限期只认标题对得上的窗口。老实例没退干净时，别的窗口可能先冒
+    # 出来，抢在题有据窗口之前被找到；它随后自己消失，就会被误判成「用户关了窗」。
+    strict_until = time.monotonic() + _WINDOW_GRACE / 2
+    hwnd = 0
+    next_lookup = 0.0
+    while not hwnd:
+        if web.poll() is not None:
+            return _service_died(web)
+        if time.monotonic() >= next_lookup:
+            hwnd = _app_window(user32, profile,
+                               require_title=time.monotonic() < strict_until)
+            next_lookup = time.monotonic() + _WINDOW_LOOKUP_BACKOFF
+        if hwnd:
+            break
+        if time.monotonic() > deadline:
+            return "no-window"
+        time.sleep(0.3)
+    # 最小化不会让句柄失效，所以这一段一直等得到 —— 用户开着软件一整天也不该被
+    # 某个超时打断。服务真死了的话上面那句 poll 会先兜住。
+    while _window_alive(user32, hwnd):
+        if web.poll() is not None:
+            return _service_died(web)
+        time.sleep(0.3)
+    return "closed"
+
+
+def _wait_by_profile(web: subprocess.Popen | None) -> str:
+    """拿不到 Win32 时的退路：仍按配置目录判断，但不再无限等。
+
+    这条路只有在非常规环境下才会走到（没装 user32 之类），平时用不到；留着它是
+    因为它是当时唯一能判断「窗口关了」的依据，不能直接删掉。web 为 None 表示
+    这个进程没启动服务，只等窗口。"""
+    profile = window_profile()
+    deadline = time.monotonic() + _CLOSE_BACKSTOP
+    while _profile_still_open(profile):
+        if web is not None and web.poll() is not None:
+            return _service_died(web)
+        if time.monotonic() > deadline:
+            print("浏览器进程迟迟没有退出，不再等它，直接停止服务。", flush=True)
+            return "closed-slow"
+        time.sleep(1.0)
+    return "closed" if web is None or web.poll() is None else _service_died(web)
+
+
 def wait_for_window(window: subprocess.Popen | None, web: subprocess.Popen) -> str:
     """等到用户关掉题库窗口（或网页服务意外退出）。
 
     返回结束原因。以前这两种情况都直接 return，日志里写的是同一句「窗口已关闭」，
     于是「服务自己没了」和「你把窗口关了」分不开 —— 出了事回头查，只能靠猜。
     """
-    started = time.monotonic()
-    if window is not None:
-        while window.poll() is None:
-            if web.poll() is not None:
-                return _service_died(web)
-            time.sleep(0.5)
-        if time.monotonic() - started > 5:
-            return "closed"
-        # 浏览器把窗口交给了已有进程就立刻返回：改为按配置目录轮询。
-        profile = window_profile()
-        time.sleep(2)
-        while web.poll() is None and _profile_still_open(profile):
-            time.sleep(4)
-        if web.poll() is not None:
-            return _service_died(web)
-        return "closed"
-    _control_window(web)
-    return "closed" if web.poll() is not None else "closed"
+    if window is None:
+        # 没有 Edge/Chrome，页面开在默认浏览器里，另有一个小窗口管收尾。
+        _control_window(web)
+        return "closed" if web.poll() is not None else "closed"
+    user32 = _user32()
+    if user32 is None:
+        return _wait_by_profile(web)
+    return _wait_until_window_closed(web, window_profile(), user32)
 
 
 def _service_died(web: subprocess.Popen) -> str:
@@ -472,22 +583,34 @@ def wait_for_reattached_window(window: subprocess.Popen | None) -> None:
 
     Same shape as ``wait_for_window`` without the server handle: this process
     started no service, so the only thing it has to outlive is the window.
+
+    判据也换成窗口本身：用户关了窗，这个进程就该跟着结束，而不是陪着浏览器
+    那几个晚退的后台进程一起等 —— 那样每多开一个窗口，就多一次「退不掉」。
     """
     if window is None:
         # No Edge/Chrome, so the page went to the default browser, which draws a
         # real title bar and needs none of this.
         return
-    profile = window_profile()
-    started = time.monotonic()
-    while window.poll() is None:
-        time.sleep(0.5)
-    if time.monotonic() - started > 5:
+    user32 = _user32()
+    if user32 is None:
+        _wait_by_profile(None)
         return
-    # The browser handed the window to a process it already had and returned at
-    # once: follow the profile directory instead.
-    time.sleep(2)
-    while _profile_still_open(profile):
-        time.sleep(4)
+    deadline = time.monotonic() + _WINDOW_GRACE
+    strict_until = time.monotonic() + _WINDOW_GRACE / 2
+    hwnd = 0
+    next_lookup = 0.0
+    while not hwnd:
+        if time.monotonic() >= next_lookup:
+            hwnd = _app_window(user32, window_profile(),
+                               require_title=time.monotonic() < strict_until)
+            next_lookup = time.monotonic() + _WINDOW_LOOKUP_BACKOFF
+        if hwnd:
+            break
+        if time.monotonic() > deadline:
+            return
+        time.sleep(0.3)
+    while _window_alive(user32, hwnd):
+        time.sleep(0.3)
 
 
 def _control_window(web: subprocess.Popen) -> None:
@@ -774,6 +897,7 @@ def _main(arguments: list[str] | None = None) -> int:
         return 0
     finally:
         launcher._clear_instance()
+        _clear_control()
         if job is not None:
             job.close()
         for process in processes:

@@ -463,31 +463,63 @@ def _relocate_local_paths() -> None:
         connection.commit()
 
 
+def _process_alive(pid: object) -> bool:
+    """运行记录里登着的那个进程还在吗。直接问 Windows 内核，不起子进程。
+
+    没有记录、或者记录里没写进程号（旧版本留下的）：按「还活着」处理，只信端口。
+    问不到（句柄打不开、拿不到退出码）也一律当作还活着 —— 宁可多连一次，也不能
+    因为一次探测失败就把人家好端端的软件判死、重新起一份去抢同一个数据库。
+    """
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return True
+    try:
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # 只查询
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259                                 # STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 - 问不到就别武断
+        return True
+
+
+def _answer_is_ours(url: str, timeout: float = 1.5) -> bool:
+    try:
+        with urllib.request.urlopen(url + "/api/health", timeout=timeout) as response:
+            data = json.loads(response.read(2048))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return False
+    return isinstance(data, dict) and data.get("app") == "question-bank-card"
+
+
 def _running_instance() -> str | None:
-    """已经有一个题有据在运行就直接打开它，避免两套服务抢同一个数据库。"""
-    urls: list[str] = []
+    """已经有一个题有据在运行就直接打开它，避免两套服务抢同一个数据库。
+
+    先信运行记录里登着的那一个，并核对它的进程号还在不在。退出卡住时记录会留在
+    原处，而那时服务往往正被半路截断；只按端口去试，就会连到一个刚死或半死的服
+    务上，页面直接白掉。
+
+    记录里的人不在了，才退回去试默认端口 —— 那多半是上一次没登记干净留下的。
+    """
+    record = None
     if INSTANCE_FILE.is_file():
         try:
             record = json.loads(INSTANCE_FILE.read_text(encoding="utf-8"))
-            port = record.get("port") if isinstance(record, dict) else None
-            if isinstance(port, int) and 1 <= port <= 65535:
-                urls.append(f"http://127.0.0.1:{port}")
         except (OSError, ValueError):
-            pass
-    preferred = f"http://127.0.0.1:{PREFERRED_PORT}"
-    if preferred not in urls:
-        urls.append(preferred)
-    for url in urls:
-        try:
-            with urllib.request.urlopen(url + "/api/health", timeout=1.5) as response:
-                data = json.loads(response.read(2048))
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-            continue
-        if isinstance(data, dict) and data.get("app") == "question-bank-card":
+            record = None
+    port = record.get("port") if isinstance(record, dict) else None
+    if isinstance(port, int) and 1 <= port <= 65535 and _process_alive(record.get("pid")):
+        url = f"http://127.0.0.1:{port}"
+        if _answer_is_ours(url) or _answer_is_ours(url, timeout=3.0):
             return url
     if INSTANCE_FILE.is_file():
         INSTANCE_FILE.unlink(missing_ok=True)
-    return None
+    preferred = f"http://127.0.0.1:{PREFERRED_PORT}"
+    return preferred if _answer_is_ours(preferred) else None
 
 
 def _write_instance(port: int) -> None:
