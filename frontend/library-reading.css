@@ -155,24 +155,14 @@
   .library-page .question-inspector-head { padding: 13px 16px; }
   .library-page .question-inspector-head h2 { font-size: 13px; font-weight: 600; color: var(--muted); }
   .library-page .question-inspector-content { padding: 17px 16px; gap: 15px; }
-  .library-page .question-inspector-title { border-left: 3px solid var(--accent); padding-left: 10px; }
-  .library-page .question-inspector-title h3 { font-size: 19px; }
-  .library-page .question-inspector-source { margin: -7px 0 0; font-size: 11px; line-height: 1.6; }
-  .library-page .question-inspector-target { padding: 0 0 13px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; color: var(--muted); font-size: 11px; }
-  .library-page .question-inspector-target > span::before { width: 5px; height: 5px; margin-right: 6px; box-shadow: none; }
-  .library-page .question-inspector-locate { min-height: 25px; padding: 3px 6px; border: 0; background: none; color: var(--accent); font-size: 11px; }
   .library-page .question-inspector-section-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; }
   .library-page .question-inspector-section-title .library-tag-history-link { min-height: 24px; padding: 2px 0; color: var(--muted); font-size: 11px; }
   .library-page .question-inspector-tags { gap: 11px; }
   .library-page .library-tag-chip { min-height: 27px; border-radius: 5px; }
   .library-page .library-tags-edit { min-height: 27px; border-radius: 5px; font-size: 12px; }
-  .library-page .question-inspector-preview { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
-  .library-page .question-inspector-preview > summary { padding: 12px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); }
-  .library-page .question-inspector-info > summary { padding: 0; font-size: 12px; }
-  /* 「查看当前题面」和「题目信息」是同一种东西：点一下展开一段。以前一条 30px、
-     一条 18px —— 两条并排看得出差一半，18px 那条手指头都点不准。 */
-  .library-page .question-inspector-preview > summary,
-  .library-page .question-inspector-info > summary { display: flex; align-items: center; min-height: 30px; }
+  /* 1.25.19：「查看当前题面」删了，面板里只剩这一条折叠行。以前两条并排时
+     18px 那条手指头点不准，现在单独一条，给够 30px。 */
+  .library-page .question-inspector-info > summary { display: flex; align-items: center; min-height: 30px; padding: 0; font-size: 12px; }
   .library-page .question-inspector-tags .tag-suggestion-card { background: var(--surface-2); border-color: var(--line); border-radius: 7px; }
 
   @media (max-width: 1200px) and (min-width: 980px) {

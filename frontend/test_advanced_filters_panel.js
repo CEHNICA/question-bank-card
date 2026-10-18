@@ -57,6 +57,13 @@ assert.match(hide[1], /display:\s*none/);
 assert.doesNotMatch(css, /\.library-advanced\[open\] > \.library-filter-group:has/,
   "选择器里不能少 `.library-filters` 这一层：卡片是它的子元素，不是 <details> 的直接子元素");
 
+// 1.25.19：上面那条只管「卡片里包着一个藏起来的维度」。卡片自己带 hidden 是另一回事，
+// 而上面第二节把每个孩子都写成了 display:flex —— 作者样式压得住 [hidden] 自带的
+// display:none，于是「标签」「常用筛选」在一个标签都还没有的新库里照样露出来。
+const hideSelf = css.match(/\.library-advanced\[open\] > \.library-filters > \[hidden\] \{([^}]*)\}/);
+assert.ok(hideSelf, "卡片自己标着先藏起来的时候也要藏住");
+assert.match(hideSelf[1], /display:\s*none/);
+
 // ── 五、标签那个多选框得撑满卡片，否则还是系统灰列表框的样子 ──
 const tagSelect = css.match(/\.library-advanced\[open\] > \.library-filters #tagSelect \{([^}]*)\}/);
 assert.ok(tagSelect, "多选框有专门样式");

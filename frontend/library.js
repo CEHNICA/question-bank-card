@@ -891,6 +891,16 @@
     return section ? `${section} · ${number}` : number;
   }
 
+  // 1.25.19：同一张卷连着几十道题，试卷名原来每张卡都写一遍，一屏能出现 17 次。
+  // 现在只在这一串里的第一张写。判断必须放在「已经知道前后顺序」的地方做，不能
+  // 埋在建卡函数里：题卡是复用的（签名没变就拿旧节点），上面那张被筛掉之后，
+  // 这张会从「不写」变成「要写」，而它自己并不会重新建。展开题面还会整张换掉，
+  // 所以渲染循环和展开那两处都要过一遍这里。
+  function syncSourceLabel(node, item, prevItem) {
+    const label = node.querySelector(".library-source");
+    if (label) label.hidden = Boolean(prevItem) && prevItem.source_filename === item.source_filename;
+  }
+
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}${state.inspectorId === item.id ? " inspector-active" : ""}`);
     article.id = `q-${item.id}`;
@@ -1003,6 +1013,9 @@
       selectInspectorQuestion(item, article);
       if (expanded) state.expanded.delete(item.id); else state.expanded.add(item.id);
       const replacement = card(item);
+      const previousCard = article.previousElementSibling;
+      syncSourceLabel(replacement, item,
+        previousCard ? state.catalog.get(previousCard.id.slice(2)) : null);
       article.replaceWith(replacement);
       replacement.querySelector('[aria-expanded]')?.focus({ preventScroll: true });
     });
@@ -1058,17 +1071,6 @@
     renderInspector(item);
     if (!window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(true);
     else markInspectorToggle(document.body.classList.contains("library-inspector-open"));
-  }
-
-  function locateInspectorQuestion(item) {
-    const target = document.getElementById(`q-${item.id}`);
-    if (!target) { toast("这道题当前不在列表中，请先清除筛选。", "error"); return; }
-    if (window.matchMedia("(max-width: 979px)").matches) setInspectorOpen(false);
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
-    target.classList.remove("inspector-focus-pulse");
-    void target.offsetWidth;
-    target.classList.add("inspector-focus-pulse");
-    window.setTimeout(() => target.classList.remove("inspector-focus-pulse"), 1900);
   }
 
   function captureLibraryViewport() {
@@ -1128,7 +1130,7 @@
     content.replaceChildren();
     if (!item) {
       const empty = node("div", "question-inspector-empty");
-      empty.append(node("strong", "", "选择一道题"), node("p", "helper", "点击中间的题卡，这里会显示题目来源、标签和核对信息。"));
+      empty.append(node("strong", "", "选择一道题"), node("p", "helper", "点击中间的题卡，这里可以给这道题整理标签。"));
       content.append(empty);
       if (ui.inspectorToggle) ui.inspectorToggle.disabled = true;
       // 禁用时也要说清为什么，否则只看到一个灰按钮，读者只能猜是自己哪里做错了。
@@ -1136,17 +1138,11 @@
       return;
     }
     if (ui.inspectorToggle) ui.inspectorToggle.disabled = false;
-    const heading = node("div", "question-inspector-title");
-    heading.append(node("h3", "", sourceLocator(item)), node("span", "library-type", QB.TYPE_NAMES[item.question_type] || item.question_type || "题目"));
-    content.append(heading, node("p", "question-inspector-source", item.source_filename || "试卷"));
-    const targetHint = node("div", "question-inspector-target");
-    const currentLabel = node("span", "", "当前选中");
-    currentLabel.title = "右侧信息对应绿色高亮题卡";
-    targetHint.append(currentLabel);
-    const locate = node("button", "button button-small question-inspector-locate", "定位题卡");
-    locate.type = "button"; locate.addEventListener("click", () => locateInspectorQuestion(item));
-    targetHint.append(locate); content.append(targetHint);
-
+    // 1.25.19：面板原来把左边题卡上的东西又抄了一遍 —— 题号、题型、试卷名，
+    // 还有一个折叠的「查看当前题面」把整道题（含选项和公式）渲染了第二份；
+    // 同一屏里试卷名一度出现 17 次。「当前选中 / 定位题卡」更是在说
+    // 「这里讲的就是左边那道题」，而那道题本来就绿框标着，伸手就能点。
+    // 面板只留左边没有、又真能做的事：整理标签。
     const extras = extrasNode(item);
     if (extras) {
       const section = node("section", "question-inspector-tags");
@@ -1161,7 +1157,8 @@
     const info = node("details", "question-inspector-info");
     info.append(node("summary", "", "题目信息"));
     const facts = node("dl", "question-inspector-facts");
-    inspectorFact(facts, "来源", item.source_filename || "试卷");
+    // 「来源」这一行原来和题卡、面板顶部的卷名是同一句话说了三遍。试卷名现在
+    // 只在题卡上出现（同一张卷只写一次），这里就不再重复。
     inspectorFact(facts, "核对", item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对`
       : item.review?.source === "human" ? "已人工核对" : "已入正式题库");
     inspectorFact(facts, "答案解析", solutions.hasContent(item.solution) ? "已保存解析"
@@ -1170,11 +1167,7 @@
     if (state.features.subquestions && item.subquestions >= 2) inspectorFact(facts, "小问", `${item.subquestions} 问`);
     info.append(facts);
 
-    const preview = node("div", "paper question-inspector-paper");
-    QB.renderQuestion(preview, item.content || {}, { showNumber: false, showAnswer: "none" });
-    const previewDetails = node("details", "question-inspector-preview");
-    previewDetails.append(node("summary", "", "查看当前题面"), preview);
-    content.append(previewDetails, info);
+    content.append(info);
     content.scrollTop = inspectorScrolls.get(item.id) || 0;
     markInspectorToggle(window.matchMedia("(max-width: 979px)").matches
       ? document.body.classList.contains("library-inspector-open") : !document.body.classList.contains("library-inspector-collapsed"));
@@ -1190,8 +1183,10 @@
     const on = Boolean(open) && !disabled;
     toggle.setAttribute("aria-expanded", String(on));
     const label = disabled ? "先选中一道题" : (on ? "收起右侧详情" : "展开右侧详情");
-    toggle.title = disabled ? "先在左边点一道题，这里才有它的来源、标签和待核对建议"
-      : `${label}：当前题目的来源、标签和待核对建议都写在这一栏`;
+    // 1.25.19：面板不再显示来源（试卷名只在题卡上出现一次），这里也跟着改。
+    // 承诺了面板里没有的东西，比不说更糟 —— 老师会去找那道「来源」。
+    toggle.title = disabled ? "先在左边点一道题，这里才有它的标签和待核对建议"
+      : `${label}：当前题目的标签和待核对建议都写在这一栏`;
     toggle.setAttribute("aria-label", label);
   }
 
@@ -2594,10 +2589,11 @@
     // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
     const previous = state.cards || new Map();
     state.cards = new Map();
-    shown.forEach((item) => {
+    shown.forEach((item, index) => {
       const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
       const kept = previous.get(item.id);
       const node = kept && kept.signature === signature ? kept.node : card(item);
+      syncSourceLabel(node, item, index > 0 ? shown[index - 1] : null);
       node.classList.toggle("inspector-active", state.inspectorId === item.id);
       if (state.inspectorId === item.id) node.setAttribute("aria-current", "true"); else node.removeAttribute("aria-current");
       state.cards.set(item.id, { signature, node });

@@ -44,18 +44,20 @@ vm.runInNewContext(toggleCode, sandbox);
 sandbox.markInspectorToggle(true);
 assert.equal(toggleNode.getAttribute("aria-expanded"), "true");
 assert.equal(toggleNode.getAttribute("aria-label"), "收起右侧详情");
-assert.match(toggleNode.title, /来源、标签和待核对建议/, "the hover line says what lives in that panel");
+assert.match(toggleNode.title, /标签和待核对建议/, "the hover line says what lives in that panel");
 sandbox.markInspectorToggle(false);
 assert.equal(toggleNode.getAttribute("aria-expanded"), "false");
 assert.equal(toggleNode.getAttribute("aria-label"), "展开右侧详情", "a collapsed panel offers to bring it back");
-assert.match(toggleNode.title, /来源、标签和待核对建议/);
+assert.match(toggleNode.title, /标签和待核对建议/);
 sandbox.markInspectorToggle(true, { disabled: true });
 assert.equal(toggleNode.getAttribute("aria-expanded"), "false", "a disabled toggle is not reported as open");
 assert.match(toggleNode.title, /先在左边点一道题/, "a greyed-out control says why it is grey, not just that it is grey");
 vm.runInNewContext(toggleCode, { ui: { inspectorToggle: null } });
-// 「查看当前题面」和「题目信息」是同一种东西。以前一条 30px、一条 18px，18px 那条点不准。
-assert.match(readingCss, /\.question-inspector-preview > summary,\s*\n?\s*\.library-page \.question-inspector-info > summary \{ display: flex; align-items: center; min-height: 30px; \}/,
-  "both panel disclosure rows get the same clickable height");
+// 1.25.19：「查看当前题面」删了，面板里只剩「题目信息」这一条折叠行，
+// 单独一条反而要保证手指头点得着。
+assert.match(readingCss, /\.library-page \.question-inspector-info > summary \{[^}]*min-height: 30px;/,
+  "the one remaining panel disclosure row is tall enough to click");
+assert.doesNotMatch(readingCss, /question-inspector-preview/, "the removed 题面 preview has no styles left behind");
 assert.match(readingCss, /\.library-page \.library-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) 288px;/, "desktop dedicates space only to the results and right inspector");
 assert.match(css, /body\.library-inspector-open \.question-inspector \{ transform: none; \}/, "the details panel opens as a drawer on narrow screens");
 assert.match(js, /setInspectorOpen\(false\);[\s\S]*?state\.basketVisible = next;/, "the basket and question inspector do not cover each other on narrow screens");
@@ -71,8 +73,10 @@ assert.match(js, /inspectorScrolls\.set\(previous, ui\.inspectorContent\.scrollT
   "switching context records the previous question's sidebar position");
 assert.match(js, /content\.scrollTop = inspectorScrolls\.get\(item\.id\)/,
   "returning to a question restores its sidebar position");
-assert.match(js, /question-inspector-target[\s\S]*?右侧信息对应绿色高亮题卡[\s\S]*?定位题卡/,
-  "the inspector explains which question it belongs to and can locate that card");
+// 1.25.19：面板不再重复题卡上已有的东西，也就没有「当前选中 / 定位题卡」那一行。
+// 判断面板讲的是哪道题，改由题卡上那道常驻的绿框负责（下面那条断言盯着它）。
+assert.doesNotMatch(js, /question-inspector-target/, "the panel no longer repeats the card's own identity");
+assert.doesNotMatch(js, /question-inspector-source/, "the paper name lives on the card, not twice more in the panel");
 assert.match(js, /function captureLibraryViewport\(\)[\s\S]*?anchorTop[\s\S]*?function restoreLibraryViewport\(position\)/,
   "library refreshes retain the selected question's viewport position");
 assert.match(js, /else restoreLibraryViewport\(viewport\)/,

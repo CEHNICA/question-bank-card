@@ -109,12 +109,6 @@ body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-coll
 .library-card.inspector-active { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px;
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 26px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow-sm); }
 .library-card.inspector-active:hover { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent), 0 10px 30px color-mix(in srgb, var(--accent) 25%, transparent), var(--shadow); }
-.library-card.inspector-focus-pulse { animation: inspector-focus-pulse 900ms ease-in-out 2; }
-@keyframes inspector-focus-pulse {
-  0%, 100% { outline-color: color-mix(in srgb, var(--accent) 35%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-sm); }
-  50% { outline-color: var(--accent); box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 28%, transparent), 0 10px 34px color-mix(in srgb, var(--accent) 32%, transparent); }
-}
-@media (prefers-reduced-motion: reduce) { .library-card.inspector-focus-pulse { animation: none; } }
 .library-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; padding: 12px 20px 0; font-size: 12px; color: var(--muted); }
 .library-card-meta > span:not(.library-source):not(.library-type):not(.library-review):not(.library-note)::before { content: "·"; margin-right: 10px; color: var(--faint); }
 .library-source { font-weight: 600; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -273,22 +267,15 @@ body.library-basket-open .question-inspector { display: none; }
 .question-inspector-head .eyebrow { margin-bottom: 1px; }
 .question-inspector-head h2 { margin: 0; font: 650 16px/1.4 var(--ui-font); }
 .question-inspector-content { display: grid; align-content: start; gap: 13px; min-width: 0; min-height: 0; padding: 13px; overflow-y: auto; overscroll-behavior: contain; }
-.question-inspector-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.question-inspector-title h3 { margin: 0; font: 700 19px/1.35 var(--ui-font); }
-.question-inspector-target { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface));
-  color: var(--accent-dark); font-size: 12px; }
-.question-inspector-target > span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent); }
-.question-inspector-locate { flex: 0 0 auto; }
+/* 1.25.19：面板只剩「整理标签」，题号、题型、卷名、「查看当前题面」、「当前选中 /
+   定位题卡」都删了 —— 左边题卡上全都有，同一句试卷名一屏能出现 17 次。
+   以前标题左边那道强调竖线也跟着标题一起没了，挪到标签区，面板看着还是"当前这道题"。 */
 .question-inspector-facts { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
 .question-inspector-fact { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; }
 .question-inspector-fact dt { color: var(--muted); }
 .question-inspector-fact dd { min-width: 0; margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
-.question-inspector-preview { min-width: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
-.question-inspector-preview > summary { padding: 8px 10px; color: var(--ink-2); font-size: 12px; font-weight: 600; cursor: pointer; }
-.question-inspector-paper { max-height: 230px; overflow: auto; padding: 4px 10px 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 13px; }
-.question-inspector-paper .qb-stem-body, .question-inspector-paper .qb-question-image { max-width: 100%; }
-.question-inspector-paper img { max-height: 180px; max-width: 100%; object-fit: contain; }
+/* 标题那块没了，强调竖线挂到标签区头上，面板仍然看得出是在讲当前这道题。 */
+.question-inspector-tags { border-left: 3px solid var(--accent); padding-left: 10px; }
 .question-inspector-tags { display: grid; gap: 7px; min-width: 0; }
 .question-inspector-tags h4 { margin: 0; color: var(--ink-2); font: 650 13px/1.5 var(--ui-font); }
 .question-inspector-tags .library-extras { margin: 0; }
@@ -306,7 +293,6 @@ body.library-basket-open .question-inspector { display: none; }
    窄屏上它是唯一能打开浮层的入口，所以只在宽屏藏。 */
 @media (min-width: 980px) { .inspector-toggle { display: none; } }
 .inspector-scrim { display: none; }
-.question-inspector-source { margin: -5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .question-inspector-info > summary { color: var(--muted); font-size: 12px; cursor: pointer; padding-block: 5px; }
 .library-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .library-card-context { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 22px 10px; }
@@ -455,6 +441,10 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 /* 这个维度没数据时，标题跟着控件一起消失，不留一个空壳。
    选择器里 `.library-filters` 这一层不能少：卡片是它的子元素，不是 <details> 的直接子元素。 */
 .library-advanced[open] > .library-filters > .library-filter-group:has([hidden]) { display: none; }
+/* 上面那条只管「卡片里包着一个藏起来的维度」。卡片自己带 hidden 时是另一回事：
+   上面把每个孩子都写成 display:flex，而作者样式压得住 [hidden] 自带的 display:none，
+   于是「标签」「常用筛选」在一个标签都还没有的新库里照样露出来，两张空壳卡片挂在面板上。 */
+.library-advanced[open] > .library-filters > [hidden] { display: none; }
 .library-advanced #tagFilterBox select { min-width: 170px; }
 /* 全选入口必须常驻，否则第一次勾不出来；三个批量按钮勾了才出现。
    1.12.10：题库要滚 8000 多像素，这条原来滚 200px 就没了。吸在顶栏下面，

@@ -525,13 +525,14 @@ def check(base):
         # 采纳之后题目列表原地不动，右侧定位也要能把题卡点亮。
         # 这里刻意没有窗口可关：整件事都在面板上做完，不再另开一层。
         assert "inspector-active" in (second.get_attribute("class") or "")
-        expect(inspector.locator(".question-inspector-target span")).to_have_attribute(
-            "title", "右侧信息对应绿色高亮题卡")
-        page.evaluate("window.scrollTo(0, 0)")
-        inspector.locator(".question-inspector-locate").click()
-        expect(second).to_have_class(re.compile("inspector-focus-pulse"))
+        # 1.25.19：面板不再重复题卡上已有的东西，「当前选中 / 定位题卡」那一行删掉了。
+        # 「面板讲的是哪一道题」改由题卡上那道常驻绿框负责 —— 这里盯的就是它没被摘掉。
+        expect(inspector.locator(".question-inspector-target")).to_have_count(0)
+        expect(inspector.locator(".question-inspector-locate")).to_have_count(0)
+        expect(inspector.locator(".question-inspector-preview")).to_have_count(0)
+        expect(inspector.locator(".library-tags-edit")).to_have_count(1)
         assert "inspector-active" in (second.get_attribute("class") or "")
-        report["checks"].append("AI tag acceptance keeps the target question in place and highlights it; inspector locator focuses the matching card")
+        report["checks"].append("AI tag acceptance keeps the target question in place and highlighted; the panel carries only the tag editor")
         page.set_viewport_size({"width": 1440, "height": 960})
         accepted_payload = accepted.value.request.post_data_json
         assert accepted_payload == resolve_payloads[0], (accepted_payload, resolve_payloads)
