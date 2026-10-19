@@ -265,7 +265,7 @@
         wires.append(path);
       }
     }
-    function renderGraph({ fitView = false, preserveFocus = "" } = {}) {
+    function renderGraph({ fitView = false, preserveFocus = "", centerOnChildren = "" } = {}) {
       const oldAnchor = state.positions.get(state.selected);
       const graph = visibleGraph(state.model, { expanded: state.expanded, query: state.query, focusId: state.focusId,
         local: state.local, rootId: state.rootId, related: state.related });
@@ -318,6 +318,15 @@
       else {
         const nextAnchor = state.positions.get(state.selected);
         if (oldAnchor && nextAnchor) { state.tx += (oldAnchor.x - nextAnchor.x) * state.zoom; state.ty += (oldAnchor.y - nextAnchor.y) * state.zoom; }
+        // 1.25.48：展开某一支后，把这一支的新节点移到视野中间；不缩放，尺寸不变。
+        const kids = centerOnChildren ? [...(state.model.children.get(centerOnChildren) || [])].map((child) => state.positions.get(child)).filter(Boolean) : [];
+        if (kids.length) {
+          const xs = kids.map((position) => position.x), ys = kids.map((position) => position.y);
+          const size = viewportSize();
+          const cx = (Math.min(...xs) + Math.max(...xs) + WIDTH) / 2, cy = (Math.min(...ys) + Math.max(...ys) + HEIGHT) / 2;
+          state.tx = size.width / 2 - cx * state.zoom; state.ty = size.height / 2 - cy * state.zoom;
+          state.touched = true;
+        }
         applyTransform();
       }
     }
@@ -371,8 +380,11 @@
       const action = control.dataset.mapAction, id = control.dataset.tagId, tag = id ? state.model.allTags.get(id) : selectedTag();
       if (action === "select") { setSelected(id); renderWires(); }
       else if (action === "expand") {
-        state.expanded.has(id) ? state.expanded.delete(id) : state.expanded.add(id);
-        renderGraph({ preserveFocus: id }); state.signature = "";
+        // 1.25.48：展开以后新节点可能落在画布外，人只看到线不见了。展开后把这一支
+        // 的新节点移到视野中间（不缩放，保持当前大小）；收起源接在原位。
+        const opening = !state.expanded.has(id);
+        opening ? state.expanded.add(id) : state.expanded.delete(id);
+        renderGraph({ preserveFocus: id, ...(opening ? { centerOnChildren: id } : {}) }); state.signature = "";
       } else if (action === "overview") {
         state.local = false; state.focusId = ""; state.rootId = ""; rootSelect.value = ""; clearQuery();
         state.expanded = new Set(state.model.roots); state.offsets.clear(); renderGraph({ fitView: true }); state.signature = "";

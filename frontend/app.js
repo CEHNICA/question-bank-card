@@ -1902,6 +1902,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (summary.pending) cutReadingErrors.delete(paper.id);
     if (!summary.pending) cutReadingStopErrors.delete(paper.id);
     const stage = directImageReview.has(paper.id) && !summary.pending ? 3 : summary.stage;
+    // 1.25.44：全部入库以后，下面的绿条已经写「全部 N 题已处理完 · 下一份」，
+    // 步骤卡里再摆一颗「开始审核」就是两个“下一步”在打架。全部做完就不摆它；
+    // 「继续切题与校正」保留 —— 还要从原卷补题时，那是入口。
+    const allSettled = state.questions.length > 0 && state.questions.every((q) => Boolean(q.approved) || Boolean(q.publication && q.publication.up_to_date));
     host.dataset.stage = String(stage);
     $("cutReadingSteps").replaceChildren(...["切题", "AI 识读", "审核"].map((label, index) => {
       const step = el("li", index + 1 === stage ? "current" : index + 1 < stage ? "done" : "");
@@ -1909,10 +1913,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (index + 1 === stage) step.setAttribute("aria-current", "step");
       return step;
     }));
-    $("cutReadingTitle").textContent = stage === 1 ? "先切出每道题"
+    $("cutReadingTitle").textContent = allSettled ? "这份卷子的题都已入库"
+      : stage === 1 ? "先切出每道题"
       : summary.pending ? `${summary.pending} 道题正在 AI 识读`
         : stage === 2 ? `${summary.eligibleIds.length} 道题尚未识读` : "对照原卷核对文字和配图，审核后入库";
-    $("cutReadingDetail").textContent = stage === 1
+    $("cutReadingDetail").textContent = allSettled
+      ? "要继续从原卷补题，用下面的「继续切题与校正」；要复核已入库的题，去正式题库。"
+      : stage === 1
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。识读成功后文字会显示在原图旁，接着核对配图并审核。"
         : stage === 2 ? "题目范围已保存，尚未提交识读。你可以主动识读未完成题目，也可以直接原图审核或继续切题与校正。"
@@ -1946,7 +1953,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (stage !== 1 && !summary.pending && stage !== 3) {
       actions.append(button("直接原图审核", "quiet", () => { directImageReview.add(paper.id); renderCutReadingStage(); focusCutReview(); }));
     }
-    if (stage === 3) actions.append(button("开始审核", "", () => focusCutReview()));
+    if (stage === 3 && !allSettled) actions.append(button("开始审核", "", () => focusCutReview()));
     if (stage !== 1) {
       const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "继续切题与校正", "quiet", openManualCut);
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
@@ -3933,6 +3940,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
       else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
       actions.append(read);
+    }
+    // 1.25.43：入库以后要能一键去题库里找到这道题。题库那边有路回到核对页，
+    // 核对页原来没有路过去 —— 老师只能自己在几百道题里翻。
+    if (q.publication?.id) {
+      actions.append(button("在题库中看", "", () => {
+        window.location.href = `/library?focus=${encodeURIComponent(q.publication.id)}`;
+      }, "到正式题库里找到这道题，看它的标签、答案和入库版本"));
     }
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -8837,7 +8851,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     closeSettingsThen(() => {
       renderWelcomeSetup();
       $("welcomeDialog").showModal();
-      requestAnimationFrame(() => $("welcomeTour").focus());
+      requestAnimationFrame(() => $("welcomeSkip").focus());
     });
   }
 

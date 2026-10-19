@@ -932,25 +932,29 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .answer-editor-status { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
 .answer-question, .answer-origin { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); }
 .answer-question > summary, .answer-origin > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; font-weight: 600; }
-/* 三区：左上原卷、左下编辑、右边整列预览。左右两栏各占满整列高度；左栏自己再分
-   上下两段（上面原卷本题、下面编辑区），不靠 grid-template-areas —— 原卷那块是
-   左栏的子元素，命名区域只在外层网格上生效过一次，套第二层就会排到旁边去。 */
+/* 1.25.40：照「录题 → 改字」那一页 —— 左源码、右预览，一行一对。
+   题目横跨整行在最上面；答案/解析各自和自己的预览同一行。 */
 .answer-editor-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr); min-height: 0; }
-.answer-editor-input-column { grid-column: 1; grid-row: 1; min-width: 0; min-height: 0; display: grid;
-  grid-template-rows: minmax(0, auto) minmax(0, 1fr); background: var(--surface); border-right: 1px solid var(--line); }
-.answer-editor-source { grid-row: 1; min-width: 0; min-height: 0; display: grid; align-content: start;
-  max-height: 34dvh; overflow-y: auto; padding: 12px 18px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
-.answer-editor-edit { grid-row: 2; min-height: 0; overflow-y: auto; padding: 16px 20px 28px; }
-.answer-editor-preview-column { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; overflow-y: auto;
-  overscroll-behavior: contain; padding: 14px 18px 18px; background: var(--surface-2); border-left: 1px solid var(--line); }
-.answer-editor-fields { display: grid; gap: 12px; margin-top: 0; }
-.answer-editor-fields label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; color: var(--ink-2); }
-.answer-editor-fields textarea { width: 100%; resize: vertical; font: 15px/1.7 var(--mono); padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--ink); box-sizing: border-box; }
-.answer-editor-fields textarea::placeholder { color: var(--muted); }
-.answer-editor-fields textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.answer-editor-preview-column > h4 { margin: 0 0 6px; color: var(--ink); font-size: 15px; }
-.answer-editor-preview-column > .helper { margin: 0 0 10px; font-size: 12px; line-height: 1.6; }
+  grid-auto-rows: auto; gap: 14px 28px; align-content: start; min-height: 0; overflow-y: auto;
+  padding: 16px 24px 32px; background: var(--surface-2); }
+.answer-editor-workspace > .answer-editor-source { grid-column: 1 / -1; min-width: 0; padding: 14px 18px;
+  border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.answer-editor-workspace > .answer-editor-source .answer-question { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.answer-editor-pair-hint { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.answer-editor-workspace > label { display: grid; gap: 6px; align-content: start; min-width: 0;
+  font-weight: 600; font-size: 14px; color: var(--ink-2); }
+.answer-editor-workspace > label textarea { width: 100%; resize: vertical; font: 15px/1.7 var(--mono);
+  padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff;
+  color: var(--ink); box-sizing: border-box; }
+.answer-editor-workspace > label textarea::placeholder { color: var(--muted); }
+.answer-editor-workspace > label textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.answer-editor-preview-cell { min-width: 0; padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: 12px; background: #fff; }
+.answer-editor-preview-cell .answer-editor-preview { margin: 0; padding: 0; border: 0; min-height: 48px; }
+.answer-editor-tools-cell { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.answer-editor-tools-cell > .answer-set-aside { margin: 0; }
+.answer-ai-draft { grid-column: 1 / -1; }
+.answer-sync-note { margin: 0; color: var(--muted); font-size: 12px; }
 .answer-image-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .answer-image-list { display: grid; gap: 10px; }
 .answer-image-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
@@ -965,9 +969,12 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
    so the preview itself has to be their containing block. Without this they
    resolve against the sticky column and land in the wrong place. */
 .answer-editor-preview { position: relative; }
-.answer-editor-preview-column > .answer-editor-preview { margin: 0; min-height: 180px; }
-.answer-origin { margin: 16px 0 0; }
+.answer-origin { margin: 0; }
 .answer-origin select { max-width: 100%; }
+/* 窄窗口：一行放不下两栏，变成「输入在上、预览在下」，仍是一对一对。 */
+@media (max-width: 1080px) {
+  .answer-editor-workspace { grid-template-columns: minmax(0, 1fr); }
+}
 /* 1.13.5：题面改过之后被搁置的那份解析。用琥珀底和一条侧边线标成「旁的一栏」，
    别让它看起来像当前编辑区里的内容 —— 填回来要点按钮，不会自动生效。 */
 .answer-set-aside { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--amber-line);
@@ -1147,6 +1154,11 @@ body.printing { overflow: hidden; }
 .tag-catalogue-field input:not([type="checkbox"]), .tag-catalogue-field textarea, .tag-catalogue-field select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: 13px/1.5 var(--ui-font); }
 .tag-catalogue-field textarea { min-height: 72px; resize: vertical; }
 .tag-catalogue-field input:focus, .tag-catalogue-field textarea:focus, .tag-catalogue-field select:focus { outline: 2px solid var(--accent-ring); border-color: var(--accent); }
+/* 1.25.38：从当前标签里新建时，说明上级已经选好、建在谁下面。 */
+.tag-catalogue-parent-hint { color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 1.25.44：「不会」这类个人标记混进知识点时的提醒。 */
+.tag-catalogue-personal-hint { display: grid; gap: 6px; justify-items: start; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.tag-catalogue-personal-hint[hidden] { display: none; }
 .tag-catalogue-check { display: flex; align-items: start; gap: 7px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .tag-catalogue-check input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
 .tag-catalogue-status { min-width: 0; flex: 1 1 120px; margin: 0; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }

@@ -24,9 +24,11 @@ assert.match(html, /<dialog id="welcomeDialog"[\s\S]*?<strong>上传<\/strong>[\
 assert.doesNotMatch(html, /id="welcomeKeys"|配置自动切题（可稍后）/,
   "first launch keeps API setup in settings instead of adding a fourth competing action");
 assert.match(html, /id="welcomeLearn"[^>]*>开始手工练习<\/button>/);
-assert.match(html, /id="welcomeTour"[^>]*>自动切题入门<\/button>/);
-assert.match(js, /requestAnimationFrame\(\(\) => \$\("welcomeTour"\)\.focus\(\)\)/,
-  "keyboard focus starts on the primary automatic-cutting guide");
+assert.match(html, /id="welcomeSkip"[^>]*class="button primary"[^>]*>直接开始<\/button>/,
+  "1.25.44：直接开始是主按钮，入门退成次要入口");
+assert.match(html, /id="welcomeTour"[^>]*class="button quiet"[^>]*>先看看自动切题入门<\/button>/);
+assert.match(js, /requestAnimationFrame\(\(\) => \$\("welcomeSkip"\)\.focus\(\)\)/,
+  "键盘焦点落在主按钮上");
 assert.match(js, /以后需要云处理或主动识读时，再到设置 → API 配置里填写密钥/);
 assert.match(js, /if \(readPref\("qb-welcome-seen", ""\) !== "1"\) openWelcome\(\);/);
 assert.match(js, /writePref\("qb-welcome-seen", "1"\)/);

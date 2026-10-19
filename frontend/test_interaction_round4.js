@@ -92,3 +92,10 @@ assert.match(js, /q\?\.source_kind === "example" \? `例 \$\{q\.number\}` : `第
 assert.match(js, /el\("span", "qnum", questionLabel\(q\)\)/);
 
 console.log("round 4 interaction checks: OK");
+
+// 1.25.43：入库的题能从核对页一键去题库里找到（题库能回来，这边原来回不去）。
+assert.match(js, /在题库中看/, "题卡动作行里有去题库的入口");
+assert.match(js, /\/library\?focus=\$\{encodeURIComponent\(q\.publication\.id\)\}/, "带着入库版本的编号过去");
+
+// 1.25.44：全部入库以后不再摆「开始审核」，只留「全部处理完 · 下一份」。
+assert.match(js, /stage === 3 && !allSettled\) actions\.append\(button\("开始审核"/, "全部做完时不再摆「开始审核」");

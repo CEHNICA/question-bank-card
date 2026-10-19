@@ -94,12 +94,16 @@
       const parts = subQuestions ? QB.subQuestionParts?.(value.answer) : null;
       if (parts && parts.length) {
         const list = node("div", "qb-subquestions");
+        // 1.25.38：分成小问显示时，这一层也要带上 data-qb-field，并把每一问的
+        // 源偏移交给 renderTypeset。原来只有「没有小问」那条分支带标记，于是
+        // 答案里有 (1)(2) 时，编辑器根本找不到答案区，还多画一行「答案：（当前为空）」。
+        if (trackSource) list.dataset.qbField = "answer";
         parts.forEach((part) => {
           const item = node("div", "qb-subquestion");
-          if (part.lead) { const lead = node("span", "qb-subquestion-lead"); QB.renderTypeset(lead, part.lead); item.append(lead); }
+          if (part.lead) { const lead = node("span", "qb-subquestion-lead"); QB.renderTypeset(lead, part.lead, trackSource ? { trackSource: true, sourceOffset: 0 } : undefined); item.append(lead); }
           item.append(node("span", "qb-subquestion-label", part.label));
           const body = node("span", "qb-subquestion-body");
-          QB.renderTypeset(body, part.body);
+          QB.renderTypeset(body, part.body, trackSource ? { trackSource: true, sourceOffset: part.offset } : undefined);
           item.append(body);
           list.append(item);
         });

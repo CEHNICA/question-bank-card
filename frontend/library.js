@@ -270,6 +270,16 @@
       state.ai = body.ai || { mode: "assistant" };
       state.items = append ? state.items.concat(body.items) : body.items;
       body.items.forEach(item => state.retainedTagItems.delete(item.id));
+      // 1.25.43：从核对页点「在题库中看」时带来的 focus，可能不在这 40 道里。
+      // 单独取回这一道放在最前面 —— 否则人只看到一页无关的题，以为按钮没反应。
+      if (!append && !quiet && state.focus && !state.items.some(item => item.id === state.focus)) {
+        try {
+          const pinned = await fetch(`/api/library?ids=${encodeURIComponent(state.focus)}&limit=1`, { cache: "no-store" });
+          const pinnedBody = await pinned.json();
+          const item = (pinnedBody.items || [])[0];
+          if (pinned.ok && item && token === state.token) state.items = [item, ...state.items];
+        } catch { /* 取不回来就按普通列表显示，不把整页拖垮 */ }
+      }
       markLibraryResult(query);
       state.items.forEach((item) => state.catalog.set(item.id, item));
       try {
@@ -699,17 +709,19 @@
     const working = queuedTags + queuedAnswers;
     if (working) menu.dataset.working = "true";
     const summary = node("summary", "library-todo-summary");
-    // 1.25.21：这三样和展开后的按钮名用同一套说法。原来折叠条写「建议待采纳」「没打标签」，
-    // 按钮写「AI 建议待核对」「未标知识点」—— 同一件事、隔着 30 像素两个名字。
-    // 第三样原来是「AI 能补 3 项」，说的是下面有几颗按钮、不是有多少活干；换成真数字。
+    // 1.25.44：三个数字原来是「440 等你核对 · 804 没知识点 · 539 没答案」。440 本来
+    // 就包含在 804 里，并排写出来像 1783 件事。现在只说两个数，把「其中多少有建议」
+    // 放在括号里，一眼看出是同一批活。
     const bits = [];
-    if (pendingCount) bits.push(`${pendingCount} 题等你核对`);
-    if (missingCount) bits.push(`${missingCount} 题没知识点`);
+    if (missingCount) bits.push(pendingCount
+      ? `${missingCount} 题没知识点（${pendingCount} 题有 AI 建议）`
+      : `${missingCount} 题没知识点`);
     // 1.25.26：没开「AI 参考答案」时，面板里根本没有处理答案的入口。折叠条上先把
     // 「1 题没答案」写出来，点开却找不到任何能处理它的地方 —— 等于把老师引到死路。
     // 有入口才报这个数。
     if (answerCount && answerActions.length) bits.push(`${answerCount} 题没答案`);
     const paidActions = tagActions.length + answerActions.length;
+    const noAnswerTotal = Number(state.facets?.answers?.no) || 0;
     summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));
     summary.append(node("span", "library-todo-bits", bits.join(" · ")));
     if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
@@ -718,6 +730,12 @@
       : `点开看：${bits.join("；")}。`
         // 只有一栏时别提「分了两栏」：屏幕上并没有第二栏。
         + (answerActions.length ? "按「标签」和「答案」分了两栏；" : "")
+        + (pendingCount && actionableCount
+          ? `AI 建议里 ${actionableCount} 题现在就能采纳${outdatedCount ? `，另 ${outdatedCount} 题对不上当前标签库、要重新生成` : ""}；`
+          : "")
+        + (noAnswerTotal && answerActions.length
+          ? `「没答案」指连 AI 初稿也没有；题库里没有入库答案的是 ${noAnswerTotal} 题，其中 ${noAnswerTotal - answerCount} 题已有 AI 初稿，可先保存。`
+          : "")
         + (paidActions
           ? "没带「AI」标记的只筛一遍、不花钱，带「AI」的会让 AI 逐题处理、消耗额度。"
           : "这里只有筛选，点一下只是把题库筛一遍，不花钱，也不会调用任何服务。");
@@ -2121,6 +2139,23 @@
     [["custom", "自定义标签"], ["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(entry) { kind.add(new Option(entry[1], entry[0])); });
     if (record?.kind === "legacy") kind.add(new Option("历史标签", "legacy"));
     kind.value = record?.kind || defaults.kind || "custom"; kind.disabled = editing;
+    // 1.25.44：知识点里出现过「不会」这种个人标记 —— 它会混进知识点筛选和 AI 建议，
+    // 却不是知识点。新建时提醒一句，并给一键改成「自定义标签」。
+    const personalMark = /^(不会|不会做|易错|易错题|重点|难点|粗心|待复习|错题|常考|必考)$/;
+    const personalHint = node("small", "tag-catalogue-personal-hint"); personalHint.hidden = true;
+    name.parentElement.append(personalHint);
+    const syncPersonalHint = () => {
+      const looksPersonal = !editing && kind.value === "knowledge" && personalMark.test(name.value.trim());
+      personalHint.hidden = !looksPersonal;
+      if (!looksPersonal) return;
+      const switchKind = node("button", "button button-quiet button-small", "改成自定义标签");
+      switchKind.type = "button";
+      switchKind.addEventListener("click", () => { kind.value = "custom"; renderParents(); syncPersonalHint(); });
+      personalHint.replaceChildren(
+        node("span", "", `「${name.value.trim()}」更像个人标记，不是知识点；建成自定义标签就不会混进知识点筛选。`),
+        switchKind);
+    };
+    name.addEventListener("input", syncPersonalHint); kind.addEventListener("change", syncPersonalHint);
     const color = field("颜色（可选）", "tagCatalogueColor", node("select"));
     [["", "默认"], ["#bb575d", "红色"], ["#4f8278", "绿色"], ["#477a9e", "蓝色"], ["#8965a5", "紫色"], ["#bf8545", "橙色"], ["#438b94", "青色"]].forEach(function(entry) { color.add(new Option(entry[1], entry[0])); });
     if (record?.color && !Array.from(color.options).some(function(option) { return option.value === record.color; })) color.add(new Option("当前颜色", record.color));
@@ -2137,6 +2172,17 @@
       });
     };
     renderParents(); kind.addEventListener("change", renderParents);
+    // 1.25.38：从「正在看的标签」里点新建时，上级已经替你选好了。写明建在谁下面，
+    // 免得以为建的是一个顶级标签。
+    if (!record && (defaults.parent_ids || []).length) {
+      const names = (defaults.parent_ids || []).map(function(id) {
+        return (tagCatalogue.tags || []).find(function(tag) { return tag.id === id; })?.name;
+      }).filter(Boolean);
+      if (names.length) {
+        parentChoices.parentElement.append(node("small", "tag-catalogue-parent-hint",
+          "会建在「" + names.join("、") + "」下面；不想挂在这里，就取消选中上面的上级。"));
+      }
+    }
     relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
     (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === "method").forEach(tag => {
       const option = new Option(tag.name, tag.id); option.selected = (record?.related_method_ids || []).includes(tag.id); relatedChoices.append(option);

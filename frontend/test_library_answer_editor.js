@@ -58,13 +58,21 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
 (async () => {
   await editor.open([original, other], { scope: "paper", focus: original.id, selected: [original.id] }); await settle();
   const workspace = descend(document.body).find(element => element.className === "answer-editor-workspace");
-  assert.deepEqual(workspace.children.map(element => element.className), ["answer-editor-input-column", "answer-editor-preview-column"]);
-  // 1.12.7: the left column is the full-height one — 原卷本题 on top, the fields below.
-  const left = workspace.children[0];
-  assert.deepEqual(left.children.map(element => element.className), ["answer-editor-source", "answer-editor-edit"]);
-  assert(left.children[0].children.some(element => element.className === "answer-question"));
-  assert(left.children[1].children.some(element => element.className === "answer-editor-fields"));
-  assert(workspace.children[1].children.some(element => element.className === "paper answer-editor-preview"));
+  // 1.25.40：照「录题 → 改字」那一页 —— 题目整行在上，下面一行一对：
+  // 答案输入 | 答案预览，解析输入 | 解析预览。
+  const classes = workspace.children.map(element => element.className);
+  assert.equal(classes[0], "answer-editor-source", "题目整行在最上面");
+  assert.equal(classes[1], "answer-editor-pair-hint");
+  const cells = descend(workspace).filter(element => element.className === "answer-editor-preview-cell");
+  assert.equal(cells.length, 2, "答案和解析各有一块自己的预览");
+  const previews = descend(workspace).filter(element => element.className === "paper answer-editor-preview");
+  assert.equal(previews.length, 2, "两块预览分开渲染");
+  const answerIndex = workspace.children.findIndex(element => element.textContent === "答案结果");
+  const analysisIndex = workspace.children.findIndex(element => element.textContent === "解析过程");
+  assert(workspace.children[answerIndex + 1].className === "answer-editor-preview-cell", "答案输入右边就是答案预览");
+  assert(workspace.children[analysisIndex + 1].className === "answer-editor-preview-cell", "解析输入右边就是解析预览");
+  assert(descend(workspace).some(element => element.className === "answer-question"), "原卷本题在整行里");
+  assert(descend(workspace).some(element => element.className === "answer-origin"), "原卷答案解析还在这一页");
   // 1.12.7: fullscreen. The bar holds 返回 / 存题库 / 保存, the strip above the three
   // zones holds the question numbers, and nothing is pinned over the lower half.
   const bar = descend(document.body).find(element => element.className === "answer-editor-bar");
@@ -100,9 +108,9 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   const originPanel = descend(document.body).find(element => element.className === "answer-origin");
   assert.equal(descend(originPanel).find(element => element.tagName === "SUMMARY").textContent, "原卷答案解析",
     "折叠面板标题不再写「与历史」——那里已经没有历史下拉了");
-  assert.match(answerCss, /\.answer-editor-input-column \{ grid-column: 1;[^}]*grid-template-rows: minmax\(0, auto\) minmax\(0, 1fr\);/,
-    "The left column stacks 原卷本题 over the editing area, so the two fill one full-height column");
-  assert.match(answerCss, /\.answer-editor-preview-column \{ grid-column: 2;/);
+  assert.match(answerCss, /\.answer-editor-preview-cell \{[^}]*border: 1px solid var\(--line\);/, "每块预览独立成卡");
+  assert.match(answerCss, /@media \(max-width: 1080px\) \{\s*\.answer-editor-workspace \{ grid-template-columns: minmax\(0, 1fr\);/, "窄屏变成上下排");
+  assert.match(answerCss, /\.answer-editor-preview-cell \{ min-width: 0;/);
   assert.equal(byId("answerEditorCopyTask"), undefined); assert(!document.body.textContent.includes("复制助手任务说明"));
   assert.equal(byId("answerEditorCheckAi").textContent, "刷新生成结果");
   assert(byId("answerEditorCheckAi").title.includes("不会重新生成"));
@@ -193,7 +201,10 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   const aiSavedBefore = saved.length, aiPostsBefore = requests.filter(value => value.opts.method === "POST").length;
   await editor.open([{ ...original, ai_answer: aiFixture }]); await settle();
   assert.equal(byId("answerEditorResult").value, "豆包既有结果"); assert.equal(byId("answerEditorAnalysis").value, "豆包已给出的详细解析");
-  assert(document.body.textContent.includes("现有 AI 参考初稿，尚未核对")); assert(!document.body.textContent.includes("尚未补齐答案解析"));
+  assert(document.body.textContent.includes("AI 初稿，尚未核对"), "AI 初稿在界面上标着未核对");
+  const statusNode = descend(document.body).find(element => element.className === "answer-editor-status");
+  assert(statusNode.title.includes("检查并保存后才用于出卷"), "完整说明放在悬停里");
+  assert(!document.body.textContent.includes("尚未补齐答案解析"));
   assert.equal(saved.length, aiSavedBefore); assert.equal(requests.filter(value => value.opts.method === "POST").length, aiPostsBefore, "Prefilling an existing validated AI draft never starts generation or persists it");
   await byText("返回").emit("click");
   originFixture = { answer: "原卷确切答案", analysis: "" };
@@ -207,7 +218,9 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   figureFixture = null; originFixture = { answer: "", analysis: "" }; aiStale = true;
   await editor.open([{ ...original, ai_answer: aiFixture }]); await settle();
   assert.equal(byId("answerEditorResult").value, ""); assert.equal(byId("answerEditorAnalysis").value, "");
-  assert(document.body.textContent.includes("题面已变化，未自动填入")); await byText("返回").emit("click");
+  assert(document.body.textContent.includes("AI 初稿与题面不符，未填入"));
+  assert(statusNode.title.includes("题面已变化") || descend(document.body).some(element => element.className === "answer-editor-status" && element.title.includes("题面已变化")),
+    "题面变化的完整原因放在悬停里"); await byText("返回").emit("click");
   aiFixture = null; aiStale = false; originFixture = null;
 
   // Completed jobs remain available for comparison, but their task status must

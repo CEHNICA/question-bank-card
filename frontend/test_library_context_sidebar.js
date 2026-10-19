@@ -171,10 +171,12 @@ assert.match(narrowPanel[0], /width: min\(520px, 100%\)/,
 // 老师因此以为这个功能不存在。
 assert.match(js, /function renderTodos\(\)[\s\S]*?const menu = node\("details", "library-todo-menu"\)/,
   "the pending-work filters and the AI jobs share one container");
-assert.match(js, /`\$\{pendingCount\} 题等你核对`/,
-  "the entry counts how many tag suggestions are waiting to be checked");
-assert.match(js, /`\$\{missingCount\} 题没知识点`/,
-  "the entry counts how many questions have no knowledge tag yet");
+// 1.25.44：440 本来就在 804 里，并排写像 1783 件事。现在合成一句：
+// 「804 题没知识点（440 题有 AI 建议）」。
+assert.match(js, /`\$\{missingCount\} 题没知识点（\$\{pendingCount\} 题有 AI 建议）`/,
+  "the entry counts how many questions have no knowledge tag yet and how many of them already have suggestions");
+assert.doesNotMatch(js, /`\$\{pendingCount\} 题等你核对`/,
+  "AI suggestions are a subset of the untagged questions, not a separate pile");
 // 1.25.21：第三样原来是「AI 能补 N 项」，说的是下面有几颗按钮，不是有多少活干。
 // 锚在 bits.push( 上，别用裸词 —— 那几个字在解释这次改动的注释里也有一份。
 assert.doesNotMatch(js, /bits\.push\(`AI 能补/, "the entry must not report how many buttons sit below it");

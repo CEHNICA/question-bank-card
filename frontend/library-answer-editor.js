@@ -1,9 +1,9 @@
-﻿/* One answer editor for the library and the current paper. Nothing exports until saved. */
+/* One answer editor for the library and the current paper. Nothing exports until saved. */
 ((root) => {
   "use strict";
   function create({ node, QB, notify, confirm, onSaved }) {
     const S = root.LibrarySolutions;
-    let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map();
+    let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map(), singleMode = false;
     let token = 0, epoch = 0, loading = false, saving = false, uploading = false, queueing = false, cancelling = false, polling = false, closing = false;
     let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
 let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPreview = false, positionArmed = false;
@@ -11,6 +11,21 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
     const jobsSucceeded = new Set(["done", "completed", "succeeded", "success"]);
+    // 1.25.38：答案框默认两行，三四行的答案会被截成一条滚动条。按内容长高，
+    // 最高 220px，超过再在框里滚动。1.25.40：解析框同理，最少留 8 行、最高 520px，
+    // 这样输入框和右边的预览不会一个矮一个高。
+    function fitBox(box, { min = 46, max = 220 } = {}) {
+      if (!box || !Number.isFinite(box.scrollHeight)) return;
+      box.style.height = "auto";
+      const wanted = box.scrollHeight + 2;
+      box.style.height = `${Math.max(min, Math.min(wanted, max))}px`;
+      box.style.overflowY = wanted > max ? "auto" : "hidden";
+    }
+    function fitFields() {
+      if (!controls) return;
+      fitBox(controls.answer, { min: 46, max: 220 });
+      fitBox(controls.analysis, { min: 160, max: 520 });
+    }
     function jobDraftState(job, record, item) {
       if (!job?.result || !jobsSucceeded.has(job.status)) return null;
       const savedSolution = record ? record.hasSavedSolution : item?.solution_revision !== "origin" && Boolean(item?.solution);
@@ -65,8 +80,11 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const syncLabel = node("label", "answer-sync"); const sync = node("input"); sync.type = "checkbox"; sync.id = "answerEditorSync";
       syncLabel.append(sync, document.createTextNode("同时保存到题库"));
+      // 1.25.38：题库里的题本来就存到题库，那个勾是灰的还勾着，看着像坏了。
+      // 这种情况换成一句说明。
+      const syncNote = node("p", "answer-sync-note", "保存后，出卷和题库都用这一版"); syncNote.hidden = true;
       const save = node("button", "button button-primary", "保存答案解析"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
-      bar.append(back, heading, status, syncLabel, save);
+      bar.append(back, heading, status, syncLabel, syncNote, save);
 
       const strip = node("div", "answer-editor-strip");
       const pickMissing = node("button", "button button-small", "勾选缺解析的题"); pickMissing.type = "button";
@@ -91,7 +109,6 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const sourceArea = node("section", "answer-editor-source");
       sourceArea.setAttribute("aria-label", "原卷本题");
       sourceArea.append(question);
-      const fields = node("div", "answer-editor-fields");
       // 1.13.5：题面一改，原来存的那份解析就被挪到一边「待核对」。挪走的东西
       // 必须给条回来的路 —— 改前改后界面上能点的东西一模一样，等于老师白填了一遍。
       // 刻意不做成一个会切换编辑区的下拉：那和「原卷」挤在一处会让人以为下面的
@@ -124,7 +141,13 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       const answer = node("textarea"); answer.id = "answerEditorResult"; answer.rows = 2; answer.placeholder = "如 B，或 x＝3"; answerLabel.append(answer);
       const analysisLabel = node("label", "", "解析过程");
       const analysis = node("textarea"); analysis.id = "answerEditorAnalysis"; analysis.rows = 8; analysis.placeholder = "写出解题步骤。公式可写 $\\frac{1}{2}$；空一行分段。"; analysisLabel.append(analysis);
-      fields.append(answerLabel, analysisLabel, node("p", "helper", "公式随输入预览；AI 初稿会直接显示在这里，检查后保存。"));
+      // 1.25.40：照「录题 → 改字」那一页 —— 左边源码、右边它印出来的样子，一行一对。
+      // 答案对答案、解析对解析，同一行顶部对齐；宽屏不再是一个大预览配两个滚动条。
+      const pairHint = node("p", "answer-editor-pair-hint", "右边是印出来的样子；绿线是当前输入位置，选中文字时预览会标出对应范围。");
+      const answerPreviewBody = node("div", "paper answer-editor-preview");
+      const analysisPreviewBody = node("div", "paper answer-editor-preview");
+      const answerPreviewCell = node("div", "answer-editor-preview-cell"); answerPreviewCell.append(answerPreviewBody);
+      const analysisPreviewCell = node("div", "answer-editor-preview-cell"); analysisPreviewCell.append(analysisPreviewBody);
       const imageTools = node("div", "answer-image-tools");
       const uploadLabel = node("label", "button button-small", "上传解析图");
       const upload = node("input"); upload.type = "file"; upload.accept = "image/png,image/jpeg,image/webp"; upload.multiple = true; upload.hidden = true;
@@ -150,26 +173,22 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       cropImage.addEventListener("error", () => { if (!dialog.open || crop.hidden) return; cropImage.dataset.ready = "false"; clearCrop(); notify("这页原卷暂时无法显示，请换页重试，或上传、粘贴解析图。", "error"); });
       const cropBox = node("div", "answer-crop-box"); cropBox.hidden = true;
       cropSurface.append(cropImage, cropBox); cropScroll.append(cropSurface, cropHint); crop.append(cropBar, cropScroll);
-      const previewTitle = node("h4", "", "实时预览"); const preview = node("div", "paper answer-editor-preview");
       const aiDraft = node("details", "answer-ai-draft"); aiDraft.hidden = true; aiDraft.append(node("summary", "", "AI 初稿（当前编辑内容已保留）")); const aiPreview = node("div", "paper"); aiDraft.append(aiPreview);
       const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷答案解析")); const originBody = node("div", "paper");
       origin.addEventListener("toggle", () => { if (origin.open && current) S.render(originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" }); });
       // 「查看已保存的解析版本」这个下拉删掉了：它挂在「原卷」那块折叠面板底部，
       // 展开才看得见，可它切的是整个编辑区，和「原卷」不是一回事，两件事挤在一处
       // 只会让人以为下面的文字也会跟着换。history 记录本身保留，保存后版本号照旧递增。
-      // 三区：左上是原卷本题，左下是编辑区（答案结果、解析过程、配图、裁图、原卷
-      // 答案），右边整列是实时预览。原来那条钉在底部的保存条取消。
+      // 1.25.40：三区改成「题目整行 + 两对（输入 | 预览）」。
       const workspace = node("div", "answer-editor-workspace");
-      const inputColumn = node("div", "answer-editor-input-column"), previewColumn = node("section", "answer-editor-preview-column");
-      previewColumn.setAttribute("aria-label", "答案解析实时预览");
-      const editBody = node("div", "answer-editor-edit");
-      editBody.append(fields, setAside, imageTools, figures, crop, origin);
-      inputColumn.append(sourceArea, editBody);
-      previewColumn.append(previewTitle, node("p", "helper", "公式与配图随输入更新。保存后用于出卷。"), preview, aiDraft);
-      workspace.append(inputColumn, previewColumn);
+      const toolsCell = node("div", "answer-editor-tools-cell");
+      toolsCell.append(setAside, imageTools, figures, crop);
+      workspace.append(sourceArea, pairHint, answerLabel, answerPreviewCell,
+        analysisLabel, analysisPreviewCell, toolsCell, origin, aiDraft);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
-      controls = { syncLabel, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, preview, previewColumn, inputColumn, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore };
-      for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; schedulePreview(); });
+      controls = { syncLabel, syncNote, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore };
+      for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; fitFields(); schedulePreview(); });
+      root.addEventListener?.("resize", () => { if (dialog.open) fitFields(); });
       // Display caret and selection, the same idea as the review 改字 editor.
       // Moving the caret or selecting text is not an edit: it must not set
       // dirty, must not create a history entry and must never reach a payload.
@@ -185,9 +204,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       }
       // The user browsing the preview by hand must not be fought: following
       // resumes the moment the caret moves again.
-      controls.previewColumn.addEventListener("pointerdown", () => { userScrolledPreview = false; updatePosition(); });
-      controls.previewColumn.addEventListener("wheel", () => { userScrolledPreview = true; }, { passive: true });
-      controls.previewColumn.addEventListener("scroll", () => { userScrolledPreview = true; });
+      // 输入和预览在同一行，不再需要跟踪预览栏的滚动。
       dialog.addEventListener("paste", event => {
         const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
         if (files.length) { event.preventDefault(); void uploadFiles(files); }
@@ -221,7 +238,12 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.sync.disabled = busy || scope === "library"; controls.upload.disabled = busy; controls.cropToggle.disabled = busy || !current?.item.document_id;
       controls.restore.disabled = busy || !current?.setAside;
       const ready = apiSettings?.api_ready === true;
-      controls.ai.hidden = controls.pickMissing.hidden = !ready;
+      controls.ai.hidden = !ready;
+      controls.pickMissing.hidden = !ready || singleMode;
+      controls.list.hidden = singleMode;
+      // 单题时 AI 是次要动作，名字也直说作用于哪一道。
+      controls.ai.textContent = singleMode ? "AI 补这一题" : "AI 补充所选题";
+      controls.ai.className = singleMode ? "button button-small" : "button button-primary button-small";
       controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
       controls.checkAi.disabled = polling || checkingApi; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
       controls.cancelAi.hidden = !selectedActiveJobs().length;
@@ -240,13 +262,20 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
       items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null;
+      // 1.25.38：只打开一道题时，不再摆一排「选哪几题」的控件 —— 题号带、
+      // 「勾选缺解析的题」和「AI 补充所选题」都是批量用的，单题时只会让人误会。
+      singleMode = items.length <= 1;
+      controls.list.hidden = singleMode;
+      controls.syncLabel.hidden = scope === "library";
+      controls.syncNote.hidden = scope !== "library";
       // 这一轮会先打开哪一道题，先定下来，后面两处都要用同一个答案。
       const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
       // 勾选框是给 AI 补解析挑题的。以前进来还得再点一下眼前这道题才勾上，
       // 而人已经在这一题里改字了 —— 忘了勾就等于这次白点。调用方显式给了
       // selected（哪怕是空数组，比如「只保留在本机」那一路）就照它说的办。
       const picked = "selected" in options ? options.selected : [item?.id];
-      selection = new Set((picked || []).filter(id => items.some(item => item.id === id)));
+      // 单题时 AI 就作用于眼前这一题，不需要先勾选。
+      selection = new Set(singleMode ? (item ? [item.id] : []) : (picked || []).filter(id => items.some(item => item.id === id)));
       // 「保存到题库还是只用于这份卷子」这句话以前常驻在标题下面，占一行。
       // 它说明的是「勾了会发生什么」，挂在这个勾选框的提示上更合适。
       controls.syncLabel.title = scope === "library" ? "保存到题库供以后使用，原卷答案保留。" : "保存后用于当前组卷；勾选后也可同步到题库。";
@@ -278,7 +307,8 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     }
     function renderList() {
       controls.list.replaceChildren();
-      controls.place.textContent = current ? `${itemLabel(current.item)} / 共 ${items.length} 题` : `共 ${items.length} 题`;
+      // 单题不写「共 1 题」：题号已经在旁边，这句话没有信息。
+      controls.place.textContent = current ? (singleMode ? itemLabel(current.item) : `${itemLabel(current.item)} / 共 ${items.length} 题`) : `共 ${items.length} 题`;
       items.forEach(item => {
         const row = node("div", `answer-list-row${current?.item.id === item.id ? " active" : ""}`);
         const box = node("input"); box.type = "checkbox"; box.checked = selection.has(item.id); box.setAttribute("aria-label", `AI 补充${itemLabel(item)}`);
@@ -310,7 +340,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.sync.checked = scope === "library"; controls.sync.disabled = scope === "library";
       controls.questionBody.replaceChildren();
       if (controls.question.open) QB.renderQuestion(controls.questionBody, current.item.content, { showNumber: false, showAnswer: "none" });
-      controls.status.textContent = `${itemLabel(current.item)} · ${isDirty() ? "有未保存的编辑" : "原卷内容保留，修改后点保存"}`;
+      controls.status.textContent = isDirty() ? "未保存" : "原卷内容保留，修改后点保存";
       controls.setAsideBody.replaceChildren();
       controls.setAside.hidden = !current.setAside;
       if (current.setAside) {
@@ -324,32 +354,25 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.aiDraft.hidden = !current.suggestion;
       if (current.suggestion) S.render(controls.aiPreview, current.suggestion, { node, QB });
       renderFigures(); renderPreview();
+      fitFields();
     }
     // The display caret and selection block live only in this preview. The
     // markers are aria-hidden and pointer-transparent, and nothing here writes
     // back into the textarea, so the real input position is always the box.
     function showPosition() {
-      if (!current || !dialog?.open || !controls?.preview || !positionArmed) return;
+      if (!current || !dialog?.open || !positionArmed) return;
       const field = controls[lastField];
       if (!field) return;
-      const result = QB.previewSelection?.(controls.preview, {
+      // 1.25.40：答案和解析各有一块自己的预览，光标只标自己那一块。
+      const target = lastField === "answer" ? controls.previewAnswer : controls.previewAnalysis;
+      const other = lastField === "answer" ? controls.previewAnalysis : controls.previewAnswer;
+      if (!target) return;
+      QB.previewSelection?.(target, {
         field: lastField, start: field.selectionStart ?? 0, end: field.selectionEnd ?? 0
       });
-      controls.preview.dataset.activeField = lastField;
-      if (!result || userScrolledPreview) return;
-      // Contain the scroll inside the preview column. A target too tall to fit
-      // is left alone rather than yanked: the fragment is the useful part.
-      const column = controls.previewColumn;
-      const target = controls.preview.querySelector(".qb-preview-active-symbol")
-        || controls.preview.querySelector(".qb-preview-caret,.qb-preview-selection,.qb-preview-active-formula,.qb-preview-active-region");
-      if (!target || !column) return;
-      const box = target.getBoundingClientRect(), area = column.getBoundingClientRect(), margin = 10;
-      if (box.height < column.clientHeight - 20) {
-        if (box.top < area.top + margin) column.scrollTop -= area.top + margin - box.top;
-        else if (box.bottom > area.bottom - margin) column.scrollTop += box.bottom - (area.bottom - margin);
-      }
-      if (box.left < area.left + margin) column.scrollLeft -= area.left + margin - box.left;
-      else if (box.right > area.right - margin) column.scrollLeft += box.right - (area.right - margin);
+      target.dataset.activeField = lastField;
+      // 另一块清掉标记，免得两处同时亮。
+      if (other) QB.previewSelection?.(other, { field: lastField === "answer" ? "analysis" : "answer", start: null, end: null });
     }
     function updatePosition() {
       if (positionFrame) root.cancelAnimationFrame?.(positionFrame);
@@ -358,25 +381,31 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     }
     function renderPreview() {
       if (!current) return;
-      const column = controls.previewColumn;
-      // Keep the reader where they were: a re-render must not jump the preview
-      // while they are reading a specific line.
-      const keepTop = column ? column.scrollTop : 0, keepLeft = column ? column.scrollLeft : 0;
-      S.render(controls.preview, current.value, { node, QB, subQuestions: true, trackSource: true });
-      if (column) { column.scrollTop = keepTop; column.scrollLeft = keepLeft; }
+      // 1.25.40：答案和解析各渲染各的，分别放在自己输入框的右边。
+      S.render(controls.previewAnswer, { answer: current.value.answer, analysis: "", figures: [] },
+        { node, QB, subQuestions: true, trackSource: true });
+      S.render(controls.previewAnalysis, { answer: "", analysis: current.value.analysis, figures: current.value.figures },
+        { node, QB, trackSource: true });
       updateEditStatus();
       if (positionArmed) showPosition();
       // Until the reader touches a field again there is no position to show,
       // and a marker left over from the previous question must not survive the
       // switch. previewSelection cleans its own markers when given no offset.
-      else QB.previewSelection?.(controls.preview, { field: lastField, start: null, end: null });
+      else {
+        QB.previewSelection?.(controls.previewAnswer, { field: "answer", start: null, end: null });
+        QB.previewSelection?.(controls.previewAnalysis, { field: "analysis", start: null, end: null });
+      }
     }
     function updateEditStatus() {
       if (!current) return;
-      const quality = S.hasContent(current.value) ? (current.value.analysis.trim() || current.value.figures.length ? "" : " · 目前只有结果，建议补充详细解析") : " · 尚未补齐答案解析";
-      const pending = pendingSaves.has(current.item.id) ? " · 上一笔保存仍在核对，可继续编辑，收到结果后恢复保存" : "";
-      const ai = current.ai_fields?.length ? " · 已填入现有 AI 参考初稿，尚未核对；检查并保存后才用于出卷" : current.ai_stale ? ` · ${current.ai_error || "现有 AI 参考答案对应的题面已变化，未自动填入；请重新生成"}` : "";
-      controls.status.textContent = `${itemLabel(current.item)}${isDirty() ? " · 未保存" : " · 已载入"}${quality}${ai}${pending}`;
+      const quality = S.hasContent(current.value) ? (current.value.analysis.trim() || current.value.figures.length ? "" : " · 只有结果，建议补详细解析") : " · 尚未补齐答案解析";
+      const pending = pendingSaves.has(current.item.id) ? " · 上一笔保存仍在核对，可继续编辑" : "";
+      // 1.25.38：题号只出现一次（在标题旁），这里只说状态；长句子放悬停。
+      const ai = current.ai_fields?.length ? " · AI 初稿，尚未核对" : current.ai_stale ? " · AI 初稿与题面不符，未填入" : "";
+      controls.status.textContent = `${isDirty() ? "未保存" : "已载入"}${quality}${ai}${pending}`;
+      controls.status.title = current.ai_fields?.length
+        ? "已填入现有 AI 参考初稿，尚未核对；检查并保存后才用于出卷。"
+        : current.ai_stale ? (current.ai_error || "现有 AI 参考答案对应的题面已变化，未自动填入；请重新生成。") : "";
     }
     function renderFigures() {
       controls.figures.replaceChildren();
@@ -612,7 +641,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       afterPaint(() => {
         if (dialog.open || closedEpoch !== epoch) return;
         clearCrop(); controls.crop.hidden = true; controls.cropImage.removeAttribute?.("src");
-        for (const container of [controls.preview, controls.figures, controls.questionBody, controls.aiPreview, controls.originBody]) container.replaceChildren();
+        for (const container of [controls.previewAnswer, controls.previewAnalysis, controls.figures, controls.questionBody, controls.aiPreview, controls.originBody]) container.replaceChildren();
         current = null; drafts.clear();
         if (focus?.isConnected) focus.focus({ preventScroll: true });
       });

@@ -63,7 +63,7 @@ def main():
         assert page.locator("#tagManagerBulkAdd").count() == 0
         assert page.locator("#tagManagerBulkRemove").count() == 0
         assert page.locator("#tagManagerHierarchyNav button").count() == 4
-        assert page.locator("#tagManagerScopes button").count() == 2
+        assert page.locator("#tagManagerScopes button").count() == 3
         assert page.get_by_text("个人分组").count() == 0
         # A level shows its top-level tags, and the chapter opens into its children.
         page.locator('#tagManagerHierarchyNav [data-nav-id="knowledge"]').click()
@@ -85,6 +85,10 @@ def main():
 
         check("t1")
         assert page.locator("#tagManagerDetail h2").inner_text() == "正弦函数"
+        # 1.25.38：点名字只是「看」，不会把勾选换成这一个，也不会让批量条冒出来。
+        page.locator('[data-tag-id="t2"] .tag-directory-name').click()
+        assert page.locator("#tagManagerDetail h2").inner_text() == "三角函数"
+        assert page.locator("#tagManagerBulk strong").inner_text() == "已选 1 个"
         check("t2")
         assert page.locator("#tagManagerBulk strong").inner_text() == "已选 2 个"
         page.locator("#tagManagerSearch").fill("ＳＩＮ")

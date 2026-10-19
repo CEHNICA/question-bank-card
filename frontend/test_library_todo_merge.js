@@ -86,10 +86,10 @@ assert.match(todos, /const menu = node\("details", "library-todo-menu"\)/, "三�
 // 1.25.21：折叠条上写的话必须和展开后按钮上的话一字不差。
 // 原来折叠条写「建议待采纳」「没打标签」，按钮写「AI 建议待核对」「未标知识点」——
 // 同一件事、隔着 30 像素两个名字，老师点开才发现对不上。
-assert.match(todos, /\$\{pendingCount\} 题等你核对/, "折叠条上写有多少题等你核对");
-assert.match(todos, /AI 建议待核对 · \$\{pendingCount\} 题/, "按钮上说的也是等你核对");
-assert.match(todos, /\$\{missingCount\} 题没知识点/, "折叠条上写有多少题没知识点");
-assert.match(todos, /未标知识点 · \$\{missingCount\} 题/, "按钮上说的也是知识点");
+// 1.25.44：440 是 804 的一部分，不能再并排写成两件事。
+assert.doesNotMatch(todos, /\$\{pendingCount\} 题等你核对/, "AI 建议不再单列一条，它是没知识点那批的一部分");
+assert.match(todos, /\$\{missingCount\} 题没知识点（\$\{pendingCount\} 题有 AI 建议）/, "折叠条写清「其中多少已有建议」");
+assert.match(todos, /AI 建议待核对 · \$\{pendingCount\} 题/, "按钮仍说清建议有几题");
 assert.match(todos, /"library-todo-lead", working \? "AI 正在处理" : "还有活没干"/, "入口先说自己是什么");
 
 // 第三样原来是「AI 能补 3 项」—— 说的是下面有几颗按钮，不是有多少活干。换成真数字。
@@ -107,8 +107,7 @@ assert.match(todos, /没带「AI」标记的只是筛一遍，不花钱；带「
   "花费的规矩写在展开后看得见的那一行，没有丢");
 
 // 折叠起来的东西要让人看得见里面有什么：三样都要合成一句话，缺一样就少一件事。
-assert.match(todos, /bits\.push\(`\$\{pendingCount\} 题等你核对`\)/);
-assert.match(todos, /bits\.push\(`\$\{missingCount\} 题没知识点`\)/);
+assert.match(todos, /bits\.push\(pendingCount\s*\?\s*`\$\{missingCount\} 题没知识点（\$\{pendingCount\} 题有 AI 建议）`/);
 assert.match(todos, /bits\.push\(`\$\{answerCount\} 题没答案`\)/);
 assert.match(summary, /summary\.title = working[\s\S]*?点开看：/, "悬停说明也要把三样说全");
 assert.match(summary, /按「标签」和「答案」分了两栏；/,

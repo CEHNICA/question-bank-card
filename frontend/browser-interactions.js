@@ -27,11 +27,22 @@
       method: "POST", headers: { "X-QB-Request": "1" }
     })?.catch?.(() => {});
     const leave = () => { try { root.close(); } catch { /* 标签页关不了自己 */ } };
+    let closeRetried = false;
     close?.addEventListener("click", () => {
       // 1.25.34：关窗之前先淡出，不要瞬间消失。
-      root.document?.body?.classList?.add?.("window-exiting");
+      const body = root.document?.body;
+      body?.classList?.add?.("window-exiting");
       const finish = () => { if (!askHost("close")) leave(); };
       if (root.setTimeout) root.setTimeout(finish, 160); else finish();
+      // 1.25.51：窗口没关掉时（控制窗口的线程已退出、或请求失败），别把页面永远
+      // 留在淡出后的白屏里：1.6 秒后恢复，再补一次关闭请求。
+      if (root.setTimeout) {
+        root.setTimeout(() => {
+          if (root.document?.hidden) return;   // 已经关掉或切走，不用管
+          body?.classList?.remove?.("window-exiting");
+          if (!closeRetried) { closeRetried = true; finish(); }
+        }, 1600);
+      }
     });
     minimize?.addEventListener("click", () => { askHost("minimize"); });
   }

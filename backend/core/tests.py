@@ -2300,3 +2300,12 @@ class ApiTests(TestCase):
         self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
                          [(1, 200), (201, 400), (401, 600), (601, 800), (801, 1000), (1001, 1200)])
         self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 1201)))
+
+class FrontendCacheTests(TestCase):
+    """1.25.40：升级后浏览器可能还拿着旧脚本，本地页面必须每次核对。"""
+
+    def test_frontend_files_ask_the_local_service_every_time(self):
+        for path in ("/library", "/library.js", "/library-answer-editor.js", "/library.css"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertEqual(response["Cache-Control"], "no-cache", path)

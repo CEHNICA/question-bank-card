@@ -247,6 +247,7 @@ class WindowTests(unittest.TestCase):
             seen = []
             windows = iter([1, 1, 0])
             fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = False
             # 窗口先活一轮、再失效一次：watch_window 会因此重新定位，直到宽限期结束收工。
             alive = iter([True, False])
             fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
@@ -282,6 +283,7 @@ class WindowTests(unittest.TestCase):
             # 窗口先活十轮再失效：这十轮里如果每轮都重新定位，就又回到一秒一轮了。
             alive_sequence = iter([True] * 10 + [False])
             fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = False
             fake_user32.IsWindow.side_effect = lambda hwnd: _record(alive, alive_sequence)
 
             def fake_app_window(user32, profile, **_options):
@@ -453,11 +455,24 @@ class MainFlowTests(unittest.TestCase):
             for item in reversed(started):
                 item.stop()
 
-    def test_running_instance_only_opens_window(self):
+    def test_running_instance_focuses_the_existing_window(self):
+        # 1.25.42：已经在运行时先把现有窗口切到前面，不再叠一个新窗口。
+        prepare = Mock()
+        opened = Mock()
+        focused = Mock(return_value=True)
+        result = self.run_patched(self.patches(focus_existing_window=focused, open_window=opened),
+                                  {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
+        self.assertEqual(result, 0)
+        focused.assert_called_once_with()
+        opened.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_running_instance_opens_a_window_when_none_can_be_found(self):
+        # 服务还在、窗口已经关了（或没找到）：退回原来的「只打开窗口」。
         prepare = Mock()
         opened = Mock(return_value=Mock())
         waited = Mock()
-        result = self.run_patched(self.patches(open_window=opened, wait_for_reattached_window=waited),
+        result = self.run_patched(self.patches(open_window=opened, wait_for_reattached_window=waited, focus_existing_window=Mock(return_value=False)),
                                   {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
         self.assertEqual(result, 0)
         opened.assert_called_once_with("http://127.0.0.1:8768")
@@ -808,3 +823,143 @@ class ShortcutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BrowserCacheTests(unittest.TestCase):
+    """1.25.40：升级后窗口里可能还是上一版的界面。启动时清掉脚本缓存，保留登录与设置。"""
+
+    def test_launch_clears_only_the_browser_caches(self):
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder)
+            for name in ("Cache", "Code Cache", "GPUCache"):
+                (profile / name).mkdir()
+            (profile / "Cookies").write_text("keep", encoding="utf-8")
+            app_window._CACHE_CLEARED = False
+            app_window._clear_stale_cache(profile)
+            for name in ("Cache", "Code Cache", "GPUCache"):
+                self.assertFalse((profile / name).exists(), name)
+            self.assertTrue((profile / "Cookies").is_file(), "不碰 Cookies 和设置")
+
+    def test_window_actions_follow_the_foreground_window(self):
+        # 1.25.51：多开过窗口时，守护线程启动时找到的句柄可能是一个缩成一条的旧
+        # 窗口；用户点的是当前前台窗口。动作要落在前台那个窗口上。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            served = [0]
+            alive_sequence = iter([True] * 4 + [False])
+            fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = False
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive_sequence, False)
+            fake_user32.GetForegroundWindow.return_value = 555
+
+            def thread_pid(handle, byref):
+                byref._obj.value = 7
+                return 1
+
+            fake_user32.GetWindowThreadProcessId.side_effect = thread_pid
+            found = []
+
+            def fake_app_window(user32, profile, **_options):
+                found.append(1)
+                return 4242 if len(found) <= 2 else 0
+
+            def fake_read_control():
+                served[0] += 1
+                return ("minimize", "n1") if served[0] == 2 else None
+
+            clock = itertools.count(0, 1)
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
+                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
+                 patch.object(app_window.time, "sleep"), \
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+                app_window.watch_window(root)
+
+            fake_user32.ShowWindow.assert_called_once_with(555, app_window._SW_MINIMIZE)
+
+    def test_a_visible_app_window_beats_a_minimised_duplicate(self):
+        # 1.25.51：多开过窗口时，进程组里可能同时挂着一个最小化的旧题有据窗口和
+        # 正在用的那个。按面积取会挑中旧窗口 —— 点最小化/关闭没反应。
+        with tempfile.TemporaryDirectory() as tmp:
+            import ctypes
+
+            profile = Path(tmp)
+            windows = {
+                1111: ("题有据 · 逐题核对", (0, 0, 1600, 1000), True),
+                2222: ("题有据 · 正式题库", (0, 0, 1440, 900), False),
+                3333: ("", (0, 0, 1800, 1100), False),
+            }
+
+            class FakeRect(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+            class FakeUser32:
+                def __init__(self):
+                    self.foreground = 0
+
+                def IsWindowVisible(self, handle):
+                    return handle in windows
+
+                def IsIconic(self, handle):
+                    return windows[handle][2]
+
+                def GetForegroundWindow(self):
+                    return self.foreground
+
+                def GetWindowThreadProcessId(self, handle, byref):
+                    byref._obj.value = 7
+                    return 1
+
+                def GetWindowRect(self, handle, byref):
+                    left, top, right, bottom = windows[handle][1]
+                    byref._obj.left, byref._obj.top = left, top
+                    byref._obj.right, byref._obj.bottom = right, bottom
+                    return True
+
+                def GetWindowTextLengthW(self, handle):
+                    return len(windows[handle][0])
+
+                def GetWindowTextW(self, handle, buffer, _limit):
+                    buffer.value = windows[handle][0]
+
+                def EnumWindows(self, callback, _):
+                    for handle in windows:
+                        if not callback(handle, 0):
+                            break
+                    return True
+
+            fake = FakeUser32()
+            with patch.object(app_window, "_browser_pids", return_value={7}):
+                self.assertEqual(app_window._app_window(fake, profile), 2222,
+                                 "最小化的旧窗口不该被挑中")
+                fake.foreground = 1111
+                self.assertEqual(app_window._app_window(fake, profile), 1111,
+                                 "用户正点着的那个前台窗口优先")
+
+    def test_a_window_left_minimized_is_restored_at_startup(self):
+        # 1.25.52：上一次运行留下的浏览器窗口可能还是最小化的；启动后要把它恢复
+        # 出来，否则点桌面图标只看到任务栏里一个缩成一条的旧窗口。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alive_sequence = iter([True] * 3 + [False])
+            fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = True
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive_sequence, False)
+            found = []
+
+            def fake_app_window(user32, profile, **_options):
+                found.append(1)
+                return 4242 if len(found) <= 2 else 0
+
+            clock = itertools.count(0, 1)
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
+                 patch.object(app_window, "_read_control", return_value=None), \
+                 patch.object(app_window.time, "sleep"), \
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+                app_window.watch_window(root)
+
+            fake_user32.ShowWindow.assert_called_with(4242, app_window._SW_RESTORE)
+            fake_user32.SetForegroundWindow.assert_called_with(4242)

@@ -126,4 +126,31 @@ assert.match(urls, /library_tagging\.templates_view/, "The system blueprint is q
 assert.match(urls, /library_tagging\.impact_view/, "The manager can inspect affected questions before deletion");
 assert.doesNotMatch(service, /MAX_TAGS|最多\s*3\s*个知识点/, "Formal manual tagging has no three-tag business limit");
 
+// 1.25.38：目录管理的逻辑 —— 看和选分开。
+assert.doesNotMatch(managerJs, /else \{ state\.selected\.clear\(\); state\.selected\.add\(id\); state\.anchor = id; \}/,
+  "点名字不再清空勾选、把这一条设成待批量删除的唯一项");
+assert.match(managerJs, /const focused = state\.focused \? tagById\(state\.focused\) : null;/, "详情跟着正在看的标签走");
+assert.match(managerJs, /tagManagerUp/, "子级里有明确的「返回上级」");
+assert.match(managerJs, /hierarchyTrail/, "返回上级按进来的路退，有多个父级也退得出去");
+assert.match(managerJs, /if \(!query && state\.hierarchyKind && state\.scope === "all"\)/, "有搜索词时不再被当前分类挡住");
+assert.match(managerJs, /tag-directory-path-line/, "搜索结果补一行上级路径");
+assert.match(managerJs, /一次最多合并 20 个标签/, "合并超过 20 个先要求缩小范围");
+assert.match(managerJs, /entry\(scopeNav, "used"/, "快速查看里有「用过的」");
+
 console.log("Formal tag picker, legacy compatibility, AI review, migration report and undo integration: OK");
+
+// 1.25.44：「不会」这类个人标记混进知识点时提醒，并能一键改成自定义标签。
+assert.match(libraryJs, /更像个人标记，不是知识点/, "个人标记的提醒");
+assert.match(libraryJs, /改成自定义标签/, "一键改成自定义标签");
+
+// 1.25.46：300 个标签按类型分段，段内先顶级（章节）后叶子。
+assert.match(managerJs, /tag-directory-section/, "全部标签按类型分段");
+assert.match(managerJs, /rootA - rootB/, "段内顶级标签排在前面");
+assert.match(managerCss, /\.tag-directory-list\.grouped \.tag-directory-kind \{ display: none; \}/, "分段后行里不再重复类型");
+assert.match(managerJs, /qb-tag-manager-scope/, "记住上次看的范围");
+assert.match(managerJs, /row.style.paddingLeft = \(9 \+ depth \* 16\)/, "左侧树按层缩进");
+assert.match(fs.readFileSync(require.resolve("./library-tag-map.js"), "utf8"), /centerOnChildren/, "地图展开后把新节点移到视野中间");
+assert.match(managerCss, /tag-directory-workspace:not\(\.tag-directory-map-view\) \.tag-directory-body:has/, "地图视图不被列表的对齐规则挤成 240px");
+assert.match(managerJs, /state\.treeOpen/, "文件夹展开状态");
+assert.match(managerJs, /tag-directory-tree-toggle/, "每层都有展开箭头");
+assert.match(managerJs, /if \(open\) \{\s*const next = new Set/, "展开后递归画下一层");

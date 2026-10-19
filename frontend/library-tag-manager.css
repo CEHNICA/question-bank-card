@@ -1,12 +1,16 @@
 /* Directory management keeps the page navigation and separates browsing from editing. */
 .tag-directory-workspace[hidden] { display: none; }
-.tag-directory-workspace { padding: 20px 0 8px; }
+/* 1.25.38：整页收进一个阅读宽度并居中，跟题库页一致。原来铺满整屏，三栏被拉成
+   「200 + 一大片 + 290」，右边那栏 90% 是空的。 */
+.tag-directory-workspace { padding: 20px 0 8px; max-width: 1240px; margin-inline: auto; }
 .tag-directory-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .tag-directory-header > div { display: flex; align-items: baseline; gap: 12px; }
 .tag-directory-header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
 .tag-directory-total, .tag-directory-hint, .tag-directory-status, .tag-directory-visible-count { color: var(--muted, #747971); font-size: 13px; }
 .tag-directory-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding-bottom: 14px; }
-.tag-directory-search { flex: 1 1 230px; max-width: 500px; }
+/* 1.25.38：工具栏右边留一大片空，看着像没排完。新建/模板/更多收到右端。 */
+.tag-directory-toolbar > #tagManagerCreateTag { margin-left: auto; }
+.tag-directory-search { flex: 1 1 320px; max-width: 560px; }
 .tag-directory-search input { width: 100%; min-height: 38px; border: 1px solid var(--line, #e3e3dc); border-radius: 9px; padding: 8px 12px; background: var(--surface, #fff); color: var(--ink, #262c29); }
 .tag-directory-view-switch { display: inline-flex; flex: 0 0 auto; padding: 3px; gap: 3px; border: 1px solid #e0e5df; border-radius: 9px; background: #eef1ed; }
 .tag-directory-view-button { border: 0; border-radius: 6px; padding: 7px 12px; background: transparent; color: #6c7871; font: inherit; font-size: 13px; cursor: pointer; }
@@ -14,6 +18,8 @@
 .tag-directory-map-kind { max-width: 130px; min-height: 36px; border: 1px solid #dce4dd; border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 13px; background: #fff; color: #30493e; }
 .tag-directory-map-kind[hidden], .tag-directory-map-host[hidden], .tag-directory-groups[hidden], .tag-directory-list-heading[hidden], .tag-directory-list[hidden] { display: none; }
 .tag-directory-map-view .tag-directory-body { grid-template-columns: minmax(0, 1fr) 290px; }
+/* 1.25.48：地图视图里没选标签时，右侧详情也收起，地图用满整个宽度。 */
+.tag-directory-workspace.tag-directory-map-view .tag-directory-body:has(.tag-directory-detail[data-empty="true"]) { grid-template-columns: minmax(0, 1fr); }
 .tag-directory-map-view .tag-directory-results { min-width: 0; overflow: hidden; }
 .tag-directory-map-view .tag-directory-detail { max-height: 720px; overflow-y: auto; min-height: 0; scrollbar-width: thin; }
 .tag-directory-question-context { margin: 12px 0 18px; padding: 12px; border: 1px solid #cce3d8; border-radius: 9px; background: #f1f8f3; }
@@ -30,13 +36,26 @@
 .tag-directory-status { margin: 0 0 10px; min-height: 0; line-height: 1.5; }
 .tag-directory-status:empty { display: none; }
 .tag-directory-status.error { color: #aa3c30; background: #fff3ed; padding: 10px 12px; border-radius: 8px; }
-.tag-directory-body { display: grid; grid-template-columns: 200px minmax(320px, 1fr) 290px; min-height: 460px; align-items: start; border: 1px solid var(--line, #e3e3dc); border-radius: 13px; background: var(--surface, #fff); overflow: clip; }
+.tag-directory-body { display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; min-height: 460px; align-items: start; border: 1px solid var(--line, #e3e3dc); border-radius: 13px; background: var(--surface, #fff); overflow: clip; }
+/* 1.25.38：没选标签时右边那栏只有一句「点一个标签查看说明」，白占 280px。
+   选中标签才出现，没选中时列表直接铺开。 */
+.tag-directory-detail[data-empty="true"] { display: none; }
+@media (min-width: 1151px) {
+  /* 1.25.48：地图视图不要套用这条 —— 原来它把地图挤进 240px，右边整片空着。 */
+  .tag-directory-workspace:not(.tag-directory-map-view) .tag-directory-body:has(.tag-directory-detail[data-empty="true"]) { grid-template-columns: 240px minmax(0, 1fr); }
+}
 .tag-directory-groups { background: var(--surface-soft, #f8f8f4); align-self: stretch; border-right: 1px solid var(--line, #e3e3dc); min-width: 0; padding: 14px 9px; }
 .tag-directory-nav-heading { margin: 0; padding: 9px 9px 8px; font-size: 12px; color: var(--muted, #747971); font-weight: 500; }
 .tag-directory-hierarchy-nav { margin-bottom: 4px; }
 .tag-directory-tree-nav { max-height: calc(100vh - 420px); overflow-y: auto; scrollbar-width: thin; }
 .tag-directory-tree-row { display: flex; gap: 6px; align-items: baseline; justify-content: space-between; padding-left: 9px; border-left: 2px solid transparent; }
 .tag-directory-tree-row[data-tree-tag-id] + .tag-directory-tree-row { margin-top: 1px; }
+/* 1.25.49：文件夹式展开箭头。 */
+.tag-directory-tree-toggle { flex: 0 0 16px; align-self: center; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted, #747971); font-size: 11px; line-height: 1; cursor: pointer; }
+.tag-directory-tree-toggle:hover { background: #e6e8e1; color: var(--ink, #262c29); }
+.tag-directory-tree-toggle.is-empty { visibility: hidden; }
 .tag-directory-tree-name { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; color: var(--ink, #262c29); font: inherit; font-size: 12px; text-align: left; padding: 4px 6px; border-radius: 5px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tag-directory-tree-name:hover { background: #eeefea; }
 .tag-directory-tree-name.current { background: #e3f0ea; color: #1d7062; font-weight: 600; }
@@ -61,6 +80,12 @@
 .tag-directory-group.active { background: #e3f0ea; color: #1d7062; font-weight: 600; }
 .tag-directory-results { min-width: 0; }
 .tag-directory-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 14px 16px; border-bottom: 1px solid var(--line, #e3e3dc); }
+/* 1.25.46：全部标签按类型分段，段头写类型和数量；分段后行里的类型收掉。 */
+.tag-directory-section { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; padding: 10px 14px 6px; background: var(--surface, #fff); border-bottom: 1px solid #f2f3ee;
+  color: var(--muted, #747971); font-size: 12px; font-weight: 600; }
+.tag-directory-section small { font-weight: 400; font-size: 11px; }
+.tag-directory-list.grouped .tag-directory-kind { display: none; }
 .tag-directory-select-all { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted, #747971); cursor: pointer; }
 .tag-directory-select-all input, .tag-directory-row > input { width: 15px; height: 15px; margin: 0; accent-color: #236e60; }
 /* 1.25.12：列表正上方的现状说明。配色跟批量操作条一致，都属于「现在能做什么」的提示，
@@ -78,16 +103,23 @@
 .tag-directory-hidden-selection:empty { display: none; }
 .tag-directory-bulk select { max-width: 190px; padding: 6px 8px; min-height: 31px; border: 1px solid #d7e0d9; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; }
 .tag-directory-list { max-height: calc(100vh - 300px); min-height: 380px; overflow-y: auto; scrollbar-width: thin; padding: 6px; }
-.tag-directory-row { display: grid; grid-template-columns: 18px 9px minmax(0, 1fr) auto auto 24px; align-items: center; gap: 9px; min-height: 42px; padding: 4px 10px; border-radius: 7px; }
-.tag-directory-row + .tag-directory-row { margin-top: 2px; }
+.tag-directory-row { display: grid; grid-template-columns: 18px 9px minmax(0, 1fr) auto auto 24px; align-items: center; gap: 9px; min-height: 38px; padding: 2px 10px; border-bottom: 1px solid #f2f3ee; border-radius: 0; }
+.tag-directory-row:last-child { border-bottom: 0; }
 .tag-directory-row:hover { background: #f6f7f3; }
 .tag-directory-row.selected { background: #eaf3ed; }
+/* 1.25.38：看和选分开。正在看的那一行用左侧色条标出；勾选仍是整行绿底。 */
+.tag-directory-row.focused { box-shadow: inset 2px 0 #2f7d68; }
 .tag-directory-row.inactive { opacity: .7; }
 .tag-directory-color { width: 7px; height: 7px; border-radius: 50%; background: #83a398; }
-.tag-directory-name { appearance: none; border: 0; padding: 7px 0; background: transparent; min-width: 0; color: var(--ink, #262c29); font: inherit; font-size: 13px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.tag-directory-name-cell { display: flex; flex-direction: column; min-width: 0; }
+.tag-directory-path-line { color: var(--muted, #747971); font-size: 11px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-directory-up { flex: 0 0 auto; }
+.tag-directory-name { appearance: none; border: 0; padding: 6px 0; background: transparent; min-width: 0; color: var(--ink, #262c29); font: inherit; font-size: 13px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .tag-directory-kind { color: var(--muted, #747971); font-size: 10px; white-space: nowrap; }
 .tag-directory-usage { border: 0; background: transparent; padding: 5px 0; color: var(--muted, #747971); font: inherit; font-size: 12px; text-align: right; cursor: pointer; font-variant-numeric: tabular-nums; }
 .tag-directory-usage:hover, .tag-directory-detail-usage:hover { color: #1d7062; text-decoration: underline; }
+/* 1.25.38：一整列「0 题」压淡，有题的才醒目。 */
+.tag-directory-usage.is-zero { color: #b8beb7; }
 .tag-directory-expand, .tag-directory-expand-placeholder { display: block; width: 24px; height: 28px; }
 .tag-directory-expand { border: 0; border-radius: 5px; color: #386e60; background: transparent; font-size: 23px; cursor: pointer; }
 .tag-directory-expand:hover { background: #dcebe5; }

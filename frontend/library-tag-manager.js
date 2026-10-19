@@ -27,7 +27,19 @@
   function create(options) {
     const mount = options.mount;
     if (!mount) throw new Error("标签管理缺少页面容器");
+    // 1.25.47：记住上次看的是「全部标签 / 用过的 / 收藏」，下次点进来还是那一个。
+    // 默认仍然是全部标签 —— 不能替人把模板藏起来。
+    const SCOPE_KEY = "qb-tag-manager-scope";
+    function savedScope() {
+      try { const value = root.localStorage?.getItem(SCOPE_KEY); return ["all", "used", "favorite"].includes(value) ? value : "all"; } catch { return "all"; }
+    }
+    function rememberScope() { try { root.localStorage?.setItem(SCOPE_KEY, state.scope); } catch { /* 存不下就每次从全部开始 */ } }
     const state = { open: false, busy: false, scope: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
+      // 1.25.38：进子级时记下「从哪里进来的」，返回上级按原路退；同一个标签有多个
+      // 父级时也不至于退不动。
+      hierarchyTrail: [],
+      // 1.25.49：左侧文件夹树里哪些层是展开的。
+      treeOpen: new Set(),
       relations: new Map(), relationLoads: new Map(),
       catalogue: { tags: [] }, shown: [], history: [], notice: "", error: false, scroll: 0, original: null, originalDisplay: "", originalHidden: false,
       view: "list", mapKind: "knowledge", questionContext: null };
@@ -64,7 +76,7 @@
     hierarchyNav.id = "tagManagerHierarchyNav"; hierarchyNav.setAttribute("aria-label", "按类型浏览标签层级");
     const treeNav = element("nav", "tag-directory-tree-nav");
     treeNav.id = "tagManagerTreeNav"; treeNav.setAttribute("aria-label", "顶层标签");
-    const hierarchyHint = element("p", "tag-directory-nav-hint", "每一级都能贴题，点右侧箭头逐层往下看。");
+    const hierarchyHint = element("p", "tag-directory-nav-hint", "点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。");
     sidebar.append(hierarchyNav, treeNav, hierarchyHint, scopeNav);
     const results = element("section", "tag-directory-results"), listHeading = element("div", "tag-directory-list-heading"), selectAll = element("input"); selectAll.type = "checkbox";
     selectAll.id = "tagManagerSelectAll"; selectAll.setAttribute("aria-label", "选择当前显示的全部标签");
@@ -159,8 +171,18 @@
     function browseHierarchy(tag) {
       if (state.busy || !tag.kind) return;
       if (state.view === "map") { state.focused = String(tag.id); state.selected = new Set([String(tag.id)]); state.mapKind = tag.kind; state.query = ""; search.value = ""; render(); map?.focus(String(tag.id), { local: true }); return; }
+      if (String(state.hierarchyNode) !== String(tag.id)) state.hierarchyTrail.push(String(state.hierarchyNode || ""));
       state.hierarchyKind = tag.kind; state.hierarchyNode = String(tag.id); state.scope = "all"; state.query = ""; search.value = "";
+      // 1.25.49：进入某一层时，把它上面的文件夹展开，保证这一层在左树里看得见。
+      parentPaths(tag).forEach((path) => path.forEach((node) => {
+        if (String(node.id) !== String(tag.id)) state.treeOpen.add(String(node.id));
+      }));
       render(); list.scrollTop = 0; location.querySelector("button")?.focus({ preventScroll: true });
+    }
+    function goUp() {
+      if (!state.hierarchyNode) return;
+      state.hierarchyNode = state.hierarchyTrail.length ? state.hierarchyTrail.pop() : "";
+      render();
     }
     async function ensureRelations(tag) {
       if (!options.request || !tag.kind) return;
@@ -207,6 +229,15 @@
       state.scroll = window.scrollY; state.original = mount.querySelector(".library-workspace");
       if (state.original) { state.originalDisplay = state.original.style.display; state.originalHidden = state.original.hidden; state.original.hidden = true; state.original.style.display = "none"; }
       state.open = true; page.hidden = false; document.body.classList.add("library-tag-manager-open"); window.scrollTo(0, 0);
+      // 1.25.47：恢复上次的「全部 / 用过的 / 收藏」；查题上下文进来时不恢复。
+      // 1.25.50：第一次进来直接打开「知识点」文件夹 —— 标签本来就该先按文件夹看。
+      if (!context.questionContext) {
+        let stored = null;
+        try { stored = root.localStorage?.getItem(SCOPE_KEY); } catch { /* 存不下就按第一次算 */ }
+        state.scope = savedScope();
+        state.hierarchyKind = stored === null ? "knowledge" : "";
+        state.hierarchyNode = ""; state.hierarchyTrail = [];
+      }
       setBusy(true); setNotice("正在载入标签目录…");
       state.questionContext = context.questionContext || null;
       try { render(await options.loadCatalogue()); setNotice(""); await reloadHistory(); }
@@ -222,6 +253,9 @@
       if (state.original) { state.original.hidden = state.originalHidden; state.original.style.display = state.originalDisplay; }
       window.scrollTo(0, state.scroll); state.questionContext = null; options.onClose?.();
     }
+    // 1.25.38：点名字只负责「看」。以前这一下会清空勾选、把它设成唯一选中项，批量条
+    // 立刻出现「已选 1 个 · 合并标签 · 删除标签」—— 读一眼说明就进了待删除状态。
+    // 现在：点名字 = 打开详情；要批量处理，用前面的勾选框（带 Shift / Ctrl 点名字仍可加选）。
     function choose(tag, event = {}) {
       const id = String(tag.id);
       if (event.shiftKey && state.anchor) {
@@ -229,7 +263,7 @@
         if (from >= 0 && to >= 0) state.shown.slice(Math.min(from, to), Math.max(from, to) + 1).forEach((value) => state.selected.add(String(value.id)));
         else state.selected.add(id);
       } else if (event.ctrlKey || event.metaKey) { if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id); state.anchor = id; }
-      else { state.selected.clear(); state.selected.add(id); state.anchor = id; }
+      state.anchor = id;
       state.focused = id; render();
       void ensureRelations(tag);
       if (state.view === "list") page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] .tag-directory-name')?.focus({ preventScroll: true });
@@ -251,47 +285,69 @@
           state.hierarchyKind === kind && state.scope === "all",
           () => {
             const inside = state.hierarchyKind === kind && state.scope === "all";
-            if (!inside) { state.hierarchyKind = kind; state.hierarchyNode = ""; }
-            else if (state.hierarchyNode) state.hierarchyNode = "";
+            if (!inside) { state.hierarchyKind = kind; state.hierarchyNode = ""; state.hierarchyTrail = []; }
+            else if (state.hierarchyNode) { state.hierarchyNode = ""; state.hierarchyTrail = []; }
             else state.hierarchyKind = "";
+            state.scope = "all"; rememberScope();
             render();
           });
       }
-      // Only the branch that leads to the tag being read stays open, so the
-      // sidebar stays a short "where am I" map instead of a second full tree.
-      const onPath = new Set();
-      const current = state.hierarchyNode ? tagById(state.hierarchyNode) : null;
-      if (current) parentPaths(current).forEach((path) => path.forEach((node) => onPath.add(String(node.id))));
+      // 1.25.49：左侧是真正的文件夹树 —— 展开哪些层由 state.treeOpen 决定，
+      // 不再是「只显示当前所在的那一条路径」。
       if (state.hierarchyKind && state.scope === "all") {
-        const roots = tags.filter((tag) => tag.kind === state.hierarchyKind
-          && !parentsOf(tag).some((parent) => parent.kind === tag.kind))
+        // 1.25.49：按文件夹来做 —— 每层有自己的 ▸/▾，展开状态记在 state.treeOpen 里；
+        // 点箭头只展开/收起这一层，点名字进入这一层（中间显示文件夹内容）。
+        const kindTags = tags.filter((tag) => tag.kind === state.hierarchyKind);
+        const roots = kindTags.filter((tag) => !parentsOf(tag).some((parent) => parent.kind === tag.kind))
           .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
-        treeNav.append(element("h2", "tag-directory-nav-heading", "顶层标签"));
-        const branch = (tag, depth) => {
+        treeNav.append(element("h2", "tag-directory-nav-heading", "文件夹"));
+        const shown = new Set();
+        const branch = (tag, depth, ancestors) => {
+          const id = String(tag.id);
+          if (shown.has(id)) return;         // 一个标签挂多个上级时只画一次
+          shown.add(id);
+          const children = childrenOf(tag).filter((child) => child.kind === state.hierarchyKind && !ancestors.has(String(child.id)));
+          const open = state.treeOpen.has(id);
           const row = element("div", "tag-directory-tree-row");
-          row.dataset.treeTagId = tag.id;
+          row.dataset.treeTagId = id;
+          row.dataset.depth = String(depth);
+          row.style.paddingLeft = (9 + depth * 16) + "px";
+          const toggle = children.length
+            ? button(open ? "▾" : "▸", () => { if (open) state.treeOpen.delete(id); else state.treeOpen.add(id); render(); }, "tag-directory-tree-toggle")
+            : element("span", "tag-directory-tree-toggle is-empty");
+          toggle.setAttribute("aria-expanded", String(open));
           const name = button(tag.name, () => browseHierarchy(tag), "tag-directory-tree-name"
             + (String(tag.id) === String(state.hierarchyNode) ? " current" : ""));
-          name.title = "查看「" + tag.name + "」下面的标签";
-          row.append(name, element("small", "", directCount(tag) + " 题"));
+          name.title = "打开「" + tag.name + "」这一层";
+          row.append(toggle, name, element("small", "", directCount(tag) + " 题"));
           treeNav.append(row);
-          if (onPath.has(String(tag.id))) childrenOf(tag).forEach((child) => branch(child, depth + 1));
+          if (open) {
+            const next = new Set([...ancestors, id]);
+            children.forEach((child) => branch(child, depth + 1, next));
+          }
         };
-        roots.forEach((tag) => branch(tag, 0));
+        roots.forEach((tag) => branch(tag, 0, new Set()));
         if (!roots.length) treeNav.append(element("p", "tag-directory-nav-hint", "这一类还没有标签。"));
       }
       scopeNav.append(element("h2", "tag-directory-nav-heading", "快速查看"));
-      const flat = (target) => () => { state.scope = target; state.hierarchyKind = ""; state.hierarchyNode = ""; render(); };
+      const flat = (target) => () => { state.scope = target; state.hierarchyKind = ""; state.hierarchyNode = ""; state.hierarchyTrail = []; rememberScope(); render(); };
       entry(scopeNav, "all", "全部标签", tags.length, state.scope === "all", flat("all"));
+      // 1.25.38：目录里大多是 0 题，先把真正用过的挑出来，比在 352 行里翻有用。
+      entry(scopeNav, "used", "用过的", tags.filter((tag) => Number(tag.subtree_count) > 0 || Number(tag.count) > 0).length, state.scope === "used", flat("used"));
       entry(scopeNav, "favorite", "收藏", tags.filter((tag) => tag.favorite).length, state.scope === "favorite", flat("favorite"));
       sidebar.scrollTop = scroll;
     }
     function renderLocation() {
       location.replaceChildren(); location.hidden = !inHierarchy();
       if (!inHierarchy()) return;
-      const current = tagById(state.hierarchyNode), home = button(kinds[state.hierarchyKind] + " · 顶级", () => { state.hierarchyNode = ""; render(); }, "tag-directory-path-button");
+      const current = tagById(state.hierarchyNode), home = button(kinds[state.hierarchyKind] + " · 顶级", () => { state.hierarchyNode = ""; state.hierarchyTrail = []; render(); }, "tag-directory-path-button");
       location.append(home);
       if (current) {
+        // 1.25.38：原来只有一条小路径能回去，退出子级得靠「再点一次同一个分类」这种
+        // 没人知道的动作。给一颗明确的「返回上级」，按进来的路退。
+        const up = button("← 返回上级", goUp, "button button-quiet button-small tag-directory-up");
+        up.id = "tagManagerUp";
+        location.append(up);
         const paths = parentPaths(current), pathList = element("div", "tag-directory-paths");
         paths.forEach((path) => {
           const row = element("div", "tag-directory-path");
@@ -299,10 +355,10 @@
             const control = button(tag.name, () => browseHierarchy(tag), "tag-directory-path-button" + (String(tag.id) === String(current.id) ? " current" : ""));
             control.dataset.pathTagId = tag.id; row.append(control); }); pathList.append(row);
         });
-        location.append(pathList, element("small", "", state.query ? "搜索当前类型的全部标签" : "正在查看「" + current.name + "」的直接子标签"));
+        location.append(pathList, element("small", "", state.query ? "搜索全部类型的标签" : "正在查看「" + current.name + "」的直接子标签"));
         location.append(button("选择当前标签", () => choose(current), "button button-small"),
           button("＋ 添加子标签", () => options.editEntity("tag", null, { parent_ids: [current.id], kind: current.kind }), "button button-small"));
-      } else location.append(element("small", "", state.query ? "搜索当前类型的全部标签" : "展开箭头查看子标签；每一级都可以贴题。"));
+      } else location.append(element("small", "", state.query ? "搜索全部类型的标签" : "展开箭头查看子标签；每一级都可以贴题。"));
     }
     // 1.25.12：把「现在是什么情况、下一步做什么」写成一句话放在列表正上方。以前这
     // 一块只有一排「0 题」，看的人无从判断是标签统计坏了还是题真的一道都没贴，更
@@ -351,13 +407,15 @@
     function renderList() {
       const scroll = list.scrollTop, query = normalized(state.query.trim());
       state.shown = (state.catalogue.tags || []).filter((tag) => {
-        if (state.hierarchyKind && state.scope === "all") {
+        // 1.25.38：搜索不再被「当前分类」挡住 —— 原来在知识点里搜不到解题方法，
+        // 可搜索框并没有说范围。现在有搜索词就搜全部类型，结果里标出类型和上级路径。
+        if (!query && state.hierarchyKind && state.scope === "all") {
           if (tag.kind !== state.hierarchyKind) return false;
-          if (!query) {
-            if (state.hierarchyNode && !relationIds(tag, "parent_ids").includes(String(state.hierarchyNode))) return false;
-            if (!state.hierarchyNode && parentsOf(tag).some((parent) => parent.kind === tag.kind)) return false;
-          }
+          if (state.hierarchyNode && !relationIds(tag, "parent_ids").includes(String(state.hierarchyNode))) return false;
+          if (!state.hierarchyNode && parentsOf(tag).some((parent) => parent.kind === tag.kind)) return false;
         }
+        // 1.25.38：「用过的」只看确实贴过题的标签（含下级）。
+        if (state.scope === "used" && !(Number(tag.subtree_count) > 0 || Number(tag.count) > 0)) return false;
         if (state.scope === "favorite" && !tag.favorite) return false;
         const searchText = normalized([tag.name, tag.description, tag.conditions, ...(tag.aliases || []),
           ...parentPaths(tag).map((path) => path.map((node) => node.name).join(" "))].join(" "));
@@ -371,20 +429,57 @@
         const empty = element("div", "tag-directory-empty"); empty.append(element("strong", "", state.query ? "没有找到这个标签" : "这里还没有标签"),
           element("p", "", state.query ? "换个名称、别名或说明搜索。" : state.hierarchyNode ? "这个标签已经可以贴题；需要细化时可添加子标签。" : "可以新建自己的标签，也可以追加需要的模板。")); list.append(empty);
       }
-      state.shown.forEach((tag) => {
-        const id = String(tag.id), row = element("div", "tag-directory-row" + (state.selected.has(id) ? " selected" : "") + (tag.active === false ? " inactive" : "")); row.dataset.tagId = id;
+      const rowFor = (tag) => {
+        const id = String(tag.id), row = element("div", "tag-directory-row" + (state.selected.has(id) ? " selected" : "") + (String(state.focused) === id ? " focused" : "") + (tag.active === false ? " inactive" : "")); row.dataset.tagId = id;
         const check = element("input"); check.type = "checkbox"; check.checked = state.selected.has(id); check.setAttribute("aria-label", "选择标签「" + tag.name + "」");
         check.addEventListener("change", () => { if (check.checked) { state.selected.add(id); state.focused = id; } else { state.selected.delete(id); if (state.focused === id) state.focused = ""; } state.anchor = id; render();
           page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] > input')?.focus({ preventScroll: true }); });
         const dot = element("span", "tag-directory-color"); dot.setAttribute("aria-hidden", "true"); if (/^#[0-9a-f]{6}$/i.test(tag.color || "")) dot.style.backgroundColor = tag.color;
         const name = button(tag.name, (event) => choose(tag, event), "tag-directory-name"); name.title = tag.description || tag.name;
+        // 1.25.38：双击名字直接进它的子标签，和文件管理器一样。
+        name.addEventListener("dblclick", (event) => { if (childrenOf(tag).length) { event.preventDefault(); browseHierarchy(tag); } });
+        const nameCell = element("div", "tag-directory-name-cell"); nameCell.append(name);
+        // 搜索时补一行上级路径：结果只写「知识点」，看不出它到底属于哪一章。
+        if (query) {
+          const paths = parentPaths(tag).map((path) => path.map((node) => node.name).join(" › ")).filter(Boolean);
+          if (paths.length) nameCell.append(element("small", "tag-directory-path-line", paths[0] + (paths.length > 1 ? "　等 " + paths.length + " 条路径" : "")));
+        }
         const type = element("small", "tag-directory-kind", (tag.favorite ? "★ " : "") + (kinds[tag.kind] || "标签") + (tag.active === false ? " · 停用" : ""));
         const usage = button(directCount(tag) + (childrenOf(tag).length ? " / " + subtreeCount(tag) : "") + " 题", () => { if (state.busy) return; close(); options.browseTag(tag); }, "tag-directory-usage");
         usage.title = "本级 " + directCount(tag) + " 题，包含下级 " + subtreeCount(tag) + " 题；点击查看含下级的题目";
+        // 1.25.38：一整列「0 题」太抢眼。没用到的标签把数字压淡，有题的才醒目。
+        if (!directCount(tag) && !subtreeCount(tag)) usage.classList.add("is-zero");
         const branch = childrenOf(tag).length && ["knowledge", "method"].includes(tag.kind) ? button("›", () => browseHierarchy(tag), "tag-directory-expand") : element("span", "tag-directory-expand-placeholder");
         if (branch.tagName === "BUTTON") { branch.title = "查看「" + tag.name + "」的子标签"; branch.setAttribute("aria-label", branch.title); branch.dataset.expandTagId = id; }
-        row.append(check, dot, name, type, usage, branch); list.append(row);
-      }); list.scrollTop = scroll;
+        row.append(check, dot, nameCell, type, usage, branch);
+        return row;
+      };
+      // 1.25.46：300 个标签原来按名称混排，知识点、方法、历史标签一行一个颜色。
+      // 现在按类型分段，段头写数量和名字；段内仍按名称排。行里的「类型」只在
+      // 只有一种类型时才有用，分段后收掉。
+      const kindCount = new Set(state.shown.map((tag) => tag.kind)).size;
+      if (kindCount > 1) {
+        list.classList.add("grouped");
+        // 段内先摆顶级标签（章节），再摆下一层 —— 「初中·函数」不该夹在一堆
+        // 叶子标签中间靠拼音排。
+        const treeOrder = (a, b) => {
+          const rootA = parentsOf(a).some((parent) => parent.kind === a.kind) ? 1 : 0;
+          const rootB = parentsOf(b).some((parent) => parent.kind === b.kind) ? 1 : 0;
+          return rootA - rootB || String(a.name).localeCompare(String(b.name), "zh-CN", { numeric: true });
+        };
+        for (const [kind, label] of [["knowledge", "知识点"], ["method", "解题方法"], ["custom", "自定义标签"], ["legacy", "历史标签"]]) {
+          const tags = state.shown.filter((tag) => tag.kind === kind).sort(treeOrder);
+          if (!tags.length) continue;
+          const heading = element("div", "tag-directory-section");
+          heading.append(element("span", "", label), element("small", "", tags.length + " 个"));
+          list.append(heading);
+          tags.forEach((tag) => list.append(rowFor(tag)));
+        }
+      } else {
+        list.classList.remove("grouped");
+        state.shown.forEach((tag) => list.append(rowFor(tag)));
+      }
+      list.scrollTop = scroll;
       bulk.hidden = !state.selected.size; selectedCount.textContent = "已选 " + state.selected.size + " 个";
       const hiddenCount = state.selected.size - state.shown.filter((tag) => state.selected.has(String(tag.id))).length;
       hiddenSelection.textContent = hiddenCount ? "其中 " + hiddenCount + " 个不在当前结果中" : "";
@@ -477,10 +572,16 @@
     }
     function renderDetail() {
       detail.replaceChildren();
-      const selected = selectedTags(), tag = selected.find((value) => String(value.id) === state.focused) || selected[0];
-      if (!tag) { detail.append(element("h2", "", "标签信息"), element("p", "tag-directory-hint", "点一个标签查看说明和上下级；勾选多个标签可以一起整理。")); return; }
-      if (selected.length > 1) {
-        detail.append(element("h2", "", "已选 " + selected.length + " 个标签"), element("p", "tag-directory-hint", "上方的合并、删除只作用于已选标签。"));
+      const selected = selectedTags();
+      // 1.25.38：详情跟着「正在看的标签」走；勾选只决定批量操作的范围。
+      const focused = state.focused ? tagById(state.focused) : null;
+      detail.dataset.empty = focused || selected.length ? "false" : "true";
+      if (!focused) {
+        if (!selected.length) {
+          detail.append(element("h2", "", "标签信息"), element("p", "tag-directory-hint", "点一下标签名字看说明和上下级；勾选框只用于批量整理。"));
+          return;
+        }
+        detail.append(element("h2", "", "已选 " + selected.length + " 个标签"), element("p", "tag-directory-hint", "上方的合并、删除只作用于勾选的标签；点名字可以看某一个的说明。"));
         const parents = new Map();
         selected.forEach((value) => parentsOf(value).forEach((parent) => parents.set(String(parent.id), parent.name)));
         const block = element("div", "tag-directory-shared-groups"); block.append(element("h3", "", "共同的上级标签"));
@@ -488,6 +589,7 @@
         else block.append(element("p", "tag-directory-hint", "所选标签都没有上级标签。"));
         detail.append(block); return;
       }
+      const tag = focused;
       const title = element("div", "tag-directory-detail-title"); title.append(element("h2", "", tag.name), element("small", "", kinds[tag.kind] || "标签")); detail.append(title);
       if (state.questionContext) {
         const context = state.questionContext, originalTag = tagById(context.tagId), block = element("section", "tag-directory-question-context");
@@ -535,6 +637,11 @@
       if (state.hierarchyNode && !existing.has(state.hierarchyNode)) state.hierarchyNode = "";
       const busy = state.busy; if (busy) setBusy(false);
       total.textContent = (state.catalogue.tags || []).length + " 个标签";
+      // 1.25.38：新建按钮会悄悄沿用当前查看的上级，名字上先说清楚要建在哪儿。
+      newTag.textContent = state.hierarchyNode ? "＋ 新建子标签" : "＋ 新建标签";
+      newTag.title = state.hierarchyNode
+        ? "建在「" + (tagById(state.hierarchyNode)?.name || "当前标签") + "」下面"
+        : "建一个顶级标签";
       if (state.view === "list") { renderSidebar(); renderLocation(); renderList(); }
       else state.shown = [];
       renderDetail(); renderView(); status.textContent = state.notice; status.classList.toggle("error", state.error);
@@ -563,6 +670,9 @@
     function openMergeDialog() {
       if (state.busy) return;
       const sources = selectedTags(); if (!sources.length) return;
+      // 1.25.38：「全选当前结果」之后能一次勾 300 个，合并方向选反就收拾不回来。
+      // 超过 20 个先缩小范围，再做这一步。
+      if (sources.length > 20) { setNotice("一次最多合并 20 个标签；请先按分类或搜索缩小范围。", true); return; }
       const dialog = element("dialog", "tag-directory-merge-dialog"), title = element("h2", "", "合并标签"), targetLabel = element("label", "", "保留哪个标签？"), target = element("select");
       target.id = "tagManagerMergeTarget"; target.add(new Option("选择保留的标签…", ""));
       (state.catalogue.tags || []).filter((tag) => tag.active !== false && sources.every((source) => source.id === tag.id || compatible(source, tag)) && !(sources.length === 1 && sources[0].id === tag.id))
@@ -592,7 +702,7 @@
     page.addEventListener("keydown", (event) => {
       if (!state.open || state.busy || event.isComposing || document.querySelector("dialog[open]") || event.target.closest("input, textarea, select, [contenteditable=true]")) return;
       if (state.view === "map" && event.key !== "Escape" && event.target.closest(".tag-map-viewport")) return;
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (state.selected.size) { state.selected.clear(); state.focused = ""; render(); } else close(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (state.selected.size || state.focused) { state.selected.clear(); state.focused = ""; render(); } else close(); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); state.shown.forEach((tag) => state.selected.add(String(tag.id))); render(); }
       else if (["ArrowDown", "ArrowUp"].includes(event.key) && state.shown.length) {
         event.preventDefault(); const current = state.shown.findIndex((tag) => String(tag.id) === String(state.focused)), next = current < 0 ? 0 : Math.max(0, Math.min(state.shown.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)));
@@ -601,12 +711,7 @@
       else if (event.key === "ArrowRight") {
         const tag = tagById(state.focused); if (tag && childrenOf(tag).length) { event.preventDefault(); browseHierarchy(tag); }
       }
-      else if (event.key === "ArrowLeft" && state.hierarchyNode) {
-        const tag = tagById(state.hierarchyNode), parents = tag ? parentsOf(tag) : []; event.preventDefault();
-        if (parents.length === 1) browseHierarchy(parents[0]);
-        else if (!parents.length) { state.hierarchyNode = ""; render(); }
-        else setNotice("这个标签有多个父级，请从上方路径或右侧父标签中选择要前往的位置。");
-      }
+      else if (event.key === "ArrowLeft" && state.hierarchyNode) { event.preventDefault(); goUp(); }
     });
     render(); renderHistory([]);
     return { get open() { return state.open; }, show, close, render, renderHistory };

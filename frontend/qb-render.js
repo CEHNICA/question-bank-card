@@ -1121,17 +1121,10 @@
     const collapsed = start === end;
     const doc = container.ownerDocument || document;
     let scope = Array.from(container.querySelectorAll("[data-qb-field]")).find((node) => node.dataset.qbField === field);
-    if (!scope) {
-      const row = doc.createElement("p");
-      row.className = "qb-preview-empty-field";
-      row.append(doc.createTextNode(`${{ stem: "题干", answer: "答案", analysis: "解析" }[field] || `${field} 选项`}：`));
-      scope = doc.createElement("span");
-      scope.dataset.qbField = field;
-      scope.textContent = "（当前为空）";
-      previewSource(scope, 0, 0, "text", [0]);
-      row.append(scope);
-      container.append(row);
-    }
+    // 1.25.38：预览里没有这一栏（多半是空着）时，不再在末尾补一行
+    // 「答案：（当前为空）」——它排在解析后面，看起来像多出来的一道空答案。
+    // 没有可对应的地方就不画光标。
+    if (!scope) return null;
     const nodes = [scope, ...scope.querySelectorAll("[data-qb-source]")]
       .map((node) => ({ node, map: previewSourceRanges.get(node) })).filter((item) => item.map);
     const touches = (map) => collapsed ? start >= map.start && start <= map.end : end > map.start && start < map.end;

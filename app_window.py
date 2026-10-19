@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -219,7 +220,25 @@ def window_profile() -> Path:
         # 关窗即退出：不让浏览器在后台常驻，否则启动器会一直以为窗口还开着。
         local_state.write_text(json.dumps({"background_mode": {"enabled": False}}), encoding="utf-8")
     _disable_profile_password_saving(profile)
+    _clear_stale_cache(profile)
     return profile
+
+
+# 1.25.40：本地页面没有版本号，浏览器会按自己的启发式缓存旧脚本 —— 升级以后
+# 窗口里还是上一版的界面（真的撞上过：修好的地方仍旧显示旧的）。启动时把这几个
+# 缓存目录清掉，页面每次都从本机服务重新读；不碰 Cookies、密码和设置。
+_CACHE_CLEARED = False
+
+
+def _clear_stale_cache(profile: Path) -> None:
+    global _CACHE_CLEARED
+    if _CACHE_CLEARED:
+        return
+    _CACHE_CLEARED = True
+    for name in ("Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache"):
+        target = profile / name
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 def _disable_profile_password_saving(profile: Path) -> bool:
@@ -285,6 +304,7 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
 #
 # 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
 _SW_MINIMIZE = 6
+_SW_RESTORE = 9
 _WM_CLOSE = 0x0010
 _CONTROL_NAME = "window-control.json"
 # 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
@@ -383,8 +403,15 @@ def _app_window(user32, profile: Path, *, require_title: bool = False) -> int:
     pids = _browser_pids(profile)
     if not pids:
         return 0
-    named: list[tuple[int, int]] = []
-    fallback: list[tuple[int, int]] = []
+    named: list[tuple[int, int, bool]] = []
+    fallback: list[tuple[int, int, bool]] = []
+
+    def _iconic(handle) -> bool:
+        check = getattr(user32, "IsIconic", None)
+        try:
+            return bool(check(handle)) if check else False
+        except Exception:  # noqa: BLE001 - 拿不到状态就当作没最小化
+            return False
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_size_t)
     def collect(handle, _):
@@ -395,7 +422,7 @@ def _app_window(user32, profile: Path, *, require_title: bool = False) -> int:
             if user32.GetWindowRect(handle, ctypes.byref(rect)):
                 area = (rect.right - rect.left) * (rect.bottom - rect.top)
                 if area > 0:
-                    entry = (area, int(handle))
+                    entry = (area, int(handle), _iconic(handle))
                     if APP_TITLE in _window_title(user32, handle):
                         named.append(entry)
                     else:
@@ -403,11 +430,30 @@ def _app_window(user32, profile: Path, *, require_title: bool = False) -> int:
         return True
 
     user32.EnumWindows(collect, 0)
+
+    def pick(entries: list[tuple[int, int, bool]]) -> int:
+        """先挑没最小化的；都最小化了再按面积取最大的那个。"""
+        if not entries:
+            return 0
+        visible = [entry for entry in entries if not entry[2]]
+        return max(visible or entries)[1]
+
+    # 1.25.51：多开过窗口时，用户点的那个窗口才是前台窗口；原来是挑面积最大的，
+    # 结果可能挑中一个缩成一条的旧窗口 —— 点「最小化/关闭」没反应，或者页面淡出
+    # 成白屏而窗口还在。
+    try:
+        foreground = int(user32.GetForegroundWindow())
+    except Exception:  # noqa: BLE001
+        foreground = 0
+    if foreground:
+        for entry in named + fallback:
+            if entry[1] == foreground:
+                return foreground
     if named:
-        return max(named)[1]
+        return pick(named)
     if require_title:
         return 0
-    return max(fallback)[1] if fallback else 0
+    return pick(fallback)
 
 
 def _read_control() -> tuple[str, str] | None:
@@ -437,6 +483,9 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
     strict_until = time.monotonic() + _WINDOW_GRACE / 2
     hwnd = 0
     next_lookup = 0.0
+    # 1.25.52：窗口刚出现的头一两秒里，浏览器可能还在恢复上一次的最小化状态。
+    # 找到窗口后过 2 秒再看一眼：如果它还是最小化的，就把它恢复出来。
+    startup_check = 0.0
     while True:
         # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号。句柄缓存住，
         # 只在它失效时才重找，而且重找之间留出间隔 —— 否则每轮 100ms 都去起一次
@@ -444,6 +493,17 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
         if not _window_alive(user32, hwnd) and time.monotonic() >= next_lookup:
             hwnd = _app_window(user32, profile,
                                require_title=time.monotonic() < strict_until)
+            # 1.25.52：上一次运行留下的窗口可能还是最小化状态（浏览器复用了
+            # 旧窗口）。启动后要把它恢复出来，否则老师点桌面图标只看到任务栏。
+            if hwnd:
+                try:
+                    if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
+                        user32.ShowWindow(hwnd, _SW_RESTORE)
+                        user32.SetForegroundWindow(hwnd)
+                except Exception:  # noqa: BLE001 - 恢复失败不挡后续控制
+                    pass
+                if not startup_check:
+                    startup_check = time.monotonic() + 2.0
             next_lookup = time.monotonic() + (
                 _WINDOW_LOOKUP_BACKOFF if not hwnd else _WINDOW_LOOKUP_INTERVAL
             )
@@ -452,13 +512,37 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
                 return
             time.sleep(interval)
             continue
+        if startup_check and time.monotonic() >= startup_check:
+            startup_check = 0.0
+            try:
+                if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
+                    user32.ShowWindow(hwnd, _SW_RESTORE)
+                    user32.SetForegroundWindow(hwnd)
+            except Exception:  # noqa: BLE001
+                pass
         request = _read_control()
         if request is not None and request[1] != seen:
             action, seen = request
+            # 1.25.51：动作落到「用户正在点的那个窗口」上。句柄是启动时找的；
+            # 多开过窗口时它可能是另一个缩成一条的旧窗口 —— 那就点了没反应。
+            target = hwnd
+            try:
+                import ctypes
+
+                foreground = int(user32.GetForegroundWindow())
+                if foreground and foreground != hwnd:
+                    fg_pid = ctypes.c_ulong()
+                    win_pid = ctypes.c_ulong()
+                    user32.GetWindowThreadProcessId(ctypes.c_void_p(foreground), ctypes.byref(fg_pid))
+                    user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(win_pid))
+                    if fg_pid.value and fg_pid.value == win_pid.value:
+                        target = foreground
+            except Exception:  # noqa: BLE001 - 拿不到前台窗口就按原句柄
+                target = hwnd
             if action == "minimize":
-                user32.ShowWindow(hwnd, _SW_MINIMIZE)
+                user32.ShowWindow(target, _SW_MINIMIZE)
             elif action == "close":
-                user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
+                user32.PostMessageW(target, _WM_CLOSE, 0, 0)
             else:
                 seen = None          # 不认识的动作不执行，也不当成已处理
         time.sleep(interval)
@@ -473,6 +557,23 @@ def open_window(url: str) -> subprocess.Popen | None:
     web = subprocess.Popen(window_command(browsers[0], url, profile), creationflags=CREATE_NO_WINDOW)
     threading.Thread(target=watch_window, args=(profile,), daemon=True).start()
     return web
+
+
+def focus_existing_window() -> bool:
+    """应用已经在运行时，把现有窗口切到前面，而不是再开一个。
+
+    1.25.42：再点一次桌面图标，原来会「只打开窗口」—— 于是桌面上叠出好几个
+    题有据窗口，每个都连同一个服务。现在先找现有窗口，找到就还原并置前。
+    """
+    user32 = _user32()
+    if user32 is None:
+        return False
+    hwnd = _app_window(user32, window_profile())
+    if not hwnd:
+        return False
+    user32.ShowWindow(hwnd, _SW_RESTORE)
+    user32.SetForegroundWindow(hwnd)
+    return True
 
 
 def _profile_still_open(profile: Path) -> bool:
@@ -807,6 +908,11 @@ def _main(arguments: list[str] | None = None) -> int:
         return _hand_off_to_console(f"需要 Python 3.12（当前是 {sys.version_info.major}.{sys.version_info.minor}）")
     existing = launcher._running_instance()
     if existing:
+        # 1.25.42：已经在运行时先切到现有窗口。原来这里直接「只打开窗口」，
+        # 点几次图标就叠出几个题有据窗口 —— 老师说的「打开好几个题目界面」。
+        if focus_existing_window():
+            print(f"已在运行：{existing}，已切到现有窗口", flush=True)
+            return 0
         print(f"已在运行：{existing}，只打开窗口", flush=True)
         window = open_window(existing)
         # 窗口上的「最小化 / 关闭」是网页自己画的按钮，由 watch_window 这条守护

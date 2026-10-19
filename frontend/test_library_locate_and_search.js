@@ -145,3 +145,7 @@ assert.match(css, /\.library-search input \{ width: 100%;/, "输入框跟着容�
 
 console.log("The library page's locate button, back-to-top icon and shorter search box "
   + "are all in place: OK");
+
+// 1.25.43：核对页「在题库中看」带过来的 focus，可能不在这 40 道里。
+assert.match(js, /ids=\$\{encodeURIComponent\(state\.focus\)\}/, "题库会按编号单独取回要定位的那一道");
+assert.match(js, /state\.items = \[item, \.\.\.state\.items\]/, "取回来的题放在最前面，随列表一起显示");

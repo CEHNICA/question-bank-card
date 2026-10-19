@@ -721,7 +721,11 @@ def _frontend(name: str, content_type: str):
     def view(request):
         if request.method != "GET":
             return HttpResponseNotAllowed(["GET"])
-        return _file(FRONTEND / name, content_type)
+        response = _file(FRONTEND / name, content_type)
+        # 1.25.40：本地脚本没有版本号，浏览器会按启发式缓存旧文件 —— 升级后窗口里
+        # 可能还是上一版的界面（真的撞上过）。要求每次都向本机服务核对。
+        response["Cache-Control"] = "no-cache"
+        return response
     return view
 
 
