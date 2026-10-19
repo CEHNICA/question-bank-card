@@ -71,10 +71,30 @@
       if (!expanded.has(id)) continue;
       for (const child of model.children.get(id) || []) { visible.add(child); starts.push(child); }
     }
-    const nodes = new Map([...visible].map((id) => [id, model.nodes.get(id)]).filter(([, tag]) => tag));
+    // 1.25.70：默认只保留「用得起的」节点 —— 自身 0 课 + 全树没子标签的先收起来，
+    // 再把隐藏节点的祖辈全找回来（保住子路径），不让画面里只剩孤岛。
+    const hideEmpty = options.hideEmpty !== false;
+    const hasQuestions = (id) => Number(model.nodes.get(id)?.subtree_count || model.nodes.get(id)?.count || 0) > 0;
+    const filtered = new Set(visible);
+    if (hideEmpty) {
+      const keep = new Set();
+      for (const id of filtered) if (hasQuestions(id)) keep.add(id);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const id of filtered) {
+          if (keep.has(id)) continue;
+          for (const child of model.children.get(id) || []) {
+            if (keep.has(child)) { keep.add(id); changed = true; break; }
+          }
+        }
+      }
+      for (const id of [...filtered]) if (!keep.has(id)) filtered.delete(id);
+    }
+    const nodes = new Map([...filtered].map((id) => [id, model.nodes.get(id)]).filter(([, tag]) => tag));
     const edges = [];
-    for (const child of visible) for (const parent of model.parents.get(child) || []) {
-      if (visible.has(parent)) edges.push({ parent, child, type: "hierarchy" });
+    for (const child of filtered) for (const parent of model.parents.get(child) || []) {
+      if (filtered.has(parent)) edges.push({ parent, child, type: "hierarchy" });
     }
     if (options.related && model.kind === "knowledge") {
       for (const tag of [...nodes.values()]) for (const id of ids(tag.related_method_ids)) {
@@ -83,7 +103,7 @@
         nodes.set(id, { ...method, related: true }); edges.push({ parent: tag.id, child: id, type: "related_method" });
       }
     }
-    return { nodes, edges, matches: query ? matches : new Set(), query, total: model.nodes.size };
+    return { nodes, edges, matches: query ? matches : new Set(), query, total: model.nodes.size, hidden: hideEmpty ? visible.size - filtered.size : 0 };
   }
 
   /** Layered DAG layout; shared children get one position and all their incoming connections. */
@@ -161,11 +181,12 @@
     workspace.setAttribute("aria-label", "标签地图");
     const toolbar = element("div", "tag-map-toolbar"), context = element("div", "tag-map-context");
     const overview = button("全部结构", "overview", "回到当前类型的顶级标签"), focusButton = button("聚焦当前", "focus", "只看选中标签附近的上下级");
+    const hideEmpty = button("只看用到的", "hide-empty", "把还没题目的标签收起来，画面就不乱了"); hideEmpty.setAttribute("aria-pressed", "true");
     const rootLabel = element("label", "tag-map-root-label"); rootLabel.append(element("span", "", "主题"));
     const rootSelect = element("select", "tag-map-root-select"); rootSelect.setAttribute("aria-label", "选择地图主题"); rootLabel.append(rootSelect);
     const related = button("相关方法", "related", "显示虚线连接的相关方法；相关关系不参与下级筛选"); related.setAttribute("aria-pressed", "false");
     const scope = element("span", "tag-map-scope"), resetLayout = button("整理位置", "reset-layout", "清除本次拖动，恢复自动排列；不会改变父子关系");
-    toolbar.append(overview, focusButton, rootLabel, related, resetLayout, scope);
+    toolbar.append(overview, focusButton, hideEmpty, rootLabel, related, resetLayout, scope);
     const viewport = element("div", "tag-map-viewport"); viewport.tabIndex = 0;
     viewport.setAttribute("aria-label", "标签关系画布，可用方向键平移、加减键缩放、数字 0 适合画布");
     const world = element("div", "tag-map-world tag-map-scene"), wires = document.createElementNS(NS, "svg");
@@ -182,6 +203,7 @@
     workspace.append(toolbar, context, viewport, footer); host.append(workspace);
     const state = { catalogue: { tags: [] }, kind: "knowledge", model: buildModel(), graph: null, layout: null,
       expanded: new Set(), selected: "", focusId: "", local: false, rootId: "", query: "", related: false,
+      hideEmpty: true,
       busy: false, zoom: 1, tx: 24, ty: 24, touched: false, signature: "", initialized: false, pendingFit: false,
       positions: new Map(), offsets: new Map(), destroyed: false, suppressClick: false, gestures: new Map(), gesture: null };
     const listeners = [];
@@ -268,7 +290,7 @@
     function renderGraph({ fitView = false, preserveFocus = "", centerOnChildren = "" } = {}) {
       const oldAnchor = state.positions.get(state.selected);
       const graph = visibleGraph(state.model, { expanded: state.expanded, query: state.query, focusId: state.focusId,
-        local: state.local, rootId: state.rootId, related: state.related });
+        local: state.local, rootId: state.rootId, related: state.related, hideEmpty: state.hideEmpty });
       state.graph = graph; state.layout = layoutGraph(graph); state.positions.clear();
       for (const [id, position] of state.layout.positions) {
         const offset = state.offsets.get(id) || { x: 0, y: 0 };
@@ -311,6 +333,7 @@
       const baseCount = [...graph.nodes.values()].filter((tag) => !tag.related).length;
       scope.textContent = state.local ? "当前标签附近" : state.rootId ? "当前主题" : "顶级与已展开分支";
       status.textContent = state.query ? "找到 " + graph.matches.size + " 个标签 · 已显示上级路径" : "显示 " + baseCount + " / " + graph.total + " 个标签";
+      if (graph.hidden) status.textContent += ` · 收起 ${graph.hidden} 个还没题目的标签`;
       if (state.related) status.textContent += " · 虚线仅表示相关方法";
       if (state.cropped && graph.nodes.size) status.textContent += " · 已保持文字可读，可拖动画布查看其余标签";
       if (preserveFocus) nodeLayer.querySelector('.tag-map-expand[data-tag-id="' + CSS.escape(preserveFocus) + '"]')?.focus({ preventScroll: true });
@@ -390,6 +413,7 @@
         state.expanded = new Set(state.model.roots); state.offsets.clear(); renderGraph({ fitView: true }); state.signature = "";
       } else if (action === "focus" && tag) focus(tag.id, { local: true });
       else if (action === "related") { state.related = !state.related; renderGraph({ fitView: true }); state.signature = ""; }
+      else if (action === "hide-empty") { state.hideEmpty = !state.hideEmpty; hideEmpty.setAttribute("aria-pressed", String(state.hideEmpty)); renderGraph({ fitView: true }); state.signature = ""; }
       else if (action === "zoom-in") zoomTo(state.zoom * 1.2);
       else if (action === "zoom-out") zoomTo(state.zoom / 1.2);
       else if (action === "fit") fit();

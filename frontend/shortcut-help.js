@@ -45,7 +45,7 @@
     }
     if (scene === "library") return { scene, title: TITLES[scene], note,
       primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc", "空格"), row("看题缩放", "Ctrl+滚轮"), row("适合宽度", "0")]
-        : [row("搜索题目", "/"), row("全屏看题（当前选中题）", "空格"), row("全屏上一题 / 下一题", "←", "→"), row("全屏返回题库", "Esc")],
+        : [row("搜索题目", "/"), row("全屏看题（当前选中题）", "空格"), row("全屏上一题 / 下一题", "←", "→"), row("全屏返回题库", "Esc"), row("撤销当前题上一次标签改动", "Ctrl+Z")],
       more: options.fullScreen ? [] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
       extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。放大用工具栏的＋／－、Ctrl＋滚轮或 0。答案默认收在「看答案」里，点一下才显示。" + "左右键仅在全屏看题中切题，按打开时的筛选或试题篮顺序浏览。宽公式正在横向滚动时，左右键保留给公式。标签可悬停、聚焦或点击浏览上下级；箭头只浏览，点击名称替换当前标签。Esc 关闭标签浮层，Tab 切换操作，Enter 执行。" };
     if (scene === "answers") return { scene, title: TITLES[scene], note,

@@ -480,6 +480,11 @@
       const button = node("button", `draft-filter${state.answer === key ? " active" : ""}`);
       button.append(node("span", "", label), node("span", "count", count));
       button.type = "button";
+      // 1.25.74：「有答案」单看名字容易误解成"老师给过答案没给过"，其实它是「题库里已经
+      // 保存了答案解析」 — 上传和切题不会自动写答案，所以新题进来都是 0；不解释就会一直奇怪。
+      button.title = key === "yes" ? "题库里保存了答案解析的题"
+        : key === "no" ? "题库里还没写答案的题 — 上传和切题都不会自动加答案"
+        : "全部";
       button.setAttribute("aria-pressed", String(state.answer === key));
       if (!count && state.answer !== key) {
         button.dataset.emptyFacet = "1";
@@ -1381,7 +1386,7 @@
 
   function renderInspector(item) {
     if (!ui.inspectorContent) return;
-    const renderKey = item ? JSON.stringify([item, state.features]) : "empty";
+    const renderKey = item ? JSON.stringify([item, state.features, inlineAdd.open && inlineAdd.itemId === item.id ? inlineAdd.query : null]) : "empty";
     if (renderKey === inspectorRenderedKey) return;
     inspectorRenderedKey = renderKey;
     const content = ui.inspectorContent;
@@ -2593,7 +2598,11 @@
   }
   function cardTagContext(item) {
     const context = node("div", "library-card-context");
-    (item.tag_assignments || []).filter(link => !link.needs_review && link.tag.kind === "knowledge").slice(0, 2)
+    const tagById = new Map((tagCatalogue.tags || []).map(t => [String(t.id), t]));
+    const attached = (item.tag_assignments || []).filter(link => !link.needs_review && link.tag.kind === "knowledge");
+    const isCovered = (link) => attached.some((other) => other !== link
+      && ((tagById.get(String(other.tag.id)) || other.tag).parent_ids || []).some(pid => String(pid) === String(link.tag.id)));
+    attached.filter(link => !isCovered(link)).slice(0, 2)
       .forEach(link => context.append(tagHoverChip(item, link, "library-card-tag-glimpse")));
     const pendingCount = item.tag_suggestion?.status === "pending" ? (item.tag_suggestion.suggestions || []).filter(entry => !entry.decision).length : 0;
     if (pendingCount) context.append(node("span", "library-card-ai-glimpse", `AI 建议 ${pendingCount} 条待核对`));
@@ -2710,19 +2719,328 @@
     } catch (error) { toast(error.message + " 后续改动已保留。", "error"); }
     finally { inlineTagLocks.delete(item.id); patchTagPresentation([item.id]); renderTagHover(); }
   }
+
+  // 1.25.66：从当前题目上加一个标签，模式很直接 —— 点开「+ 添加标签」，边输边匹配，
+  // 列表是目录里按名称/别名/路径打的分数；点一条就贴上，回车也行。
+  // 没有开关弹窗、没有跳走。匹配不到去重，再到标签管理里建。
+  const inlineAdd = { open: false, query: "", active: 0, itemId: null, busy: false };
+
+  function inlineTagRank(tag, query) {
+    const name = String(tag.name || "");
+    const aliases = (tag.aliases || []).join(" ");
+    const path = flowTagPath(tag);
+    const lower = query.toLowerCase();
+    const lowerName = name.toLowerCase();
+    const lowerAliases = aliases.toLowerCase();
+    const lowerPath = path.toLowerCase();
+    let score = 0;
+    if (lowerName === lower) score = 100;
+    else if (lowerName.startsWith(lower)) score = 80;
+    else if (lowerName.includes(lower)) score = 60;
+    else if (lowerAliases.includes(lower)) score = 50;
+    else if (lowerPath.includes(lower)) score = 30;
+    if (!score) return 0;
+    if (tag.kind === "knowledge") score += 6;
+    if (tag.color) score += 2;
+    return score;
+  }
+
+  function inlineAddMatches(item, query) {
+    const q = String(query || "").trim();
+    if (!q) return [];
+    const taken = new Set((item.tag_assignments || []).filter(link => !link.needs_review).map(link => String(link.tag.id)));
+    const seen = new Set();
+    const scored = [];
+    for (const tag of tagCatalogue.tags || []) {
+      if (tag.active === false) continue;
+      const id = String(tag.id);
+      if (taken.has(id)) continue;
+      if (tag.kind === "legacy") continue;
+      const score = inlineTagRank(tag, q);
+      if (!score) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      scored.push({ tag, score });
+    }
+    scored.sort((a, b) => b.score - a.score || String(a.tag.name).localeCompare(String(b.tag.name), "zh-CN"));
+    return scored.slice(0, 8).map(entry => entry.tag);
+  }
+
+  async function applyInlineAdd(item, tag) {
+    if (inlineTagLocks.has(item.id)) return;
+    const expected = item.tag_revision;
+    const attempt = { tagId: tag.id, tag, message: `已为本题贴上「${tag.name}」`, payload: {
+      publication_ids: [item.id], add: [tag.id], remove: [], scopes: {},
+      expected_revisions: { [item.id]: expected }, request_id: tagRequestId()
+    } };
+    inlineAdd.query = "";
+    inlineAdd.active = 0;
+    inlineAdd.open = true;             // 留着输入，下一条连贴
+    await submitInlineTagAttempt(item, attempt);
+    inspectorRenderedKey = "";
+    renderInspector(item);
+  }
+
+  // 1.25.67：输入框里敲一个目录里没有的名字，回车就把它建出来并贴上，不再绕道标签管理。
+  // 上级取当前筛的那一章（目录里点着哪章就建在哪章下）；没筛就按顶级建，学段跟着
+  // 目录顶部选的学段走。建完立刻载入目录，拿到新标签后照常贴。
+  async function createInlineTag(item, name) {
+    if (inlineAdd.busy) return;
+    const clean = String(name || "").trim().slice(0, 100);
+    if (!clean) return;
+    const parent = state.tagAny ? (tagCatalogue.tags || []).find(tag => String(tag.id) === String(state.tagAny)) : null;
+    const kind = parent?.kind === "method" ? "method" : parent?.kind === "custom" ? "custom" : "knowledge";
+    const levels = parent && (parent.levels || []).length ? parent.levels
+      : directory.stage === "初中" || directory.stage === "高中" ? [directory.stage] : [];
+    inlineAdd.busy = true;
+    inlineAdd.query = "";
+    inlineAdd.active = 0;
+    renderInspector(item);
+    try {
+      const payload = { action: "create_tag", name: clean, kind, color: "", description: "", aliases: [],
+        conditions: "", levels, parent_ids: parent ? [String(parent.id)] : [], related_method_ids: [],
+        revision: tagCatalogue.revision, request_id: tagRequestId() };
+      const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify(payload) });
+      tagCatalogue = result.catalogue || await loadTagCatalogue();
+      const created = (tagCatalogue.tags || []).find(tag => tag.name === clean && tag.kind === kind);
+      if (!created) throw new Error("标签已创建，但还没载入，请刷新后再贴。");
+      toast(`已新建并贴上「${created.name}」`, "success");
+      await applyInlineAdd(state.catalog.get(item.id) || item, created);
+      if (document.body.classList.contains("library-directory-open")) directoryRender();
+    } catch (error) {
+      toast(error.message || "新建标签失败。", "error");
+    } finally {
+      inlineAdd.busy = false;
+      inspectorRenderedKey = "";
+      renderInspector(state.catalog.get(item.id) || item);
+    }
+  }
+
+  function buildInlineAddPanel(item) {
+    const panel = node("div", "library-inline-add");
+    const field = node("label", "library-inline-add-field");
+    const input = node("input", "library-inline-add-input");
+    input.type = "text";
+    input.placeholder = "输入标签名，回车贴上或新建";
+    input.value = inlineAdd.query;
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    const close = node("button", "library-inline-add-close", "×");
+    close.type = "button";
+    close.title = "收起输入框";
+    close.setAttribute("aria-label", "收起输入框");
+    field.append(input, close);
+    const list = node("div", "library-inline-add-list");
+    list.setAttribute("role", "listbox");
+    const hint = node("p", "library-inline-add-hint", "↑↓ 选择 · 回车贴上 · Esc 收起");
+
+    // 一行一条候选；敲的名字在目录里找不到时，末尾补一条「新建并贴上」。
+    const optionsFor = (query) => {
+      const matches = inlineAddMatches(item, query);
+      const rows = matches.map(tag => ({ type: "tag", tag }));
+      const trimmed = query.trim();
+      if (trimmed) {
+        // 「新建」只在目录里真的没有同名标签时出现；已经有了、只是本题没贴，那就不该再建一个。
+        const exactTag = (tagCatalogue.tags || []).find(tag => tag.active !== false
+          && String(tag.name).toLowerCase() === trimmed.toLowerCase());
+        if (!exactTag) rows.push({ type: "create", name: trimmed });
+        else if (!matches.some(tag => String(tag.id) === String(exactTag.id))) rows.push({ type: "note", text: `「${exactTag.name}」已经贴在这道题上了` });
+      }
+      return rows;
+    };
+
+    const renderList = () => {
+      const rows = optionsFor(inlineAdd.query);
+      list.replaceChildren();
+      if (!rows.length) {
+        hint.hidden = false;
+        hint.textContent = "↑↓ 选择 · 回车贴上 · Esc 收起";
+        return;
+      }
+      hint.hidden = true;
+      if (inlineAdd.active >= rows.length) inlineAdd.active = 0;
+      rows.forEach((entry, index) => {
+        const row = node("button", "library-inline-add-item" + (inlineAdd.active === index ? " active" : ""));
+        row.type = "button";
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", String(inlineAdd.active === index));
+        if (entry.type === "tag") {
+          row.dataset.tagId = entry.tag.id;
+          const color = entry.tag.color && /^#[0-9a-f]{6}$/i.test(String(entry.tag.color)) ? String(entry.tag.color).toLowerCase() : "";
+          if (color) row.style.setProperty("--tag-color", color);
+          const dot = node("span", "library-inline-add-dot");
+          if (!color) dot.hidden = true;
+          const name = node("span", "library-inline-add-name", String(entry.tag.name));
+          const path = node("small", "library-inline-add-path", flowTagPath(entry.tag) || "");
+          row.append(dot, name, path);
+          row.title = `${entry.tag.name}${entry.tag.description ? " · " + entry.tag.description : ""}`;
+          row.addEventListener("click", () => { void applyInlineAdd(item, entry.tag); });
+        } else if (entry.type === "create") {
+          row.classList.add("is-create");
+          row.dataset.create = "1";
+          const name = node("span", "library-inline-add-name", `新建「${entry.name.slice(0, 30)}」并贴上`);
+          row.append(name);
+          row.title = "目录里没有这个标签；回车会新建它，并建在当前选中章节下";
+          row.addEventListener("click", () => { void createInlineTag(item, entry.name); });
+        } else {
+          row.classList.add("is-note");
+          row.disabled = true;
+          row.append(node("span", "library-inline-add-name", entry.text));
+        }
+        row.addEventListener("mouseenter", () => { inlineAdd.active = index; });
+        list.append(row);
+      });
+    };
+
+    input.addEventListener("input", () => { inlineAdd.query = input.value; inlineAdd.active = 0; renderList(); });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const rows = optionsFor(inlineAdd.query);
+        if (!rows.length) return;
+        inlineAdd.active = (inlineAdd.active + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+        renderList();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const rows = optionsFor(inlineAdd.query);
+        const entry = rows[inlineAdd.active] || rows[0];
+        if (!entry) return;
+        if (entry.type === "tag") void applyInlineAdd(item, entry.tag);
+        else if (entry.type === "create") void createInlineTag(item, entry.name);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeInlineAdd(item);
+      }
+    });
+    close.addEventListener("click", () => closeInlineAdd(item));
+    panel.append(field, list, hint);
+    renderList();
+    return { panel, input };
+  }
+
+  function closeInlineAdd(item) {
+    inlineAdd.open = false; inlineAdd.itemId = null; inlineAdd.query = ""; inlineAdd.active = 0;
+    inspectorRenderedKey = "";
+    if (item) renderInspector(item);
+  }
+
+  // 1.25.68：把一颗标签拖到另一颗标签上 → 它就成为子标签；父标签在本题上收起，
+  // 让子标签顶它的位。底层走目录的 set_parents（操作记录里能撤销）。
+  async function nestTagUnder(item, draggedTag, parentTag) {
+    if (!draggedTag || !parentTag) return;
+    if (String(draggedTag.id) === String(parentTag.id)) return;
+    if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
+    // 不让拖成自己的后代（防环）。
+    const descendantsOf = (root) => {
+      const out = new Set();
+      const stack = [(tagCatalogue.tags || []).find(t => String(t.id) === String(root.id))];
+      while (stack.length) {
+        const current = stack.pop();
+        if (!current) continue;
+        for (const child of (tagCatalogue.tags || [])) {
+          if ((child.parent_ids || []).some(pid => String(pid) === String(current.id) && child.kind === current.kind)) {
+            if (!out.has(String(child.id))) { out.add(String(child.id)); stack.push(child); }
+          }
+        }
+      }
+      return out;
+    };
+    if (descendantsOf(parentTag).has(String(draggedTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的子标签，把它挂回去会成环。", "error"); return; }
+    try {
+      const currentParents = (draggedTag.parent_ids || []).map(pid => String(pid));
+      if (currentParents.includes(String(parentTag.id))) { toast("「" + draggedTag.name + "」已经挂到「" + parentTag.name + "」下面了。", "info"); return; }
+      const action = "add_parent";
+      const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify({
+        action, tag_id: String(draggedTag.id), parent_id: String(parentTag.id),
+        revision: tagCatalogue.revision, request_id: tagRequestId()
+      }) });
+      tagCatalogue = result.catalogue || await loadTagCatalogue();
+      toast("「" + draggedTag.name + "」已挂到「" + parentTag.name + "」下面", "success");
+      inspectorRenderedKey = "";
+      renderInspector(state.catalog.get(item.id) || item);
+      if (document.body.classList.contains("library-directory-open")) directoryRender();
+    } catch (error) {
+      toast(error.message || "没挂上，原来的关系保留。", "error");
+    }
+  }
+
+  function attachChipDnD(strip, item) {
+    if (!strip || strip.dataset.dndAttached === "1") return;
+    strip.dataset.dndAttached = "1";
+    strip.querySelectorAll(".library-tag-chip[draggable='true']").forEach(chip => {
+      chip.addEventListener("dragstart", (event) => {
+        if (!chip.dataset.tagId) return;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/x-tag", JSON.stringify({ id: chip.dataset.tagId, kind: chip.dataset.tagKind || "" }));
+        chip.classList.add("is-dragging");
+      });
+      chip.addEventListener("dragend", () => {
+        chip.classList.remove("is-dragging");
+        strip.querySelectorAll(".is-drag-target").forEach(target => target.classList.remove("is-drag-target"));
+      });
+    });
+    strip.addEventListener("dragover", (event) => {
+      const chip = event.target.closest(".library-tag-chip[draggable='true']");
+      if (!chip) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (!chip.classList.contains("is-drag-target")) chip.classList.add("is-drag-target");
+    });
+    strip.addEventListener("dragleave", (event) => {
+      const chip = event.target.closest(".library-tag-chip[draggable='true']");
+      if (chip) chip.classList.remove("is-drag-target");
+    });
+    strip.addEventListener("drop", async (event) => {
+      const targetChip = event.target.closest(".library-tag-chip[draggable='true']");
+      if (!targetChip) return;
+      event.preventDefault();
+      targetChip.classList.remove("is-drag-target");
+      let payload; try { payload = JSON.parse(event.dataTransfer.getData("text/x-tag")); } catch (_) { return; }
+      const draggedTag = (tagCatalogue.tags || []).find(t => String(t.id) === String(payload.id));
+      const parentTag = (tagCatalogue.tags || []).find(t => String(t.id) === String(targetChip.dataset.tagId));
+      if (!draggedTag || !parentTag) return;
+      await nestTagUnder(item, draggedTag, parentTag);
+    });
+  }
   function extrasNode(item, { includeSuggestions = true } = {}) {
     const box = node("div", "library-extras");
     const row = node("div", "library-tags");
-    (item.tag_assignments || []).filter((link) => !link.needs_review).forEach((link) => {
+    // 1.25.68：父 + 子都贴在这道题上时，父就不画出来——让更具体的那颗顶着位。
+    // 父标签是否被子标签盖住，要看最新的目录（拖完一颗标签，目录刚改过，本题缓存可能没动）。
+    const tagById = new Map((tagCatalogue.tags || []).map(t => [String(t.id), t]));
+    const attached = (item.tag_assignments || []).filter(link => !link.needs_review);
+    const isCovered = (link) => attached.some((other) => {
+      if (other === link) return false;
+      const otherFresh = tagById.get(String(other.tag.id)) || other.tag;
+      return (otherFresh.parent_ids || []).some(pid => String(pid) === String(link.tag.id) && otherFresh.kind === link.tag.kind);
+    });
+    const renderChips = attached.filter(link => !isCovered(link))
+      .forEach((link) => {
       const tag = link.tag;
       const wrapper = node("div", "library-tag-chip"), chip = tagHoverChip(item, link, "library-tag");
       if (tag.color) wrapper.style.setProperty("--tag-color", tag.color);
+      wrapper.dataset.tagId = tag.id;
+      wrapper.dataset.tagKind = tag.kind;
+      wrapper.draggable = true;
+      wrapper.title = `${tag.name} · 拖到另一颗标签上可把它挂成子标签`;
       const remove = node("button", "library-tags-remove", "×"); remove.type = "button"; remove.dataset.tagId = tag.id; remove.title = `从本题移除「${tag.name}」`; remove.setAttribute("aria-label", remove.title);
-      remove.disabled = inlineTagLocks.has(item.id); remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove); row.append(wrapper);
+      remove.disabled = inlineTagLocks.has(item.id); remove.draggable = false; remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove);
+      row.append(wrapper);
     });
+    attachChipDnD(row, item);
     const edit = node("button", "library-tags-edit", "＋ 添加标签"); edit.type = "button";
-    edit.title = "为当前这道题添加标签；AI 的建议就在这个按钮下面，可以直接改名、采纳或拒绝"; edit.disabled = inlineTagLocks.has(item.id);
-    edit.addEventListener("click", () => openTagEditor(item)); row.append(edit); box.append(row);
+    edit.title = "为当前这道题添加标签 —— 输入上文的标签名，按回车贴上；不打开弹窗"; edit.disabled = inlineTagLocks.has(item.id);
+    edit.addEventListener("click", () => { inlineAdd.open = !inlineAdd.open; inlineAdd.itemId = item.id; inlineAdd.query = ""; inlineAdd.active = 0; renderInspector(item); }); row.append(edit); box.append(row);
+    if (inlineAdd.open && inlineAdd.itemId === item.id) {
+      const built = buildInlineAddPanel(item);
+      box.append(built.panel);
+      // 等下一贞再聚焦，保证面板挂在了 DOM 里。
+      queueMicrotask(() => built.input.focus());
+    }
     const saved = inlineTagStates.get(item.id);
     if (saved) {
       const status = node("div", "library-tags-save-state"); status.setAttribute("role", "status"); status.append(node("small", "", saved.message));
@@ -2981,6 +3299,15 @@
       remove.title = label;
       remove.setAttribute("aria-label", `取消${label}`);
       remove.append(node("span", "label", label), node("span", "drop", "×"));
+      // 1.25.64：标签筛选条的颜色用同一标签的颜色 —— 目录看的颜色、筛选条看的颜色，
+      // 详情里看到的颜色都是同一根色。改了标签颜色，这一栏会自动跟着变。
+      if (key === "tag") {
+        const tagId = state.tag || state.tagAny || state.tagAll || state.tagNot;
+        if (tagId) {
+          const t = tagCatalogue.tags.find(x => String(x.id) === String(tagId));
+          if (t?.color) remove.style.setProperty("--tag-color", t.color);
+        }
+      }
       remove.addEventListener("click", () => {
         if (key === "tag") { state.tag = ""; state.tagAll = state.tagAny = state.tagNot = ""; state.tagMode = "all"; state.untaggedKnowledge = state.tagReview = false; }
         else state[key] = "";
@@ -5246,6 +5573,29 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     setInspectorOpen(false);
     ui.inspectorToggle?.focus({ preventScroll: true });
   });
+  // 1.25.69：Ctrl+Z / Ctrl+Shift+Z 撤销/重做当前题上一次的标签改动。文字输入框
+  // 里仍然是浏览器原生的"撤销改字"，由 target 检查交给浏览器，不抢它。
+  document.addEventListener("keydown", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    if (event.key !== "z" && event.key !== "Z") return;
+    if (event.altKey) return;
+    if (document.querySelector("dialog[open]")) return;
+    const editable = 'input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+    if (event.target?.closest?.(editable)) return;
+    event.preventDefault();
+    const item = state.catalog.get(state.inspectorId);
+    if (!item) return;
+    if (inlineTagLocks.has(item.id)) { toast("上一步操作还没落地，稍等再撤销。", "info"); return; }
+    if (event.shiftKey) {
+      // 重做：当前只有 item 自带的"上一次操作"能撤销，目录里其它操作不带 operationId 到页面，
+      // 这里就不冒进一条接出去的命令。重做以后再操作会盖住。
+      toast("回题库用「＋ 添加标签」旁边的撤销按钮，或在标签管理里看操作记录。", "info");
+      return;
+    }
+    const saved = inlineTagStates.get(item.id);
+    if (!saved?.operationId) { toast("当前题目最近没有可撤销的标签操作。", "info"); return; }
+    void undoInlineTag(item);
+  });
   // 1.25.29：快捷键不再在抽屉里单独摆一颗按钮 —— 设置 → 帮助里有，这一页按「?」
   // 也能打开。同一个东西三个入口，抽屉里那颗反而像是「另一个页面」。
   // 原来这里常驻两条提示条（题库快捷键、打印快捷键）外加一个「恢复操作提示」按钮。
@@ -5281,7 +5631,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   // ---------------------------------------------------------------- 教材目录
   // 1.25.58：目录长在题库里。左栏就是教材目录（章 → 节 → 知识点），每个节点写
   // 这一层有几道题；点一章直接看这一章的题（含子标签）。标签管理退回去只做编辑。
-  const directory = { panel: null, loading: false, tags: [], open: new Set(), showAll: new Set(), error: "" };
+  const directory = { panel: null, loading: false, tags: [], open: new Set(), showAll: new Set(), error: "", kind: "knowledge", stage: "all" };
+  const DIRECTORY_KINDS = { knowledge: "知识点", method: "解题方法", custom: "自定义" };
 
   function directoryChildren(tag) {
     const id = String(tag.id);
@@ -5291,7 +5642,62 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   }
 
   function directoryCount(tag) {
+    // 1.25.63：数字跟着当前筛选走。题库接口返回的标签计数已经算过来源、题型这些条件
+    // （只是不算标签本身），目录直接用它 —— 筛了来源再看目录，数字和右边列表对得上。
+    // 这份计数是一张列表（只在有题的标签上出现），目录里的每个节点都去里面找自己的那道数；
+    // 载入之前先退回到目录目录里记的全库数字。
+    const facets = state.facets?.tags;
+    if (Array.isArray(facets) && facets.length) {
+      const hit = facets.find(item => String(item.id) === String(tag.id));
+      return hit ? Number(hit.subtree_count) || 0 : 0;
+    }
     return Number(tag.subtree_count) || Number(tag.count) || 0;
+  }
+
+  // 1.25.64：标签的颜色先看自己设的；没设就找最近的同型祖先；都没有，按类型/学段从调色板
+  // 里取一个（初中一色、高中一色、解题方法另起一色）—— 整片一组色看着不杂，扫到哪
+  // 知道是哪个阶段/种类。题库页面其它地方设的 `--tag-color` 是同一套变量，所以有颜色的
+  // 标签从目录、筛选条、详情到待办都是一致的。
+  const TAG_HEX = /^#[0-9a-f]{6}$/i;
+  const DIRECTORY_STAGE_COLOR = {
+    knowledge: { 初中: "#4f8278", 高中: "#477a9e", 默认: "#5b6770" },
+    method: "#bf8545",
+    custom: "#8965a5"
+  };
+  function directoryStageColor(tag) {
+    if (!tag) return "";
+    const map = DIRECTORY_STAGE_COLOR[tag.kind];
+    if (typeof map === "string") return map;
+    if (typeof map === "object") {
+      const stage = directoryStageOf(tag);
+      if (stage === "初中") return map.初中;
+      if (stage === "高中") return map.高中;
+    }
+    return map.默认 || "";
+  }
+  function directoryStageOf(tag) {
+    if (!tag) return "";
+    if (Array.isArray(tag.levels) && tag.levels.length) return tag.levels[0];
+    const name = String(tag.name || "");
+    if (name.startsWith("初中")) return "初中";
+    if (name.startsWith("高中")) return "高中";
+    return "";
+  }
+  function directoryColor(tag) {
+    if (tag.color && TAG_HEX.test(String(tag.color))) return String(tag.color).toLowerCase();
+    const byId = new Map(directory.tags.map(t => [String(t.id), t]));
+    const seen = new Set();
+    let current = tag;
+    while (current) {
+      const id = String(current.id);
+      if (seen.has(id)) break;
+      seen.add(id);
+      if (current.color && TAG_HEX.test(String(current.color))) return String(current.color).toLowerCase();
+      const pid = (current.parent_ids || []).map(String).find(id => byId.get(id)?.kind === current.kind);
+      if (!pid) break;
+      current = byId.get(pid);
+    }
+    return directoryStageColor(tag);
   }
 
   function directorySelected() { return String(state.tagAny || ""); }
@@ -5305,9 +5711,11 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     panel.hidden = true;
     workspace.prepend(panel);
     directory.panel = panel;
-    $("libraryDirectoryToggle")?.addEventListener("click", () => void directoryToggle());
     return panel;
   }
+  // 1.25.71：开关的点击事件一开始就挂上，不等首次打开。原先写在 directoryEnsure 里，
+  // 上一次关掉后 localStorage 是 "0"，不会自动打开，监听也就没绑上，再点没反应。
+  // 这里绑在初始化末尾 —— 在「if (state.document)...」之后，测试片段会忽略它。
 
   async function directoryToggle(force) {
     const panel = directoryEnsure();
@@ -5318,6 +5726,14 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     try { localStorage.setItem("qb-library-directory", open ? "1" : "0"); } catch (_) { /* 记不住也没关系 */ }
     if (!open) return;
     if (!directory.tags.length) await directoryLoad();
+    // 1.25.72：默认只展开真正有题目的章 —— 全树空的那一类才往下翻（看不到东西），反而变成一
+    // 排"还有 X 个没用到的"刷下来。这一层自动展开是给眼睛一个"目录里有货"的提示。
+    if (directory.open.size === 0 && directory.tags.length) {
+      const byId = new Map(directory.tags.map(tag => [String(tag.id), tag]));
+      for (const tag of directory.tags) {
+        if ((tag.parent_ids || []).every(pid => byId.get(String(pid))?.kind !== tag.kind) && directoryCount(tag) > 0) directory.open.add(String(tag.id));
+      }
+    }
     // 展开到当前筛的那一层，免得「明明筛着函数，目录里却找不到它」。
     if (state.tagAny) directoryOpenPath(String(state.tagAny));
     directoryRender();
@@ -5351,8 +5767,12 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     if (ancestors.has(id)) return null;
     const children = directoryChildren(tag).filter(child => !ancestors.has(String(child.id)));
     const open = directory.open.has(id);
-    const row = node("div", "library-directory-row-wrap");
+    const subtreeEmpty = directoryCount(tag) === 0;
+    const row = node("div", "library-directory-row-wrap"
+      + (directorySelected() === id ? " is-current" : "")
+      + (subtreeEmpty ? " is-empty" : ""));
     row.style.paddingLeft = (depth * 14) + "px";
+    row.style.setProperty("--directory-color", directoryColor(tag));
     const line = node("div", "library-directory-line");
     const toggle = children.length
       ? node("button", "library-directory-caret" + (open ? " open" : ""), open ? "▾" : "▸")
@@ -5374,16 +5794,19 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       directory.open.add(id);
       directorySelect(tag);
     });
-    const count = node("small", "library-directory-count" + (directoryCount(tag) ? "" : " is-zero"), `${directoryCount(tag)}`);
+    const count = node("small", "library-directory-count" + (subtreeEmpty ? " is-zero" : ""), `${directoryCount(tag)}`);
     line.append(toggle, name, count);
     row.append(line);
     if (open) {
       const used = children.filter(child => directoryCount(child) > 0);
+      // 1.25.72：子标签全部空的时候，"还有 N 个没用到的"也变成纯噪音 —— 留一行就够，
+      // 明确告诉用户"这一支还空着，要加标签到标签管理"，别再加一个箭头。
+      const allChildrenEmpty = children.length > 0 && used.length === 0;
       const hidden = children.filter(child => directoryCount(child) === 0);
       const showAll = directory.showAll.has(id);
       const list = showAll ? children : used;
       list.forEach(child => { const item = directoryRow(child, depth + 1, new Set([...ancestors, id])); if (item) row.append(item); });
-      if (hidden.length && !showAll) {
+      if (hidden.length && !showAll && !allChildrenEmpty) {
         const more = node("button", "library-directory-more", `还有 ${hidden.length} 个没用到的`);
         more.type = "button";
         more.addEventListener("click", () => { directory.showAll.add(id); directoryRender(); });
@@ -5405,13 +5828,54 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     close.addEventListener("click", () => void directoryToggle(false));
     head.append(close);
     panel.append(head);
-    panel.append(node("p", "library-directory-help", "点一章看这一章的题；0 表示这一章还没贴题，可以用「逐题贴」补上。"));
+    panel.append(node("p", "library-directory-help", "点一章看这一章的题；0 表示当前筛选下这一章没有题（多半是还没贴标签）。"));
     if (directory.loading) { panel.append(node("p", "library-directory-empty", "正在读取目录…")); return; }
     if (directory.error) {
       const retry = node("button", "button button-small", "重新读取"); retry.type = "button";
       retry.addEventListener("click", () => void directoryLoad().then(directoryRender));
       panel.append(node("p", "library-directory-empty", directory.error), retry);
       return;
+    }
+    // 1.25.63：解题方法也是一层层的方法目录（代数与函数 → 因式分解 …），以前只能去标签管理里
+    // 看。目录顶部给一个分类切换，两种文件夹都在题库里。
+    const kindRows = Object.entries(DIRECTORY_KINDS)
+      .map(([kind, label]) => ({ kind, label, total: directory.tags.filter(tag => tag.kind === kind).length }))
+      .filter(entry => entry.total);
+    if (kindRows.length > 1) {
+      const kinds = node("div", "library-directory-kinds");
+      kindRows.forEach(entry => {
+        const button = node("button", "library-directory-kind" + (directory.kind === entry.kind ? " selected" : ""), `${entry.label} ${entry.total}`);
+        button.type = "button";
+        button.addEventListener("click", () => {
+          if (directory.kind === entry.kind) return;
+          directory.kind = entry.kind; directory.open.clear(); directory.showAll.clear();
+          directoryRender();
+        });
+        kinds.append(button);
+      });
+      panel.append(kinds);
+    }
+    // 1.25.67：学段单独一行。网友提的「学段划分」落在目录上最值：初中、高中分开看，
+    // 两边的章不混在一起，找题的路少一半。学科不单列 —— 这是个数学题库，没有第二科。
+    const stageCounts = { 初中: 0, 高中: 0 };
+    directory.tags.filter(tag => tag.kind === directory.kind).forEach(tag => {
+      const stage = directoryStageOf(tag);
+      if (stage in stageCounts) stageCounts[stage] += 1;
+    });
+    if (stageCounts.初中 || stageCounts.高中) {
+      const stages = node("div", "library-directory-stages");
+      [["all", "全部"], ["初中", "初中"], ["高中", "高中"]].forEach(([value, label]) => {
+        if (value !== "all" && !stageCounts[value]) return;
+        const button = node("button", "library-directory-stage" + (directory.stage === value ? " selected" : ""), label);
+        button.type = "button";
+        button.addEventListener("click", () => {
+          if (directory.stage === value) return;
+          directory.stage = value; directory.open.clear(); directory.showAll.clear();
+          directoryRender();
+        });
+        stages.append(button);
+      });
+      panel.append(stages);
     }
     const all = node("button", "library-directory-all", "全部题目");
     all.type = "button";
@@ -5422,6 +5886,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     if (missing) {
       const untagged = node("button", "library-directory-all", `未标知识点 · ${missing} 题`);
       untagged.type = "button";
+      untagged.title = "整个题库里还没打上正式知识点标签的题数，不受上面的来源、题型影响。";
       untagged.classList.toggle("selected", state.untaggedKnowledge);
       untagged.addEventListener("click", () => {
         state.untaggedKnowledge = true; state.tagAny = ""; state.tagAll = ""; state.tagNot = ""; state.tag = ""; state.tagReview = false;
@@ -5431,10 +5896,13 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       panel.append(untagged);
     }
     const byId = new Map(directory.tags.map(tag => [String(tag.id), tag]));
-    const roots = directory.tags.filter(tag => tag.kind === "knowledge"
-      && !(tag.parent_ids || []).some(parent => byId.get(String(parent))?.kind === "knowledge"))
+    const roots = directory.tags.filter(tag => tag.kind === directory.kind
+      && !(tag.parent_ids || []).some(parent => byId.get(String(parent))?.kind === directory.kind)
+      && (directory.stage === "all" || directoryStageOf(tag) === directory.stage))
       .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
-    if (!roots.length) panel.append(node("p", "library-directory-empty", "目录里还没有知识点标签。"));
+    if (!roots.length) panel.append(node("p", "library-directory-empty", directory.stage === "all"
+      ? `还没有${DIRECTORY_KINDS[directory.kind] || "这一类"}标签。`
+      : `${directory.stage}这边还没有${DIRECTORY_KINDS[directory.kind] || "这一类"}标签。`));
     roots.forEach(root => { const row = directoryRow(root, 0, new Set()); if (row) panel.append(row); });
     panel.scrollTop = scroll;
   }
@@ -5892,4 +6360,11 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   load();
   // 1.25.58：目录默认开在左栏；关过一次就记住不再自动开。
   try { if (localStorage.getItem("qb-library-directory") !== "0") void directoryToggle(true); } catch (_) { /* 记不住就不自动开 */ }
+  // 1.25.64：拉一份目录进 tagCatalogue，让筛选条、悬停都能拿到每条标签的颜色。
+  // 目录本身已经各自 fetch 了一份，这里只为了把同一份数据放进 tag picker / 筛选条用的全局缓存。
+  void loadTagCatalogue().catch(() => { /* 失败也不影响题库主功能 */ });
+  // 1.25.71：开关的点击事件一开始就挂上，不等首次打开。原先写在 directoryEnsure 里，
+  // 上一次关掉后 localStorage 是 "0"，init 不会调 directoryToggle，监听也就没绑上 —
+  // 再点「目录」没反应。放在初始化末尾、测试片段会忽略的位置里。
+  $("libraryDirectoryToggle")?.addEventListener("click", () => void directoryToggle());
 })();

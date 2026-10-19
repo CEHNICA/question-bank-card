@@ -72,6 +72,13 @@ body.library-focus-mode .rail-collapse:hover, body.library-focus-mode .rail-coll
 .draft-filter.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(22,44,39,.12), 0 0 0 1px rgba(22,44,39,.04); }
 .draft-filter .count { min-width: 18px; padding: 0 5px; border-radius: 99px; background: rgba(0,0,0,.06); font-size: 11px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
 .draft-filter.active .count { background: var(--accent-soft); color: var(--accent); }
+/* 1.25.73：题数和侧栏的筛选条上，"有答案 0 / 无答案 807"这种「中间夹一个 0」看着跳；
+   0 项的整颗按钮弱化，不再和正文平级，但不藏起来 —— 老师还是想看到"现在没答案的题目"。 */
+.draft-filter[data-empty-facet] { color: var(--faint); background: transparent; }
+.draft-filter[data-empty-facet]:hover { color: var(--muted); }
+.draft-filter[data-empty-facet] .count { background: transparent; color: var(--faint); font-weight: 500; }
+.draft-filter[data-empty-facet].active { color: var(--muted); background: var(--surface-2); box-shadow: none; }
+.draft-filter[data-empty-facet].active .count { background: rgba(0,0,0,.04); color: var(--muted); }
 
 /* 开关 */
 .library-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; user-select: none; }
@@ -338,7 +345,7 @@ body.library-basket-open .question-inspector { display: none; }
 .library-card-context { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 22px 10px; }
 .library-card-tag-glimpse, .library-card-ai-glimpse { padding: 2px 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; }
 .library-card-ai-glimpse { color: var(--muted); background: var(--surface-2); }
-.library-tag-chip { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; border: 1px solid var(--tag-color, var(--line-strong)); border-radius: 6px; background: var(--surface-2); }
+.library-tag-chip { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; border: 1px solid var(--tag-color, var(--line-strong)); border-radius: 6px; background: color-mix(in srgb, var(--tag-color, var(--line-strong)) 8%, var(--surface-2)); }
 .library-tag-info { min-width: 0; }
 .library-tag-chip .library-tag { display: block; border: 0; border-radius: 0; padding: 5px 3px 5px 8px; background: transparent; color: var(--ink-2); font-size: 12px; line-height: 1.4; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
 .library-tag-chip > .library-tag { min-width: 0; text-align: left; font-family: var(--ui-font); }
@@ -560,6 +567,10 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 /* 名字太长时截断，「×」留在同一行末尾。完整名字放在 title 里，鼠标停上去能看全。 */
 .library-filter-chip > .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-filter-chip > .drop { flex: none; color: var(--muted); }
+/* 1.25.64：标签筛选条按这个标签的色上一道软底；颜色全是这个标签自己设的。
+   同一标签：目录、筛选条、详情里的颜色都是同一根。 */
+.library-filter-chip[style*="--tag-color"] { background: color-mix(in srgb, var(--tag-color) 14%, var(--surface)); border-color: color-mix(in srgb, var(--tag-color) 50%, var(--line)); color: var(--tag-color); }
+.library-filter-chip[style*="--tag-color"] > .drop { color: color-mix(in srgb, var(--tag-color) 70%, var(--muted)); }
 .library-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 .library-card-meta { padding-top: 13px; }
 .library-card.compact .paper { padding-top: 10px; padding-bottom: 8px; }
@@ -1482,20 +1493,32 @@ body.library-directory-open .library-directory { display: block; position: stick
 .library-directory-all:hover { background: #eef3ef; }
 .library-directory-all.selected { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .library-directory-row-wrap { min-width: 0; }
+.library-directory-row-wrap.is-empty .library-directory-name { color: var(--muted); font-weight: 400; }
+.library-directory-row-wrap.is-empty .library-directory-caret { color: var(--faint); }
+.library-directory-row-wrap.is-empty::before { background: repeating-linear-gradient(to bottom, var(--faint) 0 4px, transparent 4px 7px); opacity: .55; }
+.library-directory-row-wrap.is-empty.is-current::before { background: var(--directory-color); opacity: 1; }
+.library-directory-row-wrap.is-empty.is-current .library-directory-name { color: var(--directory-color); font-weight: 600; }
 .library-directory-line { display: flex; align-items: center; gap: 3px; min-width: 0; }
 .library-directory-caret { flex: 0 0 18px; width: 18px; height: 24px; padding: 0; border: 0; border-radius: 4px;
   background: transparent; color: var(--muted); font-size: 10px; line-height: 1; cursor: pointer; }
 .library-directory-caret:hover { background: #e6e8e1; color: var(--ink); }
 .library-directory-caret.is-empty { cursor: default; }
 .library-directory-name { flex: 1 1 auto; min-width: 0; padding: 4px 3px; overflow: hidden; border: 0; border-radius: 5px;
-  background: transparent; color: inherit; font: inherit; font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .library-directory-name:hover { background: #eef3ef; }
 .library-directory-name.selected { color: var(--accent); font-weight: 600; }
 .library-directory-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.library-directory-more { display: block; padding: 4px 0 4px 4px; border: 0; background: transparent; color: var(--muted);
-  font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.library-directory-more { display: block; padding: 2px 0 4px 22px; margin: 0; border: 0; background: transparent;
+  color: var(--faint); font: inherit; font-size: 11px; text-align: left; cursor: pointer; font-style: italic; }
 .library-directory-more:hover { color: var(--accent); text-decoration: underline; }
 .library-directory-empty { margin: 8px 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* 1.25.72：顶部的帮助文字太抢眼，改成一行浅灰小字，跟着背景走。 */
+.library-directory-help { margin: -2px 6px 8px; padding: 5px 8px; border-left: 2px solid var(--line);
+  background: transparent; color: var(--muted); font-size: 11px; line-height: 1.55; }
+/* 1.25.72：分类切换和章节间留点呼吸空，别贴在一起。 */
+.library-directory-kinds { margin-bottom: 6px; }
+.library-directory-stages { margin-bottom: 8px; }
+.library-directory-all { font-weight: 500; }
 @media (min-width: 1100px) {
   body.library-directory-open.library-page .library-workspace { grid-template-columns: 236px minmax(0, 1fr) 288px; }
   body.library-directory-open.library-page .library-workspace > .library-results { grid-column: 2; }
@@ -1515,3 +1538,63 @@ body.library-directory-open .library-directory { display: block; position: stick
 .library-directory-toggle[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .library-directory-count.is-zero { color: #b9bcb3; }
 .library-directory-help { margin: 2px 8px 8px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+/* 1.25.63：目录顶部的分类切换（知识点 / 解题方法 / 自定义）。 */
+.library-directory-kinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 2px 8px; }
+.library-directory-kind { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  color: var(--ink-2); font: inherit; font-size: 11.5px; cursor: pointer; }
+.library-directory-kind:hover { border-color: var(--line-strong); color: var(--ink); }
+.library-directory-kind.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.library-filter-group-note { margin: 0 0 8px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+/* 1.25.64：Eagle 那种"颜色 = 这章的色"做法，让目录、活跃筛选条、详情这几处一齐齐味同源。
+   每行左边有一条 4px 着色条，选中那一行还多一层淡底。颜色优先用标签自己设的；
+   没设的，按最近的同型祖先往上找；都没有，就从调色板按根章节索引取。 */
+.library-directory-row-wrap { --directory-color: var(--accent); position: relative; }
+.library-directory-row-wrap::before {
+  content: ""; position: absolute; left: 0; top: 4px; bottom: 4px;
+  width: 4px; border-radius: 4px; background: var(--directory-color); opacity: .65;
+  transition: opacity .15s ease;
+}
+.library-directory-row-wrap:hover::before { opacity: 1; }
+.library-directory-row-wrap.is-current::before { opacity: 1; }
+.library-directory-row-wrap.is-current { background: color-mix(in srgb, var(--directory-color) 14%, transparent); border-radius: 7px; }
+.library-directory-row-wrap.is-current .library-directory-name { color: var(--directory-color); font-weight: 600; }
+.library-directory-row-wrap.is-current .library-directory-count { color: var(--directory-color); opacity: .82; }
+/* 1.25.67：加上标签的输入框改紧凑 —— 只有一条输入、候选贴着输入，不再摆三行说明。
+   颜色用小圆点表示；「新建」那一行是虚线，回车就是它。 */
+.library-inline-add { display: grid; gap: 6px; margin-top: 8px; }
+.library-inline-add-field { display: flex; align-items: center; gap: 4px; padding: 0 6px 0 10px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); }
+.library-inline-add-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.library-inline-add-input { flex: 1 1 auto; min-width: 0; min-height: 34px; border: 0; outline: none;
+  background: transparent; color: inherit; font: inherit; font-size: 13px; }
+.library-inline-add-input::placeholder { color: var(--faint); }
+.library-inline-add-close { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font: 16px/1 var(--ui-font); cursor: pointer; }
+.library-inline-add-close:hover { background: var(--surface-2); color: var(--ink); }
+.library-inline-add-list { display: grid; gap: 1px; max-height: 236px; overflow: auto; }
+.library-inline-add-item { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px;
+  text-align: left; cursor: pointer; }
+.library-inline-add-item:hover { background: var(--surface-2); }
+.library-inline-add-item.active { background: color-mix(in srgb, var(--tag-color, var(--accent)) 12%, var(--surface)); }
+.library-inline-add-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tag-color, var(--line-strong)); }
+.library-inline-add-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-inline-add-path { flex: 0 1 auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-size: 11px; }
+.library-inline-add-item.is-create { border: 1px dashed var(--line-strong); color: var(--accent-dark); }
+.library-inline-add-item.is-create:hover { background: var(--accent-soft); border-style: solid; }
+.library-inline-add-hint { margin: 0; padding: 0 2px; color: var(--muted); font-size: 11px; }
+/* 1.25.67：目录顶部的学段切换（全部 / 初中 / 高中）。 */
+.library-directory-stages { display: flex; gap: 4px; margin: 0 2px 8px; }
+.library-directory-stage { padding: 3px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+.library-directory-stage:hover { color: var(--ink); background: var(--surface-2); }
+.library-directory-stage.selected { border-color: var(--line-strong); background: var(--surface); color: var(--ink); font-weight: 600; }
+.library-inline-add-item.is-note { color: var(--muted); cursor: default; }
+.library-inline-add-item.is-note:hover { background: transparent; }
+/* 1.25.68：标签拖到另一颗标签上，给它挂成子标签。 */
+.library-tag-chip { cursor: grab; }
+.library-tag-chip:active { cursor: grabbing; }
+.library-tag-chip.is-dragging { opacity: .35; }
+.library-tag-chip.is-drag-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: color-mix(in srgb, var(--tag-color, var(--accent)) 12%, transparent); }
+.library-tag-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

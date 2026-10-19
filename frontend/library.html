@@ -119,6 +119,9 @@
                 </div>
                 <div id="tagFilterBox" class="library-filter-group" hidden>
                   <span class="library-filter-group-label">标签</span>
+                  <!-- 1.25.63：左边已经是教材目录（点一章看一章）。这里的勾选是用来把
+                       几个标签组合起来、或者排除某几个的；不说清楚，两个入口看着像同一件事。 -->
+                  <p class="library-filter-group-note">左边目录按章看题；这里把几个标签组合起来（配合「标签关系」）。</p>
                   <div id="tagSelect" class="library-tag-choices" role="group" aria-label="可选标签"></div>
                 </div>
                 <label class="library-select"><span>标签关系</span><select id="tagMatchMode" aria-label="标签匹配方式"><option value="all">包含全部</option><option value="any">包含任一</option><option value="not">排除这些</option></select></label>
