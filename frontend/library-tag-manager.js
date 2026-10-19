@@ -100,8 +100,10 @@
     goReview.id = "tagManagerGoReviewSuggestions";
     usageNoteBox.append(usageNoteText, goReview);
     const list = element("div", "tag-directory-list"); list.id = "tagManagerList"; list.setAttribute("aria-label", "标签列表");
+    // 1.25.60：没有上下级的类型或「顶级」这一层，中间不再重复左边树的根节点。
+    const rootHint = element("div", "tag-directory-root-hint"); rootHint.id = "tagManagerRootHint"; rootHint.hidden = true;
     const mapHost = element("div", "tag-directory-map-host"); mapHost.id = "tagManagerMap"; mapHost.hidden = true;
-    results.append(location, listHeading, usageNoteBox, bulk, list, mapHost);
+    results.append(location, listHeading, usageNoteBox, bulk, list, rootHint, mapHost);
     const detail = element("aside", "tag-directory-detail"); detail.id = "tagManagerDetail"; detail.setAttribute("aria-label", "选中标签的信息");
     body.append(sidebar, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
@@ -136,11 +138,28 @@
       }
     }
     function inHierarchy() { return Boolean(state.hierarchyKind) && state.scope === "all"; }
+    // 1.25.60：没有上下级的类型（历史标签、多数方法、自定义）不需要左边再长一棵树 ——
+    // 树和中间列表会把同一批标签各列一遍。
+    function kindHasHierarchy(kind) {
+      if (!kind) return false;
+      const byId = new Map((state.catalogue.tags || []).map(tag => [String(tag.id), tag]));
+      return (state.catalogue.tags || []).some(tag => tag.kind === kind
+        && relationIds(tag, "parent_ids").some(id => byId.get(id)?.kind === kind));
+    }
     function renderView() {
       const mapped = state.view === "map";
+      // 有上下级的类型，在「顶级」这一层只留左边目录；中间原来的列表和左边树的
+      // 根节点是同一批标签，两处并排就是重复。进入某一章后中间才显示内容。
+      const rootOnly = !mapped && inHierarchy() && kindHasHierarchy(state.hierarchyKind) && !state.hierarchyNode;
       page.classList.toggle("tag-directory-map-view", mapped); sidebar.hidden = mapped;
-      location.hidden = mapped || !inHierarchy(); listHeading.hidden = list.hidden = mapped;
-      bulk.hidden = mapped || !state.selected.size; mapHost.hidden = !mapped; mapType.hidden = !mapped; mapType.value = state.mapKind;
+      location.hidden = mapped || !inHierarchy(); listHeading.hidden = list.hidden = mapped || rootOnly;
+      rootHint.hidden = !rootOnly;
+      if (rootOnly) {
+        const kindTags = (state.catalogue.tags || []).filter(tag => tag.kind === state.hierarchyKind);
+        rootHint.replaceChildren(element("strong", "", "点左边的一章"),
+          element("p", "", `${kinds[state.hierarchyKind]}一共 ${kindTags.length} 个标签。先在左边选一章，右边显示这一章的标签、别名和题数；每一级都能贴题。`));
+      }
+      bulk.hidden = mapped || rootOnly || !state.selected.size; mapHost.hidden = !mapped; mapType.hidden = !mapped; mapType.value = state.mapKind;
       listView.setAttribute("aria-pressed", String(!mapped)); mapView.setAttribute("aria-pressed", String(mapped));
       if (mapped) ensureMap()?.update({ catalogue: state.catalogue, kind: state.mapKind, focusId: state.focused, query: state.query, busy: state.busy });
     }
@@ -294,7 +313,7 @@
       }
       // 1.25.49：左侧是真正的文件夹树 —— 展开哪些层由 state.treeOpen 决定，
       // 不再是「只显示当前所在的那一条路径」。
-      if (state.hierarchyKind && state.scope === "all") {
+      if (state.hierarchyKind && state.scope === "all" && kindHasHierarchy(state.hierarchyKind)) {
         // 1.25.49：按文件夹来做 —— 每层有自己的 ▸/▾，展开状态记在 state.treeOpen 里；
         // 点箭头只展开/收起这一层，点名字进入这一层（中间显示文件夹内容）。
         const kindTags = tags.filter((tag) => tag.kind === state.hierarchyKind);
@@ -329,6 +348,9 @@
         roots.forEach((tag) => branch(tag, 0, new Set()));
         if (!roots.length) treeNav.append(element("p", "tag-directory-nav-hint", "这一类还没有标签。"));
       }
+      hierarchyHint.textContent = state.hierarchyKind && !kindHasHierarchy(state.hierarchyKind)
+        ? "这一类没有上下级，右边列出全部标签；点名字看说明。"
+        : "点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。";
       scopeNav.append(element("h2", "tag-directory-nav-heading", "快速查看"));
       const flat = (target) => () => { state.scope = target; state.hierarchyKind = ""; state.hierarchyNode = ""; state.hierarchyTrail = []; rememberScope(); render(); };
       entry(scopeNav, "all", "全部标签", tags.length, state.scope === "all", flat("all"));

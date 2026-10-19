@@ -326,7 +326,12 @@ body.library-basket-open .question-inspector { display: none; }
    （selectInspectorQuestion 里写死的 setInspectorOpen(true)）—— 顶栏再摆一个
    开关，同一件事两个入口，按它关掉也关不住。面板里已经有一个「收起」。
    窄屏上它是唯一能打开浮层的入口，所以只在宽屏藏。 */
-@media (min-width: 980px) { .inspector-toggle { display: none; } }
+/* 1.25.62：收起详情以后，顶栏那颗「题目详情」要重新出现 —— 否则收起就再也开不回来，
+   只能靠点题卡。开着的时候不需要它，还是藏起来。 */
+@media (min-width: 980px) {
+  .inspector-toggle { display: none; }
+  body.library-inspector-collapsed .inspector-toggle { display: inline-flex; }
+}
 .inspector-scrim { display: none; }
 .question-inspector-info > summary { color: var(--muted); font-size: 12px; cursor: pointer; padding-block: 5px; }
 .library-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -1418,3 +1423,95 @@ body.printing { overflow: hidden; }
   .solution-result .qb-subquestion-body, .library-answer .qb-subquestion-body { min-width: 0; }
   .solution-result .solution-label, .library-answer .solution-label { display: block; margin: 4px 0 2px; }
 }
+
+/* 1.25.54：逐题贴标签 —— 一次一道题的流水线。 */
+.tag-flow { width: min(980px, 94vw); max-height: min(92vh, 940px); padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: 0 24px 70px rgba(31, 35, 32, .28); }
+.tag-flow::backdrop { background: rgba(24, 28, 26, .42); }
+.tag-flow-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 20px; border-bottom: 1px solid var(--line); }
+.tag-flow-titles { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.tag-flow-titles strong { font-size: 15px; }
+.tag-flow-progress { color: var(--muted); font-size: 12px; }
+.tag-flow-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; max-height: calc(92vh - 118px); }
+.tag-flow-question { min-width: 0; padding: 18px 22px; overflow-y: auto; border-right: 1px solid var(--line); }
+.tag-flow-meta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+.tag-flow-meta span { color: var(--ink); font-weight: 600; }
+.tag-flow-paper { margin: 0; padding: 0; background: transparent; box-shadow: none; border: 0; }
+.tag-flow-paper .paper { margin: 0; padding: 0; background: transparent; box-shadow: none; border: 0; }
+.tag-flow-current { margin-top: 14px; }
+.tag-flow-current-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11.5px; }
+.tag-flow-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-flow-chip { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); font-size: 12px; line-height: 1.4; }
+.tag-flow-chip.is-button { border: 0; font: inherit; font-size: 12px; cursor: pointer; }
+.tag-flow-chip.is-button:hover { background: #d6e8e0; }
+.tag-flow-picker { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; overflow-y: auto; min-width: 0; }
+.tag-flow-search { display: flex; flex-direction: column; gap: 6px; }
+.tag-flow-search-label { color: var(--muted); font-size: 12px; }
+.tag-flow-search input { width: 100%; min-height: 36px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
+.tag-flow-search input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.tag-flow-results { display: flex; flex-direction: column; gap: 3px; min-height: 132px; }
+.tag-flow-result { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.tag-flow-result:hover, .tag-flow-result.active { background: var(--accent-soft); border-color: #d3e5dd; }
+.tag-flow-result-name { font-size: 13px; font-weight: 600; }
+.tag-flow-result-path { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tag-flow-empty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.tag-flow-recent { display: flex; flex-direction: column; gap: 6px; }
+.tag-flow-recent-label { color: var(--muted); font-size: 11.5px; }
+.tag-flow-foot { display: flex; align-items: center; gap: 12px; padding: 9px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+.tag-flow-hint { flex: 1; min-width: 0; }
+.tag-flow-status { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.tag-flow-status[data-error="true"] { color: #b34848; }
+.tag-flow-undo { flex: 0 0 auto; }
+.tag-flow-done { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 6px 2px; }
+.tag-flow-done strong { font-size: 16px; }
+.tag-flow-done p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+@media (max-width: 860px) { .tag-flow-body { grid-template-columns: minmax(0, 1fr); } .tag-flow-question { border-right: 0; border-bottom: 1px solid var(--line); } }
+.tag-flow-suggest { display: flex; flex-direction: column; gap: 6px; }
+.tag-flow-suggest[hidden] { display: none; }
+.tag-flow-suggest-label { color: var(--muted); font-size: 11.5px; }
+.tag-flow-chip:disabled { opacity: .55; cursor: default; }
+
+/* 1.25.58：教材目录长在题库里 —— 左栏，点一章看这一章的题（含子标签）。 */
+.library-directory { display: none; }
+body.library-directory-open .library-directory { display: block; position: sticky; top: calc(var(--topbar-h) + 12px);
+  max-height: calc(100dvh - var(--topbar-h) - 28px); overflow-y: auto; padding: 10px 8px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.library-directory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 8px; }
+.library-directory-head strong { font-size: 13px; }
+.library-directory-all { display: flex; align-items: center; width: 100%; padding: 6px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.library-directory-all:hover { background: #eef3ef; }
+.library-directory-all.selected { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.library-directory-row-wrap { min-width: 0; }
+.library-directory-line { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.library-directory-caret { flex: 0 0 18px; width: 18px; height: 24px; padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--muted); font-size: 10px; line-height: 1; cursor: pointer; }
+.library-directory-caret:hover { background: #e6e8e1; color: var(--ink); }
+.library-directory-caret.is-empty { cursor: default; }
+.library-directory-name { flex: 1 1 auto; min-width: 0; padding: 4px 3px; overflow: hidden; border: 0; border-radius: 5px;
+  background: transparent; color: inherit; font: inherit; font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.library-directory-name:hover { background: #eef3ef; }
+.library-directory-name.selected { color: var(--accent); font-weight: 600; }
+.library-directory-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.library-directory-more { display: block; padding: 4px 0 4px 4px; border: 0; background: transparent; color: var(--muted);
+  font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.library-directory-more:hover { color: var(--accent); text-decoration: underline; }
+.library-directory-empty { margin: 8px 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+@media (min-width: 1100px) {
+  body.library-directory-open.library-page .library-workspace { grid-template-columns: 236px minmax(0, 1fr) 288px; }
+  body.library-directory-open.library-page .library-workspace > .library-results { grid-column: 2; }
+  body.library-directory-open.library-page .library-workspace > .question-inspector { grid-column: 3; }
+  body.library-directory-open.library-page.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: 236px minmax(0, 1fr); }
+  body.library-directory-open.library-page .library-workspace > #libraryDirectory { grid-column: 1; grid-row: 1; }
+}
+@media (max-width: 1099px) {
+  body.library-directory-open .library-directory { display: block; position: fixed; z-index: 57; top: var(--topbar-h);
+    left: 0; bottom: 0; width: min(86vw, 300px); max-height: none; border-radius: 0; border-left: 0; border-top: 0; border-bottom: 0;
+    box-shadow: var(--shadow-lg); }
+}
+/* 1.25.58：目录开关看起来要像按钮，而不是筛选栏里多出来的两个字。 */
+.library-directory-toggle { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 5px 10px;
+  font-size: 12px; color: var(--ink-2); }
+.library-directory-toggle:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.library-directory-toggle[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.library-directory-count.is-zero { color: #b9bcb3; }
+.library-directory-help { margin: 2px 8px 8px; color: var(--muted); font-size: 11px; line-height: 1.55; }

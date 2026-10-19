@@ -154,3 +154,6 @@ assert.match(managerCss, /tag-directory-workspace:not\(\.tag-directory-map-view\
 assert.match(managerJs, /state\.treeOpen/, "文件夹展开状态");
 assert.match(managerJs, /tag-directory-tree-toggle/, "每层都有展开箭头");
 assert.match(managerJs, /if \(open\) \{\s*const next = new Set/, "展开后递归画下一层");
+assert.match(managerJs, /kindHasHierarchy/, "没有上下级的类型不再长左树");
+assert.match(managerJs, /tag-directory-root-hint/, "顶级这一层中间换成提示，不重复左树");
+assert.match(managerJs, /这一类没有上下级/, "平铺类型的提示");

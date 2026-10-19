@@ -216,3 +216,8 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
   .tag-directory-bulk { padding: 9px 10px; }
   .tag-directory-bulk > strong { width: 100%; }
 }
+/* 1.25.60：顶级这一层中间不再重复左边目录的根节点。 */
+.tag-directory-root-hint { display: grid; gap: 8px; justify-items: start; padding: 28px 24px; color: var(--muted, #747971); font-size: 12.5px; line-height: 1.75; }
+.tag-directory-root-hint[hidden] { display: none; }
+.tag-directory-root-hint strong { color: var(--ink, #262c29); font-size: 14px; }
+.tag-directory-root-hint p { margin: 0; max-width: 460px; }

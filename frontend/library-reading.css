@@ -69,7 +69,7 @@
      可行高照样算，筛选行下面因此永远空着 15px（实测整行 65px，其中 15px 是它）。
      这一层不再给它留格子，它在折叠板里自己怎么排是那边的事。 */
   .library-page .library-filterbar {
-    display: grid; grid-template-columns: max-content max-content; justify-content: start;
+    display: grid; grid-template-columns: max-content max-content max-content; justify-content: start;
     gap: 15px 12px; margin-bottom: 0; padding: 15px 16px 0;
     border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface);
   }
@@ -234,3 +234,4 @@
     .library-page .library-card { transition: none; }
   }
 }
+
