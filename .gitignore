@@ -48,3 +48,9 @@ Thumbs.db
 
 # benchmark credentials (tools/benchmark)
 secrets.json
+
+
+# DSH harness portable build output (not part of this repo)
+tools/dsh-portable/
+.acl-recovery/
+
