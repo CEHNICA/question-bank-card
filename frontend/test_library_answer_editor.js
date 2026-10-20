@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs"); const vm = require("node:vm"); const path = require("node:path");
 class Element {
-  constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = {}; this.style = {}; this.dataset = {}; this.value = ""; this.checked = false; this.disabled = false; this.hidden = false; this.isConnected = true; }
+  constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = {}; this.style = {}; this.dataset = {}; this.value = ""; this.checked = false; this.disabled = false; this.hidden = false; this.isConnected = true; this.classList = { toggle() {} }; }
   append(...children) { this.children.push(...children); for (const value of children) if (value && typeof value === "object") value.parentNode = this; }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(name, value) { this[name] = value; }

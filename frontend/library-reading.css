@@ -179,12 +179,11 @@
   }
   @media (max-width: 979px) {
     .library-page { --topbar-h: 96px; }
-    .library-page .topbar { grid-template-columns: 32px auto minmax(0, 1fr) auto auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
+    .library-page .topbar { grid-template-columns: 32px auto minmax(0, 1fr) auto; grid-template-rows: 36px 36px; gap: 4px 10px; padding: 8px 16px; }
     .library-page .topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
     .library-page .topbar > .brand { display: none; }
     .library-page .topbar > .library-top-navigation { grid-column: 1 / 5; grid-row: 2; }
     .library-page .topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
-    .library-page .topbar > .window-controls { grid-column: 5; grid-row: 1; padding-left: 0; }
     .library-top-navigation { grid-column: 1 / -1; grid-row: 2; gap: 8px; }
     .library-top-navigation .library-search { min-width: 90px; max-width: none; }
     .library-top-navigation .library-tag-manager-entry { padding: 5px 8px; }

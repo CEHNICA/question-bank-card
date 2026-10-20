@@ -131,10 +131,12 @@ class WindowTests(unittest.TestCase):
             self.assertIn("--app=http://127.0.0.1:8768", command)
             self.assertIn(f"--user-data-dir={profile}", command)
             self.assertIn("--profile-directory=Default", command)
-            # --kiosk 才是没有标题栏的窗口：--app 自带的那个标题栏是浏览器自己画在客户区
-            # 里的，Win32 摘 WS_CAPTION 对它无效，真机上摘完屏幕上那条窄条仍然在。
-            self.assertIn("--kiosk", command)
+            # 1.25.90：窗口改成普通浏览器窗口 —— 老师要的是标题栏上那三个按钮
+            # （最小化 / 最大化 / 关闭）和能拖边框改大小。--kiosk 整屏无边框，两个都做不到。
+            # 也不再传 --start-maximized / --window-size：这款 Edge 的 app 窗口会忽略它们。
+            self.assertNotIn("--kiosk", command)
             self.assertNotIn("--start-maximized", command)
+            self.assertFalse(any(entry.startswith("--window-size") for entry in command))
             preferences = json.loads((profile / "Default" / "Preferences").read_text(encoding="utf-8"))
             self.assertIs(preferences["credentials_enable_service"], False)
             self.assertIs(preferences["credentials_enable_autosignin"], False)

@@ -187,7 +187,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         analysisLabel, analysisPreviewCell, toolsCell, origin, aiDraft);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
       controls = { syncLabel, syncNote, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore };
-      for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; fitFields(); schedulePreview(); });
+      for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; fitFields(); paintAiFieldHint(); schedulePreview(); });
       root.addEventListener?.("resize", () => { if (dialog.open) fitFields(); });
       // Display caret and selection, the same idea as the review 改字 editor.
       // Moving the caret or selecting text is not an edit: it must not set
@@ -295,7 +295,10 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
           const loaded = S.signature(initial.value);
           // 题面被改过之后，原来那份解析挂在**旧版**上，而旧版不在题库里，
           // 所以 body.history 看不见它。后端专门跨版本取了一份 previous 过来。
-          record = { item, ...initial, loaded, dirty: loaded !== initial.saved, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], setAside: S.hasContent(body.previous) ? body.previous : null, aiJob: null };
+          record = { item, ...initial, loaded, dirty: loaded !== initial.saved, hasSavedSolution: Boolean(body.solution || (item.solution_revision !== "origin" && item.solution)), base: body.base_revision, origin: body.origin || {}, history: body.history || [], setAside: S.hasContent(body.previous) ? body.previous : null, aiJob: null,
+            // 1.25.80：把 API 返回的 AI 参考答案原样存一份；paintAiFieldHint 用它判断
+            // 老师是否改过，没改就当 AI 初稿显示，改过就消。
+            initialAi: (body.ai_answer_stale || !body.ai_answer) ? {} : { answer: String(body.ai_answer.answer || ""), analysis: String(body.ai_answer.analysis || "") } };
         }
         if (requestToken !== token || !dialog.open) return;
         current = record; renderFields(); renderList();
@@ -337,6 +340,10 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     function renderFields() {
       if (!current) return;
       controls.answer.value = current.value.answer; controls.analysis.value = current.value.analysis;
+      // 1.25.80：进编辑器时若有 AI 参考答案被自动填进答案 / 解析两个框，老师看不出
+      // 这是 AI 写的还是自己写的；给被 AI 填的两个框加一道浅底色 + 「AI 初稿」小角标，
+      // 一眼就知道哪些字需要核对。改过一个字符就自动消，恢复普通样式。
+      paintAiFieldHint();
       controls.sync.checked = scope === "library"; controls.sync.disabled = scope === "library";
       controls.questionBody.replaceChildren();
       if (controls.question.open) QB.renderQuestion(controls.questionBody, current.item.content, { showNumber: false, showAnswer: "none" });
@@ -396,8 +403,20 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         QB.previewSelection?.(controls.previewAnalysis, { field: "analysis", start: null, end: null });
       }
     }
+    function paintAiFieldHint() {
+      if (!current) return;
+      // 用 ai_fields 标记 AI 自动填进了哪些框；当前文字若还和初始自动填的版本相同，
+      // 就当作 AI 初稿显示角标；老师改过一个字符就不一样，自动消。
+      const fields = current.ai_fields || [];
+      const initialAi = current.initialAi || {};
+      const stillAi = (field) => Boolean(fields.includes(field)) && String(initialAi[field] || "").trim() !== ""
+        && String(initialAi[field] || "") === String(current.value[field] || "");
+      controls.answer.classList.toggle("is-ai-suggested", stillAi("answer"));
+      controls.analysis.classList.toggle("is-ai-suggested", stillAi("analysis"));
+    }
     function updateEditStatus() {
       if (!current) return;
+      paintAiFieldHint();
       const quality = S.hasContent(current.value) ? (current.value.analysis.trim() || current.value.figures.length ? "" : " · 只有结果，建议补详细解析") : " · 尚未补齐答案解析";
       const pending = pendingSaves.has(current.item.id) ? " · 上一笔保存仍在核对，可继续编辑" : "";
       // 1.25.38：题号只出现一次（在标题旁），这里只说状态；长句子放悬停。
@@ -406,6 +425,16 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       controls.status.title = current.ai_fields?.length
         ? "已填入现有 AI 参考初稿，尚未核对；检查并保存后才用于出卷。"
         : current.ai_stale ? (current.ai_error || "现有 AI 参考答案对应的题面已变化，未自动填入；请重新生成。") : "";
+      // 1.25.81：保存按钮跟着 AI 状态换名字 —— 题目里已经填好了 AI 参考初稿、老师还没改过，
+      // 按钮变成「采纳 AI 解析并保存」，让老师一眼看出点了之后 AI 字就成正式解析；
+      // 改了字或没 AI 时回到「保存答案解析」。
+      const aiUntouched = (current.ai_fields || []).length > 0
+        && String(current.initialAi?.answer || "") === String(current.value.answer || "")
+        && String(current.initialAi?.analysis || "") === String(current.value.analysis || "");
+      controls.save.textContent = aiUntouched ? "采纳 AI 解析并保存" : "保存答案解析";
+      controls.save.title = aiUntouched
+        ? "当前答案与解析就是初版的 AI 参考答案；点这一下后正式入库。"
+        : "把编辑区里的当前文字保存为本题的解析。";
     }
     function renderFigures() {
       controls.figures.replaceChildren();
@@ -452,7 +481,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       saving = true; pendingSaves.add(record.item.id); setBusy(); controls.status.textContent = "正在保存答案解析…";
       try {
         const body = await post(endpoint(record.item), { ...value, base_revision: record.base ?? null, sync_library: sync }, { keepAfterClose: true });
-        record.item.solution = body.solution; record.item.solution_revision = body.solution.id; record.value = S.editable(body.solution); record.saved = record.loaded = S.signature(record.value); record.dirty = false; record.hasSavedSolution = true; record.ai_fields = []; record.ai_stale = false;
+        record.item.solution = body.solution; record.item.solution_revision = body.solution.id; record.value = S.editable(body.solution); record.saved = record.loaded = S.signature(record.value); record.dirty = false; record.hasSavedSolution = true; record.ai_fields = []; record.ai_stale = false; record.initialAi = {};
         if (jobDraftState({ status: "done", result: record.suggestion }, record) === "saved") record.suggestion = null;
         record.base = body.base_revision ?? (sync ? body.solution.id : record.base);
         record.history.unshift(body.solution);

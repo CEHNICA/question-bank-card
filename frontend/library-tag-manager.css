@@ -60,6 +60,9 @@
 .tag-directory-tree-name:hover { background: #eeefea; }
 .tag-directory-tree-name.current { background: #e3f0ea; color: #1d7062; font-weight: 600; }
 .tag-directory-tree-row > small { flex: 0 0 auto; color: var(--muted, #747971); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* 1.25.80：文件夹里把题数从「本级 N 题」换成「含下级 N 题」，免得整列 0 题
+   让老师以为这一章真没内容；子标签贴的题不会显示在章根上。 */
+.tag-directory-tree-count.is-empty { color: var(--faint, #b3b6af); }
 .tag-directory-nav-hint { margin: 5px 9px 16px; color: var(--muted, #747971); font-size: 11px; line-height: 1.65; }
 .tag-directory-location { padding: 12px 16px; border-bottom: 1px solid var(--line, #e3e3dc); background: #f7faf7; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tag-directory-location[hidden] { display: none; }

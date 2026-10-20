@@ -283,13 +283,16 @@ def _disable_profile_password_saving(profile: Path) -> bool:
 
 
 def window_command(browser: Path, url: str, profile: Path) -> list[str]:
-    # --kiosk 才是真正没有标题栏的窗口。--app 自带的那个标题栏是浏览器自己画在客户区
-    # 里的（客户区顶端就在窗口顶端，没有标题栏高度），Win32 摘掉 WS_CAPTION 对它无效：
-    # 真机上摘完之后屏幕上那条带图标和三个按钮的窄条仍然在。--kiosk 则是整屏无边框，
-    # 页面内容从屏幕最顶端开始。
+    # 1.25.90：老师要的是「跟普通浏览器窗口一样」—— 标题栏上有最小化 / 最大化 / 关闭
+    # 三个按钮，能拖边框改大小，也能最小化到任务栏去看别的窗口。
+    # 以前这里用 --kiosk 整屏无边框（为了拿掉浏览器自带的那条标题栏）；那样窗口既不能
+    # 最大化也不能拖大小，页面只好自绘两个按钮。现在反过来：保留浏览器的标题栏，
+    # 三个按钮就是系统的，页面不再自绘窗口控件。
+    # 不传 --start-maximized / --window-size：这款 Edge 的 app 窗口会忽略它们，
+    # 而写死一个尺寸在小屏笔记本上会超出屏幕。交给浏览器给默认大小，想铺满点□就是。
     return [
         str(browser), f"--app={url}", f"--user-data-dir={profile}",
-        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check", "--kiosk",
+        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check",
     ]
 
 

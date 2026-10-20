@@ -338,7 +338,10 @@
           const name = button(tag.name, () => browseHierarchy(tag), "tag-directory-tree-name"
             + (String(tag.id) === String(state.hierarchyNode) ? " current" : ""));
           name.title = "打开「" + tag.name + "」这一层";
-          row.append(toggle, name, element("small", "", directCount(tag) + " 题"));
+          // 1.25.80：文件夹页若只看本级题数，整列都是 0 题，没人能看出"这一章下面到底有没有题"。
+          // 本章在题目上多数靠子标签贴上去，subtree_count 才是老师判断"是不是常用"的真数。
+          const sub = subtreeCount(tag);
+          row.append(toggle, name, element("small", "tag-directory-tree-count" + (sub ? "" : " is-empty"), sub ? "含下级 " + sub + " 题" : "0 题"));
           treeNav.append(row);
           if (open) {
             const next = new Set([...ancestors, id]);

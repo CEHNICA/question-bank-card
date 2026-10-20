@@ -52,17 +52,9 @@
     <div class="topbar-tools">
       <span id="engineLine" class="engine-line" hidden></span>
     </div>
-    <!-- 窗口控件由页面自己画，与正式题库页同一份：宿主窗口去掉系统标题栏后，
-         关闭与最小化只能从这里来，否则这一页没法关窗口。 -->
-    <div class="window-controls" aria-label="窗口">
-      <span class="window-title" aria-hidden="true">题有据</span>
-      <button id="windowMinimize" class="window-button" type="button" title="最小化" aria-label="最小化">
-        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.5h7"/></svg>
-      </button>
-      <button id="windowClose" class="window-button window-close" type="button" title="关闭题有据" aria-label="关闭题有据">
-        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6"/></svg>
-      </button>
-    </div>
+    <!-- 1.25.90：窗口的最小化 / 最大化 / 关闭交给浏览器标题栏（宿主窗口现在是普通
+         窗口，不再整屏无边框），页面不再自绘这几个按钮 —— 两套控件并排会让人不知道
+         该点哪一个。 -->
   </header>
 
   <main id="settingsHome" class="settings-home" hidden>

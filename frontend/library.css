@@ -197,6 +197,11 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-tool-action { display: flex; width: 100%; min-height: 34px; justify-content: flex-start; gap: 7px; white-space: normal; text-align: left; line-height: 1.35; }
 .library-tool-action .icon { flex: 0 0 auto; width: 14px; height: 14px; }
 .library-tool-action.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
+/* 1.25.78：「处理完自动跳下一条」开关贴在筛选条尾部 —— 跟其他 active filter 同款，
+   开启时打钩 + 同色软底，一眼看出当前是开的。 */
+.library-auto-advance { padding: 4px 11px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.library-auto-advance:hover { color: var(--ink); border-color: var(--accent); }
+.library-auto-advance.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 /* 1.25.20：待办合成一处，跟着题目列表那一行走。入口名字上直接把三样都数出来，
    折叠起来的东西要让人看得见里面有什么。
    颜色还是那个思路：它是最贵、最不该随手点的入口，平时和「更多筛选」一样低调，
@@ -306,6 +311,12 @@ body.library-basket-open .question-inspector { display: none; }
 .question-inspector-fact { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; }
 .question-inspector-fact dt { color: var(--muted); }
 .question-inspector-fact dd { min-width: 0; margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+/* 1.25.76：右侧面板的事实行里如果有动作按钮，就把按钮放右边；左边照旧贴着 dt/dd。 */
+.question-inspector-fact.has-action { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.question-inspector-fact.has-action dt { flex: none; min-width: 65px; }
+.question-inspector-fact.has-action dd { flex: 1 1 auto; min-width: 0; }
+.question-inspector-fact.has-action .question-inspector-fact-action { margin-left: auto; }
+.question-inspector-fact-action { min-height: 28px; padding: 3px 11px; font-size: 11.5px; white-space: nowrap; }
 /* 标题那块没了，强调竖线挂到标签区头上，面板仍然看得出是在讲当前这道题。 */
 .question-inspector-tags { border-left: 3px solid var(--accent); padding-left: 10px; }
 .question-inspector-tags { display: grid; gap: 7px; min-width: 0; }
@@ -1002,6 +1013,13 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .answer-set-aside > .answer-image-tools { margin: 0; }
 .answer-sync { font-size: 13px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
 .answer-ai-draft { padding: 12px; background: var(--amber-soft); border-radius: 9px; }
+/* 1.25.80：答案 / 解析两个框在有 AI 参考答案自动填进来时给一道浅底色 + 角落小角标；
+   老师改过一个字符之后自动消，恢复普通样式。 */
+#answerEditorResult, #answerEditorAnalysis { position: relative; }
+#answerEditorResult.is-ai-suggested,
+#answerEditorAnalysis.is-ai-suggested { background: linear-gradient(180deg, #fff7e6 0%, #fffaf0 100%); box-shadow: inset 0 0 0 1px #f4d59c; }
+#answerEditorResult.is-ai-suggested::after,
+#answerEditorAnalysis.is-ai-suggested::after { content: "AI 初稿"; position: absolute; top: 6px; right: 10px; padding: 1px 7px; border-radius: 99px; background: #f4d59c; color: #6a4a14; font-size: 10.5px; font-weight: 600; pointer-events: none; }
 .answer-crop { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
 .answer-crop-scroll { position: relative; max-height: 420px; overflow: auto; }
 .answer-crop-guidance { position: absolute; top: 8px; right: 8px; left: 8px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; pointer-events: none; }
@@ -1185,6 +1203,10 @@ body.printing { overflow: hidden; }
 .tag-suggestion-heading h3 { margin: 0; font: 600 13px/1.5 var(--ui-font); color: var(--ink-2); }
 .tag-suggestion-status { padding: 2px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-dark); font-size: 11px; line-height: 1.5; }
 .tag-suggestion-card[data-status="stale"] .tag-suggestion-status, .tag-suggestion-card[data-status="failed"] .tag-suggestion-status { background: var(--amber-soft); color: var(--amber); }
+/* 1.25.77：在面板头部那一行加一颗「上一条 / 下一条」——核对 440 条建议时不用回到主列表找。 */
+.tag-suggestion-nav-row { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: 1 1 auto; justify-content: flex-end; min-width: 0; }
+.tag-suggestion-nav-row .button { min-height: 26px; padding: 2px 9px; font-size: 11.5px; }
+.tag-suggestion-nav-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tag-suggestion-message { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
 .tag-suggestion-entry { margin-top: 12px; }
 .tag-suggestion-entry + .tag-suggestion-entry { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -1208,6 +1230,12 @@ body.printing { overflow: hidden; }
 .tag-suggestion-selection { margin: 0; color: var(--muted); font-size: 11px; }
 .tag-suggestion-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-suggestion-buttons .button { min-height: 30px; font-size: 12px; padding-inline: 9px; }
+/* 1.25.75：全选 / 全不选 跟采纳按钮分开一行，免得"勾选状态"和"提交动作"挤在一起看不清。 */
+.tag-suggestion-select-toggles { display: flex; gap: 6px; align-items: center; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.tag-suggestion-select-toggles .button { min-height: 26px; font-size: 11px; padding: 2px 8px; }
+.tag-suggestion-accept-all { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tag-suggestion-accept-all:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+.tag-suggestion-accept-all:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
 .library-tag-legacy-review { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #fff6df; }
 @media (max-width: 680px) {
   .library-card-body.has-tag-review > .tag-suggestion-card { margin-inline: 14px; }
@@ -1485,7 +1513,10 @@ body.printing { overflow: hidden; }
 .library-directory { display: none; }
 body.library-directory-open .library-directory { display: block; position: sticky; top: calc(var(--topbar-h) + 12px);
   max-height: calc(100dvh - var(--topbar-h) - 28px); overflow-y: auto; padding: 10px 8px 14px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  /* 1.25.87：用户拖动 --directory-width 后，把固定宽用变量撑起来；默认 240px 在 :root 上。
+     不要在这条规则上再写 --directory-width —— 它会盖住 :root 的值，面板永远只看见 240px。 */
+  width: var(--directory-width, 240px); }
 .library-directory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 8px; }
 .library-directory-head strong { font-size: 13px; }
 .library-directory-all { display: flex; align-items: center; width: 100%; padding: 6px 9px; border: 0; border-radius: 7px;
@@ -1497,21 +1528,46 @@ body.library-directory-open .library-directory { display: block; position: stick
 .library-directory-row-wrap.is-empty .library-directory-caret { color: var(--faint); }
 .library-directory-row-wrap.is-empty::before { background: repeating-linear-gradient(to bottom, var(--faint) 0 4px, transparent 4px 7px); opacity: .55; }
 .library-directory-row-wrap.is-empty.is-current::before { background: var(--directory-color); opacity: 1; }
-.library-directory-row-wrap.is-empty.is-current .library-directory-name { color: var(--directory-color); font-weight: 600; }
-.library-directory-line { display: flex; align-items: center; gap: 3px; min-width: 0; }
-.library-directory-caret { flex: 0 0 18px; width: 18px; height: 24px; padding: 0; border: 0; border-radius: 4px;
+.library-directory-row-wrap.is-empty.is-current .library-directory-name { color: var(--ink); font-weight: 600; }
+/* 1.25.89：名字不再截成省略号 —— 一行放不下就折成两行，"两边之和大于第三边"
+   "二次函数与一元二次方程、不等式"这类 13–15 字的长名一次看全，不用拖宽面板、
+   也不用悬停等提示。折行后行高由内容撑开，箭头按第一行对齐。 */
+.library-directory-line { display: flex; align-items: flex-start; gap: 3px; min-width: 0; }
+.library-directory-caret { flex: 0 0 18px; width: 18px; height: 21px; padding: 0; border: 0; border-radius: 4px;
   background: transparent; color: var(--muted); font-size: 10px; line-height: 1; cursor: pointer; }
 .library-directory-caret:hover { background: #e6e8e1; color: var(--ink); }
 .library-directory-caret.is-empty { cursor: default; }
-.library-directory-name { flex: 1 1 auto; min-width: 0; padding: 4px 3px; overflow: hidden; border: 0; border-radius: 5px;
-  background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.library-directory-name { flex: 1 1 auto; min-width: 0; padding: 4px 3px; border: 0; border-radius: 5px;
+  background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 500; text-align: left;
+  line-height: 1.35; overflow-wrap: anywhere; white-space: normal; cursor: pointer; }
 .library-directory-name:hover { background: #eef3ef; }
 .library-directory-name.selected { color: var(--accent); font-weight: 600; }
-.library-directory-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* 1.25.83 / 1.25.84：目录里深度 0 的章根字号略大、有左侧色条；子标签（is-leaf）字淡。
+   1.25.84 把章根从「加粗 700 + 全黑」改成「中等 600 + ink-2」，不再比下面的子标签重一档；
+   子标签用 `--muted` 而不是 `--ink-2」，避免长名字被截断时看起来变窄。 */
+/* 1.25.89：缩进改成纯 CSS 的一格一格 —— 子行嵌在父行里面，所以每层只声明 18px，
+   实际缩进就是 18 / 36 / 54 …… 靠嵌套自己累加。以前的 depth * 18 内联值会在嵌套上
+   再乘一次，第四层要吃掉 180px，240px 的面板里字都没地方站。 */
+.library-directory-row-wrap.is-chapter { padding-left: 0; }
+.library-directory-row-wrap.is-leaf { padding-left: 18px; }
+.library-directory-row-wrap.is-chapter .library-directory-name { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.library-directory-row-wrap.is-chapter { padding-top: 6px; padding-bottom: 2px; }
+.library-directory-row-wrap.is-chapter + .library-directory-row-wrap { padding-top: 2px; }
+.library-directory-row-wrap.is-leaf .library-directory-name { font-weight: 400; color: var(--muted); }
+.library-directory-row-wrap.is-leaf .library-directory-caret { color: var(--faint); }
+.library-directory-row-wrap.is-leaf .library-directory-count { color: var(--faint); }
+.library-directory-row-wrap.is-leaf.is-current .library-directory-name { color: var(--ink); font-weight: 600; }
+.library-directory-count { flex: 0 0 auto; padding-top: 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .library-directory-more { display: block; padding: 2px 0 4px 22px; margin: 0; border: 0; background: transparent;
   color: var(--faint); font: inherit; font-size: 11px; text-align: left; cursor: pointer; font-style: italic; }
 .library-directory-more:hover { color: var(--accent); text-decoration: underline; }
 .library-directory-empty { margin: 8px 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* 1.25.87：右边缘的拖拽手柄 —— 默认 4px 透明条，hover 显一条竖线，按下整页变 cursor。 */
+.library-directory-resize { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.library-directory-resize::before { content: ""; position: absolute; right: 2px; top: 12px; bottom: 12px; width: 2px;
+  border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .15s ease; }
+.library-directory-resize:hover::before, .library-directory-resize:focus-visible::before { background: var(--accent); opacity: 1; }
+body.is-resizing, body.is-resizing * { cursor: ew-resize !important; user-select: none; }
 /* 1.25.72：顶部的帮助文字太抢眼，改成一行浅灰小字，跟着背景走。 */
 .library-directory-help { margin: -2px 6px 8px; padding: 5px 8px; border-left: 2px solid var(--line);
   background: transparent; color: var(--muted); font-size: 11px; line-height: 1.55; }
@@ -1520,10 +1576,10 @@ body.library-directory-open .library-directory { display: block; position: stick
 .library-directory-stages { margin-bottom: 8px; }
 .library-directory-all { font-weight: 500; }
 @media (min-width: 1100px) {
-  body.library-directory-open.library-page .library-workspace { grid-template-columns: 236px minmax(0, 1fr) 288px; }
+  body.library-directory-open.library-page .library-workspace { grid-template-columns: var(--directory-width, 240px) minmax(0, 1fr) 288px; }
   body.library-directory-open.library-page .library-workspace > .library-results { grid-column: 2; }
   body.library-directory-open.library-page .library-workspace > .question-inspector { grid-column: 3; }
-  body.library-directory-open.library-page.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: 236px minmax(0, 1fr); }
+  body.library-directory-open.library-page.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: var(--directory-width, 240px) minmax(0, 1fr); }
   body.library-directory-open.library-page .library-workspace > #libraryDirectory { grid-column: 1; grid-row: 1; }
 }
 @media (max-width: 1099px) {
@@ -1557,8 +1613,15 @@ body.library-directory-open .library-directory { display: block; position: stick
 .library-directory-row-wrap:hover::before { opacity: 1; }
 .library-directory-row-wrap.is-current::before { opacity: 1; }
 .library-directory-row-wrap.is-current { background: color-mix(in srgb, var(--directory-color) 14%, transparent); border-radius: 7px; }
-.library-directory-row-wrap.is-current .library-directory-name { color: var(--directory-color); font-weight: 600; }
-.library-directory-row-wrap.is-current .library-directory-count { color: var(--directory-color); opacity: .82; }
+/* 1.25.88：之前选中行把 name 染成饱和 --directory-color（例 #477a9e）叠在 14% 同色底上，
+   对比度只有 3:1，长名字（"两边之和大于第三边"）看着累 —— 尤其深度 ≥ 2 的子标签还缩进到
+   54px，更看不清。改成用深灰字色 + 同色 14% 背景：背景仍提示选中，字色不进屏幕。 */
+.library-directory-row-wrap.is-current .library-directory-name { color: var(--ink); font-weight: 600; }
+.library-directory-row-wrap.is-current .library-directory-count { color: var(--ink-2); opacity: .82; }
+/* 1.25.86：每行原来都画一条 4px 左边色条，但多行堆叠时，章根和所有子标签的色条连成
+   一整条贯穿到底下的色带，叠在「▸」「1」上像压着字。把 4px 色条限定在章根（is-chapter）行，
+   子标签（is-leaf）不画 —— 用「更深一级 ↦ 更深一级」的缩进 + 字重传达层级就够了。 */
+.library-directory-row-wrap.is-leaf::before { display: none; }
 /* 1.25.67：加上标签的输入框改紧凑 —— 只有一条输入、候选贴着输入，不再摆三行说明。
    颜色用小圆点表示；「新建」那一行是虚线，回车就是它。 */
 .library-inline-add { display: grid; gap: 6px; margin-top: 8px; }

@@ -118,12 +118,13 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
    每一块都必须独占一列：共用列再靠外边距错开会压在一起 —— gap 只在列与列
    之间生效，同列内不分。中间那列给 1fr，窗口控件才吃得到剩余宽度。
    ------------------------------------------------------------------ */
-.app-topbar { grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; }
+/* 1.25.90：窗口现在是普通窗口（浏览器标题栏自带上最小化 / 最大化 / 关闭），页面不再
+   自绘控件，顶栏从五列回到四列 —— 留着那空的一列会多出 18px 的尾巴。 */
+.app-topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 18px; box-shadow: none; }
 .app-topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
 .app-topbar > .brand { grid-column: 2; grid-row: 1; justify-self: start; }
 .app-topbar > .library-top-navigation { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 14px; }
 .app-topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
-.app-topbar > .window-controls { grid-column: 5; grid-row: 1; }
 
 /* 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭与最小化只能从这里来。
    整条顶栏留出拖拽区（-webkit-app-region），点控件时不触发拖动。

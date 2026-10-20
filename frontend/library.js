@@ -35,6 +35,10 @@
     tagMode: ["all", "any", "not"].includes(params.get("tag_mode")) ? params.get("tag_mode") : "all",
     untaggedKnowledge: params.get("untagged_knowledge") === "true",
     tagReview: params.get("tag_review") === "true",
+    // 1.25.78：处理完一道 AI 建议后，自动滚到下一道仍有未处理建议的题。默认关 —
+    // 老师想要在当前题上继续操作时保持原状；想要"清空 440 条建议"那种连点一遍
+    // 一次性跑完的感觉，开起来。
+    autoAdvanceSuggestion: params.get("auto_advance") === "true",
     sort: ["source", "number"].includes(params.get("sort")) ? params.get("sort") : "recent",
     view: "all",
     selected: new Set(),
@@ -195,7 +199,8 @@
     for (const [key, value] of [["q", state.q], ["document", state.document], ["type", state.type], ["review", state.review],
       ["answer", state.answer], ["tag", state.tag], ["tag_all", state.tagAll], ["tag_any", state.tagAny],
       ["tag_not", state.tagNot], ["tag_mode", state.tagMode === "all" ? "" : state.tagMode],
-      ["untagged_knowledge", state.untaggedKnowledge ? "true" : ""], ["tag_review", state.tagReview ? "true" : ""]]) {
+      ["untagged_knowledge", state.untaggedKnowledge ? "true" : ""], ["tag_review", state.tagReview ? "true" : ""],
+      ["auto_advance", state.autoAdvanceSuggestion ? "true" : ""]]) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
@@ -207,8 +212,8 @@
 
   function libraryQuery(filters = state, { limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit: String(limit), offset: String(offset), sort: filters.sort || "recent" });
-    const aliases = { tag_all: "tagAll", tag_any: "tagAny", tag_not: "tagNot", tag_mode: "tagMode", untagged_knowledge: "untaggedKnowledge", tag_review: "tagReview" };
-    for (const key of ["q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not", "tag_mode", "untagged_knowledge", "tag_review"]) {
+    const aliases = { tag_all: "tagAll", tag_any: "tagAny", tag_not: "tagNot", tag_mode: "tagMode", untagged_knowledge: "untaggedKnowledge", tag_review: "tagReview", auto_advance: "autoAdvanceSuggestion" };
+    for (const key of ["q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not", "tag_mode", "untagged_knowledge", "tag_review", "auto_advance"]) {
       const raw = filters[key] ?? filters[aliases[key]];
       const value = key === "q" ? String(raw || "").trim() : raw;
       if (value) query.set(key, value);
@@ -488,7 +493,7 @@
       button.setAttribute("aria-pressed", String(state.answer === key));
       if (!count && state.answer !== key) {
         button.dataset.emptyFacet = "1";
-        button.title = `当前筛选下没有「${label}」的题`;
+        button.title = button.title + "（当前筛选下没有）";
       }
       button.addEventListener("click", () => { state.answer = key; syncUrl(); load(); });
       box.append(button);
@@ -611,6 +616,8 @@
       pending.setAttribute("aria-pressed", String(state.tagReview));
       pending.addEventListener("click", () => { state.tagReview = !state.tagReview; syncUrl(); load(); });
       quickActions.push(pending);
+      // 1.25.78："处理完自动跳下一条"开关在 activeFilters 那一行画，不藏在
+      // libraryTodos 下拉里，老师不用展开就能看见。
     }
     if (missingCount || state.untaggedKnowledge) {
       const untagged = iconButton("button", `button button-quiet button-small library-tool-action${state.untaggedKnowledge ? " active" : ""}`,
@@ -1336,6 +1343,19 @@
     row.append(node("dt", "", label), node("dd", "", value));
     facts.append(row);
   }
+  // 1.25.76：把"暂无答案解析"加一颗"为本题写答案"的按钮 —— 老师看完题要在
+  // 右侧面板顺手补答案，先要点"查看出处"再点"编辑答案解析"，跳两层。
+  // 这一颗按钮直接到答案编辑器，少点一次；同样适用于"暂无正文"的小问。
+  function inspectorFactAction(facts, label, text, actionLabel, onclick) {
+    const row = node("div", "question-inspector-fact has-action");
+    const textWrap = node("div", "question-inspector-fact-text");
+    textWrap.append(node("dt", "", label), node("dd", "", text));
+    const button = node("button", "button button-small question-inspector-fact-action", actionLabel);
+    button.type = "button";
+    button.addEventListener("click", onclick);
+    row.append(textWrap, button);
+    facts.append(row);
+  }
 
   // 从标签窗口跳回右侧面板核对：把面板切到这道题，并滚到它的建议清单上。
   // 关掉窗口就回到主界面，所以这里要确保面板真的开着（窄屏上它默认收起），
@@ -1427,8 +1447,18 @@
     // 只在题卡上出现（同一张卷只写一次），这里就不再重复。
     inspectorFact(facts, "核对", item.review?.source === "ai" ? `${item.review.agent || "AI"} 审核 · 待人工核对`
       : item.review?.source === "human" ? "已人工核对" : "已入正式题库");
-    inspectorFact(facts, "答案解析", solutions.hasContent(item.solution) ? "已保存解析"
-      : item.has_answer ? "原卷提供答案" : item.ai_answer && state.features.ai_answer ? "有 AI 参考答案 · 未核对" : "暂无答案解析");
+    // 1.25.76：右侧面板给老师一条最近的路 —— 缺答案的题从面板直接跳答案编辑器；AI
+    // 参考答案未核对的题同样给一个"编辑 / 核对"入口，让"是否采纳 AI"在浏览器里走完。
+    if (solutions.hasContent(item.solution)) {
+      inspectorFact(facts, "答案解析", "已保存解析");
+    } else if (item.has_answer) {
+      inspectorFact(facts, "答案解析", "原卷提供答案");
+    } else {
+      const isAI = item.ai_answer && state.features.ai_answer;
+      const text = isAI ? "有 AI 参考答案 · 未核对" : "暂无答案解析";
+      inspectorFactAction(facts, "答案解析", text, isAI ? "编辑 / 核对答案解析" : "为本题写答案",
+        () => openAnswerEditor([item], { scope: "library" }));
+    }
     if (item.origin) inspectorFact(facts, "题源", item.origin);
     if (state.features.subquestions && item.subquestions >= 2) inspectorFact(facts, "小问", `${item.subquestions} 问`);
     info.append(facts);
@@ -2388,6 +2418,17 @@
       const result = await tagRequest("/api/library/tag-suggestions/" + suggestion.id + "/resolve", { method: "POST", body: JSON.stringify(attempt.payload) });
       suggestionAttempts.delete(suggestion.id); attempt.payload.indices.forEach(index => delete draft[index]); saveSuggestionDrafts();
       toast((result.message || "上次提交已核实") + "。", "success"); await refreshTaggedPublications([item.id]);
+      // 1.25.78：开启"自动跳下一条"时，本题若已没有未处理建议，就跳到下一道仍有
+      // pending 的题；让"全部采纳 + 全部拒绝"那种清空操作一遍过。
+      if (state.autoAdvanceSuggestion && state.catalog.get(state.inspectorId)?.tag_suggestion?.status !== "pending") {
+        const stillPending = visibleItems().filter(it => it.tag_suggestion && it.tag_suggestion.status === "pending"
+          && (it.tag_suggestion.suggestions || []).some(e => !e.decision));
+        const next = stillPending[0];
+        if (next && next.id !== item.id) {
+          const article = document.getElementById(`q-${next.id}`);
+          if (article) { article.scrollIntoView({ block: "center" }); article.focus(); selectInspectorQuestion(next, article); }
+        }
+      }
     } catch (error) {
       if (error.status && error.status < 500) suggestionAttempts.delete(suggestion.id);
       saveSuggestionDrafts();
@@ -2484,6 +2525,43 @@
     // here would spend a whole header row on the same four characters.
     if (embedded) panel.append(node("p", "tag-suggestion-message", statusText));
     else panel.append(heading);
+    if (suggestion.status === "pending") {
+      // 1.25.77：核对 440 条建议时反复回到主列表找下一张卡很费事。给面板头部加一颗
+      // 上一条 / 下一条，按主列表的当前排序跳到下一道仍有 pending 建议的题；跳完左栏
+      // 自动滚到目标，老师不用手找。键没有这种 pending 题时按钮置灰。
+      const pendingItems = visibleItems().filter(it => it.tag_suggestion && it.tag_suggestion.status === "pending"
+        && (it.tag_suggestion.suggestions || []).some(e => !e.decision));
+      const currentIndex = pendingItems.findIndex(it => it.id === item.id);
+      const goPrev = node("button", "button button-quiet button-small tag-suggestion-nav", "上一条");
+      const goNext = node("button", "button button-quiet button-small tag-suggestion-nav", "下一条");
+      goPrev.type = goNext.type = "button";
+      const navigate = (delta) => {
+        const target = pendingItems[(currentIndex + delta + pendingItems.length) % pendingItems.length];
+        if (!target || target.id === item.id) return;
+        const article = document.getElementById(`q-${target.id}`);
+        if (article) {
+          article.scrollIntoView({ block: "center" });
+          article.focus();
+          selectInspectorQuestion(target, article);
+        } else {
+          // 还没渲染（懒加载）就先翻页再回头重试
+          toast("这一条还没载入，先滚到主列表的对应位置。");
+        }
+      };
+      goPrev.disabled = pendingItems.length <= 1;
+      goPrev.addEventListener("click", () => navigate(-1));
+      goNext.disabled = pendingItems.length <= 1;
+      goNext.addEventListener("click", () => navigate(1));
+      const navRow = node("div", "tag-suggestion-nav-row");
+      const counter = node("span", "tag-suggestion-nav-count",
+        pendingItems.length > 1
+          ? `第 ${currentIndex + 1} / ${pendingItems.length} 条`
+          : "只有这一条");
+      navRow.append(goPrev, counter, goNext);
+      heading.append(navRow);
+      // 嵌入式（面板被合并到主详情面板里）和非嵌入式（从弹窗打开）都要把导航放出来。
+      if (embedded) panel.append(navRow);
+    }
     if (suggestion.message) panel.append(node("p", "tag-suggestion-message", suggestion.message));
     const checks = [];
     (suggestion.suggestions || []).forEach((entry, index) => {
@@ -2582,7 +2660,19 @@
     if (suggestion.status === "pending") {
       const actions = node("footer", "tag-suggestion-actions"), selection = node("p", "tag-suggestion-selection", "勾选要处理的建议");
       const buttons = node("div", "tag-suggestion-buttons");
-      const accept = node("button", "button button-small button-primary", "采纳所选建议"); accept.type = "button"; accept.addEventListener("click", () => resolveTagSuggestion(item, "accept", panel));
+      // 1.25.75：AI 一次往往多条全部走查；勾三条点一次"采纳所选"比一条一条点快不了太多。
+      // 直接给一颗"全部采纳"——一次性把这条建议上未处理的都采纳；后台会自动跳要选学段、要选上级的提醒，让老师补一遍再续做。
+      const acceptAll = node("button", "button button-small button-primary tag-suggestion-accept-all", "全部采纳");
+      acceptAll.type = "button";
+      const allPendingIndices = (suggestion.suggestions || []).map((entry, i) => entry.decision ? -1 : i).filter(i => i >= 0);
+      acceptAll.disabled = allPendingIndices.length === 0;
+      acceptAll.addEventListener("click", () => resolveTagSuggestion(item, "accept", panel, allPendingIndices));
+      const selectAll = node("button", "button button-quiet button-small tag-suggestion-select-all", "全选");
+      const clearSelection = node("button", "button button-quiet button-small tag-suggestion-select-none", "全不选");
+      selectAll.type = clearSelection.type = "button";
+      selectAll.addEventListener("click", () => { checks.forEach(check => { check.checked = true; }); updateSelection(); });
+      clearSelection.addEventListener("click", () => { checks.forEach(check => { check.checked = false; }); updateSelection(); });
+      const accept = node("button", "button button-small", "采纳所选建议"); accept.type = "button"; accept.addEventListener("click", () => resolveTagSuggestion(item, "accept", panel));
       const reject = node("button", "button button-small", "拒绝所选建议"); reject.type = "button"; reject.addEventListener("click", () => resolveTagSuggestion(item, "reject", panel));
       const updateSelection = function() {
         const count = checks.filter(function(check) { return check.checked && !check.disabled; }).length;
@@ -2591,7 +2681,9 @@
       };
       checks.forEach(function(check) { check.addEventListener("change", updateSelection); }); updateSelection();
       panel.addEventListener("suggestion-unlocked", updateSelection);
-      buttons.append(accept, reject); actions.append(selection, buttons); panel.append(actions);
+      buttons.append(acceptAll, accept, reject); actions.append(selection, buttons); panel.append(actions);
+      const selectionToggles = node("div", "tag-suggestion-select-toggles");
+      selectionToggles.append(selectAll, clearSelection); panel.append(selectionToggles);
     }
     if (busy) { panel.setAttribute("aria-busy", "true"); panel.querySelectorAll("button, input, select").forEach(control => { control.disabled = true; }); }
     return panel;
@@ -3319,6 +3411,19 @@
     clear.type = "button";
     clear.addEventListener("click", clearFilters);
     box.append(clear);
+    // 1.25.78：在筛选行尾部加一颗"处理完自动跳下一条"开关。
+    // 放在 activeFilters 而不是 libraryTodos 里，老师不用展开"还有活没干"的下拉就能看见。
+    if (state.tagReview) {
+      const adv = node("button", `library-auto-advance${state.autoAdvanceSuggestion ? " active" : ""}`,
+        state.autoAdvanceSuggestion ? "✓ 处理完自动跳下一条" : "处理完自动跳下一条");
+      adv.type = "button";
+      adv.title = state.autoAdvanceSuggestion
+        ? "已开启：提交当前题的建议后，自动跳到下一道仍有未处理建议的题。再点一下关掉。"
+        : "点一下开启；开启后，处理完本题建议会自动滚到下一道有建议的题，方便清空一大批。";
+      adv.setAttribute("aria-pressed", String(state.autoAdvanceSuggestion));
+      adv.addEventListener("click", () => { state.autoAdvanceSuggestion = !state.autoAdvanceSuggestion; syncUrl(); renderActiveFilters(); });
+      box.append(adv);
+    }
   }
 
   // 「AI 建议标签」什么时候能用：功能开了、并且 API 配好测过了。
@@ -4017,6 +4122,22 @@ $("selectedViewCount").textContent = String(state.basket.length);
           for (const value of state.items) if (value.id === item.id) value.solution = solution;
         }
         deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync, item.id);
+        // 1.25.82：右侧面板里"为本题写答案"是单题入口，老师刚答完一道要回到列表
+        // 自己找下一道没答案的题 —— 不友好。存完之后自动在当前可见的列表里找下一道
+        // 没有正式解析的题，直接选上并打开编辑器。多道（出卷草稿）那种入口不动。
+        if (scope === "library" && answerEditor?.isOpen() && items.length <= 1) {
+          const next = (state.items || []).find(candidate => candidate.id !== item.id
+            && solutions.completeness(candidate) === "missing"
+            && candidate.status !== "withdrawn");
+          if (next) {
+            state.inspectorId = next.id;
+            const card = document.getElementById(`q-${next.id}`);
+            if (card) { card.scrollIntoView({ block: "center" }); card.focus(); selectInspectorQuestion(next, card); }
+            openAnswerEditor([next], { scope: "library" });
+          } else {
+            toast("当前筛选下没有更多没有答案解析的题了。", "success");
+          }
+        }
       } });
     return answerEditor.open(items, { ...options, scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
   }
@@ -5710,7 +5831,18 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     panel.setAttribute("aria-label", "教材目录");
     panel.hidden = true;
     workspace.prepend(panel);
+    // 1.25.87：右边缘加一根细拖拽手柄 —— 老师把目录拽宽一点，长名字（"三角形的三边关系"）
+    // 就能完整显示，不用反复折子标签。
+    const handle = node("span", "library-directory-resize");
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "vertical");
+    handle.setAttribute("aria-label", "拖动调整目录宽度");
+    handle.tabIndex = 0;
+    panel.append(handle);
     directory.panel = panel;
+    directory.resizeHandle = handle;
+    applyDirectoryWidth();
+    attachDirectoryResize(handle);
     return panel;
   }
   // 1.25.71：开关的点击事件一开始就挂上，不等首次打开。原先写在 directoryEnsure 里，
@@ -5726,14 +5858,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     try { localStorage.setItem("qb-library-directory", open ? "1" : "0"); } catch (_) { /* 记不住也没关系 */ }
     if (!open) return;
     if (!directory.tags.length) await directoryLoad();
-    // 1.25.72：默认只展开真正有题目的章 —— 全树空的那一类才往下翻（看不到东西），反而变成一
-    // 排"还有 X 个没用到的"刷下来。这一层自动展开是给眼睛一个"目录里有货"的提示。
-    if (directory.open.size === 0 && directory.tags.length) {
-      const byId = new Map(directory.tags.map(tag => [String(tag.id), tag]));
-      for (const tag of directory.tags) {
-        if ((tag.parent_ids || []).every(pid => byId.get(String(pid))?.kind !== tag.kind) && directoryCount(tag) > 0) directory.open.add(String(tag.id));
-      }
-    }
+    // 1.25.72 之前默认把"真有题目"的章都展开 —— 老师看到的是一长串"还有 X 个没用到的"刷下来。
+    // 1.25.83：再退一步 —— 默认就只展开"当前筛的那一章"（包括它的祖先），目录里剩下的
+    // 都折成 ▸。老师想看哪一章自己点；清空筛选、关掉目录、下次再进来时不会又被展开一大排。
     // 展开到当前筛的那一层，免得「明明筛着函数，目录里却找不到它」。
     if (state.tagAny) directoryOpenPath(String(state.tagAny));
     directoryRender();
@@ -5768,10 +5895,17 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     const children = directoryChildren(tag).filter(child => !ancestors.has(String(child.id)));
     const open = directory.open.has(id);
     const subtreeEmpty = directoryCount(tag) === 0;
+    // 1.25.83：深度 0 的章根（没有同类型上级的标签）是一级节点，子标签都更 ——
+    // 章根加粗、字号略大、子标签灰一些，让整列层级一眼可分。
+    const isChapterRoot = depth === 0;
     const row = node("div", "library-directory-row-wrap"
       + (directorySelected() === id ? " is-current" : "")
-      + (subtreeEmpty ? " is-empty" : ""));
-    row.style.paddingLeft = (depth * 14) + "px";
+      + (subtreeEmpty ? " is-empty" : "")
+      + (isChapterRoot ? " is-chapter" : " is-leaf"));
+    // 1.25.89：子行是**嵌在父行里**的（下面 row.append(item)），父行的缩进已经把子行推过
+    // 一次了。所以每层只加 CSS 里那**一格**（.is-leaf 的 padding-left），不能写 depth * 18 ——
+    // 那样每层的 18 都会和祖先叠加：18 → 54 → 108 → 180，第四层在 240px 面板里一点字宽都
+    // 不剩（折行后一行一个字）。老师看到的「字被挡住」根子在这里。
     row.style.setProperty("--directory-color", directoryColor(tag));
     const line = node("div", "library-directory-line");
     const toggle = children.length
@@ -5788,7 +5922,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     }
     const name = node("button", "library-directory-name", tag.name);
     name.type = "button";
-    name.title = tag.description || tag.name;
+    // 1.25.85：名字在面板里被截掉时，鼠标停上来能看见完整标签名 + 描述。description 之前
+    // 单独顶在前面，名字被截后没法直接看到——放到 title 里一起 hover 看。
+    name.title = tag.description ? `${tag.name} — ${tag.description}` : tag.name;
     if (directorySelected() === id) name.classList.add("selected");
     name.addEventListener("click", () => {
       directory.open.add(id);
@@ -5810,11 +5946,74 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
         const more = node("button", "library-directory-more", `还有 ${hidden.length} 个没用到的`);
         more.type = "button";
         more.addEventListener("click", () => { directory.showAll.add(id); directoryRender(); });
-        more.style.marginLeft = ((depth + 1) * 14) + "px";
+        more.style.marginLeft = "18px";
         row.append(more);
       }
     }
     return row;
+  }
+
+  // 1.25.87：拖拽调整目录宽度 —— 老师把目录拽宽一点，长名字能完整显示。
+  // localStorage 里记着宽，下次进来保持；最小 200px，最大 480px。
+  const DIRECTORY_WIDTH_KEY = "qb-library-directory-width";
+  function readDirectoryWidth() {
+    const raw = Number(localStorage.getItem(DIRECTORY_WIDTH_KEY));
+    return Number.isFinite(raw) && raw >= 200 && raw <= 480 ? raw : 240;
+  }
+  function applyDirectoryWidth() {
+    const width = readDirectoryWidth();
+    document.documentElement.style.setProperty("--directory-width", width + "px");
+  }
+  function writeDirectoryWidth(width) {
+    try { localStorage.setItem(DIRECTORY_WIDTH_KEY, String(width)); } catch (_) { /* 记不住就忘掉 */ }
+  }
+  function attachDirectoryResize(handle) {
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+    const onMove = (event) => {
+      if (!dragging) return;
+      const dx = event.clientX - startX;
+      // 拖向右边宽度变大；clamp 到 200–480 让长名字能展开，但不让它把主区挤垮。
+      const next = Math.max(200, Math.min(480, Math.round(startWidth + dx)));
+      document.documentElement.style.setProperty("--directory-width", next + "px");
+    };
+    const onUp = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      const dx = event.clientX - startX;
+      const next = Math.max(200, Math.min(480, Math.round(startWidth + dx)));
+      writeDirectoryWidth(next);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.classList.remove("is-resizing");
+    };
+    const onDown = (event) => {
+      if (event.button && event.button !== 0) return;
+      dragging = true;
+      startX = event.clientX;
+      startWidth = readDirectoryWidth();
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      document.body.classList.add("is-resizing");
+      event.preventDefault();
+    };
+    handle.addEventListener("pointerdown", onDown);
+    // 键盘也能调：左右方向键各 8px，PgUp/PgDn 各 64px，Home/End 跳到边界。
+    handle.addEventListener("keydown", (event) => {
+      const step = event.key === "PageUp" || event.key === "PageDown" ? 64
+        : event.key === "Home" ? 240 - readDirectoryWidth()
+        : event.key === "End" ? 480 - readDirectoryWidth()
+        : event.key === "ArrowLeft" || event.key === "ArrowRight" ? (event.shiftKey ? 24 : 8) : 0;
+      if (!step) return;
+      const dir = event.key === "ArrowLeft" || event.key === "PageUp" || event.key === "Home" ? -1 : 1;
+      const next = Math.max(200, Math.min(480, readDirectoryWidth() + dir * step));
+      document.documentElement.style.setProperty("--directory-width", next + "px");
+      writeDirectoryWidth(next);
+      event.preventDefault();
+    });
   }
 
   function directoryRender() {
@@ -5904,6 +6103,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       ? `还没有${DIRECTORY_KINDS[directory.kind] || "这一类"}标签。`
       : `${directory.stage}这边还没有${DIRECTORY_KINDS[directory.kind] || "这一类"}标签。`));
     roots.forEach(root => { const row = directoryRow(root, 0, new Set()); if (row) panel.append(row); });
+    // 1.25.87：directoryRender 用了 replaceChildren 把面板内容清空重建，顺手把手柄再贴回去。
+    if (directory.resizeHandle) panel.append(directory.resizeHandle);
     panel.scrollTop = scroll;
   }
 
@@ -6357,6 +6558,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
 
   if (state.document) ui.source.value = state.document;
   saveBasket();
+  applyDirectoryWidth();
   load();
   // 1.25.58：目录默认开在左栏；关过一次就记住不再自动开。
   try { if (localStorage.getItem("qb-library-directory") !== "0") void directoryToggle(true); } catch (_) { /* 记不住就不自动开 */ }
