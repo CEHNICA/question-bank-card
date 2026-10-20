@@ -420,7 +420,7 @@
     // 1.25.20：这两个筛选入口搬进了待办折叠区，class 也跟着换了。锁不锁它们
     // 仍然是「已选题」视图的事 —— 只锁上面那批会把它们漏掉，筛选在这个视图里
     // 一点都点不动。
-    for (const control of document.querySelectorAll("#libraryTodos .library-todo-look button")) control.disabled = selectedView;
+    for (const control of document.querySelectorAll(".library-todo-look button")) control.disabled = selectedView;
     applyBatchButtonState();
   }
 
@@ -464,7 +464,7 @@
     // div 挂没挂 library-tool-actions —— 1.25.20 两边都挂了，于是这里把两个免费的
     // 筛选也一起锁掉，AI 一登记它们就变灰；1.25.21 把筛选组挪回自己的 class。
     // 改这两处时必须一起验：把 class 加回去，AI 排队时那两个筛选还点不动。
-    for (const control of document.querySelectorAll("#libraryTodos .library-tool-actions button")) {
+    for (const control of document.querySelectorAll(".library-tool-actions button")) {
       control.disabled = queueBusy || selectedView || control.dataset.disabledInSelectedView === "true";
       // 排队期间要改名的只有刚才被点的那一个；别的按钮保持自己的名字，
       // 只是被锁住 —— 让它们也跟着说「正在排队」是在骗用户，以为他排了两队。
@@ -596,10 +596,73 @@
     state.untaggedKnowledge = false; state.tagReview = false; syncUrl(); load();
   }
 
+  // 1.25.96：「还有活没干」这块面板摆在哪儿。抽成纯函数，好单测。
+  // 返回两样：左边落在哪、面板实际多宽 —— 光看左边不够，面板还得整个在屏幕里。
+  // 规矩只有三条：
+  //   ① 贴住「还有没干」按钮的右缘（面板从这里往左铺）；
+  //   ② 这样摆会跑出屏幕左缘时，改贴屏幕右缘 —— 老师要的就是「在右边展示」；
+  //   ③ 视口比面板本身还窄时，只剩贴着屏幕左缘这一条路。
+  function todoPanelPlacement(anchorRight, panelWidth, viewportWidth, margin = 16) {
+    const width = Math.min(panelWidth, Math.max(0, viewportWidth - margin * 2));
+    // maxLeft 天然不小于 margin（视口比面板还窄时就是 margin 本身），
+    // 所以左缘永远不小于 margin —— 不用再单独兜一次。
+    const maxLeft = Math.max(margin, viewportWidth - margin - width);
+    let left = anchorRight - width;
+    if (left < margin) left = maxLeft;
+    if (left > maxLeft) left = maxLeft;
+    return { left: Math.round(left), width };
+  }
+
+  // 面板改成 fixed 定位（见 library.css 里 1.25.96 那段注释），位置得自己算。
+  // 算完还要保证它整个落在屏幕里：底边超出视口就往上挪；按钮滚出视野就整个藏起来，
+  // 不留一块悬在屏幕中间的空壳。
+  function placeTodoPanel() {
+    bindTodoPanel();
+    const menu = ui.todos?.querySelector(".library-todo-menu");
+    const body = document.querySelector(".library-todo-body");
+    if (!menu || !body) return;
+    if (!menu.open) { body.hidden = true; return; }
+    const anchor = menu.getBoundingClientRect();
+    // clientWidth 是不含竖滚动条的那部分宽度 —— 面板是 fixed 定位，它的可用宽度
+    // 也按这个算。拿 innerWidth（含滚动条）去算，面板右边会多出十几像素。
+    const viewportW = document.documentElement.clientWidth || window.innerWidth;
+    const viewportH = window.innerHeight;
+    const margin = 16;
+    if (anchor.bottom < 0 || anchor.top > viewportH) { body.hidden = true; return; }
+    body.hidden = false;
+    const width = body.offsetWidth || Math.min(560, viewportW - margin * 2);
+    const place = todoPanelPlacement(anchor.right, width, viewportW, margin);
+    let top = anchor.bottom + 8;
+    const maxTop = viewportH - margin - body.offsetHeight;
+    if (top > maxTop) top = Math.max(margin, maxTop);
+    body.style.left = place.left + "px";
+    body.style.top = Math.round(top) + "px";
+  }
+
+  // 窗口大小变了、页面滚了，按钮的位置跟着变，面板得跟着重摆。
+  // 监听等第一次摆位置时才挂 —— 一上来就挂，别的脚本把这一段单独拎出来跑时
+  // 会被一个不存在的 window.addEventListener 绊倒。
+  let todoPanelSync = 0;
+  let todoPanelBound = false;
+  function bindTodoPanel() {
+    if (todoPanelBound) return;
+    if (typeof window.addEventListener !== "function") return;
+    todoPanelBound = true;
+    window.addEventListener("resize", syncTodoPanel);
+    window.addEventListener("scroll", syncTodoPanel, { passive: true });
+  }
+  function syncTodoPanel() {
+    if (todoPanelSync) return;
+    todoPanelSync = window.requestAnimationFrame(() => { todoPanelSync = 0; placeTodoPanel(); });
+  }
+
   // 1.25.20：三样「还有活没干」合成一处，跟着题目列表那一行走，筛选行只留来源和更多筛选。
   function renderTodos() {
     const box = ui.todos;
     box.replaceChildren();
+    // 1.25.96：上一轮的面板挂在 .library-workspace 上（不跟着 box 一起清），
+    // 这里先收掉，别在页面上攒一叠看不见的空壳。
+    for (const stale of document.querySelectorAll(".library-todo-body")) stale.remove();
     const missingCount = Number(state.tagWork?.untagged_knowledge) || 0;
     const readyCount = Number(state.tagWork?.untagged_ready) || 0;
     const answerCount = Number(state.tagWork?.missing_answer) || 0;
@@ -843,9 +906,21 @@
       cols.append(column("答案", [paidGroup(answerActions)]));
     }
     body.append(cols);
-    menu.append(body);
-    menu.addEventListener("toggle", () => { todoMenuOpen = menu.open; });
+    // 1.25.96：面板不再挂在 details 里面。挂在里面有两个毛病：它跟着吸顶条
+    // （.library-bulk，层级 20）走，永远压在筛选行（21）底下，「更多筛选」一展开
+    // 就盖住它；而且 details 关掉时没法单独控制它显不显示。
+    // 现在挂到 .library-workspace 下（那里 z-index 是 auto，不建层叠上下文），
+    // 用 fixed 定位，位置自己算（见 todoPanelLeft / placeTodoPanel）。
+    const host = document.querySelector(".library-workspace") || document.body;
+    host.append(body);
+    body.hidden = !menu.open;
+    menu.addEventListener("toggle", () => {
+      todoMenuOpen = menu.open;
+      body.hidden = !menu.open;
+      if (menu.open) placeTodoPanel();
+    });
     box.append(menu);
+    if (menu.open) placeTodoPanel();
   }
 
   function currentFilterPayload() {
@@ -887,7 +962,7 @@
       const spent = Math.round((Date.now() - queueStartedAt) / 1000);
       // 每秒都重新找这一行：登记途中界面会重画，按住开始时那个节点，
       // 等于对着已经不在页面上的元素写字，写了也没人看得见。
-      const stateLine = document.querySelector("#libraryTodos .library-batch-state");
+      const stateLine = document.querySelector(".library-batch-state");
       if (stateLine) {
         stateLine.hidden = false;
         stateLine.dataset.tone = "working";
@@ -909,7 +984,7 @@
       applyBatchButtonState();
       // 刚才写的是「正在登记…」。登记已经结束了，留着会说谎；
       // 紧接着的刷新会把它换成真实的「AI 正在处理：还有多少道」。
-      const stateLine = document.querySelector("#libraryTodos .library-batch-state");
+      const stateLine = document.querySelector(".library-batch-state");
       if (stateLine && stateLine.dataset.queueing === "true") {
         delete stateLine.dataset.queueing;
         stateLine.hidden = true;

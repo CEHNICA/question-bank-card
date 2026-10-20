@@ -101,7 +101,9 @@ assert.match(todos, /\$\{answerCount\} 题没答案/, "折叠条上写出还没�
 // 「要花额度」是警告不是动作。挤在名字里，认出来的就不是"这是干什么的"；
 // 但它也不能丢 —— 1.25.23 起它跟着每一颗会花钱的按钮走（data-cost="ai" → 界面上的
 // 「AI」小标），面板顶上另有一行说明讲清规矩。
-const summary = todos.slice(todos.indexOf("const summary = node("), todos.indexOf("menu.append(body);"));
+// 1.25.96：面板搬到了 .library-workspace 下（不再挂在 details 里），
+// 结束标记也跟着换 —— 原来那句 menu.append(body); 没了。
+const summary = todos.slice(todos.indexOf("const summary = node("), todos.indexOf("const body = node("));
 assert.doesNotMatch(summary, /要花额度/, "「要花额度」不能占入口的名字");
 assert.match(todos, /没带「AI」标记的只是筛一遍，不花钱；带「AI」的会让 AI 逐题处理，每题消耗一次额度/,
   "花费的规矩写在展开后看得见的那一行，没有丢");
@@ -173,14 +175,18 @@ assert.ok(lookContainer, "找得到筛选组的容器；改版时 update this sl
 assert.ok(!lookContainer[1].trim().split(/\s+/).includes("library-tool-actions"),
   "筛选组不能挂 library-tool-actions：applyBatchButtonState 就是按这个 class 圈按钮的，"
   + "挂了它，AI 一登记两个免费筛选就跟着变灰");
-assert.match(js, /querySelectorAll\("#libraryTodos \.library-tool-actions button"\)/,
-  "锁 AI 动作的那句选择器没变");
-assert.match(js, /querySelectorAll\("#libraryTodos \.library-todo-look button"\)/,
+// 1.25.96：面板搬出吸顶条以后，选择器不能再用 #libraryTodos 前缀 ——
+// 面板里的按钮已经不在 #libraryTodos 下面了，带上前缀就一个都圈不到。
+assert.match(js, /querySelectorAll\("\.library-tool-actions button"\)/,
+  "锁 AI 动作的那句选择器跟着面板搬家了");
+assert.match(js, /querySelectorAll\("\.library-todo-look button"\)/,
   "锁筛选的那句选择器也还在——现在两处管的是不相交的两组按钮");
+assert.doesNotMatch(js, /querySelectorAll\("#libraryTodos /,
+  "不能再用 #libraryTodos 前缀找面板里的东西：面板已经不在那个容器里了");
 // 顺序也重要：先把筛选按"只看当前视图"锁好，再调 applyBatchButtonState。
 // 两次调用之间不能夹着另一次 applyBatchButtonState —— 后写的会赢，净效果又变成
 // "AI 排队时筛选也灰"。这里量的是两次调用之间的那一段，不靠猜 offset。
-const lookAt = js.indexOf('querySelectorAll("#libraryTodos .library-todo-look button")');
+const lookAt = js.indexOf('querySelectorAll(".library-todo-look button")');
 const applyAt = js.indexOf("applyBatchButtonState();", lookAt);
 assert.ok(lookAt > -1 && applyAt > lookAt, "两次调用都在，找得到");
 assert.ok(!js.slice(Math.max(0, lookAt - 400), applyAt).includes("applyBatchButtonState();"),

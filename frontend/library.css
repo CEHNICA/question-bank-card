@@ -226,7 +226,18 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-todo-bits { color: var(--muted); }
 .library-todos .library-todo-menu[data-working] .library-todo-bits { color: rgba(255, 255, 255, .85); }
 .library-todos .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); color: inherit; font-size: 11px; font-weight: 700; }
-.library-todo-body { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(560px, calc(100vw - 32px)); max-height: min(60vh, 460px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
+/* 1.25.96：这块面板原来写的是 right: 0，锚在「还有没干」按钮上，而那个按钮住在吸顶的
+   批量条（.library-bulk，层级 20）里。两个后果都是实测出来的：
+   ① 窗口一窄，那个按钮被挤到批量条左边，560 像素宽的面板跟着甩出屏幕左缘 ——
+      实测 1100 像素宽的窗口里面板落在 x=-141，「标签」栏五颗按钮只剩右半截，
+      「答案」栏却完好。老师报「挡住了，让他在右边展示」。
+   ② 它的层级比筛选行（21）低，「更多筛选」展开时反过来盖住它 —— 1442 像素宽也能复现。
+   1.25.18 修过同样毛病的「更多筛选」面板，这次漏了它。
+   现在：面板挂到 .library-workspace 下（那里 z-index 是 auto，不建层叠上下文），
+   用 fixed 定位，位置由 JS 算 —— 贴按钮右缘；右缘放不下就贴屏幕右缘；
+   视口比面板还窄才贴左缘。不管窗口多窄、也不管别的浮层开没开，它都完整落在屏幕里。 */
+.library-todo-body { position: fixed; top: 0; left: 0; right: auto; z-index: 58; width: min(560px, calc(100% - 32px)); max-height: min(60vh, 460px); overflow-y: auto; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 42px rgba(24, 44, 38, .18); }
+.library-todo-body[hidden] { display: none; }
 .library-todo-note { margin: 0 0 9px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
 /* 1.25.23：按「它动的是什么」分两栏 —— 标签一栏、答案一栏。平铺时看不出差别：
    「补齐缺的参考答案」和「补齐缺的知识点标签」长得一模一样，
@@ -241,8 +252,10 @@ a.library-type.undecided:hover { text-decoration: underline; }
    applyBatchButtonState 的锁定，也不该长得像一颗可以去点的按钮 —— 保持纯文字，
    和题型筛选是同一套长相。 */
 .library-todo-look { display: grid; gap: 6px; }
-.library-todos .library-tool-actions { gap: 6px; }
-.library-todos .library-tool-action { min-height: 36px; padding: 7px 9px; }
+/* 1.25.96：面板搬到了 .library-workspace 下（不在吸顶条里了），
+   这两条原来挂在 .library-todos 后面，跟着搬。 */
+.library-todo-body .library-tool-actions { gap: 6px; }
+.library-todo-body .library-tool-action { min-height: 36px; padding: 7px 9px; }
 /* 1.25.21：这两组原来连边框都一样（1px solid transparent，等于没有边框），全靠一个
    「+」号分出「只看」和「让 AI 去干」。1.25.23 那道实线边框继续留着。
    1.25.23 再加一枚「AI」小标：光靠边框，"要花钱"这件事仍然只写在面板顶上那行说明里，

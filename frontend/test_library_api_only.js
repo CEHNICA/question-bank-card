@@ -54,8 +54,10 @@ function setup({ checked = { mode: "api", api_ready: true }, posted = checked, g
   // 真正的 disable 判据就让它自己算：这里只提供它要用的 state 和 querySelectorAll。
   state: { view: "all" },
   document: {
-    querySelectorAll: selector => (selector === "#libraryTodos .library-tool-actions button" ? batchButtons : []),
-    querySelector: selector => (selector === "#libraryTodos .library-batch-state" ? stateLine : null)
+    // 1.25.96：面板搬到了 .library-workspace 下，不再是 #libraryTodos 的后代，
+    // 这两个选择器也跟着去掉前缀。
+    querySelectorAll: selector => (selector === ".library-tool-actions button" ? batchButtons : []),
+    querySelector: selector => (selector === ".library-batch-state" ? stateLine : null)
   },
   // 抓住每秒回调而不是自己造一个，这样量到的就是代码里那条真的那句。
   window: { setInterval: (fn) => { tick = fn; ticking = true; return 0; },
