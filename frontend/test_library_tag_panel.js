@@ -18,12 +18,16 @@ assert.match(libraryJs, /tagDialog\.append\(header, now, more, search, quick, bo
   "that container sits above the directory list, so it is the first thing read");
 assert.match(libraryJs, /moreTitle\.append\(node\("b", "", "想加的"\)/,
   "the directory below is labelled too, so all three blocks read the same way");
-assert.match(libraryJs, /more\.append\(moreTitle, tools\)/,
-  "creating a new label belongs with the block it adds to");
+// 1.25.94：新建标签的入口从右上角那个孤零零的按钮，挪到了列表最后一条
+// （「新建「XXX」并贴上」）—— 跟单题那边同款，不再是两套做法。
+assert.doesNotMatch(libraryJs, /tagPickerCreateTag/,
+  "the separate create button is gone — creating belongs with the list it adds to");
+assert.match(libraryJs, /新建「\$\{trimmed\.slice\(0, 30\)\}」并贴上/,
+  "creating a new label is the last row of the list, worded like the single-question one");
 // 窗口现在只管「改标签」。采纳/拒绝搬到了右边详情面板的建议清单里（那块下面
 // 本来就有空位，核对是最高频的动作，不该藏在一个要点的按钮后面）。
 // 所以窗口的说明不能再声称「采纳也在这个窗口里」—— 那会把人引到没有按钮的地方。
-assert.match(libraryJs, /"已经贴上的和想加的，都在这个窗口里；要采纳 AI 的建议，在右边详情面板上做。"/,
+assert.match(libraryJs, /要采纳 AI 的建议，在右边详情面板上做。/,
   "the dialog points accepting at the panel instead of claiming it happens here");
 
 const start = libraryJs.indexOf("  function renderTagPickerNow() {");

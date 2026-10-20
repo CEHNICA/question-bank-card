@@ -1591,6 +1591,8 @@
   function saveSuggestionDrafts() { try { sessionStorage.setItem(suggestionDraftKey, JSON.stringify(suggestionDrafts)); sessionStorage.setItem(suggestionDraftKey + ":requests", JSON.stringify(Object.fromEntries(suggestionAttempts))); } catch (_) {} }
   let tagManagerQuery = "";
   let tagTargetIds = [], tagRevisions = {}, tagMemberships = {}, tagActiveSection = "all", tagPickerView = "all", tagUndoId = "", tagOperationHistory = [];
+  // 1.25.94：批量窗口刚打开时的落地页 —— 先摆「最近用过的 + 收藏」，不铺满两百多条。
+  let tagPickerLanding = true;
   const catalogueAttempts = new Map();
   let catalogueUnknown = null;
   let pickerAttempt = null;
@@ -1816,16 +1818,16 @@
     tagDialog = node("dialog", "tag-picker-dialog"); tagDialog.id = "tagPickerDialog";
     const header = node("header", "tag-picker-head"), title = node("div");
     const heading = node("h2", "", "添加标签"); heading.id = "tagPickerTitle";
-    const subtitle = node("p", "tag-picker-subtitle", "点击标签立即保存；再次点击移除。"); subtitle.id = "tagPickerSubtitle";
+    // 1.25.94：提示语跟单题那边一样一句话 —— 两处是同一件事，别一个说「点击立即保存」、
+    // 一个说「点一下贴上，再点一下拿掉」。
+    const subtitle = node("p", "tag-picker-subtitle", "点一下贴上，再点一下拿掉。"); subtitle.id = "tagPickerSubtitle";
     title.append(heading, subtitle);
     const close = node("button", "button", "关闭"); close.type = "button"; close.addEventListener("click", function() { tagDialog.close(); });
     header.append(title, close);
-    const tools = node("div", "tag-picker-tools");
-    [["tagPickerCreateTag", "新建标签", () => openTagCatalogueEditor(null, true)]].forEach(function(entry) {
-      const button = node("button", "button button-small", entry[1]); button.id = entry[0]; button.type = "button";
-      button.addEventListener("click", entry[2]); tools.append(button);
-    });
-    const search = node("input", "tag-picker-search"); search.id = "tagPickerSearch"; search.type = "search"; search.placeholder = "搜索名称、别名或说明"; search.addEventListener("input", renderTagPicker);
+    // 1.25.94：右上角那个孤零零的「新建标签」按钮去掉了 —— 新建入口统一放在列表最后一条，
+    // 跟单题那边一模一样（「新建「XXX」并贴上」）。
+    const search = node("input", "tag-picker-search"); search.id = "tagPickerSearch"; search.type = "search"; search.placeholder = "搜索名称、别名或说明";
+    search.addEventListener("input", function() { tagPickerLanding = !search.value.trim(); renderTagPicker(); });
     const quick = node("nav", "tag-picker-quick"); quick.id = "tagPickerQuick";
     const body = node("div", "tag-picker-body"), groups = node("nav", "tag-picker-groups"), list = node("div", "tag-picker-list");
     groups.id = "tagPickerGroups"; list.id = "tagPickerList"; body.append(groups, list);
@@ -1837,7 +1839,7 @@
     const more = node("div", "tag-picker-more"); more.id = "tagPickerMore";
     const moreTitle = node("h3", "tag-picker-block-title");
     moreTitle.append(node("b", "", "想加的"), node("small", "", "点一下贴上，再点一下拿掉"));
-    more.append(moreTitle, tools);
+    more.append(moreTitle);
     tagDialog.append(header, now, more, search, quick, body, footer); document.body.append(tagDialog); return tagDialog;
   }
   async function openTagEditor(item, options = {}) {
@@ -1850,7 +1852,7 @@
     if (tagTargetIds.length > 500) { toast("一次最多整理 500 题，请减少勾选后重试。", "error"); return; }
     $("tagPickerTitle").textContent = pickerAttempt ? `核实上次标签操作（${tagTargetIds.length} 题）` : item ? `${sourceLocator(item)}的标签` : `整理勾选的 ${tagTargetIds.length} 题标签`;
     $("tagPickerSubtitle").textContent = item
-      ? "已经贴上的和想加的，都在这个窗口里；要采纳 AI 的建议，在右边详情面板上做。" : "点一下贴上，再点一下拿掉。";
+      ? "点一下贴上，再点一下拿掉。要采纳 AI 的建议，在右边详情面板上做。" : "点一下贴上，再点一下拿掉。";
     tagDialog.classList.add("loading");
     try {
       const ids = tagTargetIds.join(","), pair = await Promise.all([loadTagCatalogue(), tagRequest("/api/library/tags/assignments/batch?ids=" + encodeURIComponent(ids))]);
@@ -1860,6 +1862,9 @@
         tagMemberships[entry[0]] = new Set(entry[1].assignments.filter(function(row) { return !row.needs_review; }).map(function(row) { return row.tag.id; }));
       });
       tagActiveSection = "all"; tagPickerView = "all"; tagUndoId = ""; $("tagPickerSearch").value = options.query || "";
+      // 1.25.94：打开时先落在「最近用过的 + 收藏」，不铺满两百多条；要逛全部，
+      // 点左边某一章，或点上面的「全部标签」。
+      tagPickerLanding = !($("tagPickerSearch").value || "").trim();
       $("tagPickerStatus").textContent = tagTargetIds.length === 1 ? "单题" : "已选 " + tagTargetIds.length + " 题"; $("tagPickerUndo").hidden = true;
       $("tagPickerRetry").hidden = !pickerAttempt;
       renderTagPicker(); if (!dialog.open) dialog.showModal(); $("tagPickerSearch").focus();
@@ -1948,14 +1953,19 @@
     const groupScrollTop = groupBox.scrollTop, groupScrollLeft = groupBox.scrollLeft;
     quick.replaceChildren();
     [{ id: "all", name: "全部标签" }, { id: "favorite", name: "收藏" }, { id: "recent", name: "最近使用" }].forEach(function(view) {
-      const button = node("button", "tag-group-button" + (tagPickerView === view.id ? " active" : ""), view.name);
-      button.type = "button"; button.addEventListener("click", function() { tagPickerView = view.id; tagActiveSection = "all"; renderTagPicker(); }); quick.append(button);
+      // 1.25.94：落地页还没选任何一种看法时，别让「全部标签」亮着 —— 亮着就是骗人，
+      // 列表上摆的是「最近用过的 + 收藏」。
+      const active = tagPickerView === view.id && !tagPickerLanding;
+      const button = node("button", "tag-group-button" + (active ? " active" : ""), view.name);
+      button.type = "button";
+      button.addEventListener("click", function() { tagPickerView = view.id; tagActiveSection = "all"; tagPickerLanding = false; renderTagPicker(); });
+      quick.append(button);
     });
     const byId = new Map((tagCatalogue.tags || []).map(function(tag) { return [String(tag.id), tag]; }));
     const children = tagChildrenIndex();
     groupBox.replaceChildren();
     const allButton = node("button", "tag-group-button" + (tagActiveSection === "all" ? " active" : ""), "全部章节");
-    allButton.type = "button"; allButton.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = "all"; renderTagPicker(); }); groupBox.append(allButton);
+    allButton.type = "button"; allButton.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = "all"; tagPickerLanding = false; renderTagPicker(); }); groupBox.append(allButton);
     // 1.25.93：左栏原来把二十来个顶层标签平铺着排，知识点和解题方法混在一起，只能靠名字
     // 前缀去分是哪一类。现在按类型分组，跟标签管理页一致：先看是哪一类，再在类里挑。
     const rootTags = (tagCatalogue.tags || []).filter(function(tag) {
@@ -1970,32 +1980,43 @@
       rows.forEach(function(tag) {
         const button = node("button", "tag-group-button" + (tagActiveSection === String(tag.id) ? " active" : ""), tag.name);
         button.title = (kindLabels[tag.kind] || "标签") + " · 连同下面 " + (tagSubtree(String(tag.id), children).size - 1) + " 个下级标签";
-        button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = String(tag.id); renderTagPicker(); }); groupBox.append(button);
+        button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = String(tag.id); tagPickerLanding = false; renderTagPicker(); }); groupBox.append(button);
       });
     });
     groupBox.scrollTop = groupScrollTop; groupBox.scrollLeft = groupScrollLeft;
     const query = String($("tagPickerSearch").value || "").trim().normalize("NFKC").toLocaleLowerCase();
-    let recentIds = [];
-    try { recentIds = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]"); } catch (_) {}
     const active = tagActiveSection === "all" ? null : tagSubtree(tagActiveSection, children);
-    const rows = (tagCatalogue.tags || []).filter(function(tag) {
-      if (!tag.active) return false;
-      if (tagPickerView === "favorite" && !tag.favorite) return false;
-      if (tagPickerView === "recent" && !recentIds.includes(tag.id)) return false;
-      if (!query && tagPickerView === "all" && active && !active.has(String(tag.id))) return false;
+    const matchesText = function(tag) {
       const trail = tagTrail(tag, byId).join(" ");
       const text = [tag.name, tag.description, tag.conditions, ...(tag.aliases || []), trail].join(" ").normalize("NFKC").toLocaleLowerCase();
       return !query || text.includes(query);
-    });
-    if (tagPickerView === "recent") rows.sort(function(left, right) { return recentIds.indexOf(right.id) - recentIds.indexOf(left.id); });
-    const scrollTop = list.scrollTop;
-    list.replaceChildren(); if (!rows.length) {
-      list.append(node("p", "library-empty", query ? "没有找到这个标签。" : "还没有可用标签。"));
-      const create = node("button", "button button-small", query ? `创建「${$("tagPickerSearch").value.trim()}」并添加` : "新建标签"); create.type = "button";
-      create.addEventListener("click", () => openTagCatalogueEditor(null, true)); list.append(create);
-      list.scrollTop = scrollTop; return;
+    };
+    let rows;
+    if (tagPickerView === "recent") {
+      // 1.25.94：「最近使用」跟单题那边共用同一份，顺序也一样。
+      rows = recentTagsForAdd().filter(matchesText);
+    } else {
+      rows = (tagCatalogue.tags || []).filter(function(tag) {
+        if (!tag.active) return false;
+        if (tagPickerView === "favorite" && !tag.favorite) return false;
+        if (!query && tagPickerView === "all" && active && !active.has(String(tag.id))) return false;
+        return matchesText(tag);
+      });
     }
-    rows.forEach(function(tag) {
+    // 1.25.94：落地页 —— 先摆「最近用过的」和「收藏」，不铺满两百多条。
+    // 以前一打开就是两百六十三条密密麻麻地摊在这儿，跟单题那边「打字才出候选」
+    // 是两套完全不同的习惯；现在两边先给同一份「最近用过的」。
+    const landing = tagPickerLanding && !query && tagActiveSection === "all" && tagPickerView === "all";
+    const landingGroups = [];
+    if (landing) {
+      const recent = recentTagsForAdd();
+      const favorites = (tagCatalogue.tags || []).filter(function(tag) { return tag.active !== false && tag.favorite; });
+      if (recent.length) landingGroups.push({ title: "最近用过的", tags: recent });
+      if (favorites.length) landingGroups.push({ title: "收藏", tags: favorites });
+    }
+    const scrollTop = list.scrollTop;
+    list.replaceChildren();
+    const renderRow = function(tag) {
       const count = tagTargetIds.reduce(function(total, id) { return total + (tagMemberships[id] && tagMemberships[id].has(tag.id) ? 1 : 0); }, 0);
       const single = tagTargetIds.length === 1;
       // 1.25.93：这三句原来说的是「这个标签」怎么样 —— 老师读起来会以为库里没这个标签。
@@ -2017,15 +2038,55 @@
       const dot = node("span", "tag-picker-dot");
       if (rowColor) dot.style.setProperty("--tag-color", rowColor);
       nameLine.append(dot, node("strong", "", tag.name));
-      title.append(nameLine, node("small", "", (kindLabels[tag.kind] || "标签") + (tagTrail(tag, byId).length ? " · " + tagTrail(tag, byId).join(" › ") : "")));
-      button.append(title, node("span", "tag-picker-row-detail", tag.description || tag.conditions || ""), node("span", "tag-picker-row-state", text));
+      // 1.25.94：一行只写「圆点 + 名字 + 上级路径」，跟单题那边同款；
+      // 原来那个「知识点 · 初中 › 方程与不等式」的类型前缀和那段说明都挪到悬停里。
+      const pathText = tagPathText(tag);
+      title.append(nameLine, node("small", "tag-picker-row-path", pathText || (kindLabels[tag.kind] || "标签")));
+      button.append(title, node("span", "tag-picker-row-state", text));
+      button.title = tagRowTitle(tag);
       button.addEventListener("click", function() { void toggleTag(tag, count === tagTargetIds.length); });
       if (!single && count > 0 && count < tagTargetIds.length) {
         const mixed = node("div", "tag-picker-mixed-row"), remove = node("button", "button button-small", "全部移除"); remove.type = "button";
         button.querySelector(".tag-picker-row-state").textContent = text + " · 全部添加";
-        remove.disabled = tagDialog.classList.contains("saving"); remove.addEventListener("click", () => void toggleTag(tag, true)); mixed.append(button, remove); list.append(mixed);
-      } else list.append(button);
-    });
+        remove.disabled = tagDialog.classList.contains("saving"); remove.addEventListener("click", () => void toggleTag(tag, true)); mixed.append(button, remove);
+        return mixed;
+      }
+      return button;
+    };
+    if (landing) {
+      if (!landingGroups.length) {
+        list.append(node("p", "library-empty", "这里空着：先在上面搜一个标签名，或者从左边挑一章。"));
+      } else {
+        landingGroups.forEach(function(group) {
+          list.append(node("span", "tag-picker-group-title", group.title));
+          group.tags.forEach(function(tag) { list.append(renderRow(tag)); });
+        });
+      }
+    } else if (!rows.length) {
+      list.append(node("p", "library-empty", query ? "没有找到这个标签。" : "还没有可用标签。"));
+    } else {
+      rows.forEach(function(tag) { list.append(renderRow(tag)); });
+    }
+    // 1.25.94：新建入口统一放在列表最后一条（「新建「XXX」并贴上」），
+    // 跟单题那边一样；右上角那个孤零零的「新建标签」按钮已经去掉。
+    if (query) {
+      const trimmed = $("tagPickerSearch").value.trim();
+      const exact = (tagCatalogue.tags || []).find(function(tag) { return tag.active !== false
+        && String(tag.name).toLowerCase() === trimmed.toLowerCase(); });
+      if (!exact) {
+        const create = node("button", "tag-picker-row is-create");
+        create.type = "button";
+        // 1.25.94：跟单题那边同款 —— 一行就是「名字」，圆点留给真标签。
+        const createNameLine = node("span", "tag-picker-row-name");
+        createNameLine.append(node("span", "library-inline-add-name", `新建「${trimmed.slice(0, 30)}」并贴上`));
+        const createTitle = node("span", "tag-picker-row-title");
+        createTitle.append(createNameLine);
+        create.append(createTitle, node("span", "tag-picker-row-state", "建好就贴上"));
+        create.title = "目录里没有这个标签；建好就贴到这次整理的这几道题上";
+        create.addEventListener("click", function() { openTagCatalogueEditor(null, true); });
+        list.append(create);
+      }
+    }
     list.scrollTop = scrollTop;
   }
   async function toggleTag(tag, remove, options = {}) {
@@ -2862,6 +2923,38 @@
     finally { inlineTagLocks.delete(item.id); patchTagPresentation([item.id]); renderTagHover(); }
   }
 
+  // 1.25.94：这道题上已经贴了哪些标签 —— 两处「加标签」都要用同一份。
+  function takenTagIds(item) {
+    return new Set((item.tag_assignments || []).filter(link => !link.needs_review).map(link => String(link.tag.id)));
+  }
+
+  // 1.25.94：「加标签」这两处（单题右栏、批量窗口）是同一件事，做成同一副样子：
+  // 一条候选 = 彩色圆点 + 名字 + 上级路径。路径只写上级、用「›」连起来，
+  // 不再带「知识点 · 」这种类型前缀（类型和说明都挪到鼠标放上去才出现）。
+  function tagPathText(tag) {
+    if (!tag) return "";
+    const byId = new Map((tagCatalogue.tags || []).map(row => [String(row.id), row]));
+    return tagTrail(tag, byId).join(" › ");
+  }
+  function tagRowTitle(tag) {
+    if (!tag) return "";
+    return [(kindLabels[tag.kind] || "标签"), tagPathText(tag), tag.description || tag.conditions]
+      .filter(Boolean).join(" · ");
+  }
+  // 「最近用过的」：两处共用同一份，都排除停用的、历史标签和本题已经贴上的。
+  function recentTagsForAdd(takenIds) {
+    // takenIds 可能是数组，也可能是 Set（本题已贴的那些）—— 两种都收。
+    const skip = new Set([...(takenIds || [])].map(String));
+    const seen = new Set();
+    return flowRecentTags().filter(function(tag) {
+      if (!tag || tag.active === false || tag.kind === "legacy") return false;
+      const id = String(tag.id);
+      if (skip.has(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+
   // 1.25.66：从当前题目上加一个标签，模式很直接 —— 点开「+ 添加标签」，边输边匹配，
   // 列表是目录里按名称/别名/路径打的分数；点一条就贴上，回车也行。
   // 没有开关弹窗、没有跳走。匹配不到去重，再到标签管理里建。
@@ -2890,7 +2983,7 @@
   function inlineAddMatches(item, query) {
     const q = String(query || "").trim();
     if (!q) return [];
-    const taken = new Set((item.tag_assignments || []).filter(link => !link.needs_review).map(link => String(link.tag.id)));
+    const taken = takenTagIds(item);
     const seen = new Set();
     const scored = [];
     for (const tag of tagCatalogue.tags || []) {
@@ -2974,20 +3067,26 @@
     field.append(input, close);
     const list = node("div", "library-inline-add-list");
     list.setAttribute("role", "listbox");
-    const hint = node("p", "library-inline-add-hint", "↑↓ 选择 · 回车贴上 · Esc 收起");
+    const hint = node("p", "library-inline-add-hint", "点一下贴上，再点一下拿掉。也可以 ↑↓ 选择、回车贴上。");
 
     // 一行一条候选；敲的名字在目录里找不到时，末尾补一条「新建并贴上」。
     const optionsFor = (query) => {
       const matches = inlineAddMatches(item, query);
       const rows = matches.map(tag => ({ type: "tag", tag }));
       const trimmed = query.trim();
-      if (trimmed) {
-        // 「新建」只在目录里真的没有同名标签时出现；已经有了、只是本题没贴，那就不该再建一个。
-        const exactTag = (tagCatalogue.tags || []).find(tag => tag.active !== false
-          && String(tag.name).toLowerCase() === trimmed.toLowerCase());
-        if (!exactTag) rows.push({ type: "create", name: trimmed });
-        else if (!matches.some(tag => String(tag.id) === String(exactTag.id))) rows.push({ type: "note", text: `「${exactTag.name}」已经贴在这道题上了` });
+      if (!trimmed) {
+        // 1.25.94：空着的时候不给一片空白 —— 把「最近用过的」摆出来，点一下就贴上。
+        // 这跟批量窗口打开时列的是同一份，两处不用各学一套。
+        recentTagsForAdd(takenTagIds(item)).forEach(function(tag) {
+          if (!rows.some(row => String(row.tag.id) === String(tag.id))) rows.push({ type: "tag", tag });
+        });
+        return rows;
       }
+      // 「新建」只在目录里真的没有同名标签时出现；已经有了、只是本题没贴，那就不该再建一个。
+      const exactTag = (tagCatalogue.tags || []).find(tag => tag.active !== false
+        && String(tag.name).toLowerCase() === trimmed.toLowerCase());
+      if (!exactTag) rows.push({ type: "create", name: trimmed });
+      else if (!matches.some(tag => String(tag.id) === String(exactTag.id))) rows.push({ type: "note", text: `「${exactTag.name}」已经贴在这道题上了` });
       return rows;
     };
 
@@ -2995,11 +3094,14 @@
       const rows = optionsFor(inlineAdd.query);
       list.replaceChildren();
       if (!rows.length) {
+        // 1.25.94：这里空着也得说清楚差哪一步、去哪做，不能光给一个空盒子。
         hint.hidden = false;
-        hint.textContent = "↑↓ 选择 · 回车贴上 · Esc 收起";
+        hint.textContent = "这里空着：输入一个标签名就能找，或者到「标签管理」里建一个新的。";
         return;
       }
-      hint.hidden = true;
+      // 1.25.94：这行话一直挂着 —— 老师得始终知道「点一下会贴上」。
+      hint.hidden = false;
+      hint.textContent = "点一下贴上，再点一下拿掉。也可以 ↑↓ 选择、回车贴上。";
       if (inlineAdd.active >= rows.length) inlineAdd.active = 0;
       rows.forEach((entry, index) => {
         const row = node("button", "library-inline-add-item" + (inlineAdd.active === index ? " active" : ""));
@@ -3013,9 +3115,10 @@
           const dot = node("span", "library-inline-add-dot");
           if (!color) dot.hidden = true;
           const name = node("span", "library-inline-add-name", String(entry.tag.name));
-          const path = node("small", "library-inline-add-path", flowTagPath(entry.tag) || "");
+          // 1.25.94：跟批量窗口同款 —— 有上级就写上级，没上级就写它是哪一类。
+          const path = node("small", "library-inline-add-path", tagPathText(entry.tag) || (kindLabels[entry.tag.kind] || "标签"));
           row.append(dot, name, path);
-          row.title = `${entry.tag.name}${entry.tag.description ? " · " + entry.tag.description : ""}`;
+          row.title = tagRowTitle(entry.tag);
           row.addEventListener("click", () => { void applyInlineAdd(item, entry.tag); });
         } else if (entry.type === "create") {
           row.classList.add("is-create");

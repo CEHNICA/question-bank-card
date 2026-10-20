@@ -1136,8 +1136,13 @@ body.printing { overflow: hidden; }
 .tag-picker-row:hover, .tag-picker-row.active { border-color: #4b9081; background: #f0f7f4; }
 .tag-picker-row.mixed { border-color: #b8843d; background: #fff8e9; }
 .tag-picker-row-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.tag-picker-row-title small, .tag-picker-row-detail { color: var(--ink-2); font-size: 12px; }
+/* 1.25.94：一行只写「圆点 + 名字 + 上级路径」，跟单题那边同款；类型和说明挪到悬停里。 */
+.tag-picker-row-title small, .tag-picker-row-path { color: var(--ink-2); font-size: 12px; }
 .tag-picker-row-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; color: var(--accent-dark); }
+/* 1.25.94：新建入口跟单题那边一样，放在列表最后一条。 */
+.tag-picker-row.is-create { border-style: dashed; color: var(--ink-2); }
+.tag-picker-row.is-create:hover { border-color: #4b9081; color: var(--ink); background: #f0f7f4; }
+.tag-picker-row.is-create .tag-picker-row-state { color: var(--muted); }
 .tag-picker-foot { position: relative; z-index: 1; display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .tag-picker-save-state { min-width: 0; flex: 1 1 120px; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-2); }
 .tag-picker-foot > .button { flex: none; }
