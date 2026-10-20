@@ -35,6 +35,8 @@
 .tag-map-node.related-node.selected { border-color: #b29763; box-shadow: 0 0 0 3px #b2976321; }
 .tag-map-node-select { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; box-sizing: border-box; width: 100%; height: 65px; padding: 9px 13px 5px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: grab; }
 .tag-map-node-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: 100%; overflow: hidden; line-height: 1.4; font-size: 13px; font-weight: 600; letter-spacing: .01em; overflow-wrap: anywhere; }
+/* 1.25.93：地图上的标签也带一颗自己的颜色圆点，跟别的几处长得一样。 */
+.tag-map-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--tag-color, var(--line-strong)); vertical-align: 1px; }
 .tag-map-node-meta { display: block; margin-top: 3px; color: #8a9b90; font-size: 10px; line-height: 1.3; white-space: nowrap; }
 .tag-map-node-footer { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 30px; padding: 0 9px 0 13px; border-top: 1px solid #eff3ef; }
 .tag-map-node-count { min-width: 0; border: 0; background: transparent; padding: 3px 0; color: #6f8879; font: inherit; font-size: 10px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }

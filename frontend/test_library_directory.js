@@ -15,6 +15,9 @@ const mapJs = fs.readFileSync(path.join(__dirname, "library-tag-map.js"), "utf8"
 const answerJs = fs.readFileSync(path.join(__dirname, "library-answer-editor.js"), "utf8");
 const tagMgrJs = fs.readFileSync(path.join(__dirname, "library-tag-manager.js"), "utf8");
 const tagMgrCss = fs.readFileSync(path.join(__dirname, "library-tag-manager.css"), "utf8");
+// 1.25.93：颜色的规则搬到共享的 library-workspace.js 了（标签管理页在另一个文件里，
+// 也得用同一套），所以这条断言得看那份文件。
+const workspaceJs = fs.readFileSync(path.join(__dirname, "library-workspace.js"), "utf8");
 
 assert.match(html, /id="libraryDirectoryToggle"/, "筛选栏里有目录开关");
 assert.match(js, /id = "libraryDirectory"/, "目录是题库里的左栏，不是另一个页面");
@@ -35,7 +38,7 @@ assert.match(js, /state\.facets\?\.tags/, "目录里的题数跟着当前筛选�
 assert.match(html, /library-filter-group-note/, "更多筛选里说清楚标签勾选和左栏目录各管什么");
 assert.match(js, /function directoryColor/, "目录里每行按标签颜色画边条");
 assert.match(js, /--directory-color/, "目录把颜色写进 CSS 变量");
-assert.match(js, /DIRECTORY_STAGE_COLOR/, "没有自定义颜色时按学段/类型取一个色");
+assert.match(workspaceJs, /TAG_STAGE_COLOR/, "没有自定义颜色时按学段/类型取一个色（1.25.93 起这条规则在共享的 library-workspace.js 里，目录、标签管理、选择窗口、详情、题卡都调它）");
 assert.match(css, /\.library-filter-chip\[style\*="--tag-color"\]/, "标签筛选条按这个标签的颜色上一道软底");
 assert.match(js, /library-directory-stage/, "目录顶部有学段切换（全部/初中/高中）");
 assert.match(js, /directory\.stage/, "学段筛选状态");

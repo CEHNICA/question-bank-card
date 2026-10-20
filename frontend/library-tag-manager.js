@@ -459,7 +459,13 @@
         const check = element("input"); check.type = "checkbox"; check.checked = state.selected.has(id); check.setAttribute("aria-label", "选择标签「" + tag.name + "」");
         check.addEventListener("change", () => { if (check.checked) { state.selected.add(id); state.focused = id; } else { state.selected.delete(id); if (state.focused === id) state.focused = ""; } state.anchor = id; render();
           page.querySelector('[data-tag-id="' + CSS.escape(id) + '"] > input')?.focus({ preventScroll: true }); });
-        const dot = element("span", "tag-directory-color"); dot.setAttribute("aria-hidden", "true"); if (/^#[0-9a-f]{6}$/i.test(tag.color || "")) dot.style.backgroundColor = tag.color;
+        const dot = element("span", "tag-directory-color"); dot.setAttribute("aria-hidden", "true");
+        // 1.25.93：这里原来只看「这颗标签自己有没有设颜色」—— 老师的标签几乎都没设过，
+        // 于是这一列全是灰绿的，而教材目录里同一个标签是蓝的/绿的。统一走同一套规则
+        // （自己设的 → 同型祖先 → 按类型/学段取一个），五处看到的是同一个颜色。
+        const dotColor = root.LibraryWorkspace && root.LibraryWorkspace.tagColor
+          ? root.LibraryWorkspace.tagColor(tag, state.catalogue.tags || []) : "";
+        if (dotColor) dot.style.backgroundColor = dotColor;
         const name = button(tag.name, (event) => choose(tag, event), "tag-directory-name"); name.title = tag.description || tag.name;
         // 1.25.38：双击名字直接进它的子标签，和文件管理器一样。
         name.addEventListener("dblclick", (event) => { if (childrenOf(tag).length) { event.preventDefault(); browseHierarchy(tag); } });

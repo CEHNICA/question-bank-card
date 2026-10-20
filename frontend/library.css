@@ -360,7 +360,7 @@ body.library-basket-open .question-inspector { display: none; }
 .library-tag-info { min-width: 0; }
 .library-tag-chip .library-tag { display: block; border: 0; border-radius: 0; padding: 5px 3px 5px 8px; background: transparent; color: var(--ink-2); font-size: 12px; line-height: 1.4; cursor: pointer; overflow-wrap: anywhere; list-style: none; }
 .library-tag-chip > .library-tag { min-width: 0; text-align: left; font-family: var(--ui-font); }
-.library-card-tag-glimpse { border: 0; cursor: pointer; font-family: var(--ui-font); text-align: left; }
+.library-card-tag-glimpse { border: 1px solid color-mix(in srgb, var(--tag-color, var(--accent)) 32%, var(--line)); background: color-mix(in srgb, var(--tag-color, var(--accent)) 10%, var(--surface)); color: var(--ink-2); cursor: pointer; font-family: var(--ui-font); text-align: left; }
 .library-card-tag-glimpse:hover, .library-card-tag-glimpse:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .library-tag-hover { position: fixed; inset: auto; margin: 0; z-index: 10000; box-sizing: border-box;
   max-width: calc(100vw - 24px); max-height: min(620px, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain;
@@ -511,6 +511,8 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
   font-size: 13px; line-height: 1.45; cursor: pointer; }
 .library-tag-choice:hover { background: var(--surface-2); }
 .library-tag-choice-box { flex: none; margin: 0; accent-color: var(--accent); }
+/* 1.25.93：筛选框里每颗标签前面一颗彩色圆点 —— 跟别处的标签长得一样。 */
+.library-tag-choice-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tag-color, var(--line-strong)); }
 .library-tag-choice-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-tag-empty { margin: 0; padding: 6px 7px; color: var(--muted); font-size: 12.5px; }
 .library-advanced[open] > .library-filters .tag-saved-filter-actions { display: flex; gap: 8px; }
@@ -1124,7 +1126,13 @@ body.printing { overflow: hidden; }
 .tag-group-count { min-width: 22px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .tag-group-button:hover, .tag-group-button.active { color: var(--accent-dark); background: #e7f1ed; }
 .tag-picker-list, .tag-manager-list { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 4px; overscroll-behavior: contain; }
-.tag-picker-row { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--tag-color, var(--line)); border-radius: 10px; text-align: left; color: var(--ink); background: #fff; }
+/* 1.25.93：左边那条 4px 色条换成名字前的一颗彩色圆点 —— 跟标签管理列表、教材目录里
+   的标签长得一样。颜色还是这颗标签自己的（--tag-color 由 JS 统一算，五处共用一条规则）。 */
+.tag-picker-row { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; text-align: left; color: var(--ink); background: #fff; }
+.tag-picker-row-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tag-picker-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tag-color, var(--line-strong)); }
+/* 1.25.93：左栏按类型分组（知识点 / 解题方法 / 自定义 / 历史标签），跟标签管理页一致。 */
+.tag-picker-group-title { display: block; margin: 12px 0 4px; padding: 0 6px; color: var(--muted); font-size: 11px; letter-spacing: .02em; }
 .tag-picker-row:hover, .tag-picker-row.active { border-color: #4b9081; background: #f0f7f4; }
 .tag-picker-row.mixed { border-color: #b8843d; background: #fff8e9; }
 .tag-picker-row-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
@@ -1635,6 +1643,9 @@ body.is-resizing, body.is-resizing * { cursor: ew-resize !important; user-select
    一整条贯穿到底下的色带，叠在「▸」「1」上像压着字。把 4px 色条限定在章根（is-chapter）行，
    子标签（is-leaf）不画 —— 用「更深一级 ↦ 更深一级」的缩进 + 字重传达层级就够了。 */
 .library-directory-row-wrap.is-leaf::before { display: none; }
+/* 1.25.93：子标签（叶子）画一颗彩色圆点 —— 跟标签管理列表、标签选择窗口里的标签一样。
+   章根仍是左边那条色条（1.25.86 的理由：多行堆叠时色条会连成一片；圆点不会）。 */
+.library-directory-dot { flex: none; width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; background: var(--directory-color, var(--line-strong)); }
 /* 1.25.67：加上标签的输入框改紧凑 —— 只有一条输入、候选贴着输入，不再摆三行说明。
    颜色用小圆点表示；「新建」那一行是虚线，回车就是它。 */
 .library-inline-add { display: grid; gap: 6px; margin-top: 8px; }

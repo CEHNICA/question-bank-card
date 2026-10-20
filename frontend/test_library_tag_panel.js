@@ -76,7 +76,10 @@ class Element {
   constructor(tag, cls = "", text = "") {
     this.tagName = tag; this.className = cls; this.textContent = text;
     this.children = []; this.hidden = false; this.dataset = {};
-    this.style = { setProperty() {} }; this.listeners = {};
+    // 1.25.93：要能读到写进 CSS 变量的颜色，才能验「同一颗标签到处是同一个色」。
+    const styleValues = {};
+    this.style = { values: styleValues, setProperty(name, value) { styleValues[name] = value; } };
+    this.listeners = {};
   }
   append(...kids) { this.children.push(...kids); }
   replaceChildren(...kids) { this.children = [...kids]; }
@@ -100,14 +103,22 @@ const removed = [];
 const context = vm.createContext({
   node: (tag, cls = "", text = "") => new Element(tag, cls, text),
   $: id => (id === "tagPickerNow" ? box : null),
+  // 1.25.93：颜色规则搬到了共享的 library-workspace.js（标签管理页在另一个文件里，
+  // 也得用同一套），窗口里算颜色也调它 —— 这里把真的那份塞进来，不拿假的凑数。
+  workspace: require("./library-workspace.js"),
   state: { catalog: new Map([["pub-1", {
     id: "pub-1",
     tag_suggestion: { id: "sug-1", status: "pending", message: "提示", suggestions: [{}, {}, {}] }
   }]]) },
   tagDialog: { classList: { contains: () => false } },
   tagTargetIds: ["pub-1"],
-  tagMemberships: { "pub-1": new Set(["tag-1"]) },
-  tagCatalogue: { tags: [{ id: "tag-1", name: "平行四边形", color: "#123456" }] },
+  tagMemberships: { "pub-1": new Set(["tag-1", "tag-2"]) },
+  // 1.25.93：tag-2 故意不给颜色 —— 老师的标签几乎都没设过颜色。以前这种标签在窗口里
+  // 就是一颗没颜色的灰标签，现在按类型/学段取一个，同一个标签到处是同一个色。
+  tagCatalogue: { tags: [
+    { id: "tag-1", name: "平行四边形", color: "#123456", kind: "knowledge", levels: ["初中"], parent_ids: [] },
+    { id: "tag-2", name: "等腰三角形", kind: "knowledge", levels: ["初中"], parent_ids: [] },
+  ] },
   tagSuggestionNode: () => suggestionCard,
   toggleTag: (tag, remove) => { removed.push([tag.name, remove]); },
 });
@@ -133,6 +144,17 @@ assert.ok(drop, "each owned tag offers a way to take it off");
 assert.match(drop.title, /从这道题移除「平行四边形」/, "the removal control names the tag it removes");
 drop.listeners.click[0]();
 assert.deepEqual(removed, [["平行四边形", true]], "removing goes through the same save path as the list");
+
+// 1.25.93：同一颗标签，在窗口里、在题卡上、在详情里，颜色得是同一个。
+// 这里量的是**真代码画出来的**颜色，不是规则文本：自己设了颜色的用自己那个；
+// 没设过的（老师的标签几乎都是这种）跟同学段那颗自己设了色的顶级标签走，
+// 而不是一颗没颜色的灰标签。
+const ownedChips = walk(box, node => node.className === "tag-picker-current-chip");
+assert.equal(ownedChips.length, 2, "两颗标签各画一颗");
+assert.deepEqual(ownedChips.map(chip => chip.style.values["--tag-color"]), ["#123456", "#123456"],
+  "1.25.93：自己设了颜色的用自己那个，没设的跟同学段那颗走 —— 同一个标签到处是同一个色");
+assert.ok(ownedChips.every(chip => /^#[0-9a-f]{6}$/i.test(String(chip.style.values["--tag-color"]))),
+  "每一颗都上得了色，不留一颗没颜色的灰标签");
 
 box.replaceChildren();
 context.tagTargetIds = ["pub-1", "pub-2"];

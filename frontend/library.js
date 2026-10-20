@@ -506,14 +506,29 @@
   // 原来那个 <select multiple> 要点一下选中、按住 Ctrl 才能多选，鼠标划过还会留下一条
   // 深色高亮 —— 老师看到的就是一个「灰盒子，点一下题目就少了一半」。
   // 勾选框的好处是：能多选、看得见选了哪几个、取消就是再点一下。
-  function tagChoice(id, text, checked) {
+  function tagChoice(id, text, checked, tag) {
     const row = node("label", "library-tag-choice");
     const box = node("input", "library-tag-choice-box");
     box.type = "checkbox";
     box.value = id;
     box.checked = Boolean(checked);
-    row.append(box, node("span", "library-tag-choice-name", text));
+    row.append(box);
+    // 1.25.93：标签前面加一颗彩色圆点 —— 跟教材目录、标签管理、标签选择窗口里那颗是
+    // 同一个色、同一个样子。筛选用的是同一批标签，不该又是一个长相。
+    if (tag) {
+      const dot = node("span", "library-tag-choice-dot");
+      const color = workspace.tagColor(tag, tagCatalogue.tags || directory.tags || []);
+      if (color) { dot.style.setProperty("--tag-color", color); row.append(dot); }
+    }
+    row.append(node("span", "library-tag-choice-name", text));
     return row;
+  }
+
+  // 1.25.93：筛选框里那一颗标签要显示自己的颜色，得先找到这颗标签。
+  function knownTag(id) {
+    const key = String(id);
+    return (tagCatalogue.tags || []).find(tag => String(tag.id) === key)
+      || (directory.tags || []).find(tag => String(tag.id) === key) || null;
   }
 
   function selectedTagIds() {
@@ -540,7 +555,7 @@
     const shown = new Set();
     tags.forEach((item) => {
       shown.add(item.id);
-      ui.tagSelect.append(tagChoice(item.id, `${item.tag}（${item.count}）`, selected.includes(item.id)));
+      ui.tagSelect.append(tagChoice(item.id, `${item.tag}（${item.count}）`, selected.includes(item.id), knownTag(item.id)));
     });
     // 筛到 0 道题时，可选列表里一个标签都不剩，但老师手上那几个还得看得见、还得能取消。
     // 显示标签的名字；名字也查不到（标签被删了）才退回编号，并且说清这是什么。
@@ -1662,6 +1677,11 @@
   function tagHoverChip(item, link, className) {
     const tag = link.tag, chip = node("button", className, tag.name + (tag.kind === "method" && link.scope?.subquestions ? " · 第" + link.scope.subquestions.join("、") + "问" : ""));
     chip.type = "button"; chip.dataset.tagHover = "true"; chip.dataset.publicationId = item.id; chip.dataset.tagId = tag.id;
+    // 1.25.93：题卡上那颗标签原来一律绿、详情里那颗原来一律灰 —— 同一个标签两个样子。
+    // 现在两处都用这颗标签自己的颜色（自己设的 → 同型祖先 → 按类型/学段取一个），
+    // 跟教材目录、标签管理、标签选择窗口里那颗是同一个色。
+    const chipColor = workspace.tagColor(tag, tagCatalogue.tags || []);
+    if (chipColor) chip.style.setProperty("--tag-color", chipColor);
     chip.setAttribute("aria-haspopup", "dialog"); chip.setAttribute("aria-controls", "libraryTagHover"); chip.setAttribute("aria-expanded", "false");
     chip.title = "浏览上级、下级；点击名称校正当前题标签";
     chip.addEventListener("pointerenter", event => {
@@ -1869,7 +1889,9 @@
     if (!owned.length) chips.append(node("p", "tag-picker-hint", "还没有标签。往下挑一个，或者直接采纳 AI 的建议。"));
     owned.forEach(function(tag) {
       const chip = node("span", "tag-picker-current-chip");
-      if (tag.color) chip.style.setProperty("--tag-color", tag.color);
+      // 1.25.93：窗口里"已经在这道题上"的那几颗，跟题卡、详情、目录里是同一个颜色。
+      const ownedColor = workspace.tagColor(tag, tagCatalogue.tags || []);
+      if (ownedColor) chip.style.setProperty("--tag-color", ownedColor);
       chip.append(node("span", "", tag.name));
       const drop = node("button", "tag-picker-current-drop", "×"); drop.type = "button";
       drop.title = "从这道题移除「" + tag.name + "」"; drop.setAttribute("aria-label", drop.title);
@@ -1934,15 +1956,22 @@
     groupBox.replaceChildren();
     const allButton = node("button", "tag-group-button" + (tagActiveSection === "all" ? " active" : ""), "全部章节");
     allButton.type = "button"; allButton.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = "all"; renderTagPicker(); }); groupBox.append(allButton);
-    (tagCatalogue.tags || []).filter(function(tag) {
+    // 1.25.93：左栏原来把二十来个顶层标签平铺着排，知识点和解题方法混在一起，只能靠名字
+    // 前缀去分是哪一类。现在按类型分组，跟标签管理页一致：先看是哪一类，再在类里挑。
+    const rootTags = (tagCatalogue.tags || []).filter(function(tag) {
       return tag.active !== false && !(tag.parent_ids || []).some(function(pid) { return byId.has(String(pid)); });
     }).sort(function(left, right) {
-      return (kindLabels[left.kind] || "").localeCompare(kindLabels[right.kind] || "", "zh-CN")
-        || left.name.localeCompare(right.name, "zh-CN");
-    }).forEach(function(tag) {
-      const button = node("button", "tag-group-button" + (tagActiveSection === String(tag.id) ? " active" : ""), tag.name);
-      button.title = (kindLabels[tag.kind] || "标签") + " · 连同下面 " + (tagSubtree(String(tag.id), children).size - 1) + " 个下级标签";
-      button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = String(tag.id); renderTagPicker(); }); groupBox.append(button);
+      return left.name.localeCompare(right.name, "zh-CN");
+    });
+    ["knowledge", "method", "custom", "legacy"].forEach(function(kind) {
+      const rows = rootTags.filter(function(tag) { return tag.kind === kind; });
+      if (!rows.length) return;
+      groupBox.append(node("span", "tag-picker-group-title", kindLabels[kind] || "标签"));
+      rows.forEach(function(tag) {
+        const button = node("button", "tag-group-button" + (tagActiveSection === String(tag.id) ? " active" : ""), tag.name);
+        button.title = (kindLabels[tag.kind] || "标签") + " · 连同下面 " + (tagSubtree(String(tag.id), children).size - 1) + " 个下级标签";
+        button.type = "button"; button.addEventListener("click", function() { tagPickerView = "all"; tagActiveSection = String(tag.id); renderTagPicker(); }); groupBox.append(button);
+      });
     });
     groupBox.scrollTop = groupScrollTop; groupBox.scrollLeft = groupScrollLeft;
     const query = String($("tagPickerSearch").value || "").trim().normalize("NFKC").toLocaleLowerCase();
@@ -1969,12 +1998,26 @@
     rows.forEach(function(tag) {
       const count = tagTargetIds.reduce(function(total, id) { return total + (tagMemberships[id] && tagMemberships[id].has(tag.id) ? 1 : 0); }, 0);
       const single = tagTargetIds.length === 1;
-      const text = single ? (count ? "✓ 已添加" : "添加") : count === tagTargetIds.length ? "全部都有" : count ? "部分有 " + count + "/" + tagTargetIds.length : "全部没有";
+      // 1.25.93：这三句原来说的是「这个标签」怎么样 —— 老师读起来会以为库里没这个标签。
+      // 改成说「这几道题」怎么样，指的就是这次要整理的那几道题。
+      const total = tagTargetIds.length;
+      const text = single
+        ? (count ? "✓ 已贴上" : "贴上")
+        : count === total ? total + " 道都有" : count ? total + " 道里有 " + count + " 道" : total + " 道里都没有";
       const button = node("button", "tag-picker-row" + (count === tagTargetIds.length ? " active" : count ? " mixed" : ""));
-      if (tag.color) button.style.setProperty("--tag-color", tag.color);
+      // 1.25.93：颜色统一算（自己设的 → 同型祖先 → 按类型/学段），跟教材目录、标签管理、
+      // 题目详情、题卡里那颗是同一个色 —— 以前这里只看标签自己有没有设色，而老师的标签
+      // 几乎都没设过，于是这一栏整片是灰的。
+      const rowColor = workspace.tagColor(tag, tagCatalogue.tags || []);
+      if (rowColor) button.style.setProperty("--tag-color", rowColor);
       button.type = "button"; button.disabled = tagDialog.classList.contains("saving");
       const title = node("span", "tag-picker-row-title");
-      title.append(node("strong", "", tag.name), node("small", "", (kindLabels[tag.kind] || "标签") + (tagTrail(tag, byId).length ? " · " + tagTrail(tag, byId).join(" › ") : "")));
+      // 名字前加一颗彩色圆点：跟标签管理列表、教材目录里的标签长得一样。
+      const nameLine = node("span", "tag-picker-row-name");
+      const dot = node("span", "tag-picker-dot");
+      if (rowColor) dot.style.setProperty("--tag-color", rowColor);
+      nameLine.append(dot, node("strong", "", tag.name));
+      title.append(nameLine, node("small", "", (kindLabels[tag.kind] || "标签") + (tagTrail(tag, byId).length ? " · " + tagTrail(tag, byId).join(" › ") : "")));
       button.append(title, node("span", "tag-picker-row-detail", tag.description || tag.conditions || ""), node("span", "tag-picker-row-state", text));
       button.addEventListener("click", function() { void toggleTag(tag, count === tagTargetIds.length); });
       if (!single && count > 0 && count < tagTargetIds.length) {
@@ -2965,7 +3008,7 @@
         row.setAttribute("aria-selected", String(inlineAdd.active === index));
         if (entry.type === "tag") {
           row.dataset.tagId = entry.tag.id;
-          const color = entry.tag.color && /^#[0-9a-f]{6}$/i.test(String(entry.tag.color)) ? String(entry.tag.color).toLowerCase() : "";
+          const color = workspace.tagColor(entry.tag, tagCatalogue.tags || []);
           if (color) row.style.setProperty("--tag-color", color);
           const dot = node("span", "library-inline-add-dot");
           if (!color) dot.hidden = true;
@@ -3121,7 +3164,9 @@
       .forEach((link) => {
       const tag = link.tag;
       const wrapper = node("div", "library-tag-chip"), chip = tagHoverChip(item, link, "library-tag");
-      if (tag.color) wrapper.style.setProperty("--tag-color", tag.color);
+      // 1.25.93：用统一算出来的颜色（题卡上那颗也是同一个），不再只看标签自己有没有设色。
+      const wrapperColor = workspace.tagColor(tag, tagCatalogue.tags || []);
+      if (wrapperColor) wrapper.style.setProperty("--tag-color", wrapperColor);
       wrapper.dataset.tagId = tag.id;
       wrapper.dataset.tagKind = tag.kind;
       wrapper.draggable = true;
@@ -3409,7 +3454,9 @@
         const tagId = state.tag || state.tagAny || state.tagAll || state.tagNot;
         if (tagId) {
           const t = tagCatalogue.tags.find(x => String(x.id) === String(tagId));
-          if (t?.color) remove.style.setProperty("--tag-color", t.color);
+          // 1.25.93：筛选条上这颗标签也用统一算出来的颜色，跟目录、详情里那颗是同一个。
+          const chipColor = t ? workspace.tagColor(t, tagCatalogue.tags || []) : "";
+          if (chipColor) remove.style.setProperty("--tag-color", chipColor);
         }
       }
       remove.addEventListener("click", () => {
@@ -5809,51 +5856,14 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     return Number(tag.subtree_count) || Number(tag.count) || 0;
   }
 
-  // 1.25.64：标签的颜色先看自己设的；没设就找最近的同型祖先；都没有，按类型/学段从调色板
-  // 里取一个（初中一色、高中一色、解题方法另起一色）—— 整片一组色看着不杂，扫到哪
-  // 知道是哪个阶段/种类。题库页面其它地方设的 `--tag-color` 是同一套变量，所以有颜色的
-  // 标签从目录、筛选条、详情到待办都是一致的。
-  const TAG_HEX = /^#[0-9a-f]{6}$/i;
-  const DIRECTORY_STAGE_COLOR = {
-    knowledge: { 初中: "#4f8278", 高中: "#477a9e", 默认: "#5b6770" },
-    method: "#bf8545",
-    custom: "#8965a5"
-  };
-  function directoryStageColor(tag) {
-    if (!tag) return "";
-    const map = DIRECTORY_STAGE_COLOR[tag.kind];
-    if (typeof map === "string") return map;
-    if (typeof map === "object") {
-      const stage = directoryStageOf(tag);
-      if (stage === "初中") return map.初中;
-      if (stage === "高中") return map.高中;
-    }
-    return map.默认 || "";
-  }
-  function directoryStageOf(tag) {
-    if (!tag) return "";
-    if (Array.isArray(tag.levels) && tag.levels.length) return tag.levels[0];
-    const name = String(tag.name || "");
-    if (name.startsWith("初中")) return "初中";
-    if (name.startsWith("高中")) return "高中";
-    return "";
-  }
-  function directoryColor(tag) {
-    if (tag.color && TAG_HEX.test(String(tag.color))) return String(tag.color).toLowerCase();
-    const byId = new Map(directory.tags.map(t => [String(t.id), t]));
-    const seen = new Set();
-    let current = tag;
-    while (current) {
-      const id = String(current.id);
-      if (seen.has(id)) break;
-      seen.add(id);
-      if (current.color && TAG_HEX.test(String(current.color))) return String(current.color).toLowerCase();
-      const pid = (current.parent_ids || []).map(String).find(id => byId.get(id)?.kind === current.kind);
-      if (!pid) break;
-      current = byId.get(pid);
-    }
-    return directoryStageColor(tag);
-  }
+  // 1.25.93：颜色只算一次 —— 规则搬到共享的 library-workspace.js 了（标签管理页在另一个
+  // 文件里，也得用同一套）。这里保留两个名字给目录用，实质都转给 workspace.tagColor。
+  // 1.25.64 定的规则没变：自己设的 → 同型祖先 → 按类型/学段从调色板取。
+  // 变的是**谁在用**这条规则：1.25.93 之前只有教材目录真算了，标签管理、标签选择
+  // 窗口、题目详情、题卡各自只看「这颗标签自己有没有设颜色」—— 而老师的标签几乎都
+  // 没设过颜色（302 个里只有 17 个章设了），于是同一个标签在五个地方是五种颜色。
+  function directoryStageOf(tag) { return workspace.tagStageOf(tag); }
+  function directoryColor(tag) { return workspace.tagColor(tag, directory.tags); }
 
   function directorySelected() { return String(state.tagAny || ""); }
 
@@ -5965,6 +5975,14 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       directorySelect(tag);
     });
     const count = node("small", "library-directory-count" + (subtreeEmpty ? " is-zero" : ""), `${directoryCount(tag)}`);
+    // 1.25.93：章根是左边那条色条；子标签改画一颗彩色圆点 —— 跟标签管理列表、标签选择
+    // 窗口里的标签长得一样。1.25.86 当初把子标签的色条去掉，是怕多行堆叠时色条连成一
+    // 片；圆点不会连成一片，所以能加回来。
+    if (!isChapterRoot) {
+      const dot = node("span", "library-directory-dot");
+      dot.setAttribute("aria-hidden", "true");
+      line.append(dot);
+    }
     line.append(toggle, name, count);
     row.append(line);
     if (open) {

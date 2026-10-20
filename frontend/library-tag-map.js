@@ -304,7 +304,17 @@
         node.classList.toggle("inactive", tag.active === false); node.classList.toggle("related-node", !!tag.related);
         const select = button("", "select"); select.className = "tag-map-node-select"; select.dataset.tagId = id;
         select.setAttribute("aria-pressed", String(id === state.selected)); select.title = tag.name + (tag.description ? "\n" + tag.description : "");
-        const name = element("span", "tag-map-node-name", tag.name), meta = element("span", "tag-map-node-meta");
+        const name = element("span", "tag-map-node-name");
+        // 1.25.93：地图上的标签也带一颗自己的颜色圆点 —— 跟教材目录、标签管理、标签选择
+        // 窗口里那颗是同一个色。以前地图上一个颜色都没有，看不出哪颗是哪类。
+        const nodeColor = root.LibraryWorkspace && root.LibraryWorkspace.tagColor
+          ? root.LibraryWorkspace.tagColor(tag, state.catalogue.tags || []) : "";
+        if (nodeColor) {
+          const dot = element("span", "tag-map-dot");
+          dot.style.setProperty("--tag-color", nodeColor);
+          name.append(dot, document.createTextNode(tag.name));
+        } else name.textContent = tag.name;
+        const meta = element("span", "tag-map-node-meta");
         const parentCount = state.model.parents.get(id)?.size || 0;
         meta.textContent = (tag.related ? "相关方法" : KIND_NAMES[tag.kind] || "标签") + (parentCount > 1 ? " · " + parentCount + " 个父级" : "") + (tag.active === false ? " · 停用" : "");
         select.append(name, meta); select.disabled = state.busy;

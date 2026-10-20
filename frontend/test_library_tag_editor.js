@@ -70,7 +70,9 @@ assert.match(libraryHtml, /id="editSelectedTags"[^>]*disabled[^>]*>整理勾选�
 assert.match(libraryJs, /tagTargetIds\.length > 500[\s\S]*?return;/,
   "oversized batches are rejected explicitly instead of silently truncated");
 assert.match(libraryJs, /\/api\/library\/tags\/assignments\/batch/, "Picker writes through the versioned batch endpoint");
-assert.match(libraryJs, /全部都有|部分有|全部没有/, "Multi-select makes the mixed state explicit");
+assert.match(libraryJs, /" 道里都没有"/, "Multi-select makes the mixed state explicit");
+assert.match(libraryJs, /" 道里有 " \+ count \+ " 道"/,
+  "1.25.93：多选时说的是「这几道题」怎么样 —— 原来写「全部没有／部分有 2/3」，读起来像在说这个标签本身");
 assert.match(libraryJs, /撤销上次修改/, "Picker provides immediate undo");
 assert.match(libraryJs, /tagPickerView === "favorite"/, "Favorites are available in the picker");
 assert.match(libraryJs, /tagPickerView === "recent"/, "Recently used tags are available in the picker");
@@ -102,7 +104,9 @@ assert.match(libraryJs, /消耗额度/, "the confirmation states the quota cost 
 assert.match(libraryJs, /scope: "current_filter"/, "Current-filter AI tasks keep their explicit scope");
 assert.match(libraryJs, /旧标签待核对/, "Unmapped legacy relationships remain visible for cleanup");
 assert.match(libraryHtml, /包含全部[\s\S]*包含任一[\s\S]*排除这些/, "The library exposes all/any/exclusion tag matching");
-assert.match(libraryCss, /\.tag-picker-row \{[\s\S]*var\(--tag-color/, "Tag colors are rendered in the selector");
+assert.match(libraryCss, /\.tag-picker-dot \{[^}]*var\(--tag-color/, "Tag colors are rendered in the selector");
+assert.doesNotMatch(libraryCss, /\.tag-picker-row \{[^}]*border-left: 4px/,
+  "1.25.93：选择窗口里那一行改用名字前的彩色圆点，不再是左边一条色条 —— 跟标签管理列表、教材目录一致");
 assert.match(urls, /library_tagging\.legacy_tags_view/, "Legacy name-based clients use the guarded compatibility endpoint");
 assert.match(urls, /library_tagging\.migration_report_view/, "The application exposes a migration report download");
 assert.match(service, /"expected_revisions"/, "Human writes are revision-checked");
