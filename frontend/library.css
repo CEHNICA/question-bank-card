@@ -557,11 +557,16 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-bulk #selectionCount { color: var(--muted); }
 .bulk-actions { display: none; align-items: center; gap: 6px; margin-left: auto; }
 .library-bulk.has-selection .bulk-actions { display: flex; }
-/* 「AI 建议标签」自己占一格，不进 .bulk-actions —— 那一组整组只在勾了题时才显示，
+/* 「批量生成标签建议」自己占一格，不进 .bulk-actions —— 那一组整组只在勾了题时才显示，
    「让它常驻」写在标记里也没用：只要它还在那一组里，不勾题就照样看不见。
    右边那点空隙原来由 .bulk-actions 的 margin-left:auto 顶着，改由这一格顶，
    两组的顺序也跟着它：建议 → 待办 → 勾了题才有的那几颗。 */
-.library-suggest-slot { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; }
+.library-suggest-slot { display: flex; flex: 0 0 auto; align-items: center; margin-left: auto; gap: 9px; }
+/* 灰着的「批量生成标签建议」旁边常驻一行小字：差哪一步、去哪做。
+   光靠 title（悬停说明）等于没说 —— 老师多半根本不会把鼠标放上去，
+   看见一个灰按钮就以为功能坏了。这行字要短，位置紧挨按钮，别抢题面。 */
+.library-suggest-hint { color: var(--muted); font-size: 12.5px; line-height: 1.4; white-space: nowrap; }
+.library-suggest-hint[hidden] { display: none; }
 /* 窄屏（≤760px，和 styles.css:1192 顶栏变高的那个断点对齐）：批量条排不下两行。
    收掉「已显示 X / 共 Y 题」这段 —— 它最长也最不常用。上面那几个批量按钮不用动，
    它们本来就在 .library-bulk.has-selection 时才出现。实测 390px：没勾选 59→34px，
@@ -571,6 +576,8 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 @media (max-width: 760px) {
   .library-bulk #libraryStatus[data-tone="plain"] { display: none; }
   .library-suggest-slot { margin-left: 0; }
+  /* 窄屏上那句提示要能换行，不然一行撑出去，屏幕右边被顶掉。 */
+  .library-suggest-hint { white-space: normal; }
   .library-filterbar > .library-advanced { margin-left: auto; }
 }
 .active-filters { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 12px; }

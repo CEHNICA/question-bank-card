@@ -107,6 +107,30 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["queued"], 3, "the answer button's number is what gets queued")
 
+    def test_answer_counts_all_use_the_whole_library_so_they_never_subtract_into_a_negative(self):
+        # 界面上那句「题库里没有入库答案的是 N 题，其中 M 题已有 AI 初稿」原来拿的是
+        # 当前筛选下的 N，去减全库的 M —— 两个口径混着减，负数就是这么来的。
+        # 三个数现在都按全库算，且互相之间只差「有没有 AI 初稿」。
+        self.publication(1)
+        self.publication(2)
+        self.publication(3, answer="原卷答案")
+        self.publication(4, extras={"ai_answer": {"answer": "已有 AI 参考"}})
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["missing_answer"], 2, "没有答案、也没有 AI 初稿")
+        self.assertEqual(work["ai_draft_answers"], 1, "没有答案、但已经有 AI 初稿")
+        self.assertEqual(work["missing_answer_total"], 3, "没入库答案的全部")
+        self.assertEqual(work["missing_answer_total"] - work["missing_answer"],
+                         work["ai_draft_answers"], "两个数之差必须正好等于第三个数")
+        self.assertGreaterEqual(work["missing_answer_total"], work["missing_answer"])
+
+    def test_the_library_tells_the_page_whether_a_key_was_ever_filled_in(self):
+        # 题库页要分清「还没填密钥」「填了但没测过」「测过了」，
+        # 只给一个 api_ready，前端只能写一句笼统的话。
+        payload = self.client.get("/api/library", HTTP_X_QB_REQUEST="1").json()
+        for key in ("api_ready", "key_configured", "configured", "status"):
+            self.assertIn(key, payload["ai"])
+        self.assertIn(payload["ai"]["status"], ("assistant", "verified", "unverified", "missing"))
+
     def test_working_counts_report_only_active_api_jobs(self):
         busy_tag = self.publication(1)
         busy_answer = self.publication(2)

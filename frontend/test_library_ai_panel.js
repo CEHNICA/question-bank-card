@@ -20,8 +20,10 @@ assert.doesNotMatch(panelJs, /api\/settings\/knowledge|libraryAIKnowledge|openCa
 
 assert.match(libraryHtml, /id="libraryTagManager"/,
   "the formal library owns tag directory management through its dedicated page entry");
-assert.match(libraryJs, /AI 建议标签/,
-  "the library exposes an explicit per-question suggestion action");
+assert.match(libraryJs, /AI 生成标签建议/,
+  "the library exposes an explicit per-question suggestion action, and its name says it generates a suggestion");
+assert.match(libraryHtml, /批量生成标签建议/,
+  "the batch action says it generates suggestions for the ticked questions");
 assert.match(libraryJs, /只处理当前这批/,
   "the library can explicitly queue suggestions for the full current result set");
 // 三个批量按钮以前叫「全库缺少知识点」「当前筛选全部」，看不出差别，

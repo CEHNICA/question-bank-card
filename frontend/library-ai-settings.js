@@ -152,7 +152,7 @@
           </section>
           <section class="library-ai-section" aria-label="分别开启功能">
             <p id="libraryAICost" class="library-ai-cost"></p>
-            <label class="library-ai-switch"><input id="libraryAITags" type="checkbox"><span><strong>允许 AI 建议标签</strong><small>只在正式题库中由你主动发起；每条建议都要人工核对后才会成为正式标签。</small></span></label>
+            <label class="library-ai-switch"><input id="libraryAITags" type="checkbox"><span><strong>允许 AI 生成标签建议</strong><small>只在正式题库中由你主动发起；每条建议都要人工核对后才会成为正式标签。</small></span></label>
             <label class="library-ai-switch"><input id="libraryAIAnswer" type="checkbox"><span><strong>补充 AI 参考答案</strong><small>原卷无答案时补充解答，保存为“AI 参考 · 未核对”。</small></span></label>
             <label id="libraryAIAnswerTiming" class="library-ai-switch library-ai-timing" hidden><input id="libraryAIAnswerIntake" type="checkbox"><span>新题入库时生成参考答案<small id="libraryAIAnswerBacklog"></small></span></label>
           </section>

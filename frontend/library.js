@@ -237,7 +237,9 @@
         if (response.ok) {
           const settings = await response.json();
           state.features = { ...state.features, ...settings.features };
-          state.ai = { mode: settings.mode, provider: settings.provider, message: settings.message, api_ready: settings.api_ready };
+          state.ai = { mode: settings.mode, provider: settings.provider, message: settings.message,
+                       api_ready: settings.api_ready, key_configured: settings.key_configured,
+                       configured: settings.configured, status: settings.status };
         }
       } catch (_) { /* Keep the last known settings when a local refresh fails. */ }
       await refreshBasket({ force: true });
@@ -742,7 +744,10 @@
     // 有入口才报这个数。
     if (answerCount && answerActions.length) bits.push(`${answerCount} 题没答案`);
     const paidActions = tagActions.length + answerActions.length;
-    const noAnswerTotal = Number(state.facets?.answers?.no) || 0;
+    // 「没入库答案」按全库算。原来取的是当前筛选下的数，再去减全库的数，
+    // 两个口径混着减，负数就是这么来的（出现过「其中 -37 题已有 AI 初稿」）。
+    const noAnswerTotal = Number(state.tagWork?.missing_answer_total) || 0;
+    const aiDraftAnswers = Number(state.tagWork?.ai_draft_answers) || 0;
     summary.append(node("span", "library-todo-lead", working ? "AI 正在处理" : "还有活没干"));
     summary.append(node("span", "library-todo-bits", bits.join(" · ")));
     if (working) summary.append(node("span", "library-batch-live", `处理中 ${working} 道`));
@@ -755,7 +760,9 @@
           ? `AI 建议里 ${actionableCount} 题现在就能采纳${outdatedCount ? `，另 ${outdatedCount} 题对不上当前标签库、要重新生成` : ""}；`
           : "")
         + (noAnswerTotal && answerActions.length
-          ? `「没答案」指连 AI 初稿也没有；题库里没有入库答案的是 ${noAnswerTotal} 题，其中 ${noAnswerTotal - answerCount} 题已有 AI 初稿，可先保存。`
+          ? `题库里没有入库答案的一共 ${noAnswerTotal} 题（全题库的数，不受筛选影响），`
+            + `其中 ${aiDraftAnswers} 题已经有 AI 初稿、可以先保存下来；`
+            + `剩下 ${answerCount} 题连 AI 初稿都没有，才需要让 AI 补。`
           : "")
         + (paidActions
           ? "没带「AI」标记的只筛一遍、不花钱，带「AI」的会让 AI 逐题处理、消耗额度。"
@@ -3208,7 +3215,7 @@
   // 会让人以为此刻还没配好，于是反复回头检查已经配好的设置。
   // ready 传的是此刻的真实状态，不是当时的状态。
   function describeJobFailure(kind, message, ready) {
-    const label = kind === "tags" ? "AI 建议标签" : "AI 生成答案";
+    const label = kind === "tags" ? "生成标签建议" : "AI 生成答案";
     const configurationIssue = /API 配置|服务商配置|密钥配置|模型配置|请重新配置|尚未配置/.test(message);
     if (configurationIssue && ready) {
       return {
@@ -3236,8 +3243,13 @@
     if (tagReady && state.features.knowledge_tags && (!item.tag_suggestion || ["failed", "no_match", "review", "accepted", "rejected", "stale"].includes(item.tag_suggestion.status))) {
       const busy = waiting.has("tags");
       const prior = item.tag_suggestion && ["failed", "no_match", "review", "stale", "accepted", "rejected"].includes(item.tag_suggestion.status);
-      const button = iconButton("button", "button button-quiet button-small", busy ? "正在生成标签建议…" : prior ? "重新建议" : state.ai.mode === "assistant" ? "交给助手建议标签" : "AI 建议标签", busy ? "" : "plus");
+      // 名字要说清是「生成建议」不是「贴标签」：老师看见「AI 建议标签」会以为这就是
+      // 贴标签的按钮，贴不上就说功能坏了。这一颗管这一道题，批量条那颗管勾选的题。
+      const button = iconButton("button", "button button-quiet button-small", busy ? "正在生成标签建议…" : prior ? "重新生成建议" : state.ai.mode === "assistant" ? "交给助手提标签建议" : "AI 生成标签建议", busy ? "" : "plus");
       button.disabled = busy;
+      button.title = busy
+        ? "正在生成标签建议…"
+        : "让 AI 给这道题生成标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。";
       button.addEventListener("click", () => queueJobs("tags", { ids: [item.id], retry: Boolean(prior) }));
       buttons.push(button);
     }
@@ -3426,21 +3438,40 @@
     }
   }
 
-  // 「AI 建议标签」什么时候能用：功能开了、并且 API 配好测过了。
+  // 「AI 生成标签建议」什么时候能用：功能开了、并且 API 配好测过了。
   // 单独抽出来是因为 syncSelection 里既要拿它决定灰不灰，又要拿它写悬停说明，
   // 两处各写一遍的话，改了一处忘了另一处就会说一套做一套。
   function suggestTagsReady() {
     return state.features.knowledge_tags === true && state.ai.mode === "api" && state.ai.api_ready === true;
   }
-  // 灰着的按钮必须说清「为什么灰、接下来该怎么办」。只写「功能未开启」而不写
-  // 「先去哪开」，用户还是不知道该做什么。
+  // 灰着的按钮必须说清「为什么灰、接下来该怎么办」，而且三种原因要分开说：
+  // 「功能没开」「还没填密钥」「填了但没测过」—— 原来一律写成「配置并测试通过」，
+  // 老师换过密钥后没重测，看见这句话只会以为功能坏了。
   function suggestTagsTitle() {
-    if (state.features.knowledge_tags !== true) return "题库里没有开启「AI 建议标签」这项功能，要到「设置」里打开才能用。";
-    if (state.ai.mode !== "api" || state.ai.api_ready !== true) return "需要先到「设置 → API 配置」里配置并测试通过，才能用这一项。";
+    // 状态还没读到的时候不要下结论：页面刚打开那一刻这两样都是空的，
+    // 说「功能没开」或「没配 API」都是冤枉人。
+    if (state.ai.api_ready === undefined) return "正在读取 API 状态，请稍等一下。";
+    if (state.features.knowledge_tags !== true) return "题库里没有开启「AI 生成标签建议」这项功能，要到「设置」里打开才能用。";
     const count = state.selected.size;
+    if (state.ai.mode !== "api") return "现在是助手模式，不能自己调 API。到「设置 → API 配置」里切成独立 API 并测一次，这一项才能用。";
+    if (state.ai.api_ready !== true) {
+      if (state.ai.key_configured !== true) return "还没填 API 密钥。到「设置 → API 配置」里填上密钥、选好模型，再点一次「测试连接」，这一项才能用。";
+      return "密钥填好了，但连接还没测过（换过密钥或改过模型都要重测）。到「设置 → API 配置」里点一次「测试连接」，这一项就能用。";
+    }
     return count
       ? `让 AI 给勾选的 ${count} 道题生成标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。`
-      : "先在左边勾几道题，再点这个让 AI 给它们提标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。";
+      : "先在左边勾几道题，再点这个让 AI 给它们生成标签建议。生成的只是建议，要你逐条核对确认后才贴到题目上。每道题调用一次 AI，会消耗额度。";
+  }
+  // 悬停看不见的东西等于没说：光靠 title 解释为什么灰，老师多半根本不会把鼠标
+  // 放上去。所以按钮旁边常驻一行短提示，写清差哪一步、去哪做。
+  function suggestTagsHint() {
+    if (state.ai.api_ready === undefined) return "";
+    if (state.features.knowledge_tags !== true) return "这项功能没开：到「设置」里打开";
+    if (state.ai.mode !== "api") return "现在是助手模式：到「设置 → API 配置」切成独立 API";
+    if (state.ai.api_ready !== true) return state.ai.key_configured === true
+      ? "API 还没测过：到「设置 → API 配置」测一次"
+      : "还没填 API 密钥：到「设置 → API 配置」填上";
+    return "";
   }
 
   function syncSelection() {
@@ -3463,7 +3494,7 @@
       button.hidden = !state.features[feature] || state.ai.mode !== "api" || state.ai.api_ready !== true;
       button.disabled = !state.selected.size;
     }
-    // 1.25.20：「AI 建议标签」原来跟着另一颗一起藏，条件是「功能开了、API 配了、
+    // 1.25.20：「AI 生成标签建议」原来跟着另一颗一起藏，条件是「功能开了、API 配了、
     // 而且你已经勾了题」。老师什么都没勾的时候页面上一个入口都没有，于是以为这个
     // 功能不存在。改成常驻：任何时候都在，只是没勾题时灰着；灰着的时候要说清
     // 是要先勾题、还是要去开功能配 API —— 只看到一个灰按钮，等于没有入口。
@@ -3471,6 +3502,9 @@
     suggest.hidden = false;
     suggest.disabled = !state.selected.size || !suggestTagsReady();
     suggest.title = suggestTagsTitle();
+    // 灰着的时候，旁边常驻一行话，写清差哪一步、去哪做。悬停说明看不见就等于没说。
+    const hint = $("suggestTagsHint");
+    if (hint) { hint.textContent = suggestTagsHint(); hint.hidden = !hint.textContent; }
     $("addSelected").disabled = !state.selected.size;
     $("withdrawSelected").disabled = !state.selected.size;
     $("clearSelection").disabled = !state.selected.size;

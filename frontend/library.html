@@ -144,14 +144,17 @@
             title="把当前筛选出来的题全部勾上，包括还没显示在屏幕上的">选中全部</button>
           <span id="selectionCount" role="status" aria-live="polite">已勾选 0 题</span>
           <span id="libraryStatus" class="library-status" role="status" aria-live="polite" data-tone="plain">正在读取题库…</span>
-          <!-- 1.25.20：「AI 建议标签」原来藏在勾选之后，不勾题就一个按钮都没有，
+          <!-- 1.25.20：「AI 生成标签建议」原来藏在勾选之后，不勾题就一个按钮都没有，
                老师因此以为这个功能不存在。改成常驻：没勾题时灰着，鼠标放上去
                说清要先勾什么。功能没开或没配 API 时同样留着按钮，说清去哪开。
                它必须自己占一个位置，不能跟着 .bulk-actions 一起藏 ——
-               那一组是「勾了题才出现」的，进去就等于还是没露出来。 -->
+               那一组是「勾了题才出现」的，进去就等于还是没露出来。
+               1.25.91：名字里补上「生成」，免得看成是贴标签的按钮；
+               旁边那行小字常驻写着「差哪一步、去哪做」，光靠悬停说明等于没说。 -->
           <div id="suggestTagsSlot" class="library-suggest-slot">
             <button id="generateSelectedTags" class="button button-quiet button-small" type="button" disabled
-              title="先在左边勾几道题，再点这个让 AI 给它们提标签建议">AI 建议标签</button>
+              title="先在左边勾几道题，再点这个让 AI 给它们生成标签建议">批量生成标签建议</button>
+            <span id="suggestTagsHint" class="library-suggest-hint" role="status" hidden></span>
           </div>
           <div id="libraryTodos" class="library-todos" role="group" aria-label="还有活没干" hidden></div>
           <div class="bulk-actions">

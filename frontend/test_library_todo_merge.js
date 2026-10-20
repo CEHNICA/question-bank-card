@@ -246,6 +246,39 @@ setState({ features: { knowledge_tags: true }, ai: { mode: "assistant", api_read
 assert.equal(sandbox.suggestTagsReady(), false);
 assert.match(sandbox.suggestTagsTitle(), /API 配置/, "API 没配好要说去哪儿配");
 
+// ── 三之二、灰着的时候要说清「差哪一步」（1.25.91）──
+// 老师 10 月 16 日换过密钥，软件按规矩要求重测一次，但界面上只有一句笼统的
+// 「配置并测试通过」，他就以为功能坏了（他原话：「好像打不了标签了」）。
+// 三种原因必须分开说：功能没开 / 还没填密钥 / 填了但没测过。
+setState({ features: { knowledge_tags: true }, ai: { mode: "api", api_ready: false, key_configured: false } });
+assert.equal(sandbox.suggestTagsReady(), false);
+assert.match(sandbox.suggestTagsTitle(), /还没填 API 密钥/, "没填密钥要说「去填密钥」");
+assert.match(sandbox.suggestTagsHint(), /还没填 API 密钥/, "旁边那行看得见的字也要说「去填密钥」");
+
+setState({ ai: { mode: "api", api_ready: false, key_configured: true } });
+assert.match(sandbox.suggestTagsTitle(), /连接还没测过/, "密钥填了、只是没重测，要说「测一次」而不是「再配一次」");
+assert.match(sandbox.suggestTagsHint(), /测一次/, "旁边那行字要说「测一次」");
+
+setState({ ai: { mode: "api", api_ready: true, key_configured: true } });
+assert.equal(sandbox.suggestTagsHint(), "", "都配好了就不该再有提示占地方");
+
+// 悬停说明看不见就等于没说：光把 title 写细了不算修好，得有一行常驻的字。
+assert.match(markup, /id="suggestTagsHint"/, "按钮旁边那行常驻提示要真的在标记里");
+assert.match(js, /hint\.textContent = suggestTagsHint\(\)/, "每次同步都要把那行字刷新");
+assert.match(js, /hint\.hidden = !hint\.textContent/, "没有要说的原因时那行字要收起来");
+
+// 名字里必须说清是「生成建议」而不是「贴标签」：老师看见「AI 建议标签」
+// 就会以为那是贴标签的按钮，贴不上就说功能坏了。
+assert.match(markup, />批量生成标签建议</, "批量按钮的名字要说清是生成标签建议");
+assert.match(js, /"AI 生成标签建议"/, "单题卡上那颗也要说清是生成标签建议");
+
+// 「没入库答案」原来取的是当前筛选下的数，再去减全库的数，两个口径混着减，
+// 就减出了「其中 -37 题已有 AI 初稿」。三个数必须都按全库口径。
+assert.match(js, /state\.tagWork\?\.missing_answer_total/, "「没入库答案」按全库口径取");
+assert.match(js, /state\.tagWork\?\.ai_draft_answers/, "「已有 AI 初稿」按全库口径取");
+assert.doesNotMatch(js, /noAnswerTotal - answerCount/, "两个口径不能相减（会出负数）");
+assert.doesNotMatch(js, /facets\?\.answers\?\.no/, "不能拿筛选口径的数去减全库口径的数");
+
 // ── 四、搬走以后留下的死代码和死样式 ──
 for (const dead of ["library-batch-ai", "library-batch-cost", "library-batch-count",
   "library-extra-tools", "library-batch-toolbar", "renderExtraTools", "aiBatchTools"]) {

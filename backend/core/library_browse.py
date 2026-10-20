@@ -240,9 +240,17 @@ def tag_work_counts() -> dict:
     already_asked = LibraryTagSuggestion.objects.filter(
         status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
                     LibraryTagSuggestion.Status.PENDING]).values("publication_id")
-    missing_answers = sum(1 for content, extras in live.values_list("content", "extras")
-                          if not str((content or {}).get("answer") or "").strip()
-                          and not (extras or {}).get("ai_answer"))
+    # 「没入库答案」和「连 AI 初稿都没有」是两个数，差值是「已经有 AI 初稿」的那些。
+    # 三个数都按全库算：拿筛选后的数去减全库的数会减出负数（原来「-37 题」就是这么来的）。
+    missing_answers = 0
+    ai_draft_answers = 0
+    for content, extras in live.values_list("content", "extras"):
+        if str((content or {}).get("answer") or "").strip():
+            continue
+        if (extras or {}).get("ai_answer"):
+            ai_draft_answers += 1
+        else:
+            missing_answers += 1
     processing = LibraryJob.objects.filter(executor=LibraryJob.Executor.API,
                                            status__in=library_jobs.ACTIVE).aggregate(
         tags=Count("pk", filter=models.Q(kind=LibraryJob.Kind.TAGS)),
@@ -250,6 +258,8 @@ def tag_work_counts() -> dict:
     return {"untagged_knowledge": untagged.distinct().count(),
             "untagged_ready": untagged.exclude(pk__in=already_asked).distinct().count(),
             "missing_answer": missing_answers,
+            "missing_answer_total": missing_answers + ai_draft_answers,
+            "ai_draft_answers": ai_draft_answers,
             "queued_tags": processing["tags"],
             "queued_answers": processing["answers"],
             "pending_review": len(waiting | flagged),
@@ -346,7 +356,11 @@ def library_list(request):
         "presence": dimension_presence(),
         "selected_tag_names": selected_tag_names(request.GET),
         "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
-        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready")},
+        # 题库页要分清「还没填密钥」「填了但没测过」「测过了」三种情况，
+        # 才能告诉老师下一步去哪。只给一个 api_ready，前端只能写一句笼统的话，
+        # 老师看了只会以为功能坏了。
+        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready",
+                                                    "key_configured", "configured", "status", "verified_at")},
         "sort": sort, "limit": limit, "offset": offset,
         "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
     })
