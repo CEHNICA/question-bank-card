@@ -1106,7 +1106,12 @@ body.printing { overflow: hidden; }
 .tag-picker-block-title small { color: var(--ink-2); font-size: 12px; font-weight: normal; }
 .tag-picker-hint { margin: 0; color: var(--ink-2); font-size: 13px; }
 .tag-picker-current { display: flex; flex-wrap: wrap; gap: 7px; }
-.tag-picker-current-chip { display: inline-flex; align-items: center; gap: 2px; padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--tag-color, var(--surface-2, #f4f6f5)); font-size: 13px; }
+/* 1.25.95：这一颗原来把标签的颜色**整个当底色**用（background: var(--tag-color)）。
+   1.25.93 之前这颗 chip 上没有 --tag-color，底色是浅灰，看着正常；1.25.93 统一给
+   标签上色之后，它就变成了「深蓝底 + 近黑的字」—— 字压在深色上，几乎看不清，
+   老师报「把字体挡住了，颜色太深」。
+   现在跟题卡、题目详情那几处一样：淡底 + 同色边 + 深字。 */
+.tag-picker-current-chip { display: inline-flex; align-items: center; gap: 2px; padding: 4px 4px 4px 10px; border: 1px solid var(--tag-color, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--tag-color, var(--line-strong)) 10%, var(--surface)); color: var(--ink-2); font-size: 13px; }
 .tag-picker-current-drop { border: 0; border-radius: 999px; padding: 0 6px; background: transparent; color: var(--ink-2); font-size: 15px; line-height: 1.2; cursor: pointer; }
 .tag-picker-current-drop:hover:not(:disabled) { color: var(--ink); background: #00000014; }
 .tag-picker-now .tag-suggestion-card { margin: 0; }
