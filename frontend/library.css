@@ -1586,6 +1586,12 @@ body.is-resizing, body.is-resizing * { cursor: ew-resize !important; user-select
   body.library-directory-open.library-page .library-workspace { grid-template-columns: var(--directory-width, 240px) minmax(0, 1fr) 288px; }
   body.library-directory-open.library-page .library-workspace > .library-results { grid-column: 2; }
   body.library-directory-open.library-page .library-workspace > .question-inspector { grid-column: 3; }
+  /* 1.25.92：篮面板原来被 library-reading.css 钉在第 2 列 —— 那个文件后加载，
+     选择器也一样具体，于是把本文件第 296 行那条「第 3 列」盖掉了。
+     目录一开，栅格变成「目录 | 题目 | 详情」三列，题目挪到第 2 列，篮子却
+     没跟着挪：两个面板摞在同一列上，篮一展开就把整片题目盖住了。
+     这里让篮子跟详情面板一样回到第 3 列。 */
+  body.library-directory-open.library-page .library-workspace > .basket-panel { grid-column: 3; grid-row: 1; }
   body.library-directory-open.library-page.library-inspector-collapsed:not(.library-basket-open) .library-workspace { grid-template-columns: var(--directory-width, 240px) minmax(0, 1fr); }
   body.library-directory-open.library-page .library-workspace > #libraryDirectory { grid-column: 1; grid-row: 1; }
 }
