@@ -1033,6 +1033,20 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .answer-set-aside > .paper { padding: 12px; margin: 8px 0; border: 1px solid var(--line);
   border-radius: 9px; background: #fff; }
 .answer-set-aside > .answer-image-tools { margin: 0; }
+/* 1.25.98：一份解析攒了几版，这里把它们摆出来。刻意不做成下拉、也不做成切换器
+   —— 1.11.5 那个「版本下拉」被删掉就是因为它切的是整个编辑区，老师会以为下面的
+   字也跟着换。现在是一块只读清单：点「看内容」才展开，点「填回编辑区」才把
+   那一版放进编辑区，还要自己保存。 */
+.answer-versions { margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: #fbfcfd; }
+.answer-versions > summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.answer-version-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.answer-version { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.answer-version.current { border-color: var(--line); background: #f4fbf7; }
+.answer-version-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.answer-version-head > strong { font-size: 13px; }
+.answer-version-body { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.answer-version > .answer-image-tools { margin: 8px 0 0; }
 .answer-sync { font-size: 13px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
 .answer-ai-draft { padding: 12px; background: var(--amber-soft); border-radius: 9px; }
 /* 1.25.80：答案 / 解析两个框在有 AI 参考答案自动填进来时给一道浅底色 + 角落小角标；

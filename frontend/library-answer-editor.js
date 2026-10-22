@@ -137,6 +137,16 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
         setAsideBody);
       const asideActions = node("div", "answer-image-tools"); asideActions.append(restore);
       setAside.append(asideActions);
+      // 1.25.98：这份解析攒了几版，界面上却看不见 —— 接口早就把全部版本带回来了
+      // （body.history），前端存进 record.history 之后就一直没用。1.11.5 那个
+      //「版本下拉」被删掉是对的：它切的是整个编辑区，又藏在「原卷」折叠面板底下，
+      // 老师会以为下面的字也跟着换。所以这里不做下拉、不做切换器：是一块只读的
+      // 清单，点「看内容」才展开，点「填回编辑区」才把那一版放进编辑区（还要
+      // 自己保存，保存后成为新的一版）。
+      const versions = node("details", "answer-versions");
+      const versionsSummary = node("summary", "");
+      const versionsBody = node("div", "answer-version-list");
+      versions.append(versionsSummary, versionsBody);
       const answerLabel = node("label", "", "答案结果");
       const answer = node("textarea"); answer.id = "answerEditorResult"; answer.rows = 2; answer.placeholder = "如 B，或 x＝3"; answerLabel.append(answer);
       const analysisLabel = node("label", "", "解析过程");
@@ -182,11 +192,11 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       // 1.25.40：三区改成「题目整行 + 两对（输入 | 预览）」。
       const workspace = node("div", "answer-editor-workspace");
       const toolsCell = node("div", "answer-editor-tools-cell");
-      toolsCell.append(setAside, imageTools, figures, crop);
+      toolsCell.append(setAside, versions, imageTools, figures, crop);
       workspace.append(sourceArea, pairHint, answerLabel, answerPreviewCell,
         analysisLabel, analysisPreviewCell, toolsCell, origin, aiDraft);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
-      controls = { syncLabel, syncNote, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore };
+      controls = { syncLabel, syncNote, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore, versions, versionsSummary, versionsBody };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; fitFields(); paintAiFieldHint(); schedulePreview(); });
       root.addEventListener?.("resize", () => { if (dialog.open) fitFields(); });
       // Display caret and selection, the same idea as the review 改字 editor.
@@ -337,6 +347,51 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       });
       setBusy();
     }
+    function renderVersions() {
+      if (!current) return;
+      const history = Array.isArray(current.history) ? current.history.filter((row) => row && row.id) : [];
+      // 只有一版时没有可比的东西，占地方反而让人以为漏了什么。
+      controls.versions.hidden = history.length < 2;
+      controls.versionsSummary.textContent = history.length > 1 ? `这份解析有 ${history.length} 个版本` : "这份解析的版本";
+      controls.versionsBody.replaceChildren();
+      history.forEach((row) => {
+        const isCurrent = Boolean(current.base) && row.id === current.base;
+        const entry = node("div", `answer-version${isCurrent ? " current" : ""}`);
+        const head = node("div", "answer-version-head");
+        head.append(node("strong", "", isCurrent ? "当前在用" : "以前那一版"));
+        head.append(node("span", "helper", row.created_at ? new Date(row.created_at).toLocaleString() : "时间未知"));
+        if (row.needs_check) head.append(node("span", "answer-quality result_only", "和现在的题面对不上"));
+        entry.append(head);
+        const body = node("div", "paper answer-version-body"); body.hidden = true;
+        S.render(body, row, { node, QB, empty: "这一版没有文字。" });
+        entry.append(body);
+        const actions = node("div", "answer-image-tools");
+        const show = node("button", "button button-small", "看内容"); show.type = "button";
+        show.addEventListener("click", () => { body.hidden = !body.hidden; show.textContent = body.hidden ? "看内容" : "收起内容"; });
+        actions.append(show);
+        if (!isCurrent) {
+          const back = node("button", "button button-small", "填回编辑区"); back.type = "button";
+          back.addEventListener("click", async () => {
+            if (loading || saving) return;
+            // 填回是「用这一版盖掉现在编辑区里的字」。老师很可能已经对着新题面写了
+            // 半段，这一下按下去就没了 —— 那种丢字最贵。已经有内容就问一句。
+            const session = epoch;
+            if (S.hasContent(current.value) && current.dirty
+              && !await confirm({ title: "用这一版盖掉现在编辑区里的内容？", text: "你在本题已经改过答案或解析。填回后这里会换成这一版，刚才改的不会留着。", ok: "填回" })) return;
+            if (session !== epoch || !dialog.open || !current) return;
+            current.value = S.editable(row);
+            current.dirty = true;
+            controls.answer.value = current.value.answer;
+            controls.analysis.value = current.value.analysis;
+            renderFigures(); renderPreview(); updateEditStatus();
+            notify("这一版已填进编辑区。核对后点保存，才会对这次出卷生效。");
+          });
+          actions.append(back);
+        }
+        entry.append(actions);
+        controls.versionsBody.append(entry);
+      });
+    }
     function renderFields() {
       if (!current) return;
       controls.answer.value = current.value.answer; controls.analysis.value = current.value.analysis;
@@ -357,6 +412,7 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       }
       controls.originBody.replaceChildren();
       if (controls.origin.open) S.render(controls.originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" });
+      renderVersions();
       positionArmed = false; lastField = "analysis";
       controls.aiDraft.hidden = !current.suggestion;
       if (current.suggestion) S.render(controls.aiPreview, current.suggestion, { node, QB });

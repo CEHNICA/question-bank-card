@@ -28,7 +28,7 @@ const other = { id: "pub-2", number: 2, content: { stem: "问题二", answer: ""
 const requests = [], saved = [], notices = [], clipboardWrites = [], confirmations = [], timers = [];
 let clock = Date.now(), confirmDecision = true;
 class ControlledDate extends Date { static now() { return clock; } }
-let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done", apiConfigured = true, settingsGate = null;
+let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done", apiConfigured = true, settingsGate = null, historyFixture = [];
 const paintFrames = [];
 const handoffText = '仅处理本批任务：job_id=job-wait, publication_id=pub-1, kind=answer, solution_scope=true。使用后端给出的真实本机CLI领取题面并逐题回写结果，不开启全局功能。检查初稿并保存后才用于出卷。';
 const root = { LibrarySolutions: require("./library-solutions.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout: (callback, delay) => { timers.push({ callback, delay }); return setTimeout(callback, delay); }, clearTimeout,
@@ -45,7 +45,7 @@ const root = { LibrarySolutions: require("./library-solutions.js"), localStorage
       if (failSave) return { ok: false, json: async () => ({ error: "另一窗口已修改，当前文字保留" }) };
       const payload = JSON.parse(opts.body); revision = { id: "saved-1", publication_id: "pub-1", answer: payload.answer, analysis: payload.analysis, figures: [] }; body = { solution: revision, base_revision: payload.sync_library ? revision.id : null };
     } else if (url.endsWith("/solution?revision=origin")) body = { solution: null, base_revision: "later-library-head", origin: { answer: original.content.answer, analysis: "" }, history: [] };
-    else if (url.endsWith("/solution")) { body = { solution: figureFixture, base_revision: null, origin: originFixture || { answer: original.content.answer, analysis: "" }, ai_answer: aiFixture, ai_answer_stale: aiStale, history: [] }; if (readGate) await readGate; }
+    else if (url.endsWith("/solution")) { const loaded = historyFixture.length ? historyFixture[0] : figureFixture; body = { solution: loaded, base_revision: historyFixture.length ? historyFixture[0].id : null, origin: originFixture || { answer: original.content.answer, analysis: "" }, ai_answer: aiFixture, ai_answer_stale: aiStale, history: historyFixture.slice() }; if (readGate) await readGate; }
     else if (url.startsWith("/api/papers/")) { body = { paper: { pages: [{ page_idx: 0 }, { page_idx: 1 }] } }; if (paperGate) await paperGate; }
     else throw new Error("unexpected request " + url);
     return { ok: true, json: async () => body };
@@ -357,6 +357,42 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await byId("answerEditorAi").emit("click"); await settle();
   assert.equal(requests.filter(value => value.opts.method === "POST").length, missingPosts);
   apiConfigured = true;
+
+  // 1.25.98：一份解析攒了几版，界面上要看得见。刻意不做成下拉、不做成切换器 ——
+  // 1.11.5 那个「版本下拉」就是被删掉的：它切的是整个编辑区，老师会以为下面的字
+  // 也跟着换。现在是一块只读清单，看内容要点开，填回编辑区要点按钮。
+  historyFixture = [
+    { id: "v-now", publication_id: "pub-1", answer: "现在的答案", analysis: "现在的解析", figures: [], created_at: "2026-10-22T10:00:00" },
+    { id: "v-old", publication_id: "pub-1", answer: "以前的答案", analysis: "以前的解析", figures: [], created_at: "2026-10-20T09:00:00", needs_check: true },
+  ];
+  await editor.open([original], { scope: "library", focus: original.id, selected: [original.id] }); await settle();
+  const versionBlock = descend(document.body).find(element => element.className === "answer-versions");
+  assert(versionBlock, "版本清单在编辑器里");
+  assert.equal(versionBlock.hidden, false, "有两版就要露出来");
+  assert(versionBlock.querySelectorAll("select").length === 0, "不做成下拉：切整个编辑区会让人以为下面的字也跟着换");
+  const versionRows = descend(versionBlock).filter(element => /^answer-version( current)?$/.test(String(element.className)));
+  assert.equal(versionRows.length, 2, "两个版本都摆出来");
+  const currentRow = versionRows.find(row => String(row.className).includes("current"));
+  assert(currentRow, "当前在用的那一版标出来了");
+  assert(currentRow.textContent.includes("当前在用"), "当前在用的那版说清楚了");
+  assert(!currentRow.textContent.includes("填回编辑区"), "当前在用的那版不用再填回来");
+  const olderRow = versionRows.find(row => row !== currentRow);
+  assert(olderRow.textContent.includes("和现在的题面对不上"), "对不上题面的那版要说出来");
+  const backButtons = descend(versionBlock).filter(element => element.tagName === "BUTTON" && element.textContent === "填回编辑区");
+  assert.equal(backButtons.length, 1, "只有以前那一版可以填回编辑区");
+  // 填回之前若老师已经改过内容，先问一句 —— 那种丢字最贵。
+  const answerBox = byId("answerEditorResult");
+  answerBox.value = "老师刚改的内容"; await answerBox.emit("input");
+  const confirmationsBefore = confirmations.length;
+  await backButtons[0].emit("click"); await settle();
+  assert(confirmations.length > confirmationsBefore, "填回前先问一句");
+  assert(confirmations.at(-1).title.includes("盖掉"), "问的是会不会盖掉现在的内容");
+  confirmDecision = true;
+  await backButtons[0].emit("click"); await settle();
+  assert.equal(byId("answerEditorResult").value, "以前的答案", "填回后编辑区里是那一版的内容");
+  assert(notices.some(value => String(value[0]).includes("填进编辑区")), "填回之后说清楚还要自己保存");
+  historyFixture = [];
+  await byText("返回").emit("click");
   await byId("answerEditorCheckAi").emit("click"); await settle();
   assert.equal(byId("answerEditorAi").hidden, false, "Read-only refresh observes a newly configured API without changing shared assistant mode");
   apiConfigured = false;
