@@ -7029,7 +7029,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function figureCandidateKey(figure) {
-    return `${figure.page_idx}:${figure.bbox.map((value) => Math.round(Number(value) * 10) / 10).join(",")}`;
+    // 1.25.97：这里的算法必须和后端 core/figure_policy.py 的 candidate_key 一模一样：
+    // 四舍五入到一位小数、夹到 0–1000，再按"一位小数、去掉末尾多余的 0"写出来。
+    // 以前后端用的是 Python 的 round(v, 1)（银行家舍入），90.55 得 90.5；网页用
+    // Math.round(v * 10) / 10，90.55 得 90.6。同一张候选图两边算出两个身份，网页把
+    // 其中一个发给后端，后端说不相识，于是整份配图一起存不进去，老师看到的提示是
+    // "重试"，而重试永远不会成功。后端已改成和网页同一套规则。
+    const values = (figure.bbox || []).map((value) => {
+      const rounded = Math.round(Number(value) * 10) / 10;
+      const clamped = Math.min(1000, Math.max(0, rounded));
+      return Number.isFinite(clamped) ? String(clamped) : "0";
+    });
+    return `${figure.page_idx}:${values.join(",")}`;
   }
 
   function hasFigureCandidateKey(question, key) {
@@ -7933,8 +7944,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (saved) trackCropDraft();
       if (error.name === "AbortError") showCropResult("识读已取消，框选仍保留。");
       else {
+        // 1.25.97：「请重试」是死路 —— 同样的内容再存一次，结果还是一样。改成
+        // 说清是哪一步卡住了、接下来该点哪里。
+        const hint = /无关候选图/.test(error.message)
+          ? "有一张被标成「与本题无关」的图，后端对不上它的身份。请关掉这个窗口，重新打开「配图」再保存一次（那一步会重新核对候选图）。"
+          : "请重试。";
         showCropResult(dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动改字。`
-          : `未保存：${error.message}。框选仍保留，请重试。`, true);
+          : `未保存：${error.message}。框选仍保留。${hint}`, true);
         toast(error.message, "error");
       }
     } finally { if (dialog.session === session && dialog.saving) setCropSaving(false); }

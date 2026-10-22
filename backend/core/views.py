@@ -36,7 +36,7 @@ from .figure_policy import (
     BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, DECISION_FLAGS, FLAG_FOREIGN_FIGURE, FLAG_NO_FIGURE,
     FLAG_ROW_FIGURE, FLAG_UNCUED_FIGURE,
     FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
-    cue_matches, figure_flag,
+    canonical_candidate_key, cue_matches, figure_flag, legacy_candidate_key, paper_candidate_keys,
     reusing_reviews, stored_or_derived_review,
 )
 from .models import (
@@ -119,10 +119,12 @@ def _candidate_key(item: dict) -> str | None:
 
 
 def _candidate_keys(question: Question) -> set[str]:
-    return {
-        key for item in (question.figure_candidates or [])
-        if (key := _candidate_key(item)) is not None
-    }
+    keys: set[str] = set()
+    for item in (question.figure_candidates or []):
+        for key in (figure_candidate_key(item), legacy_candidate_key(item)):
+            if key:
+                keys.add(key)
+    return keys
 
 
 def _saved_ignored_candidates(question: Question, review: dict | None = None) -> list[str]:
@@ -134,7 +136,8 @@ def _saved_ignored_candidates(question: Question, review: dict | None = None) ->
     raw = review.get("ignored_candidates")
     if not isinstance(raw, list):
         return []
-    return sorted({value for value in raw if isinstance(value, str) and value in available})
+    return sorted({canonical_candidate_key(value) for value in raw
+                   if isinstance(value, str) and value in available})
 
 
 def _selected_candidate_keys(question: Question, figures: list[dict] | None = None) -> set[str]:
@@ -535,10 +538,15 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         table_blocks = tables.table_blocks(question.paper)
     valid_candidate_keys = _candidate_keys(question)
     if isinstance(figure_review, dict) and "ignored_candidates" in figure_review:
-        ignored = sorted({
-            value for value in figure_review.get("ignored_candidates", [])
-            if isinstance(value, str) and value in valid_candidate_keys
-        }) if isinstance(figure_review.get("ignored_candidates"), list) else []
+        raw = figure_review.get("ignored_candidates")
+        raw = raw if isinstance(raw, list) else []
+        kept = [value for value in raw if isinstance(value, str) and value in valid_candidate_keys]
+        # 1.25.97：原卷里还在、但已经不在本题范围内的图，"与本题无关"这个判断仍然算数 ——
+        # 以前这里直接把它丢掉，老师标过的"无关"会悄悄消失，下次重算又冒出来。
+        if any(isinstance(value, str) and value not in valid_candidate_keys for value in raw):
+            known_anywhere = valid_candidate_keys | paper_candidate_keys(question.paper)
+            kept = [value for value in raw if isinstance(value, str) and value in known_anywhere]
+        ignored = sorted(set(kept))
         figure_review = {
             **figure_review,
             "ignored_candidates": ignored,
@@ -2755,10 +2763,20 @@ def question_action(request, question_id, action: str):
             previous_ignored = _saved_ignored_candidates(question)
             ignored_candidates = payload.get("ignored_candidates", previous_ignored)
             if (not isinstance(ignored_candidates, list) or len(ignored_candidates) > 200
-                    or not all(isinstance(value, str) and value in candidate_keys
-                               for value in ignored_candidates)):
+                    or not all(isinstance(value, str) for value in ignored_candidates)):
                 return _error("无关候选图格式不正确")
-            ignored_candidates = sorted(set(ignored_candidates))
+            # 1.25.97：「这张图与本题无关」是老师看着原卷做下的判断。改了题目范围之后，
+            # 那张图可能已经落在范围外、不再是本题的候选图 —— 判断本身没错，但以前
+            # 服务端会因此把整份配图一起拒掉，老师看到的是"重试"，而重试永远不会成功，
+            # 框里的白干一场。原卷里确实存在的那张图（哪怕已经不在本题范围内）继续算
+            # 有效；连原卷里都没有的 key 仍然是格式错误。
+            unknown = [value for value in ignored_candidates if value not in candidate_keys]
+            if unknown:
+                known_anywhere = candidate_keys | paper_candidate_keys(question.paper)
+                if any(value not in known_anywhere for value in unknown):
+                    return _error("无关候选图格式不正确")
+            # 存之前统一成今天的写法：旧版本记下的身份（用的是上一套四舍五入）也认。
+            ignored_candidates = sorted({canonical_candidate_key(value) for value in ignored_candidates})
             pages = {p["page_idx"] for p in question.paper.pages}
             cleaned = []
             for item in figures:
@@ -2808,7 +2826,7 @@ def question_action(request, question_id, action: str):
                         cleaned_item["parts"] = parts
                 cleaned.append(cleaned_item)
             selected_candidate_keys = {
-                piece["candidate_key"]
+                canonical_candidate_key(piece["candidate_key"])
                 for item in cleaned for piece in (item, *item.get("parts", []))
                 if "candidate_key" in piece
             }

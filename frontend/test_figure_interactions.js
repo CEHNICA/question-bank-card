@@ -33,6 +33,17 @@ assert.match(js, /const figures = figuresFromBoxes\(dialog\.boxes\)/);
 assert.match(js, /confirmCurrentFigures[\s\S]*ignored_candidates: \[\.\.\.ignoredCandidates\]/);
 assert.match(js, /slot: figure\.slot \|\| "stem"/);
 
+// 1.25.97：候选图的身份算法必须和后端一致（一位小数、夹到 0–1000、去尾零）。
+// 两边算法不同就会让同一张图有两个身份，后端不认，老师的整份配图存不进去。
+const keyFunction = js.match(/function figureCandidateKey[\s\S]*?\r?\n  }/)?.[0] || "";
+assert.match(keyFunction, /Math\.round\(Number\(value\) \* 10\) \/ 10/, "候选图身份按浏览器规则保留一位小数");
+assert.match(keyFunction, /Math\.min\(1000, Math\.max\(0, rounded\)\)/, "坐标夹到 0–1000，和后端一致");
+assert.match(keyFunction, /String\(clamped\)/, "去尾零的写法要和后端一致");
+assert.doesNotMatch(js, /round\(Number\(value\) \* 10\) \/ 10\)\.join/, "旧的散写实现不再出现");
+
+// 1.25.97：存不进去时不能只说"请重试"（重试永远不会成功），要说清下一步。
+assert.match(js, /无关候选图[\s\S]*重新打开「配图」再保存一次/, "存不下时给出能照做的下一步，而不是让人反复重试");
+
 // 标签可单独拖动；偏移随保存负载发送，而框本身的 bbox 不会在标签拖动函数里被改写。
 const labelDrag = js.match(/function startLabelDrag[\s\S]*?\r?\n  }\r?\n\r?\n  \$\("figureSlotMenu"\)/)?.[0] || "";
 assert.match(labelDrag, /box\.label_offset\s*=/);

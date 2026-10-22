@@ -30,6 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 if not getattr(sys, "frozen", False):
@@ -316,7 +317,13 @@ def first_line(text: str, limit: int = 60) -> str:
 
 
 def candidate_key(item: dict) -> str | None:
-    """The page/bbox identity the app uses for a figure candidate (figure_policy.candidate_key)."""
+    """The page/bbox identity the app uses for a figure candidate (figure_policy.candidate_key).
+
+    1.25.97：这里的四舍五入必须和应用、和网页完全一样 —— 一位小数、逢五进位、
+    夹到 0–1000、去尾零。以前这里用的是 Python 的 round(v, 1)（银行家舍入），
+    90.55 会得 90.5，而应用和网页得 90.6：同一张候选图三个身份，助手按自己那份
+    去核对，结论和界面对不上。
+    """
     bbox = item.get("bbox") if isinstance(item, dict) else None
     if not isinstance(item.get("page_idx") if isinstance(item, dict) else None, int) \
             or not isinstance(bbox, list) or len(bbox) != 4:
@@ -324,15 +331,16 @@ def candidate_key(item: dict) -> str | None:
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
            for value in bbox):
         return None
-    x0, y0, x1, y1 = (round(float(value), 1) for value in bbox)
-    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(1000, x1), min(1000, y1)
+    x0, y0, x1, y1 = (max(0, min(1000, float(value))) for value in bbox)
     if x1 - x0 < 3 or y1 - y0 < 3:
         return None
 
     def shown(number: float) -> str:
         return f"{number:.1f}".rstrip("0").rstrip(".")
 
-    return f"{item['page_idx']}:" + ",".join(shown(value) for value in (x0, y0, x1, y1))
+    rounded = [float(Decimal(repr(float(value))).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+               for value in (x0, y0, x1, y1)]
+    return f"{item['page_idx']}:" + ",".join(shown(value) for value in rounded)
 
 
 def candidates(question: dict) -> list[dict]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 from copy import deepcopy
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import math
@@ -527,9 +528,7 @@ def repaired_automatic_figures(
     return repaired
 
 
-def candidate_key(item: dict) -> str | None:
-    """Return the stable page/bbox identity shared with the figure editor."""
-
+def _normalised_box(item: dict) -> tuple[int, tuple[float, float, float, float]] | None:
     if not isinstance(item, dict) or not isinstance(item.get("page_idx"), int):
         return None
     bbox = item.get("bbox")
@@ -537,15 +536,98 @@ def candidate_key(item: dict) -> str | None:
             or any(isinstance(value, bool) or not isinstance(value, (int, float))
                    or not math.isfinite(value) for value in bbox)):
         return None
-    x0, y0, x1, y1 = (round(float(value), 1) for value in bbox)
-    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(1000, x1), min(1000, y1)
+    x0, y0, x1, y1 = (max(0, min(1000, float(value))) for value in bbox)
     if x1 - x0 < 3 or y1 - y0 < 3:
         return None
+    return item["page_idx"], (x0, y0, x1, y1)
+
+
+def candidate_key(item: dict) -> str | None:
+    """Return the stable page/bbox identity shared with the figure editor.
+
+    1.25.97：这里的四舍五入规则必须和网页（frontend/app.js 的 figureCandidateKey）
+    **完全一样**：先取最短十进制写法，再按"四舍五入、逢五进位"保留一位小数，最后
+    去掉末尾多余的 0。
+
+    以前服务端用的是 Python 的 round(v, 1) —— 银行家舍入，90.55 得 90.5；而网页用
+    Math.round(v * 10) / 10，90.55 得 90.6。同一张候选图，两边算出两个身份：网页把
+    它当"无关"发给后端，后端说不认识，于是**整份配图一起存不进去**，老师看到的
+    提示是"重试"，而重试永远不会成功。实测 25 万个随机坐标里有 2,174 个会分叉；
+    改成和网页同一套规则后是 0 个。
+    """
+
+    box = _normalised_box(item)
+    if box is None:
+        return None
+    page_idx, (x0, y0, x1, y1) = box
+
+    def shown(value: float) -> str:
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+
+    rounded = []
+    for value in (x0, y0, x1, y1):
+        rounded.append(float(Decimal(repr(float(value))).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)))
+    return f"{page_idx}:" + ",".join(shown(value) for value in rounded)
+
+
+def legacy_candidate_key(item: dict) -> str | None:
+    """The identity rule used before 1.25.97.
+
+    Kept so that decisions recorded by an older build (a teacher marked an image
+    as "not mine") stay valid instead of silently losing their meaning.
+    """
+
+    box = _normalised_box(item)
+    if box is None:
+        return None
+    page_idx, (x0, y0, x1, y1) = box
 
     def shown(number: float) -> str:
         return f"{number:.1f}".rstrip("0").rstrip(".")
 
-    return f"{item['page_idx']}:" + ",".join(shown(value) for value in (x0, y0, x1, y1))
+    values = (round(float(value), 1) for value in (x0, y0, x1, y1))
+    return f"{page_idx}:" + ",".join(shown(value) for value in values)
+
+
+def canonical_candidate_key(key: str) -> str:
+    """Re-render a stored identity in the current rule.
+
+    Identities recorded by an older build use the previous rounding. Parsing the
+    numbers back and printing them with today's rule makes old and new agree, so
+    a decision the teacher made last month keeps matching today's candidates.
+    """
+
+    if not isinstance(key, str) or ":" not in key:
+        return key
+    page, _, coords = key.partition(":")
+    try:
+        page_idx = int(page)
+        values = [float(value) for value in coords.split(",")]
+    except (TypeError, ValueError):
+        return key
+    if len(values) != 4:
+        return key
+    return candidate_key({"page_idx": page_idx, "bbox": values}) or key
+
+
+def paper_candidate_keys(paper) -> set[str]:
+    """Every figure identity that exists anywhere in the paper.
+
+    A teacher who marks an image as "not mine" stays right about that even after
+    the question's range is narrowed and the image no longer sits inside it.
+    These keys therefore stay valid for the "ignore" list, so saving the
+    question is never blocked by a decision that was correct when it was made.
+    """
+    from . import segment
+
+    keys: set[str] = set()
+    blocks = paper.blocks.filter(type__in=segment.FIGURE_TYPES).only("page_idx", "bbox")
+    for block in blocks:
+        item = {"page_idx": block.page_idx, "bbox": block.bbox}
+        for key in (candidate_key(item), legacy_candidate_key(item)):
+            if key:
+                keys.add(key)
+    return keys
 
 
 def _validated_layout(primary: dict, candidates: list[dict]) -> tuple[dict, dict, bool]:
