@@ -40,7 +40,7 @@ import zipfile
 from pathlib import Path
 
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
 BUNDLE_FORMAT = 1
@@ -317,7 +317,10 @@ class _Merge:
         with connection.cursor() as cursor:
             try:
                 cursor.execute(f'INSERT INTO "{table}" ({names}) VALUES ({placeholders})', values)
-            except sqlite3.IntegrityError:
+            except (IntegrityError, sqlite3.IntegrityError):
+                # 捕的是 Django 的 IntegrityError —— 之前这里只捕 sqlite3 的那个，
+                # Django 根本不抛它，于是"编号已经有了就跳过"这条兜底从来没生效过：
+                # 同一个包合并两次（或者本机已经有一份同编号的卷）就会当场失败。
                 if row.get("id") is not None and self._exists_by_id(table, str(row["id"])):
                     return None
                 raise
@@ -494,37 +497,62 @@ class _Merge:
         self._merge_assignments(assignments)
 
     def _local_paper(self, sha256: str) -> str | None:
+        """本机有没有这份原卷。
+
+        判重认的是**原文件内容的 sha256**，不是文件名 —— 改了名的同一份卷照样认得出。
+
+        本机可能留着好几份一样的（老师"仍然新建"重录过一次）��这时要挑得
+        **确定**：先排除归档的（归档的那份老师在题库里看不见，题并进去就等于
+        藏起来了），剩下里挑题最多的那份。都归档了就当本机没有 —— 另建一份
+        看得见的，比把题塞进看不见的地方好。
+        """
         if not sha256:
             return None
         with connection.cursor() as cursor:
-            row = cursor.execute('SELECT id FROM "core_paper" WHERE sha256=? LIMIT 1', (sha256,)).fetchone()
-        return str(row[0]) if row else None
+            rows = cursor.execute(
+                'SELECT id, archived FROM "core_paper" WHERE sha256=? ORDER BY archived ASC, created_at DESC',
+                (sha256,)).fetchall()
+        visible = [str(row[0]) for row in rows if not row[1]]
+        if not visible:
+            return None
+        if len(visible) == 1:
+            return visible[0]
+        with connection.cursor() as cursor:
+            counts = {str(row[0]): int(row[1]) for row in cursor.execute(
+                'SELECT paper_id, COUNT(*) FROM "core_question" WHERE paper_id IN (%s) GROUP BY paper_id'
+                % ",".join("?" * len(visible)), visible).fetchall()}
+        return max(visible, key=lambda paper_id: counts.get(paper_id, 0))
 
     def _add_paper(self, paper, blocks_by_paper, questions_by_paper, publications_by_question,
                    solutions_by_publication, regions_by_question, groups_by_paper, batches_by_paper) -> None:
-        paper_id = str(paper["id"])
+        incoming_id = str(paper["id"])
         row = {**paper}
-        files = self._manifest_files(paper_id)
+        files = self._manifest_files(incoming_id)
         for label, column in (("source", "source_path"), ("render", "render_path"), ("zip", "zip_path")):
             relative = files.get(label)
             row[column] = str(data_root() / relative) if relative else ""
+        # 卷子的编号是 UUID，两台电脑各编各的 —— 但本机可能已经有这个编号了
+        # （同一份卷在这儿归档过）。照抄会撞车，撞车就是一次"操作没完成"。
+        if self._exists_by_id(PAPER_TABLE, incoming_id):
+            row["id"] = uuid.uuid4().hex
         inserted = self._insert(PAPER_TABLE, row)
         if inserted:
             self.added["papers"].append(inserted)
             self.report["新增卷子"] += 1
-        self.paper_map[paper_id] = inserted or paper_id
-        for block in blocks_by_paper.get(paper_id, []):
+        paper_id = inserted or incoming_id
+        self.paper_map[incoming_id] = paper_id
+        for block in blocks_by_paper.get(incoming_id, []):
             inserted = self._insert(BLOCK_TABLE, block)
             if inserted:
                 # 撤销时要删：卷子一删，这些块还指着它，外键就断了。
                 self.added["blocks"].append(inserted)
         # 题组和删除批次得先摆好：题目马上要指过去。
-        self._merge_question_groups(paper_id, groups_by_paper.get(paper_id, []))
-        self._merge_deletion_batches(paper_id, batches_by_paper.get(paper_id, []))
-        id_map = self._add_questions(paper_id, questions_by_paper.get(paper_id, []),
+        self._merge_question_groups(paper_id, groups_by_paper.get(incoming_id, []))
+        self._merge_deletion_batches(paper_id, batches_by_paper.get(incoming_id, []))
+        id_map = self._add_questions(paper_id, questions_by_paper.get(incoming_id, []),
                                      publications_by_question, solutions_by_publication, regions_by_question)
         self._fix_batch_question_ids(id_map)
-        self._copy_paper_files(paper_id)
+        self._copy_paper_files(incoming_id)
 
     def _merge_question_groups(self, local_paper_id: str, incoming_groups: list) -> None:
         """题组（一、二、三 大题这些"题号作用域"）跟着卷子一起搬。
@@ -666,18 +694,32 @@ class _Merge:
         to_add: list[dict] = []
         for question in incoming_questions:
             number = question.get("number")
-            local = self._local_question(local_paper_id, number)
-            if local is None:
-                to_add.append(question)
-                continue
+            # 这道题在本机的哪个题组里（题号只在题组里才唯一）。
+            group_id = self.question_group_map.get(str(question.get("group_id")))
             stem = str(question.get("stem") or "")
-            mine = str(local.get("stem") or "")
-            if stem and mine and not _same_stem(mine, stem):
-                new_number = self._next_number(local_paper_id)
-                to_add.append({**question, "number": new_number})
-                self.report["题号一样内容不同"] += 1
-                self.notes.append(f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着")
-                continue
+            local = self._local_question(local_paper_id, number, group_id)
+            if local is None:
+                # 这个题号上没有题：也许同组里有题干一样的（题号变过）。
+                twin = self._question_with_same_stem(local_paper_id, group_id, stem)
+                if twin is not None:
+                    local = twin
+                else:
+                    to_add.append(question)
+                    continue
+            else:
+                mine = str(local.get("stem") or "")
+                if stem and mine and not _same_stem(mine, stem):
+                    # 同一个题号，题干不是一回事：先在同组里找找有没有题干一样的
+                    # （上次合并给"题号一样内容不同"那道另编了题号的副本）。
+                    twin = self._question_with_same_stem(local_paper_id, group_id, stem)
+                    if twin is not None:
+                        local = twin
+                    else:
+                        new_number = self._next_number(local_paper_id, group_id)
+                        to_add.append({**question, "number": new_number})
+                        self.report["题号一样内容不同"] += 1
+                        self.notes.append(f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着")
+                        continue
             changed = []
             for field, label in (("answer", "答案"), ("analysis", "解析")):
                 if not str(local.get(field) or "").strip() and str(question.get(field) or "").strip():
@@ -735,21 +777,66 @@ class _Merge:
                 self.report["补进来的解析版本"] += 1
         self._copy_solution_files(publication_id)
 
-    def _local_question(self, paper_id: str, number) -> dict | None:
+    def _local_question(self, paper_id: str, number, group_id=None) -> dict | None:
+        """本机这道题在哪儿（先按位置找）。
+
+        **题号只在题组里才有意义**：一本书每章都从 1 开始编题号，只按题号找会把
+        第一章的第 1 题和第二章的第 1 题配成一对 —— 1.26.5 真机上撞过：同一本书
+        合并两次，712 道题被当成"题号一样但内容不同"又搬了一遍。
+
+        所以认题是 **(卷, 题组, 题号)**；本机这道题没分组时，退而在同卷里按题号找
+        （老库没有题组的情况）。
+        """
+        if group_id is not None:
+            row = self._question_row("paper_id=? AND group_id=? AND number=?", (paper_id, group_id, number))
+            if row is not None:
+                return row
+            # 本机这道题没分组（老库）：只在"没分组的那批题"里按题号找，
+            # 别把别章的题配过来。
+            return self._question_row("paper_id=? AND group_id IS NULL AND number=?", (paper_id, number))
+        return self._question_row("paper_id=? AND number=?", (paper_id, number))
+
+    def _question_with_same_stem(self, paper_id: str, group_id, stem: str) -> dict | None:
+        """本机有没有题干一样的这道题。
+
+        题号是显示用的，会变（上次合并遇到"题号一样内容不同"时会给备份里的那道
+        另编一个题号）。**题干才是硬证据** —— 认题最终看它。
+        """
+        if not stem:
+            return None
+        where = "paper_id=?"
+        params: list = [paper_id]
+        if group_id is not None:
+            where += " AND group_id=?"
+            params.append(group_id)
         with connection.cursor() as cursor:
-            cursor.execute('SELECT * FROM "core_question" WHERE paper_id=? AND number=? LIMIT 1',
-                           (paper_id, number))
+            cursor.execute(f'SELECT * FROM "core_question" WHERE {where}', params)
+            columns = [description[0] for description in cursor.description]
+            for row in cursor.fetchall():
+                candidate = dict(zip(columns, row))
+                if _same_stem(candidate.get("stem") or "", stem):
+                    return candidate
+        return None
+
+    def _question_row(self, where: str, params: tuple) -> dict | None:
+        with connection.cursor() as cursor:
+            cursor.execute(f'SELECT * FROM "core_question" WHERE {where} LIMIT 1', params)
             columns = [description[0] for description in cursor.description]
             row = cursor.fetchone()
         return dict(zip(columns, row)) if row else None
 
-    def _next_number(self, paper_id: str) -> int:
-        """本卷末尾的空题号。预览时也要算对，所以先把用掉的号记下来。"""
+    def _next_number(self, paper_id: str, group_id=None) -> int:
+        """本卷末尾的空题号（题号在题组里才唯一，所以按题组算）。"""
         with connection.cursor() as cursor:
-            row = cursor.execute('SELECT MAX(number) FROM "core_question" WHERE paper_id=?',
-                                 (paper_id,)).fetchone()
+            if group_id is None:
+                row = cursor.execute('SELECT MAX(number) FROM "core_question" WHERE paper_id=?',
+                                     (paper_id,)).fetchone()
+            else:
+                row = cursor.execute(
+                    'SELECT MAX(number) FROM "core_question" WHERE paper_id=? AND group_id=?',
+                    (paper_id, group_id)).fetchone()
         highest = int(row[0] or 0) if row else 0
-        reserved = self.reserved_numbers.setdefault(paper_id, set())
+        reserved = self.reserved_numbers.setdefault(f"{paper_id}:{group_id}", set())
         candidate = highest + 1
         while candidate in reserved:
             candidate += 1

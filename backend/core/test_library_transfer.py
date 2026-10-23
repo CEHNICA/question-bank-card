@@ -332,6 +332,77 @@ class ReferencedRowsTests(TransferFixture):
         self.assertEqual(LibraryTagGroup.objects.count(), 0)
 
 
+    def test_a_duplicate_paper_on_this_machine_is_picked_deterministically(self):
+        """本机留着好几份一样的卷（老师重录过一次）时，要挑得确定。
+
+        而且优先挑**没归档**的那份：归档的卷老师在题库里看不见，题并进去
+        等于藏起来了。
+        """
+        from core.models import Paper as PaperModel
+
+        duplicate = PaperModel.objects.create(filename="卷一（重录）.pdf", kind="pdf",
+                                               sha256="a" * 64, status=PaperModel.Status.READY,
+                                               pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        Question.objects.create(paper=duplicate, number=9, question_type="single_choice",
+                                stem="（虚构）重录的那道题", options={"A": "甲"}, answer="",
+                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        bundle = self.export()
+        # 本机删掉原来那份卷，只剩重录的这份 → 合并要并进它，而不是新建第三份。
+        Question.objects.filter(paper=self.paper).delete()
+        Paper.objects.filter(pk=self.paper.pk).delete()
+        result = library_transfer.merge_bundle(bundle)
+        self.assertEqual(result["report"]["新增卷子"], 0, "本机有的卷不该再来一套")
+        self.assertEqual(Paper.objects.count(), 1)
+        self.assertTrue(Question.objects.filter(stem="（虚构）重录的那道题").exists())
+
+    def test_an_archived_duplicate_is_not_used_as_the_merge_target(self):
+        """本机那份被归档了 → 另建一份看得见的，别把题塞进看不见的地方。"""
+        from core.models import Paper as PaperModel
+
+        archived = PaperModel.objects.create(filename="卷一（归档）.pdf", kind="pdf", sha256="a" * 64,
+                                             status=PaperModel.Status.READY, archived=True,
+                                             pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        Question.objects.filter(paper=self.paper).delete()
+        Paper.objects.filter(pk=self.paper.pk).delete()
+        bundle = self.export()
+        result = library_transfer.merge_bundle(bundle)
+        self.assertEqual(result["report"]["新增卷子"], 1, "归档的那份不算数，要另建一份")
+        self.assertEqual(Paper.objects.count(), 2)
+        self.assertFalse(Paper.objects.get(pk=archived.pk).questions.exists(),
+                         "题不该并进归档的那份")
+
+
+    def test_a_book_where_every_chapter_restarts_the_numbering(self):
+        """一本书每章都从第 1 题开始编 —— 认题必须带上"题组"。
+
+        1.26.5 真机上撞过：认题只按 (卷, 题号) 找，第一章的第 1 题就被拿去和
+        第二章的第 1 题配对，712 道题被当成"题号一样内容不同"又搬了一遍。
+        """
+        book = Paper.objects.create(filename="（虚构）教材.pdf", kind="pdf", sha256="c" * 64,
+                                    status=Paper.Status.READY,
+                                    pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        for chapter in range(2):
+            group = QuestionGroup.objects.create(paper=book, title=f"第 {chapter + 1} 章",
+                                                 kind=QuestionGroup.Kind.CHAPTER, sequence=chapter)
+            for number in range(1, 4):
+                Question.objects.create(
+                    paper=book, group=group, number=number, question_type="single_choice",
+                    stem=f"（虚构）第 {chapter + 1} 章第 {number} 题", options={"A": "甲"},
+                    answer="", analysis="", state=Question.State.YELLOW, text_source="agree")
+        bundle = self.export()
+        Question.objects.filter(paper=book).delete()
+        Paper.objects.filter(pk=book.pk).delete()
+
+        first = library_transfer.merge_bundle(bundle)
+        self.assertEqual(first["report"]["新增题目"], 6)
+        self.assertEqual(first["report"]["题号一样内容不同"], 0,
+                         "各章的题号一样，但不是同一道题，不该判成冲突")
+        # 再合一次同一个包：不能又搬一遍。
+        second = library_transfer.merge_bundle(bundle)
+        self.assertEqual(second["report"]["新增题目"], 0, "同一个包合两次，不该多出题")
+        self.assertEqual(Question.objects.filter(paper__filename="（虚构）教材.pdf").count(), 6)
+
+
 class SolutionVersionTests(TransferFixture):
     """两边都有解析时：两份都留着，不覆盖。"""
 
