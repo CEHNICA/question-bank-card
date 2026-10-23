@@ -23,7 +23,9 @@ from pathlib import Path
 from django.test import TestCase, override_settings
 
 from core import library_transfer
-from core.models import Block, LibrarySolution, Paper, PublishedQuestion, Question
+from core.models import (Block, LibrarySolution, LibraryTag, LibraryTagAssignment,
+                         LibraryTagGroup, Paper, PublishedQuestion, Question,
+                         QuestionDeletionBatch, QuestionGroup)
 
 
 class TransferFixture(TestCase):
@@ -249,6 +251,85 @@ class MergeBehaviourTests(TransferFixture):
         self.assertEqual(Paper.objects.count(), 1, "撤销只删这次加进来的")
         self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1,
                          "本机原来就有的题不能被撤销掉")
+
+
+class ReferencedRowsTests(TransferFixture):
+    """题目外面挂着的那些行：题组、删除批次、题上贴的标签。
+
+    1.26.3 真机上撞过：这些行不跟着走，搬过来的题就指向了不存在的行 ——
+    SQLite 要到提交时才查外键，那时整次合并被退回（"FOREIGN KEY constraint
+    failed"），**预览却看不出任何问题**。这里用真数据把那条路堵住。
+    """
+
+    def build_references(self):
+        group = QuestionGroup.objects.create(paper=self.paper, title="第 1 组",
+                                             kind=QuestionGroup.Kind.EXAM, sequence=0)
+        self.questions[0].group = group
+        self.questions[0].save(update_fields=["group"])
+        batch = QuestionDeletionBatch.objects.create(
+            paper=self.paper, question_ids=[str(self.questions[1].pk)],
+            origin=QuestionDeletionBatch.Origin.USER, reason="（虚构）删掉的一道")
+        self.questions[1].deleted_at = "2026-01-01T00:00:00Z"
+        self.questions[1].deletion_batch = batch
+        self.questions[1].save(update_fields=["deleted_at", "deletion_batch"])
+        tag_group = LibraryTagGroup.objects.create(name="（虚构）目录", position=0)
+        tag = LibraryTag.objects.create(name="（虚构）知识点", kind=LibraryTag.Kind.KNOWLEDGE)
+        tag.groups.add(tag_group)
+        publication = PublishedQuestion.objects.create(
+            question=self.questions[0], paper=self.paper, number=1, version=1,
+            content={"stem": "（虚构）第一题", "answer": "甲"},
+            content_hash="c" * 64, search_text="第一题", source_filename="卷一.pdf",
+            question_type="single_choice", status=PublishedQuestion.Status.PUBLISHED)
+        LibraryTagAssignment.objects.create(publication=publication, tag=tag,
+                                            source=LibraryTagAssignment.Source.HUMAN)
+        return group, batch, tag_group, tag, publication
+
+    def forget_local_rows(self):
+        """模拟另一台电脑：那些行它没有。"""
+        QuestionGroup.objects.all().delete()
+        QuestionDeletionBatch.objects.all().delete()
+        LibraryTagAssignment.objects.all().delete()
+        LibraryTagGroup.objects.all().delete()
+
+    def test_the_merge_brings_the_rows_the_questions_point_at(self):
+        self.build_references()
+        bundle = self.export()
+        self.forget_local_rows()
+
+        library_transfer.merge_bundle(bundle)
+
+        self.assertEqual(QuestionGroup.objects.count(), 1, "题组得跟着题走")
+        self.assertEqual(QuestionDeletionBatch.objects.count(), 1, "删除批次得跟着题走")
+        self.assertEqual(LibraryTagGroup.objects.count(), 1, "标签目录得跟着标签走")
+        self.assertEqual(LibraryTagAssignment.objects.count(), 1, "题上贴的标签得跟着快照走")
+
+    def test_the_merge_leaves_no_dangling_reference(self):
+        """合并完之后，库里不能有指向空行的引用 —— 外键一断，提交就会退回。"""
+        from django.db import connection
+
+        self.build_references()
+        bundle = self.export()
+        self.forget_local_rows()
+
+        library_transfer.merge_bundle(bundle)
+
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_key_check")
+            broken = cursor.fetchall()
+        self.assertEqual(broken, [], f"合并后有指向空行的引用：{broken[:5]}")
+
+    def test_the_undo_takes_the_brought_along_rows_with_it(self):
+        self.build_references()
+        bundle = self.export()
+        self.forget_local_rows()
+
+        library_transfer.merge_bundle(bundle)
+        library_transfer.undo_last_merge()
+
+        self.assertEqual(QuestionGroup.objects.count(), 0, "撤销要把题组一起带走")
+        self.assertEqual(QuestionDeletionBatch.objects.count(), 0, "撤销要把删除批次一起带走")
+        self.assertEqual(LibraryTagAssignment.objects.count(), 0, "撤销要把标签挂接一起带走")
+        self.assertEqual(LibraryTagGroup.objects.count(), 0)
 
 
 class SolutionVersionTests(TransferFixture):

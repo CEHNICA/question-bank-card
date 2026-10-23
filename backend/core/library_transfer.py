@@ -59,15 +59,15 @@ TAG_GROUP_TABLE = "core_librarytaggroup"
 TAG_TABLE = "core_librarytag"
 RELATION_TABLE = "core_librarytagrelation"
 ASSIGNMENT_TABLE = "core_librarytagassignment"
+TAG_MEMBERSHIP_TABLE = "core_librarytag_groups"
+# 题组（一份资料里的题号作用域）和删除批次（一次删除动作）：
+# **题目本身的外键就指着这两张表**。不跟着走，搬过来的题就指向了不存在的行 ——
+# SQLite 要到提交时才检查外键，那时整次合并会被退回（1.26.3 真机上撞过：
+# 599 道题指向没搬过来的题组、69 道题指向没搬过来的删除批次，合并报
+# "FOREIGN KEY constraint failed"，预览却看不出问题）。
+QUESTION_GROUP_TABLE = "core_questiongroup"
+DELETION_BATCH_TABLE = "core_questiondeletionbatch"
 
-# 跟着题走的表：题在哪张卷下，它们就跟着走。
-QUESTION_CHILDREN = (PUBLICATION_TABLE, SOLUTION_TABLE, REGION_TABLE)
-# 只在本机有意义、不该跟着走的：AI 任务队列、AI 标签候选、操作日志、回收站。
-LOCAL_ONLY_TABLES = {
-    "core_libraryjob", "core_librarytagsuggestion", "core_librarytagoperation",
-    "core_questionlayoutoperation", "core_questiondeletionbatch", "core_importchunk",
-    "core_librarytagcatalogue", "core_questiongroup",
-}
 # 能重新生成的中间产物：带上只是让包变大、冲突变多。
 SKIP_DIRECTORIES = {"chunks", "pages", "library"}
 SKIP_NAMES = {"features.json", "mineru_engine.json", "knowledge-points.txt",
@@ -274,10 +274,22 @@ class _Merge:
             "补进来的解析版本": 0,
         }
         self.added = {"papers": [], "questions": [], "publications": [], "solutions": [],
-                      "tags": [], "groups": [], "relations": [], "assignments": [], "filled": []}
+                      "tags": [], "groups": [], "relations": [], "assignments": [], "filled": [],
+                      "question_groups": [], "deletion_batches": [], "memberships": [], "blocks": [],
+                      "regions": []}
         # 预览和真合并要报出同一件事，所以两边共用这些记录。
         self.notes: list[str] = []
         self.reserved_numbers: dict[str, set] = {}
+        # 对方编号 → 本机编号的对照。题目、标签、题组、删除批次、入库快照都要
+        # 按它改写指向 —— 对方的编号在本机不一定指向同一个东西。
+        self.tag_map: dict[str, str] = {}
+        self.tag_group_map: dict[str, str] = {}
+        self.publication_map: dict[str, str] = {}
+        self.paper_map: dict[str, str] = {}
+        self.question_group_map: dict[str, str] = {}
+        self.deletion_batch_map: dict[str, str] = {}
+        # 删除批次里的"这些题是哪几道"要等题搬完才知道本机编号，先记着。
+        self._pending_batch_questions: list[tuple[str, list]] = []
 
     # -- 小工具 -------------------------------------------------------
 
@@ -351,9 +363,8 @@ class _Merge:
         return self.report
 
     def _merge_tags(self) -> None:
-        groups = _rows(self.incoming, TAG_GROUP_TABLE)
-        group_map: dict[str, str] = {}
-        for group in groups:
+        group_map = self.tag_group_map
+        for group in _rows(self.incoming, TAG_GROUP_TABLE):
             name = str(group.get("name") or "")
             if not name:
                 continue
@@ -367,7 +378,7 @@ class _Merge:
             else:
                 group_map[str(group["id"])] = local
 
-        tag_map: dict[str, str] = {}
+        tag_map = self.tag_map
         for tag in _rows(self.incoming, TAG_TABLE):
             kind = str(tag.get("kind") or "knowledge")
             name = str(tag.get("name") or "")
@@ -382,6 +393,22 @@ class _Merge:
                     self.report["新增标签"] += 1
             else:
                 tag_map[str(tag["id"])] = local
+
+        # 标签属于哪几个"标签组"（自定义目录）：这是多对多的中间表，编号两边不一样，
+        # 不改写就会指向不存在的标签/目录。
+        for row in _rows(self.incoming, TAG_MEMBERSHIP_TABLE):
+            tag = tag_map.get(str(row.get("librarytag_id")))
+            group = group_map.get(str(row.get("librarytaggroup_id")))
+            if not tag or not group:
+                continue
+            if self._local_exists(TAG_MEMBERSHIP_TABLE, '"librarytag_id"=? AND "librarytaggroup_id"=?',
+                                  (tag, group)):
+                continue
+            inserted = self._insert(TAG_MEMBERSHIP_TABLE,
+                                    {key: value for key, value in row.items() if key != "id"} |
+                                    {"librarytag_id": tag, "librarytaggroup_id": group})
+            if inserted:
+                self.added["memberships"].append(inserted)
 
         for relation in _rows(self.incoming, RELATION_TABLE):
             parent = tag_map.get(str(relation.get("parent_id")))
@@ -418,6 +445,8 @@ class _Merge:
         solutions = _rows(self.incoming, SOLUTION_TABLE)
         regions = _rows(self.incoming, REGION_TABLE)
         assignments = _rows(self.incoming, ASSIGNMENT_TABLE)
+        question_groups = _rows(self.incoming, QUESTION_GROUP_TABLE)
+        deletion_batches = _rows(self.incoming, DELETION_BATCH_TABLE)
 
         blocks_by_paper: dict[str, list] = {}
         for block in blocks:
@@ -434,15 +463,34 @@ class _Merge:
         regions_by_question: dict[str, list] = {}
         for region in regions:
             regions_by_question.setdefault(str(region.get("question_id")), []).append(region)
+        groups_by_paper: dict[str, list] = {}
+        for group in question_groups:
+            groups_by_paper.setdefault(str(group.get("paper_id")), []).append(group)
+        batches_by_paper: dict[str, list] = {}
+        for batch in deletion_batches:
+            batches_by_paper.setdefault(str(batch.get("paper_id")), []).append(batch)
 
         for paper in papers:
             local = self._local_paper(str(paper.get("sha256") or ""))
             if local is None:
                 self._add_paper(paper, blocks_by_paper, questions_by_paper, publications_by_question,
-                                solutions_by_publication, regions_by_question)
+                                solutions_by_publication, regions_by_question,
+                                groups_by_paper, batches_by_paper)
             else:
                 self._merge_into_paper(local, paper, questions_by_paper.get(str(paper["id"]), []),
-                                       publications_by_question, solutions_by_publication, regions_by_question)
+                                       publications_by_question, solutions_by_publication, regions_by_question,
+                                       groups_by_paper.get(str(paper["id"]), []),
+                                       batches_by_paper.get(str(paper["id"]), []))
+        # 已经撤回、题目又被删掉的旧快照：没有题目可跟，那就自己搬。
+        # 少了它们，"只增不减"就成了空话（本机那份历史就少了几十条）。
+        for publication in publications:
+            if publication.get("question_id") is not None:
+                continue
+            row = {**publication}
+            incoming_paper = str(publication.get("paper_id") or "")
+            if incoming_paper and incoming_paper in self.paper_map:
+                row["paper_id"] = self.paper_map[incoming_paper]
+            self._add_publication(row, solutions_by_publication)
         self._merge_assignments(assignments)
 
     def _local_paper(self, sha256: str) -> str | None:
@@ -453,7 +501,7 @@ class _Merge:
         return str(row[0]) if row else None
 
     def _add_paper(self, paper, blocks_by_paper, questions_by_paper, publications_by_question,
-                   solutions_by_publication, regions_by_question) -> None:
+                   solutions_by_publication, regions_by_question, groups_by_paper, batches_by_paper) -> None:
         paper_id = str(paper["id"])
         row = {**paper}
         files = self._manifest_files(paper_id)
@@ -464,11 +512,93 @@ class _Merge:
         if inserted:
             self.added["papers"].append(inserted)
             self.report["新增卷子"] += 1
+        self.paper_map[paper_id] = inserted or paper_id
         for block in blocks_by_paper.get(paper_id, []):
-            self._insert(BLOCK_TABLE, block)
-        self._add_questions(paper_id, questions_by_paper.get(paper_id, []),
-                            publications_by_question, solutions_by_publication, regions_by_question)
+            inserted = self._insert(BLOCK_TABLE, block)
+            if inserted:
+                # 撤销时要删：卷子一删，这些块还指着它，外键就断了。
+                self.added["blocks"].append(inserted)
+        # 题组和删除批次得先摆好：题目马上要指过去。
+        self._merge_question_groups(paper_id, groups_by_paper.get(paper_id, []))
+        self._merge_deletion_batches(paper_id, batches_by_paper.get(paper_id, []))
+        id_map = self._add_questions(paper_id, questions_by_paper.get(paper_id, []),
+                                     publications_by_question, solutions_by_publication, regions_by_question)
+        self._fix_batch_question_ids(id_map)
         self._copy_paper_files(paper_id)
+
+    def _merge_question_groups(self, local_paper_id: str, incoming_groups: list) -> None:
+        """题组（一、二、三 大题这些"题号作用域"）跟着卷子一起搬。
+
+        题目的 group_id 指着题组。不搬题组，搬过来的题就指了个空 ——
+        提交时外键一查，整次合并被退回。
+        """
+        for group in incoming_groups:
+            sequence = group.get("sequence")
+            title = str(group.get("title") or "")
+            local = self._local_question_group(local_paper_id, sequence, title)
+            if local is not None:
+                self.question_group_map[str(group.get("id"))] = local
+                continue
+            row = {key: value for key, value in group.items() if key != "id"}
+            row["paper_id"] = local_paper_id
+            # 编号是本机自己编的：照抄对方的会撞上本机已有的题组。
+            new_id = self._insert(QUESTION_GROUP_TABLE, row)
+            if new_id:
+                self.question_group_map[str(group.get("id"))] = new_id
+                self.added["question_groups"].append(new_id)
+
+    def _local_question_group(self, paper_id: str, sequence, title: str) -> str | None:
+        """本机这张卷上有没有同一组。
+
+        **有序号就只按序号认**：组名会重复（同一本书里好几个「第 70 组」），按名字
+        认会把一组认成另一组，题就落进了错的组里。只有连序号都没有时（很老的库）
+        才退而按名字认。
+        """
+        with connection.cursor() as cursor:
+            if sequence is not None:
+                row = cursor.execute(
+                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND sequence=? LIMIT 1',
+                    (paper_id, sequence)).fetchone()
+                return str(row[0]) if row else None
+            if title:
+                row = cursor.execute(
+                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND title=? LIMIT 1',
+                    (paper_id, title)).fetchone()
+        return str(row[0]) if row else None
+
+    def _merge_deletion_batches(self, local_paper_id: str, incoming_batches: list) -> None:
+        """删除批次（一次"删掉这几道题"的动作）跟着搬。
+
+        题目的 deletion_batch_id 指着它。批次本身是 UUID，两台电脑各记各的，
+        所以这里另给一个编号 —— 但"删掉的是哪几道题"要照搬，那道题在这台电脑上
+        删了没有，得能还原。
+        """
+        for batch in incoming_batches:
+            row = {key: value for key, value in batch.items() if key not in ("id", "question_ids")}
+            row["id"] = uuid.uuid4().hex
+            row["paper_id"] = local_paper_id
+            row["question_ids"] = json.dumps([])
+            new_id = self._insert(DELETION_BATCH_TABLE, row)
+            if new_id:
+                self.deletion_batch_map[str(batch.get("id"))] = new_id
+                self.added["deletion_batches"].append(new_id)
+                self._pending_batch_questions.append((new_id, list(batch.get("question_ids") or [])))
+
+    def _fix_batch_question_ids(self, id_map: dict[str, str]) -> None:
+        """批次里的题号改成搬过来之后的本机编号。
+
+        改不出来的（那道题本机本来就有、没搬）就不写进去 —— 留着对方的编号，
+        万一和本机某道题撞号，还原时会把不相干的题给还原了。
+        """
+        for batch_id, incoming_ids in self._pending_batch_questions:
+            local_ids = [str(id_map[str(value)]) for value in incoming_ids if str(value) in id_map]
+            if not local_ids:
+                continue
+            if self.dry_run:
+                continue
+            with connection.cursor() as cursor:
+                cursor.execute('UPDATE "core_questiondeletionbatch" SET "question_ids"=? WHERE id=?',
+                               (json.dumps(local_ids), batch_id))
 
     def _add_questions(self, paper_id, questions, publications_by_question,
                        solutions_by_publication, regions_by_question) -> dict:
@@ -487,7 +617,10 @@ class _Merge:
             incoming_id = question.get("id")
             row = {key: value for key, value in question.items() if key != "id"}
             row["paper_id"] = paper_id
-            row["group_id"] = None          # 题组的指向最后统一补
+            # 题组指向题组表，删除批次指向批次表 —— 都要换成本机的编号，
+            # 不能留对方的编号（那在本机根本不存在）。
+            row["group_id"] = self.question_group_map.get(str(question.get("group_id")))
+            row["deletion_batch_id"] = self.deletion_batch_map.get(str(question.get("deletion_batch_id")))
             # source_key 是**这台机器给这张卡的身份**（两台机器各自生成，本来就
             # 不会一样），搬过来要重新给一个 —— 照抄会撞上本机已有的唯一约束。
             row["source_key"] = uuid.uuid4().hex
@@ -498,20 +631,6 @@ class _Merge:
                 id_map[source_id] = new_id
                 self.added["questions"].append(new_id)
                 self.report["新增题目"] += 1
-        # 题组：一道题属于某个题组时，把指向改到本机的新编号上。
-        for question in questions:
-            source_id = str(question.get("id"))
-            group_source = question.get("group_id")
-            target = id_map.get(source_id)
-            if not target or group_source is None:
-                continue
-            group_target = id_map.get(str(group_source))
-            if not group_target:
-                continue
-            if not self.dry_run:
-                with connection.cursor() as cursor:
-                    cursor.execute('UPDATE "core_question" SET "group_id"=? WHERE id=?',
-                                   (group_target, target))
         # 入库快照、解析版本、框选识读：都跟着新的题目编号走。
         for question in questions:
             source_id = str(question.get("id"))
@@ -523,18 +642,27 @@ class _Merge:
                                       solutions_by_publication)
             for region in (regions_by_question or {}).get(source_id, []):
                 # 框选识读是整型主键，交给数据库自己编号。
-                self._insert(REGION_TABLE, {key: value for key, value in region.items() if key != "id"} |
-                             {"question_id": target})
+                inserted = self._insert(REGION_TABLE, {key: value for key, value in region.items() if key != "id"} |
+                                       {"question_id": target})
+                if inserted:
+                    # 撤销时要删：题和卷子一删，这些识读记录还指着它们。
+                    self.added["regions"].append(inserted)
         return id_map
 
     def _merge_into_paper(self, local_paper_id, paper, incoming_questions,
-                          publications_by_question, solutions_by_publication, regions_by_question) -> None:
+                          publications_by_question, solutions_by_publication, regions_by_question,
+                          incoming_groups, incoming_batches) -> None:
         """同一份原卷：逐题比。本机有的不删，空着的补上。
 
         认题只认两样：**这套原卷**（按 sha256）+ **题号**。题号一样再看题干：
         题干也一样就是同一道题（合并内容）；题干不一样就是两道不同的题
         （两道都留着，备份里的那道放到本卷末尾的空题号上）。
         """
+        # 这套卷本机已经有了：题组按"第几组"对上本机已有的，删除批次另起一批
+        # （一次删除动作在本机也该算一次）。
+        self._merge_question_groups(local_paper_id, incoming_groups)
+        self._merge_deletion_batches(local_paper_id, incoming_batches)
+        self.paper_map[str(paper.get("id"))] = local_paper_id
         to_add: list[dict] = []
         for question in incoming_questions:
             number = question.get("number")
@@ -580,18 +708,26 @@ class _Merge:
                     incoming_solutions = solutions_by_publication.get(str(publication["id"]), [])
                     if incoming_solutions and self._local_solution_count(str(local_snapshot["id"])):
                         self.report["两版解析都留着"] += 1
+                    # 对方这个入库快照在本机是另一个编号（版本号一样、内容一样，
+                    # 但两边各编各的号）—— 题上贴的标签要跟着本机那个走。
+                    self.publication_map[str(publication["id"])] = str(local_snapshot["id"])
                     continue
                 self._add_publication({**publication, "question_id": local["id"], "paper_id": local_paper_id},
                                       solutions_by_publication)
         if to_add:
-            self._add_questions(local_paper_id, to_add, publications_by_question,
-                                solutions_by_publication, regions_by_question)
+            id_map = self._add_questions(local_paper_id, to_add, publications_by_question,
+                                          solutions_by_publication, regions_by_question)
+            self._fix_batch_question_ids(id_map)
 
     def _add_publication(self, publication, solutions_by_publication) -> None:
         publication_id = str(publication["id"])
         inserted = self._insert(PUBLICATION_TABLE, publication)
         if inserted:
             self.added["publications"].append(inserted)
+            # 题上贴的标签指着入库快照：两边编号不一样，要记下对照。
+            self.publication_map[publication_id] = inserted
+        else:
+            self.publication_map[publication_id] = publication_id
         for solution in (solutions_by_publication or {}).get(publication_id, []):
             solution_id = self._insert(SOLUTION_TABLE, solution)
             if solution_id:
@@ -643,15 +779,21 @@ class _Merge:
 
     def _merge_assignments(self, assignments) -> None:
         for assignment in assignments:
-            publication_id = str(assignment.get("publication_id"))
-            tag_id = str(assignment.get("tag_id"))
+            publication_id = self.publication_map.get(str(assignment.get("publication_id")))
+            tag_id = self.tag_map.get(str(assignment.get("tag_id")))
             if not publication_id or not tag_id:
                 continue
             if self._local_exists(ASSIGNMENT_TABLE, '"publication_id"=? AND "tag_id"=?',
                                   (publication_id, tag_id)):
                 continue
-            if self._insert(ASSIGNMENT_TABLE, assignment):
-                self.added["assignments"].append(str(assignment.get("id")))
+            row = {key: value for key, value in assignment.items() if key != "id"}
+            row["id"] = uuid.uuid4().hex       # 主键是 UUID，两边各编各的
+            row["publication_id"] = publication_id
+            row["tag_id"] = tag_id
+            inserted = self._insert(ASSIGNMENT_TABLE, row)
+            if inserted:
+                # 记的是**新编号**：本机给了它一个新的 id，撤销时要按新编号删。
+                self.added["assignments"].append(inserted)
                 self.report["多贴的标签"] += 1
 
     # -- 文件 ---------------------------------------------------------
@@ -795,12 +937,22 @@ def undo_last_merge() -> dict:
             removed["solutions"] += _delete("core_librarysolution", solution_id)
         for assignment_id in record.get("assignments") or []:
             _delete("core_librarytagassignment", assignment_id)
+        for membership_id in record.get("memberships") or []:
+            _delete(TAG_MEMBERSHIP_TABLE, membership_id)
         for relation_id in record.get("relations") or []:
             _delete("core_librarytagrelation", relation_id)
         for tag_id in record.get("tags") or []:
             removed["tags"] += _delete("core_librarytag", tag_id)
         for group_id in record.get("groups") or []:
             _delete("core_librarytaggroup", group_id)
+        for batch_id in record.get("deletion_batches") or []:
+            _delete("core_questiondeletionbatch", batch_id)
+        for group_id in record.get("question_groups") or []:
+            _delete("core_questiongroup", group_id)
+        for block_id in record.get("blocks") or []:
+            _delete("core_block", block_id)
+        for region_id in record.get("regions") or []:
+            _delete("core_regionread", region_id)
         for paper_id in record.get("papers") or []:
             removed["papers"] += _delete("core_paper", paper_id)
             shutil.rmtree(data_root() / paper_id, ignore_errors=True)
