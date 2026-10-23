@@ -137,6 +137,12 @@
     if (report["新增标签"]) changes.push(`新增 ${report["新增标签"]} 个标签`);
     if (report["多贴的标签"]) changes.push(`${report["多贴的标签"]} 道题多贴了标签`);
     card.append(el("p", "transfer-summary", changes.length ? "合并后会：" + changes.join("；") + "。本机原有的题一道不删。" : "这份备份里的东西本机都有了，合并了也不会变。"));
+    const notes = report["说明"];
+    if (Array.isArray(notes) && notes.length) {
+      const list = el("ul", "transfer-facts");
+      notes.slice(0, 8).forEach((note) => list.append(el("li", "", note)));
+      card.append(list);
+    }
     const actions = el("div", "transfer-actions");
     const go = el("button", "button button-primary button-small", "合并进来");
     go.type = "button";
@@ -172,8 +178,9 @@
     if (report["题号一样内容不同"]) parts.push(`${report["题号一样内容不同"]} 道题题号一样但内容不同，两道都留着了`);
     if (report["新增标签"]) parts.push(`新增 ${report["新增标签"]} 个标签`);
     if (report["多贴的标签"]) parts.push(`${report["多贴的标签"]} 道题多贴了标签`);
-    if (!parts.length) return "合并完成：没有需要补的东西，本机题库保持原样。";
-    return "合并完成：" + parts.join("；") + "。本机原有的题一道没删。";
+    const notes = Array.isArray(report["说明"]) ? report["说明"] : [];
+    const head = parts.length ? "合并完成：" + parts.join("；") + "。" : "合并完成：没有需要补的东西，本机题库保持原样。";
+    return notes.length ? `${head} ${notes.slice(0, 3).join("；")}` : `${head} 本机原有的题一道没删。`;
   }
 
   // ---- 导入记录 ----------------------------------------------------

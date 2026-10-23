@@ -308,6 +308,7 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
 # 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
 _SW_MINIMIZE = 6
 _SW_RESTORE = 9
+_SW_MAXIMIZE = 3
 _WM_CLOSE = 0x0010
 _CONTROL_NAME = "window-control.json"
 # 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
@@ -544,6 +545,14 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
                 target = hwnd
             if action == "minimize":
                 user32.ShowWindow(target, _SW_MINIMIZE)
+            elif action == "maximize":
+                # 1.26.0：页面右上角的三个按钮要能真的用。窗口已经最大化就还原，
+                # 否则最大化 —— 与标题栏上的 □ 同一个意思。
+                try:
+                    zoomed = bool(getattr(user32, "IsZoomed", lambda _h: False)(target))
+                except Exception:  # noqa: BLE001
+                    zoomed = False
+                user32.ShowWindow(target, _SW_RESTORE if zoomed else _SW_MAXIMIZE)
             elif action == "close":
                 user32.PostMessageW(target, _WM_CLOSE, 0, 0)
             else:

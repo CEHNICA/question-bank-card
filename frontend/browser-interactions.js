@@ -10,15 +10,20 @@
     if (!keepTextMenu(event.target)) event.preventDefault();
   });
 
-  // The host window has no system title bar, so the page supplies its own
-  // minimize/close controls. In a plain browser tab these simply do nothing,
-  // which keeps the same markup usable during development.
+  // The host window has a system title bar, but it is not always within reach:
+  // dragged against the screen edge, maximized or in a full-screen reading view,
+  // the title bar is out of sight. The page therefore keeps its own
+  // minimize/maximize/close controls in the top-right corner. They only appear
+  // when a real desktop window is behind the page — in a plain browser tab they
+  // would be decoration that does nothing.
   function wireWindowControls() {
     // getElementById is looked up defensively: the unit test drives this file
     // with a document stub that only carries addEventListener.
     const byId = root.document?.getElementById?.bind(root.document);
     const close = byId?.("windowClose");
     const minimize = byId?.("windowMinimize");
+    const maximize = byId?.("windowMaximize");
+    const group = byId?.("windowControls");
     // 宿主窗口没有系统标题栏，这两个按钮是唯一的窗口控制入口。浏览器没有
     // 「最小化/关闭本窗口」的脚本接口：window.close() 对命令行 --app 打开的
     // 窗口无效，所以请启动器去操作真正的窗口句柄。请求带上前端标记头，
@@ -45,6 +50,14 @@
       }
     });
     minimize?.addEventListener("click", () => { askHost("minimize"); });
+    maximize?.addEventListener("click", () => { askHost("maximize"); });
+    // 只有真在桌面程序里跑着才显示这一组按钮。
+    if (group && root.fetch) {
+      root.fetch("/api/window/available", { cache: "no-store" })
+        ?.then?.(response => response?.json?.())
+        ?.then?.(body => { if (body?.available) group.hidden = false; })
+        ?.catch?.(() => {});
+    }
   }
   if (root.document?.readyState === "loading") {
     root.document.addEventListener("DOMContentLoaded", wireWindowControls);

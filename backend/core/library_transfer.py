@@ -275,6 +275,9 @@ class _Merge:
         }
         self.added = {"papers": [], "questions": [], "publications": [], "solutions": [],
                       "tags": [], "groups": [], "relations": [], "assignments": [], "filled": []}
+        # 预览和真合并要报出同一件事，所以两边共用这些记录。
+        self.notes: list[str] = []
+        self.reserved_numbers: dict[str, set] = {}
 
     # -- 小工具 -------------------------------------------------------
 
@@ -292,21 +295,23 @@ class _Merge:
         老师以为搬过去了，其实少搬了一半。
         """
         if self.dry_run:
-            return True
+            return str(row.get("id")) if row.get("id") is not None else None
         columns = [name for name in row if name in self._main_columns(table)]
         if not columns:
-            return False
+            return None
         placeholders = ",".join("?" for _ in columns)
         names = ",".join(f'"{name}"' for name in columns)
         values = [row[name] for name in columns]
         with connection.cursor() as cursor:
             try:
                 cursor.execute(f'INSERT INTO "{table}" ({names}) VALUES ({placeholders})', values)
-                return True
             except sqlite3.IntegrityError:
-                if row.get("id") and self._exists_by_id(table, str(row["id"])):
-                    return False
+                if row.get("id") is not None and self._exists_by_id(table, str(row["id"])):
+                    return None
                 raise
+            if row.get("id") is not None:
+                return str(row["id"])
+            return str(cursor.lastrowid)
 
     def _main_columns(self, table: str) -> list[str]:
         cached = getattr(self, "_column_cache", None)
@@ -341,6 +346,8 @@ class _Merge:
             "卷子": _count(PAPER_TABLE), "题目": _count(QUESTION_TABLE),
             "入库快照": _count(PUBLICATION_TABLE), "标签": _count(TAG_TABLE),
         }
+        if self.notes:
+            self.report["说明"] = list(self.notes)
         return self.report
 
     def _merge_tags(self) -> None:
@@ -352,12 +359,11 @@ class _Merge:
                 continue
             local = self._local_tag_group(name)
             if local is None:
-                new_id = str(uuid.uuid4())
+                new_id = uuid.uuid4().hex
                 group_map[str(group["id"])] = new_id
                 row = {**group, "id": new_id}
                 if self._insert(TAG_GROUP_TABLE, row):
                     self.added["groups"].append(new_id)
-                    self.report["新增标签"] += 0
             else:
                 group_map[str(group["id"])] = local
 
@@ -369,7 +375,7 @@ class _Merge:
                 continue
             local = self._local_tag(kind, name)
             if local is None:
-                new_id = str(uuid.uuid4())
+                new_id = uuid.uuid4().hex
                 tag_map[str(tag["id"])] = new_id
                 if self._insert(TAG_TABLE, {**tag, "id": new_id}):
                     self.added["tags"].append(new_id)
@@ -382,12 +388,16 @@ class _Merge:
             child = tag_map.get(str(relation.get("child_id")))
             if not parent or not child:
                 continue
-            row = {**relation, "parent_id": parent, "child_id": child}
             if self._local_exists(RELATION_TABLE, '"parent_id"=? AND "child_id"=? AND "relation_type"=?',
                                   (parent, child, relation.get("relation_type") or "HIERARCHY")):
                 continue
-            if self._insert(RELATION_TABLE, row):
-                self.added["relations"].append(str(relation.get("id")))
+            # 标签上下级这张表的主键是**整数**（不是 UUID），不能照抄对方的编号 ——
+            # 那个编号在本机可能已经被另一条关系占着。给一条新的。
+            row = {key: value for key, value in relation.items() if key != "id"}
+            row.update({"parent_id": parent, "child_id": child})
+            inserted = self._insert(RELATION_TABLE, row)
+            if inserted:
+                self.added["relations"].append(inserted)
 
     def _local_tag(self, kind: str, name: str) -> str | None:
         with connection.cursor() as cursor:
@@ -450,40 +460,95 @@ class _Merge:
         for label, column in (("source", "source_path"), ("render", "render_path"), ("zip", "zip_path")):
             relative = files.get(label)
             row[column] = str(data_root() / relative) if relative else ""
-        if self._insert(PAPER_TABLE, row):
-            self.added["papers"].append(paper_id)
+        inserted = self._insert(PAPER_TABLE, row)
+        if inserted:
+            self.added["papers"].append(inserted)
             self.report["新增卷子"] += 1
         for block in blocks_by_paper.get(paper_id, []):
             self._insert(BLOCK_TABLE, block)
-        for question in questions_by_paper.get(paper_id, []):
-            self._add_question(question, publications_by_question, solutions_by_publication, regions_by_question)
+        self._add_questions(paper_id, questions_by_paper.get(paper_id, []),
+                            publications_by_question, solutions_by_publication, regions_by_question)
         self._copy_paper_files(paper_id)
 
-    def _add_question(self, question, publications_by_question, solutions_by_publication, regions_by_question):
-        """整道题搬进来：题、入库快照、解析版本、框选识读。"""
-        question_id = str(question["id"])
-        if self._insert(QUESTION_TABLE, question):
-            self.added["questions"].append(question_id)
-            self.report["新增题目"] += 1
-        for publication in (publications_by_question or {}).get(question_id, []):
-            self._add_publication(publication, solutions_by_publication)
-        for region in (regions_by_question or {}).get(question_id, []):
-            self._insert(REGION_TABLE, region)
+    def _add_questions(self, paper_id, questions, publications_by_question,
+                       solutions_by_publication, regions_by_question) -> dict:
+        """把一道卷上的若干道题整批搬进来，返回"对方编号 → 本机编号"的对照。
+
+        **编号不能照抄**：题目的主键是整数自增，两台电脑各自从 1 开始编，
+        对方的第 42 题和本机的第 42 题根本不是同一道题。照抄编号会撞车 ——
+        撞上了那道题还会被当成"已经有了"而**悄悄丢掉**。
+
+        所以：编号在本机没被占就沿用（题组之间的指向不用改），被占了就由
+        数据库另编一个，然后把指向题组的那些关系改到新编号上。
+        """
+        id_map: dict[str, str] = {}
+        for question in questions:
+            source_id = str(question.get("id"))
+            incoming_id = question.get("id")
+            row = {key: value for key, value in question.items() if key != "id"}
+            row["paper_id"] = paper_id
+            row["group_id"] = None          # 题组的指向最后统一补
+            # source_key 是**这台机器给这张卡的身份**（两台机器各自生成，本来就
+            # 不会一样），搬过来要重新给一个 —— 照抄会撞上本机已有的唯一约束。
+            row["source_key"] = uuid.uuid4().hex
+            if incoming_id is not None and not self._exists_by_id(QUESTION_TABLE, str(incoming_id)):
+                row["id"] = incoming_id
+            new_id = self._insert(QUESTION_TABLE, row)
+            if new_id:
+                id_map[source_id] = new_id
+                self.added["questions"].append(new_id)
+                self.report["新增题目"] += 1
+        # 题组：一道题属于某个题组时，把指向改到本机的新编号上。
+        for question in questions:
+            source_id = str(question.get("id"))
+            group_source = question.get("group_id")
+            target = id_map.get(source_id)
+            if not target or group_source is None:
+                continue
+            group_target = id_map.get(str(group_source))
+            if not group_target:
+                continue
+            if not self.dry_run:
+                with connection.cursor() as cursor:
+                    cursor.execute('UPDATE "core_question" SET "group_id"=? WHERE id=?',
+                                   (group_target, target))
+        # 入库快照、解析版本、框选识读：都跟着新的题目编号走。
+        for question in questions:
+            source_id = str(question.get("id"))
+            target = id_map.get(source_id)
+            if not target:
+                continue
+            for publication in (publications_by_question or {}).get(source_id, []):
+                self._add_publication({**publication, "question_id": target, "paper_id": paper_id},
+                                      solutions_by_publication)
+            for region in (regions_by_question or {}).get(source_id, []):
+                # 框选识读是整型主键，交给数据库自己编号。
+                self._insert(REGION_TABLE, {key: value for key, value in region.items() if key != "id"} |
+                             {"question_id": target})
+        return id_map
 
     def _merge_into_paper(self, local_paper_id, paper, incoming_questions,
                           publications_by_question, solutions_by_publication, regions_by_question) -> None:
-        """同一份原卷：逐题比。本机有的不删，空着的补上。"""
+        """同一份原卷：逐题比。本机有的不删，空着的补上。
+
+        认题只认两样：**这套原卷**（按 sha256）+ **题号**。题号一样再看题干：
+        题干也一样就是同一道题（合并内容）；题干不一样就是两道不同的题
+        （两道都留着，备份里的那道放到本卷末尾的空题号上）。
+        """
+        to_add: list[dict] = []
         for question in incoming_questions:
             number = question.get("number")
             local = self._local_question(local_paper_id, number)
             if local is None:
-                self._add_question({**question, "paper_id": local_paper_id},
-                                   publications_by_question, solutions_by_publication, regions_by_question)
+                to_add.append(question)
                 continue
             stem = str(question.get("stem") or "")
             mine = str(local.get("stem") or "")
             if stem and mine and not _same_stem(mine, stem):
+                new_number = self._next_number(local_paper_id)
+                to_add.append({**question, "number": new_number})
                 self.report["题号一样内容不同"] += 1
+                self.notes.append(f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着")
                 continue
             changed = []
             for field, label in (("answer", "答案"), ("analysis", "解析")):
@@ -504,23 +569,33 @@ class _Merge:
                 # 计数要放在 if 外面：预览时也要报出"会补上几道"，
                 # 不然老师看到的是 0，真合并却是 2。
                 self.report["补上答案"] += 1
-            # 两边都有解析：两份都留着（题有据的解析本来就是一串版本），不覆盖。
-            local_publications = self._local_publications(local["id"])
+            # 入库快照：同一个题、同一个版本号 = 同一个位置 → 保留本机那一份；
+            # 对方多出来的版本（v2、v3…）带进来，解析版本也一起带。
             for publication in publications_by_question.get(str(question["id"]), []):
-                if str(publication["id"]) in local_publications:
+                version = publication.get("version")
+                local_snapshot = self._local_publication(local["id"], version)
+                if local_snapshot is not None:
+                    if local_snapshot.get("content_hash") != publication.get("content_hash"):
+                        self.report["两边都有保留本机"] += 1
                     incoming_solutions = solutions_by_publication.get(str(publication["id"]), [])
-                    if incoming_solutions and self._local_solution_count(str(publication["id"])):
+                    if incoming_solutions and self._local_solution_count(str(local_snapshot["id"])):
                         self.report["两版解析都留着"] += 1
                     continue
-                self._add_publication(publication, solutions_by_publication)
+                self._add_publication({**publication, "question_id": local["id"], "paper_id": local_paper_id},
+                                      solutions_by_publication)
+        if to_add:
+            self._add_questions(local_paper_id, to_add, publications_by_question,
+                                solutions_by_publication, regions_by_question)
 
     def _add_publication(self, publication, solutions_by_publication) -> None:
         publication_id = str(publication["id"])
-        if self._insert(PUBLICATION_TABLE, publication):
-            self.added["publications"].append(publication_id)
+        inserted = self._insert(PUBLICATION_TABLE, publication)
+        if inserted:
+            self.added["publications"].append(inserted)
         for solution in (solutions_by_publication or {}).get(publication_id, []):
-            if self._insert(SOLUTION_TABLE, solution):
-                self.added["solutions"].append(str(solution["id"]))
+            solution_id = self._insert(SOLUTION_TABLE, solution)
+            if solution_id:
+                self.added["solutions"].append(solution_id)
                 self.report["补进来的解析版本"] += 1
         self._copy_solution_files(publication_id)
 
@@ -532,10 +607,33 @@ class _Merge:
             row = cursor.fetchone()
         return dict(zip(columns, row)) if row else None
 
+    def _next_number(self, paper_id: str) -> int:
+        """本卷末尾的空题号。预览时也要算对，所以先把用掉的号记下来。"""
+        with connection.cursor() as cursor:
+            row = cursor.execute('SELECT MAX(number) FROM "core_question" WHERE paper_id=?',
+                                 (paper_id,)).fetchone()
+        highest = int(row[0] or 0) if row else 0
+        reserved = self.reserved_numbers.setdefault(paper_id, set())
+        candidate = highest + 1
+        while candidate in reserved:
+            candidate += 1
+        reserved.add(candidate)
+        return candidate
+
     def _local_publications(self, question_id: str) -> set[str]:
         with connection.cursor() as cursor:
             return {str(row[0]) for row in cursor.execute(
                 'SELECT id FROM "core_publishedquestion" WHERE question_id=?', (question_id,)).fetchall()}
+
+    def _local_publication(self, question_id: str, version) -> dict | None:
+        """这道题本机有没有同一个版本号的入库快照。"""
+        if version is None:
+            return None
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT id, content_hash FROM "core_publishedquestion" WHERE question_id=? AND version=? LIMIT 1',
+                           (question_id, version))
+            row = cursor.fetchone()
+        return {"id": str(row[0]), "content_hash": row[1]} if row else None
 
     def _local_solution_count(self, publication_id: str) -> int:
         with connection.cursor() as cursor:

@@ -126,6 +126,59 @@ class MergeBehaviourTests(TransferFixture):
         after = [(q.number, q.answer) for q in Question.objects.all()]
         self.assertEqual(before, after, "同一个包合两次，第二次什么都不会变")
 
+    def test_a_conflicting_question_is_kept_with_a_free_number(self):
+        """题号一样、题干不同 = 两道不同的题：两道都留着，不替老师删掉一个。"""
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        rebuilt = self._rebuild_bundle(bundle, "UPDATE core_question SET stem='（虚构）另一道题' WHERE number=1")
+        plan = library_transfer.plan_merge(rebuilt)
+        self.assertEqual(plan["report"]["题号一样内容不同"], 1, "预览就该看出有一道题对不上")
+        merged = library_transfer.merge_bundle(rebuilt)
+        self.assertEqual(merged["report"]["题号一样内容不同"], 1)
+        self.assertIn("说明", merged["report"])
+        stems = sorted(Question.objects.values_list("stem", flat=True))
+        self.assertIn("（虚构）第一题", stems, "本机那道题不能没")
+        self.assertIn("（虚构）另一道题", stems, "备份里那道也要留着")
+        numbers = sorted(Question.objects.values_list("number", flat=True))
+        self.assertEqual(len(numbers), len(set(numbers)), "两道题的题号不能撞车")
+        self.assertEqual(Question.objects.count(), 4)
+
+    def _rebuild_bundle(self, bundle, statement=None):
+        """把包里的题库改一改，再重新打包 —— 模拟"另一台电脑上是另一道题"。"""
+        with zipfile.ZipFile(bundle) as archive:
+            payload = archive.read(library_transfer.DATABASE_NAME)
+        probe = self.work / "probe.sqlite3"
+        probe.write_bytes(payload)
+        with sqlite3.connect(probe) as reader:
+            for sql in (statement if isinstance(statement, (list, tuple)) else [statement]):
+                if sql:
+                    reader.execute(sql)
+            reader.commit()
+        rebuilt = self.work / "rebuilt.zip"
+        with zipfile.ZipFile(bundle) as source, zipfile.ZipFile(rebuilt, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                if item.filename == library_transfer.DATABASE_NAME:
+                    target.writestr(item.filename, probe.read_bytes())
+                else:
+                    target.writestr(item, source.read(item.filename))
+        return rebuilt
+
+    def test_a_question_whose_number_collides_is_still_brought_over(self):
+        """两台电脑的题目编号各自从 1 开始编 —— 编号撞上了也不能把题丢掉。
+
+        照抄对方的编号会撞上本机已有的那一行；以前的做法是"编号已存在就跳过"，
+        那道题就**悄无声息地没了**。现在撞上就另编一个。
+        """
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        rebuilt = self._rebuild_bundle(bundle, [
+            "DELETE FROM core_question WHERE id=1",
+            "UPDATE core_question SET id=1, number=99, stem='（虚构）撞号的新题' WHERE number=3",
+        ])
+        merged = library_transfer.merge_bundle(rebuilt)
+        self.assertTrue(Question.objects.filter(stem="（虚构）撞号的新题").exists(),
+                        "编号撞车的题也要搬过来")
+        self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1, "本机那道不能被覆盖")
+        self.assertEqual(Question.objects.filter(stem="（虚构）第一题").first().answer, "甲")
+
     def test_a_paper_the_machine_does_not_have_comes_over_whole(self):
         other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
                                      status=Paper.Status.READY,

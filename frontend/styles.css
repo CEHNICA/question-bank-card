@@ -120,11 +120,15 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
    ------------------------------------------------------------------ */
 /* 1.25.90：窗口现在是普通窗口（浏览器标题栏自带上最小化 / 最大化 / 关闭），页面不再
    自绘控件，顶栏从五列回到四列 —— 留着那空的一列会多出 18px 的尾巴。 */
-.app-topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 18px; box-shadow: none; }
+.app-topbar { grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 18px; box-shadow: none; }
 .app-topbar > .drawer-trigger { grid-column: 1; grid-row: 1; }
 .app-topbar > .brand { grid-column: 2; grid-row: 1; justify-self: start; }
 .app-topbar > .library-top-navigation { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 14px; }
 .app-topbar > .topbar-tools { grid-column: 4; grid-row: 1; }
+/* 1.26.0：页面右上角自绘的三个窗口按钮。标题栏有时够不着，这一份任何时候都在。 */
+.app-topbar > .window-controls { grid-column: 5; grid-row: 1; }
+.window-controls { display: flex; align-items: stretch; height: 100%; margin-left: 4px; }
+.window-controls[hidden] { display: none; }
 
 /* 窗口控件由页面自己画：宿主窗口去掉系统标题栏后，关闭与最小化只能从这里来。
    整条顶栏留出拖拽区（-webkit-app-region），点控件时不触发拖动。
@@ -133,9 +137,9 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   height: 100%; margin-left: auto; padding-left: 10px; }
 .window-title { -webkit-app-region: no-drag; display: none; color: var(--muted); font-size: 12px; }
 .window-button { -webkit-app-region: no-drag; display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 100%; min-height: 32px; padding: 0; border: 0; border-radius: 0;
+  width: 34px; height: 100%; min-height: 32px; padding: 0; border: 0; border-radius: 0;
   background: none; color: var(--muted); cursor: default; }
-.window-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; }
+.window-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; }
 .window-button:hover { background: var(--bg-sunken); color: var(--ink); }
 .window-button.window-close:hover { background: #c42b1c; color: #fff; }
 /* 1.25.34：关窗之前先淡出，不要一点「×」画面就瞬间消失。 */

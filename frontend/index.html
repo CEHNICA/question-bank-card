@@ -33,6 +33,9 @@
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l.8 13h9.4l.8-13M10 11v5M14 11v5"/></symbol>
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-window-minimize" viewBox="0 0 24 24"><path d="M6 17h12"/></symbol>
+    <symbol id="i-window-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></symbol>
+    <symbol id="i-window-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </svg>
 
   <header class="topbar app-topbar">
@@ -52,9 +55,22 @@
     <div class="topbar-tools">
       <span id="engineLine" class="engine-line" hidden></span>
     </div>
-    <!-- 1.25.90：窗口的最小化 / 最大化 / 关闭交给浏览器标题栏（宿主窗口现在是普通
-         窗口，不再整屏无边框），页面不再自绘这几个按钮 —— 两套控件并排会让人不知道
-         该点哪一个。 -->
+    <!-- 1.26.0：窗口的最小化 / 最大化 / 关闭在页面右上角也放一份。
+         标题栏上那三个按钮有时够不着 —— 窗口拖到屏幕边缘、最大化、整屏看题时，
+         标题栏就不在眼前了。页面这一份任何时候都在，而且只在真正由桌面程序
+         启动时才出现（普通浏览器标签页里没有可操作的窗口，显示了也是摆设）。
+         真正操作窗口的是启动器：这个请求写进控制文件，由启动器去动窗口句柄。 -->
+    <div class="window-controls" id="windowControls" hidden>
+      <button id="windowMinimize" class="window-button" type="button" title="最小化" aria-label="最小化">
+        <svg class="icon" aria-hidden="true"><use href="#i-window-minimize"/></svg>
+      </button>
+      <button id="windowMaximize" class="window-button" type="button" title="最大化" aria-label="最大化">
+        <svg class="icon" aria-hidden="true"><use href="#i-window-maximize"/></svg>
+      </button>
+      <button id="windowClose" class="window-button window-close" type="button" title="关闭题有据" aria-label="关闭题有据">
+        <svg class="icon" aria-hidden="true"><use href="#i-window-close"/></svg>
+      </button>
+    </div>
   </header>
 
   <main id="settingsHome" class="settings-home" hidden>
