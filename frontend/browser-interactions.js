@@ -51,20 +51,29 @@
     });
     minimize?.addEventListener("click", () => { askHost("minimize"); });
     maximize?.addEventListener("click", () => { askHost("maximize"); });
-    // 页面右上角这一组按钮，**只在标题栏够不着的时候**才出现：
-    //   · 普通浏览器标签页：背后没有可操作的窗口，显示了也是摆设；
-    //   · 标题栏还在（普通窗口、最大化）：由标题栏那三个管，页面再画一份就变成
-    //     两套控件并排，老师会不知道该点哪一个（1.25.90 删掉它们就是这个理由）；
-    //   · 整屏显示、或窗口被拖到屏幕边缘外面：标题栏整个够不着 → 页面这份顶上。
-    // 宿主（启动器）守着窗口，窗口一变它就把状态写过来；这里顺便听一下尺寸变化，
-    // 整屏/还原不用刷新页面。
+    // 页面右上角这一组按钮，**只在"眼前这个窗口没有标题栏"的时候**才出现：
+    //   · 题有据自己的窗口：系统标题栏自带最小化/最大化/关闭，页面再画一份就是
+    //     两套并排，老师会不知道该点哪一个（1.25.90 删掉页面按钮就是这个理由）；
+    //   · 题有据自己的窗口被整屏显示（F11）或拖到屏幕边缘外：标题栏够不着 →
+    //     页面这份顶上；
+    //   · 在别的浏览器标签页里打开题有据：那个标签页自己没有标题栏 → 画出来，
+    //     这是从那儿关掉软件的唯一入口。
+    // "我现在是不是在题有据自己的窗口里"由启动器给的标记决定（?qbhost=app），
+    // 记在 sessionStorage 里，页面内跳转也不丢。
+    const marker = /(?:^|[?&])qbhost=([^&]*)/.exec(root.location?.search || "")?.[1] || "";
+    let inAppWindow = false;
+    try {
+      if (marker === "app") root.sessionStorage?.setItem("qbHost", "app");
+      inAppWindow = (marker === "app") || root.sessionStorage?.getItem("qbHost") === "app";
+    } catch (_) { inAppWindow = marker === "app"; }
     const refresh = () => {
       if (!group || !root.fetch) return;
       root.fetch("/api/window/available", { cache: "no-store" })
         ?.then?.(response => response?.json?.())
         ?.then?.(body => {
           if (!body?.available) { group.hidden = true; return; }
-          group.hidden = body.caption !== false;
+          // 标题栏还在（body.caption 为真）→ 不画第二套；够不着 → 画出来顶上。
+          group.hidden = inAppWindow ? body.caption !== false : false;
         })
         ?.catch?.(() => {});
     };

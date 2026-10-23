@@ -619,6 +619,17 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
         time.sleep(interval)
 
 
+def app_window_url(url: str) -> str:
+    """题有据自己窗口要打开的地址：带一个"我在应用窗口里"的标记。
+
+    页面据此决定要不要在右上角自绘窗口按钮：应用自己的窗口有系统标题栏
+    （自带最小化/最大化/关闭），再画一套就是两套并排；别的标签页没有标题栏，
+    那三个按钮是唯一的出口，就该画出来。
+    """
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}qbhost=app"
+
+
 def open_window(url: str) -> subprocess.Popen | None:
     browsers = browser_candidates()
     if not browsers:
@@ -1066,7 +1077,7 @@ def _main(arguments: list[str] | None = None) -> int:
             return 0
         url = value
         print(f"服务就绪：{url}", flush=True)
-        window = open_window(url)
+        window = open_window(app_window_url(url))
         how = wait_for_window(window, processes[-1])
         if how == "service-died":
             print("窗口还开着但服务没了，下面这次退出会把整个软件一起关掉。", flush=True)

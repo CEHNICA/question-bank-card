@@ -529,6 +529,15 @@ class MainFlowTests(unittest.TestCase):
         self.assertFalse(app_window._caption_reachable((0, 0, 1918, 1078), screen),
                          "只差两像素就是整屏 → 按整屏算，页面把按钮画出来")
 
+    def test_the_app_window_marks_itself_so_the_page_knows_where_it_is(self):
+        # 1.26.2：页面要分得清"我现在是在题有据自己的窗口里，还是在别的标签页里"。
+        # 自己的窗口有系统标题栏 → 页面不画第二套按钮；别的标签页没有标题栏 →
+        # 那三个按钮是唯一的出口，该画出来。
+        self.assertEqual(app_window.app_window_url("http://127.0.0.1:8768"),
+                         "http://127.0.0.1:8768?qbhost=app")
+        self.assertEqual(app_window.app_window_url("http://127.0.0.1:8768/library?paper=x"),
+                         "http://127.0.0.1:8768/library?paper=x&qbhost=app")
+
     def test_closing_the_window_stops_at_once_without_its_background_processes(self):
         # 一个题有据窗口背后挂着 8 个 Edge 进程（1 个管窗口 + 崩溃收集器/显卡/工具/
         # 页面），它们比窗口晚退好几句。以前的判据是「这个配置目录下还剩几个进程」，

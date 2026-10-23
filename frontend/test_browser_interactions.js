@@ -46,7 +46,6 @@ assert.deepEqual(calls.filter(value => value.options?.method === "POST").map(val
 assert.deepEqual(calls.filter(value => value.options?.method === "POST").map(value => value.options.headers["X-QB-Request"]), ["1", "1", "1"],
   "the custom header is exactly what the service checks before acting");
 assert.ok(classes.has("window-exiting"), "closing fades the page out first");
-// 1.26.0：只有真在桌面程序里跑着才显示这一组按钮 —— 普通浏览器标签页里显示也是摆设。
 assert.ok(calls.some(value => value.url === "/api/window/available"), "the page asks whether a real desktop window is behind it");
 // 1.25.51：窗口没关掉时，1.6 秒后恢复页面并补一次关闭请求 —— 不能永远白屏。
 const watchdog = timers.find(timer => timer.delay === 1600);
@@ -57,29 +56,52 @@ assert.equal(calls.filter(value => value.url === "/api/window/close").length, 2,
   "the close request is retried once");
 console.log("Self-drawn window controls: minimize and close reach the launcher, closing fades out and recovers: OK");
 
-// 1.26.0：真在桌面程序里跑着、而且标题栏够不着时，这一组按钮才露出来；
-// 普通浏览器标签页里不显示，标题栏还在时也不显示（避免两套控件并排）。
+// 1.26.2：这一组按钮只在"眼前这个窗口没有标题栏"的时候出现：
+//   · 题有据自己的窗口 → 有系统标题栏（自带三个按钮）→ 页面不画，两套并排会让人
+//     不知道该点哪一个（1.25.90 删掉页面按钮就是这个理由）；
+//   · 题有据自己的窗口被整屏显示或拖到屏幕边缘外 → 标题栏够不着 → 页面这份顶上；
+//   · 在别的浏览器标签页里打开题有据 → 那个标签页自己没有标题栏 → 画出来，
+//     这是从那儿关掉软件的唯一出口。
+function windowStub({ search = "", available = true, caption = true } = {}) {
+  const stub = {
+    document: {
+      addEventListener: () => {},
+      readyState: "complete",
+      hidden: false,
+      getElementById: id => (["windowClose","windowMinimize","windowMaximize"].includes(id) ? button(id)
+        : id === "windowControls" ? stub.group : null),
+      body: { classList: { add(){}, remove(){} } },
+    },
+    location: { search },
+    sessionStorage: { store: {}, setItem(k, v) { this.store[k] = v; }, getItem(k) { return this.store[k]; } },
+    fetch: () => Promise.resolve({ json: () => Promise.resolve({ available, caption }) }),
+    setTimeout: () => {},
+  };
+  stub.group = { hidden: true };
+  return stub;
+}
+
 (async () => {
+  // 别的标签页：没有标题栏 → 画出来。
+  const tab = windowStub({ available: true, caption: true });
+  vm.runInNewContext(source, { window: tab });
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(group.hidden, false, "the page shows its window buttons when the title bar is out of reach");
-  const bare = { document: { addEventListener: () => {}, readyState: "complete", hidden: false,
-    getElementById: id => (["windowClose","windowMinimize","windowMaximize"].includes(id) ? button(id)
-      : id === "windowControls" ? { hidden: true } : null), body: { classList: { add(){}, remove(){} } } },
-    fetch: url => Promise.resolve({ json: () => Promise.resolve({ available: false, caption: false }) }),
-    setTimeout: () => {} };
-  vm.runInNewContext(source, { window: bare });
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(bare.document.getElementById("windowControls").hidden, true,
-    "a plain browser tab gets no window buttons — they would do nothing there");
-  // 标题栏还在的时候也不画 —— 两套控件并排，老师会不知道该点哪一个。
-  const captioned = { document: { addEventListener: () => {}, readyState: "complete", hidden: false,
-    getElementById: id => (["windowClose","windowMinimize","windowMaximize"].includes(id) ? button(id)
-      : id === "windowControls" ? { hidden: true } : null), body: { classList: { add(){}, remove(){} } } },
-    fetch: url => Promise.resolve({ json: () => Promise.resolve({ available: true, caption: true }) }),
-    setTimeout: () => {} };
+  assert.equal(tab.group.hidden, false, "在别的标签页里，这组按钮是唯一的出口 → 画出来");
+  // 题有据自己的窗口，标题栏还在 → 不画第二套。
+  const captioned = windowStub({ search: "?qbhost=app", available: true, caption: true });
   vm.runInNewContext(source, { window: captioned });
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(captioned.document.getElementById("windowControls").hidden, true,
-    "while the title bar is reachable, the page does not draw a second set of buttons");
-  console.log("Window buttons appear only when the title bar is out of reach: OK");
+  assert.equal(captioned.group.hidden, true,
+    "题有据自己的窗口里，标题栏的按钮管这件事，页面不画第二套");
+  // 同一个窗口被整屏显示 → 标题栏够不着 → 页面这份顶上。
+  const fullscreen = windowStub({ search: "?qbhost=app", available: true, caption: false });
+  vm.runInNewContext(source, { window: fullscreen });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(fullscreen.group.hidden, false, "整屏显示时标题栏够不着，页面这组按钮顶上");
+  // 背后根本没有桌面窗口 → 不显示。
+  const bare = windowStub({ available: false });
+  vm.runInNewContext(source, { window: bare });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(bare.group.hidden, true, "背后没有桌面窗口时（普通网页服务器），不显示");
+  console.log("Window buttons appear only where there is no title bar of their own: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
