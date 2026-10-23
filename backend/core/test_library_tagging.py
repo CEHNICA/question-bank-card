@@ -17,7 +17,7 @@ from core import library, library_browse, library_tagging
 from core.library_tag_reports import legacy_tag_migration_rows
 from core.models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCatalogue, LibraryTagGroup,
                          LibraryTagOperation,
-                         LibraryTagSuggestion, Paper, PublishedQuestion, Question)
+                         LibraryTagSuggestion, Paper, PublishedQuestion, Question, QuestionGroup)
 
 urlpatterns = [
     path("api/library/tags", library_tagging.catalogue_view),
@@ -376,6 +376,27 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(len(body["items"]), 1)
         self.assertFalse(body["has_more"])
+
+    def test_suggestion_history_of_a_question_that_belongs_to_a_group(self):
+        """这道题属于某个题组时（也就是书里的题），记录照样要读得出来。
+
+        1.26.7 真机上撞过：题组的字段叫 title，代码写成了 .name —— 只要这道题
+        属于某个题组，这个接口就 500，页面拿到的是 HTML 错误页，于是显示
+        "Unexpected token '<' ... is not valid JSON"。
+        """
+        publication = self.publication()
+        question = publication.question
+        group = QuestionGroup.objects.create(paper=question.paper, title="（虚构）第一章",
+                                             kind=QuestionGroup.Kind.CHAPTER, sequence=0)
+        question.group = group
+        question.save(update_fields=["group"])
+        self.suggestion(publication, [{"kind": "knowledge", "new_name": "候选一", "name": "候选一",
+            "rationale": "依据", "evidence": "题面", "scope": {"whole": True}}])
+        response = self.client.get("/api/library/tags/suggestions?publication_id=" + str(publication.pk)
+            + "&status=all&limit=20&offset=0", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Content-Type"].split(";")[0], "application/json")
+        self.assertEqual(response.json()["items"][0]["group"], "（虚构）第一章")
 
     def test_undo_of_a_pre_upgrade_group_operation_still_repairs_the_old_record(self):
         # Groups cannot be created any more, but a catalogue operation recorded

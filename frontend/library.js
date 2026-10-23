@@ -2261,8 +2261,71 @@
       return result;
     } catch (error) { toast(error.message + " 目录没有被覆盖。", "error"); return false; }
   }
-  async function openTagTemplates() {
-    try {
+  // 1.26.6：照着课本目录写一份教材目录。
+  // 群里那位同学的原话：「目录能不能自己根据教材目录来编写，现在根据标签模板生成的
+  // 目录感觉还是不够细，也不太自由」—— 一个个建标签太慢，所以这里把课本目录的
+  // **文字**贴进来，解析成一棵树，看一眼预览再确认。
+  function tocRenderPreview(box, parsed) {
+    box.replaceChildren();
+    if (!parsed.count) {
+      box.append(node("p", "helper", "还没认出目录。把课本目录的文字贴进来（拍照转文字、复制都行）。"));
+      return;
+    }
+    box.append(node("p", "helper", `认出 ${parsed.count} 个目录节点。确认后一次建好；已有的同名目录会直接接上，不重复建。`));
+    const list = node("div", "library-toc-tree");
+    (window.QBTextbookToc?.flatten(parsed.roots) || []).forEach(entry => {
+      const row = node("p", "library-toc-row");
+      row.style.paddingLeft = (entry.depth * 16) + "px";
+      row.append(node("span", "", entry.name));
+      list.append(row);
+    });
+    box.append(list);
+  }
+  async function openTextbookTocDialog() {
+    const dialog = node("dialog", "tag-picker-dialog library-toc-dialog");
+    const header = node("header", "tag-picker-head"), intro = node("div");
+    intro.append(node("h2", "", "按课本目录新建"),
+      node("p", "tag-picker-subtitle", "把课本目录贴进来 —— 抄一遍、复制粘贴、拍照转文字都行。先看预览，确认了才建。"));
+    const close = node("button", "button", "关闭"); close.type = "button"; header.append(intro, close);
+    const body = node("div", "library-toc-body");
+    const area = node("textarea", "library-toc-text"); area.id = "libraryTocText"; area.rows = 12;
+    area.placeholder = "第一章 集合\n1.1 集合的含义\n1.2 外集\n第二章 一元二次函数\n2.1 二次函数的图象";
+    const preview = node("div", "library-toc-preview");
+    const parsed = () => (window.QBTextbookToc?.parse(area.value) || { roots: [], count: 0, ignored: 0 });
+    const update = () => tocRenderPreview(preview, parsed());
+    area.addEventListener("input", update);
+    body.append(node("p", "helper", "认得这几���写法：「第一章 集合」「1.1 集合的含义」「（一）集合的含义」，以及前面的缩进。"),
+      area, preview);
+    const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "还没贴目录。"),
+      cancel = node("button", "button", "取消"), apply = node("button", "button button-primary", "建好这份目录");
+    cancel.type = "button"; apply.type = "button"; footer.append(status, cancel, apply);
+    dialog.append(header, body, footer); document.body.append(dialog);
+    const closeDialog = () => dialog.close();
+    close.addEventListener("click", closeDialog); cancel.addEventListener("click", closeDialog);
+    dialog.addEventListener("close", () => { dialog.remove(); });
+    update();
+    apply.addEventListener("click", async () => {
+      const result = parsed();
+      if (!result.count) { status.textContent = "还没认出目录内容。"; return; }
+      apply.disabled = true; status.textContent = "正在建…";
+      try {
+        const answer = await catalogueAction("create_tags_batch", { kind: "knowledge", nodes: result.roots });
+        const created = (answer.catalogue?.tags || []).length;
+        toast(`教材目录建好了：新增 ${result.count} 个节点。`, "success");
+        await loadTagCatalogue();
+        directory.tags = [];
+        directory.open.clear(); directory.showAll.clear();
+        await directoryLoad().then(directoryRender);
+        dialog.close();
+      } catch (error) {
+        status.textContent = error.message || "没能建好，目录没有改动。";
+        apply.disabled = false;
+      }
+    });
+    dialog.showModal();
+    area.focus();
+  }
+  async function openTagTemplates() {    try {
       const data = await tagRequest("/api/library/tags/templates");
       const dialog = node("dialog", "tag-picker-dialog tag-template-dialog"); tagTemplateDialog = dialog;
       const header = node("header", "tag-picker-head"), intro = node("div");
@@ -6253,6 +6316,12 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     panel.replaceChildren();
     const head = node("div", "library-directory-head");
     head.append(node("strong", "", "教材目录"));
+    // 1.26.6：入口就摆在目录标题旁边 —— 之前目录只能改标签、模板只能整套导入，
+    // 「怎么设置」这件事在界面上没答案，群里那位同学就没搞懂。
+    const toc = node("button", "button button-small", "＋ 按课本目录新建"); toc.type = "button";
+    toc.title = "把课本目录贴进来，一次建好整棵目录";
+    toc.addEventListener("click", () => void openTextbookTocDialog());
+    head.append(toc);
     const close = node("button", "button button-small button-quiet", "收起"); close.type = "button";
     close.addEventListener("click", () => void directoryToggle(false));
     head.append(close);

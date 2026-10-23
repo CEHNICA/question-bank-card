@@ -1205,6 +1205,17 @@ body.printing { overflow: hidden; }
 .tag-manager-actions select { max-width: 220px; }
 .button-danger { color: #a93437; border-color: #e0b8b6; }
 .tag-template-dialog { width: min(860px, calc(100vw - 32px)); height: min(82dvh, 780px); }
+/* 1.26.6：按课本目录新建教材目录 */
+.library-toc-dialog { width: min(760px, calc(100vw - 32px)); }
+.library-toc-body { display: flex; flex-direction: column; gap: 10px; padding: 0 20px 16px; overflow-y: auto; }
+.library-toc-text { width: 100%; min-height: 180px; resize: vertical; font: inherit; line-height: 1.55;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.library-toc-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.library-toc-preview { display: grid; gap: 6px; }
+.library-toc-tree { display: grid; gap: 2px; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); }
+.library-toc-row { margin: 0; font-size: 13px; line-height: 1.6; }
+.library-toc-row span { display: inline-block; }
 .tag-template-body { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; gap: 10px; padding: 0 20px 18px; overflow: hidden; }
 .tag-template-packages { display: flex; flex-wrap: wrap; gap: 7px; }
 .tag-template-all { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
@@ -1571,6 +1582,8 @@ body.library-directory-open .library-directory { display: block; position: stick
   width: var(--directory-width, 240px); }
 .library-directory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 8px; }
 .library-directory-head strong { font-size: 13px; }
+/* 1.26.6：「按课本目录新建」紧挨着标题，右边的「收起」仍然靠右。 */
+.library-directory-head strong + .button { margin-right: auto; }
 .library-directory-all { display: flex; align-items: center; width: 100%; padding: 6px 9px; border: 0; border-radius: 7px;
   background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .library-directory-all:hover { background: #eef3ef; }

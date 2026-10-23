@@ -27,6 +27,8 @@ from .models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCat
 
 MAX_NAME = 100
 MAX_ALIASES = 20
+# 一次建一棵目录树的上限：一本教材的目录也就几百条。
+MAX_BATCH_NODES = 800
 
 
 class TaggingError(ValueError):
@@ -953,6 +955,51 @@ def catalogue_mutation(payload: dict) -> dict:
             if "related_method_ids" in payload:
                 _set_relation_neighbors(tag, payload["related_method_ids"], LibraryTagRelation.Type.RELATED_METHOD)
             after = {"tag": tag_json(tag)}
+        elif action == "create_tags_batch":
+            # 1.26.6：照着课本目录一次建一棵树。
+            # 老师的原话：「目录能不能自己根据教材目录来编写」—— 一个个建标签太慢，
+            # 所以这里一次建一整棵。已经存在的同名同类型标签直接接上去，不重复建。
+            kind = payload.get("kind") or LibraryTag.Kind.KNOWLEDGE
+            if kind not in {LibraryTag.Kind.KNOWLEDGE, LibraryTag.Kind.METHOD, LibraryTag.Kind.CUSTOM}:
+                raise TaggingError("请选择知识点、解题方法或自定义标签")
+            nodes = payload.get("nodes")
+            if not isinstance(nodes, list) or not nodes:
+                raise TaggingError("请把课本目录贴进来")
+
+            def count_nodes(items):
+                total = 0
+                for item in items:
+                    if isinstance(item, dict):
+                        total += 1 + count_nodes(item.get("children") or [])
+                return total
+
+            if count_nodes(nodes) > MAX_BATCH_NODES:
+                raise TaggingError(f"一次最多建 {MAX_BATCH_NODES} 个节点，请分几次建")
+            created_tags = []
+            reused_tags = []
+
+            def build(items, parent):
+                for item in items:
+                    if not isinstance(item, dict):
+                        raise TaggingError("目录结构看不懂，请检查每一行")
+                    name = _clean_name(item.get("name"))
+                    existing = LibraryTag.objects.filter(name=name, kind=kind).first()
+                    if existing is None:
+                        existing = LibraryTag.objects.create(name=name, kind=kind, levels=[])
+                        created_tags.append(existing)
+                    else:
+                        reused_tags.append(existing)
+                    if parent is not None:
+                        _set_relation_neighbors(existing, [str(parent.pk)], LibraryTagRelation.Type.HIERARCHY)
+                    children = item.get("children") or []
+                    if children and not isinstance(children, list):
+                        raise TaggingError("目录结构看不懂，请检查每一行")
+                    build(children, existing)
+
+            build(nodes, None)
+            after = {"created_tags": [tag_json(tag) for tag in created_tags],
+                     "created_tag_ids": [str(tag.pk) for tag in created_tags],
+                     "reused_tag_ids": [str(tag.pk) for tag in reused_tags]}
         elif action in {"set_parents", "add_parent", "remove_parent", "move_parent", "set_related_methods"}:
             tag = get_object_or_404(LibraryTag, pk=payload.get("tag_id"))
             before = {"tag": tag_json(tag)}
@@ -1527,6 +1574,18 @@ def undo_catalogue_operation(operation):
                 tag.save(update_fields=["active", "updated_at"])
             else:
                 tag.delete()
+        elif action == "create_tags_batch":
+            # 1.26.6：整棵树一起撤。已经贴到题上的标签不删（那会让题的标签凭空消失），
+            # 只停用；没用过的直接删掉。上下级关系由共享的关系快照统一还原。
+            for tag_id in after.get("created_tag_ids") or []:
+                tag = LibraryTag.objects.filter(pk=tag_id).first()
+                if tag is None:
+                    continue
+                if tag.assignments.exists():
+                    tag.active = False
+                    tag.save(update_fields=["active", "updated_at"])
+                else:
+                    tag.delete()
         elif action in {"update_tag", "deactivate_tag", "activate_tag", "favorite_tag"}:
             tag = LibraryTag.objects.get(pk=before["tag"]["id"])
             old_name = tag.name
@@ -1774,7 +1833,9 @@ def suggestions_view(request):
         question = row.publication.question if row.publication.question_id else None
         group = question.group if question and question.group_id else None
         items.append({**suggestion_json(row), "number": row.publication.number,
-            "group": group.name if group else "", "source_filename": row.publication.source_filename,
+            # 题组的字段叫 title（1.26.7：这里写成了 .name，只要那道题属于某个题组
+            # ——也就是书里的题 —— 这个接口就 500，页面拿到 HTML 就报"不是合法 JSON"）。
+            "group": group.title if group else "", "source_filename": row.publication.source_filename,
             "question": str(content.get("stem") or content.get("body") or "原图题，暂不支持文字全文搜索")[:500],
             "revision": row.publication.tag_revision})
     return JsonResponse({"status": status, "total": total, "items": items,

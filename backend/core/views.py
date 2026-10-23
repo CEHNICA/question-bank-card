@@ -747,6 +747,7 @@ library_tag_manager_styles = _frontend("library-tag-manager.css", "text/css; cha
 library_tag_map_script = _frontend("library-tag-map.js", "application/javascript; charset=utf-8")
 library_tag_map_styles = _frontend("library-tag-map.css", "text/css; charset=utf-8")
 library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
+library_toc_script = _frontend("library-toc.js", "application/javascript; charset=utf-8")
 library_solutions_script = _frontend("library-solutions.js", "application/javascript; charset=utf-8")
 library_question_editor_script = _frontend("library-question-editor.js", "application/javascript; charset=utf-8")
 library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
