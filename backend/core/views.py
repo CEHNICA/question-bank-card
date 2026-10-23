@@ -3310,7 +3310,9 @@ def library_ai_share_reading_key_view(request):
         return rejected
     payload = _body(request) or {}
     try:
-        return JsonResponse(library_ai_settings.share_reading_key(payload.get("provider", "minimax")))
+        # 1.26.6：和「读取设置」同一个形状（前端用同一把尺子校验每个答复）。
+        return JsonResponse(_ai_settings_with_backlog(
+            library_ai_settings.share_reading_key(payload.get("provider", "minimax"))))
     except library_ai_settings.ServiceError as error:
         return _error(str(error), 409)
     except library_ai_settings.SettingsError as error:
@@ -3328,7 +3330,11 @@ def library_ai_test_view(request):
     if rejected:
         return rejected
     try:
-        return JsonResponse(library_ai_settings.test_connection(_body(request)))
+        # 1.26.6：测试连接的结果要和「读取设置」长得一模一样 —— 前端拿同一把尺子
+        # 校验每个答复（少一个字段就说"设置状态读取不完整"）。原来这里直接返回
+        # test_connection 的结果，**少了「题库里还差几道」那个数字**，于是点一下
+        # 「测试连接」就报"设置状态读取不完整"，连接到底通不通都看不出来。
+        return JsonResponse(_ai_settings_with_backlog(library_ai_settings.test_connection(_body(request))))
     except library_ai_settings.ServiceError as error:
         return _error(str(error), 409)
     except library_ai_settings.SettingsError as error:

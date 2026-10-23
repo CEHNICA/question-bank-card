@@ -707,6 +707,29 @@ class IndependentAISettingsTests(TestCase):
         self.assertNotIn("reasoning_content", response.json())
         self.assertEqual(self.network.call_count, 1)
 
+    def test_every_answer_the_page_reads_has_the_same_shape(self):
+        """设置页拿同一把尺子校验每个答复 —— 少一个字段就说"设置状态读取不完整"。
+
+        点一下「测试连接」原来就过不了这把尺子：那个答复少了「题库里还差几道」
+        那个数字，于是不管连接通不通，一律报"读取不完整"。共用读题密钥那条接口
+        也一样。
+        """
+        self.configure()
+        self.network.side_effect = None
+        self.network.return_value = answer_response()
+        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-reused-key"]}})
+        client = Client()
+        read = client.get("/api/settings/library-ai").json()
+        tested = client.post("/api/settings/library-ai/test", data='{"confirm": true}',
+                             content_type="application/json", HTTP_X_QB_REQUEST="1").json()
+        shared = client.post("/api/settings/library-ai/share-reading-key", data=json.dumps({"provider": "modelscope"}),
+                             content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(shared.status_code, 200, shared.content)
+        for name, body in (("测试连接", tested), ("共用密钥", shared.json())):
+            self.assertEqual(set(body), set(read), f"「{name}」的答复和「读取设置」不是同一个形状")
+            self.assertIn("backlog", body, f"「{name}」的答复少了「还差几道」那个数字")
+            self.assertIsInstance(body["backlog"]["total"], int)
+
 
 class GenerationBindingTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
