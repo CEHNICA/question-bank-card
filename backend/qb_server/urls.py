@@ -1,11 +1,10 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice, window_control, transfer_views
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice, transfer_views
 
 urlpatterns = [
     path("", views.index_page),
     path("library", views.library_page),
-    path("api/window/<str:action>", window_control.window_control_view),
     path("practice/<uuid:paper_id>", practice.page),
     path("practice.js", views._frontend("practice.js", "application/javascript; charset=utf-8")),
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),

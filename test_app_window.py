@@ -141,28 +141,21 @@ class WindowTests(unittest.TestCase):
             self.assertIs(preferences["credentials_enable_service"], False)
             self.assertIs(preferences["credentials_enable_autosignin"], False)
 
-    def test_control_file_sits_where_the_web_service_will_look_for_it(self):
-        # 去掉系统标题栏之后，页面那两个按钮是唯一的窗口控制入口。两端约定的控制
-        # 文件必须同名：启动器按 launcher.DATA_ROOT 算，服务按 settings.DATA_ROOT 算，
-        # 而 launcher.DATA_ROOT 正是它通过 QB_DATA_ROOT 传给服务进程的那个值。
-        self.assertEqual(app_window.control_file().name, "window-control.json")
-        self.assertEqual(app_window.control_file().parent, app_window.launcher.DATA_ROOT)
-        service = (app_window.ROOT / "backend" / "core" / "window_control.py").read_text(encoding="utf-8")
-        self.assertIn('CONTROL_NAME = "window-control.json"', service)
-
-    def test_a_broken_control_file_is_ignored_instead_of_raising(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            with patch.object(app_window.launcher, "DATA_ROOT", root):
-                self.assertIsNone(app_window._read_control())
-                target = app_window.control_file()
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text("{不是 JSON", encoding="utf-8")
-                self.assertIsNone(app_window._read_control())
-                target.write_text(json.dumps({"action": "minimize"}), encoding="utf-8")
-                self.assertIsNone(app_window._read_control(), "缺少 nonce 时不当作一条新请求")
-                target.write_text(json.dumps({"action": "minimize", "nonce": "abc"}), encoding="utf-8")
-                self.assertEqual(app_window._read_control(), ("minimize", "abc"))
+    def test_the_page_does_not_draw_its_own_window_buttons(self):
+        # 1.26.3：宿主窗口是普通的浏览器窗口，标题栏自带最小化 / 最大化 / 关闭。
+        # 页面再画一套就是两套并排 —— 老师会不知道该点哪一个（1.25.90 删掉页面按钮
+        # 就是这个理由，1.26.0～1.26.2 又加回来，1.26.3 彻底撤掉）。
+        index = (app_window.ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        library = (app_window.ROOT / "frontend" / "library.html").read_text(encoding="utf-8")
+        for name, page in (("index", index), ("library", library)):
+            self.assertNotIn("windowControls", page, f"{name}.html 不该再有页面自绘的窗口按钮")
+            self.assertNotIn("windowClose", page)
+            self.assertNotIn("windowMinimize", page)
+            self.assertNotIn("windowMaximize", page)
+        script = (app_window.ROOT / "frontend" / "browser-interactions.js").read_text(encoding="utf-8")
+        self.assertNotIn("/api/window/", script, "页面不该再向启动器要窗口动作")
+        styles = (app_window.ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn(".window-button", styles)
 
     def test_opening_the_window_starts_the_thread_that_watches_window_controls(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,7 +170,6 @@ class WindowTests(unittest.TestCase):
             self.assertEqual(popen.call_args.args[0][1], "--app=http://127.0.0.1:8768")
             # 少了这个线程，页面右上角那两个按钮点了没反应，窗口就关不掉了。
             self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
-
     def test_the_app_window_is_picked_by_title_not_by_size(self):
         # 这些浏览器进程同时还开着「无法更新 Microsoft Edge」之类的小气泡窗、
         # 加载期的空白窗口，甚至还有一个比题有据窗口还大的临时窗口（上一次运行没
@@ -239,83 +231,38 @@ class WindowTests(unittest.TestCase):
                 del windows[9012]
                 self.assertEqual(app_window._app_window(fake, profile, require_title=True), 0)
 
-    def test_a_control_file_left_by_the_previous_run_is_not_replayed(self):
-        # 上一次运行留下的控制文件必须当成「已处理」。否则新窗口一打开就会被
-        # 上一次的「关闭」立刻关掉 —— 这条真机上撞过一次。
+    def test_the_window_handle_is_cached_instead_of_being_looked_up_every_round(self):
+        # 定位一次窗口要起一个 PowerShell 去查进程号，冷启动三五百毫秒。句柄明明
+        # 还有效却每一轮都重新定位，守护线程自己就被拖垮了。
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            target = root / "window-control.json"
-            target.write_text(json.dumps({"action": "close", "nonce": "from-last-run"}), encoding="utf-8")
-            seen = []
-            windows = iter([1, 1, 0])
-            fake_user32 = Mock()
-            fake_user32.IsIconic.return_value = False
-            # 窗口先活一轮、再失效一次：watch_window 会因此重新定位，直到宽限期结束收工。
-            alive = iter([True, False])
-            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
-
-            def fake_app_window(user32, profile, **_options):
-                return next(windows, 0)
-
-            def fake_read_control():
-                return ("close", "from-last-run") if not seen else None
-
-            clock = itertools.count(0, 1)
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
-                 patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
-                app_window.watch_window(root, interval=0)
-            fake_user32.PostMessageW.assert_not_called()
-            fake_user32.ShowWindow.assert_not_called()
-            self.assertEqual(seen, [], "遗留的请求既不能执行，也不该再被当成待处理的新请求")
-
-    def test_minimize_is_picked_up_quickly_and_the_window_is_looked_up_once(self):
-        # 真机上量到的延迟：请求 20~100ms 就到了，窗口 1.2 秒后才缩下去 —— 每轮轮询都
-        # 重新起一个 PowerShell 进程去定位窗口，一个循环要一秒多。这里把轮询压到 100ms，
-        # 并把窗口句柄缓存住：只在句柄失效时才重新定位。
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            served = [0]
             alive = [False]                       # 上一次 IsWindow 的答案
             found = []
             looked_up_while_alive = []
-            # 窗口先活十轮再失效：这十轮里如果每轮都重新定位，就又回到一秒一轮了。
+            # 窗口先活十轮再失效：这十轮里如果每轮都重新定位，就是一秒一轮的老毛病。
             alive_sequence = iter([True] * 10 + [False])
             fake_user32 = Mock()
             fake_user32.IsIconic.return_value = False
             fake_user32.IsWindow.side_effect = lambda hwnd: _record(alive, alive_sequence)
 
             def fake_app_window(user32, profile, **_options):
-                # 句柄明明还有效却又定位了一次 —— 这正是原来一秒多一轮的来源。
                 if alive[0]:
                     looked_up_while_alive.append(1)
                 found.append(1)
                 return 4242 if len(found) <= 2 else 0
 
-            def fake_read_control():
-                served[0] += 1
-                return ("minimize", "n1") if served[0] == 2 else None
-
             clock = itertools.count(0, 1)
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
                  patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
                  patch.object(app_window.time, "sleep") as sleep, \
                  patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
                 app_window.watch_window(root)
 
-            fake_user32.ShowWindow.assert_called_once_with(4242, app_window._SW_MINIMIZE)
             self.assertEqual(looked_up_while_alive, [], "句柄还有效时不该重新定位")
-            # 存下来的句柄每轮都要先问它还活着，而不是直接重新定位 —— 不查 IsWindow
-            # 的写法（也就是改动前的写法）会被这一条挡下。
+            # 存下来的句柄每轮都要先问它还活着，而不是直接重新定位。
             self.assertGreaterEqual(fake_user32.IsWindow.call_count, 10)
             self.assertTrue(sleep.call_args_list, "总得让出时间片")
-            for call in sleep.call_args_list:
-                self.assertLessEqual(call[0][0], 0.25, "轮询间隔太大会让页面按钮看起来没反应")
 
     def test_the_window_is_not_looked_up_every_round_while_it_has_not_appeared(self):
         # 定位一次窗口要起一个 PowerShell 去查进程号，冷启动实测三五百毫秒，比 100ms
@@ -354,7 +301,6 @@ class WindowTests(unittest.TestCase):
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
                  patch.object(app_window, "_app_window", side_effect=lambda u, p, **kw: handles_used.append(next(handles, 0)) or handles_used[-1]), \
-                 patch.object(app_window, "_read_control", return_value=None), \
                  patch.object(app_window.time, "sleep"), \
                  patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
                 app_window.watch_window(root)
@@ -513,31 +459,6 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(handed_out, [],
                          "a window that turns up late is waited for, not given up on")
 
-    def test_the_page_buttons_stand_in_only_when_the_title_bar_is_out_of_reach(self):
-        # 1.26.0：标题栏自带三个按钮时，页面右上角不该再画一份 —— 两套并排，
-        # 老师会不知道该点哪一个（1.25.90 删掉页面按钮就是这个理由）。
-        # 只有标题栏真的够不着（整屏显示 / 窗口被拖到屏幕边缘外面）时，页面那份顶上。
-        screen = (1920, 1080)
-        self.assertTrue(app_window._caption_reachable((10, 10, 1060, 806), screen),
-                        "普通窗口：标题栏在，页面不画按钮")
-        self.assertTrue(app_window._caption_reachable((0, 0, 1920, 1080), screen) is False,
-                        "整屏显示：标题栏整个没了，页面要把按钮画出来")
-        self.assertFalse(app_window._caption_reachable((0, -400, 1920, 700), screen),
-                         "窗口顶边被拖到屏幕上方之外：标题栏够不着")
-        self.assertTrue(app_window._caption_reachable((0, 0, 1900, 1060), screen),
-                        "还差着一截 → 标题栏还在，仍由标题栏管")
-        self.assertFalse(app_window._caption_reachable((0, 0, 1918, 1078), screen),
-                         "只差两像素就是整屏 → 按整屏算，页面把按钮画出来")
-
-    def test_the_app_window_marks_itself_so_the_page_knows_where_it_is(self):
-        # 1.26.2：页面要分得清"我现在是在题有据自己的窗口里，还是在别的标签页里"。
-        # 自己的窗口有系统标题栏 → 页面不画第二套按钮；别的标签页没有标题栏 →
-        # 那三个按钮是唯一的出口，该画出来。
-        self.assertEqual(app_window.app_window_url("http://127.0.0.1:8768"),
-                         "http://127.0.0.1:8768?qbhost=app")
-        self.assertEqual(app_window.app_window_url("http://127.0.0.1:8768/library?paper=x"),
-                         "http://127.0.0.1:8768/library?paper=x&qbhost=app")
-
     def test_closing_the_window_stops_at_once_without_its_background_processes(self):
         # 一个题有据窗口背后挂着 8 个 Edge 进程（1 个管窗口 + 崩溃收集器/显卡/工具/
         # 页面），它们比窗口晚退好几句。以前的判据是「这个配置目录下还剩几个进程」，
@@ -572,15 +493,6 @@ class MainFlowTests(unittest.TestCase):
             how = app_window.wait_for_window(Mock(), Mock(**{"poll.return_value": None}))
         self.assertEqual(how, "closed-slow",
                          "a browser that never finishes quitting must not block exit forever")
-
-    def test_quitting_removes_the_control_file_it_no_longer_listens_to(self):
-        # 退出时那条控制请求已经没人执行了。留着它，下一次启动还得先读一遍才知道
-        # 该跳过，得不偿失。
-        control = Path(tempfile.mkdtemp()) / "window-control.json"
-        control.write_text('{"action": "close", "nonce": "abc"}', encoding="utf-8")
-        with patch.object(app_window, "control_file", Mock(return_value=control)):
-            app_window._clear_control()
-        self.assertFalse(control.exists(), "the stale control request is cleaned up on exit")
 
     def test_first_install_is_handed_to_console(self):
         handoff = Mock(return_value=0)
@@ -872,6 +784,8 @@ class BrowserCacheTests(unittest.TestCase):
     def test_window_actions_follow_the_foreground_window(self):
         # 1.25.51：多开过窗口时，守护线程启动时找到的句柄可能是一个缩成一条的旧
         # 窗口；用户点的是当前前台窗口。动作要落在前台那个窗口上。
+        # 1.26.3：页面不再自绘窗口按钮，这条动作通道撤掉了 —— 窗口控制回到标题栏，
+        # 由浏览器自己做。这里保留"认得出当前前台窗口"的能力（关窗时要用到）。
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             served = [0]
@@ -892,20 +806,15 @@ class BrowserCacheTests(unittest.TestCase):
                 found.append(1)
                 return 4242 if len(found) <= 2 else 0
 
-            def fake_read_control():
-                served[0] += 1
-                return ("minimize", "n1") if served[0] == 2 else None
-
             clock = itertools.count(0, 1)
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
                  patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window, "_read_control", side_effect=fake_read_control), \
                  patch.object(app_window.time, "sleep"), \
                  patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
                 app_window.watch_window(root)
 
-            fake_user32.ShowWindow.assert_called_once_with(555, app_window._SW_MINIMIZE)
+            fake_user32.ShowWindow.assert_not_called()
 
     def test_a_visible_app_window_beats_a_minimised_duplicate(self):
         # 1.25.51：多开过窗口时，进程组里可能同时挂着一个最小化的旧题有据窗口和
@@ -986,7 +895,6 @@ class BrowserCacheTests(unittest.TestCase):
             with patch.object(app_window.launcher, "DATA_ROOT", root), \
                  patch.object(app_window, "_user32", return_value=fake_user32), \
                  patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window, "_read_control", return_value=None), \
                  patch.object(app_window.time, "sleep"), \
                  patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
                 app_window.watch_window(root)

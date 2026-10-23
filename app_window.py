@@ -298,24 +298,12 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
 
 # ---------------------------------------------------------------- 窗口控制
 
-# 窗口不带系统标题栏：页面顶部留了拖拽区（-webkit-app-region: drag），
-# 最小化与关闭由页面右上角自绘。
-#
-# 去掉标题栏之后那两个按钮就成了唯一的窗口控制入口，所以窗口动作必须同时做出来 ——
-# 浏览器没有「最小化/关闭本窗口」的脚本接口（window.close() 对命令行 --app 打开的
-# 窗口无效），因此网页只写一个控制文件，由这里去操作真正的窗口句柄。
+# 窗口控制：宿主窗口是**普通的浏览器窗口**，标题栏自带最小化 / 最大化 / 关闭。
+# 1.26.3：页面不再自绘那三个按钮（两套并排，老师会不知道该点哪一个），
+# 于是"页面 → 启动器"的控制通道（控制文件 + /api/window/…）也一并撤掉了。
 #
 # 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
-_SW_MINIMIZE = 6
 _SW_RESTORE = 9
-_SW_MAXIMIZE = 3
-_WM_CLOSE = 0x0010
-_CONTROL_NAME = "window-control.json"
-_STATE_NAME = "window-state.json"
-# 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
-# 窗口却要 1.2 秒才缩下去 —— 那是这里一秒一轮询的代价。100ms 一轮，
-# 每轮只多读一个几十字节的 json，可以忽略不计。
-_CONTROL_POLL = 0.1
 # 窗口迟迟不出现就放弃守候，不拖住退出。
 _WINDOW_GRACE = 60.0
 # 窗口还没出现时，别每轮都去重新定位：定位要起一个 PowerShell 查进程号，冷启动
@@ -341,68 +329,6 @@ def _window_alive(user32, hwnd: int) -> bool:
     下次双击会撞上一个半死不活的服务，页面就白了。
     """
     return bool(hwnd) and bool(user32.IsWindow(hwnd))
-
-
-def control_file() -> Path:
-    """页面与启动器之间唯一约定的控制文件。两端各自算出路径但指向同一个：
-    启动器把自己的 DATA_ROOT 通过 QB_DATA_ROOT 传给了服务进程。"""
-    return launcher.DATA_ROOT / _CONTROL_NAME
-
-
-def window_state_file() -> Path:
-    """窗口当前"标题栏还在不在"的状态文件。页面据此决定要不要自己画按钮。"""
-    return launcher.DATA_ROOT / _STATE_NAME
-
-
-def _caption_reachable(rect: tuple[int, int, int, int], screen: tuple[int, int]) -> bool:
-    """纯算的版本，方便测：窗口矩形 + 屏幕尺寸 → 标题栏够不够得着。"""
-    left, top, right, bottom = rect
-    width, height = screen
-    fullscreen = abs(right - left) >= width - 2 and abs(bottom - top) >= height - 2
-    if fullscreen:
-        return False
-    # 窗口顶边被拖到屏幕上方之外 → 标题栏那条不在屏幕上。
-    return top >= -2
-
-
-def caption_visible(user32, hwnd) -> bool:
-    """标题栏这三个按钮现在点得到吗。
-
-    窗口是普通窗口时，标题栏自带最小化/最大化/关闭 —— 页面就不该再画一份
-    （两套控件并排，老师会不知道该点哪一个）。但有两种情况标题栏够不着：
-
-    - 窗口被整屏显示（F11）：标题栏整个没了；
-    - 窗口被拖到屏幕边缘外面：标题栏那条被顶出去了。
-
-    这两种时候页面右上角那份才该露出来。
-    """
-    if user32 is None or not hwnd:
-        return True
-    try:
-        import ctypes
-        import ctypes.wintypes
-
-        rect = ctypes.wintypes.RECT()
-        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            return True
-        screen = (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
-        return _caption_reachable((rect.left, rect.top, rect.right, rect.bottom), screen)
-    except Exception:  # noqa: BLE001 - 拿不准就当标题栏还在（页面不画按钮）
-        return True
-
-
-def write_window_state(user32, hwnd) -> None:
-    """把"标题栏还在不在"写给页面。只在变了的时候写，免得每秒刷磁盘。"""
-    visible = caption_visible(user32, hwnd)
-    if getattr(write_window_state, "_last", None) == visible:
-        return
-    try:
-        target = window_state_file()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps({"caption": visible}), encoding="utf-8")
-    except OSError:
-        pass
-    write_window_state._last = visible
 
 
 def _user32():
@@ -517,29 +443,16 @@ def _app_window(user32, profile: Path, *, require_title: bool = False) -> int:
     return pick(fallback)
 
 
-def _read_control() -> tuple[str, str] | None:
-    """控制文件里的 (动作, nonce)。文件不存在、被写坏或缺字段都当没有。"""
-    try:
-        data = json.loads(control_file().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if isinstance(data, dict) and isinstance(data.get("action"), str) and isinstance(data.get("nonce"), str):
-        return data["action"], data["nonce"]
-    return None
+def watch_window(profile: Path, interval: float = 0.5) -> None:
+    """守着应用窗口。
 
-
-def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
-    """守着应用窗口，执行页面发来的最小化/关闭。
-
-    窗口消失且已经过了宽限期就收工，不会拖住进程退出。
+    1.26.3：这里原来还会执行页面发来的"最小化/最大化/关闭"。宿主窗口是普通的
+    浏览器窗口，标题栏自带那三个按钮，页面不必再画一套 —— 这条通道一并撤掉，
+    守护线程现在只做一件事：盯着窗口，窗口没了就收工。
     """
     user32 = _user32()
     if user32 is None:
         return
-    # 上一次运行可能留下了控制文件（上次没关窗口、或关到一半）。那一条是上一次
-    # 的请求，这次不能再执行一遍 —— 否则新窗口一开就被上一轮的「关闭」关掉。
-    stale = _read_control()
-    seen: str | None = stale[1] if stale else None
     deadline = time.monotonic() + _WINDOW_GRACE
     strict_until = time.monotonic() + _WINDOW_GRACE / 2
     hwnd = 0
@@ -581,53 +494,7 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
                     user32.SetForegroundWindow(hwnd)
             except Exception:  # noqa: BLE001
                 pass
-        request = _read_control()
-        # 1.26.0：标题栏够不着的时候，页面右上角那份按钮才该露出来。
-        write_window_state(user32, hwnd)
-        if request is not None and request[1] != seen:
-            action, seen = request
-            # 1.25.51：动作落到「用户正在点的那个窗口」上。句柄是启动时找的；
-            # 多开过窗口时它可能是另一个缩成一条的旧窗口 —— 那就点了没反应。
-            target = hwnd
-            try:
-                import ctypes
-
-                foreground = int(user32.GetForegroundWindow())
-                if foreground and foreground != hwnd:
-                    fg_pid = ctypes.c_ulong()
-                    win_pid = ctypes.c_ulong()
-                    user32.GetWindowThreadProcessId(ctypes.c_void_p(foreground), ctypes.byref(fg_pid))
-                    user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(win_pid))
-                    if fg_pid.value and fg_pid.value == win_pid.value:
-                        target = foreground
-            except Exception:  # noqa: BLE001 - 拿不到前台窗口就按原句柄
-                target = hwnd
-            if action == "minimize":
-                user32.ShowWindow(target, _SW_MINIMIZE)
-            elif action == "maximize":
-                # 1.26.0：页面右上角的三个按钮要能真的用。窗口已经最大化就还原，
-                # 否则最大化 —— 与标题栏上的 □ 同一个意思。
-                try:
-                    zoomed = bool(getattr(user32, "IsZoomed", lambda _h: False)(target))
-                except Exception:  # noqa: BLE001
-                    zoomed = False
-                user32.ShowWindow(target, _SW_RESTORE if zoomed else _SW_MAXIMIZE)
-            elif action == "close":
-                user32.PostMessageW(target, _WM_CLOSE, 0, 0)
-            else:
-                seen = None          # 不认识的动作不执行，也不当成已处理
         time.sleep(interval)
-
-
-def app_window_url(url: str) -> str:
-    """题有据自己窗口要打开的地址：带一个"我在应用窗口里"的标记。
-
-    页面据此决定要不要在右上角自绘窗口按钮：应用自己的窗口有系统标题栏
-    （自带最小化/最大化/关闭），再画一套就是两套并排；别的标签页没有标题栏，
-    那三个按钮是唯一的出口，就该画出来。
-    """
-    separator = "&" if "?" in url else "?"
-    return f"{url}{separator}qbhost=app"
 
 
 def open_window(url: str) -> subprocess.Popen | None:
@@ -669,16 +536,6 @@ def _profile_still_open(profile: Path) -> bool:
         return int((result.stdout or "0").strip() or 0) > 0
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
-
-
-def _clear_control() -> None:
-    """退出时把控制文件删掉。
-
-    留着也无害（每次请求都带一次性编号，启动时会跳过上一次留下的那条），但一个
-    没人再听的请求摊在那里，下一次启动还得先把它读一遍才知道该跳过。
-    """
-    with contextlib.suppress(OSError):
-        control_file().unlink(missing_ok=True)
 
 
 def _wait_until_window_closed(web: subprocess.Popen, profile: Path, user32) -> str:
@@ -1077,7 +934,7 @@ def _main(arguments: list[str] | None = None) -> int:
             return 0
         url = value
         print(f"服务就绪：{url}", flush=True)
-        window = open_window(app_window_url(url))
+        window = open_window(url)
         how = wait_for_window(window, processes[-1])
         if how == "service-died":
             print("窗口还开着但服务没了，下面这次退出会把整个软件一起关掉。", flush=True)
@@ -1085,7 +942,6 @@ def _main(arguments: list[str] | None = None) -> int:
         return 0
     finally:
         launcher._clear_instance()
-        _clear_control()
         if job is not None:
             job.close()
         for process in processes:
