@@ -96,4 +96,11 @@ assert.match(js, /Math\.max\(200.*Math\.min\(480/, "宽度 clamp 在 200–480 �
 assert.match(css, /library-directory-name[^}]*white-space:\s*normal/, "目录名字放不下就折行，不再截成省略号 —— 长名字一次看全");
 assert.match(css, /library-directory-name[^}]*overflow-wrap:\s*anywhere/, "折行时按任意字符断开，长英文/公式名也不会撑破面板");
 assert.match(css, /is-leaf\s*\{\s*padding-left:\s*18px/, "缩进每层只声明一格，靠嵌套累加 —— 不能再按深度乘，否则第四层吃掉整块面板");
-assert.ok(!/\.style\.paddingLeft\s*=/.test(js), "目录行不再用内联 paddingLeft 写缩进，交给 CSS 的 .is-leaf 一格");
+// 1.26.7：这条断言只看**目录树自己那几行**（directoryRow）。教材目录的预览是一张
+// 平铺的清单（在弹窗里，不是左栏那种嵌套面板），按深度缩进没问题 —— 以前这条
+// 断言是整个文件扫一遍，一份新代码用了内联缩进就被误判成破坏了契约。
+const directoryRowStart = js.indexOf("function directoryRow(");
+const directoryRowEnd = js.indexOf("\n  function ", directoryRowStart + 10);
+const directoryRowCode = js.slice(directoryRowStart, directoryRowEnd > 0 ? directoryRowEnd : undefined);
+assert.ok(directoryRowStart >= 0 && directoryRowCode.length > 0, "找得到目录树的渲染代码");
+assert.ok(!/\.style\.paddingLeft\s*=/.test(directoryRowCode), "目录行不再用内联 paddingLeft 写缩进，交给 CSS 的 .is-leaf 一格");
