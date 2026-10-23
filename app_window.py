@@ -311,6 +311,7 @@ _SW_RESTORE = 9
 _SW_MAXIMIZE = 3
 _WM_CLOSE = 0x0010
 _CONTROL_NAME = "window-control.json"
+_STATE_NAME = "window-state.json"
 # 页面点一下「最小化」就得马上有反应。真机上量到的是：请求 20~100ms 就到了，
 # 窗口却要 1.2 秒才缩下去 —— 那是这里一秒一轮询的代价。100ms 一轮，
 # 每轮只多读一个几十字节的 json，可以忽略不计。
@@ -346,6 +347,62 @@ def control_file() -> Path:
     """页面与启动器之间唯一约定的控制文件。两端各自算出路径但指向同一个：
     启动器把自己的 DATA_ROOT 通过 QB_DATA_ROOT 传给了服务进程。"""
     return launcher.DATA_ROOT / _CONTROL_NAME
+
+
+def window_state_file() -> Path:
+    """窗口当前"标题栏还在不在"的状态文件。页面据此决定要不要自己画按钮。"""
+    return launcher.DATA_ROOT / _STATE_NAME
+
+
+def _caption_reachable(rect: tuple[int, int, int, int], screen: tuple[int, int]) -> bool:
+    """纯算的版本，方便测：窗口矩形 + 屏幕尺寸 → 标题栏够不够得着。"""
+    left, top, right, bottom = rect
+    width, height = screen
+    fullscreen = abs(right - left) >= width - 2 and abs(bottom - top) >= height - 2
+    if fullscreen:
+        return False
+    # 窗口顶边被拖到屏幕上方之外 → 标题栏那条不在屏幕上。
+    return top >= -2
+
+
+def caption_visible(user32, hwnd) -> bool:
+    """标题栏这三个按钮现在点得到吗。
+
+    窗口是普通窗口时，标题栏自带最小化/最大化/关闭 —— 页面就不该再画一份
+    （两套控件并排，老师会不知道该点哪一个）。但有两种情况标题栏够不着：
+
+    - 窗口被整屏显示（F11）：标题栏整个没了；
+    - 窗口被拖到屏幕边缘外面：标题栏那条被顶出去了。
+
+    这两种时候页面右上角那份才该露出来。
+    """
+    if user32 is None or not hwnd:
+        return True
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        rect = ctypes.wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return True
+        screen = (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+        return _caption_reachable((rect.left, rect.top, rect.right, rect.bottom), screen)
+    except Exception:  # noqa: BLE001 - 拿不准就当标题栏还在（页面不画按钮）
+        return True
+
+
+def write_window_state(user32, hwnd) -> None:
+    """把"标题栏还在不在"写给页面。只在变了的时候写，免得每秒刷磁盘。"""
+    visible = caption_visible(user32, hwnd)
+    if getattr(write_window_state, "_last", None) == visible:
+        return
+    try:
+        target = window_state_file()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"caption": visible}), encoding="utf-8")
+    except OSError:
+        pass
+    write_window_state._last = visible
 
 
 def _user32():
@@ -525,6 +582,8 @@ def watch_window(profile: Path, interval: float = _CONTROL_POLL) -> None:
             except Exception:  # noqa: BLE001
                 pass
         request = _read_control()
+        # 1.26.0：标题栏够不着的时候，页面右上角那份按钮才该露出来。
+        write_window_state(user32, hwnd)
         if request is not None and request[1] != seen:
             action, seen = request
             # 1.25.51：动作落到「用户正在点的那个窗口」上。句柄是启动时找的；

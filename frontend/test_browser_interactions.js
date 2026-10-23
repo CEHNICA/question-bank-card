@@ -29,7 +29,7 @@ const hostRoot = {
   },
   fetch: (url, options) => {
     calls.push({ url, options });
-    if (url.endsWith("/available")) return Promise.resolve({ json: () => Promise.resolve({ available: true }) });
+    if (url.endsWith("/available")) return Promise.resolve({ json: () => Promise.resolve({ available: true, caption: false }) });
     return Promise.resolve();
   },
   // 关窗先淡出再交给宿主：160ms 的淡出定时器同步执行；1.6 秒的兜底定时器留到后面手动触发。
@@ -57,18 +57,29 @@ assert.equal(calls.filter(value => value.url === "/api/window/close").length, 2,
   "the close request is retried once");
 console.log("Self-drawn window controls: minimize and close reach the launcher, closing fades out and recovers: OK");
 
-// 1.26.0：真在桌面程序里跑着时，这一组按钮才露出来；普通浏览器标签页里不显示。
+// 1.26.0：真在桌面程序里跑着、而且标题栏够不着时，这一组按钮才露出来；
+// 普通浏览器标签页里不显示，标题栏还在时也不显示（避免两套控件并排）。
 (async () => {
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(group.hidden, false, "the page shows its window buttons when a desktop window is behind it");
+  assert.equal(group.hidden, false, "the page shows its window buttons when the title bar is out of reach");
   const bare = { document: { addEventListener: () => {}, readyState: "complete", hidden: false,
     getElementById: id => (["windowClose","windowMinimize","windowMaximize"].includes(id) ? button(id)
       : id === "windowControls" ? { hidden: true } : null), body: { classList: { add(){}, remove(){} } } },
-    fetch: url => Promise.resolve({ json: () => Promise.resolve({ available: false }) }),
+    fetch: url => Promise.resolve({ json: () => Promise.resolve({ available: false, caption: false }) }),
     setTimeout: () => {} };
   vm.runInNewContext(source, { window: bare });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(bare.document.getElementById("windowControls").hidden, true,
     "a plain browser tab gets no window buttons — they would do nothing there");
-  console.log("Window buttons appear only behind a real desktop window: OK");
+  // 标题栏还在的时候也不画 —— 两套控件并排，老师会不知道该点哪一个。
+  const captioned = { document: { addEventListener: () => {}, readyState: "complete", hidden: false,
+    getElementById: id => (["windowClose","windowMinimize","windowMaximize"].includes(id) ? button(id)
+      : id === "windowControls" ? { hidden: true } : null), body: { classList: { add(){}, remove(){} } } },
+    fetch: url => Promise.resolve({ json: () => Promise.resolve({ available: true, caption: true }) }),
+    setTimeout: () => {} };
+  vm.runInNewContext(source, { window: captioned });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(captioned.document.getElementById("windowControls").hidden, true,
+    "while the title bar is reachable, the page does not draw a second set of buttons");
+  console.log("Window buttons appear only when the title bar is out of reach: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

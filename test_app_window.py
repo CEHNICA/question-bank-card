@@ -513,6 +513,22 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(handed_out, [],
                          "a window that turns up late is waited for, not given up on")
 
+    def test_the_page_buttons_stand_in_only_when_the_title_bar_is_out_of_reach(self):
+        # 1.26.0：标题栏自带三个按钮时，页面右上角不该再画一份 —— 两套并排，
+        # 老师会不知道该点哪一个（1.25.90 删掉页面按钮就是这个理由）。
+        # 只有标题栏真的够不着（整屏显示 / 窗口被拖到屏幕边缘外面）时，页面那份顶上。
+        screen = (1920, 1080)
+        self.assertTrue(app_window._caption_reachable((10, 10, 1060, 806), screen),
+                        "普通窗口：标题栏在，页面不画按钮")
+        self.assertTrue(app_window._caption_reachable((0, 0, 1920, 1080), screen) is False,
+                        "整屏显示：标题栏整个没了，页面要把按钮画出来")
+        self.assertFalse(app_window._caption_reachable((0, -400, 1920, 700), screen),
+                         "窗口顶边被拖到屏幕上方之外：标题栏够不着")
+        self.assertTrue(app_window._caption_reachable((0, 0, 1900, 1060), screen),
+                        "还差着一截 → 标题栏还在，仍由标题栏管")
+        self.assertFalse(app_window._caption_reachable((0, 0, 1918, 1078), screen),
+                         "只差两像素就是整屏 → 按整屏算，页面把按钮画出来")
+
     def test_closing_the_window_stops_at_once_without_its_background_processes(self):
         # 一个题有据窗口背后挂着 8 个 Edge 进程（1 个管窗口 + 崩溃收集器/显卡/工具/
         # 页面），它们比窗口晚退好几句。以前的判据是「这个配置目录下还剩几个进程」，

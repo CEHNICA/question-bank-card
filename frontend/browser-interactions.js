@@ -51,12 +51,26 @@
     });
     minimize?.addEventListener("click", () => { askHost("minimize"); });
     maximize?.addEventListener("click", () => { askHost("maximize"); });
-    // 只有真在桌面程序里跑着才显示这一组按钮。
-    if (group && root.fetch) {
+    // 页面右上角这一组按钮，**只在标题栏够不着的时候**才出现：
+    //   · 普通浏览器标签页：背后没有可操作的窗口，显示了也是摆设；
+    //   · 标题栏还在（普通窗口、最大化）：由标题栏那三个管，页面再画一份就变成
+    //     两套控件并排，老师会不知道该点哪一个（1.25.90 删掉它们就是这个理由）；
+    //   · 整屏显示、或窗口被拖到屏幕边缘外面：标题栏整个够不着 → 页面这份顶上。
+    // 宿主（启动器）守着窗口，窗口一变它就把状态写过来；这里顺便听一下尺寸变化，
+    // 整屏/还原不用刷新页面。
+    const refresh = () => {
+      if (!group || !root.fetch) return;
       root.fetch("/api/window/available", { cache: "no-store" })
         ?.then?.(response => response?.json?.())
-        ?.then?.(body => { if (body?.available) group.hidden = false; })
+        ?.then?.(body => {
+          if (!body?.available) { group.hidden = true; return; }
+          group.hidden = body.caption !== false;
+        })
         ?.catch?.(() => {});
+    };
+    if (group) {
+      refresh();
+      root.addEventListener?.("resize", refresh);
     }
   }
   if (root.document?.readyState === "loading") {

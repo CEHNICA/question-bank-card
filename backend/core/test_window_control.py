@@ -80,6 +80,15 @@ class WindowControlTests(TestCase):
             self.assertFalse(json.loads(response.content)["available"])
         self.assertFalse(window_control.control_path().exists(), "看一眼不该写控制文件")
 
+    def test_the_page_is_told_whether_the_title_bar_is_still_reachable(self):
+        """标题栏还在时，页面不画那三个按钮 —— 两套控件并排会让人不知道点哪个。"""
+        with mock.patch.dict(os.environ, {"QB_DESKTOP_EXPORT": "1"}):
+            response = self.client.get("/api/window/available")
+            self.assertTrue(json.loads(response.content)["caption"], "读不到状态就当标题栏还在")
+            window_control.state_path().write_text(json.dumps({"caption": False}), encoding="utf-8")
+            response = self.client.get("/api/window/available")
+            self.assertFalse(json.loads(response.content)["caption"], "整屏显示时标题栏够不着")
+
 
 if __name__ == "__main__":
     unittest.main()

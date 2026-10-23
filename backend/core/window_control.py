@@ -25,11 +25,30 @@ from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 CONTROL_NAME = "window-control.json"
+STATE_NAME = "window-state.json"
 ACTIONS = {"minimize", "maximize", "close"}
 
 
 def control_path() -> Path:
     return Path(settings.DATA_ROOT) / CONTROL_NAME
+
+
+def state_path() -> Path:
+    return Path(settings.DATA_ROOT) / STATE_NAME
+
+
+def caption_visible() -> bool:
+    """宿主窗口的标题栏现在还在不在（够不够得着）。
+
+    启动器守着窗口，窗口一变就把状态写过来。标题栏还在时页面不画那三个按钮 ——
+    两套控件并排，老师会不知道该点哪一个；标题栏真的没了（整屏显示、或窗口被
+    拖到屏幕边缘外面），页面右上角那份才露出来。
+    """
+    try:
+        data = json.loads(state_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True          # 读不到就当标题栏还在：宁可少画，不要两套并排
+    return bool(data.get("caption", True))
 
 
 @csrf_exempt
@@ -38,9 +57,9 @@ def window_control_view(request, action: str):
     from .views import _error, _guard
 
     if request.method == "GET" and action == "available":
-        # 页面右上角那三个按钮只在真的由桌面程序启动时才出现 ——
-        # 普通浏览器标签页里点了也是摆设，不如不显示。
-        return JsonResponse({"available": _desktop_shell()})
+        # 页面右上角那三个按钮只在真的由桌面程序启动、而且标题栏够不着的时候出现 ——
+        # 普通浏览器标签页里点了也是摆设；标题栏还在时也该由标题栏来管。
+        return JsonResponse({"available": _desktop_shell(), "caption": caption_visible()})
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     if action not in ACTIONS:
