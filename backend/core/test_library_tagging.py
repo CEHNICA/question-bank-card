@@ -145,6 +145,65 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(again.status_code, 200, again.content)
         self.assertEqual(LibraryTag.objects.count(), imported)
 
+    def test_a_whole_textbook_outline_can_be_built_in_one_go(self):
+        """1.26.6：照着课本目录一次建一棵树。
+
+        群里那位同学的原话：「目录能不能自己根据教材目录来编写」—— 一个个建标签
+        太慢，所以这里一次建一整棵。
+        """
+        nodes = [
+            {"name": "第一章 集合", "children": [
+                {"name": "1.1 集合的含义", "children": []},
+                {"name": "1.2 外集", "children": []},
+            ]},
+            {"name": "第二章 一元二次函数", "children": [
+                {"name": "2.1 二次函数的图象", "children": []},
+            ]},
+        ]
+        revision = library_tagging.catalogue_state().revision
+        response = self.post_json("/api/library/tags", {
+            "action": "create_tags_batch", "kind": "knowledge", "nodes": nodes,
+            "revision": revision, "request_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["catalogue"]["revision"], revision + 1)
+        made = {tag.name for tag in LibraryTag.objects.filter(kind="knowledge",
+                  name__in=["第一章 集合", "1.1 集合的含义", "1.2 外集",
+                            "第二章 一元二次函数", "2.1 二次函数的图象"])}
+        self.assertEqual(len(made), 5, "五个节点都建出来了")
+        chapter = LibraryTag.objects.get(name="第一章 集合")
+        child = LibraryTag.objects.get(name="1.1 集合的含义")
+        parents = library_tagging.tag_json(child)["parent_ids"]
+        self.assertIn(str(chapter.pk), parents, "节要挂在章下面")
+
+    def test_an_existing_tag_is_reused_instead_of_duplicated(self):
+        """同名同类型的标签直接接上 —— 目录改过一遍再贴一次，不该变成两份。"""
+        existing = self.tag("第一章 集合", kind="knowledge")
+        revision = library_tagging.catalogue_state().revision
+        response = self.post_json("/api/library/tags", {
+            "action": "create_tags_batch", "kind": "knowledge",
+            "nodes": [{"name": "第一章 集合", "children": [{"name": "1.1 集合的含义", "children": []}]}],
+            "revision": revision, "request_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(LibraryTag.objects.filter(name="第一章 集合", kind="knowledge").count(), 1)
+        child = LibraryTag.objects.get(name="1.1 集合的含义")
+        self.assertIn(str(existing.pk), library_tagging.tag_json(child)["parent_ids"])
+
+    def test_a_batch_of_textbook_outline_can_be_undone(self):
+        revision = library_tagging.catalogue_state().revision
+        response = self.post_json("/api/library/tags", {
+            "action": "create_tags_batch", "kind": "knowledge",
+            "nodes": [{"name": "虚构第一章", "children": [{"name": "虚构 1.1", "children": []}]}],
+            "revision": revision, "request_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(LibraryTag.objects.filter(name="虚构第一章").exists())
+        undone = self.post_json("/api/library/tags/undo", {"operation_id": response.json()["operation_id"],
+                                                            "request_id": str(uuid.uuid4())})
+        self.assertEqual(undone.status_code, 200, undone.content)
+        self.assertFalse(LibraryTag.objects.filter(name="虚构第一章").exists(),
+                         "撤销要把刚建的目录节点带走")
+        self.assertFalse(LibraryTag.objects.filter(name="虚构 1.1").exists())
+
     def test_the_catalogue_never_carries_groups_any_more(self):
         body = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
         self.assertNotIn("groups", body)
@@ -386,7 +445,7 @@ class FormalLibraryTaggingTests(TestCase):
         """
         publication = self.publication()
         question = publication.question
-        group = QuestionGroup.objects.create(paper=question.paper, title="（虚构）第一章",
+        group = QuestionGroup.objects.create(paper=question.paper, title="虚构第一章",
                                              kind=QuestionGroup.Kind.CHAPTER, sequence=0)
         question.group = group
         question.save(update_fields=["group"])
@@ -396,7 +455,7 @@ class FormalLibraryTaggingTests(TestCase):
             + "&status=all&limit=20&offset=0", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response["Content-Type"].split(";")[0], "application/json")
-        self.assertEqual(response.json()["items"][0]["group"], "（虚构）第一章")
+        self.assertEqual(response.json()["items"][0]["group"], "虚构第一章")
 
     def test_undo_of_a_pre_upgrade_group_operation_still_repairs_the_old_record(self):
         # Groups cannot be created any more, but a catalogue operation recorded

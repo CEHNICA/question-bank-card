@@ -2294,7 +2294,7 @@
     const parsed = () => (window.QBTextbookToc?.parse(area.value) || { roots: [], count: 0, ignored: 0 });
     const update = () => tocRenderPreview(preview, parsed());
     area.addEventListener("input", update);
-    body.append(node("p", "helper", "认得这几���写法：「第一章 集合」「1.1 集合的含义」「（一）集合的含义」，以及前面的缩进。"),
+    body.append(node("p", "helper", "认得这几种写法：「第一章 集合」「1.1 集合的含义」「（一）集合的含义」，以及前面的缩进。"),
       area, preview);
     const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "还没贴目录。"),
       cancel = node("button", "button", "取消"), apply = node("button", "button button-primary", "建好这份目录");
@@ -6316,15 +6316,15 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     panel.replaceChildren();
     const head = node("div", "library-directory-head");
     head.append(node("strong", "", "教材目录"));
-    // 1.26.6：入口就摆在目录标题旁边 —— 之前目录只能改标签、模板只能整套导入，
-    // 「怎么设置」这件事在界面上没答案，群里那位同学就没搞懂。
-    const toc = node("button", "button button-small", "＋ 按课本目录新建"); toc.type = "button";
-    toc.title = "把课本目录贴进来，一次建好整棵目录";
-    toc.addEventListener("click", () => void openTextbookTocDialog());
-    head.append(toc);
     const close = node("button", "button button-small button-quiet", "收起"); close.type = "button";
     close.addEventListener("click", () => void directoryToggle(false));
     head.append(close);
+    // 1.26.6：入口就摆在目录标题下面 —— 之前目录只能改标签、模板只能整套导入，
+    // 「怎么设置」这件事在界面上没答案，群里那位同学就没搞懂。
+    const toc = node("button", "button button-small library-toc-new", "＋ 按课本目录新建"); toc.type = "button";
+    toc.title = "把课本目录贴进来，一次建好整棵目录";
+    toc.addEventListener("click", () => void openTextbookTocDialog());
+    head.append(toc);
     panel.append(head);
     panel.append(node("p", "library-directory-help", "点一章看这一章的题；0 表示当前筛选下这一章没有题（多半是还没贴标签）。"));
     if (directory.loading) { panel.append(node("p", "library-directory-empty", "正在读取目录…")); return; }

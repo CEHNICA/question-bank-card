@@ -1580,10 +1580,11 @@ body.library-directory-open .library-directory { display: block; position: stick
   /* 1.25.87：用户拖动 --directory-width 后，把固定宽用变量撑起来；默认 240px 在 :root 上。
      不要在这条规则上再写 --directory-width —— 它会盖住 :root 的值，面板永远只看见 240px。 */
   width: var(--directory-width, 240px); }
-.library-directory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 8px; }
-.library-directory-head strong { font-size: 13px; }
-/* 1.26.6：「按课本目录新建」紧挨着标题，右边的「收起」仍然靠右。 */
-.library-directory-head strong + .button { margin-right: auto; }
+.library-directory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 8px; flex-wrap: wrap; }
+.library-directory-head strong { font-size: 13px; white-space: nowrap; }
+/* 1.26.6：「按课本目录新建」自己占一行 —— 目录面板只有 240px 宽，挤在一行会把
+   标题压成竖排。 */
+.library-directory-head .library-toc-new { flex: 1 0 100%; justify-content: center; margin-top: 2px; }
 .library-directory-all { display: flex; align-items: center; width: 100%; padding: 6px 9px; border: 0; border-radius: 7px;
   background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .library-directory-all:hover { background: #eef3ef; }
