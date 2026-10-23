@@ -68,12 +68,12 @@ class _WindowsFolderDialog:
     def _call(self, index, argument_types, *arguments):
         return _method(self.interface, index, ctypes.c_long, *argument_types)(self.interface, *arguments)
 
-    def choose(self, initial_directory):
+    def choose(self, initial_directory, title="选择 Word 和 PDF 的导出文件夹"):
         # Pick existing filesystem folders, without changing the process cwd or
         # adding the user's choice to Windows recent documents.
         options = 0x20 | 0x40 | 0x800 | 0x8 | 0x2000000
         self._check(self._call(9, [ctypes.c_uint32], options))
-        self._check(self._call(17, [ctypes.c_wchar_p], "选择 Word 和 PDF 的导出文件夹"))
+        self._check(self._call(17, [ctypes.c_wchar_p], title))
         self._check(self._call(18, [ctypes.c_wchar_p], "选择文件夹"))
         if initial_directory:
             item = ctypes.c_void_p()
@@ -116,13 +116,15 @@ class _WindowsFolderDialog:
             self.initialized = False
 
 
-def choose_directory(initial_directory=""):
+def choose_directory(initial_directory="", title=None):
     """Return the explicit choice, or None on Cancel; never save it implicitly."""
     if os.name != "nt":
         raise FolderPickerError("文件夹选择仅用于 Windows 桌面版。")
     dialog = None
     try:
         dialog = _WindowsFolderDialog()
+        if title:
+            return dialog.choose(initial_directory, title)
         return dialog.choose(initial_directory)
     except FolderPickerError:
         raise

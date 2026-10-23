@@ -752,6 +752,7 @@ library_question_editor_script = _frontend("library-question-editor.js", "applic
 library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
 library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
 export_settings_script = _frontend("export-settings.js", "application/javascript; charset=utf-8")
+library_transfer_script = _frontend("library-transfer.js", "application/javascript; charset=utf-8")
 library_question_viewer_script = _frontend("library-question-viewer.js", "application/javascript; charset=utf-8")
 browser_interactions_script = _frontend("browser-interactions.js", "application/javascript; charset=utf-8")
 site_drawer_script = _frontend("site-drawer.js", "application/javascript; charset=utf-8")

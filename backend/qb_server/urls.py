@@ -1,6 +1,6 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice, window_control
+from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice, window_control, transfer_views
 
 urlpatterns = [
     path("", views.index_page),
@@ -11,8 +11,7 @@ urlpatterns = [
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
     path("review-finder.js", views._frontend("review-finder.js", "application/javascript; charset=utf-8")),
     path("settings", views.index_page),
-    path("app.js", views.app_script),
-    path("original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")),
+    path("app.js", views.app_script),    path("original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")),
     path("browser-interactions.js", views.browser_interactions_script),
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),
@@ -30,6 +29,7 @@ urlpatterns = [
     path("exam-layout.js", views.exam_layout_script),
     path("static/library-ai-settings.js", views.library_ai_script),
     path("static/export-settings.js", views.export_settings_script),
+    path("static/library-transfer.js", views.library_transfer_script),
     path("styles.css", views.styles),
     path("library.css", views.library_styles),
     path("library-reading.css", views.library_reading_styles),
@@ -48,6 +48,11 @@ urlpatterns = [
     path("api/settings/library-ai/key/reveal", api_key_reveal.reveal_view),
     path("api/export-preferences", export_preferences.preferences_view),
     path("api/export-preferences/select", export_preferences.select_export_directory_view),
+    path("api/backup/export", transfer_views.export_view),
+    path("api/backup/choose-directory", transfer_views.choose_directory_view),
+    path("api/backup/inspect", transfer_views.inspect_view),
+    path("api/backup/import", transfer_views.import_view),
+    path("api/backup/records", transfer_views.records_view),
     path("api/export-preferences/open", export_preferences.open_export_view),
     path("api/papers", views.papers),
     path("api/demo", views.demo_paper),

@@ -1210,6 +1210,17 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .settings-privacy strong { color: var(--ink); }
 .settings-section#settingsAbout .button { margin-top: 12px; }
 
+/* 1.25.99：数据备份与迁移。合并前那张"会发生什么"的卡片，是这一节的主角 ——
+   老师要能在点下去之前，先看清楚会多进来什么、会不会动到本机已有的东西。 */
+.transfer-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 4px; }
+.transfer-status { margin: 6px 0 0; min-height: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.transfer-status.is-error { color: var(--danger, #b3261e); }
+.transfer-preview { margin-top: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2, #f7f9fc); }
+.transfer-preview h4 { margin-bottom: 6px; font-size: 14px; }
+.transfer-facts { margin: 0 0 8px; padding-left: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+.transfer-summary { margin: 0 0 4px; color: var(--ink); font-size: 13px; line-height: 1.6; }
+.transfer-records { margin: 0 0 8px; padding-left: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.7; }
+
 /* 已保存密钥与新输入分开：默认星号，眼睛临时查看，输入永不预填。 */
 .credential-dialog { width: min(690px, 94vw); max-height: 92vh; padding: 0; overflow: hidden; }
 .credential-dialog[open] { display: flex; flex-direction: column; }

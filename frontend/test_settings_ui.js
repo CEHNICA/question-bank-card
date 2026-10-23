@@ -111,10 +111,10 @@ function routes(hash = "") {
     visible() { return pages.filter((page) => !page.hidden).map((page) => page.id); }
   };
 }
-for (const hash of ["#ai", "#api", "#services", "", "#display", "#help", "#about", "#unknown"]) {
+for (const hash of ["#ai", "#api", "#services", "", "#display", "#transfer", "#help", "#about", "#unknown"]) {
   const entry = routes(hash);
   entry.context.openSettings();
-  const expected = ({ "#display": "settingsDisplay", "#help": "settingsReview", "#about": "settingsAbout" })[hash] || "settingsGeneral";
+  const expected = ({ "#display": "settingsDisplay", "#transfer": "settingsTransfer", "#help": "settingsReview", "#about": "settingsAbout" })[hash] || "settingsGeneral";
   assert.deepEqual(entry.selected(), [expected]); assert.deepEqual(entry.visible(), [expected]);
   assert.deepEqual(entry.opened, ["#ai", "#api"].includes(hash) ? ["answers"] : [], "Initial bookmarks use only the unified window");
   assert.equal(entry.location.hash, hash, "Entry does not replace legacy bookmark before routing");
@@ -126,7 +126,7 @@ for (const hash of ["#ai", "#api", "#services", "", "#display", "#help", "#about
   }
 }
 const navigation = routes(); navigation.context.openSettings();
-assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["API 配置", "显示与导出", "帮助", "关于"]);
+assert.deepEqual(navigation.tabs.map((tab) => tab.textContent), ["API 配置", "显示与导出", "数据备份与迁移", "帮助", "关于"]);
 for (let index = 0; index < navigation.tabs.length; index++) {
   for (const key of ["ArrowLeft", "ArrowRight"]) {
     let prevented = false;

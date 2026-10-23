@@ -66,6 +66,7 @@
       <div class="settings-nav" role="tablist" aria-label="设置分区">
         <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">API 配置</button>
         <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">显示与导出</button>
+        <button type="button" role="tab" data-settings-tab="settingsTransfer" aria-selected="false">数据备份与迁移</button>
         <button type="button" role="tab" data-settings-tab="settingsReview" aria-selected="false">帮助</button>
         <button type="button" role="tab" data-settings-tab="settingsAbout" aria-selected="false">关于</button>
       </div>
@@ -95,6 +96,9 @@
             <p class="settings-footnote">审核时还可以点工具栏上的“全屏”（Q），收起顶栏和试卷列表。</p>
             <button id="keysButton" class="button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>查看全部快捷键</button>
           </section>
+        </div>
+        <div id="settingsTransfer" class="settings-page" role="tabpanel" hidden>
+          <div id="transferSettingsMount"></div>
         </div>
         <div id="settingsReview" class="settings-page" role="tabpanel" hidden>
           <section class="settings-section help-start" aria-labelledby="settingsReviewTitle">
@@ -846,6 +850,7 @@
   <script src="/qb-render.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/static/export-settings.js" defer></script>
+  <script src="/static/library-transfer.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
   <script src="/site-drawer.js" defer></script>

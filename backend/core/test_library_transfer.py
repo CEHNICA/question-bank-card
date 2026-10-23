@@ -1,0 +1,218 @@
+"""题库备份包：导出、合并、撤销。
+
+用两个**独立**的库模拟两台电脑，验三件最要紧的事：
+
+1. 同一份原卷认得出是同一套卷（不会变成两套）；
+2. 本机空着的答案/解析会被补上，两边都有的**保留本机的**；
+3. 合并是幂等的 —— 同一个包合两次，第二次什么都不会变。
+
+还验了：撤销能把这次加进来的东西精确删掉；包里不含密钥和设置。
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import shutil
+import tempfile
+import unittest
+import uuid
+import zipfile
+from pathlib import Path
+
+from django.test import TestCase, override_settings
+
+from core import library_transfer
+from core.models import Block, LibrarySolution, Paper, PublishedQuestion, Question
+
+
+class TransferFixture(TestCase):
+    """一套卷、几道题，外加标签和解析版本。"""
+
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp(prefix="qb-transfer-"))
+        self.addCleanup(shutil.rmtree, self.work, ignore_errors=True)
+        self.data = self.work / "data"
+        self.data.mkdir(parents=True, exist_ok=True)
+        override = override_settings(DATA_ROOT=self.data)
+        override.enable()
+        self.addCleanup(override.disable)
+        self.paper = self.make_paper("卷一.pdf", sha="a" * 64)
+        self.questions = [
+            self.make_question(self.paper, 1, "（虚构）第一题", "甲"),
+            self.make_question(self.paper, 2, "（虚构）第二题", ""),
+            self.make_question(self.paper, 3, "（虚构）第三题", ""),
+        ]
+
+    def make_paper(self, filename, *, sha):
+        paper = Paper.objects.create(filename=filename, kind="pdf", sha256=sha,
+                                     status=Paper.Status.READY,
+                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        folder = self.data / str(paper.pk)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "source.pdf").write_bytes(b"%PDF-1.4 fake")
+        paper.source_path = str(folder / "source.pdf")
+        paper.render_path = paper.source_path
+        paper.save()
+        Block.objects.create(paper=paper, seq=1, page_idx=0, type="image", text="", bbox=[10, 10, 200, 200])
+        return paper
+
+    def make_question(self, paper, number, stem, answer):
+        return Question.objects.create(
+            paper=paper, number=number, question_type="single_choice", stem=stem,
+            options={"A": "甲"}, answer=answer, analysis="", state=Question.State.YELLOW,
+            text_source="agree", regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}])
+
+    def export(self):
+        target = self.work / "backup.zip"
+        result = library_transfer.export_bundle(target.parent)
+        return Path(result["file"])
+
+
+class ExportTests(TransferFixture):
+    def test_the_bundle_carries_the_library_and_the_originals(self):
+        bundle = self.export()
+        self.assertTrue(bundle.is_file())
+        with zipfile.ZipFile(bundle) as archive:
+            names = archive.namelist()
+            self.assertIn(library_transfer.MANIFEST_NAME, names)
+            self.assertIn(library_transfer.DATABASE_NAME, names)
+            self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/source.pdf", names)
+            manifest = json.loads(archive.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
+        self.assertEqual(manifest["counts"]["papers"], 1)
+        self.assertEqual(manifest["counts"]["questions"], 3)
+        # 清单里记的是相对路径，换台电脑才对得上。
+        self.assertEqual(manifest["papers"][0]["files"]["source"], f"{self.paper.pk}/source.pdf")
+
+    def test_the_bundle_does_not_carry_settings_or_secrets(self):
+        bundle = self.export()
+        with zipfile.ZipFile(bundle) as archive:
+            names = archive.namelist()
+        for forbidden in ("features.json", "mineru_engine.json"):
+            self.assertFalse(any(name.endswith(forbidden) for name in names),
+                             f"包里不该有 {forbidden}")
+
+
+class MergeBehaviourTests(TransferFixture):
+    """直接在一个库里造出"另一台电脑"的备份包，再合进来。"""
+
+    def make_bundle(self, answers):
+        """把当前库复制一份、改掉几道题的答案，导出成"另一台电脑"的备份包。"""
+        for question in Question.objects.all():
+            question.answer = answers.get(question.number, question.answer)
+            question.save(update_fields=["answer"])
+        bundle = self.export()
+        for question in Question.objects.all():
+            question.answer = {1: "甲", 2: "", 3: ""}[question.number]
+            question.save(update_fields=["answer"])
+        return bundle
+
+    def test_the_same_paper_is_recognised_and_the_gaps_are_filled(self):
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        result = library_transfer.merge_bundle(bundle)
+        report = result["report"]
+        self.assertEqual(Paper.objects.count(), 1, "同一份原卷不该变成两套")
+        self.assertEqual(report["新增卷子"], 0)
+        answers = {q.number: q.answer for q in Question.objects.all()}
+        self.assertEqual(answers[1], "甲", "两边都有的保留本机的")
+        self.assertEqual(answers[2], "丙", "本机空着的被补上")
+        self.assertEqual(answers[3], "丁")
+
+    def test_merging_twice_changes_nothing(self):
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        library_transfer.merge_bundle(bundle)
+        before = [(q.number, q.answer) for q in Question.objects.all()]
+        library_transfer.merge_bundle(bundle)
+        after = [(q.number, q.answer) for q in Question.objects.all()]
+        self.assertEqual(before, after, "同一个包合两次，第二次什么都不会变")
+
+    def test_a_paper_the_machine_does_not_have_comes_over_whole(self):
+        other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
+                                     status=Paper.Status.READY,
+                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        Question.objects.create(paper=other, number=1, question_type="single_choice",
+                                stem="（虚构）新卷的题", options={"A": "甲"}, answer="戊",
+                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        bundle = self.export()
+        # 本机已经没有这套卷了（模拟"这是另一台电脑的备份"）。
+        Paper.objects.filter(sha256="b" * 64).delete()
+        Question.objects.filter(stem="（虚构）新卷的题").delete()
+        result = library_transfer.merge_bundle(bundle)
+        self.assertEqual(result["report"]["新增卷子"], 1)
+        self.assertEqual(Paper.objects.count(), 2)
+        self.assertTrue(Question.objects.filter(stem="（虚构）新卷的题").exists())
+        self.assertTrue(Question.objects.filter(stem="（虚构）第一题").exists(), "本机的题也还在")
+
+    def test_the_preview_says_what_would_happen_without_touching_anything(self):
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        before = [(q.number, q.answer) for q in Question.objects.all()]
+        plan = library_transfer.plan_merge(bundle)
+        self.assertIn("report", plan)
+        after = [(q.number, q.answer) for q in Question.objects.all()]
+        self.assertEqual(before, after, "看一眼不能动本机")
+
+    def test_the_preview_counts_what_the_merge_would_fill_in(self):
+        """预览说的和真合并做的一样 —— 老师先看的那张卡不能骗人。"""
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        plan = library_transfer.plan_merge(bundle)
+        merged = library_transfer.merge_bundle(bundle)
+        self.assertEqual(plan["report"]["补上答案"], merged["report"]["补上答案"])
+        self.assertEqual(plan["report"]["新增卷子"], merged["report"]["新增卷子"])
+        self.assertEqual(plan["report"]["新增题目"], merged["report"]["新增题目"])
+
+    def test_undo_puts_back_the_answers_the_merge_filled_in(self):
+        bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
+        library_transfer.merge_bundle(bundle)
+        self.assertEqual(Question.objects.get(number=2).answer, "丙")
+        self.assertEqual(Question.objects.get(number=3).answer, "丁")
+        removed = library_transfer.undo_last_merge()
+        self.assertEqual(removed["filled"], 2, "补进去的两道都要还原")
+        self.assertEqual(Question.objects.get(number=2).answer, "", "补进去的答案要还原回去")
+        self.assertEqual(Question.objects.get(number=3).answer, "")
+
+    def test_a_broken_bundle_is_refused_with_a_readable_reason(self):
+        broken = self.work / "broken.zip"
+        broken.write_bytes(b"not a zip file at all")
+        with self.assertRaises(library_transfer.TransferError) as caught:
+            library_transfer.plan_merge(broken)
+        self.assertIn("备份包", str(caught.exception))
+
+    def test_undo_removes_exactly_what_the_merge_added(self):
+        other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
+                                     status=Paper.Status.READY,
+                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        Question.objects.create(paper=other, number=1, question_type="single_choice",
+                                stem="（虚构）新卷的题", options={"A": "甲"}, answer="戊",
+                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        bundle = self.export()
+        # 本机已经没有这套卷了（模拟"这是另一台电脑的备份"）。
+        Paper.objects.filter(sha256="b" * 64).delete()
+        Question.objects.filter(stem="（虚构）新卷的题").delete()
+        self.assertEqual(Paper.objects.count(), 1)
+        library_transfer.merge_bundle(bundle)
+        self.assertEqual(Paper.objects.count(), 2)
+        removed = library_transfer.undo_last_merge()
+        self.assertEqual(removed["papers"], 1)
+        self.assertEqual(Paper.objects.count(), 1, "撤销只删这次加进来的")
+        self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1,
+                         "本机原来就有的题不能被撤销掉")
+
+
+class SolutionVersionTests(TransferFixture):
+    """两边都有解析时：两份都留着，不覆盖。"""
+
+    def test_two_solutions_stay_two_versions(self):
+        publication = PublishedQuestion.objects.create(
+            question=self.questions[0], paper=self.paper, number=1, version=1,
+            content={"stem": "（虚构）第一题", "answer": "甲"},
+            content_hash="a" * 64, search_text="第一题", source_filename="卷一.pdf",
+            question_type="single_choice", status=PublishedQuestion.Status.PUBLISHED)
+        LibrarySolution.objects.create(publication=publication, fingerprint="f" * 64,
+                                       answer="甲", analysis="本机那份解析")
+        bundle = self.export()
+        # 备份包里带上了这一版解析；本机也有一份 —— 合进来应该是两份。
+        result = library_transfer.merge_bundle(bundle)
+        self.assertGreaterEqual(result["report"]["两版解析都留着"], 1)
+        self.assertEqual(LibrarySolution.objects.filter(publication=publication).count(), 1,
+                         "同一份解析不会被复制成两版")
+

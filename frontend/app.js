@@ -5236,7 +5236,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestAnimationFrame(action);
   }
 
-  const SETTINGS_HASHES = { settingsGeneral: "services", settingsDisplay: "display", settingsReview: "help", settingsAbout: "about" };
+  const SETTINGS_HASHES = { settingsGeneral: "services", settingsDisplay: "display", settingsTransfer: "transfer", settingsReview: "help", settingsAbout: "about" };
   function settingsTabFromHash() {
     const hash = window.location.hash.slice(1);
     return Object.keys(SETTINGS_HASHES).find((id) => SETTINGS_HASHES[id] === hash) || "settingsGeneral";
@@ -5251,6 +5251,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     document.querySelectorAll("#settingsDialog .settings-page").forEach((page) => { page.hidden = page.id !== id; });
     if (id === "settingsDisplay") void window.ExportSettings?.refresh?.();
+    if (id === "settingsTransfer") void window.LibraryTransfer?.refresh?.();
     const scroller = document.querySelector("#settingsDialog .settings-scroll");
     if (scroller) scroller.scrollTop = 0;
     if (window.location.pathname === "/settings" && updateHash) {
@@ -9452,6 +9453,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();
       if (window.ExportSettings?.mount) await window.ExportSettings.mount($("exportSettingsMount"));
+      if (window.LibraryTransfer?.mount) await window.LibraryTransfer.mount($("transferSettingsMount"));
       return;
     }
     await loadPapers();

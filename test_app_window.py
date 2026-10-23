@@ -535,9 +535,12 @@ class MainFlowTests(unittest.TestCase):
     def test_exit_gives_up_instead_of_waiting_forever_for_stuck_browser_processes(self):
         # 拿不到窗口句柄时只能按配置目录判断。这条路以前没有上限，一个卡住的崩溃
         # 收集器就能让退出永远停在这里。现在有兜底：到点就收手，照样停服务。
+        # 「配置目录还在被占用」这件事必须自己 mock 出来 —— 早先这条测试靠
+        # 真机上恰好有个带 "profile" 字样的浏览器进程才成立，换台机器就红。
         still_open = Mock(return_value=True)
         with patch.object(app_window, "_user32", Mock(return_value=None)), \
              patch.object(app_window, "_CLOSE_BACKSTOP", 5.0), \
+             patch.object(app_window, "_profile_still_open", still_open), \
              patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))), \
              patch.object(app_window.time, "sleep", Mock()), \
              patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 9.9, 10.1])):
