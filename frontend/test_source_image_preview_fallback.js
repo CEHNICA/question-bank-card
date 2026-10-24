@@ -135,4 +135,48 @@ assert.equal(multi.status.hidden, false); assert.match(multi.status.textContent,
 const viewerCall = js.slice(js.indexOf("  function renderViewer()"), js.indexOf("    const images =", js.indexOf("  function renderViewer()")));
 assert.match(viewerCall, /fallbackImages: q\.body_mode === "source_image" \? q\.question_images \|\| \[\] : \[\]/);
 assert.match(js, /sticky\.append\(cropView\(q\.regions, \{[^\n]+fallbackImages: q\.body_mode === "source_image"/);
-console.log("Source-image preview fallback: saved range/order, one retry, recovery notices and viewer zoom/pan readiness OK");
+
+// 1.26.23：原卷预览打不开时，最后再退到现场重裁这道题里的图 ——
+// 备份恢复之后原卷文件没归位，审核页只剩一个白框，老师什么也核不了。
+const liveFigures = [
+  { slot: "stem", page_idx: 1, bbox: [120, 220, 400, 380] },
+  { slot: "stem", page_idx: 0, bbox: [60, 520, 300, 700] }
+];
+const liveCrop = makeCrop(pieces, regions, { questionId: 42, figures: liveFigures });
+const liveImages = liveCrop.querySelectorAll("img");
+liveImages[0].dispatch("error");
+assert.equal(liveImages[0].src, "/saved/0.png", "先退到已保存的裁片");
+liveImages[0].dispatch("error");
+assert.equal(liveImages[0].src, "/api/questions/42/figures/0", "再退到现场重裁的图");
+assert.equal(liveImages[0].dataset.cropFallback, "recrop");
+assert.equal(liveImages[0].dataset.cropSource, "live");
+assert.match(liveCrop.querySelectorAll(".hint")[0].textContent, /重新裁/);
+liveImages[0].dispatch("load");
+assert.equal(liveImages[0].dataset.cropFallback, "ready");
+assert.equal(liveCrop.querySelectorAll(".hint")[0].hidden, true);
+liveImages[0].dispatch("error");
+assert.equal(liveImages[0].dataset.cropFallback, "failed", "现场也裁不出来就老实说失败");
+assert.match(liveCrop.querySelectorAll(".hint")[0].textContent, /调整范围/);
+assert.deepEqual(liveImages[0].requests,
+  ["/pages/1/preview.png", "/saved/0.png", "/api/questions/42/figures/0"], "每条退路只试一次");
+
+// 没有已存裁片时，直接退到现场重裁。
+const liveOnly = makeCrop([], regions, { questionId: 7, figures: liveFigures });
+const liveOnlyImage = liveOnly.querySelectorAll("img")[0];
+liveOnlyImage.dispatch("error");
+assert.equal(liveOnlyImage.src, "/api/questions/7/figures/0");
+assert.equal(liveOnlyImage.dataset.cropSource, "live");
+
+// 放大对照里，重裁还在路上不算失败。
+const liveViewerCrop = makeCrop([pieces[0]], [regions[0]], { questionId: 42, figures: liveFigures });
+const liveTracking = viewerTracking(liveViewerCrop); const liveViewerImage = liveViewerCrop.querySelectorAll("img")[0];
+liveViewerImage.dispatch("error");
+liveViewerImage.dispatch("error");
+assert.equal(liveTracking.viewer.imageReady, false);
+assert.doesNotMatch(liveTracking.status.className, /image-error/, "重裁还在路上，别报失败");
+assert.match(liveTracking.status.textContent, /重新裁/);
+liveViewerImage.dispatch("load");
+assert.equal(liveTracking.viewer.imageReady, true);
+assert.equal(liveTracking.status.hidden, true);
+
+console.log("Source-image preview fallback: saved range/order, one retry, live re-crop, recovery notices and viewer zoom/pan readiness OK");

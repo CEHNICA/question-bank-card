@@ -2768,7 +2768,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return marks;
   }
 
-  function cropView(regions, { figures = [], spots = [], fallbackImages = [], onZoom, capToNatural = false } = {}) {
+  function cropView(regions, { figures = [], spots = [], fallbackImages = [], onZoom, capToNatural = false, questionId = null } = {}) {
     const wrap = el("div", "crop");
     if (!regions.length) {
       wrap.append(el("p", "crop-missing", "这道题还没有原卷范围。点“调整范围”框出题目范围并保存；需要 AI 读字时，再点题卡上的“AI 识读这题”。保存范围不会自动识读。"));
@@ -2815,14 +2815,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const canFallback = Boolean(saved?.url && saved.page_idx === region.page_idx
         && Array.isArray(saved.bbox) && saved.bbox.length === 4
         && saved.bbox.every((value, i) => value === region.bbox[i]));
-      let fallbackAttempted = false;
+      // 现场重裁：这道题在这一页上的图。原卷预览打不开时，至少还能看到图 ——
+      // 1.26.23：备份恢复之后原卷文件没归位，审核页只剩一个白框，什么也核不了。
+      const liveIndex = questionId == null ? -1
+        : figures.findIndex((figure) => figure && figure.page_idx === region.page_idx);
+      // 三步退路：页面预览 → 已保存的整题裁片 → 现场重裁的图。
+      let stage = 0;
       image.addEventListener("load", () => {
-        if (fallbackAttempted) image.dataset.cropFallback = "ready";
+        if (stage) image.dataset.cropFallback = "ready";
         imageNotice.hidden = true;
       });
       image.addEventListener("error", () => {
-        if (!fallbackAttempted && canFallback) {
-          fallbackAttempted = true;
+        if (stage === 0 && canFallback) {
+          stage = 1;
           image.dataset.cropSource = "saved";
           image.dataset.cropFallback = "loading";
           imageNotice.textContent = "原卷预览暂不可用，正在加载已保存的题目裁片…";
@@ -2838,7 +2843,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           image.src = saved.url;
           return;
         }
-        if (fallbackAttempted) image.dataset.cropFallback = "failed";
+        if (stage < 2 && liveIndex >= 0) {
+          stage = 2;
+          image.dataset.cropSource = "live";
+          image.dataset.cropFallback = "recrop";
+          imageNotice.textContent = "原卷预览打不开，正在重新裁这道题里的图…";
+          imageNotice.hidden = false;
+          image.style.width = "100%";
+          image.style.height = "100%";
+          image.style.objectFit = "contain";
+          image.style.left = "0";
+          image.style.top = "0";
+          image.src = `/api/questions/${questionId}/figures/${liveIndex}`;
+          return;
+        }
+        image.dataset.cropFallback = "failed";
         imageNotice.textContent = "题目图片未能加载。重新打开放大窗口重试，或在“调整范围”里恢复并保存。";
         imageNotice.hidden = false;
       });
@@ -3110,7 +3129,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const regions = q.regions || [];
     if (!regions.length && viewer.mode === "fit") viewer.zoom = 1;
     viewer.imageReady = false;
-    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [] }));
+    crop.replaceChildren(cropView(regions, { figures: q.figures || [], spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [], questionId: q.id }));
     const images = [...crop.querySelectorAll("img")];
     const imageStates = new Map(images.map((image) => [image, "pending"]));
     const syncImages = () => {
@@ -3123,16 +3142,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       status.hidden = !images.length || (viewer.imageReady && !failed && !pending);
       status.classList.toggle("image-error", failed);
       status.textContent = failed ? (viewer.imageReady ? "部分题目图片未能加载，关闭窗口后重试，或调整范围后保存。" : "题目图片未能加载，关闭窗口后重试，或调整范围后保存。")
-        : images.some((image) => image.dataset.cropFallback === "loading") ? "原卷预览暂不可用，正在加载已保存的题目裁片…" : "正在加载原卷…";
+        : images.some((image) => image.dataset.cropFallback === "loading") ? "原卷预览暂不可用，正在加载已保存的题目裁片…"
+          : images.some((image) => image.dataset.cropFallback === "recrop") ? "原卷预览打不开，正在重新裁这道题里的图…"
+            : "正在加载原卷…";
       if (!viewer.imageReady) stopViewerSourcePan();
       syncViewerZoom();
       if (viewer.imageReady && viewer.mode === "fit" && $("viewerDialog").open) requestViewerFit();
     };
     images.forEach((image) => {
       const finish = (result) => { imageStates.set(image, result); syncImages(); };
+      // 退路里的图还在路上（已存裁片 / 现场重裁），别当成已经失败。
+      const pendingFallback = () => image.dataset.cropFallback === "loading" || image.dataset.cropFallback === "recrop";
       image.addEventListener("load", () => finish("ready"));
-      image.addEventListener("error", () => finish(image.dataset.cropFallback === "loading" ? "pending" : "failed"));
-      if (image.complete) imageStates.set(image, image.naturalWidth ? "ready" : image.dataset.cropFallback === "loading" ? "pending" : "failed");
+      image.addEventListener("error", () => finish(pendingFallback() ? "pending" : "failed"));
+      if (image.complete) imageStates.set(image, image.naturalWidth ? "ready" : pendingFallback() ? "pending" : "failed");
     });
     syncImages();
     // 又宽又矮的截图（一两行字的题）改成上下排：原卷能占满整个窗口宽度。
@@ -3855,7 +3878,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const source = el("div", "card-source");
     const sticky = el("div", "source-sticky");
     // 1.10.1：每张卡都是左图右文（以前宽的截图会改成上图下文，版式和打勾位置跟着变）。
-    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [], onZoom: () => openViewer(q), capToNatural: true }));
+    sticky.append(cropView(q.regions, { figures: q.figures, spots: q.check_spots, fallbackImages: q.body_mode === "source_image" ? q.question_images || [] : [], onZoom: () => openViewer(q), capToNatural: true, questionId: q.id }));
     // 说明文字也能点：写着“点击放大对照”，点它就该打开放大对照。
     const sourceNote = el("button", "source-note");
     sourceNote.type = "button";

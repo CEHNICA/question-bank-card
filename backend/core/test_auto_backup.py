@@ -87,7 +87,7 @@ class AutoBackupTests(TestCase):
         self._make_backup(1)
         with mock.patch("core.features.enabled", return_value=True):
             body = self.client.get("/api/backup/auto").json()
-        self.assertEqual(body["keep"], 10)
+        self.assertEqual(body["keep"], library_transfer.BACKUP_KEEP)
         self.assertEqual(body["interval_days"], 1)
         self.assertGreater(body["total_bytes"], 0)
         self.assertIn("backups", body["folder"])
@@ -121,7 +121,7 @@ class AutoBackupTests(TestCase):
         os.utime(path, (old, old))
         self.assertTrue(library_transfer.backup_due())
 
-    def test_only_the_newest_ten_are_kept(self):
+    def test_only_the_newest_ones_are_kept(self):
         root = library_transfer.backups_root()
         root.mkdir(parents=True, exist_ok=True)
         for index in range(12):
@@ -130,8 +130,8 @@ class AutoBackupTests(TestCase):
             import os
             os.utime(path, (1000000 + index, 1000000 + index))
         removed = library_transfer.prune_backups()
-        self.assertEqual(len(removed), 2)
-        self.assertEqual(len(library_transfer.list_backups()), 10)
+        self.assertEqual(len(removed), 12 - library_transfer.BACKUP_KEEP)
+        self.assertEqual(len(library_transfer.list_backups()), library_transfer.BACKUP_KEEP)
 
     def test_a_backup_name_outside_the_folder_is_refused(self):
         with self.assertRaises(library_transfer.TransferError):

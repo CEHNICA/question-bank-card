@@ -38,7 +38,7 @@ import tempfile
 import time
 import uuid
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
@@ -73,13 +73,39 @@ DELETION_BATCH_TABLE = "core_questiondeletionbatch"
 # 1.26.19：加上 backups 和 imports —— 备份包本身**绝不能**打进另一个备份包里。
 # 以前没排除 backups，结果是：自动备份把上一次的备份包也打了进去，每打一次
 # 包就大一倍（63 GB 的教训），最后把磁盘塞满，整个题库都打不开了。
-SKIP_DIRECTORIES = {"chunks", "pages", "library", "backups", "imports"}
+SKIP_DIRECTORIES = {"chunks", "pages", "backups", "imports"}
 SKIP_NAMES = {"features.json", "mineru_engine.json", "knowledge-points.txt",
               "library-drafts.json", "worker.lock", "library-drafts.lock"}
 
 
 class TransferError(ValueError):
     """A problem the teacher can act on; the message says what to do next."""
+
+
+def _uuid_text(value) -> str:
+    """把编号统一成"带横杠"的写法。
+
+    数据库里存的是 32 位连写（e5899a0411c94a73a6c26a6efcb5ba1d），磁盘上的文件夹
+    和备份包里的路径用的却是带横杠的（e5899a04-11c9-4a73-a6c2-6a6efcb5ba1d）。
+    两边对不上，备份恢复就会一个文件都回不来：清单里的那份卷子找不到，原卷文件
+    也按错的名字去包里找。统一之后，两边说的是同一件事。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(uuid.UUID(text))
+    except (ValueError, AttributeError, TypeError):
+        return text
+
+
+def _looks_like_uuid(value) -> bool:
+    """这段文字像一个编号吗。"""
+    try:
+        uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 def data_root() -> Path:
@@ -99,11 +125,15 @@ def records_root() -> Path:
 # 1.26.17：每周自动打一个备份包，放在软件自己的文件夹里，旧的只留最近十份。
 # 备份只在本地，不联网、不上传 —— 和 AGENTS 里的规矩一样。
 #
-# 1.26.21：改成**每天**一份，留的份数不变（还是十份）—— 占用一样（十份 × 84 MB
-# ≈ 840 MB），但拿到手的是**最近十天**，不是最近十周。老师真正会用到的是
-# 「我昨天弄错了，回昨天那份」；十周前的那份基本没人翻。
+# 1.26.21：改成**每天**一份 —— 拿到的就是最近十天，而不是最近十周。
+#
+# 1.26.23：份数从十份改成**两份（今天和昨天）**。老师的理由很实在：
+# 备份包的大小跟着题库走 —— 现在一份 84 MB，十份就是 840 MB；题库再大十倍，
+# 十份就是十倍，硬盘会被这些包撑满。两份就封住了：不管题库长到多大，
+# 自动备份最多占两份的量。空间检查也按"新包 + 已经留着的旧包"一起算，
+# 磁盘真的不够时它会自己停下来。
 BACKUP_INTERVAL_DAYS = 1
-BACKUP_KEEP = 10
+BACKUP_KEEP = 2
 AUTO_BACKUP_PREFIX = "题有据自动备份"
 
 
@@ -193,8 +223,13 @@ def _free_bytes(folder: Path) -> int | None:
 def _backup_bytes_needed() -> int:
     """打一份备份大概要多少空间。
 
-    按题库现在的体积估：原卷文件 + 数据库快照，再留一倍给压缩过程中的临时副本。
-    算不出来就按 2 GB 算 —— 宁可少打一次，也别把盘塞满。
+    算三笔账（1.26.23）：
+    1. 题库现在的体积（原卷文件 + 数据库）—— 新包大概这么大；
+    2. 再乘二 —— 压缩时的临时副本和数据库快照临时文件；
+    3. **已经留着的旧包也要算进去** —— 它们已经占了磁盘，写新包必须还有余量。
+
+    这样磁盘占用就被封住了：不管题库长到多大，自动备份最多占"份数 + 一份"的量，
+    绝不会把盘塞满。算不出来就按 2 GB 算 —— 宁可少打一次，也别把盘塞满。
     """
 
     total = 0
@@ -214,7 +249,8 @@ def _backup_bytes_needed() -> int:
         total += database_path().stat().st_size
     except OSError:
         pass
-    return max(total * 2, 2 * 1024 * 1024 * 1024)
+    retained = sum(int(item.get("size") or 0) for item in list_backups())
+    return max(total * 2 + retained, 2 * 1024 * 1024 * 1024)
 
 
 def backup_path(identifier: str) -> Path:
@@ -297,19 +333,41 @@ def _bundle_files(root: Path):
         yield path
 
 
+def _paper_files(paper) -> dict:
+    """这套卷在硬盘上有哪些文件，记成相对题库数据文件夹的路径。
+
+    清单要记的是**相对路径**（换台电脑才对得上）。以前是拿库里存的绝对路径
+    去反推的 —— 一旦那个绝对路径指到别处（数据文件夹挪过家、或者这份库是
+    从另一台电脑恢复来的，里面存着人家的路径），反推就失败，清单里的文件
+    记录整条空掉，恢复时就对不上号了。
+
+    现在改成：**文件名取自库里，位置按本机这套卷自己的文件夹去找**。
+    """
+    folder = data_root() / _uuid_text(paper.pk)
+    files: dict[str, str] = {}
+    for label, value in (("source", paper.source_path), ("render", paper.render_path),
+                         ("zip", paper.zip_path)):
+        if not value:
+            continue
+        name = Path(str(value)).name
+        if not name:
+            continue
+        if (folder / name).is_file():
+            files[label] = PurePosixPath(_uuid_text(paper.pk), name).as_posix()
+            continue
+        try:
+            files[label] = Path(str(value)).resolve().relative_to(data_root().resolve()).as_posix()
+        except ValueError:
+            continue
+    return files
+
+
 def _manifest() -> dict:
     from core.models import LibraryTag, Paper, PublishedQuestion, Question
 
     papers = []
     for paper in Paper.objects.all().order_by("created_at"):
-        files = {}
-        for label, value in (("source", paper.source_path), ("render", paper.render_path),
-                             ("zip", paper.zip_path)):
-            if value and Path(value).is_file():
-                try:
-                    files[label] = Path(value).resolve().relative_to(data_root().resolve()).as_posix()
-                except ValueError:
-                    continue
+        files = _paper_files(paper)
         papers.append({
             "id": str(paper.pk), "filename": paper.filename, "sha256": paper.sha256,
             "questions": Question.objects.filter(paper=paper).count(),
@@ -474,10 +532,12 @@ class _Merge:
         self.manifest = manifest
         self.dry_run = dry_run
         self.incoming: sqlite3.Connection | None = None
+        # 包里有哪些条目，先看一遍：还原文件时要按名字一个个找。
+        self._names = list(archive.namelist())
         self.report = {
             "新增卷子": 0, "新增题目": 0, "补上答案": 0, "两边都有保留本机": 0,
             "题号一样内容不同": 0, "两版解析都留着": 0, "新增标签": 0, "多贴的标签": 0,
-            "补进来的解析版本": 0,
+            "补进来的解析版本": 0, "补回的文件": 0, "补回原卷路径": 0,
         }
         self.added = {"papers": [], "questions": [], "publications": [], "solutions": [],
                       "tags": [], "groups": [], "relations": [], "assignments": [], "filled": [],
@@ -560,6 +620,9 @@ class _Merge:
         try:
             self._merge_tags()
             self._merge_papers()
+            # 文件最后还原：这时候"对方编号 → 本机编号"的对照才全了，
+            # 卷子换了新编号、入库快照换了新编号，图片才知道该放哪。
+            self._restore_originals()
         finally:
             self.incoming.close()
             shutil.rmtree(source.parent, ignore_errors=True)
@@ -707,7 +770,7 @@ class _Merge:
 
         判重认的是**原文件内容的 sha256**，不是文件名 —— 改了名的同一份卷照样认得出。
 
-        本机可能留着好几份一样的（老师"仍然新建"重录过一次）��这时要挑得
+        本机可能留着好几份一样的（老师"仍然新建"重录过一次），这时要挑得
         **确定**：先排除归档的（归档的那份老师在题库里看不见，题并进去就等于
         藏起来了），剩下里挑题最多的那份。都归档了就当本机没有 —— 另建一份
         看得见的，比把题塞进看不见的地方好。
@@ -733,14 +796,20 @@ class _Merge:
                    solutions_by_publication, regions_by_question, groups_by_paper, batches_by_paper) -> None:
         incoming_id = str(paper["id"])
         row = {**paper}
-        files = self._manifest_files(incoming_id)
-        for label, column in (("source", "source_path"), ("render", "render_path"), ("zip", "zip_path")):
-            relative = files.get(label)
-            row[column] = str(data_root() / relative) if relative else ""
         # 卷子的编号是 UUID，两台电脑各编各的 —— 但本机可能已经有这个编号了
         # （同一份卷在这儿归档过）。照抄会撞车，撞车就是一次"操作没完成"。
+        local_id = incoming_id
         if self._exists_by_id(PAPER_TABLE, incoming_id):
-            row["id"] = uuid.uuid4().hex
+            local_id = uuid.uuid4().hex
+        row["id"] = local_id
+        # 原卷文件在本机的位置：**跟着本机的新编号走**。
+        # 1.26.23：以前这里写的是清单里记的那条路径（对方机器上的相对路径），
+        # 清单里的编号（带横杠）和数据库里的（连写）对不上，就写成空字符串 ——
+        # 原卷预览当场坏掉，审核页只剩一个白框。
+        files = self._manifest_files(incoming_id)
+        folder = _uuid_text(local_id)
+        for label, column in (("source", "source_path"), ("render", "render_path"), ("zip", "zip_path")):
+            row[column] = self._restored_path(folder, files.get(label))
         inserted = self._insert(PAPER_TABLE, row)
         if inserted:
             self.added["papers"].append(inserted)
@@ -758,7 +827,6 @@ class _Merge:
         id_map = self._add_questions(paper_id, questions_by_paper.get(incoming_id, []),
                                      publications_by_question, solutions_by_publication, regions_by_question)
         self._fix_batch_question_ids(id_map)
-        self._copy_paper_files(incoming_id)
 
     def _merge_question_groups(self, local_paper_id: str, incoming_groups: list) -> None:
         """题组（一、二、三 大题这些"题号作用域"）跟着卷子一起搬。
@@ -897,6 +965,7 @@ class _Merge:
         self._merge_question_groups(local_paper_id, incoming_groups)
         self._merge_deletion_batches(local_paper_id, incoming_batches)
         self.paper_map[str(paper.get("id"))] = local_paper_id
+        self._repair_paper_paths(local_paper_id, paper)
         to_add: list[dict] = []
         for question in incoming_questions:
             number = question.get("number")
@@ -981,7 +1050,7 @@ class _Merge:
             if solution_id:
                 self.added["solutions"].append(solution_id)
                 self.report["补进来的解析版本"] += 1
-        self._copy_solution_files(publication_id)
+        # 解析里的图片跟着入库快照一起还原（见 _restore_originals）
 
     def _local_question(self, paper_id: str, number, group_id=None) -> dict | None:
         """本机这道题在哪儿（先按位置找）。
@@ -1091,39 +1160,149 @@ class _Merge:
 
     # -- 文件 ---------------------------------------------------------
 
-    def _manifest_files(self, paper_id: str) -> dict:
+    def _manifest_paper(self, paper_id: str) -> dict:
+        """清单里关于这套卷子的记录。
+
+        清单按**带横杠**的编号记（那是硬盘上文件夹的名字），合并时手里拿到的
+        是数据库里的**连写**编号。两种写法指的是同一个东西，但字符串不相等 ——
+        以前就卡在这儿：清单说"没这个文件"，于是卷子的原卷路径被写成空的，
+        原卷预览当场坏掉，审核页只剩一个白框。现在两边都先换成同一种写法。
+        """
+        wanted = _uuid_text(paper_id)
         for paper in self.manifest.get("papers") or []:
-            if str(paper.get("id")) == paper_id:
-                files = paper.get("files") or {}
-                return {key: value for key, value in files.items() if isinstance(value, str)}
+            if _uuid_text(paper.get("id")) == wanted:
+                return paper
         return {}
 
-    def _copy_paper_files(self, paper_id: str) -> None:
+    def _manifest_files(self, paper_id: str) -> dict:
+        files = self._manifest_paper(paper_id).get("files") or {}
+        return {key: value for key, value in files.items() if isinstance(value, str)}
+
+    def _repair_paper_paths(self, local_paper_id: str, incoming_paper) -> None:
+        """本机这份卷子的原卷路径是空的，就从备份里补上。
+
+        1.26.23：早先的恢复会把原卷路径写成空字符串（清单和数据库的编号对不上），
+        于是原卷预览坏掉、审核页只剩一个白框。这次恢复把文件放回来了，
+        路径也得跟着指回去。
+        """
+        with connection.cursor() as cursor:
+            row = cursor.execute(
+                'SELECT source_path, render_path, zip_path FROM "core_paper" WHERE id=?',
+                (local_paper_id,)).fetchone()
+        if row is None:
+            return
+        files = self._manifest_files(str(incoming_paper.get("id") or ""))
+        folder = _uuid_text(local_paper_id)
+        changes: dict[str, str] = {}
+        for index, (label, column) in enumerate((("source", "source_path"),
+                                                 ("render", "render_path"),
+                                                 ("zip", "zip_path"))):
+            if str(row[index] or "").strip():
+                continue
+            restored = self._restored_path(folder, files.get(label))
+            if restored:
+                changes[column] = restored
+        if not changes:
+            return
+        self.report["补回原卷路径"] = self.report.get("补回原卷路径", 0) + len(changes)
         if self.dry_run:
             return
-        folder = data_root() / paper_id
-        prefix = f"{ORIGINALS}/{paper_id}/"
-        for name in self.archive.namelist():
+        with connection.cursor() as cursor:
+            for column, value in changes.items():
+                cursor.execute(f'UPDATE "core_paper" SET "{column}"=? WHERE id=?',
+                               (value, local_paper_id))
+
+    def _restored_path(self, folder: str, relative) -> str:
+        """原卷文件在本机的绝对位置；清单里没有就留空。
+
+        清单里记的是**对方机器上**的相对路径（相对题库数据文件夹），第一段是
+        卷子自己的文件夹名。本机的卷子可能换了新编号，所以第一段换成本机的，
+        后面的原样保留。
+        """
+        if not relative or not isinstance(relative, str):
+            return ""
+        parts = PurePosixPath(relative).parts
+        if len(parts) < 2:
+            return ""
+        return str(data_root().joinpath(folder, *parts[1:]))
+
+    def _mapped_paper(self, folder: str) -> str:
+        """包里那个卷子文件夹，在本机叫什么。"""
+        wanted = _uuid_text(folder)
+        for incoming, local in self.paper_map.items():
+            if _uuid_text(incoming) == wanted:
+                return _uuid_text(local)
+        return wanted
+
+    def _mapped_publication(self, folder: str) -> str | None:
+        """包里那个入库快照文件夹，在本机叫什么。
+
+        对不上就返回 None —— 那个入库快照本机没有，放下来也是没人看的孤儿。
+        """
+        wanted = _uuid_text(folder)
+        for incoming, local in self.publication_map.items():
+            if _uuid_text(incoming) == wanted:
+                return _uuid_text(local)
+        return None
+
+    def _target_relative(self, relative: str) -> str | None:
+        """包里的一条路径，放到硬盘上该去的那个相对路径。
+
+        认得三种：卷子自己的文件夹、题库裁片的文件夹、答案解析的文件夹。
+        顶层别的零散文件（窗口位置之类）不还原 —— 那是那台电脑的界面状态，
+        搬过来只会把本机的界面弄乱。
+        """
+        parts = PurePosixPath(relative).parts
+        if not parts:
+            return None
+        head, rest = parts[0], parts[1:]
+        if head == "library" and rest:
+            publication = self._mapped_publication(rest[0])
+            if publication is None:
+                return None
+            return PurePosixPath("library", publication, *rest[1:]).as_posix()
+        if head == "library-solutions" and rest:
+            publication = self._mapped_publication(rest[0])
+            if publication is None:
+                return None
+            return PurePosixPath("library-solutions", publication, *rest[1:]).as_posix()
+        if not _looks_like_uuid(head):
+            # 顶上是别的零散文件（窗口位置之类）：那是那台电脑的界面状态，
+            # 搬过来只会把本机的界面弄乱，不还原。
+            return None
+        # 顶上就是卷子编号的，是卷子自己的文件（题目插图、原卷 PDF 都在这儿）
+        return PurePosixPath(self._mapped_paper(head), *rest).as_posix()
+
+    def _restore_originals(self) -> None:
+        """把包里的原卷文件放回硬盘上该在的位置。
+
+        1.26.23：以前是"按卷子的编号去包里找前缀"，而包里用的是带横杠的写法、
+        硬盘上用的是连写的 —— 前缀对不上，**一个文件都回不来**，卷子的原卷路径
+        还被写成空的，原卷预览当场坏掉。
+
+        现在反过来：**包里怎么写，就按同一个相对路径放回去**；只有卷子或入库
+        快照换了新编号时，目录名跟着换。
+        """
+        prefix = f"{ORIGINALS}/"
+        count = 0
+        for name in self._names:
             if not name.startswith(prefix) or name.endswith("/"):
                 continue
             relative = name[len(prefix):]
-            target = folder / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with self.archive.open(name) as reader, open(target, "wb") as writer:
-                shutil.copyfileobj(reader, writer)
-
-    def _copy_solution_files(self, publication_id: str) -> None:
-        if self.dry_run:
-            return
-        folder = data_root() / "library-solutions" / publication_id
-        prefix = f"{ORIGINALS}/library-solutions/{publication_id}/"
-        for name in self.archive.namelist():
-            if not name.startswith(prefix) or name.endswith("/"):
+            target_relative = self._target_relative(relative)
+            if target_relative is None:
                 continue
-            target = folder / name[len(prefix):]
+            count += 1
+            if self.dry_run:
+                continue
+            target = data_root() / PurePosixPath(target_relative)
             target.parent.mkdir(parents=True, exist_ok=True)
-            with self.archive.open(name) as reader, open(target, "wb") as writer:
-                shutil.copyfileobj(reader, writer)
+            try:
+                with self.archive.open(name) as reader, open(target, "wb") as writer:
+                    shutil.copyfileobj(reader, writer)
+            except (OSError, KeyError):
+                continue
+        self.report["补回的文件"] = count
 
 
 def _same_stem(left: str, right: str) -> bool:
@@ -1248,7 +1427,9 @@ def undo_last_merge() -> dict:
             _delete("core_regionread", region_id)
         for paper_id in record.get("papers") or []:
             removed["papers"] += _delete("core_paper", paper_id)
-            shutil.rmtree(data_root() / paper_id, ignore_errors=True)
+            # 卷子的文件夹名是**带横杠**的编号（数据库里存的是连写的那个）——
+            # 用数据库里的写法去删，删不掉真东西，原卷文件会留在盘上。
+            shutil.rmtree(data_root() / _uuid_text(paper_id), ignore_errors=True)
     path.unlink(missing_ok=True)
     return removed
 

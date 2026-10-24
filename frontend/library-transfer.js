@@ -223,10 +223,11 @@
           list.append(item);
         });
         box.append(list);
-        const keep = body.keep || 10;
+        const keep = body.keep || 2;
         const total = megabytes(body.total_bytes || 0);
         box.append(el("p", "settings-footnote",
-          `一共 ${backups.length} 份，占 ${total}；最多留 ${keep} 份，旧的自动删掉。包放在本机，不联网、不上传。`));
+          `一共 ${backups.length} 份，占 ${total}；只留最近 ${keep} 份（今天和昨天），旧的自动删掉。`
+          + "题库再大十倍，这里也只占两份的量。包放在本机，不联网、不上传。"));
       }
       // 1.26.22：自动备份开关 —— 用不上就关掉，随时能再打开。
       const toggle = el("label", "settings-switch");
@@ -395,10 +396,10 @@
     recordsBox.append(records, recordsStatus);
 
     // 1.26.17：本机自动备份 —— 每天自己打一份，存在软件自己的文件夹里。
-    // 1.26.21：改成每天一份（份数不变），并说清楚一共占多少磁盘。
+    // 1.26.21：改成每天一份；1.26.23：只留两份（今天和昨天），题库再大也只占两份。
     const autoBox = el("section", "settings-section");
     autoBox.append(el("h3", "", "本机自动备份"),
-      el("p", "settings-footnote", "每天自己打一个备份包，放在软件自己的文件夹里，只留最近 10 份。不联网、不上传。"));
+      el("p", "settings-footnote", "每天自己打一个备份包，放在软件自己的文件夹里，只留最近 2 份（今天和昨天）。不联网、不上传。"));
     const autoInner = el("div");
     autoInner.id = "transferAuto";
     const autoStatus = el("p", "transfer-status");
