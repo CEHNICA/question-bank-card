@@ -206,7 +206,7 @@ ${keyBlocks()}
                 <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
               </section>
             </details>
-            <section class="credential-service" data-library-service="test">
+            <section id="libraryAITestSection" class="credential-service" data-library-service="test">
               <div class="credential-service-head"><strong>连接测试</strong><span id="libraryAITestState" class="api-state">正在读取…</span></div>
               <p class="credential-purpose">测试只发送软件的合成题和合成图，不发送你的试卷。可能消耗服务额度；<strong>测通后才能生成</strong>，生成的答案仍要人工核对。</p>
               <!-- 1.26.8：这一块原来把"同意发起一次 API 测试"画成一个和功能开关一模一样的
@@ -680,6 +680,9 @@ ${keyBlocks()}
     for (const provider of providerOrder) {
       const block = $(`libraryAIKeyBlock-${provider}`);
       if (block) block.hidden = provider !== active;
+      // 1.26.14：测试连接搬进当前这家自己的卡片里 —— 测的就是眼前这家，
+      // 不用猜「刚才那个连接测试按钮说的是谁」。
+      if (provider === active && block) mountTestInto(block);
       const count = storedKeyCount(provider);
       const state$ = $(`libraryAIKeyState-${provider}`);
       if (state$) {
@@ -703,8 +706,14 @@ ${keyBlocks()}
     }
   }
 
-  function renderTestState(serviceReady) {
-    // 1.26.8：这块卡片自己说明白"现在是什么状态、下一步做什么"。
+  function mountTestInto(block) {
+    // 1.26.14：把「连接测试」这一块搬进当前服务商的卡片（同一个节点换爹，不复制）。
+    const section = $("libraryAITestSection");
+    if (!section || !block || section.parentElement === block) return;
+    block.append(section);
+  }
+
+  function renderTestState(serviceReady) {    // 1.26.8：这块卡片自己说明白"现在是什么状态、下一步做什么"。
     // 以前只有一个灰着的按钮和一句"保存后，测试一次连接" —— 老师只能猜。
     // 徽标只说**测试的状态**（上面那张卡已经说了服务本身的状态，不重复）；
     // 提示行只说**下一步做什么**。

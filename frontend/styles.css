@@ -1287,6 +1287,9 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-ui .credential-actions { position: static; border-top: 0; padding: 12px 0 0; background: transparent; }
 /* 摆在设置页上的时候没有"取消"这个说法：离开这一页会问一次要不要放弃改动。 */
 .settings-credential-host [data-close] { display: none; }
+/* 1.26.14：测试连接搬进服务商自己的卡片后，别再套一层框 —— 看着就像这家的一部分。 */
+.library-ai-key-block [data-library-service="test"] { border: 0; background: transparent; padding: 10px 0 0; margin-top: 10px; border-top: 1px dashed var(--line); }
+.library-ai-key-block [data-library-service="test"] .credential-service-head { padding: 0; }
 /* 1.26.13：看图读题这一段的"测试连接" —— 和答题那边一个样子。 */
 .credential-connection-test { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); display: grid; gap: 8px; }
 .credential-consent { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 12.5px; cursor: pointer; }

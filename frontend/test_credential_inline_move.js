@@ -25,10 +25,11 @@ const afterLeave = js.slice(leaveStart + 10);
 const nextTop = afterLeave.search(/\n  (async )?function /);
 const leaveGuard = js.slice(leaveStart, leaveStart + 10 + (nextTop > 0 ? nextTop : afterLeave.length));
 // 1.26.13：看图读题这一段的"测试连接"也在切片之外，单独取出来。
-const probeStart = js.indexOf("  async function testVisionConnection()");
+const probeStart = js.indexOf("  async function testVisionConnection(provider)");
 const probeEnd = js.indexOf("  // Queue the values captured", probeStart);
-const wiringAt = js.indexOf('  $("credentialVisionTestButton").addEventListener(');
-const probeWiring = js.slice(wiringAt, js.indexOf("\n", wiringAt) + 1);
+const wiringAt = js.indexOf('  for (const provider of ["modelscope", "minimax", "siliconflow"]) {');
+const wiringEnd = js.indexOf("\n  }", wiringAt) + 4;
+const probeWiring = js.slice(wiringAt, wiringEnd);
 const probeCode = js.slice(probeStart, probeEnd) + probeWiring;
 assert.ok(start > 0 && end > start && listenersStart > 0 && leaveStart > 0 && leaveGuard.includes("prepareSettingsLeave")
   && probeStart > 0 && probeCode.includes("testVisionConnection"),
@@ -143,20 +144,23 @@ function scenario() {
   await turns();
   probe.$("settingsPrimaryModel").value = "minimax_m3";
   probe.context.syncCredentialVisionPanel();
-  probe.$("credentialVisionTestButton").events.click[0]();
+  probe.$("credentialVisionTestButton-minimax").events.click[0]();
   await turns();
   assert.equal(probe.requests.filter((entry) => entry.url.includes("credentials/test")).length, 0,
     "without the consent no request goes out");
-  assert.match(probe.$("credentialVisionTestResult").textContent, /同意/, "and the teacher is told why");
-  probe.$("credentialVisionTestConsent").checked = true;
-  probe.$("credentialVisionTestButton").events.click[0]();
+  assert.match(probe.$("credentialVisionTestResult-minimax").textContent, /同意/, "and the teacher is told why");
+  probe.$("credentialVisionTestConsent-minimax").checked = true;
+  probe.$("credentialVisionTestButton-minimax").events.click[0]();
   await turns();
   const sent = probe.requests.filter((entry) => entry.url.includes("credentials/test"));
   assert.equal(sent.length, 1, "with the consent exactly one test request goes out");
   // The body object is built inside the sandbox realm, so compare field by field.
   assert.equal(sent[0].body.service, "minimax", "it asks about the ticked vendor only");
   assert.equal(sent[0].body.confirm, true, "and only with the explicit consent");
-  assert.equal(probe.$("credentialVisionTestConsent").checked, false, "each probe requires fresh consent");
+  assert.equal(probe.$("credentialVisionTestConsent-minimax").checked, false, "each probe requires fresh consent");
+  // 1.26.14：每家的卡片里各有一个测试按钮，测的是自己那家。
+  assert.equal(probe.$("credentialVisionTestResult-modelscope").textContent, "", "another vendor keeps its own result");
+  assert.equal(probe.$("credentialVisionTestResult-siliconflow").textContent, "", "and so does the third");
 
   console.log("API configuration moves as one block, guards unsaved keys, and keeps its cancel button: OK");
 })().catch((error) => { console.error(error); process.exit(1); });

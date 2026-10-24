@@ -347,6 +347,7 @@
           <input id="credentialMineruInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MinerU 官网里复制的 Token">
           <div class="credential-service-actions"><button id="credentialMineruDelete" class="button small credential-delete" type="button" aria-label="删除 MinerU 密钥" hidden>删除密钥</button></div>
+          <p class="credential-storage-note">MinerU 没有公开的 Token 验证接口，所以这里测不了：保存成功就表示已配置，实际能不能用看切题任务的返回。</p>
         </section>
         <section class="credential-vision-step" aria-labelledby="credentialVisionTitle">
           <h4 id="credentialVisionTitle"><span class="credential-step-number">2</span> 勾一家看图读题服务</h4>
@@ -361,16 +362,6 @@
             <label class="provider-option"><input type="radio" id="credentialVision-assistant" name="credentialVisionProvider" value="assistant"><span>暂不配置<small>原图审核或 AI 助手</small><em class="provider-option-state" id="credentialVisionState-assistant">不用密钥</em></span></label>
           </fieldset>
           <select id="credentialVisionProvider" hidden aria-hidden="true" tabindex="-1"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
-          <!-- 1.26.13：这一段以前没有测试连接 —— 填了密钥只能等真读一份资料才知道
-               能不能用。现在和「标签与答案」那段一样：勾一家，同意一次，发一张软件
-               自己画的合成图（两个黑点）问模型有几个点，不发你的试卷。 -->
-          <div class="credential-connection-test" id="credentialVisionTest">
-            <label class="credential-consent"><input id="credentialVisionTestConsent" type="checkbox"><span>我同意这一次测试（会向服务商发一张软件自己画的合成图）</span></label>
-            <div class="credential-connection-actions">
-              <button id="credentialVisionTestButton" class="button" type="button">测试连接</button>
-              <span id="credentialVisionTestResult" class="settings-save-result" role="status" aria-live="polite"></span>
-            </div>
-          </div>
           <p id="settingsModelSummary" class="settings-footnote"></p>
           <div class="settings-form-actions"><span id="settingsModelResult" class="settings-save-result" role="status"></span></div>
         <section id="credentialModelscopeSection" class="credential-service" data-service="modelscope">
@@ -388,6 +379,15 @@
                    placeholder="魔搭后台里的模型名称；不改就用上面填好的默认值">
           </label>
           <datalist id="settingsModelscopeModels"></datalist>
+          <!-- 1.26.14：测试连接跟着这家自己的卡片走 —— 测的就是眼前这家，不用猜。
+               抄 Chatbox（Check 在服务商自己的页里）和 LobeHub（检查在服务商卡片里）。 -->
+          <div class="credential-connection-test">
+            <label class="credential-consent"><input id="credentialVisionTestConsent-modelscope" type="checkbox"><span>我同意这一次测试（会向服务商发一张软件自己画的合成图）</span></label>
+            <div class="credential-connection-actions">
+              <button id="credentialVisionTestButton-modelscope" class="button" type="button">测试连接</button>
+              <span id="credentialVisionTestResult-modelscope" class="settings-save-result" role="status" aria-live="polite"></span>
+            </div>
+          </div>
           <div class="credential-service-actions"><button id="credentialModelscopeDelete" class="button small credential-delete" type="button" aria-label="删除魔搭密钥" hidden>删除密钥</button></div>
         </section>
         <section id="credentialMinimaxSection" class="credential-service" data-service="minimax" hidden>
@@ -403,6 +403,13 @@
                    placeholder="MiniMax 后台里的模型名称；不改就用上面填好的默认值">
           </label>
           <datalist id="settingsMinimaxModels"></datalist>
+          <div class="credential-connection-test">
+            <label class="credential-consent"><input id="credentialVisionTestConsent-minimax" type="checkbox"><span>我同意这一次测试（会向服务商发一张软件自己画的合成图）</span></label>
+            <div class="credential-connection-actions">
+              <button id="credentialVisionTestButton-minimax" class="button" type="button">测试连接</button>
+              <span id="credentialVisionTestResult-minimax" class="settings-save-result" role="status" aria-live="polite"></span>
+            </div>
+          </div>
           <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
         <section id="credentialSiliconflowSection" class="credential-service" data-service="siliconflow" hidden>
@@ -418,6 +425,13 @@
                    placeholder="硅基流动后台里的模型名称；不改就用上面填好的默认值">
           </label>
           <datalist id="settingsSiliconflowModels"></datalist>
+          <div class="credential-connection-test">
+            <label class="credential-consent"><input id="credentialVisionTestConsent-siliconflow" type="checkbox"><span>我同意这一次测试（会向服务商发一张软件自己画的合成图）</span></label>
+            <div class="credential-connection-actions">
+              <button id="credentialVisionTestButton-siliconflow" class="button" type="button">测试连接</button>
+              <span id="credentialVisionTestResult-siliconflow" class="settings-save-result" role="status" aria-live="polite"></span>
+            </div>
+          </div>
           <div class="credential-service-actions"><button id="credentialSiliconflowDelete" class="button small credential-delete" type="button" aria-label="删除硅基流动密钥" hidden>删除密钥</button></div>
         </section>
         </section>
