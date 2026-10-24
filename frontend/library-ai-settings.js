@@ -650,6 +650,11 @@ ${keyBlocks()}
     const testBlocked = state.busy || state.dirty || !testServiceReady;
     $("libraryAITest").disabled = testBlocked || !$("libraryAITestConsent").checked;
     for (const id of fields) $(id).disabled = !idle;
+    // 1.26.9：勾选行也要跟着忙闲走 —— 忙的时候勾了会被服务端回来的状态覆盖。
+    for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
+      const option = $(`libraryAIProvider-${provider}`);
+      if (option) option.disabled = !idle;
+    }
     $("libraryAIAnswerIntake").disabled = !idle || !$("libraryAIAnswer").checked;
     $("libraryAITestConsent").disabled = !idle;
     const active = $("libraryAIProvider").value;

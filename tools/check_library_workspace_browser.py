@@ -188,8 +188,6 @@ def check(base):
         expect(page).to_have_url(base + "/settings")
         expect(page.locator(".layout")).to_be_hidden()
         # 「标签与答案」搬进了共享的密钥窗口：设置页 → 打开密钥窗口 → 标签与答案页。
-        page.locator("#settingsCredentialOpen").click()
-        page.locator("#credentialAnswerTab").click()
         page.wait_for_selector("#libraryAISettingsDialog", state="visible", timeout=8000)
         expect(page.locator("#libraryAITags")).not_to_be_checked()
         expect(page.locator("#libraryAIAnswer")).not_to_be_checked()

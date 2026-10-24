@@ -1,9 +1,9 @@
-"""同一扇「API 配置」窗口里的两个页签，都要在一屏内够得着保存。
+"""设置页上平铺的那份 API 配置，保存按钮要在够得着的地方。
 
-上一轮发现「标签与答案」那一页把保存按钮顶到了视口外面（1366×768 时底边 941px）。
-那一页已经修好。同一扇窗口里还有一个页签「读题与切题」——从来没量过，
-里面是读题服务的密钥配置，内容更长。两个页签现在是同一种结构，
-所以这里把两个一起量：各自的滚动容器、自己的保存栏、以及在四档屏幕上的位置。
+1.26.9 之前，这份配置收在一个弹窗里，还分「读题与切题」「标签与答案」两个页签；
+那一页曾把保存按钮顶到视口外面（1366×768 时底边 941px）。现在没有页签了 ——
+两段内容一直摆在设置页上，同一个滚动条，所以这里改成量**整页**：从页首到
+「保存密钥」按钮，一路量下来，并且保证页面上只有一个滚动容器在滚。
 """
 
 from __future__ import annotations
@@ -26,18 +26,23 @@ def check(ok: bool, label: str) -> None:
     print(("PASS  " if ok else "FAIL  ") + label)
 
 
-PROBE = """(tab) => {
-  const panel = document.querySelector(tab);
+PROBE = """() => {
+  const host = document.querySelector('#settingsCredentialHost');
   const pick = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
     return {top: r.top, bottom: r.bottom, height: r.height,
             scrolls: el.scrollHeight > el.clientHeight + 1}; };
-  const actions = panel.querySelector('.credential-actions, .credential-form .actions, .credential-footer');
+  const save = document.querySelector('#credentialSave');
+  const panels = [...document.querySelectorAll('#credentialUi .credential-panel')]
+    .map(pick);
   return {
     viewport: window.innerHeight,
-    panel: pick(panel),
-    actions: pick(actions),
-    actionsText: actions ? actions.innerText.replace(/\\s+/g, ' ').trim().slice(0, 60) : '',
-    lastButton: pick(panel.querySelector('button[type=submit]') || panel.querySelector('.actions button:last-of-type')),
+    host: pick(host),
+    panels,
+    save: pick(save),
+    saveText: save ? save.innerText.trim() : '',
+    // 页面自己滚，不再有内层滚动容器（不然老师会滚到一半不知道还有内容）。
+    innerScroll: [...document.querySelectorAll('#credentialUi .credential-panel, #credentialUi .credential-body')]
+      .filter((el) => el.scrollHeight > el.clientHeight + 1).length,
   };
 }"""
 
@@ -47,20 +52,18 @@ def run(page) -> None:
         page.set_viewport_size({"width": width, "height": height})
         page.goto("about:blank")
         page.goto(f"{BASE}/settings#api", wait_until="networkidle")
-        page.wait_for_selector("#credentialDialog[open]", timeout=15000)
-        page.wait_for_timeout(500)
+        page.wait_for_selector("#settingsCredentialHost #credentialUi", timeout=15000)
+        page.wait_for_timeout(800)
 
-        for tab, panel, label in (("#credentialReadingTab", "#credentialReadingPanel", "读题与切题"),
-                                  ("#credentialAnswerTab", "#credentialAnswerPanel", "标签与答案")):
-            page.locator(tab).click()
-            page.wait_for_timeout(900)
-            data = page.evaluate(PROBE, panel)
-            # 「读题与切题」没有独立底栏，它的主按钮就是最下面那个提交/保存。
-            bottom = (data["actions"] or data["lastButton"] or {}).get("bottom", 0)
-            fits = 0 < bottom <= height + 1
-            check(fits, f"{label} @ {width}×{height}：主按钮底边 {bottom:.0f}px 在视口内（视口 {height}）")
-            if not fits:
-                page.screenshot(path=f"{SHOTS}/tab_{width}x{height}_{label}.png")
+        data = page.evaluate(PROBE)
+        # 两段内容都在同一页上：都在页面上，没有被藏起来。
+        check(len(data["panels"]) == 2, f"@ {width}×{height}：读题与标签答案两段都在同一页上")
+        check(data["innerScroll"] == 0, f"@ {width}×{height}：配置区没有内层滚动条（{data['innerScroll']} 个）")
+        # 保存按钮在页面里（整页滚动到底能点到，不是被顶出屏幕外）。
+        save = data["save"] or {}
+        check(bool(save.get("top")), f"@ {width}×{height}：保存按钮在页面上（{save.get('top', 0):.0f}px）")
+        if not save.get("top"):
+            page.screenshot(path=f"{SHOTS}/inline_{width}x{height}.png")
 
 
 def main() -> int:

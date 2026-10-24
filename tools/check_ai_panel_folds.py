@@ -51,7 +51,6 @@ def measure(page):
     page.goto("about:blank")
     page.goto(f"{BASE}/settings#api", wait_until="networkidle")
     page.wait_for_selector("#credentialDialog[open]", timeout=15000)
-    page.locator("#credentialAnswerTab").click()
     page.wait_for_selector("#libraryAISettingsDialog", state="visible", timeout=8000)
     page.wait_for_timeout(900)
     return page.evaluate(MEASURE)

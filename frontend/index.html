@@ -321,7 +321,6 @@
           <p class="settings-eyebrow">切题、读题与答题</p>
           <h3 id="credentialTitle">API 配置</h3>
           <p class="hint">云端切题、看图读题、生成标签和答案 —— 勾选哪一家，它就管哪件事。</p>
-          <p id="credentialSavedTotal" class="credential-saved-total" aria-label="读题服务的已保存密钥总数" role="status">正在读取已保存的密钥…</p>
         </div>
         <button class="button quiet" type="button" data-close>关闭</button>
       </header>
@@ -336,6 +335,9 @@
     <form id="credentialForm" class="credential-form" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
 
       <div class="credential-body">
+        <!-- 1.26.9：这一行原来待在弹窗的标题里，平铺之后就看不见了 —— 挪进
+             配置块里，两种摆法都看得到"一共存了几个密钥"。 -->
+        <p id="credentialSavedTotal" class="credential-saved-total" aria-label="读题服务的已保存密钥总数" role="status">正在读取已保存的密钥…</p>
         <p class="credential-storage-note">已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下方只填写新密钥；留空就保留原来的配置。</p>
         <section class="credential-service" data-service="mineru">
           <div class="credential-service-head"><strong><span class="credential-step-number">1</span> MinerU <small class="credential-required">云端自动切题必填</small></strong><span id="credentialMineruState" class="api-state">正在读取…</span></div>
@@ -432,7 +434,10 @@
       <footer class="credential-actions">
         <span id="credentialResult" class="settings-save-result" role="status"></span>
         <button id="credentialSave" class="button primary" type="submit">保存密钥</button>
-        <button class="button" type="button" data-close>取消</button>
+        <!-- 1.26.9：这个按钮现在住在可搬动的配置块里，而不再是弹窗的子节点 ——
+             "dialog [data-close]" 那个按加载期求值的接法匹配不到它了，所以显式给了
+             id，由 app.js 直接接线。 -->
+        <button id="credentialCancel" class="button" type="button" data-close>取消</button>
       </footer>
     </form>
     <form id="modelSettingsForm" class="model-settings-form" hidden></form>

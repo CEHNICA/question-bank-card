@@ -28,7 +28,6 @@ def open_panel(page):
     page.goto("about:blank")
     page.goto(f"{BASE}/settings#api", wait_until="networkidle")
     page.wait_for_selector("#credentialDialog[open]", timeout=15000)
-    page.locator("#credentialAnswerTab").click()
     page.wait_for_selector("#libraryAISettingsDialog", state="visible", timeout=8000)
     # 目录这一段跟着「生成知识点标签」走：本机默认没开，整段不渲染，
     # 后面点「查看目录」会直接找不到按钮。先把它打开（不保存，走完就丢）。

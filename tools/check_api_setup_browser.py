@@ -251,19 +251,14 @@ async def browser_check(output, port, report):
             report["screenshots"].append({"name": name, "path": str(output / name)})
 
         async def reading():
-            await page.locator("#credentialReadingTab").click()
+            # 1.26.9：没有标签页了 —— 两段内容一直摆在一起。
             await expect(page.locator("#credentialReadingPanel")).to_be_visible()
 
         async def answers():
-            await page.locator("#credentialAnswerTab").click()
             await expect(page.locator("#credentialAnswerPanel")).to_be_visible()
-            await expect(page.locator("#libraryAIProvider")).to_be_enabled()
-            if not await page.locator("#libraryAIProvider").is_visible():
-                await page.locator("#libraryAIAdvanced > summary").click()
-            await expect(page.locator("#libraryAIProvider")).to_be_visible()
 
         async def selected_reading(provider):
-            await page.locator("#credentialVisionProvider").select_option(provider)
+            await page.locator("#credentialVision-" + provider).check()
             await page.wait_for_load_state("networkidle")
             await expect(page.locator("#" + READING_CARD_IDS[provider])).to_be_visible()
             for other, card_id in READING_CARD_IDS.items():
@@ -271,7 +266,7 @@ async def browser_check(output, port, report):
                     await expect(page.locator("#" + card_id)).not_to_be_visible()
 
         async def selected_library(provider):
-            await page.locator("#libraryAIProvider").select_option(provider)
+            await page.locator("#libraryAIProvider-" + provider).check()
             await expect(page.locator("#libraryAIKeyBlock-" + provider)).to_be_visible()
             await expect(page.locator('[id^="libraryAIKeyBlock-"]:visible')).to_have_count(1)
 
@@ -284,13 +279,12 @@ async def browser_check(output, port, report):
 
         try:
             await page.goto(base + "/settings", wait_until="networkidle")
-            await expect(page.locator("#settingsCredentialOpen")).to_be_visible()
             await expect(page.locator("#settingsGeneral .api-status-list")).to_have_count(0)
-            await page.locator("#settingsCredentialOpen").click()
-            await expect(page.locator("#credentialDialog")).to_be_visible()
+            # 1.26.9：配置直接平铺在设置页上，不再有那个按钮和弹窗。
+            await expect(page.locator("#settingsCredentialHost #credentialUi")).to_be_visible()
             await expect(page.locator('#credentialReadingPanel [data-service="mineru"]')).to_contain_text("云端自动切题必填")
             await expect(page.locator("#credentialVisionTitle")).to_be_visible()
-            await expect(page.locator("#credentialVisionProvider")).to_have_value("modelscope")
+            await expect(page.locator("#credentialVision-modelscope")).to_be_checked()
             await selected_reading("modelscope")
             await screenshot("api-reading-two-steps-desktop.png", overview=True)
             await page.locator("#credentialModelscopeSection").scroll_into_view_if_needed()
@@ -310,7 +304,7 @@ async def browser_check(output, port, report):
 
             before_answer_open = len(fixture.posts)
             await answers()
-            await expect(page.locator("#libraryAIProvider")).to_have_value("deepseek")
+            await expect(page.locator("#libraryAIProvider-deepseek")).to_be_checked()
             await expect(page.locator("#libraryAIKeyBlock-deepseek")).to_be_visible()
             await expect(page.locator('[id^="libraryAIKeyBlock-"]:visible')).to_have_count(1)
             assert len(fixture.posts) == before_answer_open
@@ -395,7 +389,7 @@ async def browser_check(output, port, report):
             await expect(page.locator("#libraryAIKey-deepseek")).to_have_value("")
             await expect(page.locator("#libraryAIKey-deepseek")).to_be_enabled()
             await expect(page.locator("#libraryAISave")).to_be_disabled()
-            await expect(page.locator("#libraryAIProvider")).to_have_value("deepseek")
+            await expect(page.locator("#libraryAIProvider-deepseek")).to_be_checked()
             await expect(page.locator("#libraryAIModel")).to_have_value(library_model_draft)
             await expect(page.locator("#libraryAIAnswer")).to_be_checked()
             await screenshot("api-answers-failure-retains-draft.png")
@@ -426,7 +420,7 @@ async def browser_check(output, port, report):
                         await page.locator("#confirmOk").click()
                 assert (await shared.value).ok
                 assert fixture.share_requests[before_share:] == [provider]
-                await expect(page.locator("#libraryAIProvider")).to_have_value(provider)
+                await expect(page.locator("#libraryAIProvider-" + provider)).to_be_checked()
                 await expect(page.locator("#libraryAIKeyBlock-" + provider)).to_be_visible()
                 await expect(page.locator('[id^="libraryAIKeyBlock-"]:visible')).to_have_count(1)
                 assert fixture.keys[provider]["shared_with_reading"] is True
@@ -455,8 +449,6 @@ async def browser_check(output, port, report):
             await expect(page.locator("#credentialDialog")).not_to_be_visible()
             await page.goto(base + "/settings#services", wait_until="networkidle")
             await expect(page.locator("#settingsGeneral")).to_be_visible()
-            if not await page.locator("#credentialDialog").is_visible():
-                await page.locator("#settingsCredentialOpen").click()
             await expect(page.locator("#credentialReadingPanel")).to_be_visible()
             await screenshot("api-legacy-services-link.png")
             # Reset only this in-memory fixture before reloading: an existing
@@ -465,7 +457,7 @@ async def browser_check(output, port, report):
             before_legacy = len(fixture.posts)
             await page.goto(base + "/settings#api", wait_until="networkidle")
             await expect(page.locator("#credentialAnswerPanel")).to_be_visible()
-            await expect(page.locator("#libraryAIProvider")).to_have_value("deepseek")
+            await expect(page.locator("#libraryAIProvider-deepseek")).to_be_checked()
             assert len(fixture.posts) == before_legacy
             await screenshot("api-legacy-api-link.png")
             report["passed"].append("legacy /settings#services and /settings#api remain valid entries in the same credential window and never auto-replace independent DeepSeek")

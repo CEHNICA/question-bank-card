@@ -4786,7 +4786,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 1.26.9：勾选行跟着下拉框走（真正的状态还是这一份，下拉框只是留着给老逻辑用）。
     for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
       const option = $(`credentialVision-${provider}`);
-      if (option) option.checked = option.value === select.value;
+      if (!option) continue;
+      option.checked = option.value === select.value;
+      option.disabled = credentialBusy || !visionPickerReady();
     }
     for (const [provider, id] of [["modelscope", "credentialModelscopeSection"], ["minimax", "credentialMinimaxSection"], ["siliconflow", "credentialSiliconflowSection"]]) {
       $(id).hidden = select.value !== provider;
@@ -4829,6 +4831,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   let credentialServices = {};
   let credentialTab = "reading";
   let credentialAnswersMounted = false;
+
+  function visionPickerReady() {
+    // 1.26.9：服务列表还没读到之前不让勾 —— 否则勾完会被回填覆盖，
+    // 老师只看到"勾了一下又弹回去"。
+    return Boolean(state.status?.engines);
+  }
   let credentialClosing = false;
   let credentialCloseTask = null;
   let credentialModelGuard = null;
@@ -5011,6 +5019,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 设置页里直接平铺，或者临时搬回弹窗。搬的是同一个 DOM，密钥、开关和未保存的
   // 改动都原样跟着走 —— 不会出现"弹窗里填了一半、设置页里是另一份"。
   let credentialInline = false;
+  let credentialWasInline = false;
   let credentialReturnFocus = null;
 
   function credentialUiVisible() {
@@ -5062,6 +5071,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     credentialSavedRows.forEach((row) => { row.button.disabled = busy; });
     $("credentialSave").disabled = busy;
     $("credentialVisionProvider").disabled = busy;
+    // 1.26.9：勾选行也要跟着忙闲走 —— 忙的时候勾了会被服务端回来的状态覆盖，
+    // 看起来就像"勾了又弹回去"。
+    for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
+      const option = $(`credentialVision-${provider}`);
+      if (option) option.disabled = busy || !visionPickerReady();
+    }
     Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
       $(field.input).disabled = busy;
       $(field.remove).disabled = busy || !credentialServices[service]?.configured;
@@ -5119,13 +5134,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 1.26.9：设置页上原来那个「配置 API」按钮没有了，关闭后要把焦点还给
     // **打开这个窗口的那个东西**，不能还给一个已经不在页面上的按钮。
     credentialReturnFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
-    resetCredentialInputs();
-    renderCredentialStates({ services: {} });
-    $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
-    Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
-    $("credentialResult").textContent = "";
+    // 1.26.9：已经填了东西的时候不要一上来就清空 —— 老师在内嵌那一页填了一半的
+    // 密钥，临时弹窗看一眼再关掉，填的东西应该还在。
+    const hadDraft = credentialHasNewKeys();
+    if (!hadDraft) {
+      resetCredentialInputs();
+      renderCredentialStates({ services: {} });
+      $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
+      Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
+      $("credentialResult").textContent = "";
+    }
     // 1.26.9：从题库或答案编辑器打开时，把整份配置搬回弹窗里（设置页那一份会
     // 让位 —— 同一时刻只有一份，不会出现两处各填一半的情况）。
+    credentialWasInline = credentialInline;
     credentialInline = false;
     mountCredentialUI($("credentialDialogBody"));
     $("credentialDialog").showModal();
@@ -5166,6 +5187,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("credentialResult").textContent = error.message;
     }
     await panelReady;
+    // 1.26.9：旧书签（/settings#ai、#api）要滚到"生成标签和答案"那一段 ——
+    // 块挂上来之后才滚得动。
+    if (["#ai", "#api"].includes(window.location.hash)) scrollToCredentialAnswers();
   }
 
   window.APISettings = Object.freeze({ open: openCredentialSettings });
@@ -5311,11 +5335,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // Existing answer-setting links keep opening the answer section of the one
     // API window, without bringing back a second settings page or entry point.
     // 1.26.9：配置已经直接摆在设置页上了，这两个旧链接就滚到"生成标签和答案"
-    // 那一段去 —— 不用再弹一个窗口。
-    if (["#ai", "#api"].includes(window.location.hash)) {
-      const answers = $("credentialAnswerPanel");
-      if (answers && typeof answers.scrollIntoView === "function") answers.scrollIntoView({ block: "start" });
+    // 那一段去 —— 不用再弹一个窗口。滚动要等配置块挂上来之后才做，否则滚的是空气。
+    if (["#ai", "#api"].includes(window.location.hash)) scrollToCredentialAnswers();
+  }
+  function scrollToCredentialAnswers() {
+    const answers = $("credentialAnswerPanel");
+    if (!answers) return;
+    // 1.26.9：块还没挂上来时，等它挂好再滚（第一次打开页面时就是这个顺序）。
+    const laid = typeof answers.getClientRects === "function" ? answers.getClientRects().length : 1;
+    if (!laid) {
+      setTimeout(() => { scrollToCredentialAnswers(); }, 120);
+      return;
     }
+    if (typeof answers.scrollIntoView === "function") answers.scrollIntoView({ block: "start" });
   }
   window.addEventListener("hashchange", () => {
     if (window.location.pathname === "/settings") syncSettingsRoute();
@@ -5455,11 +5487,23 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (credentialAnswersMounted) window.LibraryAISettings?.deactivate?.();
     resetCredentialInputs();
     $("credentialResult").textContent = "";
+    // 1.26.9：弹窗是从设置页上"借"走这一块的，关掉之后要还回去 —— 否则设置页
+    // 上的 API 配置会整块消失，只能刷新页面才回来。
+    if (credentialWasInline) {
+      credentialWasInline = false;
+      credentialInline = true;
+      mountCredentialUI($("settingsCredentialHost"));
+    }
     // 1.26.9：焦点还给打开这个窗口的那个东西（设置页上原来那个按钮没有了）。
     const back = credentialReturnFocus;
     credentialReturnFocus = null;
     if (back && typeof back.focus === "function") back.focus({ preventScroll: true });
   });
+
+  // 1.26.9：这一块现在是 dialog 的**兄弟**不是子节点，所以
+  // "dialog [data-close]" 匹配不到它里面的「取消」按钮 —— 那个按钮点了没反应。
+  // 这里显式接上。
+  $("credentialCancel")?.addEventListener("click", () => { void requestCredentialClose(); });
 
   $("credentialForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -5620,6 +5664,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (modelFormDirty) return false;
     }
     if (window.LibraryAISettings?.isMutating?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
+    // 1.26.9：刚填了还没保存的读题密钥，也要在离开这一页时问一次。
+    // 以前这段只查弹窗（弹窗关得掉），平铺之后这一页就是配置的所在地 —— 不查就
+    // 会让老师填了一半的 Token 悄悄消失。
+    if (credentialHasNewKeys()) {
+      const discard = await confirmDialog({ title: "API 配置还没保存", text: "离开会放弃刚刚填入、还没保存的密钥；已经保存的配置保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
+      if (!discard) return false;
+      resetCredentialInputs();
+    }
     if (window.LibraryAISettings?.hasUnsavedChanges?.()) {
       const discard = await confirmDialog({ title: "标签与答案设置还没保存", text: "离开会放弃本次设置改动；已经保存的开关和密钥保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
       if (!discard) return false;

@@ -75,7 +75,6 @@ def open_panel(page):
     page.goto("about:blank")
     page.goto(f"{BASE}/settings#api", wait_until="networkidle")
     page.wait_for_selector("#credentialDialog[open]", timeout=15000)
-    page.locator("#credentialAnswerTab").click()
     page.wait_for_selector("#libraryAISettingsDialog", state="visible", timeout=8000)
     # 知识点目录那一段跟着「生成知识点标签」开关走：没开的时候整段不渲染，
     # #libraryAIKnowledgeCount 量到 0×0，后面点「查看目录」直接找不到按钮。

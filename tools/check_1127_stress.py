@@ -225,7 +225,6 @@ def run(pg):
     check("MinerU 状态灯有结论", mineru in ("已填写", "已填写（旧环境变量）", "未填写"), mineru)
     note = pg.evaluate("() => { const n=document.querySelector('#settingsMineruState'); const r=n&&n.parentElement.querySelector('.api-source-note'); return r?r.textContent:''; }")
     print("     MinerU 灯：%s ｜ 来源说明：%s" % (mineru, note or "（无）"))
-    pg.click("#settingsCredentialOpen"); pg.wait_for_timeout(1800)
     total = pg.evaluate("() => (document.querySelector('#credentialSavedTotal')||{}).textContent || ''")
     print("     密钥窗口：%s" % total)
     check("密钥窗口能打开并显示总数", "密钥" in total, total)
