@@ -24,7 +24,14 @@ const leaveStart = js.indexOf("  async function prepareSettingsLeave()");
 const afterLeave = js.slice(leaveStart + 10);
 const nextTop = afterLeave.search(/\n  (async )?function /);
 const leaveGuard = js.slice(leaveStart, leaveStart + 10 + (nextTop > 0 ? nextTop : afterLeave.length));
-assert.ok(start > 0 && end > start && listenersStart > 0 && leaveStart > 0 && leaveGuard.includes("prepareSettingsLeave"),
+// 1.26.13：看图读题这一段的"测试连接"也在切片之外，单独取出来。
+const probeStart = js.indexOf("  async function testVisionConnection()");
+const probeEnd = js.indexOf("  // Queue the values captured", probeStart);
+const wiringAt = js.indexOf('  $("credentialVisionTestButton").addEventListener(');
+const probeWiring = js.slice(wiringAt, js.indexOf("\n", wiringAt) + 1);
+const probeCode = js.slice(probeStart, probeEnd) + probeWiring;
+assert.ok(start > 0 && end > start && listenersStart > 0 && leaveStart > 0 && leaveGuard.includes("prepareSettingsLeave")
+  && probeStart > 0 && probeCode.includes("testVisionConnection"),
   "the credential slices are still where we expect them");
 
 const turns = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
@@ -45,7 +52,11 @@ function scenario() {
     });
     return nodes.get(id);
   }
-  const context = vm.createContext({ $, console, state: { status: { engines: { saved: {}, choices: [] } } },
+  const context = vm.createContext({ $, console,
+    state: { status: { engines: { saved: {}, choices: [
+      { key: "minimax_m3", provider_key: "minimax", model: "MiniMax-M3" },
+      { key: "modelscope_qwen", provider_key: "modelscope", model: "Qwen/Qwen3.5-35B-A3B" }
+    ] } } },
     credentialSourceNote: () => "", el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
     modelFormDirty: false, lastModelSave: null, credentialModelGuard: null,
     window: { addEventListener() {}, location: { hash: "", pathname: "/settings" } }, document: { addEventListener() {}, activeElement: null },
@@ -58,7 +69,7 @@ function scenario() {
       return { services: JSON.parse(JSON.stringify(saved)) };
     }
   });
-  vm.runInContext(functions + listeners + leaveGuard + "\nglobalThis.fields = CREDENTIAL_FIELDS;", context);
+  vm.runInContext(functions + listeners + leaveGuard + probeCode + "\nglobalThis.fields = CREDENTIAL_FIELDS;", context);
   return { context, $, requests, confirmations, focuses, saved,
     set answer(value) { scenarioAnswer = value; }, get answer() { return scenarioAnswer; } };
 }
@@ -125,6 +136,27 @@ function scenario() {
   assert.equal(states.$("credentialVisionState-minimax").textContent, "已存 2 把", "the vendor says how many keys it has");
   assert.equal(states.$("credentialVisionState-modelscope").textContent, "未存密钥", "and says plainly when it has none");
   assert.equal(states.$("credentialVisionState-assistant").textContent, "不用密钥", "the no-service option needs no key");
+
+  // ⑥ 看图读题这一段的测试连接（1.26.13）：没勾同意不发请求；没保存密钥先提示去保存。
+  const probe = scenario();
+  await probe.context.showCredentialInline();
+  await turns();
+  probe.$("settingsPrimaryModel").value = "minimax_m3";
+  probe.context.syncCredentialVisionPanel();
+  probe.$("credentialVisionTestButton").events.click[0]();
+  await turns();
+  assert.equal(probe.requests.filter((entry) => entry.url.includes("credentials/test")).length, 0,
+    "without the consent no request goes out");
+  assert.match(probe.$("credentialVisionTestResult").textContent, /同意/, "and the teacher is told why");
+  probe.$("credentialVisionTestConsent").checked = true;
+  probe.$("credentialVisionTestButton").events.click[0]();
+  await turns();
+  const sent = probe.requests.filter((entry) => entry.url.includes("credentials/test"));
+  assert.equal(sent.length, 1, "with the consent exactly one test request goes out");
+  // The body object is built inside the sandbox realm, so compare field by field.
+  assert.equal(sent[0].body.service, "minimax", "it asks about the ticked vendor only");
+  assert.equal(sent[0].body.confirm, true, "and only with the explicit consent");
+  assert.equal(probe.$("credentialVisionTestConsent").checked, false, "each probe requires fresh consent");
 
   console.log("API configuration moves as one block, guards unsaved keys, and keeps its cancel button: OK");
 })().catch((error) => { console.error(error); process.exit(1); });

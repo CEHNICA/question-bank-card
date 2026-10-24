@@ -5520,8 +5520,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 这里显式接上。
   $("credentialCancel")?.addEventListener("click", () => { void requestCredentialClose(); });
 
-  $("credentialForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
+  $("credentialForm").addEventListener("submit", async (event) => {    event.preventDefault();
     if (credentialBusy) return;
     const services = {};
     for (const [service, field] of Object.entries(CREDENTIAL_FIELDS)) {
@@ -5559,6 +5558,42 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (refreshMessage) await refreshCredentialStatus(refreshMessage, session);
   });
+
+  // 1.26.13：看图读题这一段的"测试连接"。测的是勾选的那一家，用的是**已保存**的
+  // 密钥 —— 没保存的密钥要先点「保存读题密钥」，不然测的是旧的那一份。
+  async function testVisionConnection() {
+    if (credentialBusy) return;
+    const result = $("credentialVisionTestResult");
+    const provider = selectedReadingProvider();
+    if (!["modelscope", "minimax", "siliconflow"].includes(provider)) {
+      result.textContent = "先在上面勾一家看图读题服务，再来测。";
+      return;
+    }
+    if (!credentialServices[provider]?.configured) {
+      result.textContent = "这家还没有保存密钥：先把密钥填进去，保存之后再测。";
+      return;
+    }
+    if (!$("credentialVisionTestConsent").checked) {
+      result.textContent = "先勾上「我同意这一次测试」，测试会向服务商发一张合成图。";
+      return;
+    }
+    const session = credentialSession;
+    setCredentialBusy(true);
+    result.textContent = "正在发一张合成图测试…";
+    try {
+      const body = await api("/api/settings/credentials/test", { method: "POST", body: { service: provider, confirm: true } });
+      if (session !== credentialSession) return;
+      result.textContent = body.message || "连接成功。";
+      toast(result.textContent, "success");
+    } catch (error) {
+      if (session !== credentialSession) return;
+      result.textContent = error.message;
+      toast(error.message, "error");
+    } finally {
+      $("credentialVisionTestConsent").checked = false;
+      setCredentialBusy(false);
+    }
+  }
 
   // Queue the values captured at each change, rather than reading the form
   // later, after an older response may have arrived.
@@ -5627,6 +5662,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (credentialBusy || credentialMutationPending()) { syncCredentialVisionPanel(); return; }
     hideAPISecrets();
     const provider = $("credentialVisionProvider").value;
+    // 1.26.13：换了家，之前那句测试结果就不作数了。
+    $("credentialVisionTestResult").textContent = "";
     const key = provider === "assistant" ? "assistant" : settingsEngineChoices(state.status?.engines || {})
       .find((choice) => choice.provider_key === provider)?.key;
     if (!key) { toast("服务列表尚未加载，请稍后重试。", "warn"); syncCredentialVisionPanel(); return; }
@@ -5634,6 +5671,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     syncCredentialVisionPanel({ followSelection: false });
     void saveModelSettings();
   });
+  // 1.26.13：看图读题这一段的测试连接。
+  $("credentialVisionTestButton").addEventListener("click", () => { void testVisionConnection(); });
   modelSettingFields.forEach((id) => $(id).addEventListener("input", () => {
     modelFormDirty = true;
     showModelSaveResult("有改动待保存；离开输入框后会自动保存。", { retry: Boolean(lastModelSave?.failed) });

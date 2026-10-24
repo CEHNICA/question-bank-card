@@ -3342,6 +3342,34 @@ def library_ai_test_view(request):
         return _error(str(error), 400)
 
 @csrf_exempt
+def credential_connection_test_view(request):
+    """1.26.13：测一下「看图读题」这一段的密钥能不能用。
+
+    只发一张软件自己画的合成图，不发老师的试卷。测哪一家由老师勾选决定。
+    """
+
+    from . import reader_test
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("连接测试只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if not isinstance(payload, dict) or payload.get("confirm") is not True:
+        return _error("请明确同意这一次连接测试；这可能消耗一点服务额度。", 400)
+    service = payload.get("service")
+    if not isinstance(service, str) or service not in reader_test.SERVICE_URLS:
+        return _error("请先勾选一家看图读题服务再测试。", 400)
+    try:
+        result = reader_test.test_reading_connection(service)
+    except reader_test.ReadingTestError as error:
+        return _error(str(error), 400)
+    return JsonResponse(result, status=200 if result.get("ok") else 409)
+
+
+@csrf_exempt
 def feature_settings(request):
     """GET 读、POST 改设置里的“功能开关”（没有密钥，网页和工作者共用）。"""
     if request.method == "GET":

@@ -361,6 +361,16 @@
             <label class="provider-option"><input type="radio" id="credentialVision-assistant" name="credentialVisionProvider" value="assistant"><span>暂不配置<small>原图审核或 AI 助手</small><em class="provider-option-state" id="credentialVisionState-assistant">不用密钥</em></span></label>
           </fieldset>
           <select id="credentialVisionProvider" hidden aria-hidden="true" tabindex="-1"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
+          <!-- 1.26.13：这一段以前没有测试连接 —— 填了密钥只能等真读一份资料才知道
+               能不能用。现在和「标签与答案」那段一样：勾一家，同意一次，发一张软件
+               自己画的合成图（两个黑点）问模型有几个点，不发你的试卷。 -->
+          <div class="credential-connection-test" id="credentialVisionTest">
+            <label class="credential-consent"><input id="credentialVisionTestConsent" type="checkbox"><span>我同意这一次测试（会向服务商发一张软件自己画的合成图）</span></label>
+            <div class="credential-connection-actions">
+              <button id="credentialVisionTestButton" class="button" type="button">测试连接</button>
+              <span id="credentialVisionTestResult" class="settings-save-result" role="status" aria-live="polite"></span>
+            </div>
+          </div>
           <p id="settingsModelSummary" class="settings-footnote"></p>
           <div class="settings-form-actions"><span id="settingsModelResult" class="settings-save-result" role="status"></span></div>
         <section id="credentialModelscopeSection" class="credential-service" data-service="modelscope">

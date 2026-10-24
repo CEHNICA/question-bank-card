@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/health", views.health),
     path("api/status", views.status),
     path("api/settings/credentials", views.credential_settings_view),
+    path("api/settings/credentials/test", views.credential_connection_test_view),
     path("api/settings/credentials/key/reveal", api_key_reveal.credential_reveal_view),
     path("api/settings/models", views.model_settings),
     path("api/settings/features", views.feature_settings),
