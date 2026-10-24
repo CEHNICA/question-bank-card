@@ -51,6 +51,33 @@ class AutoBackupTests(TestCase):
         self._make_backup(1)
         self.assertFalse(library_transfer.backup_due())
 
+    def test_a_backup_from_earlier_today_is_enough(self):
+        """1.26.21：每天一份 —— 今天打过了，今天就别再打了。"""
+        path = self._make_backup(1)
+        import os
+        earlier = time.time() - 3 * 3600
+        os.utime(path, (earlier, earlier))
+        self.assertFalse(library_transfer.backup_due())
+
+    def test_a_backup_from_yesterday_is_due_again(self):
+        path = self._make_backup(1)
+        import os
+        yesterday = time.time() - 26 * 3600
+        os.utime(path, (yesterday, yesterday))
+        self.assertTrue(library_transfer.backup_due())
+
+    def test_the_interval_is_one_day(self):
+        self.assertEqual(library_transfer.BACKUP_INTERVAL_DAYS, 1)
+
+    def test_the_listing_reports_the_total_size(self):
+        """1.26.21：老师要知道这些包一共占了多少磁盘。"""
+        self._make_backup(1)
+        body = self.client.get("/api/backup/auto").json()
+        self.assertEqual(body["keep"], 10)
+        self.assertEqual(body["interval_days"], 1)
+        self.assertGreater(body["total_bytes"], 0)
+        self.assertIn("backups", body["folder"])
+
     def test_a_week_old_backup_is_due_again(self):
         path = self._make_backup(1)
         old = time.time() - 8 * 86400

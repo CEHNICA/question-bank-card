@@ -206,7 +206,7 @@
       const backups = body.backups || [];
       box.replaceChildren();
       if (!backups.length) {
-        box.append(el("p", "settings-footnote", "还没有自动备份过。软件每周会自己打一份，也可以现在就打一份。"));
+        box.append(el("p", "settings-footnote", "还没有自动备份过。软件每天会自己打一份，也可以现在就打一份。"));
       } else {
         const list = el("ul", "transfer-records");
         backups.forEach((backup) => {
@@ -215,10 +215,18 @@
           restore.type = "button";
           restore.disabled = busy;
           restore.addEventListener("click", () => { void restoreAutoBackup(backup.id); });
-          item.append(el("span", "", `${when(backup.created_at)}　${backup.name}　${megabytes(backup.size)}`), restore);
+          const label = el("span", "", `${when(backup.created_at)}　${megabytes(backup.size)}`);
+          // 文件名放在提示里，不摆在正中间 —— 老师要认的是"哪一天的那份"，
+          // 不是一串程序里的名字。
+          label.title = backup.name;
+          item.append(label, restore);
           list.append(item);
         });
         box.append(list);
+        const keep = body.keep || 10;
+        const total = megabytes(body.total_bytes || 0);
+        box.append(el("p", "settings-footnote",
+          `一共 ${backups.length} 份，占 ${total}；最多留 ${keep} 份，旧的自动删掉。包放在本机，不联网、不上传。`));
       }
       const now = el("button", "button", "现在备份一次");
       now.type = "button";
@@ -230,7 +238,7 @@
         status("auto", "正在打包，请稍候…");
         try {
           const result = await post("/api/backup/auto", {});
-          status("auto", `已备份：${result.name}。`, false);
+          status("auto", `已备份：${when(result.created_at)}，${megabytes(result.size)}。`, false);
           await loadAutoBackups();
         } catch (error) { status("auto", error.message, true); }
         finally { busy = false; }
@@ -364,10 +372,11 @@
     recordsStatus.id = "transferStatusrecords";
     recordsBox.append(records, recordsStatus);
 
-    // 1.26.17：本机自动备份 —— 每周自己打一份，存在软件自己的文件夹里。
+    // 1.26.17：本机自动备份 —— 每天自己打一份，存在软件自己的文件夹里。
+    // 1.26.21：改成每天一份（份数不变），并说清楚一共占多少磁盘。
     const autoBox = el("section", "settings-section");
     autoBox.append(el("h3", "", "本机自动备份"),
-      el("p", "settings-footnote", "每周自己打一个备份包，放在软件自己的文件夹里，旧的只留最近 10 份。不联网、不上传。"));
+      el("p", "settings-footnote", "每天自己打一个备份包，放在软件自己的文件夹里，只留最近 10 份。不联网、不上传。"));
     const autoInner = el("div");
     autoInner.id = "transferAuto";
     const autoStatus = el("p", "transfer-status");

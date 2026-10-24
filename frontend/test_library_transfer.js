@@ -41,7 +41,7 @@ function makeDom() {
 }
 
 function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody = {}, choose = { selected: true, directory: "D:/备份" },
-  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false } } = {}) {
+  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false, keep: 10, total_bytes: 12 * 1024 * 1024 } } = {}) {
   const dom = makeDom();
   const calls = [];
   const context = vm.createContext({
@@ -198,15 +198,21 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
 }
 
 // 9. 1.26.17：本机自动备份 —— 列出备份包、现在打一份、从某一份恢复。
+//    1.26.21：正中间不再摆程序里的文件名，改成「哪一天的那一份 + 多大」；
+//    并说明一共留几份、共占多少磁盘。
 {
   const { dom, calls, window } = boot();
   window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
   await new Promise((resolve) => setTimeout(resolve, 0));
   const box = dom.document.getElementById("transferAuto");
   const summary = text(box);
-  assert.match(summary, /题有据自动备份/, "备份包列出来了");
   assert.match(summary, /从这一份恢复/, "每一份备份都能从这里恢复");
   assert.match(summary, /现在备份一次/, "也能随时手动打一份");
+  assert.match(summary, /一共 1 份/, "要说清楚一共几份");
+  assert.match(summary, /12\.0 MB/, "要说清楚这些包一共占多少磁盘");
+  assert.doesNotMatch(summary, /题有据自动备份-20261020-050000\.zip/, "正中间不摆程序里的文件名");
+  const label = box.children[0].children[0].children[0];
+  assert.equal(label.title, "题有据自动备份-20261020-050000.zip", "文件名放在提示里，不占正中间");
   const called = calls.filter((call) => call.url === "/api/backup/auto");
   assert.ok(called.length, "读了一次自动备份列表");
 }

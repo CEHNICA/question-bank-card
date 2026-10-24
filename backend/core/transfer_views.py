@@ -170,11 +170,16 @@ def auto_backups_view(request):
     if request.method == "GET":
         if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
             return _error("备份记录只能在本机题库中查看", 403)
+        backups = library_transfer.list_backups()
         response = JsonResponse({
-            "backups": library_transfer.list_backups(),
+            "backups": backups,
             "due": library_transfer.backup_due(),
             "keep": library_transfer.BACKUP_KEEP,
             "interval_days": library_transfer.BACKUP_INTERVAL_DAYS,
+            # 1.26.21：告诉老师这些包一共占了多少磁盘、下一份什么时候打 ——
+            # 让他一眼知道代价，不用猜。
+            "total_bytes": sum(int(item.get("size") or 0) for item in backups),
+            "folder": str(library_transfer.backups_root()),
         })
         response["Cache-Control"] = "no-store"
         return response
