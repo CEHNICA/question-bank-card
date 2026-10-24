@@ -8,6 +8,8 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
+<!-- 1.26.15：API 配置这一页的重新排版，单独一个文件，方便整页回退。 -->
+<link rel="stylesheet" href="/api-redesign.css?v=2">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -76,7 +78,18 @@
                平铺在这里：云端切题、看图读题、生成标签和答案，一页看完，不用切标签。
                （原来那个「配置 API」按钮藏起来的是老师最需要看到的东西。） -->
           <section class="settings-section api-setup-entry" aria-labelledby="settingsServicesTitle">
-            <div><p id="settingsServiceReadiness" class="settings-readiness" role="status">正在查看这台电脑的配置…</p><h3 id="settingsServicesTitle">API 配置</h3><p class="settings-description">下面就是全部配置：云端切题、看图读题、生成标签和答案。勾选哪一家，它就管哪件事；密钥只加密保存在这台电脑上。</p></div>
+            <div class="api-setup-intro">
+              <h3 id="settingsServicesTitle">API 配置</h3>
+              <!-- 1.26.15：打开这一页先看到"配到哪一步了"—— 三步各一颗点，
+                   不用往下翻就知道还差哪一样。 -->
+              <ol id="settingsServiceSteps" class="api-step-track" aria-label="配置进度">
+                <li id="apiStepTrack-mineru"><span class="api-step-dot">1</span><span class="api-step-name">云端切题</span><em class="api-step-state">正在查看…</em></li>
+                <li id="apiStepTrack-reader"><span class="api-step-dot">2</span><span class="api-step-name">看图读题</span><em class="api-step-state">正在查看…</em></li>
+                <li id="apiStepTrack-answers"><span class="api-step-dot">3</span><span class="api-step-name">生成标签和答案</span><em class="api-step-state">正在查看…</em></li>
+              </ol>
+              <p id="settingsServiceReadiness" class="settings-readiness" role="status">正在查看这台电脑的配置…</p>
+              <p class="settings-description">下面就是全部配置：云端切题、看图读题、生成标签和答案。勾选哪一家，它就管哪件事；密钥只加密保存在这台电脑上。</p>
+            </div>
           </section>
           <div id="settingsCredentialHost" class="settings-credential-host"></div>
         </div>

@@ -760,6 +760,8 @@ site_drawer_script = _frontend("site-drawer.js", "application/javascript; charse
 exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
 exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
 styles = _frontend("styles.css", "text/css; charset=utf-8")
+# 1.26.15：API 配置这一页的重新排版，单独一个文件，整页回退只要删掉这一行。
+api_redesign_styles = _frontend("api-redesign.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
 library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")

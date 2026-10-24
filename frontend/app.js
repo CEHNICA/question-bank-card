@@ -4924,7 +4924,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderCredentialSavedRows(service, field, count) {
     const list = $(field.list);
     list.replaceChildren();
-    if (!count) { list.append(el("li", "credential-saved-empty", "暂无已保存密钥")); return; }
+    // 1.26.15：空的占位句去掉了 —— 状态已经写在卡片标题右边（"已保存 0 个"），
+    // 同一件事再说一遍只会让页面更吵。
+    if (!count) { list.replaceChildren(); return; }
     for (let index = 0; index < count; index += 1) {
       const item = el("li", "credential-saved-row");
       const number = el("span", "credential-saved-number", `${index + 1}`);
@@ -8525,6 +8527,27 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const { tone, text } = serviceReadiness();
     node.textContent = text;
     node.className = `settings-readiness ${tone}`;
+    renderApiStepTrack();
+  }
+
+  // 1.26.15：三步各一颗点，打开这一页就知道配到哪一步了。
+  function renderApiStepTrack() {
+    const status = state.status;
+    if (!status) return;
+    const reading = status.reader_readiness;
+    const readerReady = Boolean(reading && reading.ready);
+    const mineruReady = Boolean(status.mineru);
+    const steps = [
+      ["mineru", mineruReady, mineruReady ? "已配置" : "还没配"],
+      ["reader", readerReady, readerReady ? (reading.label || status.reader || "已配置") : "还没配"]
+    ];
+    for (const [key, ready, label] of steps) {
+      const item = $(`apiStepTrack-${key}`);
+      if (!item) continue;
+      item.className = ready ? "done" : "todo";
+      const state = item.querySelector(".api-step-state");
+      if (state) state.textContent = label;
+    }
   }
 
   async function sendUpload(form, label) {

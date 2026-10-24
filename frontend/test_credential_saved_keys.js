@@ -89,7 +89,9 @@ function cropCloseScenario({ dirty = false, backendChanged = false } = {}) {
   for (const [service, count] of Object.entries(masked.counts)) {
     const field = masked.context.fields[service];
     assert.equal(masked.$(field.state).textContent, `已保存 ${count} 个`);
-    assert.equal(masked.$(field.list).children.length, count || 1);
+    // 1.26.15：没存过的那家不再塞一句"暂无已保存密钥"占位 —— 状态已经写在
+    // 卡片标题右边（"已保存 0 个"），同一件事说两遍只会让页面更吵。
+    assert.equal(masked.$(field.list).children.length, count);
     assert.equal(masked.$(field.input).value, "");
     for (let index = 0; index < count; index++) assert.equal(masked.row(service, index).value.textContent, "****************");
   }

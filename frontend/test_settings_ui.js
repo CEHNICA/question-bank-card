@@ -10,6 +10,14 @@ const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const layout = fs.readFileSync(path.join(__dirname, "original-paper-layout.js"), "utf8");
 
+// 1.26.15：API 配置页顶上有三步进度（云端切题／看图读题／生成标签和答案），
+// 打开这一页就知道配到哪一步了；重新排版单独一个样式文件，方便整页回退。
+assert.match(html, /id="settingsServiceSteps"/, "the API page shows a three-step progress track");
+assert.match(html, /apiStepTrack-mineru/, "step one is the cloud cut");
+assert.match(html, /apiStepTrack-reader/, "step two is the reader");
+assert.match(html, /apiStepTrack-answers/, "step three is the answers");
+assert.match(html, /api-redesign\.css/, "the redesigned layout lives in its own stylesheet");
+
 // 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
 for (const page of [html, libraryHtml]) {
   assert.match(page, /<strong>题有据<\/strong>/);

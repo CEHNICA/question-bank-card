@@ -31,6 +31,7 @@ urlpatterns = [
     path("static/export-settings.js", views.export_settings_script),
     path("static/library-transfer.js", views.library_transfer_script),
     path("styles.css", views.styles),
+    path("api-redesign.css", views.api_redesign_styles),
     path("library.css", views.library_styles),
     path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),

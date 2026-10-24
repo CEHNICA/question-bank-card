@@ -824,6 +824,14 @@ ${keyBlocks()}
     state.baseline = effectiveSettings(); state.dirty = false;
     $("libraryAIState").textContent = body.api_ready ? "答题 API 已通过测试，生成结果仍需核对。" : "选择或复用一家服务，保存并测试后才可生成；不需要标签和答案时可以跳过。";
     $("libraryAIState").classList.toggle("error", !body.api_ready);
+    // 1.26.15：把这一步的状态报给页面上的进度条（第三步）。
+    const step = $("apiStepTrack-answers");
+    if (step) {
+      const ready = Boolean(body.configured && body.api_ready);
+      step.className = ready ? "done" : "todo";
+      const state = step.querySelector(".api-step-state");
+      if (state) state.textContent = ready ? "已测通" : (body.configured ? "已保存，未测试" : "还没配");
+    }
   }
 
   async function open() {

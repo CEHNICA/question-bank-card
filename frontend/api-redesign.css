@@ -1,0 +1,103 @@
+
+/* ==========================================================================
+   1.26.15：把「设置 → API 配置」重新排一遍。
+
+   之前这一页的问题（老师自己说"不好看"）：
+   - 同一个信息说了四遍（"共保存 0 个密钥"／卡片右上"已保存 0 个"／
+     勾选行里的"未存密钥"／卡片里的"暂无已保存密钥"）；
+   - 步骤编号是一个浮在标题上的绿圆点，像贴纸；
+   - 四张服务商卡片长得一模一样，一眼看不出哪张是"正在用的那家"；
+   - 大半篇幅是重复的输入框和灰色小字。
+
+   改法：进度条（三步各一颗点）＋ 步骤卡（统一的头）＋ 服务商一行式
+   （左：厂家和状态；右：密钥、模型、测试）。
+   规则挂在 #credentialUi 上 —— 同一份配置在设置页和弹窗里都长这样。
+   ========================================================================== */
+
+/* — 顶部进度条：三步各一颗点 — */
+.api-setup-intro { display: grid; gap: 10px; }
+.api-step-track { display: flex; flex-wrap: wrap; gap: 8px 10px; margin: 0; padding: 0; list-style: none; }
+.api-step-track li {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px 7px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  color: var(--muted); font-size: 13px;
+}
+.api-step-dot {
+  display: inline-grid; place-items: center; width: 21px; height: 21px; flex: none;
+  border-radius: 50%; background: var(--bg-sunken); color: var(--muted);
+  font-size: 11.5px; font-weight: 700;
+}
+.api-step-name { color: var(--ink-2); font-weight: 650; }
+.api-step-state { font-style: normal; font-size: 12px; }
+.api-step-track li.done { border-color: var(--green-bar); background: var(--green-soft); }
+.api-step-track li.done .api-step-dot { background: var(--green); color: #fff; }
+.api-step-track li.done .api-step-name { color: var(--ink); }
+.api-step-track li.done .api-step-state { color: var(--green); font-weight: 650; }
+.api-step-track li.todo .api-step-name { color: var(--muted); }
+
+/* — 步骤卡：统一的头（编号徽章 + 标题 + 右侧状态） — */
+#credentialUi .credential-service,
+#credentialUi .credential-vision-step {
+  border-radius: 14px; border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(31, 35, 32, .04);
+  padding: 16px 18px; gap: 12px;
+}
+#credentialUi .credential-step-number {
+  width: 24px; height: 24px; border-radius: 8px; vertical-align: -5px; margin-right: 8px;
+  font-size: 12.5px; font-weight: 700; background: var(--accent-soft); color: var(--accent-dark);
+  border: 1px solid var(--accent-ring);
+}
+#credentialUi .credential-vision-step h4 { display: flex; align-items: center; font-size: 16.5px; letter-spacing: .2px; }
+#credentialUi .credential-service-head > strong { font-size: 14.5px; display: flex; align-items: center; flex-wrap: wrap; }
+
+/* — 服务商一行式：左栏是"哪家 + 什么状态"，右栏是"填什么"。
+   左栏是绝对定位的：它不占行高，右栏的标签和输入框才会紧挨着。 — */
+#credentialUi .credential-service {
+  position: relative; display: grid; grid-template-columns: 1fr;
+  gap: 2px 20px; align-items: start; padding: 14px 16px 14px 200px;
+}
+#credentialUi .credential-service-head {
+  position: absolute; left: 16px; top: 15px; width: 172px;
+  flex-direction: column; align-items: flex-start; gap: 3px;
+}
+#credentialUi .credential-service-head .api-state { font-size: 12px; }
+#credentialUi .credential-service > *:not(.credential-service-head) { grid-column: 1; }
+#credentialUi .credential-service .credential-service-actions {
+  position: absolute; left: 16px; bottom: 14px; justify-content: flex-start;
+}
+#credentialUi .credential-service .model-id-field { margin-top: 4px; }
+#credentialUi .credential-service .credential-connection-test { margin-top: 8px; }
+#credentialUi .library-ai-key-block { background: var(--bg-sunken); }
+
+/* 空列表不占地方：状态已经写在标题右边了 */
+#credentialUi .credential-saved-list:empty { display: none; }
+
+/* — 勾选行：像几个可点的卡片，一眼看出选中了谁 — */
+#credentialUi .provider-picker { border: 0; padding: 0; margin: 0; background: transparent; }
+#credentialUi .provider-picker .field-legend { padding: 0; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+#credentialUi .provider-option {
+  padding: 8px 13px; border-radius: 11px; border-color: var(--line-strong); background: var(--surface);
+  box-shadow: 0 1px 1px rgba(31, 35, 32, .03);
+}
+#credentialUi .provider-option:hover { border-color: var(--accent-ring); }
+#credentialUi .provider-option:has(input:checked) {
+  border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* — 那些重复的说明和小字，收一收，别抢注意力 — */
+#credentialUi .credential-storage-note,
+#credentialUi .settings-footnote { margin: 2px 0 0; font-size: 12px; line-height: 1.55; }
+#credentialUi .credential-purpose { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+#credentialUi .credential-saved-total {
+  display: inline; margin: 0; padding: 0; border: 0; background: transparent;
+  font-size: 12.5px; color: var(--ink-2); font-weight: 650;
+}
+#credentialUi .credential-saved-total + .credential-storage-note { display: inline; margin-left: 8px; font-weight: 400; }
+
+/* — 「保存读题密钥」：平铺的时候是普通一行操作，不再像横贯整页的工具条；
+     弹窗里保留原来吸底的样子（那里它本来就该跟着走）。 — */
+.settings-credential-host #credentialUi .credential-actions {
+  position: static; border-top: 0; background: transparent; padding: 4px 0 0; margin: 0;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.settings-credential-host #credentialUi .credential-actions .settings-save-result { flex: 1 1 100%; order: -1; margin: 0; }
