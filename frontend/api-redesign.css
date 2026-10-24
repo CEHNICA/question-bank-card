@@ -12,7 +12,21 @@
    改法：进度条（三步各一颗点）＋ 步骤卡（统一的头）＋ 服务商一行式
    （左：厂家和状态；右：密钥、模型、测试）。
    规则挂在 #credentialUi 上 —— 同一份配置在设置页和弹窗里都长这样。
+
+   1.26.16：这份样式扩到整个设置页 —— 五个区用同一种卡片、同一套行。
    ========================================================================== */
+
+/* — 设置页五区共用的卡片：一套视觉语言 — */
+.settings-page .settings-section {
+  border-radius: 14px; border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(31, 35, 32, .04);
+  padding: 16px 18px; gap: 10px;
+}
+.settings-page .settings-section > h3 { font-size: 16px; letter-spacing: .2px; }
+.settings-page .settings-section > h3 + .settings-footnote { margin: -4px 0 2px; }
+.settings-page .settings-footnote { font-size: 12px; line-height: 1.55; color: var(--muted); }
+/* 每个区开头一句引导：这一区管什么、要不要管 */
+.settings-area-lead { margin: 0 0 12px; color: var(--ink-2); font-size: 13px; line-height: 1.6; }
 
 /* — 顶部进度条：三步各一颗点 — */
 .api-setup-intro { display: grid; gap: 10px; }

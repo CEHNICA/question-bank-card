@@ -17,6 +17,12 @@ assert.match(html, /apiStepTrack-mineru/, "step one is the cloud cut");
 assert.match(html, /apiStepTrack-reader/, "step two is the reader");
 assert.match(html, /apiStepTrack-answers/, "step three is the answers");
 assert.match(html, /api-redesign\.css/, "the redesigned layout lives in its own stylesheet");
+// 1.26.16：每个区一句引导，页头按区换。
+assert.match(html, /id="settingsPageLead"/, "the page header carries a per-area lead sentence");
+const leads = js.slice(js.indexOf("const SETTINGS_AREA_LEADS"), js.indexOf("};", js.indexOf("const SETTINGS_AREA_LEADS")));
+for (const area of ["settingsGeneral", "settingsDisplay", "settingsTransfer", "settingsReview", "settingsAbout"]) {
+  assert.ok(leads.includes(area), `每个区都有一句引导：${area}`);
+}
 
 // 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
 for (const page of [html, libraryHtml]) {

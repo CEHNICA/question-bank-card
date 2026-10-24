@@ -45,6 +45,19 @@
     return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("zh-CN", { hour12: false });
   }
 
+  // 1.26.16：机器时间写成人话 —— "3 天前 · 10 月 23 日 05:28"。
+  // 只看得出是哪一天的记录不够，合并记录往往是几天前的事，"几天前"才管用。
+  function when(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+    const stamp = `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    if (days <= 0) return `今天 ${stamp}`;
+    if (days === 1) return `昨天 ${stamp}`;
+    if (days < 30) return `${days} 天前 · ${stamp}`;
+    return stamp;
+  }
+
   // ---- 导出 --------------------------------------------------------
 
   function renderExport() {
@@ -205,7 +218,7 @@
         if (record.solutions) bits.push(`${record.solutions} 份解析`);
         if (record.filled) bits.push(`给 ${record.filled} 道题补上答案`);
         if (record.tags) bits.push(`${record.tags} 个标签`);
-        item.append(el("span", "", `${moment(record.created_at)}　并进来 ${bits.join("、") || "一些题目"}`));
+        item.append(el("span", "", `${when(record.created_at)}　并进来 ${bits.join("、") || "一些题目"}`));
         list.append(item);
       });
       box.append(list);
@@ -246,8 +259,7 @@
     host = target || host;
     if (!host) return;
     host.replaceChildren();
-    const intro = el("p", "settings-description",
-      "题库全在这台电脑上。换电脑、备份，或者把两台电脑的题库并到一起，都在这里。备份不联网，也不上传。");
+    // 1.26.16：这一区的引导改由页头统一给（每个区一句），这里不再重复一遍。
     const exportBox = el("section", "settings-section");
     exportBox.append(el("h3", "", "导出备份"), el("p", "settings-footnote", "把整库（含原卷照片）打成一个包，放到你自己选的文件夹里。"));
     const exportInner = el("div");
@@ -276,7 +288,7 @@
     recordsStatus.id = "transferStatusrecords";
     recordsBox.append(records, recordsStatus);
 
-    host.append(intro, exportBox, mergeBox, recordsBox);
+    host.append(exportBox, mergeBox, recordsBox);
     renderExport(); renderMerge();
     void loadRecords();
   }

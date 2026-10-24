@@ -171,6 +171,27 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   assert.match(dom.document.getElementById("transferStatusrecords").textContent, /已撤销/);
 }
 
+// 7. 1.26.16：导入记录的时间写成人话 —— "3 天前 · 10 月 20 日 09:00"，
+// 而不是机器时间戳。合并记录往往是几天前的事，"几天前"才管用。
+{
+  const { dom, window } = boot({ records: { records: [{ id: "1", created_at: "2026-10-22T09:00:00Z", papers: 1, questions: 20, solutions: 2, tags: 4 }] } });
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const records = dom.document.getElementById("transferRecords");
+  const summary = text(records);
+  assert.match(summary, /前 · |今天 |昨天 /, "导入记录写成人话：今天／昨天／几天前");
+  assert.doesNotMatch(summary, /\d{4}\/\d{1,2}\/\d{1,2}\s+\d{2}:\d{2}:\d{2}/, "不再出现机器时间戳");
+}
+
+// 8. 1.26.16：这一区不再自带一句引导 —— 页头统一给每个区一句。
+{
+  const { dom, window } = boot();
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const summary = text(dom.document.getElementById("transferSettingsMount"));
+  assert.doesNotMatch(summary, /备份不联网，也不上传/, "页头已经说了这一区，区内不再重复");
+}
+
 console.log("设置 → 数据备份与迁移：所有断言通过");
 }
 main();

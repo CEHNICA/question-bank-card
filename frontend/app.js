@@ -5331,6 +5331,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return Object.keys(SETTINGS_HASHES).find((id) => SETTINGS_HASHES[id] === hash) || "settingsGeneral";
   }
 
+  // 1.26.16：每个区开头一句引导 —— 这一区管什么、要不要管。
+  const SETTINGS_AREA_LEADS = {
+    settingsGeneral: "填好这一区，识读和生成答案就能用。密钥只加密保存在这台电脑上。",
+    settingsDisplay: "只改这台电脑上的显示和导出，不改题库里的题。",
+    settingsTransfer: "换电脑、备份，或者把两台电脑的题库并到一起，都在这里。备份不联网，也不上传。",
+    settingsReview: "先挑一种切题方式，别的随时能换。",
+    settingsAbout: "题有据在这一台电脑上运行，数据不出这台电脑。"
+  };
+
   function showSettingsTab(id, { updateHash = true } = {}) {
     if (!Object.hasOwn(SETTINGS_HASHES, id)) id = "settingsGeneral";
     document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
@@ -5339,6 +5348,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       tab.tabIndex = active ? 0 : -1;
     });
     document.querySelectorAll("#settingsDialog .settings-page").forEach((page) => { page.hidden = page.id !== id; });
+    const lead = $("settingsPageLead");
+    if (lead) lead.textContent = SETTINGS_AREA_LEADS[id] || SETTINGS_AREA_LEADS.settingsGeneral;
     if (id === "settingsDisplay") void window.ExportSettings?.refresh?.();
     if (id === "settingsTransfer") void window.LibraryTransfer?.refresh?.();
     const scroller = document.querySelector("#settingsDialog .settings-scroll");
