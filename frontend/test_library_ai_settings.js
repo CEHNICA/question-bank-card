@@ -261,7 +261,10 @@ function setup({ coordinator = true, ignoreAbort = false } = {}) {
 
   const switchStyle = unchanged.document.head.children[0].textContent, switchMarkup = unchanged.get("libraryAISettingsDialog").html;
   assert.match(switchStyle, /\.library-ai-switch\{[^}]*display:inline-flex;[^}]*width:fit-content;[^}]*max-width:100%;[^}]*justify-self:start;/);
-  assert.match(switchMarkup, /<label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>/, "Checkbox and actual text retain native label/Space accessibility");
+  // 1.26.8：测试的同意框紧挨着按钮（不是功能开关那种单独的开关行），
+  // 文字里也写明是"这一次"。
+  assert.match(switchMarkup, /<label class="library-ai-consent"><input id="libraryAITestConsent" type="checkbox"><span>我同意这一次测试/, "The one-off consent sits next to the button and says it is for this one test");
+  assert.match(switchMarkup, /id="libraryAITestHint"/, "The test card says what to do next");
 
   s.get("libraryAITags").checked = true;
   s.get("libraryAITags").trigger("input");
@@ -330,6 +333,22 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(s.calls.at(-1).url, "/api/settings/library-ai/test");
   assert.deepEqual(s.calls.at(-1).payload, { confirm: true });
   assert.equal(s.get("libraryAITestConsent").checked, false, "each probe requires fresh consent");
+
+  // 1.26.8：卡片自己说明白"现在是什么状态、下一步做什么"，不再让人对着一个灰按钮猜。
+  assert.equal(s.get("libraryAITestState").textContent, "已测通", "a verified service says so right on the test card");
+  assert.match(s.get("libraryAITestHint").textContent, /已经测通/, "and says what it means");
+  const waiting = setup();
+  Object.assign(waiting.current, { mode: "api", provider: "deepseek", configured: false, key_configured: false, api_ready: false });
+  await waiting.window.LibraryAISettings.open(); await flush();
+  assert.equal(waiting.get("libraryAITestState").textContent, "还没测过", "the badge only reports the test state; the service state is on the other card");
+  assert.match(waiting.get("libraryAITestHint").textContent, /先在上面填好/, "the card says what is missing");
+  const dirty = setup();
+  Object.assign(dirty.current, { mode: "api", provider: "deepseek", configured: true, key_configured: true, api_ready: false });
+  await dirty.window.LibraryAISettings.open(); await flush();
+  dirty.get("libraryAIBaseURL").value = "https://offline-edited.example/v1"; dirty.get("libraryAIBaseURL").trigger("input");
+  await flush();
+  assert.equal(dirty.get("libraryAITestState").textContent, "还没测过", "unsaved edits are called out before the probe");
+  assert.match(dirty.get("libraryAITestHint").textContent, /先点下面的「保存设置」/, "and the next step is spelled out");
 
   s.get("libraryAIProvider").value = "custom";
   s.get("libraryAIKey-deepseek").value = "previous-provider-unsaved-key";

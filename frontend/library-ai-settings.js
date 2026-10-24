@@ -183,10 +183,17 @@ ${keyBlocks()}
               </section>
             </details>
             <section class="credential-service" data-library-service="test">
-              <div class="credential-service-head"><strong>保存后，测试一次连接</strong><span class="api-state">通过后才可生成</span></div>
-              <p class="credential-purpose">测试只发送软件的合成题和合成图，不发送你的试卷。可能消耗服务额度；通过测试仍需要人工核对答案。</p>
-              <label class="library-ai-switch"><input id="libraryAITestConsent" type="checkbox"><span>同意发起一次 API 测试</span></label>
-              <div class="credential-service-actions"><button id="libraryAITest" class="button" type="button" disabled>测试连接</button></div>
+              <div class="credential-service-head"><strong>连接测试</strong><span id="libraryAITestState" class="api-state">正在读取…</span></div>
+              <p class="credential-purpose">测试只发送软件的合成题和合成图，不发送你的试卷。可能消耗服务额度；<strong>测通后才能生成</strong>，生成的答案仍要人工核对。</p>
+              <!-- 1.26.8：这一块原来把"同意发起一次 API 测试"画成一个和功能开关一模一样的
+                勾选框，单独占一行 —— 老师读成"又一个开关"，勾了、测完它又自己弹起来。
+                现在勾选框紧挨着按钮，写明"这一次"：它只是这一次测试的同意，不是设置。
+                按钮为什么灰、接下来该点哪一步，都由下面那行字说清楚。 -->
+              <div class="credential-service-actions library-ai-test-actions">
+                <label class="library-ai-consent"><input id="libraryAITestConsent" type="checkbox"><span>我同意这一次测试（会向服务商发一条合成题）</span></label>
+                <button id="libraryAITest" class="button" type="button" disabled>测试连接</button>
+              </div>
+              <p id="libraryAITestHint" class="helper" role="status" aria-live="polite"></p>
             </section>
             <details class="credential-more"><summary>复用密钥和切换服务会怎样？</summary><p>复用会复制读题侧的第一个账号，不需要再次粘贴。以后更换读题密钥时，在这里再点一次复用即可；不会自动跟着更改。每家已保存的密钥和模型配置分别保留，选择其他服务不会删除它们。</p><p>密钥仅加密保存在本机。配置、保存或测试都不会自动生成标签和答案。</p></details>
           </section>
@@ -613,7 +620,11 @@ ${keyBlocks()}
     renderCapabilities(); syncDirty();
     const idle = !state.busy && Boolean(state.current);
     $("libraryAISave").disabled = !idle || state.keyPending.size > 0;
-    $("libraryAITest").disabled = state.busy || state.dirty || !isAPI() || state.current?.mode !== "api" || !state.current?.configured || !$("libraryAITestConsent").checked;
+    // 1.26.8：测试这一块的状态自己算一遍，并且**说给老师听**：
+    // 按钮为什么灰、下一步该点哪一步，都写在卡片里，不再让人猜。
+    const testServiceReady = isAPI() && state.current?.mode === "api" && Boolean(state.current?.configured);
+    const testBlocked = state.busy || state.dirty || !testServiceReady;
+    $("libraryAITest").disabled = testBlocked || !$("libraryAITestConsent").checked;
     for (const id of fields) $(id).disabled = !idle;
     $("libraryAIAnswerIntake").disabled = !idle || !$("libraryAIAnswer").checked;
     $("libraryAITestConsent").disabled = !idle;
@@ -646,10 +657,48 @@ ${keyBlocks()}
       if (remove) { remove.hidden = !count; remove.disabled = !idle || !count; }
     }
     renderCapabilities(); renderSharing();
+    renderTestState(testServiceReady);
     if (state.inline) {
       $("libraryAICancel").disabled = state.busy;
       $("libraryAICancel").textContent = state.current ? "撤销更改" : "重新读取";
     }
+  }
+
+  function renderTestState(serviceReady) {
+    // 1.26.8：这块卡片自己说明白"现在是什么状态、下一步做什么"。
+    // 以前只有一个灰着的按钮和一句"保存后，测试一次连接" —— 老师只能猜。
+    // 徽标只说**测试的状态**（上面那张卡已经说了服务本身的状态，不重复）；
+    // 提示行只说**下一步做什么**。
+    const chip = $("libraryAITestState");
+    const hint = $("libraryAITestHint");
+    const testing = state.busy && state.operation === "test";
+    const verified = Boolean(state.current?.api_ready);
+    let label = "还没测过";
+    let text = "还没测过：勾上上面的同意，点「测试连接」。";
+    if (!state.current) {
+      label = "正在读取…";
+      text = "";
+    } else if (state.current.mode !== "api" || !isAPI()) {
+      label = "当前不用它";
+      text = "";
+    } else if (!serviceReady) {
+      label = "还没测过";
+      text = "这一家还没保存密钥或模型：先在上面填好，保存之后再测。";
+    } else if (state.dirty) {
+      label = "还没测过";
+      text = "有未保存的改动：先点下面的「保存设置」，再测试 —— 测的是保存过的那份。";
+    } else if (testing) {
+      label = "测试中";
+      text = "正在用合成题测试，请稍候…";
+    } else if (verified) {
+      label = "已测通";
+      text = "已经测通，可以生成；生成的答案仍要人工核对。";
+    }
+    if (chip) {
+      chip.textContent = label;
+      chip.className = `api-state ${verified ? "ready" : "missing"}`;
+    }
+    if (hint) hint.textContent = text;
   }
 
   async function request(url, payload) {

@@ -1260,6 +1260,15 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-service > input[type="password"]:disabled { background: var(--surface-2); color: var(--muted); }
 .credential-service-actions { display: flex; justify-content: flex-end; }
 .credential-service-actions:has(> [hidden]) { display: none; }
+/* 1.26.8：连接测试这一行的勾选框不是"功能开关"，是"这一次测试的同意" ——
+   它紧挨着按钮，样式也跟功能开关分开，免得老师把它当成设置（勾了之后它还会自己
+   弹起来，看着像出 bug）。 */
+.library-ai-test-actions { align-items: center; gap: 14px; flex-wrap: wrap; }
+.library-ai-consent { display: inline-flex; align-items: center; gap: 8px; margin-right: auto;
+  color: var(--ink-2); font-size: 12.5px; line-height: 1.5; cursor: pointer; }
+.library-ai-consent input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.library-ai-consent:has(input:disabled) { opacity: .55; cursor: default; }
+.credential-service .helper { margin: 8px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 .credential-delete { color: var(--red); }
 .credential-storage-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .credential-security-note { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
