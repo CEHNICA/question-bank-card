@@ -103,3 +103,58 @@ console.log("temperature unit checks: OK");
   assert.deepEqual(QB.typesetSegments("计算 $-3$ 的值").map((segment) => segment.latex).filter(Boolean), ["-3"]);
 }
 console.log("figure number checks: OK");
+
+// 1.26.18：一道题缺了两张配图时，原来会连着出现两句一模一样的话
+// （"这道题的配图没在原卷目录里…"），看着像同一句话重复了两遍。
+// 现在要说清是哪一张。
+{
+  const document = {
+    createElement(tag) {
+      const node = {
+        tagName: String(tag).toUpperCase(),
+        children: [], dataset: {}, style: {}, className: "", textContent: "",
+        ownerDocument: document,
+        classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+        append(...kids) { kids.forEach((kid) => node.children.push(kid)); },
+        appendChild(kid) { node.children.push(kid); return kid; },
+        prepend(kid) { node.children.unshift(kid); },
+        replaceChildren(...kids) { node.children = kids; },
+        remove() {}, setAttribute() {}, getAttribute() { return null; },
+        querySelectorAll() { return []; }, querySelector() { return null; },
+        addEventListener() {},
+      };
+      return node;
+    },
+    createTextNode(text) { return { nodeType: 3, textContent: String(text) }; },
+  };
+  // qb-render.js 里有一处直接用全局 document 建文本节点。
+  const previousDocument = global.document;
+  global.document = document;
+  try {
+    const root = document.createElement("div");
+    QB.renderQuestion(root, {
+      stem: "如图1，AB 是 ⊙O 的直径。",
+      figures: [
+        { slot: "stem", missing: true, url: "/media/1.png" },
+        { slot: "stem", missing: true, url: "/media/2.png" },
+        { slot: "B", missing: true, url: "/media/3.png" },
+      ],
+    }, { literal: true, showNumber: false });
+    const notes = [];
+    (function walk(node) {
+      if (node.className === "qb-image-error") notes.push(node.textContent);
+      (node.children || []).forEach(walk);
+    })(root);
+    assert.equal(notes.length, 3, "三张缺失配图各说一句");
+    assert.notEqual(notes[0], notes[1], "两张题干配图不能说同一句话");
+    assert.notEqual(notes[1], notes[2], "题干配图和选项配图也不能说同一句话");
+    assert.match(notes[0], /题干配图/);
+    assert.match(notes[1], /第 2 张题干配图/);
+    assert.match(notes[2], /选项 B/);
+    assert.ok(notes.every((note) => note.includes("没在原卷目录里")));
+    assert.ok(notes.every((note) => note.includes("题面和答案不受影响")));
+  } finally {
+    global.document = previousDocument;
+  }
+}
+console.log("missing figure notes: OK");

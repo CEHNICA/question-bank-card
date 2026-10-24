@@ -1253,7 +1253,7 @@
     });
   }
 
-  function figureElement(figure, resolveUrl, action) {
+  function figureElement(figure, resolveUrl, action, ordinal) {
     const frame = document.createElement("figure");
     frame.className = "qb-figure";
     // 这个函数不在 renderQuestion / answerRows 里，那两处的 make 是局部变量，
@@ -1262,7 +1262,12 @@
     const note = () => {
       const text = frame.ownerDocument.createElement("p");
       text.className = "qb-image-error";
-      text.textContent = "这道题的配图没在原卷目录里。题面和答案不受影响；"
+      // 1.26.18：说清是哪一张。一道题缺了两张配图时，原来会连着出现两句一模一样
+      // 的话，看着像同一句话重复了两遍。
+      const which = figure.slot === "stem"
+        ? (ordinal > 1 ? `第 ${ordinal} 张题干配图` : "题干配图")
+        : `选项 ${figure.slot} 的配图`;
+      text.textContent = `这道题的${which}没在原卷目录里。题面和答案不受影响；`
         + "点「查看出处」可以回到原卷核对，或重新切一次这道题的图。";
       return text;
     };
@@ -1374,7 +1379,7 @@
     const stemFigures = figures.filter((figure) => figure.slot === "stem");
     if (stemFigures.length) {
       const row = make("div", "qb-figures");
-      stemFigures.forEach((figure) => row.append(figureElement(figure, opts.resolveUrl, opts.figureAction)));
+      stemFigures.forEach((figure, index) => row.append(figureElement(figure, opts.resolveUrl, opts.figureAction, index + 1)));
       container.append(row);
     }
     const options = content.options && typeof content.options === "object" ? content.options : {};

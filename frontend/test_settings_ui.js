@@ -17,6 +17,16 @@ assert.match(html, /apiStepTrack-mineru/, "step one is the cloud cut");
 assert.match(html, /apiStepTrack-reader/, "step two is the reader");
 assert.match(html, /apiStepTrack-answers/, "step three is the answers");
 assert.match(html, /api-redesign\.css/, "the redesigned layout lives in its own stylesheet");
+// 1.26.18：「删除密钥」原来绝对定位在卡片左下角，正好压在「测试连接」按钮上
+// （只有存过密钥的账号才看得到，所以平时发现不了）。
+const redesign = fs.readFileSync(path.join(__dirname, "api-redesign.css"), "utf8");
+const actionsRule = redesign.slice(
+  redesign.indexOf("#credentialUi .credential-service .credential-service-actions")
+);
+assert.ok(actionsRule.length, "the delete-button row is styled in the redesign stylesheet");
+assert.doesNotMatch(actionsRule.slice(0, actionsRule.indexOf("}")), /position:\s*absolute/,
+  "删除密钥不再绝对定位 —— 绝对定位会压住测试连接按钮");
+assert.match(actionsRule.slice(0, actionsRule.indexOf("}")), /position:\s*static/);
 // 1.26.16：每个区一句引导，页头按区换。
 assert.match(html, /id="settingsPageLead"/, "the page header carries a per-area lead sentence");
 const leads = js.slice(js.indexOf("const SETTINGS_AREA_LEADS"), js.indexOf("};", js.indexOf("const SETTINGS_AREA_LEADS")));

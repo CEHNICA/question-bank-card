@@ -76,8 +76,10 @@
 }
 #credentialUi .credential-service-head .api-state { font-size: 12px; }
 #credentialUi .credential-service > *:not(.credential-service-head) { grid-column: 1; }
+/* 1.26.18：「删除密钥」原来绝对定位在卡片左下角，正好压在「测试连接」按钮上
+   （有已保存密钥时才看得到，所以平时发现不了）。改回正常流里，右对齐。 */
 #credentialUi .credential-service .credential-service-actions {
-  position: absolute; left: 16px; bottom: 14px; justify-content: flex-start;
+  position: static; justify-content: flex-end; margin-top: 6px;
 }
 #credentialUi .credential-service .model-id-field { margin-top: 4px; }
 #credentialUi .credential-service .credential-connection-test { margin-top: 8px; }
