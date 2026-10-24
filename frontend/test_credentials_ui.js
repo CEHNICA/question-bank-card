@@ -57,7 +57,8 @@ assert.match(html, /已保存的密钥逐条隐藏显示，点眼睛可查看 60
 assert.match(html, /id="credentialSavedTotal"/);
 assert.match(html, /不写入题库、日志或项目文件/);
 assert.match(html, /不上传文件、不消耗识读额度/);
-assert.match(html, />保存密钥<\/button>/);
+// 1.26.12：按钮改名叫"保存读题密钥" —— 它存的是读题这一段，不是整页。
+assert.match(html, />保存读题密钥<\/button>/);
 assert.match(html, /class="credential-storage-note"/);
 assert.doesNotMatch(html + js, /credential(?:Mineru|Modelscope|Minimax|Siliconflow)Clear|credential-clear|field\.clear/);
 assert.doesNotMatch(html, /不消耗额度的官网验证/);
@@ -73,7 +74,7 @@ for (const service of ["mineru", "modelscope", "minimax", "siliconflow"]) {
 assert.ok(html.indexOf('id="credentialModelscopeInput"') < html.indexOf('id="credentialMinimaxInput"'));
 assert.doesNotMatch(html + js, /zhipu|智谱|bigmodel/i);
 
-const functions = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"), js.indexOf("  function renderSettingsTask("));
+const functions = js.slice(js.indexOf("  function settingsEngineChoices("), js.indexOf("  function renderSettingsTask("));
 const listenersStart = js.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', js.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = js.slice(listenersStart, js.indexOf("  // Queue the values captured", listenersStart));
 assert.ok(functions && listenersStart > 0);

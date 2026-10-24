@@ -1287,6 +1287,19 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-ui .credential-actions { position: static; border-top: 0; padding: 12px 0 0; background: transparent; }
 /* 摆在设置页上的时候没有"取消"这个说法：离开这一页会问一次要不要放弃改动。 */
 .settings-credential-host [data-close] { display: none; }
+/* 1.26.12：平铺之后，"保存读题密钥"夹在两段内容中间 —— 别再摆成一条横贯整页的
+   工具条（看着像整页的保存）。改成一行普通操作：左边说明，右边按钮。 */
+.settings-credential-host .credential-actions { flex-wrap: wrap; gap: 10px; }
+.settings-credential-host .credential-actions .settings-save-result { flex: 1 1 100%; order: -1; }
+.settings-credential-host .credential-actions .button { flex: none; }
+/* 1.26.12：模型名称跟着厂家那一行 —— 默认填好、看得见、改得动。 */
+.library-ai-model-row { display: grid; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.library-ai-model-row label { color: var(--muted); font-size: 12px; font-weight: 650; }
+.library-ai-model-row input { width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-family: var(--mono); }
+.library-ai-model-row input:disabled { background: var(--surface-2); color: var(--muted); }
+.credential-service .model-id-field { display: grid; gap: 5px; margin-top: 10px; }
+.credential-service .model-id-field > span { display: flex; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 12.5px; font-weight: 650; }
+.credential-service .model-id-field input { width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; color: var(--ink); font-family: var(--mono); }
 /* 1.26.8：连接测试这一行的勾选框不是"功能开关"，是"这一次测试的同意" ——
    它紧挨着按钮，样式也跟功能开关分开，免得老师把它当成设置（勾了之后它还会自己
    弹起来，看着像出 bug）。 */

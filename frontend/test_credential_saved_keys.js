@@ -9,7 +9,7 @@ const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
 const css = fs.readFileSync(require.resolve("./styles.css"), "utf8");
 assert.match(css, /\.credential-dialog::backdrop\s*\{\s*backdrop-filter:\s*none;/);
 const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-const functions = between("  const CREDENTIAL_FIELDS = {", "  function renderSettingsTask(");
+const functions = between("  function settingsEngineChoices(", "  function renderSettingsTask(");
 const start = source.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', source.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
 const listeners = source.slice(start, source.indexOf("  // Queue the values captured", start));
 const apiFunction = between("  async function api(", "  let toastTimer =");

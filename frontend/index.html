@@ -369,6 +369,15 @@
           <label for="credentialModelscopeInput">新的令牌（留空就不改）· <a href="https://www.modelscope.cn/my/myaccesstoken" target="_blank" rel="noopener">获取魔搭令牌</a></label>
           <input id="credentialModelscopeInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴魔搭“访问令牌”页里复制的 Access Token">
+          <!-- 1.26.12：模型名从"模型细节（一般不用改）"里搬出来，跟着这家的卡片走 ——
+               默认值已经填好，照着改也行，不改就用默认。 -->
+          <label class="model-id-field" for="settingsModelscopeModel">
+            <span><strong>模型名称</strong><small id="settingsModelscopeModelState" class="model-provider-state">正在读取…</small></span>
+            <input id="settingsModelscopeModel" form="modelSettingsForm" name="modelscope_model" type="text" list="settingsModelscopeModels"
+                   autocomplete="off" spellcheck="false" aria-describedby="settingsModelscopeModelState"
+                   placeholder="魔搭后台里的模型名称；不改就用上面填好的默认值">
+          </label>
+          <datalist id="settingsModelscopeModels"></datalist>
           <div class="credential-service-actions"><button id="credentialModelscopeDelete" class="button small credential-delete" type="button" aria-label="删除魔搭密钥" hidden>删除密钥</button></div>
         </section>
         <section id="credentialMinimaxSection" class="credential-service" data-service="minimax" hidden>
@@ -377,6 +386,13 @@
           <label for="credentialMinimaxInput">新的 Key（留空就不改）</label>
           <input id="credentialMinimaxInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴 MiniMax 开放平台里复制的 API Key">
+          <label class="model-id-field" for="settingsMinimaxModel">
+            <span><strong>模型名称</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
+            <input id="settingsMinimaxModel" form="modelSettingsForm" name="minimax_model" type="text" list="settingsMinimaxModels"
+                   autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState"
+                   placeholder="MiniMax 后台里的模型名称；不改就用上面填好的默认值">
+          </label>
+          <datalist id="settingsMinimaxModels"></datalist>
           <div class="credential-service-actions"><button id="credentialMinimaxDelete" class="button small credential-delete" type="button" aria-label="删除 MiniMax 密钥" hidden>删除密钥</button></div>
         </section>
         <section id="credentialSiliconflowSection" class="credential-service" data-service="siliconflow" hidden>
@@ -385,6 +401,13 @@
           <label for="credentialSiliconflowInput">新的 Key（留空就不改）</label>
           <input id="credentialSiliconflowInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"
                  placeholder="粘贴硅基流动里复制的 API Key">
+          <label class="model-id-field" for="settingsSiliconflowModel">
+            <span><strong>模型名称</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
+            <input id="settingsSiliconflowModel" form="modelSettingsForm" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
+                   autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState"
+                   placeholder="硅基流动后台里的模型名称；不改就用上面填好的默认值">
+          </label>
+          <datalist id="settingsSiliconflowModels"></datalist>
           <div class="credential-service-actions"><button id="credentialSiliconflowDelete" class="button small credential-delete" type="button" aria-label="删除硅基流动密钥" hidden>删除密钥</button></div>
         </section>
         </section>
@@ -396,44 +419,25 @@
           <p class="credential-security-note">密钥用这台电脑当前 Windows 用户的加密能力保存，不写入题库、日志或项目文件。保存时只检查填写格式，不上传文件、不消耗识读额度。MinerU 当前未公开无需解析任务的 Token 验证接口；保存成功表示已配置，实际可用性以识读任务返回为准。</p>
         </details>
           <details id="settingsModels" class="settings-section settings-models">
-            <summary>模型细节（一般不用改）</summary>
+            <summary>读题用哪个模型（一般不用改）</summary>
           <section class="settings-models-body" aria-labelledby="settingsModelsTitle">
             <h3 id="settingsModelsTitle">读题模型</h3>
             <p class="settings-description">改动自动保存，从下一份资料或重新识读开始生效。</p>
             <div class="model-settings-form">
               <label class="field" for="settingsPrimaryModel" hidden><span>主读</span><select id="settingsPrimaryModel" form="modelSettingsForm" name="primary" aria-label="读题模型"></select></label>
-              <details class="model-id-details">
-                <summary>各家使用的具体模型（高级）</summary>
-                <fieldset class="model-id-settings">
-                  <legend>具体模型</legend>
-                  <p class="settings-footnote">请选择服务商支持的视觉模型 ID。</p>
-                  <label class="model-id-field" for="settingsMinimaxModel">
-                    <span><strong>MiniMax</strong><small id="settingsMinimaxModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsMinimaxModel" form="modelSettingsForm" name="minimax_model" type="text" list="settingsMinimaxModels"
-                           autocomplete="off" spellcheck="false" aria-describedby="settingsMinimaxModelState">
-                    <datalist id="settingsMinimaxModels"></datalist>
-                  </label>
-                  <label class="model-id-field" for="settingsModelscopeModel">
-                    <span><strong>魔搭</strong><small id="settingsModelscopeModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsModelscopeModel" form="modelSettingsForm" name="modelscope_model" type="text" list="settingsModelscopeModels"
-                           autocomplete="off" spellcheck="false" aria-describedby="settingsModelscopeModelState">
-                    <datalist id="settingsModelscopeModels"></datalist>
-                  </label>
-                  <label class="model-id-field" for="settingsSiliconflowModel">
-                    <span><strong>硅基流动</strong><small id="settingsSiliconflowModelState" class="model-provider-state">正在读取…</small></span>
-                    <input id="settingsSiliconflowModel" form="modelSettingsForm" name="siliconflow_model" type="text" list="settingsSiliconflowModels"
-                           autocomplete="off" spellcheck="false" aria-describedby="settingsSiliconflowModelState">
-                    <datalist id="settingsSiliconflowModels"></datalist>
-                  </label>
-                </fieldset>
-              </details>
+              <!-- 1.26.12：各家的模型名称已经搬到各自的服务商卡片里（看得见、改得动），
+                   这里不再重复一份，只留下说明。 -->
+              <p class="settings-footnote">每家的模型名称就填在上面那家的卡片里：默认已经给你填好了，
+                照着改成后台里的那个名字就行，不改就用默认的。</p>
             </div>
           </section>
           </details>
       </div>
       <footer class="credential-actions">
         <span id="credentialResult" class="settings-save-result" role="status"></span>
-        <button id="credentialSave" class="button primary" type="submit">保存密钥</button>
+        <!-- 1.26.12：按钮改个名字 —— 它存的是"读题这一段"的密钥，不是整页。
+             平铺之后它夹在两段内容中间，名字不说清楚会以为整页都归它管。 -->
+        <button id="credentialSave" class="button primary" type="submit">保存读题密钥</button>
         <!-- 1.26.9：这个按钮现在住在可搬动的配置块里，而不再是弹窗的子节点 ——
              "dialog [data-close]" 那个按加载期求值的接法匹配不到它了，所以显式给了
              id，由 app.js 直接接线。 -->

@@ -183,6 +183,13 @@
                 </div>
               </fieldset>
               <select id="libraryAIProvider" hidden aria-hidden="true" tabindex="-1"><optgroup label="可复用看图读题密钥"><option value="modelscope">魔搭</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option></optgroup><optgroup label="独立答题服务"><option value="deepseek">DeepSeek</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></optgroup></select>
+              <!-- 1.26.12：模型名从"模型和 API 地址（一般不用改）"里搬出来，紧跟着厂家那一行 ——
+                   默认值已经填好，照着改成后台里的名字也行，不改就用默认的。 -->
+              <div class="library-ai-model-row">
+                <label for="libraryAIModel">模型名称</label>
+                <input id="libraryAIModel" type="text" placeholder="服务商后台里的模型名称；不改就用上面填好的默认值" autocomplete="off" spellcheck="false">
+                <small class="settings-footnote">下面填的是这家的默认模型名；想换就照着服务商后台里的名字改。</small>
+              </div>
               <p id="libraryAIMinimaxHelp" hidden></p>
             </section>
             <div id="libraryAIShareKey" class="library-ai-share" hidden>
@@ -192,10 +199,9 @@
             <p id="libraryAIKeyNote" class="credential-storage-note" role="status" aria-live="polite">${KEY_NOTE}</p>
 ${keyBlocks()}
             <details id="libraryAIAdvanced" class="library-ai-advanced">
-              <summary>模型和 API 地址（一般不用改）</summary>
+              <summary>API 地址和模型能力（一般不用改）</summary>
               <section class="library-ai-section">
                 <label for="libraryAIBaseURL">API 地址</label><input id="libraryAIBaseURL" type="text" placeholder="服务商提供的 API 地址" autocomplete="off" spellcheck="false">
-                <label for="libraryAIModel">模型 ID</label><input id="libraryAIModel" type="text" placeholder="服务商提供的模型 ID；豆包填写 Endpoint ID" autocomplete="off" spellcheck="false">
                 <label class="library-ai-switch"><input id="libraryAIImages" type="checkbox"><span>此模型支持图片<small>含配图的题需要图文模型；纯文字模型不会跳过配图直接作答。</small></span></label>
                 <label class="library-ai-switch"><input id="libraryAIThinking" type="checkbox"><span>开启数学思考</span></label>
               </section>

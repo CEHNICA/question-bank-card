@@ -20,7 +20,7 @@ const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8").replace(/\r\n
 // 以前这里直接用 "\n  }\n" 当结束标记：文件一旦被存成 CRLF，这个串一次都匹配不上，
 // slice(起点, -1 + 4) 会**悄悄**切出一段空字符串 —— 少了一个函数，测试照样往下跑，
 // 直到哪天那个函数真的被调用才炸，而那时看起来像是新改动弄坏了旧东西。
-const credentialCode = js.slice(js.indexOf("  const CREDENTIAL_FIELDS = {"),
+const credentialCode = js.slice(js.indexOf("  function settingsEngineChoices("),
   js.indexOf("  function renderSettingsTask("));
 const modelCode = js.slice(js.indexOf("  let modelSaving = Promise.resolve();"),
   js.indexOf("  async function prepareSettingsLeave("))
@@ -29,7 +29,7 @@ const modelCode = js.slice(js.indexOf("  let modelSaving = Promise.resolve();"),
 assert.ok(credentialCode.length > 0 && modelCode.length > 0);
 assert.ok(modelCode.includes("function saveModelSettingsNow("),
   "saveModelSettingsNow must actually be inside the slice; a -1 end marker yields an empty string, not a failure");
-assert.ok(js.indexOf("  const CREDENTIAL_FIELDS = {") < js.indexOf("  let modelSaving"));
+assert.ok(js.indexOf("  function settingsEngineChoices(") < js.indexOf("  let modelSaving"));
 
 const providers = ["mineru", "modelscope", "minimax", "siliconflow"];
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
