@@ -350,6 +350,23 @@ assert.deepEqual(s.calls.at(-1).payload.on_intake, { tags: false, answer: false 
   assert.equal(dirty.get("libraryAITestState").textContent, "还没测过", "unsaved edits are called out before the probe");
   assert.match(dirty.get("libraryAITestHint").textContent, /先点下面的「保存设置」/, "and the next step is spelled out");
 
+  // 1.26.11：每家服务商自己身上写明"存没存密钥"，不用挨个点开才知道；
+  // 测试失败时给一句能照着做的排查清单，而不是只把服务端那句话丢出来。
+  const keyed = setup();
+  Object.assign(keyed.current, { mode: "api", provider: "minimax", configured: true, key_configured: true, api_ready: true, verified: true,
+    keys: { minimax: { configured: true, count: 2 }, deepseek: { configured: false, count: 0 }, modelscope: { configured: true, count: 1 } } });
+  await keyed.window.LibraryAISettings.open(); await flush();
+  assert.equal(keyed.get("libraryAIProviderState-minimax").textContent, "已存 2 把", "the vendor says how many keys it has");
+  assert.equal(keyed.get("libraryAIProviderState-modelscope").textContent, "已存 1 把");
+  assert.equal(keyed.get("libraryAIProviderState-deepseek").textContent, "未存密钥", "and says plainly when it has none");
+  keyed.get("libraryAITestConsent").checked = true; keyed.get("libraryAITestConsent").trigger("change");
+  keyed.response(() => { throw new Error("offline-synthetic-failure"); });
+  keyed.get("libraryAITest").trigger("click");
+  await flush();
+  assert.match(keyed.get("libraryAIResult").textContent, /offline-synthetic-failure/, "the actual reason is still shown");
+  assert.match(keyed.get("libraryAIResult").textContent, /复制完整/, "and a checklist the teacher can actually work through");
+  assert.match(keyed.get("libraryAIResult").textContent, /余额/, "including the balance, the provider and expiry");
+
   s.get("libraryAIProvider").value = "custom";
   s.get("libraryAIKey-deepseek").value = "previous-provider-unsaved-key";
   s.get("libraryAIKey-deepseek").trigger("input");

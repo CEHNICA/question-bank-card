@@ -1168,7 +1168,7 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .model-provider-state.missing { color: var(--amber); }
 .model-role-heading { margin: 4px 0 -2px; }
 .settings-form-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; flex-wrap: wrap; }
-.settings-save-result { margin-right: auto; color: var(--muted); font-size: 12px; }
+.settings-save-result { margin-right: auto; color: var(--muted); font-size: 12px; white-space: pre-line; }
 .explain-list { display: grid; gap: 9px; margin: 12px 0 0; }
 .explain-list > div { padding: 10px 11px; border-left: 3px solid #b9d6cb; border-radius: 0 9px 9px 0; background: var(--surface-2); }
 .explain-list dt { color: var(--ink); font-size: 13px; font-weight: 700; }
@@ -1278,6 +1278,9 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .provider-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); font-weight: 650; }
 .provider-option input[type="radio"] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
 .provider-option small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+/* 1.26.11：谁有密钥、谁没存，写在勾选项自己身上 —— 不用挨个点开才知道。 */
+.provider-option-state { margin-left: 7px; color: var(--muted); font-size: 11.5px; font-style: normal; font-weight: 400; }
+.provider-option:has(input:checked) .provider-option-state { color: var(--accent); font-weight: 650; }
 /* 1.26.9：配置直接摆在设置页上时，弹窗那点外壳（关闭、取消）用不上。 */
 .settings-credential-host .credential-dialog-body { display: block; }
 .credential-ui .credential-panel + .credential-panel { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }

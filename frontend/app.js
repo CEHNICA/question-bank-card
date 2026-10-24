@@ -4789,6 +4789,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (!option) continue;
       option.checked = option.value === select.value;
       option.disabled = credentialBusy || !visionPickerReady();
+      // 1.26.11：谁有密钥一眼看见（别家不用挨个点开才知道）。
+      // 参照 kaogong-shuati 的"每张卡写明已配置/未配置"和 Chatbox 的绿点。
+      const state = $(`credentialVisionState-${provider}`);
+      if (state) state.textContent = provider === "assistant" ? "不用密钥" : credentialKeyHint(provider);
     }
     for (const [provider, id] of [["modelscope", "credentialModelscopeSection"], ["minimax", "credentialMinimaxSection"], ["siliconflow", "credentialSiliconflowSection"]]) {
       $(id).hidden = select.value !== provider;
@@ -4836,6 +4840,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 1.26.9：服务列表还没读到之前不让勾 —— 否则勾完会被回填覆盖，
     // 老师只看到"勾了一下又弹回去"。
     return Boolean(state.status?.engines);
+  }
+
+  function credentialKeyHint(provider) {
+    // 1.26.11：一句人话说明这家现在是什么状态。
+    const status = credentialServices[provider];
+    if (!status) return "正在读取…";
+    if (!status.configured) return "未存密钥";
+    return status.count > 1 ? `已存 ${status.count} 把` : "已存 1 把";
   }
   let credentialClosing = false;
   let credentialCloseTask = null;
@@ -5114,6 +5126,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       renderCredentialSavedRows(service, field, count);
     });
     $("credentialSavedTotal").textContent = `共保存 ${total} 个密钥`;
+    // 1.26.11：密钥读回来之后，勾选行上那句"存没存"要跟着更新 ——
+    // 不然老师看到的还是"正在读取…"。
+    syncCredentialVisionPanel({ followSelection: false });
   }
 
   async function loadCredentialStates() {

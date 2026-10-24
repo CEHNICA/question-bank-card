@@ -17,6 +17,10 @@
   const providerOrder = ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"];
   const KEY_MASK = "****************";
   const KEY_NOTE = "已保存的密钥逐条隐藏显示，点眼睛可查看 60 秒。下面只填写新密钥；留空就保留原来的配置。";
+  // 1.26.11：测试失败时照着这几条查一遍。参照 Chatbox 的排查清单写法 ——
+  // 全部是可以自己动手确认的事，不写"invalid api key"这种没法查的话。
+  const TEST_CHECKLIST = "可以照这几条自己查一遍：① 密钥是不是复制完整、有没有多余空格；"
+    + "② 账户余额是不是够；③ 服务商有没有选错；④ 密钥是不是过期了。";
   // 和“读题与切题”那几栏用同一个图标精灵里的眼睛，两边画出来才一样。
   const eyeIcon = '<svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>';
   const fields = ["libraryAITags", "libraryAIAnswer", "libraryAIAnswerIntake", "libraryAIMode", "libraryAIProvider", "libraryAIBaseURL",
@@ -168,14 +172,14 @@
               <fieldset class="provider-picker" id="libraryAIProviderPicker">
                 <legend class="field-legend">生成标签和答案用哪家</legend>
                 <div class="provider-picker-group"><span class="provider-picker-label">可复用看图读题密钥</span>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-modelscope" name="libraryAIProvider" value="modelscope"><span>魔搭</span></label>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-minimax" name="libraryAIProvider" value="minimax"><span>MiniMax</span></label>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-siliconflow" name="libraryAIProvider" value="siliconflow"><span>硅基流动</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-modelscope" name="libraryAIProvider" value="modelscope"><span>魔搭<em class="provider-option-state" id="libraryAIProviderState-modelscope">…</em></span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-minimax" name="libraryAIProvider" value="minimax"><span>MiniMax<em class="provider-option-state" id="libraryAIProviderState-minimax">…</em></span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-siliconflow" name="libraryAIProvider" value="siliconflow"><span>硅基流动<em class="provider-option-state" id="libraryAIProviderState-siliconflow">…</em></span></label>
                 </div>
                 <div class="provider-picker-group"><span class="provider-picker-label">独立答题服务</span>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-deepseek" name="libraryAIProvider" value="deepseek"><span>DeepSeek</span></label>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-doubao" name="libraryAIProvider" value="doubao"><span>豆包 API</span></label>
-                  <label class="provider-option"><input type="radio" id="libraryAIProvider-custom" name="libraryAIProvider" value="custom"><span>其他兼容服务</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-deepseek" name="libraryAIProvider" value="deepseek"><span>DeepSeek<em class="provider-option-state" id="libraryAIProviderState-deepseek">…</em></span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-doubao" name="libraryAIProvider" value="doubao"><span>豆包 API<em class="provider-option-state" id="libraryAIProviderState-doubao">…</em></span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-custom" name="libraryAIProvider" value="custom"><span>其他兼容服务<em class="provider-option-state" id="libraryAIProviderState-custom">…</em></span></label>
                 </div>
               </fieldset>
               <select id="libraryAIProvider" hidden aria-hidden="true" tabindex="-1"><optgroup label="可复用看图读题密钥"><option value="modelscope">魔搭</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option></optgroup><optgroup label="独立答题服务"><option value="deepseek">DeepSeek</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></optgroup></select>
@@ -762,8 +766,22 @@ ${keyBlocks()}
     if (!select) return;
     for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
       const option = $(`libraryAIProvider-${provider}`);
-      if (option) option.checked = option.value === select.value;
+      if (!option) continue;
+      option.checked = option.value === select.value;
+      // 1.26.11：谁有密钥一眼看见（别家不用挨个点开才知道）。
+      const state = $(`libraryAIProviderState-${provider}`);
+      if (state) state.textContent = providerKeyHint(provider);
     }
+  }
+
+  function providerKeyHint(provider) {
+    // 1.26.11：一句人话说明这家现在是什么状态（参照 kaogong-shuati 的
+    // "已启用/未启用"徽标和 Chatbox 的绿点）。
+    const keys = state.current?.keys;
+    if (!keys) return "正在读取…";
+    const saved = keys[provider];
+    if (!saved || !saved.configured) return "未存密钥";
+    return saved.count > 1 ? `已存 ${saved.count} 把` : "已存 1 把";
   }
 
   function render(body) {
@@ -930,7 +948,10 @@ ${keyBlocks()}
       $("libraryAIResult").textContent = "连接测试已通过；生成内容仍需人工核对。";
     } catch (error) {
       if (session === state.session && isActive()) {
-        $("libraryAIResult").textContent = error.message;
+        // 1.26.11：失败时给一句能照着做的排查清单（参照 Chatbox 的
+        // "请确保 Key 复制完整、没有多余空格、余额充足、匹配服务商、没有过期"），
+        // 而不是只把服务端那句话原样丢出来。
+        $("libraryAIResult").textContent = `${error.message}\n${TEST_CHECKLIST}`;
         try { const body = await request(API); if (session === state.session && isActive()) render(body); } catch { /* 保留实际错误 */ }
       }
     } finally {

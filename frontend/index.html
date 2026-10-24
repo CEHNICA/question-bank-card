@@ -355,10 +355,10 @@
                哪家有密钥、哪家在用，一眼就看得见（单选：只能勾一家）。 -->
           <fieldset class="provider-picker" id="credentialVisionPicker">
             <legend class="field-legend">看图读题用哪家</legend>
-            <label class="provider-option"><input type="radio" id="credentialVision-modelscope" name="credentialVisionProvider" value="modelscope"><span>魔搭<small>推荐</small></span></label>
-            <label class="provider-option"><input type="radio" id="credentialVision-minimax" name="credentialVisionProvider" value="minimax"><span>MiniMax</span></label>
-            <label class="provider-option"><input type="radio" id="credentialVision-siliconflow" name="credentialVisionProvider" value="siliconflow"><span>硅基流动</span></label>
-            <label class="provider-option"><input type="radio" id="credentialVision-assistant" name="credentialVisionProvider" value="assistant"><span>暂不配置<small>原图审核或 AI 助手</small></span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-modelscope" name="credentialVisionProvider" value="modelscope"><span>魔搭<small>推荐</small><em class="provider-option-state" id="credentialVisionState-modelscope">…</em></span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-minimax" name="credentialVisionProvider" value="minimax"><span>MiniMax<em class="provider-option-state" id="credentialVisionState-minimax">…</em></span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-siliconflow" name="credentialVisionProvider" value="siliconflow"><span>硅基流动<em class="provider-option-state" id="credentialVisionState-siliconflow">…</em></span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-assistant" name="credentialVisionProvider" value="assistant"><span>暂不配置<small>原图审核或 AI 助手</small><em class="provider-option-state" id="credentialVisionState-assistant">不用密钥</em></span></label>
           </fieldset>
           <select id="credentialVisionProvider" hidden aria-hidden="true" tabindex="-1"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
           <p id="settingsModelSummary" class="settings-footnote"></p>

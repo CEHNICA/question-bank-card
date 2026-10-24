@@ -117,5 +117,14 @@ function scenario() {
   for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
     assert.equal(early.$(`credentialVision-${provider}`).disabled, false, "and enabled once it has");
   }
+
+  // ⑤ 每家服务商自己身上写明存没存密钥（1.26.11）。
+  const states = scenario();
+  await states.context.showCredentialInline();
+  await turns();
+  assert.equal(states.$("credentialVisionState-minimax").textContent, "已存 2 把", "the vendor says how many keys it has");
+  assert.equal(states.$("credentialVisionState-modelscope").textContent, "未存密钥", "and says plainly when it has none");
+  assert.equal(states.$("credentialVisionState-assistant").textContent, "不用密钥", "the no-service option needs no key");
+
   console.log("API configuration moves as one block, guards unsaved keys, and keeps its cancel button: OK");
 })().catch((error) => { console.error(error); process.exit(1); });
