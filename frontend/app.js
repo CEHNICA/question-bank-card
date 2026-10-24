@@ -5413,7 +5413,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.replaceChildren();
     const advancedBox = $("featureAdvancedSwitches");
     advancedBox.replaceChildren();
-    (data.features || []).filter((item) => !["knowledge_tags", "ai_answer", "double_read"].includes(item.key)).forEach((item) => {
+    // 1.26.22：「每天自动备份」这个开关放在「设置 → 数据备份与迁移」里，
+    // 不在「题面与显示」这一区里出现第二次。
+    (data.features || []).filter((item) => !["knowledge_tags", "ai_answer", "double_read", "auto_backup"].includes(item.key)).forEach((item) => {
       const label = el("label", "settings-switch");
       const text = el("span");
       const labels = { origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数" };

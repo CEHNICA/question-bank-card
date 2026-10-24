@@ -228,6 +228,28 @@
         box.append(el("p", "settings-footnote",
           `一共 ${backups.length} 份，占 ${total}；最多留 ${keep} 份，旧的自动删掉。包放在本机，不联网、不上传。`));
       }
+      // 1.26.22：自动备份开关 —— 用不上就关掉，随时能再打开。
+      const toggle = el("label", "settings-switch");
+      const input = el("input");
+      input.type = "checkbox";
+      input.checked = body.enabled !== false;
+      input.addEventListener("change", async () => {
+        input.disabled = true;
+        try {
+          await post("/api/settings/features", { features: { auto_backup: input.checked } });
+          status("auto", input.checked
+            ? "已打开：每天在本机打一份备份，留最近 10 份。"
+            : "已关闭：以后不再自动打备份。想留一份可以点「现在备份一次」。", false);
+        } catch (error) {
+          input.checked = !input.checked;
+          status("auto", error.message, true);
+        } finally { input.disabled = false; }
+      });
+      toggle.append(input, el("span", "", "每天自动打一份备份"));
+      box.append(toggle);
+      box.append(el("p", "settings-footnote",
+        "它救的是「题库自己坏了」：软件出毛病、升级出错或磁盘写坏时，能把题库救回来。"
+        + "误删的题有回收站，原卷在你自己的硬盘上，这两样它不管。"));
       const now = el("button", "button", "现在备份一次");
       now.type = "button";
       now.disabled = busy;

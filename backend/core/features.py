@@ -42,6 +42,16 @@ FEATURES = {
         "default": False, "label": "AI 参考答案",
         "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
+    # 1.26.22：每天自动打一份本机备份（留最近 10 份）。
+    # 它救的是"题库自己坏了"——软件出 bug、迁移出错、磁盘写坏这类；
+    # 误删的题有回收站，原卷在老师自己手里，这两样它不管。
+    # 用不上可以关掉，随时能再打开。
+    "auto_backup": {
+        "default": True, "label": "每天自动备份",
+        "help": "每天在本机打一份题库备份包，留最近 10 份（约 840 MB）。软件出毛病、"
+                "迁移出错或磁盘写坏时，能把题库救回来。不联网、不上传。"
+                "关掉以后仍可以点“现在备份一次”手动打。",
+    },
 }
 # Keep the removed switch readable as false so an old features.json cannot
 # silently re-enable a second model call after updating the app.

@@ -17,6 +17,19 @@ from . import library_transfer
 
 
 class AutoBackupTests(TestCase):
+    class _Once:
+        """stop 事件：第一次 wait 返回假（让循环体跑一次），之后返回真（退出）。"""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def wait(self, _interval):
+            self.calls += 1
+            return self.calls > 1
+
+        def is_set(self):
+            return self.calls > 1
+
     def setUp(self) -> None:
         self.client = Client()
         self.tmp = Path(self.enterClassContext(__import__("tempfile").TemporaryDirectory()))
@@ -72,11 +85,34 @@ class AutoBackupTests(TestCase):
     def test_the_listing_reports_the_total_size(self):
         """1.26.21：老师要知道这些包一共占了多少磁盘。"""
         self._make_backup(1)
-        body = self.client.get("/api/backup/auto").json()
+        with mock.patch("core.features.enabled", return_value=True):
+            body = self.client.get("/api/backup/auto").json()
         self.assertEqual(body["keep"], 10)
         self.assertEqual(body["interval_days"], 1)
         self.assertGreater(body["total_bytes"], 0)
         self.assertIn("backups", body["folder"])
+        self.assertTrue(body["enabled"])
+
+    def test_the_auto_backup_switch_defaults_to_on(self):
+        """1.26.22：默认开着，但老师可以自己关掉。"""
+        from core import features
+        self.assertTrue(features.DEFAULTS["auto_backup"])
+
+    def test_the_worker_skips_the_backup_when_the_switch_is_off(self):
+        from .management.commands import run_worker
+        with mock.patch("core.features.enabled", return_value=False), \
+                mock.patch.object(library_transfer, "run_auto_backup") as run:
+            run_worker.auto_backup_lane(self._Once())
+            run.assert_not_called()
+
+    def test_the_worker_takes_the_backup_when_the_switch_is_on(self):
+        from .management.commands import run_worker
+        with mock.patch("core.features.enabled", return_value=True), \
+                mock.patch.object(library_transfer, "backup_due", return_value=True), \
+                mock.patch.object(library_transfer, "run_auto_backup",
+                                  return_value={"name": "题有据自动备份-x.zip"}) as run:
+            run_worker.auto_backup_lane(self._Once())
+            run.assert_called_once()
 
     def test_a_week_old_backup_is_due_again(self):
         path = self._make_backup(1)

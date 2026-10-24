@@ -60,6 +60,7 @@ function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody 
       if (url === "/api/backup/auto") return { ok: true, json: async () => auto };
       if (url === "/api/backup/auto/inspect") return { ok: true, json: async () => inspect };
       if (url === "/api/backup/auto/import") return { ok: true, json: async () => merge };
+      if (url === "/api/settings/features") return { ok: true, json: async () => ({ features: { auto_backup: true } }) };
       return { ok: false, json: async () => ({ error: "不该到这里" }) };
     },
     setTimeout, clearTimeout, console,
@@ -215,6 +216,27 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   assert.equal(label.title, "题有据自动备份-20261020-050000.zip", "文件名放在提示里，不占正中间");
   const called = calls.filter((call) => call.url === "/api/backup/auto");
   assert.ok(called.length, "读了一次自动备份列表");
+}
+
+// 10. 1.26.22：自动备份可以关掉 —— 用不上就别占磁盘；关掉以后手动那份照旧能用。
+{
+  const { dom, calls, window } = boot();
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const box = dom.document.getElementById("transferAuto");
+  const summary = text(box);
+  assert.match(summary, /每天自动打一份备份/, "有一个开关");
+  assert.match(summary, /题库自己坏了/, "说清楚它到底救什么");
+  const toggle = box.children.find((child) => child.className === "settings-switch");
+  assert.ok(toggle, "开关行在卡片里");
+  const input = toggle.children[0];
+  assert.equal(input.checked, true, "默认是开着的");
+  input.checked = false;
+  await input.listeners.change[0]();
+  const saved = calls.filter((call) => call.url === "/api/settings/features");
+  assert.equal(saved.length, 1, "关掉的时候要存到开关里");
+  assert.deepEqual(JSON.parse(saved[0].options.body), { features: { auto_backup: false } });
+  assert.match(dom.document.getElementById("transferStatusauto").textContent, /已关闭/);
 }
 
 console.log("设置 → 数据备份与迁移：所有断言通过");

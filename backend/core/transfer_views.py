@@ -171,6 +171,7 @@ def auto_backups_view(request):
         if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
             return _error("备份记录只能在本机题库中查看", 403)
         backups = library_transfer.list_backups()
+        from core import features
         response = JsonResponse({
             "backups": backups,
             "due": library_transfer.backup_due(),
@@ -180,6 +181,8 @@ def auto_backups_view(request):
             # 让他一眼知道代价，不用猜。
             "total_bytes": sum(int(item.get("size") or 0) for item in backups),
             "folder": str(library_transfer.backups_root()),
+            # 1.26.22：自动备份可以关；关掉以后「现在备份一次」照旧能用。
+            "enabled": features.enabled("auto_backup"),
         })
         response["Cache-Control"] = "no-store"
         return response

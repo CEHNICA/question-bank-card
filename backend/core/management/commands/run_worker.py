@@ -275,18 +275,23 @@ def clean_saved_example_labels(out=None) -> None:
 
 
 def auto_backup_lane(stop: threading.Event) -> None:
-    """1.26.17：每周给这台电脑上的题库打一个备份包。
+    """1.26.17：每天给这台电脑上的题库打一个备份包。
 
     放在软件自己的文件夹里（%LOCALAPPDATA%\\QuestionBankCard\\data\\backups），
     旧的只留最近十份。**不联网、不上传** —— 备份就是一份本地的 zip。
 
     单独一个线程，不挡处理试卷那条线；一次备份失败也不该让整个工作者退出。
+
+    1.26.22：老师可以在设置里关掉自动备份（"auto_backup" 开关）。关掉以后
+    就不再自动打，但「现在备份一次」照旧能用。
     """
-    from core import library_transfer
+    from core import features, library_transfer
 
     last_error = ""
     while not stop.wait(300):  # 每五分钟看一眼
         try:
+            if not features.enabled("auto_backup"):
+                continue
             if not library_transfer.backup_due():
                 continue
             result = library_transfer.run_auto_backup()
