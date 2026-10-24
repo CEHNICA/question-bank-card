@@ -105,6 +105,40 @@ class AutoBackupTests(TestCase):
         needed = library_transfer._backup_bytes_needed()
         assert needed >= 2 * 1024 * 1024 * 1024, "至少按 2 GB 算，别拿磁盘冒险"
 
+    def test_a_failed_backup_leaves_nothing_behind(self):
+        """1.26.20：备份写坏了不能留残骸。
+
+        真出过事：备份写到一半软件被关掉，目录里留下一个 16.9 GB 的半个包 ——
+        程序打不开、还白占着磁盘。写坏了当场删掉。
+        """
+        out = self.tmp / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(library_transfer, "_manifest", side_effect=RuntimeError("断电了")):
+            with self.assertRaises(RuntimeError):
+                library_transfer.export_bundle(out)
+        self.assertEqual(list(out.iterdir()), [], "写坏的地方不能留下半个包")
+
+    def test_a_finished_backup_is_a_readable_package(self):
+        out = self.tmp / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        result = library_transfer.export_bundle(out)
+        package = Path(result["file"])
+        self.assertTrue(package.is_file())
+        self.assertEqual([p.name for p in out.iterdir()], [package.name],
+                         "临时文件要清干净，只留最终的包")
+        with library_transfer.zipfile.ZipFile(package) as archive:
+            names = set(archive.namelist())
+        self.assertIn(library_transfer.MANIFEST_NAME, names)
+        self.assertIn(library_transfer.DATABASE_NAME, names)
+
+    def test_only_one_backup_runs_at_a_time(self):
+        """界面点「现在就打」和后台每周那次不能撞在一起。"""
+        out = self.tmp / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        with library_transfer._backup_lock():
+            with self.assertRaises(library_transfer.TransferError):
+                library_transfer.export_bundle(out)
+
 
 class AutoBackupApiTests(TestCase):
     def setUp(self) -> None:

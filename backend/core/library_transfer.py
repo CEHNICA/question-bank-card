@@ -29,6 +29,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -214,7 +215,6 @@ def _backup_bytes_needed() -> int:
 
 def backup_path(identifier: str) -> Path:
     """按名字取本机自动备份里的一个包；只认自己目录下的文件。"""
-
     name = Path(str(identifier or "")).name
     if not name.startswith(f"{AUTO_BACKUP_PREFIX}-") or not name.endswith(".zip"):
         raise TransferError("找不到这个备份包。")
@@ -326,22 +326,90 @@ def _manifest() -> dict:
     }
 
 
+BACKUP_LOCK_NAME = "backup.lock"
+BACKUP_LOCK_STALE_SECONDS = 2 * 60 * 60
+
+
+@contextlib.contextmanager
+def _backup_lock():
+    """同一时刻只准一份备份在写。
+
+    界面上的「现在就打一份」和后台每周那次要是撞在一起，两边都往同一个
+    目录里写包，容易写出坏包。锁放在软件自己的文件夹里；超过两小时的锁
+    是上次意外留下的，接过来继续用。
+    """
+    lock_path = backups_root() / BACKUP_LOCK_NAME
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            handle = lock_path.open("x")
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except OSError:
+                age = 0
+            if age > BACKUP_LOCK_STALE_SECONDS:
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                continue
+            raise TransferError("已经有一次备份在做了，等它打完再试。") from None
+        else:
+            try:
+                handle.write(str(os.getpid()))
+            finally:
+                handle.close()
+            break
+    try:
+        yield
+    finally:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 def export_bundle(directory: Path, prefix: str = "题有据备份") -> dict:
-    """把整库打包成一个 zip 放进 `directory`。"""
+    """把整库打包成一个 zip 放进 `directory`。
+
+    1.26.20：**先写临时文件，写成了再改名**。以前直接往最终文件名上写，
+    中途出错（比如软件被关掉）就留下一个半个的包 —— 那不是备份，是垃圾：
+    程序打不开，还白占磁盘。写坏了的临时文件当场删掉，不留残骸。
+    """
     directory = Path(directory)
     if not directory.is_dir():
         raise TransferError("选的文件夹不在了，重新选一个。")
+    with _backup_lock():
+        return _export_bundle(directory, prefix)
+
+
+def _export_bundle(directory: Path, prefix: str) -> dict:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = directory / f"{prefix}-{stamp}.zip"
-    with tempfile.TemporaryDirectory() as work:
-        snapshot = Path(work) / DATABASE_NAME
-        _snapshot_database(snapshot)
-        manifest = _manifest()
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
-            archive.write(snapshot, DATABASE_NAME)
-            for path in _bundle_files(data_root()):
-                archive.write(path, f"{ORIGINALS}/{path.relative_to(data_root()).as_posix()}")
+    temp = directory / f".{prefix}-{stamp}.part"
+    try:
+        with tempfile.TemporaryDirectory() as work:
+            snapshot = Path(work) / DATABASE_NAME
+            _snapshot_database(snapshot)
+            manifest = _manifest()
+            with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
+                archive.write(snapshot, DATABASE_NAME)
+                for path in _bundle_files(data_root()):
+                    archive.write(path, f"{ORIGINALS}/{path.relative_to(data_root()).as_posix()}")
+        # 写完了自己先验一遍：包能打开、清单和题库都在，才算是个备份。
+        with zipfile.ZipFile(temp) as check:
+            names = set(check.namelist())
+        if MANIFEST_NAME not in names or DATABASE_NAME not in names:
+            raise TransferError("备份包没写完整，已经把半成品删掉了，请再打一次。")
+    except Exception:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
+    os.replace(temp, target)
     return {"file": str(target), "name": target.name, "size": target.stat().st_size,
             "counts": manifest["counts"], "created_at": manifest["created_at"]}
 
