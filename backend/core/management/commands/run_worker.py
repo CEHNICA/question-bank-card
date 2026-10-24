@@ -284,14 +284,20 @@ def auto_backup_lane(stop: threading.Event) -> None:
     """
     from core import library_transfer
 
+    last_error = ""
     while not stop.wait(300):  # 每五分钟看一眼
         try:
             if not library_transfer.backup_due():
                 continue
             result = library_transfer.run_auto_backup()
             logging.getLogger("core").info("自动备份完成：%s", result["name"])
-        except Exception:
-            logging.getLogger("core").exception("自动备份失败")
+            last_error = ""
+        except Exception as error:
+            # 磁盘不够这类问题会一直存在，别每五分钟刷一遍同样的日志。
+            message = str(error)
+            if message != last_error:
+                logging.getLogger("core").warning("自动备份没做成：%s", message)
+                last_error = message
 
 
 class Command(BaseCommand):

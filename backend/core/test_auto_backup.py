@@ -80,6 +80,31 @@ class AutoBackupTests(TestCase):
         path = self._make_backup(5)
         self.assertEqual(library_transfer.backup_path(path.name), path)
 
+    def test_a_backup_package_never_contains_another_backup(self):
+        """1.26.19：备份包绝不能把旧备份包打进去。
+
+        真出过事：自动备份把上一次的包也打了进去，每打一次包就大一倍，
+        最后写出 63 GB 把磁盘塞满，题库都打不开了。
+        """
+        root = library_transfer.backups_root()
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{library_transfer.AUTO_BACKUP_PREFIX}-20261020-050000.zip").write_bytes(b"old")
+        bundle_files = list(library_transfer._bundle_files(self.root))
+        assert not any(path.name.endswith(".zip") and "backups" in path.parts
+                       for path in bundle_files), "备份包里不能有别的备份包"
+        assert not any("imports" in path.parts for path in bundle_files), "合并记录也不进包"
+
+    def test_a_full_disk_stops_the_backup(self):
+        """磁盘不够的时候，宁可不备份，也不能把盘塞满。"""
+        with mock.patch.object(library_transfer, "_free_bytes", return_value=1024):
+            with self.assertRaises(library_transfer.TransferError) as caught:
+                library_transfer.run_auto_backup()
+        assert "磁盘" in str(caught.exception)
+
+    def test_the_needed_size_covers_the_library(self):
+        needed = library_transfer._backup_bytes_needed()
+        assert needed >= 2 * 1024 * 1024 * 1024, "至少按 2 GB 算，别拿磁盘冒险"
+
 
 class AutoBackupApiTests(TestCase):
     def setUp(self) -> None:

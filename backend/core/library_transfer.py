@@ -69,7 +69,10 @@ QUESTION_GROUP_TABLE = "core_questiongroup"
 DELETION_BATCH_TABLE = "core_questiondeletionbatch"
 
 # 能重新生成的中间产物：带上只是让包变大、冲突变多。
-SKIP_DIRECTORIES = {"chunks", "pages", "library"}
+# 1.26.19：加上 backups 和 imports —— 备份包本身**绝不能**打进另一个备份包里。
+# 以前没排除 backups，结果是：自动备份把上一次的备份包也打了进去，每打一次
+# 包就大一倍（63 GB 的教训），最后把磁盘塞满，整个题库都打不开了。
+SKIP_DIRECTORIES = {"chunks", "pages", "library", "backups", "imports"}
 SKIP_NAMES = {"features.json", "mineru_engine.json", "knowledge-points.txt",
               "library-drafts.json", "worker.lock", "library-drafts.lock"}
 
@@ -157,9 +160,56 @@ def run_auto_backup() -> dict:
 
     root = backups_root()
     root.mkdir(parents=True, exist_ok=True)
+    # 1.26.19：先腾地方，再看磁盘够不够。备份是整库的大小（还要加上压缩时的
+    # 临时副本），盘不够就别打 —— 塞满磁盘的后果比没有备份严重得多
+    # （题库会直接打不开）。
+    prune_backups()
+    needed = _backup_bytes_needed()
+    free = _free_bytes(root)
+    if free is not None and free < needed:
+        raise TransferError(
+            f"磁盘只剩 {free // (1024 * 1024)} MB 可用，打一份备份要 {needed // (1024 * 1024)} MB。"
+            "先腾点空间，或者把旧的备份包删掉。")
     result = export_bundle(root, prefix=AUTO_BACKUP_PREFIX)
     prune_backups()
     return result
+
+
+def _free_bytes(folder: Path) -> int | None:
+    """这个文件夹所在盘还剩多少空间；问不到就不知道（返回 None）。"""
+
+    try:
+        usage = shutil.disk_usage(str(folder))
+    except OSError:
+        return None
+    return int(usage.free)
+
+
+def _backup_bytes_needed() -> int:
+    """打一份备份大概要多少空间。
+
+    按题库现在的体积估：原卷文件 + 数据库快照，再留一倍给压缩过程中的临时副本。
+    算不出来就按 2 GB 算 —— 宁可少打一次，也别把盘塞满。
+    """
+
+    total = 0
+    root = data_root()
+    if root.is_dir():
+        for path in root.rglob("*"):
+            if not path.is_file() or path.is_symlink():
+                continue
+            relative = path.relative_to(root)
+            if any(part in SKIP_DIRECTORIES for part in relative.parts):
+                continue
+            try:
+                total += path.stat().st_size
+            except OSError:
+                continue
+    try:
+        total += database_path().stat().st_size
+    except OSError:
+        pass
+    return max(total * 2, 2 * 1024 * 1024 * 1024)
 
 
 def backup_path(identifier: str) -> Path:
