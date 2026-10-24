@@ -82,6 +82,29 @@ class LibraryTagHierarchyTests(TestCase):
         self.assertEqual(LibraryTagRelation.objects.get().parent_id, a.pk)
         self.assertIsNotNone(result["operation_id"])
 
+    def test_sibling_shares_one_parent_and_can_be_undone(self):
+        """1.26.24：题卡上把一颗标签拖到另一颗上面时，除了「成为子标签」，
+        还能选「并列」——两颗共享同一个上级。并列靠的就是 set_parents
+        （把上级整组换掉），所以空上级（挪到最外层）和撤销都得验。"""
+        root, left, right = self.tag("几何"), self.tag("全等"), self.tag("相似")
+        self.parents(left, root)
+        self.parents(right, root)
+        self.assertEqual(set(left.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+        self.assertEqual(set(right.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+        # 并列到最外层：上级整组换成空的（不是「不传」）。
+        moved = self.parents(left)
+        self.assertFalse(left.incoming_relations.exists())
+        self.assertEqual(set(right.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+        library_tagging.undo_catalogue_operation(LibraryTagOperation.objects.get(pk=moved["operation_id"]))
+        self.assertEqual(set(left.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+        self.assertEqual(set(right.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+        # 把上级换成自己的后代 → 成环，整组不落库。
+        child = self.tag("全等判定")
+        self.parents(child, left)
+        with self.assertRaises(library_tagging.TaggingError):
+            self.parents(left, child)
+        self.assertEqual(set(left.incoming_relations.values_list("parent_id", flat=True)), {root.pk})
+
     def test_related_method_never_inherits_and_all_nodes_can_be_attached(self):
         root, child, method = self.tag("平面几何"), self.tag("中位线"), self.tag("添辅助线", "method")
         self.parents(child, root)

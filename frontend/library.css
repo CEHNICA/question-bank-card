@@ -1178,6 +1178,19 @@ body.printing { overflow: hidden; }
 .tag-picker-foot { position: relative; z-index: 1; display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .tag-picker-save-state { min-width: 0; flex: 1 1 120px; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-2); }
 .tag-picker-foot > .button { flex: none; }
+/* 1.26.24：把一颗标签拖到另一颗上面之后，问一句「这两颗标签怎么排」。
+   灰掉的选项要在卡片上写清为什么灰 —— 只写在悬停里，老师看不见。 */
+/* 弹窗按内容高低收着。弹窗本身是 top layer 里上下贴边的，写 height:auto 等于撑满一屏，
+   底下留一大块空白 —— 这里要用 fit-content。 */
+.library-tag-choice-dialog { width: min(560px, calc(100vw - 32px)); max-width: 560px; height: fit-content; max-height: min(86dvh, 760px); }
+.library-tag-choice-body { display: grid; gap: 10px; padding: 2px 20px 16px; overflow-y: auto; }
+.library-tag-choice-option { display: grid; gap: 5px; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.library-tag-choice-option:hover:not(:disabled) { border-color: #4b9081; background: #f0f7f4; }
+.library-tag-choice-option strong { font-size: 15px; line-height: 1.4; }
+.library-tag-choice-hint { color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.library-tag-choice-blocked { color: #8a5b12; font-size: 13px; font-weight: 600; }
+.library-tag-choice-option:disabled { cursor: default; background: #f2f3f2; }
+.library-tag-choice-option:disabled strong { color: var(--ink-2); }
 .tag-manager-tools { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
 .tag-manager-search { flex: 0 0 auto; margin: 0 20px 12px; min-height: 38px; }
 .tag-manager-group-row { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; }

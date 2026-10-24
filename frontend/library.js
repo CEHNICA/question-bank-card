@@ -3313,42 +3313,174 @@
 
   // 1.25.68：把一颗标签拖到另一颗标签上 → 它就成为子标签；父标签在本题上收起，
   // 让子标签顶它的位。底层走目录的 set_parents（操作记录里能撤销）。
-  async function nestTagUnder(item, draggedTag, parentTag) {
-    if (!draggedTag || !parentTag) return;
-    if (String(draggedTag.id) === String(parentTag.id)) return;
-    if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
-    // 不让拖成自己的后代（防环）。
-    const descendantsOf = (root) => {
-      const out = new Set();
-      const stack = [(tagCatalogue.tags || []).find(t => String(t.id) === String(root.id))];
-      while (stack.length) {
-        const current = stack.pop();
-        if (!current) continue;
-        for (const child of (tagCatalogue.tags || [])) {
-          if ((child.parent_ids || []).some(pid => String(pid) === String(current.id) && child.kind === current.kind)) {
-            if (!out.has(String(child.id))) { out.add(String(child.id)); stack.push(child); }
-          }
+  // 1.26.24：拖放之后不再直接挂上去，先问一句「这两颗标签怎么排」——
+  // 可以成为子标签，也可以并列（共享同一个上级）。两种排法在同一个地方说清楚。
+  function tagDescendants(root) {
+    const out = new Set();
+    const stack = [(tagCatalogue.tags || []).find(t => String(t.id) === String(root.id))];
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current) continue;
+      for (const child of (tagCatalogue.tags || [])) {
+        if ((child.parent_ids || []).some(pid => String(pid) === String(current.id) && child.kind === current.kind)) {
+          if (!out.has(String(child.id))) { out.add(String(child.id)); stack.push(child); }
         }
       }
-      return out;
-    };
-    if (descendantsOf(parentTag).has(String(draggedTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的子标签，把它挂回去会成环。", "error"); return; }
+    }
+    return out;
+  }
+
+  // 1.26.24：两颗标签各挂在谁下面、是不是同一个上级 —— 拖放那一下就靠这两句说话。
+  function tagParentList(tag) {
+    const byId = new Map((tagCatalogue.tags || []).map(t => [String(t.id), t]));
+    return (tag.parent_ids || []).map(id => byId.get(String(id))).filter(Boolean);
+  }
+
+  function tagSameParents(one, other) {
+    const left = (one.parent_ids || []).map(String).sort();
+    const right = (other.parent_ids || []).map(String).sort();
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+
+  // 1.26.24：两颗标签摆在一起只有两种排法。把要说的两句话一次算清楚，别到时候现拼
+  // （现拼出来的话老师看不懂）。灰掉的选项必须在卡片上写清为什么灰。
+  function tagRelationOptions(draggedTag, targetTag) {
+    const named = (tag) => "「" + tag.name + "」";
+    const options = [];
+
+    // 一、成为子标签：被拖的那颗缩到目标里面。
+    const isChildAlready = (draggedTag.parent_ids || []).map(String).includes(String(targetTag.id));
+    // 两个方向都会成环：拖的是目标的子标签，或者拖的是目标的上级。
+    const draggedUnderTarget = tagDescendants(targetTag).has(String(draggedTag.id));
+    const targetUnderDragged = tagDescendants(draggedTag).has(String(targetTag.id));
+    options.push({
+      key: "child",
+      label: "让" + named(draggedTag) + "成为" + named(targetTag) + "的子标签",
+      hint: named(draggedTag) + "收到" + named(targetTag) + "里面；在标签目录里点开" + named(targetTag) + "才看得见它。",
+      disabled: isChildAlready || draggedUnderTarget || targetUnderDragged,
+      disabledReason: isChildAlready
+        ? named(draggedTag) + "已经是" + named(targetTag) + "的子标签，不用再放一次。"
+        : draggedUnderTarget
+          ? named(draggedTag) + "是" + named(targetTag) + "的子标签，挂回去会成环。"
+          : targetUnderDragged
+            ? named(draggedTag) + "是" + named(targetTag) + "的上级，挂过去会成环。"
+            : "",
+    });
+
+    // 二、并列：两颗共享同一个上级 —— 被拖的那颗挪到目标那一层去。
+    const targetParents = tagParentList(targetTag);
+    const draggedParents = tagParentList(draggedTag);
+    const alreadySibling = tagSameParents(draggedTag, targetTag);
+    let siblingHint;
+    if (!targetParents.length) siblingHint = named(draggedTag) + "和" + named(targetTag) + "都留在最外层，谁也不套着谁。";
+    else if (targetParents.length === 1) siblingHint = named(draggedTag) + "和" + named(targetTag)
+      + "都挂在" + named(targetParents[0]) + "下面，并排着。";
+    else siblingHint = named(draggedTag) + "和" + named(targetTag) + "挂的上级一样（都是 "
+      + targetParents.map(t => t.name).join("、") + "），并排着。";
+    if (draggedParents.length) {
+      const current = draggedParents.length === 1
+        ? named(draggedParents[0])
+        : "「" + draggedParents.map(t => t.name).join("、") + "」";
+      siblingHint += named(draggedTag) + "现在挂在" + current + "下面，选这个就改挂。";
+    }
+    options.push({
+      key: "sibling",
+      label: "让" + named(draggedTag) + "和" + named(targetTag) + "并列（"
+        + (targetParents.length ? "同一个上级" : "都留在最外层") + "）",
+      hint: siblingHint,
+      disabled: targetUnderDragged || alreadySibling,
+      disabledReason: targetUnderDragged
+        ? named(draggedTag) + "是" + named(targetTag) + "的上级，两颗没法并列。"
+        : alreadySibling
+          ? "两个已经是同一个上级的了，本来就并列。"
+          : "",
+    });
+    return options;
+  }
+
+  // 1.26.24：两颗标签之间的一次调整，最后都走这一条：改目录 → 重画这一题 → 说一句话。
+  async function applyTagRelation(item, draggedTag, action, extra, successText) {
     try {
-      const currentParents = (draggedTag.parent_ids || []).map(pid => String(pid));
-      if (currentParents.includes(String(parentTag.id))) { toast("「" + draggedTag.name + "」已经挂到「" + parentTag.name + "」下面了。", "info"); return; }
-      const action = "add_parent";
       const result = await tagRequest("/api/library/tags", { method: "POST", body: JSON.stringify({
-        action, tag_id: String(draggedTag.id), parent_id: String(parentTag.id),
-        revision: tagCatalogue.revision, request_id: tagRequestId()
+        action, tag_id: String(draggedTag.id),
+        revision: tagCatalogue.revision, request_id: tagRequestId(), ...extra
       }) });
       tagCatalogue = result.catalogue || await loadTagCatalogue();
-      toast("「" + draggedTag.name + "」已挂到「" + parentTag.name + "」下面", "success");
+      toast(successText, "success");
       inspectorRenderedKey = "";
       renderInspector(state.catalog.get(item.id) || item);
       if (document.body.classList.contains("library-directory-open")) directoryRender();
     } catch (error) {
       toast(error.message || "没挂上，原来的关系保留。", "error");
     }
+  }
+
+  // 1.25.68：把一颗标签挂到另一颗标签下面。
+  async function nestTagUnder(item, draggedTag, parentTag) {
+    if (!draggedTag || !parentTag) return;
+    if (String(draggedTag.id) === String(parentTag.id)) return;
+    if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
+    // 不让拖成自己的后代（防环）——两个方向都要拦。
+    if (tagDescendants(parentTag).has(String(draggedTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的子标签，把它挂回去会成环。", "error"); return; }
+    if (tagDescendants(draggedTag).has(String(parentTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的上级，把它挂到下面会成环。", "error"); return; }
+    const currentParents = (draggedTag.parent_ids || []).map(pid => String(pid));
+    if (currentParents.includes(String(parentTag.id))) { toast("「" + draggedTag.name + "」已经挂到「" + parentTag.name + "」下面了。", "info"); return; }
+    await applyTagRelation(item, draggedTag, "add_parent", { parent_id: String(parentTag.id) },
+      "「" + draggedTag.name + "」已挂到「" + parentTag.name + "」下面");
+  }
+
+  // 1.26.24：让两颗标签并列 —— 把被拖的那颗挪到目标同一个上级下面。
+  async function makeSiblingOf(item, draggedTag, siblingTag) {
+    if (!draggedTag || !siblingTag) return;
+    if (String(draggedTag.id) === String(siblingTag.id)) return;
+    if (draggedTag.kind !== siblingTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
+    if (tagDescendants(draggedTag).has(String(siblingTag.id))) { toast("「" + draggedTag.name + "」是「" + siblingTag.name + "」的上级，两颗没法并列。", "error"); return; }
+    const parentIds = (siblingTag.parent_ids || []).map(String);
+    if (tagSameParents(draggedTag, siblingTag)) { toast("「" + draggedTag.name + "」和「" + siblingTag.name + "」已经是同一个上级的了，本来就并列。", "info"); return; }
+    const successText = parentIds.length
+      ? "「" + draggedTag.name + "」和「" + siblingTag.name + "」现在挂在同一个上级下面，并排了"
+      : "「" + draggedTag.name + "」和「" + siblingTag.name + "」现在都留在最外层，并排了";
+    await applyTagRelation(item, draggedTag, "set_parents", { parent_ids: parentIds }, successText);
+  }
+
+  // 1.26.24：拖放之后弹一个小选择 —— 这两颗标签怎么排。选完才动目录。
+  function openTagRelationChoice(item, draggedTag, targetTag) {
+    const options = tagRelationOptions(draggedTag, targetTag);
+    const dialog = node("dialog", "tag-picker-dialog library-tag-choice-dialog");
+    const header = node("header", "tag-picker-head"), intro = node("div");
+    intro.append(node("h2", "", "两颗标签怎么排？"),
+      node("p", "tag-picker-subtitle", "你把「" + draggedTag.name + "」放到了「" + targetTag.name + "」上面。选一种排法。"));
+    const close = node("button", "button", "关闭"); close.type = "button"; header.append(intro, close);
+    const body = node("div", "library-tag-choice-body");
+    options.forEach(option => {
+      const card = node("button", "library-tag-choice-option");
+      card.type = "button";
+      card.append(node("strong", "", option.label), node("span", "library-tag-choice-hint", option.hint));
+      if (option.disabled) {
+        card.disabled = true;
+        card.classList.add("is-disabled");
+        // 灰控件旁边必须有一行看得见的说明 —— 悬停不算数。
+        card.append(node("span", "library-tag-choice-blocked", option.disabledReason));
+        card.title = option.disabledReason;
+      } else {
+        card.title = option.hint;
+      }
+      card.addEventListener("click", () => {
+        if (option.disabled) return;
+        dialog.close();
+        if (option.key === "child") void nestTagUnder(item, draggedTag, targetTag);
+        else void makeSiblingOf(item, draggedTag, targetTag);
+      });
+      body.append(card);
+    });
+    const footer = node("footer", "tag-picker-foot"), status = node("span", "helper", "选一个；不选就什么都不改。"),
+      cancel = node("button", "button", "取消");
+    cancel.type = "button"; footer.append(status, cancel);
+    dialog.append(header, body, footer); document.body.append(dialog);
+    const closeDialog = () => dialog.close();
+    close.addEventListener("click", closeDialog); cancel.addEventListener("click", closeDialog);
+    dialog.addEventListener("close", () => { dialog.remove(); });
+    dialog.showModal();
   }
 
   function attachChipDnD(strip, item) {
@@ -3377,7 +3509,7 @@
       const chip = event.target.closest(".library-tag-chip[draggable='true']");
       if (chip) chip.classList.remove("is-drag-target");
     });
-    strip.addEventListener("drop", async (event) => {
+    strip.addEventListener("drop", (event) => {
       const targetChip = event.target.closest(".library-tag-chip[draggable='true']");
       if (!targetChip) return;
       event.preventDefault();
@@ -3386,7 +3518,10 @@
       const draggedTag = (tagCatalogue.tags || []).find(t => String(t.id) === String(payload.id));
       const parentTag = (tagCatalogue.tags || []).find(t => String(t.id) === String(targetChip.dataset.tagId));
       if (!draggedTag || !parentTag) return;
-      await nestTagUnder(item, draggedTag, parentTag);
+      if (String(draggedTag.id) === String(parentTag.id)) return;
+      if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
+      // 1.26.24：先问「怎么排」，别直接挂上去。
+      openTagRelationChoice(item, draggedTag, parentTag);
     });
   }
   function extrasNode(item, { includeSuggestions = true } = {}) {
@@ -3411,7 +3546,7 @@
       wrapper.dataset.tagId = tag.id;
       wrapper.dataset.tagKind = tag.kind;
       wrapper.draggable = true;
-      wrapper.title = `${tag.name} · 拖到另一颗标签上可把它挂成子标签`;
+      wrapper.title = `${tag.name} · 拖到另一颗标签上：可以挂成它的子标签，也可以跟它并列（同一个上级）`;
       const remove = node("button", "library-tags-remove", "×"); remove.type = "button"; remove.dataset.tagId = tag.id; remove.title = `从本题移除「${tag.name}」`; remove.setAttribute("aria-label", remove.title);
       remove.disabled = inlineTagLocks.has(item.id); remove.draggable = false; remove.addEventListener("click", () => removeInlineTag(item, tag)); wrapper.append(chip, remove);
       row.append(wrapper);
