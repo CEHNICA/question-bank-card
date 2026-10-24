@@ -88,12 +88,15 @@ function scenario() {
   // Closing during read-only status loading is immediate and never saves a draft.
   const loading = scenario(), status = deferred();
   loading.context.api = (url, options) => { loading.requests.push({ url, options }); return status.promise; };
+  // 1.26.9：设置页上原来那个「配置 API」按钮没有了，关闭后焦点还给打开它的那个东西。
+  const opener = { focus(options) { loading.focuses.push({ id: "paperConfigureApi", options }); } };
+  loading.context.document.activeElement = opener;
   const opened = loading.context.openCredentialSettings();
   loading.clickClose();
   assert.equal(loading.$("credentialDialog").open, false);
   loading.drainNative(); loading.drainFrames();
   assert.ok(loading.values().every((value) => value === ""));
-  assert.equal(loading.focuses.at(-1).id, "settingsCredentialOpen");
+  assert.equal(loading.focuses.at(-1).id, "paperConfigureApi", "The focus returns to whatever opened the API window");
   status.resolve({ services: loading.saved }); await opened; loading.drainFrames();
   assert.equal(loading.focuses.filter((focus) => focus.id === "credentialMineruInput").length, 0);
   assert.equal(loading.requests.length, 1);

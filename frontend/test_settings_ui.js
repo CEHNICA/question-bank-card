@@ -67,8 +67,11 @@ assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \
 assert.doesNotMatch(html + js, /libraryAISettingsMount/);
 // 外层只给真实配置入口，不再重复四家服务的密钥状态清单。
 assert.match(html, /data-settings-tab="settingsGeneral"[^>]*>API 配置</);
-assert.match(html, /id="settingsServicesTitle"[^>]*>配置切题、读题和答题服务</);
-assert.match(html, /id="settingsCredentialOpen"[^>]*>配置 API<\/button>/);
+// 1.26.9：API 配置直接平铺在设置页上，不再是"一个按钮 + 一个弹窗"，也没有标签页了。
+assert.match(html, /id="settingsServicesTitle"[^>]*>API 配置</);
+assert.match(html, /id="settingsCredentialHost"/);
+assert.doesNotMatch(html, /id="settingsCredentialOpen"/);
+assert.doesNotMatch(html, /credential-tabs|credentialReadingTab|credentialAnswerTab/);
 const outerAPI = html.slice(html.indexOf('id="settingsGeneral"'), html.indexOf('id="settingsDisplay"'));
 assert.doesNotMatch(outerAPI, /api-status|settings(?:Mineru|Modelscope|Minimax|Siliconflow)State|settingsFreePlan/);
 assert.match(html, /云端自动切题必填/);
@@ -102,7 +105,7 @@ function routes(hash = "") {
   }, state: { lens: false, focus: false, autoExpand: true }, modelFormDirty: false,
   openCredentialSettings(tab) { opened.push(tab); $("credentialDialog").open = true; },
   loadFeatureSwitches: () => {}, renderSettingsModels: () => {},
-  showModelSaveResult: () => {}, loadStatus: () => {},
+  showModelSaveResult: () => {}, loadStatus: () => {}, showCredentialInline: () => {},
   leaveFor: (url) => navigated.push(url), anyDialogOpen: () => $("credentialDialog").open,
   requestAnimationFrame: (fn) => fn() });
   vm.runInContext(routeSource + openSource, context);
@@ -116,13 +119,13 @@ for (const hash of ["#ai", "#api", "#services", "", "#display", "#transfer", "#h
   entry.context.openSettings();
   const expected = ({ "#display": "settingsDisplay", "#transfer": "settingsTransfer", "#help": "settingsReview", "#about": "settingsAbout" })[hash] || "settingsGeneral";
   assert.deepEqual(entry.selected(), [expected]); assert.deepEqual(entry.visible(), [expected]);
-  assert.deepEqual(entry.opened, ["#ai", "#api"].includes(hash) ? ["answers"] : [], "Initial bookmarks use only the unified window");
+  assert.deepEqual(entry.opened, [], "1.26.9：旧书签不再另开一个窗口 —— 配置就摆在设置页上");
   assert.equal(entry.location.hash, hash, "Entry does not replace legacy bookmark before routing");
   for (const nextHash of ["#ai", "#api", "#services", "#display"]) {
     entry.opened.length = 0; entry.location.hash = nextHash; entry.listeners.get("hashchange")();
     assert.deepEqual(entry.selected(), [nextHash === "#display" ? "settingsDisplay" : "settingsGeneral"]);
     assert.deepEqual(entry.visible(), entry.selected());
-    assert.deepEqual(entry.opened, ["#ai", "#api"].includes(nextHash) ? ["answers"] : [], "Changed legacy bookmarks also open the answer section");
+    assert.deepEqual(entry.opened, [], "1.26.9：改了旧书签也一样，不再另开窗口");
   }
 }
 const navigation = routes(); navigation.context.openSettings();

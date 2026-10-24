@@ -9,9 +9,19 @@ const dom = require("./credential-test-dom.js");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
-assert.match(html, /id="settingsCredentialOpen"[^>]*>配置 API<\/button>/);
+// 1.26.9：API 配置不再收进一个「配置 API」按钮 + 一个弹窗 —— 设置页直接平铺。
+assert.doesNotMatch(html, /id="settingsCredentialOpen"/);
+assert.match(html, /id="settingsCredentialHost"/);
+assert.match(html, /id="credentialUi"/);
 assert.match(html, /id="credentialDialog"[^>]*aria-labelledby="credentialTitle"/);
 assert.doesNotMatch(html, /从开始菜单[^<]*配置 API/);
+// 1.26.9：厂家不再是下拉框，是摆出来的一排勾选。
+for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
+  assert.match(html, new RegExp(`<input[^>]*id="credentialVision-${provider}"[^>]*>`));
+  assert.match(html, new RegExp(`<input[^>]*id="credentialVision-${provider}"[^>]*value="${provider}"`));
+}
+assert.match(html, /id="credentialVisionPicker"[\s\S]*?type="radio"[\s\S]*?id="credentialVision-assistant"/);
+assert.match(html, /id="credentialVisionProvider"[^>]*hidden/);
 
 for (const provider of ["Mineru", "Modelscope", "Minimax", "Siliconflow"]) {
   assert.match(html, new RegExp(`id="credential${provider}Input"[^>]*type="password"`));

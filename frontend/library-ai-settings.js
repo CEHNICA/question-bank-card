@@ -162,9 +162,23 @@
           <section id="libraryAIAssistantHelp" class="library-ai-section" hidden></section>
           <section id="libraryAIAPIFields" class="library-ai-api-fields" hidden>
             <section class="credential-service" data-library-service="active">
-              <div class="credential-service-head"><strong>选择生成服务 <small>标签和答案都用这一家</small></strong><span id="libraryAIActiveState" class="api-state">正在读取…</span></div>
-              <label for="libraryAIProvider">服务商</label>
-              <select id="libraryAIProvider"><optgroup label="可复用看图读题密钥"><option value="modelscope">魔搭</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option></optgroup><optgroup label="独立答题服务"><option value="deepseek">DeepSeek</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></optgroup></select>
+              <div class="credential-service-head"><strong>勾一家生成服务 <small>标签和答案都用这一家</small></strong><span id="libraryAIActiveState" class="api-state">正在读取…</span></div>
+              <!-- 1.26.9：原来是一个下拉框，选完才知道选了谁、密钥存没存。
+                   现在摆成两行"勾选"：谁在用、谁有密钥，一眼看得见（单选）。 -->
+              <fieldset class="provider-picker" id="libraryAIProviderPicker">
+                <legend class="field-legend">生成标签和答案用哪家</legend>
+                <div class="provider-picker-group"><span class="provider-picker-label">可复用看图读题密钥</span>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-modelscope" name="libraryAIProvider" value="modelscope"><span>魔搭</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-minimax" name="libraryAIProvider" value="minimax"><span>MiniMax</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-siliconflow" name="libraryAIProvider" value="siliconflow"><span>硅基流动</span></label>
+                </div>
+                <div class="provider-picker-group"><span class="provider-picker-label">独立答题服务</span>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-deepseek" name="libraryAIProvider" value="deepseek"><span>DeepSeek</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-doubao" name="libraryAIProvider" value="doubao"><span>豆包 API</span></label>
+                  <label class="provider-option"><input type="radio" id="libraryAIProvider-custom" name="libraryAIProvider" value="custom"><span>其他兼容服务</span></label>
+                </div>
+              </fieldset>
+              <select id="libraryAIProvider" hidden aria-hidden="true" tabindex="-1"><optgroup label="可复用看图读题密钥"><option value="modelscope">魔搭</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option></optgroup><optgroup label="独立答题服务"><option value="deepseek">DeepSeek</option><option value="doubao">豆包 API</option><option value="custom">其他兼容服务</option></optgroup></select>
               <p id="libraryAIMinimaxHelp" hidden></p>
             </section>
             <div id="libraryAIShareKey" class="library-ai-share" hidden>
@@ -233,6 +247,16 @@ ${keyBlocks()}
       };
       $(id).addEventListener("input", changed);
       if (id === "libraryAIProvider") $(id).addEventListener("change", changed);
+    }
+    // 1.26.9：勾选行和下拉框是一份状态的两个脸 —— 勾谁就写下拉框，下拉框变了勾选行回填。
+    for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
+      const option = $(`libraryAIProvider-${provider}`);
+      if (!option) continue;
+      option.addEventListener("change", () => {
+        if (!option.checked) return;
+        $("libraryAIProvider").value = option.value;
+        $("libraryAIProvider").dispatchEvent(new Event("change"));
+      });
     }
     for (const provider of providerOrder) {
       const input = keyInput(provider);
@@ -727,6 +751,16 @@ ${keyBlocks()}
     } finally { clearTimeout(timeout); requests.delete(controller); }
   }
 
+  function syncProviderPicker() {
+    // 1.26.9：勾选行跟着下拉框回填（勾选行只是给人看的，状态还是下拉框那一份）。
+    const select = $("libraryAIProvider");
+    if (!select) return;
+    for (const provider of ["modelscope", "minimax", "siliconflow", "deepseek", "doubao", "custom"]) {
+      const option = $(`libraryAIProvider-${provider}`);
+      if (option) option.checked = option.value === select.value;
+    }
+  }
+
   function render(body) {
     state.current = body;
     state.profileDrafts = {};
@@ -741,6 +775,7 @@ ${keyBlocks()}
     renderCost(body);
     $("libraryAIMode").value = "api";
     $("libraryAIProvider").value = body.provider;
+    syncProviderPicker();
     $("libraryAIBaseURL").value = body.base_url || "";
     $("libraryAIModel").value = body.model || "";
     $("libraryAIImages").checked = body.supports_images === true;

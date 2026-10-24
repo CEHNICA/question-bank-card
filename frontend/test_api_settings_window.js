@@ -107,14 +107,16 @@ function scenario() {
   for (const oldHash of ["#ai", "#api"]) {
     const legacy = scenario(); legacy.context.window.location.hash = oldHash;
     legacy.context.syncSettingsRoute(); await turns();
-    assert.equal(legacy.$("credentialDialog").open, true); assert.equal(legacy.$("credentialAnswerPanel").hidden, false);
-    assert.equal(legacy.$("credentialReadingPanel").hidden, true); assert.equal(legacy.ai.mountCount, 1);
+    // 1.26.9：旧书签不再另开一个窗口 —— 整份配置就摆在设置页上，两段内容一起在。
+    assert.equal(legacy.$("credentialDialog").open, false, "Legacy bookmarks no longer open a second window");
+    assert.equal(legacy.$("credentialAnswerPanel").hidden, false);
+    assert.equal(legacy.$("credentialReadingPanel").hidden, false, "Both sections stay on one page; there are no tabs any more");
     legacy.ai.key = "legacy-route-synthetic-draft"; legacy.ai.dirty = true;
     legacy.$("credentialMinimaxInput").value = "reading-route-synthetic-draft";
     legacy.context.window.location.hash = oldHash === "#ai" ? "#api" : "#ai";
     legacy.windowEvents.get("hashchange")(); await turns();
-    assert.equal(legacy.calls.filter((call) => call === "show").length, 1, "Legacy aliases reuse the existing unified dialog");
-    assert.equal(legacy.ai.mountCount, 1); assert.equal(legacy.ai.key, "legacy-route-synthetic-draft");
+    assert.equal(legacy.calls.filter((call) => call === "show").length, 0, "Changing a legacy bookmark does not open a window either");
+    assert.equal(legacy.ai.key, "legacy-route-synthetic-draft");
     assert.equal(legacy.$("credentialMinimaxInput").value, "reading-route-synthetic-draft"); assert.equal(legacy.confirmations.length, 0);
   }
   const switched = scenario();

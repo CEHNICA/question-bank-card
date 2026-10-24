@@ -72,10 +72,13 @@
       </div>
       <div class="settings-scroll">
         <div id="settingsGeneral" class="settings-page" role="tabpanel">
+          <!-- 1.26.9：API 配置不再收进一个按钮 + 一个弹窗。设置页直接把整份配置
+               平铺在这里：云端切题、看图读题、生成标签和答案，一页看完，不用切标签。
+               （原来那个「配置 API」按钮藏起来的是老师最需要看到的东西。） -->
           <section class="settings-section api-setup-entry" aria-labelledby="settingsServicesTitle">
-            <div><p id="settingsServiceReadiness" class="settings-readiness" role="status">正在查看这台电脑的配置…</p><h3 id="settingsServicesTitle">配置切题、读题和答题服务</h3><p class="settings-description">按步骤填写 MinerU 和一家看图服务。标签与答案需要时再配置。</p></div>
-            <button id="settingsCredentialOpen" class="button primary" type="button">配置 API</button>
+            <div><p id="settingsServiceReadiness" class="settings-readiness" role="status">正在查看这台电脑的配置…</p><h3 id="settingsServicesTitle">API 配置</h3><p class="settings-description">下面就是全部配置：云端切题、看图读题、生成标签和答案。勾选哪一家，它就管哪件事；密钥只加密保存在这台电脑上。</p></div>
           </section>
+          <div id="settingsCredentialHost" class="settings-credential-host"></div>
         </div>
         <div id="settingsDisplay" class="settings-page" role="tabpanel" hidden>
           <div id="exportSettingsMount"></div>
@@ -317,16 +320,19 @@
         <div>
           <p class="settings-eyebrow">切题、读题与答题</p>
           <h3 id="credentialTitle">API 配置</h3>
-          <p class="hint">先完成下面两步，即可使用云端切题与看图读题。标签与答案是可选功能。</p>
+          <p class="hint">云端切题、看图读题、生成标签和答案 —— 勾选哪一家，它就管哪件事。</p>
           <p id="credentialSavedTotal" class="credential-saved-total" aria-label="读题服务的已保存密钥总数" role="status">正在读取已保存的密钥…</p>
         </div>
         <button class="button quiet" type="button" data-close>关闭</button>
       </header>
-    <div class="credential-tabs" role="tablist" aria-label="API 配置分区">
-      <button id="credentialReadingTab" type="button" role="tab" aria-selected="true" aria-controls="credentialReadingPanel">切题与读题</button>
-      <button id="credentialAnswerTab" type="button" role="tab" aria-selected="false" aria-controls="credentialAnswerPanel" tabindex="-1">标签与答案 · 可选</button>
-    </div>
-    <div id="credentialReadingPanel" class="credential-panel" role="tabpanel" aria-labelledby="credentialReadingTab">
+    <div id="credentialDialogBody" class="credential-dialog-body"></div>
+  </dialog>
+
+  <!-- 1.26.9：这一整块是"可搬动"的：设置页把它直接摆出来（不再藏进按钮和弹窗），
+       题库和答案编辑器要临时看一眼时，再把它搬回弹窗里。搬的是同一个 DOM，
+       所以密钥、开关、未保存的改动都原样跟着走。 -->
+  <div id="credentialUi" class="credential-ui" hidden>
+    <div id="credentialReadingPanel" class="credential-panel">
     <form id="credentialForm" class="credential-form" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
 
       <div class="credential-body">
@@ -341,10 +347,18 @@
           <div class="credential-service-actions"><button id="credentialMineruDelete" class="button small credential-delete" type="button" aria-label="删除 MinerU 密钥" hidden>删除密钥</button></div>
         </section>
         <section class="credential-vision-step" aria-labelledby="credentialVisionTitle">
-          <h4 id="credentialVisionTitle"><span class="credential-step-number">2</span> 选择一家看图读题服务</h4>
-          <p class="credential-purpose">负责把题目截图转成可编辑文字。推荐魔搭；已有其他服务的密钥，可以直接换用，只需填写一家。</p>
-          <label for="credentialVisionProvider">看图服务</label>
-          <select id="credentialVisionProvider"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
+          <h4 id="credentialVisionTitle"><span class="credential-step-number">2</span> 勾一家看图读题服务</h4>
+          <p class="credential-purpose">负责把题目截图转成可编辑文字。推荐魔搭；已有其他服务的密钥，可以直接换用，只需勾一家。</p>
+          <!-- 1.26.9：原来是一个下拉框，选完才知道选了谁。现在直接摆成一行"勾选"，
+               哪家有密钥、哪家在用，一眼就看得见（单选：只能勾一家）。 -->
+          <fieldset class="provider-picker" id="credentialVisionPicker">
+            <legend class="field-legend">看图读题用哪家</legend>
+            <label class="provider-option"><input type="radio" id="credentialVision-modelscope" name="credentialVisionProvider" value="modelscope"><span>魔搭<small>推荐</small></span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-minimax" name="credentialVisionProvider" value="minimax"><span>MiniMax</span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-siliconflow" name="credentialVisionProvider" value="siliconflow"><span>硅基流动</span></label>
+            <label class="provider-option"><input type="radio" id="credentialVision-assistant" name="credentialVisionProvider" value="assistant"><span>暂不配置<small>原图审核或 AI 助手</small></span></label>
+          </fieldset>
+          <select id="credentialVisionProvider" hidden aria-hidden="true" tabindex="-1"><option value="modelscope">魔搭（推荐）</option><option value="minimax">MiniMax</option><option value="siliconflow">硅基流动</option><option value="assistant">暂不配置 · 原图审核或 AI 助手</option></select>
           <p id="settingsModelSummary" class="settings-footnote"></p>
           <div class="settings-form-actions"><span id="settingsModelResult" class="settings-save-result" role="status"></span></div>
         <section id="credentialModelscopeSection" class="credential-service" data-service="modelscope">
@@ -423,10 +437,10 @@
     </form>
     <form id="modelSettingsForm" class="model-settings-form" hidden></form>
     </div>
-    <div id="credentialAnswerPanel" class="credential-panel" role="tabpanel" aria-labelledby="credentialAnswerTab" hidden>
+    <div id="credentialAnswerPanel" class="credential-panel">
       <div id="libraryAIAPISettingsMount" class="library-ai-mount"></div>
     </div>
-  </dialog>
+  </div>
 
   <dialog id="pageDialog" class="page-dialog" aria-labelledby="pageDialogTitle">
     <div class="dialog-head">

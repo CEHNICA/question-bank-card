@@ -1217,6 +1217,12 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-tabs button { padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 650; cursor: pointer; }
 .credential-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
 .credential-panel { min-height: 0; overflow-y: auto; background: var(--bg); }
+/* 1.26.9：弹窗里现在是两段内容（读题 + 标签答案）连着放，外壳负责滚动。 */
+.credential-dialog-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 摆在设置页上时不再自己滚动 —— 整页一起滚。 */
+.settings-credential-host .credential-panel,
+.settings-credential-host .credential-body { overflow: visible; min-height: 0; }
+.settings-credential-host .credential-body { padding: 0; background: transparent; }
 #credentialReadingPanel { display: flex; flex-direction: column; overflow: hidden; }
 /* 「标签与答案」挂在这一页里。外面这层是滚动容器，挂在里面的面板必须自己撑满、
    自己滚，否则面板按内容长高，「保存 API 设置」会被顶到 1366×768 这类屏幕的视口外面。 */
@@ -1260,6 +1266,24 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .credential-service > input[type="password"]:disabled { background: var(--surface-2); color: var(--muted); }
 .credential-service-actions { display: flex; justify-content: flex-end; }
 .credential-service-actions:has(> [hidden]) { display: none; }
+/* 1.26.9：厂家不再是一个下拉框，而是摆成一排"勾选"。哪家在用、哪家有密钥，
+   一眼看得见；选中谁，下面那家的密钥栏就露出来。 */
+.provider-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.provider-picker .field-legend { flex: 0 0 100%; padding: 0 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.provider-picker-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.provider-picker-label { color: var(--muted); font-size: 12px; }
+.provider-option { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px;
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface);
+  color: var(--ink-2); font-size: 13px; cursor: pointer; }
+.provider-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); font-weight: 650; }
+.provider-option input[type="radio"] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.provider-option small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+/* 1.26.9：配置直接摆在设置页上时，弹窗那点外壳（关闭、取消）用不上。 */
+.settings-credential-host .credential-dialog-body { display: block; }
+.credential-ui .credential-panel + .credential-panel { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.credential-ui .credential-actions { position: static; border-top: 0; padding: 12px 0 0; background: transparent; }
+/* 摆在设置页上的时候没有"取消"这个说法：离开这一页会问一次要不要放弃改动。 */
+.settings-credential-host [data-close] { display: none; }
 /* 1.26.8：连接测试这一行的勾选框不是"功能开关"，是"这一次测试的同意" ——
    它紧挨着按钮，样式也跟功能开关分开，免得老师把它当成设置（勾了之后它还会自己
    弹起来，看着像出 bug）。 */

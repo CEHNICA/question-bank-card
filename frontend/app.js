@@ -3683,7 +3683,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     box.append(el("p", "hint", `${service ? `“${service}”` : "看图读题服务"}还没有 API Key，所以这次识读没有发出请求。`
       + "原卷、已切好的题目和人工改过的内容都保留着：配好密钥后可以直接重新识读，"
       + "也可以先对照原图审核或改字，不影响这一份资料。"));
-    box.append(button("配置 API", "small primary", () => openCredentialSettings("reading"),
+    box.append(button("配置 API", "small primary", () => openCredentialSettings(),
       "在本机填写这家的 API Key；填好后回到题卡点“重新 AI 识读”即可"));
     return box;
   }
@@ -4783,6 +4783,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const hasSavedReader = Boolean(engines.saved?.primary || ["modelscope", "minimax", "siliconflow"].some((provider) => configured[provider]));
       select.value = hasSavedReader ? selectedReadingProvider() : "modelscope";
     }
+    // 1.26.9：勾选行跟着下拉框走（真正的状态还是这一份，下拉框只是留着给老逻辑用）。
+    for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
+      const option = $(`credentialVision-${provider}`);
+      if (option) option.checked = option.value === select.value;
+    }
     for (const [provider, id] of [["modelscope", "credentialModelscopeSection"], ["minimax", "credentialMinimaxSection"], ["siliconflow", "credentialSiliconflowSection"]]) {
       $(id).hidden = select.value !== provider;
     }
@@ -4851,7 +4856,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function toggleCredentialKey(service, index) {
     const row = credentialSavedRows.get(`${service}:${index}`);
-    if (!row || credentialBusy || !$("credentialDialog").open) return;
+    if (!row || credentialBusy || !credentialUiVisible()) return;
     if (row.pending || row.visible) { hideCredentialKey(row); return; }
     const epoch = ++row.epoch, session = credentialSession;
     const controller = new AbortController();
@@ -4861,7 +4866,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     row.button.setAttribute("aria-label", `取消查看 ${row.label} 第 ${index + 1} 个密钥`);
     row.timeout = setTimeout(() => controller.abort(), 15000);
     const current = () => row.epoch === epoch && session === credentialSession
-      && credentialSavedRows.get(`${service}:${index}`) === row && $("credentialDialog").open;
+      && credentialSavedRows.get(`${service}:${index}`) === row && credentialUiVisible();
     try {
       const result = await api("/api/settings/credentials/key/reveal", {
         method: "POST", body: { service, index }, signal: controller.signal
@@ -4927,7 +4932,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     cancelCredentialFocus();
     credentialFocusFrame = requestAnimationFrame(() => {
       credentialFocusFrame = 0;
-      if (session !== credentialSession || $("credentialDialog").open !== opening) return;
+      if (session !== credentialSession || credentialUiVisible() !== opening) return;
       // A previous close must not pull focus out of a newly opened dialog.
       if (!opening && anyDialogOpen()) return;
       $(id)?.focus({ preventScroll: true });
@@ -4977,11 +4982,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       try {
         if (credentialModelGuard?.hasUnsavedChanges() && !(await credentialModelGuard.prepareClose())) return;
-        if (session !== credentialSession || !$("credentialDialog").open || credentialMutationPending()) return;
+        if (session !== credentialSession || !credentialUiVisible() || credentialMutationPending()) return;
         const answerDirty = credentialAnswersMounted && window.LibraryAISettings?.hasUnsavedChanges?.();
         if (credentialHasNewKeys() || answerDirty) {
           const discard = await confirmDialog({ title: "API 配置还没保存", text: "关闭会放弃尚未保存的新密钥与标签、答案设置；已经保存的配置保持原样。", ok: "放弃并关闭", cancel: "继续设置", focusCancel: true });
-          if (!discard || session !== credentialSession || !$("credentialDialog").open || credentialMutationPending()) return;
+          if (!discard || session !== credentialSession || !credentialUiVisible() || credentialMutationPending()) return;
           if (answerDirty && window.LibraryAISettings.discard() === false) return;
           resetCredentialInputs();
         }
@@ -5002,20 +5007,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return false;
   }
 
-  async function showCredentialTab(tab) {
-    tab = tab === "answers" ? "answers" : "reading";
+  // 1.26.9：整份 API 配置现在只有**一份**（#credentialUi），可以摆在两个地方：
+  // 设置页里直接平铺，或者临时搬回弹窗。搬的是同一个 DOM，密钥、开关和未保存的
+  // 改动都原样跟着走 —— 不会出现"弹窗里填了一半、设置页里是另一份"。
+  let credentialInline = false;
+  let credentialReturnFocus = null;
+
+  function credentialUiVisible() {
+    return credentialInline || Boolean($("credentialDialog")?.open);
+  }
+
+  function mountCredentialUI(host) {
+    const ui = $("credentialUi");
+    if (!ui || !host) return;
+    if (ui.parentElement === host) return;
+    host.append(ui);
+    ui.hidden = false;
+  }
+
+  async function showCredentialSections() {
     hideAPISecrets();
     cancelCredentialFocus();
-    credentialTab = tab;
-    $("credentialReadingPanel").hidden = tab !== "reading";
-    $("credentialAnswerPanel").hidden = tab !== "answers";
-    $("credentialSavedTotal").hidden = tab !== "reading";
-    for (const name of ["reading", "answers"]) {
-      const button = $(name === "reading" ? "credentialReadingTab" : "credentialAnswerTab");
-      button.setAttribute("aria-selected", String(tab === name));
-      button.tabIndex = tab === name ? 0 : -1;
-    }
-    if (tab !== "answers" || !window.LibraryAISettings?.mount) return;
+    $("credentialReadingPanel").hidden = false;
+    $("credentialAnswerPanel").hidden = false;
+    $("credentialSavedTotal").hidden = false;
+    if (!window.LibraryAISettings?.mount) return;
     // The optional answers panel can reuse a configured visual service.
     // It must not read the reading credential store itself,
     // so the status this dialog already loaded is handed over instead.
@@ -5090,27 +5106,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     let payload;
     try { payload = await api("/api/settings/credentials"); }
     catch (error) { if (request !== credentialStateRequest) return null; throw error; }
-    if (request === credentialStateRequest && $("credentialDialog").open) renderCredentialStates(payload);
+    if (request === credentialStateRequest && credentialUiVisible()) renderCredentialStates(payload);
     return payload;
   }
 
-  async function openCredentialSettings(tab = "reading") {
-    tab = tab === "answers" ? "answers" : "reading";
+  async function openCredentialSettings() {
     if (credentialClosing) return;
-    if ($("credentialDialog").open) return showCredentialTab(tab);
+    if ($("credentialDialog").open) return showCredentialSections();
     if (credentialBusy) return;
     const session = ++credentialSession;
     cancelCredentialFocus();
+    // 1.26.9：设置页上原来那个「配置 API」按钮没有了，关闭后要把焦点还给
+    // **打开这个窗口的那个东西**，不能还给一个已经不在页面上的按钮。
+    credentialReturnFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
     resetCredentialInputs();
     renderCredentialStates({ services: {} });
     $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
     Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
     $("credentialResult").textContent = "";
+    // 1.26.9：从题库或答案编辑器打开时，把整份配置搬回弹窗里（设置页那一份会
+    // 让位 —— 同一时刻只有一份，不会出现两处各填一半的情况）。
+    credentialInline = false;
+    mountCredentialUI($("credentialDialogBody"));
     $("credentialDialog").showModal();
-    const panelReady = showCredentialTab(tab);
+    const panelReady = showCredentialSections();
     try {
       await loadCredentialStates();
-      if (session === credentialSession && $("credentialDialog").open && credentialTab === "reading") focusCredentialControl("credentialMineruInput", session, true);
+      if (session === credentialSession && $("credentialDialog").open) focusCredentialControl("credentialMineruInput", session, true);
     } catch (error) {
       if (session !== credentialSession || !$("credentialDialog").open) return;
       $("credentialSavedTotal").textContent = "暂时无法读取密钥数量";
@@ -5120,12 +5142,38 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     await panelReady;
   }
 
+  async function showCredentialInline() {
+    // 1.26.9：设置页 → API 配置。整份配置直接摆在这一页上：云端切题、看图读题、
+    // 生成标签和答案，一页看完，不用再点一个按钮、也不用切标签。
+    const host = $("settingsCredentialHost");
+    const ui = $("credentialUi");
+    // 已经在这一页上了就别重置 —— 老师填了一半的密钥不能因为切了个页签就没了。
+    const alreadyHere = Boolean(ui && host && ui.parentElement === host);
+    credentialInline = true;
+    mountCredentialUI(host);
+    if (!alreadyHere) {
+      resetCredentialInputs();
+      renderCredentialStates({ services: {} });
+      $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
+      Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
+      $("credentialResult").textContent = "";
+    }
+    const panelReady = showCredentialSections();
+    try {
+      await loadCredentialStates();
+    } catch (error) {
+      $("credentialSavedTotal").textContent = "暂时无法读取密钥数量";
+      $("credentialResult").textContent = error.message;
+    }
+    await panelReady;
+  }
+
   window.APISettings = Object.freeze({ open: openCredentialSettings });
 
   async function refreshCredentialStatus(message, session) {
     let refreshed = false;
     try { refreshed = await loadStatus(); } catch { /* The mutation already succeeded. */ }
-    if (!refreshed && session === credentialSession && $("credentialDialog").open) {
+    if (!refreshed && session === credentialSession && credentialUiVisible()) {
       $("credentialResult").textContent = `${message} 当前状态暂未刷新，重新打开设置或刷新页面即可查看。`;
     }
   }
@@ -5262,7 +5310,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     showSettingsTab(settingsTabFromHash(), { updateHash: false });
     // Existing answer-setting links keep opening the answer section of the one
     // API window, without bringing back a second settings page or entry point.
-    if (["#ai", "#api"].includes(window.location.hash)) void openCredentialSettings("answers");
+    // 1.26.9：配置已经直接摆在设置页上了，这两个旧链接就滚到"生成标签和答案"
+    // 那一段去 —— 不用再弹一个窗口。
+    if (["#ai", "#api"].includes(window.location.hash)) {
+      const answers = $("credentialAnswerPanel");
+      if (answers && typeof answers.scrollIntoView === "function") answers.scrollIntoView({ block: "start" });
+    }
   }
   window.addEventListener("hashchange", () => {
     if (window.location.pathname === "/settings") syncSettingsRoute();
@@ -5341,6 +5394,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!modelFormDirty) showModelSaveResult("");
     syncSettingsRoute();
     void loadStatus();
+    // 1.26.9：API 配置直接摆在这一页上（不再是一个按钮 + 一个弹窗）。
+    void showCredentialInline();
     requestAnimationFrame(() => { if (!anyDialogOpen()) $("settingsTitle").focus({ preventScroll: true }); });
   }
 
@@ -5348,7 +5403,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (window.location.pathname === "/settings") { event.preventDefault(); openSettings(); }
   });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
-  $("settingsCredentialOpen").addEventListener("click", openCredentialSettings);
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
   $("settingsAutoExpand").addEventListener("change", (event) => {
@@ -5380,17 +5434,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $(field.remove).addEventListener("click", () => deleteCredential(service));
   });
 
-  for (const [id, tab] of [["credentialReadingTab", "reading"], ["credentialAnswerTab", "answers"]]) {
-    $(id).addEventListener("click", () => { void showCredentialTab(tab); });
-    $(id).addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-      event.preventDefault();
-      const next = tab === "reading" ? "answers" : "reading";
-      void showCredentialTab(next);
-      $(next === "reading" ? "credentialReadingTab" : "credentialAnswerTab").focus();
-    });
-  }
-
+  // 1.26.9：不再有"切题与读题 / 标签与答案"两个标签页，两块内容一直摆在一起。
   $("credentialDialog").addEventListener("cancel", (event) => {
     if (!requestCredentialClose({ native: true })) event.preventDefault();
   });
@@ -5411,7 +5455,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (credentialAnswersMounted) window.LibraryAISettings?.deactivate?.();
     resetCredentialInputs();
     $("credentialResult").textContent = "";
-    focusCredentialControl("settingsCredentialOpen", session, false);
+    // 1.26.9：焦点还给打开这个窗口的那个东西（设置页上原来那个按钮没有了）。
+    const back = credentialReturnFocus;
+    credentialReturnFocus = null;
+    if (back && typeof back.focus === "function") back.focus({ preventScroll: true });
   });
 
   $("credentialForm").addEventListener("submit", async (event) => {
@@ -5506,6 +5553,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const modelSettingFields = ["settingsPrimaryModel", "settingsMinimaxModel",
     "settingsSiliconflowModel", "settingsModelscopeModel"];
+  // 1.26.9：勾选行和下拉框是一份状态的两个脸。勾哪一家 → 写下拉框 → 走原来那套
+  // 保存逻辑；下拉框被别的代码改了 → 勾选行跟着回填。
+  for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
+    const option = $(`credentialVision-${provider}`);
+    if (!option) continue;
+    option.addEventListener("change", () => {
+      if (!option.checked) return;
+      $("credentialVisionProvider").value = option.value;
+      $("credentialVisionProvider").dispatchEvent(new Event("change"));
+    });
+  }
   $("credentialVisionProvider").addEventListener("change", () => {
     if (credentialBusy || credentialMutationPending()) { syncCredentialVisionPanel(); return; }
     hideAPISecrets();
