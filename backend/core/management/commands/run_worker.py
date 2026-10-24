@@ -274,6 +274,26 @@ def clean_saved_example_labels(out=None) -> None:
         out.write(f"已恢复 {len(converted)} 道已有识读结果，可直接审核；未重新调用读题服务。")
 
 
+def auto_backup_lane(stop: threading.Event) -> None:
+    """1.26.17：每周给这台电脑上的题库打一个备份包。
+
+    放在软件自己的文件夹里（%LOCALAPPDATA%\\QuestionBankCard\\data\\backups），
+    旧的只留最近十份。**不联网、不上传** —— 备份就是一份本地的 zip。
+
+    单独一个线程，不挡处理试卷那条线；一次备份失败也不该让整个工作者退出。
+    """
+    from core import library_transfer
+
+    while not stop.wait(300):  # 每五分钟看一眼
+        try:
+            if not library_transfer.backup_due():
+                continue
+            result = library_transfer.run_auto_backup()
+            logging.getLogger("core").info("自动备份完成：%s", result["name"])
+        except Exception:
+            logging.getLogger("core").exception("自动备份失败")
+
+
 class Command(BaseCommand):
     help = "处理排队的试卷和重读请求"
 
@@ -297,6 +317,7 @@ class Command(BaseCommand):
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
             threading.Thread(target=parse_lane, args=(stop,), name="parse-lane", daemon=True).start()
             threading.Thread(target=overlap_lane, args=(stop,), name="overlap-lane", daemon=True).start()
+            threading.Thread(target=auto_backup_lane, args=(stop,), name="auto-backup-lane", daemon=True).start()
         while True:
             close_old_connections()
             worked = False

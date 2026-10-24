@@ -90,6 +90,90 @@ def records_root() -> Path:
     return data_root() / "imports"
 
 
+# ------------------------------------------------------- 本机自动备份
+
+# 1.26.17：每周自动打一个备份包，放在软件自己的文件夹里，旧的只留最近十份。
+# 备份只在本地，不联网、不上传 —— 和 AGENTS 里的规矩一样。
+BACKUP_INTERVAL_DAYS = 7
+BACKUP_KEEP = 10
+AUTO_BACKUP_PREFIX = "题有据自动备份"
+
+
+def backups_root() -> Path:
+    return data_root() / "backups"
+
+
+def list_backups() -> list[dict]:
+    """本机自动备份目录里的备份包，按时间倒序（新的在前）。"""
+
+    root = backups_root()
+    if not root.is_dir():
+        return []
+    items: list[dict] = []
+    for path in root.glob(f"{AUTO_BACKUP_PREFIX}-*.zip"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append({
+            "id": path.stem,
+            "name": path.name,
+            "size": stat.st_size,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
+        })
+    items.sort(key=lambda item: item["created_at"], reverse=True)
+    return items
+
+
+def backup_due(now: float | None = None) -> bool:
+    """离上一次自动备份是不是已经过了一周（从来没有过就是该备份了）。"""
+
+    items = list_backups()
+    if not items:
+        return True
+    newest = max(item["created_at"] for item in items)
+    try:
+        stamp = time.mktime(time.strptime(newest, "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return True
+    return (now if now is not None else time.time()) - stamp >= BACKUP_INTERVAL_DAYS * 86400
+
+
+def prune_backups(keep: int = BACKUP_KEEP) -> list[str]:
+    """只留最近 `keep` 份，其余删掉。返回删掉的文件名。"""
+
+    removed: list[str] = []
+    for item in list_backups()[keep:]:
+        try:
+            (backups_root() / item["name"]).unlink()
+        except OSError:
+            continue
+        removed.append(item["name"])
+    return removed
+
+
+def run_auto_backup() -> dict:
+    """现在打一个自动备份包，并把旧的清理到只剩最近十份。"""
+
+    root = backups_root()
+    root.mkdir(parents=True, exist_ok=True)
+    result = export_bundle(root, prefix=AUTO_BACKUP_PREFIX)
+    prune_backups()
+    return result
+
+
+def backup_path(identifier: str) -> Path:
+    """按名字取本机自动备份里的一个包；只认自己目录下的文件。"""
+
+    name = Path(str(identifier or "")).name
+    if not name.startswith(f"{AUTO_BACKUP_PREFIX}-") or not name.endswith(".zip"):
+        raise TransferError("找不到这个备份包。")
+    path = backups_root() / name
+    if not path.is_file():
+        raise TransferError("找不到这个备份包，可能已经被清理了。")
+    return path
+
+
 # ---------------------------------------------------------------- 导出
 
 
@@ -192,13 +276,13 @@ def _manifest() -> dict:
     }
 
 
-def export_bundle(directory: Path) -> dict:
+def export_bundle(directory: Path, prefix: str = "题有据备份") -> dict:
     """把整库打包成一个 zip 放进 `directory`。"""
     directory = Path(directory)
     if not directory.is_dir():
         raise TransferError("选的文件夹不在了，重新选一个。")
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = directory / f"题有据备份-{stamp}.zip"
+    target = directory / f"{prefix}-{stamp}.zip"
     with tempfile.TemporaryDirectory() as work:
         snapshot = Path(work) / DATABASE_NAME
         _snapshot_database(snapshot)

@@ -40,7 +40,8 @@ function makeDom() {
   return { nodes, document, make };
 }
 
-function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody = {}, choose = { selected: true, directory: "D:/备份" } } = {}) {
+function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody = {}, choose = { selected: true, directory: "D:/备份" },
+  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false } } = {}) {
   const dom = makeDom();
   const calls = [];
   const context = vm.createContext({
@@ -55,6 +56,10 @@ function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody 
       if (url === "/api/backup/import") return { ok: true, json: async () => merge };
       if (url === "/api/backup/records" && options.method === "POST") return { ok: true, json: async () => ({ removed: { papers: 1, questions: 2, solutions: 3 } }) };
       if (url === "/api/backup/records") return { ok: true, json: async () => records };
+      if (url === "/api/backup/auto" && options.method === "POST") return { ok: true, json: async () => ({ name: "题有据自动备份-20261023-050000.zip", backups: auto.backups }) };
+      if (url === "/api/backup/auto") return { ok: true, json: async () => auto };
+      if (url === "/api/backup/auto/inspect") return { ok: true, json: async () => inspect };
+      if (url === "/api/backup/auto/import") return { ok: true, json: async () => merge };
       return { ok: false, json: async () => ({ error: "不该到这里" }) };
     },
     setTimeout, clearTimeout, console,
@@ -190,6 +195,20 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   await new Promise((resolve) => setTimeout(resolve, 0));
   const summary = text(dom.document.getElementById("transferSettingsMount"));
   assert.doesNotMatch(summary, /备份不联网，也不上传/, "页头已经说了这一区，区内不再重复");
+}
+
+// 9. 1.26.17：本机自动备份 —— 列出备份包、现在打一份、从某一份恢复。
+{
+  const { dom, calls, window } = boot();
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const box = dom.document.getElementById("transferAuto");
+  const summary = text(box);
+  assert.match(summary, /题有据自动备份/, "备份包列出来了");
+  assert.match(summary, /从这一份恢复/, "每一份备份都能从这里恢复");
+  assert.match(summary, /现在备份一次/, "也能随时手动打一份");
+  const called = calls.filter((call) => call.url === "/api/backup/auto");
+  assert.ok(called.length, "读了一次自动备份列表");
 }
 
 console.log("设置 → 数据备份与迁移：所有断言通过");

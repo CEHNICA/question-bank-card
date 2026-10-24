@@ -196,6 +196,82 @@
     return notes.length ? `${head} ${notes.slice(0, 3).join("；")}` : `${head} 本机原有的题一道没删。`;
   }
 
+  // ---- 本机自动备份 --------------------------------------------------
+
+  async function loadAutoBackups() {
+    const box = $("transferAuto");
+    if (!box) return;
+    try {
+      const body = await json("/api/backup/auto");
+      const backups = body.backups || [];
+      box.replaceChildren();
+      if (!backups.length) {
+        box.append(el("p", "settings-footnote", "还没有自动备份过。软件每周会自己打一份，也可以现在就打一份。"));
+      } else {
+        const list = el("ul", "transfer-records");
+        backups.forEach((backup) => {
+          const item = el("li");
+          const restore = el("button", "button button-small", "从这一份恢复");
+          restore.type = "button";
+          restore.disabled = busy;
+          restore.addEventListener("click", () => { void restoreAutoBackup(backup.id); });
+          item.append(el("span", "", `${when(backup.created_at)}　${backup.name}　${megabytes(backup.size)}`), restore);
+          list.append(item);
+        });
+        box.append(list);
+      }
+      const now = el("button", "button", "现在备份一次");
+      now.type = "button";
+      now.disabled = busy;
+      now.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
+        now.disabled = true;
+        status("auto", "正在打包，请稍候…");
+        try {
+          const result = await post("/api/backup/auto", {});
+          status("auto", `已备份：${result.name}。`, false);
+          await loadAutoBackups();
+        } catch (error) { status("auto", error.message, true); }
+        finally { busy = false; }
+      });
+      box.append(now);
+    } catch (error) {
+      box.replaceChildren(el("p", "settings-footnote", "自动备份的状态暂时读不出来。"));
+    }
+  }
+
+  async function restoreAutoBackup(id) {
+    if (busy) return;
+    busy = true;
+    status("auto", "正在看这份备份会带来什么…");
+    try {
+      const preview = await post("/api/backup/auto/inspect", { id });
+      const counts = ["papers", "questions", "tags", "publications"]
+        .map((key) => ({ papers: "套卷子", questions: "道题", tags: "个标签", publications: "条入库题目" })[key] + " " + (preview[key] || 0))
+        .join("、");
+      status("auto", `这份备份里有 ${counts}。合并进来只会增加，本机原有的题一道不删。`, false);
+      const go = el("button", "button primary", "合并进来");
+      go.type = "button";
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        status("auto", "正在合并…");
+        try {
+          const result = await post("/api/backup/auto/import", { id });
+          status("auto", mergeReport(result.report), false);
+          await loadAutoBackups();
+          await loadRecords();
+        } catch (error) { status("auto", error.message, true); }
+        finally { go.disabled = false; busy = false; }
+      });
+      const box = $("transferAuto");
+      if (box) box.append(go);
+    } catch (error) {
+      status("auto", error.message, true);
+      busy = false;
+    }
+  }
+
   // ---- 导入记录 ----------------------------------------------------
 
   async function loadRecords() {
@@ -288,9 +364,20 @@
     recordsStatus.id = "transferStatusrecords";
     recordsBox.append(records, recordsStatus);
 
-    host.append(exportBox, mergeBox, recordsBox);
+    // 1.26.17：本机自动备份 —— 每周自己打一份，存在软件自己的文件夹里。
+    const autoBox = el("section", "settings-section");
+    autoBox.append(el("h3", "", "本机自动备份"),
+      el("p", "settings-footnote", "每周自己打一个备份包，放在软件自己的文件夹里，旧的只留最近 10 份。不联网、不上传。"));
+    const autoInner = el("div");
+    autoInner.id = "transferAuto";
+    const autoStatus = el("p", "transfer-status");
+    autoStatus.id = "transferStatusauto";
+    autoBox.append(autoInner, autoStatus);
+
+    host.append(autoBox, exportBox, mergeBox, recordsBox);
     renderExport(); renderMerge();
     void loadRecords();
+    void loadAutoBackups();
   }
 
   window.LibraryTransfer = { mount, refresh: loadRecords };

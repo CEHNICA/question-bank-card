@@ -161,9 +161,98 @@ def import_view(request):
 
 
 @csrf_exempt
+def auto_backups_view(request):
+    """本机自动备份：有哪些备份包、该不该再打一个。
+
+    1.26.17：每周自动打一份，放在软件自己的文件夹里，旧的只留最近十份。
+    备份不联网、不上传。
+    """
+    if request.method == "GET":
+        if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+            return _error("备份记录只能在本机题库中查看", 403)
+        response = JsonResponse({
+            "backups": library_transfer.list_backups(),
+            "due": library_transfer.backup_due(),
+            "keep": library_transfer.BACKUP_KEEP,
+            "interval_days": library_transfer.BACKUP_INTERVAL_DAYS,
+        })
+        response["Cache-Control"] = "no-store"
+        return response
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["GET", "POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    try:
+        result = library_transfer.run_auto_backup()
+    except TransferError as error:
+        return _error(str(error))
+    except OSError:
+        return _error("备份没写成，检查一下软件的文件夹能不能写入。", status=500)
+    response = JsonResponse({
+        "file": result["file"], "name": result["name"], "size": result["size"],
+        "backups": library_transfer.list_backups(),
+    })
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def auto_backup_inspect_view(request):
+    """看一份本机自动备份会带来什么（和上传备份包的预览一样）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    try:
+        path = library_transfer.backup_path(str(payload.get("id") or ""))
+        result = library_transfer.plan_merge(path)
+    except TransferError as error:
+        return _error(str(error))
+    except (OSError, ValueError):
+        return _error("这个备份包读不出来，没法看。", status=400)
+    manifest = result["manifest"]
+    counts = manifest.get("counts") or {}
+    response = JsonResponse({
+        "created_at": manifest.get("created_at"), "machine": manifest.get("machine"),
+        "app_version": manifest.get("app_version"),
+        "papers": counts.get("papers", 0), "questions": counts.get("questions", 0),
+        "tags": counts.get("tags", 0), "publications": counts.get("publications", 0),
+        "report": result["report"],
+    })
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def auto_backup_import_view(request):
+    """把一份本机自动备份并进本机：只增不减，本机已有的题一道不删。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    try:
+        path = library_transfer.backup_path(str(payload.get("id") or ""))
+        result = library_transfer.merge_bundle(path)
+    except TransferError as error:
+        return _error(str(error))
+    except (OSError, ValueError):
+        return _error("合并没能完成，本机题库还是原样。可以再试一次。", status=500)
+    response = JsonResponse({"report": result["report"], "record": result["record"]})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
 def records_view(request):
     """合并过哪些次、能不能撤销。"""
     if request.method == "GET":
+        if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+            return _error("合并记录只能在本机题库中查看", 403)
         response = JsonResponse({"records": library_transfer.list_records()})
         response["Cache-Control"] = "no-store"
         return response
