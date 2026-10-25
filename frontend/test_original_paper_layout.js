@@ -52,10 +52,10 @@ assert.deepEqual(L.moveBox([800, 850, 999, 998], 20, 20), [801, 852, 1000, 1000]
 
 // A group's label must name the place it covers, not the file it came from.
 const scopeGroups = [
-  { id: 187, sequence: 0, pages: [0], title: "IMG20261025105610 等 3 张照片" },
-  { id: 188, sequence: 1, pages: [0], title: "IMG20261025105610 等 3 张照片（2）" },
-  { id: 191, sequence: 4, pages: [2], title: "IMG20261025105610 等 3 张照片（5）" },
-  { id: 192, sequence: 5, pages: [2], title: "IMG20261025105610 等 3 张照片（6）" }
+  { id: 187, sequence: 0, pages: [0], seq_start: null, title: "IMG20261025105610 等 3 张照片" },
+  { id: 188, sequence: 1, pages: [0], seq_start: 4, title: "IMG20261025105610 等 3 张照片（2）" },
+  { id: 191, sequence: 4, pages: [2], seq_start: 43, title: "IMG20261025105610 等 3 张照片（5）" },
+  { id: 192, sequence: 5, pages: [2], seq_start: 55, title: "IMG20261025105610 等 3 张照片（6）" }
 ];
 assert.equal(L.groupTitle(scopeGroups[0]), "第 1 页 · 第 1 组", "a group is named by the page it covers, never by the source file");
 assert.equal(L.groupTitle(scopeGroups[2]), "第 3 页 · 第 5 组");
@@ -68,16 +68,21 @@ assert.equal(L.groupCoversPage(scopeGroups[2], 1), false);
 const scopeQuestions = [
   { id: 1, number: 7, group: { id: 191 }, regions: [r(2, [50, 260, 530, 400])] },
   { id: 2, number: 2, group: { id: 191 }, regions: [r(2, [530, 135, 970, 195])] },
-  { id: 3, number: 9, group: { id: 192 }, regions: [r(2, [477, 677, 949, 814])] }
+  { id: 3, number: 2, group: { id: 192 }, regions: [r(2, [477, 677, 949, 814])] }
 ];
-assert.equal(L.pickGroupForPages(scopeGroups, [2], scopeQuestions).id, 192, "the scope whose numbering already reached furthest on the page wins");
+assert.equal(L.pickGroupForPages(scopeGroups, [2], scopeQuestions).id, 192,
+  "the scope that continues the original paper's numbering wins, not the one with the biggest number on screen");
 assert.equal(L.pickGroupForPages(scopeGroups, [0], scopeQuestions).id, 188,
   "page 1 is shared by two scopes; the one that actually holds questions wins over the empty shell");
 assert.equal(L.pickGroupForPages(scopeGroups, [9], scopeQuestions), null, "a page no scope owns has no answer");
 const singleOwner = [{ id: 5, sequence: 0, pages: [3] }];
 assert.equal(L.pickGroupForPages(singleOwner, [3], scopeQuestions).id, 5);
-assert.equal(L.pickGroupForPages(scopeGroups, [2], scopeQuestions.slice(0, 1)).id, 191,
-  "without a numbering hint the later scope wins, so a new question moves forward instead of back");
+const withoutRange = [
+  { id: 191, sequence: 4, pages: [2], seq_start: null, title: "甲" },
+  { id: 192, sequence: 5, pages: [2], seq_start: null, title: "乙" }
+];
+assert.equal(L.pickGroupForPages(withoutRange, [2], scopeQuestions).id, 191,
+  "without an original range the number on screen is the only hint left");
 const evidence = L.sourceEvidence({ questions: [a, b], region_reads: [{ id: 4, question_id: 1, text: "旧识读" }, { id: 5, question_id: 2 }], publications: [{ id: 8, question_id: 1 }, { id: 9, question_id: 2 }], library_jobs: [{ id: 11, publication_id: 8, result: { answer: "旧答案" } }, { id: 12, publication_id: 9 }] }, 1);
 assert.equal(evidence.question.edited_stem, "人工文字");
 assert.deepEqual(evidence.region_reads.map((item) => item.id), [4]);
@@ -542,14 +547,14 @@ async function run() {
   // an unrelated scope on any paper with more than one group.
   controller.close();
   state.paper.question_groups = [
-    { id: 187, sequence: 0, pages: [0], title: "第 1 页 · 第 1 组" },
-    { id: 188, sequence: 1, pages: [0], title: "第 1 页 · 第 2 组" },
-    { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" },
-    { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }
+    { id: 187, sequence: 0, pages: [0], seq_start: null, title: "第 1 页 · 第 1 组" },
+    { id: 188, sequence: 1, pages: [0], seq_start: 4, title: "第 1 页 · 第 2 组" },
+    { id: 191, sequence: 2, pages: [2], seq_start: 43, title: "第 3 页 · 第 3 组" },
+    { id: 192, sequence: 3, pages: [2], seq_start: 55, title: "第 3 页 · 第 4 组" }
   ];
   state.questions = [
     { id: 71, number: 7, group: { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" }, question_type: "free_response", regions: [r(2, [50, 260, 530, 400])], content_revision: 1, layout_fingerprint: "a".repeat(64), color_index: 0 },
-    { id: 72, number: 9, group: { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }, question_type: "free_response", regions: [r(2, [477, 677, 949, 814])], content_revision: 1, layout_fingerprint: "b".repeat(64), color_index: 1 }
+    { id: 72, number: 2, group: { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }, question_type: "free_response", regions: [r(2, [477, 677, 949, 814])], content_revision: 1, layout_fingerprint: "b".repeat(64), color_index: 1 }
   ];
   dialog.page = 2;
   controller.open("view", null); await Promise.resolve(); await Promise.resolve();
@@ -566,8 +571,8 @@ async function run() {
 
   // A page owned by a single scope needs no choice at all.
   state.paper.question_groups = [
-    { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" },
-    { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }
+    { id: 191, sequence: 2, pages: [2], seq_start: 43, title: "第 3 页 · 第 3 组" },
+    { id: 192, sequence: 3, pages: [2], seq_start: 55, title: "第 3 页 · 第 4 组" }
   ];
   controller.close();
   controller.open("view", null); await Promise.resolve(); await Promise.resolve();

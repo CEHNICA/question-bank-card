@@ -518,6 +518,12 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
                 "title": group.display_title(),
                 "sequence": group.sequence,
                 "pages": list((group.metadata or {}).get("pages") or []),
+                # The range of question numbers this scope covers in the
+                # original paper. Cards are numbered from one inside every
+                # scope, so this is the only way to tell which scope comes
+                # later on a shared page.
+                "seq_start": (group.metadata or {}).get("seq_start"),
+                "seq_end": (group.metadata or {}).get("seq_end"),
             }
             for group in paper.question_groups.order_by("sequence", "id")
         ],

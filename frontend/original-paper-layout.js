@@ -23,6 +23,13 @@
     if (pages.length) return pages.includes(page);
     return false;
   }
+  // Where a scope starts in the original paper's own question numbering.
+  // The number a card shows is counted from one inside every scope, so only
+  // this range can say which scope comes later on the page.
+  function groupSeqStart(group) {
+    const start = group?.seq_start;
+    return typeof start === "number" ? start : null;
+  }
   // The group label must let the teacher recognise the scope without
   // remembering which exam or chapter a title came from.
   function groupTitle(group) {
@@ -37,10 +44,10 @@
     return parts.length ? parts.join(" · ") : (group?.title || "未分组");
   }
   // Pick the scope a new question belongs to. When several scopes share the
-  // page, the teacher keeps numbering downwards, so the scope whose questions
-  // already reach highest on that page wins; the last scope breaks a tie.
-  // This keeps "add a question" moving forward instead of jumping back to the
-  // first group.
+  // page, the teacher keeps numbering downwards, so the scope that sits later
+  // in the original paper wins. The original paper's own number range says
+  // which one that is; the number shown inside a scope is counted from one
+  // again and cannot be compared across scopes.
   function pickGroupForPages(groups, pages, questions = []) {
     const wanted = [...new Set(pages)].filter((page) => typeof page === "number");
     if (!wanted.length) return null;
@@ -48,6 +55,8 @@
     if (!candidates.length) return null;
     if (candidates.length === 1) return candidates[0];
     const page = wanted[0];
+    // The range of question numbers this scope covers in the original paper.
+    const start = new Map(candidates.map((g) => [g.id, groupSeqStart(g)]));
     const highest = new Map(candidates.map((g) => [g.id, null]));
     questions.forEach((q) => {
       const gid = groupId(q);
@@ -58,11 +67,14 @@
       if (held === null || number > held) highest.set(gid, number);
     });
     return candidates.slice().sort((a, b) => {
-      const left = highest.get(a.id), right = highest.get(b.id);
-      if (left !== right) {
-        if (left === null) return 1;
-        if (right === null) return -1;
-        return right - left;
+      const left = start.get(a.id), right = start.get(b.id);
+      if (left !== null && right !== null && left !== right) return right - left;
+      if (left !== null || right !== null) return left === null ? 1 : -1;
+      const leftNumber = highest.get(a.id), rightNumber = highest.get(b.id);
+      if (leftNumber !== rightNumber) {
+        if (leftNumber === null) return 1;
+        if (rightNumber === null) return -1;
+        return rightNumber - leftNumber;
       }
       return b.sequence - a.sequence;
     })[0];
