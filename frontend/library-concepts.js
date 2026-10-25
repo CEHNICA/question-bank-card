@@ -1372,16 +1372,35 @@
           option.value = String(sub.stable_key || "").replace(/^sq:/, "");
           scopeSelect.append(option);
         });
+        // 建议本身带了范围，下拉就得先摆成建议说的那一问。
+        // 界面写「整题」而建议说第（2）问，老师会以为范围没标 —— 那就错了。
+        const suggestedScope = Array.isArray(entry.scope?.subquestions)
+          ? entry.scope.subquestions.map((item) => String(item).trim()).filter(Boolean)
+          : [];
+        if (suggestedScope.length === 1) {
+          scopeSelect.value = suggestedScope[0];
+        }
         if (scopeSelect.options.length > 1) {
-          scopeSelect.addEventListener("change", () => {
-            const value = scopeSelect.value;
-            state.edits[index] = {
-              ...(state.edits[index] || {}),
-              scope: value ? { subquestions: [value] } : { whole: true },
-            };
-          });
-          scopeRow.append(scopeSelect);
-          box.append(scopeRow);
+          if (suggestedScope.length > 1) {
+            // 建议落在好几问上，底下拉只能选一问 —— 锁住并说清楚现在是什么。
+            scopeSelect.disabled = true;
+            scopeSelect.value = "";
+            scopeRow.append(scopeSelect);
+            scopeRow.append(
+              el("span", "concepts-hint", `建议说用在第 ${suggestedScope.join("、")} 问，范围不止一问，要改范围得在解析里拆开。`),
+            );
+            box.append(scopeRow);
+          } else {
+            scopeSelect.addEventListener("change", () => {
+              const value = scopeSelect.value;
+              state.edits[index] = {
+                ...(state.edits[index] || {}),
+                scope: value ? { subquestions: [value] } : { whole: true },
+              };
+            });
+            scopeRow.append(scopeSelect);
+            box.append(scopeRow);
+          }
         }
         if (entry.rationale) box.append(el("p", "concepts-suggestion-why", entry.rationale));
         if (entry.evidence) {

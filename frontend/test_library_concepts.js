@@ -160,6 +160,14 @@ assert.match(
   /option\.value = String\(sub\.stable_key \|\| ""\)\.replace\(\/\^sq:\/, ""\)/,
   "范围值用小问的稳定编号，不是展示编号",
 );
+// 建议本身带了范围，下拉要先摆成建议说的那一问 ——
+// 界面写「整题」而建议说第（2）问，老师会以为范围没标。
+assert.match(js, /scopeSelect\.value = suggestedScope\[0\]/, "下拉先摆成建议说的那一问");
+assert.match(
+  js,
+  /建议说用在第 \$\{suggestedScope\.join\("、"\)\} 问/,
+  "建议落在好几问上时要说清楚现在是什么",
+);
 
 // 后端：范围键和小问外键必须成对落库。
 // 只写范围键不写外键，这条关联在按小问检索时会被当成「不落在任何小问」。
