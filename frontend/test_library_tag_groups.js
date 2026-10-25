@@ -44,9 +44,11 @@ assert.match(managerCss, /grid-template-columns: repeat\(auto-fill, minmax\(148p
 // 「#」组排在最后 —— 认不出首字母的不假装它属于哪个字母。
 assert.match(managerJs, /\(a === "#" \? 1 : b === "#" \? -1 : a\.localeCompare\(b\)\)/, "认不出的排在最后");
 
-// 触屏上没有悬停，勾选框必须常驻，否则没法批量归组。
+// 勾选框要一直看得见 —— 批量归组就靠它。只在悬停时显形等于把入口藏起来了。
+assert.match(managerCss, /\.tag-directory-chip-check \{[^}]*opacity: \.4;/,
+  "勾选框常驻，只是压得很淡");
 assert.match(managerCss, /@media \(hover: none\) \{ \.tag-directory-chip-check \{ opacity: 1; \} \}/,
-  "触屏上勾选框一直看得见");
+  "触屏上勾选框一直是实的");
 
 // ---------------------------------------------------------------- 群组操作
 

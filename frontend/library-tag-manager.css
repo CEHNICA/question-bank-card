@@ -240,11 +240,14 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
 .tag-directory-chip.selected { background: #eaf3ed; }
 .tag-directory-chip.focused { box-shadow: inset 2px 0 #2f7d68; }
 .tag-directory-chip.inactive { opacity: .68; }
-.tag-directory-chip-check { flex: none; width: 14px; height: 14px; margin: 0; accent-color: #236e60; opacity: 0; }
+/* 勾选框一直看得见 —— 批量归组就靠它。
+   平时压得很淡（不抢标签名字的注意力），悬停或选中时变实。
+   原来只在悬停时显形，等于把这个入口藏起来了：没用过的人根本不知道能勾。 */
+.tag-directory-chip-check { flex: none; width: 14px; height: 14px; margin: 0; accent-color: #236e60; opacity: .4; }
 .tag-directory-chip:hover .tag-directory-chip-check,
 .tag-directory-chip.selected .tag-directory-chip-check,
 .tag-directory-chip:focus-within .tag-directory-chip-check { opacity: 1; }
-/* 触屏上没有悬停，勾选框必须一直在 —— 否则根本没法批量归组。 */
+/* 触屏上没有悬停，勾选框得一直是实的 —— 不然根本没法批量归组。 */
 @media (hover: none) { .tag-directory-chip-check { opacity: 1; } }
 .tag-directory-chip .tag-directory-color { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #83a398; }
 .tag-directory-chip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; border: 0; background: transparent; color: var(--ink, #262c29); font: inherit; font-size: 13px; padding: 2px 0; cursor: pointer; }
