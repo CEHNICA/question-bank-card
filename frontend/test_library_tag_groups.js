@@ -61,6 +61,11 @@ assert.match(managerJs, /"group_membership_batch"/, "能一次归一组");
 assert.match(managerJs, /所属分组/, "详情里说清楚这颗标签在哪些组");
 assert.match(managerJs, /删除分组「" \+ group\.name/, "删组前说清楚标签还在，只是回到未分类");
 
+// 操作记录里群组操作要有名字 —— 一律显示「标签操作」等于没写。
+assert.match(managerJs, /"catalogue:create_group": "新建标签群组"/, "操作记录里有「新建标签群组」");
+assert.match(managerJs, /"catalogue:delete_group": "删除标签群组"/, "操作记录里有「删除标签群组」");
+assert.match(managerJs, /"catalogue:group_membership_batch": "批量调整标签所属分组"/, "操作记录里有「批量调整标签所属分组」");
+
 // ---------------------------------------------------------------- 后端
 
 assert.match(service, /"initial": initial_for\(tag\.name\)/, "接口把拼音首字母给前端");

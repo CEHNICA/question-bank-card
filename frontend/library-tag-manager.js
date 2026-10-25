@@ -9,7 +9,12 @@
     "catalogue:reset_empty": "清空标签目录", "catalogue:apply_template": "追加模板",
     "catalogue:set_parents": "设置标签父级", "catalogue:add_parent": "增加标签父级",
     "catalogue:remove_parent": "移除标签父级", "catalogue:move_parent": "移动标签父级",
-    "catalogue:set_related_methods": "调整相关方法" };
+    "catalogue:set_related_methods": "调整相关方法",
+    // 1.27.0：标签群组。名字写清楚，老师看操作记录才知道刚才动了什么 ——
+    // 一律显示「标签操作」等于没写。
+    "catalogue:create_group": "新建标签群组", "catalogue:update_group": "重命名标签群组",
+    "catalogue:delete_group": "删除标签群组", "catalogue:group_membership": "调整标签所属分组",
+    "catalogue:group_membership_batch": "批量调整标签所属分组" };
   function element(name, className, text) {
     const value = document.createElement(name);
     if (className) value.className = className;
