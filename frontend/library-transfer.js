@@ -399,9 +399,11 @@
     // 1.26.17：本机自动备份 —— 每天自己打一份，存在软件自己的文件夹里。
     // 1.26.21：改成每天一份；1.26.23：只留两份（今天和昨天），题库再大也只占两份。
     // 1.26.26：这段话精简 —— 老师 10 月 24 日说「介绍的太麻烦，简洁点，就是备份两次就可以了」。
+    // 也不写「（今天和昨天）」：手动打过一次备份，两份就都是今天的；隔几天没开软件，
+    // 留着的两份比昨天还旧。写死那句话就是承诺兑现不了的事。
     const autoBox = el("section", "settings-section");
     autoBox.append(el("h3", "", "本机自动备份"),
-      el("p", "settings-footnote", "每天自动打一份备份，只留最近两份（今天和昨天）。放在本机，不联网、不上传。"));
+      el("p", "settings-footnote", "每天自动打一份备份，只留最近两份。放在本机，不联网、不上传。"));
     const autoInner = el("div");
     autoInner.id = "transferAuto";
     const autoStatus = el("p", "transfer-status");

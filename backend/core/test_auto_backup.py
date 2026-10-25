@@ -98,6 +98,14 @@ class AutoBackupTests(TestCase):
         from core import features
         self.assertTrue(features.DEFAULTS["auto_backup"])
 
+    def test_the_switch_help_does_not_promise_which_days_the_two_copies_are(self):
+        """1.26.26：手动打过一次备份，留着的两份就都是今天的；隔几天没开软件，
+        两份比昨天还旧。所以话里不能写死「今天和昨天」。"""
+        from core import features
+        help_text = features.FEATURES["auto_backup"]["help"]
+        self.assertNotIn("今天和昨天", help_text)
+        self.assertIn("只留最近 2 份", help_text)
+
     def test_the_worker_skips_the_backup_when_the_switch_is_off(self):
         from .management.commands import run_worker
         with mock.patch("core.features.enabled", return_value=False), \

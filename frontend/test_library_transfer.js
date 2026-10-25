@@ -227,11 +227,11 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   const box = dom.document.getElementById("transferAuto");
   const summary = text(box);
   const whole = text(dom.document.getElementById("transferSettingsMount"));
-  assert.match(whole, /只留最近两份（今天和昨天）/, "一句话就说清留几份");
+  assert.match(whole, /只留最近两份。/, "一句话就说清留几份");
   assert.match(summary, /一共 1 份，占 12\.0 MB。旧的自动删掉。/, "眼下有几份、多大，一句说完");
   // 同一件事不许在三处各说一遍。
   assert.equal((whole.match(/不联网、不上传/g) || []).length, 1, "「不联网、不上传」只说一次");
-  assert.equal((whole.match(/今天和昨天/g) || []).length, 1, "「今天和昨天」只说一次");
+  assert.doesNotMatch(whole, /今天和昨天/, "不能写死「今天和昨天」——手动打过一次备份，两份就都是今天的");
   assert.doesNotMatch(whole, /题库再大十倍/, "「题库再大十倍」那句解释删掉");
   assert.doesNotMatch(whole, /10 份/, "份数不能写死成别的数");
   // 开关旁边那句也压短了，但「救什么」这件事还得说。
