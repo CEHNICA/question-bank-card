@@ -353,19 +353,88 @@ class QuestionLayoutTests(TestCase):
         )
 
     def test_merge_retires_sources_and_preserves_explicit_piece_order(self):
+        # A merge carries the words, and two cards that both carry options
+        # cannot be merged. These two have no options, so the piece order is
+        # what this test is about.
+        first = self.question(7, options={})
+        second = self.question(8, regions=self.pieces(top=300), options={})
         ordered = [*self.pieces(page=1, top=200), *self.pieces(page=0, top=80), *self.pieces(top=300)]
         payload = self.payload(
             "merge",
-            sources=[self.first, self.second],
-            targets=[{"number": 1, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}],
+            sources=[first, second],
+            targets=[{"number": 7, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}],
         )
         operation, _ = self.mutate(payload)
         merged = Question.objects.get(pk=operation.target_ids[0])
         self.assertEqual(merged.regions, ordered)
-        self.assertEqual(merged.number, 1)
-        self.assertEqual(set(operation.source_ids), {self.first.pk, self.second.pk})
+        self.assertEqual(merged.number, 7)
+        self.assertEqual(set(operation.source_ids), {first.pk, second.pk})
         self.assertFalse(Question.objects.filter(pk__in=operation.source_ids).exists())
-        self.assertNotIn(merged.source_key, {self.first.source_key, self.second.source_key})
+        self.assertNotIn(merged.source_key, {first.source_key, second.source_key})
+
+    def test_merge_carries_the_words_that_were_already_read(self):
+        first = self.question(7, options={}, stem="第一段的题干", answer="第一段答案")
+        second = self.question(8, options={}, stem="第二段的题干", answer="第二段答案", analysis="第二段解析")
+        payload = self.payload(
+            "merge",
+            sources=[first, second],
+            targets=[
+                {
+                    "number": 7,
+                    "group_id": self.group.pk,
+                    "question_type": "free_response",
+                    "regions": [*self.pieces(page=0, top=80), *self.pieces(page=1, top=200)],
+                }
+            ],
+        )
+        operation, _ = self.mutate(payload)
+        merged = Question.objects.get(pk=operation.target_ids[0])
+        self.assertEqual(merged.stem, "第一段的题干\n\n第二段的题干", "the two stems join with one blank line between")
+        self.assertEqual(merged.answer, "第一段答案\n\n第二段答案")
+        self.assertEqual(merged.analysis, "第二段解析")
+        self.assertEqual(merged.body_mode, "text", "a merged card keeps the text instead of becoming a picture again")
+        self.assertEqual(merged.state, Question.State.YELLOW, "the merged words are new and still need a look")
+        self.assertTrue(merged.edited)
+        self.assertFalse(Question.objects.filter(pk__in=[first.pk, second.pk]).exists())
+
+    def test_merge_refuses_two_choice_questions_because_the_options_would_repeat(self):
+        first = self.question(7, options={"A": "甲", "B": "乙"})
+        second = self.question(8, options={"A": "丙", "B": "丁"})
+        payload = self.payload(
+            "merge",
+            sources=[first, second],
+            targets=[
+                {
+                    "number": 7,
+                    "group_id": self.group.pk,
+                    "question_type": "single_choice",
+                    "regions": [*self.pieces(page=0, top=80), *self.pieces(page=1, top=200)],
+                }
+            ],
+        )
+        self.rejected(payload, 409)
+        self.assertTrue(Question.objects.filter(pk=first.pk).exists(), "a refused merge leaves both cards alone")
+
+    def test_merge_keeps_the_figures_of_every_merged_card(self):
+        first = self.question(7, options={}, figures=[{"slot": "stem", "page_idx": 0, "bbox": [10, 10, 20, 20]}])
+        second = self.question(8, options={}, figures=[{"slot": "stem", "page_idx": 1, "bbox": [30, 30, 40, 40]}])
+        payload = self.payload(
+            "merge",
+            sources=[first, second],
+            targets=[
+                {
+                    "number": 7,
+                    "group_id": self.group.pk,
+                    "question_type": "free_response",
+                    "regions": [*self.pieces(page=0, top=80), *self.pieces(page=1, top=200)],
+                }
+            ],
+        )
+        operation, _ = self.mutate(payload)
+        merged = Question.objects.get(pk=operation.target_ids[0])
+        self.assertEqual(
+            [figure["page_idx"] for figure in merged.figures], [0, 1], "the pictures of both cards come along"
+        )
 
     def test_all_validation_errors_are_atomic(self):
         cases = []

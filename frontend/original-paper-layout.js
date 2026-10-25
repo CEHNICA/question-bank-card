@@ -99,30 +99,15 @@
   }
   function createDraft(kind, sources, questions, defaultGroup = null) {
     sources = kind === "add" ? [] : [...sources];
-    if (!["regions", "renumber", "add", "split", "merge"].includes(kind)) throw new Error("不支持的题目操作");
+    if (!["regions", "renumber", "add", "merge"].includes(kind)) throw new Error("不支持的题目操作");
     if (kind !== "add" && !sources.length) throw new Error("请先选题");
     if (kind === "merge" && (sources.length < 2 || sources.some((q) => groupId(q) !== groupId(sources[0])))) throw new Error("只能合并同一题组中的至少两道题");
     let targets;
     if (kind === "add") targets = [{ number: nextNumber(questions, defaultGroup), group_id: defaultGroup, question_type: "unknown", regions: [] }];
-    else if (kind === "split") {
-      const first = targetOf(sources[0]);
-      targets = [first, { ...targetOf(sources[0]), number: nextNumber(questions, first.group_id, [first.number], sources.map((q) => q.id)), regions: [] }];
-    } else if (kind === "merge") targets = [{ ...targetOf(sources[0]), regions: sources.flatMap((q) => regions(q.regions)) }];
+    else if (kind === "merge") targets = [{ ...targetOf(sources[0]), regions: sources.flatMap((q) => regions(q.regions)) }];
     else targets = [targetOf(sources[0])];
     if (kind !== "renumber" && targets.some((t) => t.regions.length > 12)) throw new Error("一道题最多保留 12 段，请先减少片段再合题");
     return { kind, sources: sources.map((q) => ({ id: q.id, revision: q.content_revision, fingerprint: q.layout_fingerprint })), targets, active: 0 };
-  }
-  function resizeSplit(draft, count, questions) {
-    if (draft.kind !== "split" || !Number.isInteger(count) || count < 2 || count > 12) throw new Error("拆成题数应为 2–12");
-    const result = copy(draft);
-    if (count < result.targets.length && result.targets.slice(count).some((t) => t.regions.length)) throw new Error("待移除的题还有片段，请先转移或移除这些片段");
-    while (result.targets.length < count) {
-      const first = result.targets[0];
-      result.targets.push({ ...copy(first), number: nextNumber(questions, first.group_id, result.targets.map((t) => t.number), result.sources.map((s) => s.id)), regions: [] });
-    }
-    result.targets.length = count;
-    result.active = Math.min(result.active, count - 1);
-    return result;
   }
   function validate(draft, questions, pages) {
     if (!draft || !draft.targets.length) return "请先选择要做的操作";
@@ -134,7 +119,7 @@
       seen.add(key);
       if (draft.kind !== "regions" && questions.some((q) => !excluded.has(q.id) && groupId(q) === target.group_id && Number(q.number) === Number(target.number))) return "这个题组中已存在该题号，请调整题号";
       if (draft.kind === "renumber") continue;
-      if (!target.regions.length || target.regions.length > 12) return "每道题应有 1–12 段范围；拆题后的空题也需要画框";
+      if (!target.regions.length || target.regions.length > 12) return "每道题应有 1–12 段范围；还没有框的题需要先画框";
       for (const r of target.regions) {
         if (!pages.some((p) => p.page_idx === r.page_idx) || !Array.isArray(r.bbox) || r.bbox.length !== 4 || r.bbox.some((v) => !Number.isFinite(v) || v < 0 || v > 1000)
           || r.bbox[0] >= r.bbox[2] || r.bbox[1] >= r.bbox[3]) return "范围无效，请重新调整";
@@ -161,7 +146,7 @@
     let selectedPart = null, confirmOpen = false, conflict = false, lookupFailed = false, previewOpen = true;
     let manualSession = false, continuousAdd = false, saveDisposition = null;
     let generation = 0, closing = false, draftRevision = null, pendingAfterSave = null, lastFrameTap = null, lastDeleted = null;
-    const kindNames = { regions: "调整范围", renumber: "修改题号", add: "补题", split: "拆题", merge: "合题" };
+    const kindNames = { regions: "调整范围", renumber: "修改题号", add: "补题", merge: "合题" };
     const panel = $("pageLayoutPanel"), overlap = $("pageLayoutOverlap");
     $("pageStage").addEventListener("dblclick", async (event) => {
       if (!dialog.layoutWorkspace || dialog.tool === "draw" || dialog.drag || dialog.sketch || dialog.saving || lookupFailed) return;
@@ -212,7 +197,7 @@
     function configure() {
       $("pageDialog").classList.toggle("layout-editing", Boolean(draft));
       $("pageDialogSave").hidden = !draft;
-      $("pageDialogSave").textContent = draft?.kind === "split" || draft?.kind === "merge" ? "预览并确认" : "保存";
+      $("pageDialogSave").textContent = draft?.kind === "merge" ? "预览并确认" : "保存";
       const missingRange = draft && draft.kind !== "renumber" && draft.targets.some((t) => !t.regions.length);
       $("pageDialogSave").disabled = dialog.saving || lookupFailed || Boolean(missingRange);
       $("pageDialogSave").title = missingRange ? "请先画出题目范围；删除整题请使用“删除这题”" : "保存当前修改";
@@ -263,10 +248,10 @@
         const choice = await askDirtyAction();
         if (choice === "stay") return false;
         if (choice === "discard") return true;
-        if (["split", "merge"].includes(draft?.kind)) {
+        if (draft?.kind === "merge") {
           pendingAfterSave = afterSave;
           confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" });
-          toast("拆题或合题需要先查看替换题目的影响，再确认保存。", "success");
+          toast("合题需要先查看替换题目的影响，再确认保存。", "success");
           return false;
         }
         return await preview({ direct: true });
@@ -449,12 +434,9 @@
       const add = button("补一题", "small primary", () => begin("add", null, { continuous: true })); add.id = "pageLayoutAdd"; add.disabled = readOnly(); actions.append(add);
       const q = selectedQuestion();
       const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; renumber.disabled = !q || readOnly();
-      const split = button("拆题", "small", () => begin("split")); split.id = "pageLayoutSplit"; split.disabled = !q || readOnly();
       const merge = button("合题…", "small", () => renderMergePicker()); merge.id = "pageLayoutMerge"; merge.disabled = !q || readOnly();
-      if (q) actions.append(renumber);
-      const more = el("details", "layout-more-actions"); more.append(el("summary", "", "更多操作"));
-      const advanced = el("div", "layout-actions"); advanced.append(split, merge); more.append(advanced);
-      if (q) actions.append(more); panel.append(actions);
+      if (q) { actions.append(renumber, merge); }
+      panel.append(actions);
       if (q) {
         const pages = [...new Set(q.regions.map((r) => r.page_idx + 1))];
         panel.append(el("p", "layout-current", `${q.regions.length} 段 · ${pages.length ? `第 ${pages.join("、")} 页` : "尚无范围"} · ${status(q)}`));
@@ -467,14 +449,29 @@
       if (draft) clearDraft();
       const chooser = el("section", "layout-merge-picker"); chooser.id = "pageLayoutMergePicker"; chooser.append(el("strong", "", "选择同组题目，按下面顺序合成一道题"));
       const chosen = [q.id], list = el("div");
-      state.questions.filter((item) => groupId(item) === groupId(q)).sort(host.questionCompare).forEach((item) => {
-        const check = el("input"); check.type = "checkbox"; check.checked = item.id === q.id; check.dataset.layoutMergeId = item.id;
-        check.addEventListener("change", () => { const i = chosen.indexOf(item.id); if (check.checked && i < 0) chosen.push(item.id); else if (!check.checked && i >= 0) chosen.splice(i, 1); summary.textContent = `合题顺序：${chosen.map((id) => label(state.questions.find((x) => x.id === id))).join(" → ")}`; });
-        list.append(labeledField(label(item), check));
-      });
       const summary = el("p", "hint", `合题顺序：${label(q)}`);
       const start = button("编辑合题结果", "small primary", () => begin("merge", chosen.map((id) => state.questions.find((x) => x.id === id)))); start.id = "pageLayoutMergeBegin";
-      chooser.append(list, summary, start, button("返回", "small quiet", render)); panel.replaceChildren(chooser);
+      // Two cards that both carry options cannot be merged: their option keys
+      // would repeat. The teacher is told here, not after a save is refused.
+      const withOptions = () => chosen.filter((id) => {
+        const card = state.questions.find((item) => item.id === id);
+        return card?.options && Object.keys(card.options).length;
+      }).length > 1;
+      const warning = el("p", "layout-warning");
+      const refresh = () => {
+        summary.textContent = `合题顺序：${chosen.map((id) => label(state.questions.find((x) => x.id === id))).join(" → ")}`;
+        const blocked = withOptions();
+        warning.textContent = blocked ? "这几道题都有选项，合并后选项会重复，不能合。选择题被切开请用「调整范围」把两半框回去。" : "";
+        warning.hidden = !blocked;
+        start.disabled = blocked;
+      };
+      state.questions.filter((item) => groupId(item) === groupId(q)).sort(host.questionCompare).forEach((item) => {
+        const check = el("input"); check.type = "checkbox"; check.checked = item.id === q.id; check.dataset.layoutMergeId = item.id;
+        check.addEventListener("change", () => { const i = chosen.indexOf(item.id); if (check.checked && i < 0) chosen.push(item.id); else if (!check.checked && i >= 0) chosen.splice(i, 1); refresh(); });
+        list.append(labeledField(label(item), check));
+      });
+      refresh();
+      chooser.append(list, warning, summary, start, button("返回", "small quiet", render)); panel.replaceChildren(chooser);
     }
     function renderDraft() {
       const cancelLabel = draft.kind === "renumber" ? "返回题框" : draft.kind === "add" && continuousAdd ? "取消本题" : draft.kind === "regions" ? "返回总览" : "取消这次操作";
@@ -489,12 +486,8 @@
         actions.append(button("查看这题", "small quiet", () => { void reviewQuestion(q.id); }, "返回审核并定位到这道题"));
         const add = button("补一题", "small primary", () => { void begin("add", null, { continuous: true }); }); add.id = "pageLayoutAdd"; actions.append(add);
         const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; actions.append(renumber);
-        const more = el("details", "layout-more-actions"); more.append(el("summary", "", "更多操作"));
-        const advanced = el("div", "layout-actions");
-        const split = button("拆题", "small", () => begin("split")); split.id = "pageLayoutSplit";
         const merge = button("合题…", "small", () => { void renderMergePicker(); }); merge.id = "pageLayoutMerge";
-        advanced.append(split, merge);
-        more.append(advanced); actions.append(more); panel.append(actions);
+        actions.append(merge); panel.append(actions);
       }
       if (draft.kind === "renumber") {
         const q = selectedQuestion(), t = current();
@@ -522,12 +515,7 @@
       if (draft.kind === "regions") panel.append(el("p", "hint", "直接拖边角改大小、拖题号标签移动；保存后留在原卷。"));
       else if (draft.kind === "add" && continuousAdd) panel.append(el("p", "hint", "十字光标下点两角固定题框；保存只保留原图，不会识读。"));
       else panel.append(el("p", "hint", "结果作为原图题保存，不自动识读。请逐题核对题号、题组、题型和完整范围。"));
-      if (draft.kind === "split") {
-        const count = el("input"); count.id = "pageLayoutSplitCount"; count.type = "number"; count.min = "2"; count.max = "12"; count.value = draft.targets.length;
-        count.addEventListener("change", () => { try { const resized = resizeSplit(draft, Number(count.value), state.questions); change(() => { draft = resized; }); } catch (error) { toast(error.message, "error"); count.value = draft.targets.length; } });
-        panel.append(labeledField("拆成几题", count));
-      }
-      if (draft.kind === "split" || draft.kind === "merge") {
+      if (draft.kind === "merge") {
         const tabs = el("div", "layout-targets");
         draft.targets.forEach((t, index) => {
           const tab = button(`结果 ${index + 1} · 第 ${t.number ?? "?"} 题 · ${t.regions.length} 段`, "small", () => { if (dialog.drag) dialog.drag(); if (dialog.sketch) dialog.sketch.cancel(); draft.active = index; selectedPart = null; dialog.tool = "select"; redraw(); });
@@ -636,17 +624,44 @@
     function renderConfirmation() {
       const box = el("section", "layout-confirm"); box.id = "pageLayoutConfirm"; box.setAttribute("aria-label", "核对保存结果");
       box.append(el("strong", "", "核对这次保存"));
-      if (["split", "merge"].includes(draft.kind)) {
-        box.append(el("p", "layout-warning", "拆题或合题后，旧题会移入回收站，受影响的已入库版本会撤回发布。历史记录保留，旧组卷不会静默换成新题；结果需要重新核对。"));
+      if (draft.kind === "merge") {
+        box.append(el("p", "layout-warning", "合题后，旧题会移入回收站，受影响的已入库版本会撤回发布。历史记录保留，旧组卷不会静默换成新题；结果需要重新核对。"));
         const published = draft.sources.map((s) => state.questions.find((q) => q.id === s.id)).filter((q) => q?.publication);
         const list = el("ul", "layout-withdrawals"); list.id = "pageLayoutWithdrawals";
         published.forEach((q) => list.append(el("li", "", `${label(q)} · 已入库 v${q.publication.version}（编号 ${q.publication.id}）`)));
         if (!published.length) list.append(el("li", "", "当前所选旧题没有有效的入库版本需要撤回。")); box.append(list);
+        const merged = mergedTextPreview();
+        if (merged) {
+          box.append(el("strong", "", "合出来的文字"));
+          const text = el("pre", "layout-history-text", merged);
+          box.append(text);
+          box.append(el("p", "hint", "两段文字中间空一行。保存后请对照原卷核对一遍。"));
+        }
       } else box.append(el("p", "hint", "补题保存为原图题；核对通过后才会入库。"));
       box.append(el("p", "hint", draft.kind === "regions" ? "保留原有人工文字；本次不提交 AI。" : "保存为原图题；旧题的人工文字保留在操作历史中，本次不提交 AI。"));
       draft.targets.forEach((t, i) => { box.append(el("strong", "", `结果 ${i + 1} · 第 ${t.number} 题 · ${host.TYPE_NAMES[t.question_type] || t.question_type} · ${t.regions.length} 段`), cropView(t.regions)); });
       const save = button("确认保存", "small primary", commit); save.id = "pageLayoutConfirmSave";
       box.append(save, button("继续调整", "small quiet", () => { confirmOpen = false; pendingAfterSave = null; render(); })); panel.append(box);
+    }
+    // What the merged card will say. The teacher has to see this before
+    // confirming, because the words of the old cards are what gets carried
+    // over — nothing is read again.
+    function mergedTextPreview() {
+      const cards = draft.sources.map((s) => state.questions.find((q) => q.id === s.id)).filter(Boolean);
+      if (!cards.length) return "";
+      const join = (parts) => parts.map((part) => String(part || "").trim()).filter(Boolean).join("\n\n");
+      const stem = join(cards.map((card) => card.stem));
+      const answer = join(cards.map((card) => card.answer));
+      const analysis = join(cards.map((card) => card.analysis));
+      const withOptions = cards.filter((card) => card.options && Object.keys(card.options).length);
+      if (withOptions.length > 1) return "这两道题都有选项，合并后选项会重复，不能合。";
+      const options = withOptions.length ? withOptions[0].options : {};
+      const lines = [];
+      if (stem) lines.push(stem);
+      Object.entries(options || {}).forEach(([key, value]) => { if (String(value || "").trim()) lines.push(`${key}. ${value}`); });
+      if (answer) lines.push(`【答案】${answer}`);
+      if (analysis) lines.push(`【解析】${analysis}`);
+      return lines.join("\n");
     }
     async function loadHistory() {
       const token = generation, id = state.paperId;
@@ -733,11 +748,11 @@
         confirmOpen = false;
         return commit({ direct: true });
       }
-      if (["split", "merge"].includes(draft.kind) && !direct) {
+      if (draft.kind === "merge" && !direct) {
         confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" }); $("pageLayoutConfirmSave")?.focus();
         return false;
       }
-      if (["split", "merge"].includes(draft.kind) && direct) {
+      if (draft.kind === "merge" && direct) {
         confirmOpen = true; render(); $("pageLayoutConfirm")?.scrollIntoView({ block: "nearest" });
         return false;
       }
@@ -834,7 +849,7 @@
       finally { if (token === generation) { setCropSaving(false); configure(); } }
     }
     async function commit({ direct = false } = {}) {
-      if (!draft || (!confirmOpen && !direct) || (direct && ["split", "merge"].includes(draft.kind)) || dialog.saving || lookupFailed) return false;
+      if (!draft || (!confirmOpen && !direct) || (direct && draft.kind === "merge") || dialog.saving || lookupFailed) return false;
       const error = validate(draft, state.questions, state.paper.pages); if (error) { toast(error, "error"); return; }
       const token = generation, id = state.paperId; setCropSaving(true);
       try {
@@ -1030,5 +1045,5 @@
     const x = Math.min(1000 - w, Math.max(0, bbox[0] + dx)), y = Math.min(1000 - h, Math.max(0, bbox[1] + dy));
     return [x, y, x + w, y + h].map((v) => Math.round(v * 10) / 10);
   }
-  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, resizeSplit, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages };
+  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages };
 });

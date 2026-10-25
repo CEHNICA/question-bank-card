@@ -259,6 +259,38 @@ def _group(paper, target, regions, default=None):
     return matches[0] if matches else None
 
 
+def _joined_text(parts) -> str:
+    """Join the text of several cards into one, one blank line between."""
+    kept = [str(part or "").strip() for part in parts]
+    return "\n\n".join(part for part in kept if part)
+
+
+def _merged_content(sources) -> dict:
+    """The text of several cards, merged into the text of one.
+
+    A merge is the teacher's judgement that these cards were one question all
+    along, so the words already read stay. Two choice questions cannot be
+    merged: their option keys would collide, and a choice question cut in half
+    is fixed by adjusting the range instead.
+    """
+    with_options = [row for row in sources if row.options]
+    if len(with_options) > 1:
+        raise LayoutError("这几道题都有选项，合并后选项会重复。选择题被切开请用「调整范围」把两半框回去。", 409)
+    options = deepcopy(with_options[0].options) if with_options else {}
+    figures = []
+    for row in sources:
+        figures.extend(deepcopy(row.figures or []))
+    return {
+        "stem": _joined_text(row.stem for row in sources),
+        "options": options,
+        "answer": _joined_text(row.answer for row in sources),
+        "analysis": _joined_text(row.analysis for row in sources),
+        "origin": next((row.origin for row in sources if (row.origin or "").strip()), ""),
+        "figures": figures,
+        "question_type": str(sources[0].question_type or "unknown"),
+    }
+
+
 def _clear_approval(question):
     question.approved = False
     question.approved_at = None
@@ -493,7 +525,7 @@ def mutate(paper_id, payload, *, request_payload=None):
     revision = _revision(payload)
     kind = payload.get("kind")
     if kind not in {"regions", "renumber", "add", "split", "merge"}:
-        raise LayoutError("请选择保存范围、修改题号、补题、拆题或合题。")
+        raise LayoutError("请选择保存范围、修改题号、补题或合题。")
     try:
         with transaction.atomic():
             paper = _claim(paper_id, revision)
@@ -551,7 +583,7 @@ def mutate(paper_id, payload, *, request_payload=None):
                         paper=paper,
                         question_ids=ids,
                         origin=QuestionDeletionBatch.Origin.LAYOUT,
-                        reason="原卷拆合操作的完整源题历史",
+                        reason="原卷合题操作的完整源题历史",
                     )
                     operation.deletion_batch = batch
                     for question in sources:
@@ -564,20 +596,42 @@ def mutate(paper_id, payload, *, request_payload=None):
                 from . import qtypes
                 from .pipeline import candidates_in
 
+                # A merge carries the words that were already read: the teacher
+                # says these cards were one question, so the text follows.
+                merged = _merged_content(sources) if kind == "merge" else None
                 new = []
                 for target in targets:
+                    fields = dict(target)
+                    if merged is not None:
+                        fields.update(
+                            {
+                                "stem": merged["stem"],
+                                "options": merged["options"],
+                                "answer": merged["answer"],
+                                "analysis": merged["analysis"],
+                                "origin": merged["origin"],
+                                "figures": merged["figures"],
+                                "question_type": merged["question_type"],
+                            }
+                        )
                     question = Question.objects.create(
                         paper=paper,
-                        **target,
+                        **fields,
                         regions_auto=deepcopy(target["regions"]),
                         start_source="manual",
                         source_kind=Question.SourceKind.MANUAL,
                         processing_mode="manual",
-                        body_mode="source_image",
+                        body_mode="text" if merged is not None else "source_image",
                         figure_candidates=candidates_in(paper, target["regions"]),
-                        type_locked=qtypes.decided(target["question_type"]),
+                        type_locked=qtypes.decided(fields["question_type"]),
                         state=Question.State.YELLOW,
-                        flags=["原图题范围已保存，请对照原卷核对；识读需主动提交。"],
+                        edited=merged is not None,
+                        text_source="human" if merged is not None else "",
+                        flags=(
+                            ["合题后请核对文字：题干、答案和解析是两段接起来的。"]
+                            if merged is not None
+                            else ["原图题范围已保存，请对照原卷核对；识读需主动提交。"]
+                        ),
                     )
                     new.append(question)
                 operation.target_ids = [row.pk for row in new]

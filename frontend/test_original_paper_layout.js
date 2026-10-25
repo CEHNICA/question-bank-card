@@ -16,15 +16,7 @@ const supplement = L.createDraft("add", [a], questions, 20);
 assert.deepEqual(supplement.sources, [], "supplement never treats a previously selected question as a source");
 assert.equal(supplement.targets[0].group_id, 20);
 assert.equal(supplement.targets[0].number, 2);
-const split = L.createDraft("split", [a], questions);
-assert.deepEqual(split.targets[0].regions, a.regions, "first split target inherits all ranges");
-assert.deepEqual(split.targets[1].regions, [], "other split target is blank, never duplicates source ranges");
-assert.equal(split.targets[1].number, 3);
-assert.match(L.validate(split, questions, pages), /空题/);
-split.targets[1].regions.push(split.targets[0].regions.pop());
-assert.equal(L.validate(split, questions, pages), "");
-assert.equal(L.resizeSplit(split, 12, questions).targets.length, 12);
-assert.throws(() => L.resizeSplit(split, 13, questions), /2–12/);
+assert.throws(() => L.createDraft("split", [a], questions), /不支持的题目操作/, "拆题已被移除");
 assert.throws(() => L.createDraft("merge", [a, c], questions), /同一题组/);
 const merged = L.createDraft("merge", [a, b], questions);
 assert.deepEqual(merged.targets[0].regions.map((x) => x.page_idx), [0, 1, 0], "merge retains explicit source and piece order across pages");
@@ -188,12 +180,13 @@ async function run() {
   assert.equal(dialog.page, 0); assert.equal(dialog.mode, "regions", "saved question remains selected for direct range adjustment");
   assert.equal(state.questions[0].edited_stem, "人工文字", "manual text survives canonical save");
   assert.equal(controller.dirty(), false, "canonical save leaves a clean selected frame");
-  await controller.begin("split"); assert.equal(snapshot().targets.length, 2);
-  await $("pageLayoutPanel").querySelector('[data-layout-target-index="1"]').emit("click");
-  assert.equal(dialog.boxes.length, 0, "target selection keeps distinct range lists");
-  dialog.page = 1; await $("pageLayoutPanel").querySelector("#pageLayoutDraw").emit("click"); host.renderStage();
-  await surface.emit("pointerdown", pointer(100, 300)); await surface.emit("pointerdown", pointer(500, 700));
-  assert.equal(snapshot().targets[1].regions[0].page_idx, 1); controller.restore(false); assert.equal(snapshot().targets[1].regions.length, 0); controller.restore(true);
+  // A merge takes the ranges of every chosen card, in the order they were
+  // picked, so a question that continues on the next page becomes one card.
+  await controller.begin("merge", [state.questions[0], state.questions[1]]);
+  assert.equal(snapshot().targets.length, 1);
+  assert.deepEqual(snapshot().targets[0].regions.map((x) => x.page_idx), [0, 1, 0],
+    "the merged card keeps the picked order across pages");
+  controller.close();
   // Start a fresh region draft and verify 409 retains draft/revision for review.
   controller.close(); dialog.page = 0; controller.open("regions", state.questions[0]); host.renderStage();
   await labelNode().emit("pointerdown", pointer(14, 10)); await window.emit("pointermove", pointer(18, 10)); await window.emit("pointerup", pointer(18, 10));
@@ -229,7 +222,7 @@ async function run() {
   assert.equal($("pageDialogSave").textContent, "保存");
   assert.equal(surface.querySelector("[data-layout-handle]"), null);
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDraw"), null);
-  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutSplitCount"), null);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutSplitCount"), null, "拆题已移除");
   controller.remove(0);
   assert.deepEqual(snapshot().targets[0].regions, beforeRenumber.regions, "Delete cannot change a range during renumber");
   const beforeNumberWrites = writes.length;
@@ -274,9 +267,10 @@ async function run() {
   controller.close(); state.paper.archived = true;
   controller.open("regions", state.questions[0]);
   assert.equal(controller.snapshot().layout, "", "archived originals open for inspection without an editable draft");
-  for (const id of ["pageLayoutAdd", "pageLayoutRenumber", "pageLayoutSplit", "pageLayoutMerge", "pageLayoutUndoSaved"]) {
+  for (const id of ["pageLayoutAdd", "pageLayoutRenumber", "pageLayoutMerge", "pageLayoutUndoSaved"]) {
     assert.equal($("pageLayoutPanel").querySelector(`#${id}`).disabled, true, `${id} remains read-only while archived`);
   }
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutSplit"), null, "拆题入口已移除");
   await controller.begin("add");
   assert.equal(controller.snapshot().layout, "", "programmatic action cannot bypass archived read-only state");
 
@@ -535,12 +529,11 @@ async function run() {
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDeleteQuestion"), null, "a new empty draft has no saved question to delete");
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutEmptyRange"), null);
   assert.equal($("pageDialogSave").disabled, true);
-  openRegions(state.questions[0]); await controller.begin("split");
-  await $("pageLayoutPanel").querySelector('[data-layout-target-index="1"]').emit("click");
-  assert.equal(snapshot().targets[1].regions.length, 0);
-  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDeleteQuestion"), null, "an empty split result cannot delete its saved source question");
+  openRegions(state.questions[0]);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutSplit"), null, "拆题入口已移除");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDeleteQuestion"), null, "an empty draft cannot delete its saved source question");
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutEmptyRange"), null);
-  assert.equal($("pageDialogSave").disabled, true);
+  assert.equal($("pageDialogSave").disabled, false, "an existing card can still be saved after a range edit");
 
   // The group of a new question follows the page it is framed on. It used to
   // default to the first group in the paper, which dropped the question into
@@ -587,10 +580,40 @@ async function run() {
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null, "adjusting an existing question shows no group picker");
   controller.close();
   controller.open("view", null); await Promise.resolve(); await Promise.resolve();
-  await controller.begin("split");
-  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null, "splitting keeps the original scope, so no picker appears");
+  await controller.begin("merge", [state.questions[0], state.questions[1]]);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null, "merging keeps the original scope, so no picker appears");
   controller.close();
 
-  console.log("Original-paper layout: overlap ordering, direct selection, split/merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery, protected question deletion and page-scoped group choice: OK");
+  // The merge picker refuses two cards that both carry options: their option
+  // keys would repeat. The teacher hears it while picking, not after a
+  // refused save.
+  state.questions = [
+    { ...state.questions[0], id: 81, number: 1, options: { A: "甲", B: "乙" }, stem: "第一道", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
+    { ...state.questions[1], id: 82, number: 2, options: { A: "丙", B: "丁" }, stem: "第二道", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
+    { ...state.questions[2], id: 83, number: 3, options: {}, stem: "没有选项", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } }
+  ];
+  controller.open("regions", state.questions[0]);
+  await $("pageLayoutPanel").querySelector("#pageLayoutMerge").emit("click");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, false,
+    "one card alone is not a merge yet");
+  const second = $("pageLayoutPanel").querySelector('[data-layout-merge-id="82"]');
+  second.checked = true;
+  await second.emit("change");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, true,
+    "two choice questions cannot be merged");
+  assert.match($("pageLayoutPanel").querySelector(".layout-warning").textContent, /选项会重复/);
+  // A card without options can join the merge.
+  const third = $("pageLayoutPanel").querySelector('[data-layout-merge-id="83"]');
+  third.checked = true;
+  await third.emit("change");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, true,
+    "the second choice question is still in the merge");
+  second.checked = false;
+  await second.emit("change");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, false,
+    "a card without options can be merged");
+  controller.close();
+
+  console.log("Original-paper layout: overlap ordering, direct selection, merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery, protected question deletion, page-scoped group choice and the choice-question merge guard: OK");
 }
 run().catch((error) => { console.error(error); process.exitCode = 1; });
