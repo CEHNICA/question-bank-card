@@ -124,6 +124,7 @@ def search_concepts(query: str, *, limit: int = 24) -> list[dict]:
                 "scope_note": tag.scope_note,
                 "aliases": list(tag.aliases or []),
                 "description": tag.description,
+                "active": tag.active,
                 "match": "exact" if exact else "alias",
                 "ambiguous": False,
             }

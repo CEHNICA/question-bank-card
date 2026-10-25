@@ -41,6 +41,7 @@ parser.add_argument("--runs", type=int, default=20)
 parser.add_argument("--seed", type=int, default=20261025)
 parser.add_argument("--json-out", default="")
 parser.add_argument("--reuse", action="store_true", help="复用库里已有数据，不重造")
+parser.add_argument("--catalogue", type=int, default=120, help="概念目录规模（深链）")
 args = parser.parse_args()
 
 os.environ["QB_DATABASE"] = str(Path(args.database).resolve())
@@ -56,6 +57,7 @@ from core.models import (  # noqa: E402
     LibrarySubquestion,
     LibraryTag,
     LibraryTagAssignment,
+    LibraryTagRelation,
     Paper,
     PublishedQuestion,
     Question,
@@ -214,15 +216,39 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+def build_catalogue_chain(count: int):
+    """造一条深链：概念 0 → 概念 1 → … → 概念 count-1。
+
+    「包含下级」的展开要走这条链。链越深、目录越大，展开越贵 ——
+    真实题库目录是分层的，不是平的，这条链是最难走的一种形状。
+    """
+    print(f"=== 造 {count} 个概念的深链 ===")
+    rows = []
+    previous = None
+    for index in range(count):
+        tag = LibraryTag.objects.create(name=f"链式概念{index}", kind="knowledge", canonical_key=f"链式概念{index}")
+        rows.append(tag)
+        if previous is not None:
+            LibraryTagRelation.objects.create(
+                parent=previous, child=tag, relation_type=LibraryTagRelation.Type.HIERARCHY
+            )
+        previous = tag
+    print(f"  链长 {count}，关系 {count - 1} 条")
+    return rows
+
+
 def main() -> int:
     if args.reuse:
-        from core.models import LibraryTag
+        from core.models import LibraryTag, LibraryTagRelation
 
         concepts = list(LibraryTag.objects.filter(kind="knowledge").order_by("name"))
         methods = list(LibraryTag.objects.filter(kind="method").order_by("name"))
         print(f"=== 复用已有数据：{len(concepts)} 个概念、{len(methods)} 个方法 ===")
     else:
         concepts, methods = build(args.questions)
+        if args.catalogue > 120:
+            chain = build_catalogue_chain(args.catalogue)
+            concepts = list(concepts) + chain
     total_assignments = LibraryTagAssignment.objects.count()
     total_publications = PublishedQuestion.objects.count()
 

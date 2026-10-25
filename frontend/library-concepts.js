@@ -359,7 +359,16 @@
               renderChips();
               runSearch();
             });
-            box.append(button);
+            const maintain = el("button", "concepts-rail-maintain", "维护");
+            maintain.type = "button";
+            maintain.title = "改名字、别名、范围说明；停用；或合并到别的概念";
+            maintain.addEventListener("click", (event) => {
+              event.stopPropagation();
+              openConceptMaintenance(concept);
+            });
+            const row = el("div", "concepts-rail-item-row");
+            row.append(button, maintain);
+            box.append(row);
           });
           if (!(payload.concepts || []).length) {
             box.append(el("p", "concepts-hint", "目录里没有这个概念。"));
@@ -684,6 +693,355 @@
       state.message = error.message;
       renderSummary();
     }
+  }
+
+  // ---------------------------------------------------------------- 旧标签组合转换
+
+  const LEGACY_TAG_FILTERS_KEY = "qb-library-saved-tag-filters";
+
+  function readLegacyFilters() {
+    try {
+      const raw = window.localStorage.getItem(LEGACY_TAG_FILTERS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((item) => item && item.name) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  /** 旧组合里存的是标签**名字**，新搜索要的是稳定 id —— 名字得一个一个换成 id。 */
+  async function resolveTagIds(names) {
+    const found = [];
+    for (const name of names) {
+      const text = String(name || "").trim();
+      if (!text) continue;
+      const payload = await api(`/api/library/concepts?q=${encodeURIComponent(text)}`);
+      const hits = payload.concepts || [];
+      // 先找完全同名的，找不到再退回第一个 —— 同名但含义可能不同，所以先精确匹配。
+      const hit = hits.find((item) => item.name === text) || hits[0];
+      if (hit) found.push({ id: hit.id, name: hit.name, kind: hit.kind });
+    }
+    return found;
+  }
+
+  function legacyToQuery(item, resolved) {
+    const filter = item.filter || {};
+    const mode = String(filter.mode || "all") === "any" ? "any" : "all";
+    const all = resolved.filter((row) => (filter.all || []).includes(row.name));
+    const any = resolved.filter((row) => (filter.any || []).includes(row.name));
+    const not = resolved.filter((row) => (filter.not || []).includes(row.name));
+    const conceptIds = (mode === "any" ? any : all).filter((row) => row.kind !== "method");
+    const methodIds = (mode === "any" ? any : all).filter((row) => row.kind === "method");
+    const query = {
+      query_version: 2,
+      keywords: [],
+      filters: {},
+      concept_groups: conceptIds.length
+        ? [{ ids: conceptIds.map((row) => row.id), roles: ["primary"], all_or_any: "all", include_descendants: false }]
+        : [],
+      method_groups: methodIds.length
+        ? [{ ids: methodIds.map((row) => row.id), subquestion: "", variant_scope: "", cooccurrence: "same_variant" }]
+        : [],
+      exclusions: {
+        conditions: not.length
+          ? [{ ids: not.map((row) => row.id), roles: ["primary", "method"], include_descendants: false }]
+          : [],
+        handling_of_unknown: "separate",
+      },
+      include_clues: false,
+      sort: "recent",
+    };
+    if (mode === "any" && query.concept_groups.length) {
+      query.concept_groups[0].all_or_any = "any";
+    }
+    return query;
+  }
+
+  async function offerLegacyConversion() {
+    const legacy = readLegacyFilters();
+    const banner = document.getElementById("conceptsLegacyBanner");
+    if (!banner) return;
+    if (!legacy.length) {
+      banner.hidden = true;
+      return;
+    }
+    const existing = new Set((state.savedSearches || []).map((item) => item.name));
+    const pending = legacy.filter((item) => !existing.has(String(item.name || "").trim()));
+    if (!pending.length) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.replaceChildren();
+    banner.append(
+      el(
+        "span",
+        "concepts-legacy-text",
+        `你以前在浏览器里存了 ${pending.length} 条「保存标签组合」。要转成现在的完整搜索吗？转完旧的还留着，不影响你。`,
+      ),
+    );
+    const doIt = el("button", "btn btn-quiet", "转成新搜索");
+    doIt.type = "button";
+    doIt.addEventListener("click", () => convertLegacyFilters(pending));
+    banner.append(doIt);
+    const skip = el("button", "btn btn-quiet", "先不转");
+    skip.type = "button";
+    skip.addEventListener("click", () => {
+      banner.hidden = true;
+    });
+    banner.append(skip);
+  }
+
+  async function convertLegacyFilters(pending) {
+    const banner = document.getElementById("conceptsLegacyBanner");
+    let done = 0;
+    let skipped = 0;
+    for (const item of pending) {
+      const names = [
+        ...((item.filter || {}).all || []),
+        ...((item.filter || {}).any || []),
+        ...((item.filter || {}).not || []),
+      ];
+      const resolved = await resolveTagIds(names);
+      const query = legacyToQuery(item, resolved);
+      if (!query.concept_groups.length && !query.method_groups.length) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await api("/api/library/saved-searches", {
+          method: "POST",
+          body: { action: "save", name: String(item.name).trim(), query },
+        });
+        done += 1;
+      } catch (error) {
+        skipped += 1;
+      }
+    }
+    await loadSavedSearches();
+    if (banner) {
+      banner.hidden = false;
+      banner.replaceChildren();
+      banner.append(
+        el(
+          "span",
+          "concepts-legacy-text",
+          `转好了 ${done} 条${skipped ? `，${skipped} 条没转（里面的标签名在目录里找不到了）` : ""}。旧的那几条还在浏览器里。`,
+        ),
+      );
+      const close = el("button", "btn btn-quiet", "知道了");
+      close.type = "button";
+      close.addEventListener("click", () => {
+        banner.hidden = true;
+      });
+      banner.append(close);
+    }
+  }
+
+  // ---------------------------------------------------------------- 概念维护
+
+  const TYPE_HINT_OPTIONS = [
+    ["知识点", "knowledge"],
+    ["解题方法", "method"],
+    ["自定义", "custom"],
+  ];
+
+  async function catalogueRevision() {
+    const payload = await api("/api/library/tags");
+    return { revision: payload.revision, tags: payload.tags || [] };
+  }
+
+  async function catalogueMutation(payload) {
+    const { revision } = await catalogueRevision();
+    return api("/api/library/tags", {
+      method: "POST",
+      body: { ...payload, revision, request_id: newRequestId() },
+    });
+  }
+
+  function field(label, value, hint) {
+    const wrap = el("label", "concepts-field");
+    wrap.append(el("span", "concepts-field-label", label));
+    const input = el("input", "concepts-field-input");
+    input.type = "text";
+    input.value = value ?? "";
+    wrap.append(input);
+    if (hint) wrap.append(el("span", "concepts-field-hint", hint));
+    return { wrap, input };
+  }
+
+  function openConceptMaintenance(tag) {
+    const overlay = el("div", "concepts-overlay");
+    const panel = el("div", "concepts-maintain");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", `维护概念 ${tag.name}`);
+
+    const head = el("div", "concepts-maintain-head");
+    head.append(el("h2", "concepts-maintain-title", tag.name));
+    const close = el("button", "concepts-maintain-close", "×");
+    close.type = "button";
+    close.title = "关闭";
+    close.addEventListener("click", () => overlay.remove());
+    head.append(close);
+    panel.append(head);
+
+    const nameField = field("规范名", tag.name, "改了名，旧名会自动收进别名，检索还找得到。");
+    const aliasField = field("别名", (tag.aliases || []).join("，"), "用逗号分开。");
+    const scopeField = field(
+      "范围说明",
+      tag.scope_note || "",
+      "同名但含义不同时写一句区分 —— 界面会把它显示出来，不会自动合并。",
+    );
+    const descField = field("定义", tag.description || "", "这个概念是什么。");
+
+    // 类型提示是多值的：同一个概念可以既是考点又是手段。
+    const hintWrap = el("div", "concepts-field");
+    hintWrap.append(el("span", "concepts-field-label", "类型提示"));
+    const hintBoxes = [];
+    TYPE_HINT_OPTIONS.forEach(([label, value]) => {
+      const row = el("label", "concepts-hint-check");
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = (tag.type_hints || []).includes(value);
+      row.append(box, el("span", "", label));
+      hintWrap.append(row);
+      hintBoxes.push([box, value]);
+    });
+    hintWrap.append(el("span", "concepts-field-hint", "可以多选。类型提示只影响推荐和浏览，不决定这个概念的身份。"));
+
+    panel.append(nameField.wrap, aliasField.wrap, scopeField.wrap, descField.wrap, hintWrap);
+
+    const status = el("p", "concepts-maintain-status");
+    panel.append(status);
+
+    const actions = el("div", "concepts-maintain-actions");
+    const save = el("button", "btn", "保存");
+    save.type = "button";
+    save.addEventListener("click", async () => {
+      const hints = hintBoxes.filter(([box]) => box.checked).map(([, value]) => value);
+      try {
+        await catalogueMutation({
+          action: "update_tag",
+          tag_id: tag.id,
+          name: nameField.input.value.trim(),
+          aliases: aliasField.input.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+          scope_note: scopeField.input.value.trim(),
+          description: descField.input.value.trim(),
+          type_hints: hints,
+        });
+        status.textContent = "存好了。";
+        await loadRail();
+        await offerLegacyConversion();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+    actions.append(save);
+
+    const toggle = el("button", "btn btn-quiet", tag.active ? "停用" : "启用");
+    toggle.type = "button";
+    toggle.addEventListener("click", async () => {
+      try {
+        await catalogueMutation({
+          action: tag.active ? "deactivate_tag" : "activate_tag",
+          tag_id: tag.id,
+        });
+        status.textContent = tag.active ? "停用了。停用不是删除，历史还在。" : "启用好了。";
+        await loadRail();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+    actions.append(toggle);
+
+    const merge = el("button", "btn btn-quiet", "合并到别的概念…");
+    merge.type = "button";
+    merge.addEventListener("click", () => openMergeFlow(tag, status, overlay));
+    actions.append(merge);
+
+    panel.append(actions);
+    overlay.append(panel);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.remove();
+    });
+    document.body.append(overlay);
+  }
+
+  async function openMergeFlow(sourceTag, status, overlay) {
+    const box = el("div", "concepts-merge");
+    box.append(el("h3", "concepts-merge-title", `把「${sourceTag.name}」合并到`));
+    const input = el("input", "concepts-field-input");
+    input.type = "search";
+    input.placeholder = "输入要合并进去的那个概念…";
+    box.append(input);
+    const results = el("div", "concepts-merge-results");
+    box.append(results);
+    const note = el("p", "concepts-field-hint", "合并会把这颗标签下的题和别名都转到目标概念上，旧的名字保留成别名。先看影响范围再确认。");
+    box.append(note);
+    status.replaceChildren(box);
+
+    input.addEventListener("input", async () => {
+      const text = input.value.trim();
+      results.replaceChildren();
+      if (!text) return;
+      const payload = await api(`/api/library/concepts?q=${encodeURIComponent(text)}`);
+      (payload.concepts || [])
+        .filter((item) => item.id !== sourceTag.id)
+        .forEach((item) => {
+          const button = el("button", "concepts-merge-option");
+          button.type = "button";
+          button.append(el("span", "", item.name));
+          if (item.scope_note) button.append(el("span", "concepts-merge-note", item.scope_note));
+          button.addEventListener("click", () => previewMerge(sourceTag, item, status));
+          results.append(button);
+        });
+    });
+  }
+
+  async function previewMerge(sourceTag, targetTag, status) {
+    const impact = await api(
+      `/api/library/tags/impact?action=delete_tag&tag_id=${sourceTag.id}&target_id=${targetTag.id}`,
+    );
+    const box = el("div", "concepts-merge");
+    box.append(el("h3", "concepts-merge-title", `合并到「${targetTag.name}」的影响`));
+    const rows = [
+      ["受影响的题", impact.question_count],
+      ["标签关联", impact.assignment_count],
+      ["上下级关系", impact.relation_count],
+      ["历史记录", impact.historical_count],
+    ];
+    rows.forEach(([label, value]) => {
+      const row = el("div", "concepts-merge-count");
+      row.append(el("span", "", label));
+      row.append(el("strong", "", String(value ?? 0)));
+      box.append(row);
+    });
+    const confirm = el("button", "btn", "确认合并");
+    confirm.type = "button";
+    confirm.addEventListener("click", async () => {
+      try {
+        const { revision } = await catalogueRevision();
+        await api("/api/library/tags", {
+          method: "POST",
+          body: {
+            action: "merge_tags",
+            source_id: sourceTag.id,
+            target_id: targetTag.id,
+            revision,
+            request_id: newRequestId(),
+            confirmed: true,
+            impact_token: impact.token,
+          },
+        });
+        status.textContent = "合并好了。";
+        await loadRail();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+    box.append(confirm);
+    status.replaceChildren(box);
   }
 
   // ---------------------------------------------------------------- 当前题
@@ -1150,6 +1508,7 @@
     bindUi();
     renderChips();
     await Promise.all([loadRail(), loadSavedSearches()]);
+    await offerLegacyConversion();
     await runSearch();
   }
 

@@ -62,6 +62,9 @@
       <button id="allQuestionsButton" class="library-basket-return" type="button" hidden>← 返回全部题目</button>
       <button id="basketViewButton" class="library-basket-enter" type="button" hidden>只看篮里的 <span id="selectedViewCount" class="count">0</span> 题</button>
       <button id="libraryTagManager" class="library-tag-manager-entry" type="button" title="标签管理" aria-label="标签管理"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>标签管理</span></button>
+      <!-- 1.27.0：找题与整理是独立的一页（教材目录 / 数学主题 / 个人专题三入口）。
+           这里给它一个固定入口 —— 藏在别的页面里，老师不会知道它存在。 -->
+      <a class="library-top-entry" href="/library/concepts" title="按教材目录、数学主题、个人专题找题，并整理每道题"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span>找题与整理</span></a>
     </nav>
     <div class="topbar-tools"><button id="libraryFilterToggle" class="button quiet small rail-toggle" type="button" aria-controls="libraryRail" aria-expanded="false" hidden>查找</button><button id="inspectorToggle" class="button quiet small inspector-toggle" type="button" aria-controls="questionInspector" aria-expanded="false" disabled>题目详情</button></div>
   </header>

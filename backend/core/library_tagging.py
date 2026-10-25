@@ -32,6 +32,7 @@ from .models import (
     LibraryTagSuggestion,
     PublishedQuestion,
 )
+from .textnorm import concept_key
 
 MAX_NAME = 100
 MAX_ALIASES = 20
@@ -260,6 +261,11 @@ def tag_json(tag: LibraryTag, *, count=None, context=None) -> dict:
         "active": tag.active,
         "favorite": tag.favorite,
         "system_key": tag.system_key,
+        # 1.27.0：统一概念身份的三件套。范围说明用来区分同名不同义的概念，
+        # 类型提示是多值的（同一个概念可以既是考点又是手段）。
+        "canonical_key": tag.canonical_key or "",
+        "scope_note": tag.scope_note or "",
+        "type_hints": list(tag.type_hints or []),
     }
     context = relation_context() if context is None else context
     neighbors = context.get(str(tag.pk), {})
@@ -1318,8 +1324,23 @@ def catalogue_mutation(payload: dict) -> dict:
                     if name != tag.name:
                         tag.aliases = _clean_aliases([*(tag.aliases or []), tag.name])
                         tag.name = name
+                        # 规范身份键跟着重算 —— 不然改了名，却还用旧身份被检索到。
+                        # 撞上别的概念就不动，直接说清楚，别静默改掉身份。
+                        new_key = concept_key(name)
+                        if new_key and LibraryTag.objects.filter(canonical_key=new_key).exclude(pk=tag.pk).exists():
+                            raise TaggingError("已经有同名的概念了，先合并或者换个名字", 409)
+                        tag.canonical_key = new_key
                 if "aliases" in payload:
                     tag.aliases = _clean_aliases(payload["aliases"])
+                if "scope_note" in payload:
+                    # 范围说明：同名但含义不同时靠它区分。界面要显示出来，不要自动合并。
+                    tag.scope_note = str(payload["scope_note"] or "").strip()[:300]
+                if "type_hints" in payload:
+                    # 类型提示是多值的 —— 同一个概念可以既是考点又是方法手段。
+                    hints = payload["type_hints"]
+                    if not isinstance(hints, list):
+                        raise TaggingError("类型提示应为列表")
+                    tag.type_hints = [str(item).strip()[:24] for item in hints if str(item).strip()][:8]
                 for field, maximum in (("description", 300), ("conditions", 2000)):
                     if field in payload:
                         setattr(tag, field, str(payload[field] or "").strip()[:maximum])
