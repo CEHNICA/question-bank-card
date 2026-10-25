@@ -2416,6 +2416,31 @@ def resolve_suggestion_view(request, suggestion_id):
         return JsonResponse({"error": "同类型标签已存在，请选择现有标签"}, status=409)
 
 
+def _scope_key_for_suggestion(publication, scope):
+    """候选建议的范围 → 规范化范围键。
+
+    旧建议里的小问是展示编号（「1」），这里换成那道题里对应的小问的稳定编号。
+    换不到就退回整题 —— 不能凭编号猜一个不存在的小问。
+    """
+    from .models import LibrarySubquestion
+
+    if not isinstance(scope, dict) or scope.get("whole", True):
+        return "whole"
+    labels = scope.get("subquestions")
+    if not isinstance(labels, list) or not labels:
+        return "whole"
+    wanted = {str(item).strip() for item in labels}
+    rows = LibrarySubquestion.objects.filter(publication=publication).order_by("position", "id")
+    picked = []
+    for row in rows:
+        label = (row.display_label or "").strip("（）() \t　")
+        if label in wanted or row.stable_key in {f"sq:{item}" for item in wanted}:
+            picked.append(str(row.pk))
+    if not picked:
+        return "whole"
+    return "+".join(f"sub:{item}" for item in picked)
+
+
 def resolve_suggestion(suggestion_id, payload):
     action = payload.get("action")
     if action not in {"accept", "reject"}:
@@ -2436,6 +2461,7 @@ def resolve_suggestion(suggestion_id, payload):
             "indices": indices,
             "expected_revision": payload.get("expected_revision"),
             "new_tags": payload.get("new_tags", {}),
+            "edits": payload.get("edits", {}),
         }
     )
     with transaction.atomic():
@@ -2460,6 +2486,9 @@ def resolve_suggestion(suggestion_id, payload):
         ):
             raise StaleTagSuggestionError("题面或配图已变化，请重新生成建议。", 409)
         requested_new_tags = payload.get("new_tags") if isinstance(payload.get("new_tags"), dict) else {}
+        edits = payload.get("edits") if isinstance(payload.get("edits"), dict) else {}
+        if len(edits) > 20:
+            raise TaggingError("改动项过多")
         entries = copy.deepcopy(suggestion.suggestions or [])
         if len(set(indices)) != len(indices) or min(indices) < 0 or max(indices) >= len(entries):
             raise TaggingError("所选建议已变化，请刷新后重试", 409)
@@ -2502,6 +2531,12 @@ def resolve_suggestion(suggestion_id, payload):
                 raise TaggingError("新标签信息不正确")
             for index in indices:
                 item = entries[index]
+                # 人工改过的用途和范围按改后的写；没改的按建议里的写。
+                edit = edits.get(str(index)) or {}
+                role = str(edit.get("role") or item.get("role") or "primary")
+                if role not in dict(LibraryTagAssignment.Role.choices):
+                    raise TaggingError("用途不正确")
+                scope_key = _scope_key_for_suggestion(publication, item.get("scope"))
                 tag = None
                 if item.get("tag_id"):
                     tag = LibraryTag.objects.filter(pk=item["tag_id"], active=True).first()
@@ -2614,6 +2649,8 @@ def resolve_suggestion(suggestion_id, payload):
                     existing.rationale = str(item.get("rationale") or "")[:500]
                     existing.evidence = str(item.get("evidence") or "")[:500]
                     existing.scope = item.get("scope") or {"whole": True}
+                    existing.role = role
+                    existing.scope_key = scope_key
                     existing.source_snapshot = {
                         "suggestion_id": str(suggestion.pk),
                         "method_source": suggestion.method_source,
@@ -2628,6 +2665,8 @@ def resolve_suggestion(suggestion_id, payload):
                         rationale=str(item.get("rationale") or "")[:500],
                         evidence=str(item.get("evidence") or "")[:500],
                         scope=item.get("scope") or {"whole": True},
+                        role=role,
+                        scope_key=scope_key,
                         source_snapshot={
                             "suggestion_id": str(suggestion.pk),
                             "method_source": suggestion.method_source,
@@ -2635,6 +2674,8 @@ def resolve_suggestion(suggestion_id, payload):
                     )
                 entries[index]["decision"] = "accepted"
                 entries[index]["accepted_tag_id"] = str(tag.pk)
+                entries[index]["role"] = role
+                entries[index]["scope_key"] = scope_key
         else:
             for index in indices:
                 entries[index]["decision"] = "rejected"

@@ -48,6 +48,7 @@
     selected: null,
     detail: null,
     conversion: null,
+    edits: {},
     railData: { textbooks: [], chapters: [], collections: [], concepts: [] },
     message: "",
   };
@@ -911,7 +912,26 @@
       entries.forEach((entry, index) => {
         const box = el("div", "concepts-suggestion");
         box.append(el("div", "concepts-suggestion-name", entry.name || entry.new_name || "（未命名）"));
-        box.append(el("div", "concepts-suggestion-role", `拟议用途：${ROLE_LABELS[entry.role] || entry.role || "主要考查"}`));
+        // 用途可以改 —— 改完按改的写进去，原建议原样留着。
+        const roleRow = el("div", "concepts-suggestion-role-row");
+        roleRow.append(el("span", "concepts-suggestion-role-label", "用途"));
+        const roleSelect = el("select", "concepts-inline-select");
+        [
+          ["primary", "主要考查"],
+          ["supporting", "辅助用到"],
+          ["method", "解法采用"],
+          ["feature", "题面特征"],
+        ].forEach(([value, label]) => {
+          const option = el("option", "", label);
+          option.value = value;
+          if ((entry.role || "primary") === value) option.selected = true;
+          roleSelect.append(option);
+        });
+        roleSelect.addEventListener("change", () => {
+          state.edits[index] = { ...(state.edits[index] || {}), role: roleSelect.value };
+        });
+        roleRow.append(roleSelect);
+        box.append(roleRow);
         if (entry.rationale) box.append(el("p", "concepts-suggestion-why", entry.rationale));
         if (entry.evidence) {
           const details = el("details", "concepts-suggestion-evidence");
@@ -1064,16 +1084,22 @@
   }
 
   async function resolveSuggestion(suggestionId, action, index) {
+    const edits = {};
+    if (action === "accept" && state.edits[index]) {
+      edits[String(index)] = state.edits[index];
+    }
     try {
       await api(`/api/library/tag-suggestions/${suggestionId}/resolve`, {
         method: "POST",
         body: {
           action,
           indices: [index],
+          edits,
           request_id: newRequestId(),
           expected_revision: state.detail.tag_revision || 0,
         },
       });
+      state.edits = {};
       await selectQuestion(state.selected);
     } catch (error) {
       state.message = error.message;

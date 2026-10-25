@@ -357,6 +357,91 @@ class AssertionWorkflowTests(RefactorTestBase):
 # ---------------------------------------------------------------------------
 
 
+class CandidateEditTests(RefactorTestBase):
+    """R04：人工改过再采纳 —— 按改后的内容写入，原建议原样留着。"""
+
+    def _pending(self, publication, *, role="primary"):
+        from core.models import LibraryTagSuggestion
+
+        catalogue = library_tagging.catalogue_state()
+        tag = self.make_concept("候选概念")
+        return LibraryTagSuggestion.objects.create(
+            publication=publication,
+            status=LibraryTagSuggestion.Status.PENDING,
+            taxonomy_revision=catalogue.revision,
+            assignment_revision=publication.tag_revision,
+            suggestions=[
+                {
+                    "name": "候选概念",
+                    "tag_id": str(tag.pk),
+                    "kind": "knowledge",
+                    "role": role,
+                    "scope": {"whole": True},
+                    "rationale": "虚构建议的理由。",
+                    "evidence": "虚构建议的依据。",
+                }
+            ],
+        )
+
+    def test_accept_writes_the_role_the_teacher_chose(self):
+        publication = self.make_publication()
+        suggestion = self._pending(publication)
+        result = library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "edits": {"0": {"role": "supporting"}},
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+        self.assertTrue(result["ok"])
+        row = LibraryTagAssignment.objects.get(publication=publication)
+        self.assertEqual(row.role, "supporting")
+        self.assertEqual(row.scope_key, "whole")
+        self.assertEqual(row.review_status, LibraryTagAssignment.ReviewStatus.CONFIRMED)
+
+    def test_accept_keeps_the_original_suggestion(self):
+        """原建议原样留着 —— 采纳后还能看出当初模型是怎么说的。"""
+        publication = self.make_publication()
+        suggestion = self._pending(publication)
+        original = list(suggestion.suggestions)
+        library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "edits": {"0": {"role": "supporting"}},
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, LibraryTagSuggestion.Status.ACCEPTED)
+        self.assertEqual(len(suggestion.suggestions), 1)
+        self.assertEqual(suggestion.suggestions[0]["name"], original[0]["name"])
+        self.assertEqual(suggestion.suggestions[0]["rationale"], original[0]["rationale"])
+        self.assertEqual(suggestion.suggestions[0]["decision"], "accepted")
+
+    def test_accept_without_edit_uses_the_suggested_role(self):
+        """没改就按建议里的用途写，不能落成「旧关联，作用未细分」。"""
+        publication = self.make_publication()
+        suggestion = self._pending(publication, role="primary")
+        library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+        row = LibraryTagAssignment.objects.get(publication=publication)
+        self.assertEqual(row.role, "primary")
+        self.assertNotEqual(row.role, LibraryTagAssignment.Role.LEGACY)
+
+
 class SearchSemanticsTests(RefactorTestBase):
     def test_S01_supporting_does_not_impersonate_primary(self):
         """搜「主要考查」时，辅助用到和题面出现都不能冒充主考。"""
