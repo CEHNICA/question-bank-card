@@ -139,6 +139,123 @@ class AnchorReadingFlagReconcileTests(TestCase):
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
         self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 0)
 
+    def test_a_flag_was_added_for_the_source_note_and_is_now_taken_off(self):
+        """老判据拿出处那句去比对，认出不来是必然的 —— 那句话早被拆进「题源」了。
+
+        真库 #1096：9 张（#1085~#1099）挂的就是这句话。判据修好之后要撤掉，
+        卡恢复成绿的：内容一个字没动，它本来就没问题。
+        """
+        Block.objects.create(
+            paper=self.paper,
+            seq=702,
+            type="text",
+            page_idx=0,
+            bbox=[100, 300, 900, 360],
+            text=(
+                "3.(2025届江苏盐城射阳中学开学考,6)函数 $f(x)=1+\\ln x$ 与 $g(x)=\\mathrm{e}^{x}-1$ "
+                "图象的公切线的纵截距为\nA.1 或 0 B.-1 或 0 C.1 或 e D.-1 或 e"
+            ),
+        )
+        wrong_flag = (
+            pipeline.ANCHOR_MISMATCH_FLAG_PREFIX
+            + "届江苏盐城射阳中学开…"
+            + "」，但识读出来的内容里认不出这句话，卡上可能是另一道题；请对照原书确认这张卡的范围和内容"
+        )
+        card = self.card(
+            source_anchor_seq=702,
+            stem="函数 $f(x)=1+\\ln x$ 与 $g(x)=e^x-1$ 图象的公切线的纵截距为",
+            options={"A": "$1$ 或 $0$", "B": "$-1$ 或 $0$", "C": "$1$ 或 $e$", "D": "$-1$ 或 $e$"},
+            origin="2025届江苏盐城射阳中学开学考，6",
+            flags=[wrong_flag],
+            state=Question.State.YELLOW,
+        )
+
+        self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [], card.flags)
+        self.assertEqual(card.state, Question.State.GREEN)
+
+    def test_a_flag_that_is_still_true_is_kept(self):
+        """卡上真是另一道题时，旗标不能被顺手撤掉。"""
+        card = self.card()
+        pipeline.reconcile_anchor_reading_flags(self.paper)
+        card.refresh_from_db()
+        self.assertEqual(len(card.flags), 1, card.flags)
+
+        self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 0)
+
+        card.refresh_from_db()
+        self.assertEqual(len(card.flags), 1, card.flags)
+        self.assertEqual(card.state, Question.State.YELLOW)
+
+    def test_a_flag_is_taken_off_even_when_the_figures_were_confirmed_by_hand(self):
+        """人工确认过「这题确实没图」跟这句话无关，不能因为它让误报永远撤不掉。
+
+        真库 #1089：2026-10-25 凌晨人工确认无图，同一条误报就再也没人撤得掉。
+        撤旗标不动他那个确认，也不推翻他任何一个决定。
+        """
+        Block.objects.create(
+            paper=self.paper,
+            seq=703,
+            type="text",
+            page_idx=0,
+            bbox=[100, 300, 900, 360],
+            text=(
+                "6.(2024广东佛山顺德教学质量检测一,3)已知函数 $f(x)=\\frac{1}{2}ax^{2}+bx+1$ 的图象在点 "
+                "$(1,1)$ 处的切线与直线 $l: x+y-1=0$ 垂直，则 $ab$ 的最大值为"
+            ),
+        )
+        wrong_flag = (
+            pipeline.ANCHOR_MISMATCH_FLAG_PREFIX
+            + "广东佛山顺德教学质检…"
+            + "」，但识读出来的内容里认不出这句话，卡上可能是另一道题；请对照原书确认这张卡的范围和内容"
+        )
+        card = self.card(
+            source_anchor_seq=703,
+            stem="已知函数 $f(x)=\\frac{1}{2}ax^{2}+bx+1$ 的图象在点 $(1,1)$ 处的切线与直线 $l: x+y-1=0$ 垂直，则 $ab$ 的最大值为",
+            origin="2024广东佛山顺德教学质量检测一，3",
+            flags=[wrong_flag],
+            state=Question.State.YELLOW,
+            figure_review={"status": "confirmed_no_figure", "source": "human"},
+        )
+
+        self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 1)
+
+        card.refresh_from_db()
+        self.assertEqual(card.flags, [], card.flags)
+        self.assertEqual(card.state, Question.State.GREEN)
+        # 人工那个确认一个字都没动
+        self.assertEqual(card.figure_review["source"], "human")
+
+    def test_a_flag_on_a_card_someone_edited_or_approved_is_left_alone(self):
+        """人工改过字、已通过 —— 那是人对这张卡下的结论，误报旗标也不动。"""
+        for index, values in enumerate(({"edited": True}, {"approved": True})):
+            Block.objects.create(
+                paper=self.paper,
+                seq=710 + index,
+                type="text",
+                page_idx=0,
+                bbox=[100, 300, 900, 360],
+                text=(
+                    "3.(2025届江苏盐城射阳中学开学考,6)函数 $f(x)=1+\\ln x$ 与 $g(x)=\\mathrm{e}^{x}-1$ "
+                    "图象的公切线的纵截距为"
+                ),
+            )
+            card = self.card(
+                source_anchor_seq=710 + index,
+                stem="函数 $f(x)=1+\\ln x$ 与 $g(x)=e^x-1$ 图象的公切线的纵截距为",
+                origin="2025届江苏盐城射阳中学开学考，6",
+                flags=[pipeline.ANCHOR_MISMATCH_FLAG_PREFIX + "届江苏盐城射阳中学开…」，但认不出"],
+                state=Question.State.YELLOW,
+                **values,
+            )
+
+            self.assertEqual(pipeline.reconcile_anchor_reading_flags(self.paper), 0, values)
+
+            card.refresh_from_db()
+            self.assertEqual(len(card.flags), 1, card.flags)
+
     def test_read_card_and_this_pass_say_the_same_thing(self):
         """两处必须给出同一句话：识读那一刻挂的，和事后补的。
 
