@@ -95,8 +95,13 @@ assert.match(managerJs, /所属分组/, "the tag detail says which groups the ta
 assert.match(managerJs, /未分类/, "the sidebar separates tags that belong to no group");
 assert.match(managerJs, /标签群组 \(/, "the sidebar lists the groups with a count");
 assert.match(managerJs, /tagManagerTreeNav/, "the manager browses top-level tags as a hierarchy");
-assert.match(managerJs, /for \(const kind of \["knowledge", "method", "custom", "legacy"\]\) \{[\s\S]*?entry\(hierarchyNav/,
-  "custom and legacy tags have their own level entry");
+// 1.27.0：知识点 / 解题方法 / 自定义 / 历史标签 这四项是「系统默认分组」——
+// 它们本来就是一组一组的，画在分组栏里，点得动、筛得出。
+assert.match(managerJs, /系统默认分组/, "左栏有「系统默认分组」这一栏");
+assert.match(managerJs, /for \(const kind of \["knowledge", "method", "custom", "legacy"\]\) \{\n {8}const count = tags\.filter\(\(tag\) => tag\.kind === kind\)\.length;/,
+  "四个类型都作为系统默认分组列出来");
+assert.match(managerJs, /state\.scope\.startsWith\("kind:"\) && tag\.kind !== state\.scope\.slice\(5\)/,
+  "点哪个系统默认分组，右边就只列哪一类");
 assert.doesNotMatch(libraryJs, /tagCatalogue\.groups|tagActiveGroup|tagManagerGroup|group_keys|group_ids|所属分组|导入所选分组/,
   "the question tag picker and templates read chapters, not groups");
 assert.match(libraryJs, /tagSubtree\(/, "the picker filters by a chapter and everything under it");
@@ -170,4 +175,5 @@ assert.match(managerJs, /tag-directory-tree-toggle/, "每层都有展开箭头")
 assert.match(managerJs, /if \(open\) \{\s*const next = new Set/, "展开后递归画下一层");
 assert.match(managerJs, /kindHasHierarchy/, "没有上下级的类型不再长左树");
 assert.match(managerJs, /tag-directory-root-hint/, "顶级这一层中间换成提示，不重复左树");
-assert.match(managerJs, /这一类没有上下级/, "平铺类型的提示");
+// 1.27.0：类型不再是「树」，教材章节树才是树 —— 提示文字固定下来了。
+assert.match(managerJs, /点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。/, "章节树的提示");

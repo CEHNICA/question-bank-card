@@ -45,7 +45,12 @@
     // 1.27.0：左栏改成「全部 / 未分类 / 常用标签 / 标签群组」，scope 也跟着换。
     const SCOPE_KEY = "qb-tag-manager-scope";
     function savedScope() {
-      try { const value = root.localStorage?.getItem(SCOPE_KEY); return ["all", "ungrouped", "favorite", "used"].includes(value) ? value : "all"; } catch { return "all"; }
+      try {
+        const value = root.localStorage?.getItem(SCOPE_KEY);
+        // 1.27.0：「kind:xxx」是系统默认分组（知识点 / 解题方法 / 自定义 / 历史标签）。
+        if (typeof value === "string" && value.startsWith("kind:")) return value;
+        return ["all", "ungrouped", "favorite", "used"].includes(value) ? value : "all";
+      } catch { return "all"; }
     }
     function rememberScope() { try { root.localStorage?.setItem(SCOPE_KEY, state.scope); } catch { /* 存不下就每次从全部开始 */ } }
     const state = { open: false, busy: false, scope: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
@@ -91,14 +96,12 @@
     const body = element("div", "tag-directory-body"), sidebar = element("aside", "tag-directory-groups");
     const scopeNav = element("nav", "tag-directory-group-list");
     scopeNav.id = "tagManagerScopes"; scopeNav.setAttribute("aria-label", "标签范围");
-    const hierarchyNav = element("nav", "tag-directory-hierarchy-nav");
-    hierarchyNav.id = "tagManagerHierarchyNav"; hierarchyNav.setAttribute("aria-label", "按类型浏览标签层级");
     const treeNav = element("nav", "tag-directory-tree-nav");
     treeNav.id = "tagManagerTreeNav"; treeNav.setAttribute("aria-label", "顶层标签");
     const hierarchyHint = element("p", "tag-directory-nav-hint", "点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。");
-    // 1.27.0：左栏顶部先摆「全部 / 未分类 / 常用标签 / 标签群组」，
-    // 类型和文件夹树挪到下面 —— 分类是老师天天用的，层级是偶尔翻的。
-    sidebar.append(scopeNav, hierarchyNav, treeNav, hierarchyHint);
+    // 1.27.0：左栏顶部先摆「全部 / 未分类 / 常用标签」和分组，
+    // 教材章节树挪到下面 —— 分类是老师天天用的，层级是偶尔翻的。
+    sidebar.append(scopeNav, treeNav, hierarchyHint);
     const results = element("section", "tag-directory-results"), listHeading = element("div", "tag-directory-list-heading"), selectAll = element("input"); selectAll.type = "checkbox";
     selectAll.id = "tagManagerSelectAll"; selectAll.setAttribute("aria-label", "选择当前显示的全部标签");
     const selectAllLabel = element("label", "tag-directory-select-all"); selectAllLabel.append(selectAll, element("span", "", "全选当前结果"));
@@ -213,6 +216,15 @@
       const mine = new Set(tagGroups().map((group) => String(group.id)));
       return !(tag.group_ids || []).some((id) => mine.has(String(id)));
     }
+    // 1.27.0：系统默认分组的说清楚是什么。
+    // 「历史标签」这个词老师看不懂 —— 它是旧版题库迁进来的、已经停用、
+    // 一道题也没贴的旧标签，不是「以前的知识点」。
+    function systemGroupHint(kind, count) {
+      if (kind === "legacy") return "历史标签：" + count + " 个从旧版题库迁进来的标签，都已停用，一道题也没贴，等你决定去留。";
+      if (kind === "knowledge") return "知识点：" + count + " 个数学知识点。";
+      if (kind === "method") return "解题方法：" + count + " 个解题方法。";
+      return "自定义标签：" + count + " 个你自己起的标签。";
+    }
     function relationIds(tag, field) { return (tag[field] || []).map((value) => String(typeof value === "object" ? value.id : value)); }
     function parentsOf(tag) { return relationIds(tag, "parent_ids").map(tagById).filter(Boolean); }
     function childrenOf(tag) {
@@ -298,12 +310,10 @@
       // 1.25.47：恢复上次的「全部 / 用过的 / 收藏」；查题上下文进来时不恢复。
       // 1.25.50：第一次进来直接打开「知识点」文件夹 —— 标签本来就该先按文件夹看。
       if (!context.questionContext) {
-        let stored = null;
-        try { stored = root.localStorage?.getItem(SCOPE_KEY); } catch { /* 存不下就按第一次算 */ }
         state.scope = savedScope();
-        // 1.27.0：网格视图第一次进来直接平铺全部标签，不先钻进「知识点」
-        // 文件夹 —— 钻进文件夹时中间那一列是空的，看着像没东西。
-        state.hierarchyKind = (stored === null && state.view === "list") ? "knowledge" : "";
+        // 1.27.0：网格视图第一次进来直接平铺全部标签，不先钻进某个层级 ——
+        // 钻进层级时中间那一列是空的，看着像没东西。
+        state.hierarchyKind = "";
         state.hierarchyNode = ""; state.hierarchyTrail = [];
       }
       setBusy(true); setNotice("正在载入标签目录…");
@@ -338,7 +348,7 @@
     }
     function renderSidebar() {
       const scroll = sidebar.scrollTop, tags = state.catalogue.tags || [];
-      hierarchyNav.replaceChildren(); treeNav.replaceChildren(); scopeNav.replaceChildren();
+      treeNav.replaceChildren(); scopeNav.replaceChildren();
       const entry = (nav, id, label, number, active, onPick, extra) => {
         const control = button("", onPick, "tag-directory-group" + (active ? " active" : ""));
         control.dataset.navId = id; control.setAttribute("aria-pressed", String(active));
@@ -346,31 +356,16 @@
         if (extra) Object.assign(control.dataset, extra);
         nav.append(control);
       };
-      for (const kind of ["knowledge", "method", "custom", "legacy"]) {
-        // Clicking the level you are already in steps up one notch: first out of
-        // the tag being read, then out of the level entirely.
-        entry(hierarchyNav, kind, kinds[kind], tags.filter((tag) => tag.kind === kind).length,
-          state.hierarchyKind === kind && state.scope === "all",
-          () => {
-            const inside = state.hierarchyKind === kind && state.scope === "all";
-            if (!inside) { state.hierarchyKind = kind; state.hierarchyNode = ""; state.hierarchyTrail = []; }
-            else if (state.hierarchyNode) { state.hierarchyNode = ""; state.hierarchyTrail = []; }
-            else state.hierarchyKind = "";
-            state.scope = "all"; rememberScope();
-            render();
-          });
-      }
       // 1.25.49：左侧是真正的文件夹树 —— 展开哪些层由 state.treeOpen 决定，
       // 不再是「只显示当前所在的那一条路径」。
-      if (state.hierarchyKind && state.scope === "all" && kindHasHierarchy(state.hierarchyKind)) {
-        // 1.25.49：按文件夹来做 —— 每层有自己的 ▸/▾，展开状态记在 state.treeOpen 里；
-        // 点箭头只展开/收起这一层，点名字进入这一层（中间显示文件夹内容）。
-        const kindTags = tags.filter((tag) => tag.kind === state.hierarchyKind);
-        const roots = kindTags.filter((tag) => !parentsOf(tag).some((parent) => parent.kind === tag.kind))
-          .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
-        treeNav.append(element("h2", "tag-directory-nav-heading", "文件夹"));
+      // 1.27.0：树的根改成**教材章节**（system_key 以 section: 开头的那批），
+      // 跟上面的分组栏分开：分组是横向的归类，教材章节是纵向的层级。
+      {
+        const chapters = tags.filter((tag) => String(tag.system_key || "").startsWith("section:"));
+        const roots = chapters.sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
+        if (roots.length) treeNav.append(element("h2", "tag-directory-nav-heading", "按教材浏览"));
         const shown = new Set();
-        const branch = (tag, depth, ancestors) => {
+        const branch = (tag, depth, ancestors, parentKind) => {
           const id = String(tag.id);
           if (shown.has(id)) return;         // 一个标签挂多个上级时只画一次
           shown.add(id);
@@ -389,7 +384,7 @@
           name.title = "打开「" + tag.name + "」这一层";
           // 1.26.27：跨类型的子标签也画在它爹下面，名字后头标出它是哪一类 ——
           // 不然老师会以为那颗标签不见了。
-          if (tag.kind !== state.hierarchyKind) {
+          if (depth > 0 && tag.kind !== parentKind) {
             name.append(element("small", "tag-directory-tree-kind", "· " + (kinds[tag.kind] || "标签")));
           }
           // 1.25.80：文件夹页若只看本级题数，整列都是 0 题，没人能看出"这一章下面到底有没有题"。
@@ -399,15 +394,13 @@
           treeNav.append(row);
           if (open) {
             const next = new Set([...ancestors, id]);
-            children.forEach((child) => branch(child, depth + 1, next));
+            children.forEach((child) => branch(child, depth + 1, next, tag.kind));
           }
         };
-        roots.forEach((tag) => branch(tag, 0, new Set()));
-        if (!roots.length) treeNav.append(element("p", "tag-directory-nav-hint", "这一类还没有标签。"));
+        roots.forEach((tag) => branch(tag, 0, new Set(), tag.kind));
+        if (!roots.length) treeNav.append(element("p", "tag-directory-nav-hint", "还没有教材章节。"));
       }
-      hierarchyHint.textContent = state.hierarchyKind && !kindHasHierarchy(state.hierarchyKind)
-        ? "这一类没有上下级，右边列出全部标签；点名字看说明。"
-        : "点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。";
+      hierarchyHint.textContent = "点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。";
       scopeNav.replaceChildren();
       scopeNav.append(element("h2", "tag-directory-nav-heading", "标签"));
       // 1.27.0：分类换成「全部 / 未分类 / 常用标签」。
@@ -419,6 +412,21 @@
       entry(scopeNav, "all", "全部", tags.length, state.scope === "all" && !state.groupId, flat("all"));
       entry(scopeNav, "ungrouped", "未分类", ungrouped, state.scope === "ungrouped" && !state.groupId, flat("ungrouped"));
       entry(scopeNav, "favorite", "常用标签", favorites, state.scope === "favorite" && !state.groupId, flat("favorite"));
+      // 1.27.0：系统默认分组。知识点 / 解题方法 / 自定义 / 历史标签 —— 这四类
+      // 本身就是一组一组的，点得动、筛得出，就跟老师自建的分组摆在一处。
+      scopeNav.append(element("h2", "tag-directory-nav-heading", "系统默认分组"));
+      for (const kind of ["knowledge", "method", "custom", "legacy"]) {
+        const count = tags.filter((tag) => tag.kind === kind).length;
+        const scope = "kind:" + kind;
+        const control = button("", () => {
+          state.scope = scope; state.groupId = ""; state.hierarchyKind = ""; state.hierarchyNode = ""; state.hierarchyTrail = [];
+          rememberScope(); render();
+        }, "tag-directory-group" + (state.scope === scope ? " active" : ""));
+        control.dataset.navId = scope; control.setAttribute("aria-pressed", String(state.scope === scope));
+        control.append(element("span", "", kinds[kind]), element("small", "", count));
+        control.title = systemGroupHint(kind, count);
+        scopeNav.append(control);
+      }
       // 标签群组：老师自己分的组。标题上带数量，右边一个「＋」新建。
       const groupTitle = element("div", "tag-directory-group-title");
       groupTitle.append(element("h2", "tag-directory-nav-heading", "标签群组 (" + tagGroups().length + ")"));
@@ -442,7 +450,9 @@
     function renderLocation() {
       location.replaceChildren(); location.hidden = !inHierarchy();
       if (!inHierarchy()) return;
-      const current = tagById(state.hierarchyNode), home = button(kinds[state.hierarchyKind] + " · 顶级", () => { state.hierarchyNode = ""; state.hierarchyTrail = []; render(); }, "tag-directory-path-button");
+      // 1.27.0：章节树是「按教材浏览」，顶层就是全部标签 —— 原来写「知识点 · 顶级」
+      // 是类型树时代的说法，现在点它回不去任何地方。
+      const current = tagById(state.hierarchyNode), home = button("全部标签", () => { state.hierarchyNode = ""; state.hierarchyTrail = []; render(); }, "tag-directory-path-button");
       location.append(home);
       if (current) {
         // 1.25.38：原来只有一条小路径能回去，退出子级得靠「再点一次同一个分类」这种
@@ -526,6 +536,9 @@
         // 1.27.0：未分类 = 还没归到任何标签群组；选中某个分组时只列组里的。
         if (state.scope === "ungrouped" && !isUngrouped(tag)) return false;
         if (state.groupId && !(tag.group_ids || []).includes(state.groupId)) return false;
+        // 1.27.0：系统默认分组（知识点 / 解题方法 / 自定义 / 历史标签）——
+        // 点哪一类，右边就只列哪一类。
+        if (state.scope.startsWith("kind:") && tag.kind !== state.scope.slice(5)) return false;
         const searchText = normalized([tag.name, tag.description, tag.conditions, ...(tag.aliases || []),
           ...parentPaths(tag).map((path) => path.map((node) => node.name).join(" "))].join(" "));
         return !query || query.split(/\s+/).every((part) => searchText.includes(part));

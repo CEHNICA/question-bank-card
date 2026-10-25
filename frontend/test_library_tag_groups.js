@@ -66,6 +66,11 @@ assert.match(managerJs, /"catalogue:create_group": "新建标签群组"/, "操�
 assert.match(managerJs, /"catalogue:delete_group": "删除标签群组"/, "操作记录里有「删除标签群组」");
 assert.match(managerJs, /"catalogue:group_membership_batch": "批量调整标签所属分组"/, "操作记录里有「批量调整标签所属分组」");
 
+// 「历史标签」这个词老师看不懂 —— 得说清楚它是什么。
+assert.match(managerJs, /function systemGroupHint\(kind, count\)/, "系统默认分组有说明");
+assert.match(managerJs, /历史标签：.*旧版题库迁进来的标签，都已停用，一道题也没贴/,
+  "「历史标签」说清楚是什么：旧版迁入、已停用、没贴在题上");
+
 // ---------------------------------------------------------------- 后端
 
 assert.match(service, /"initial": initial_for\(tag\.name\)/, "接口把拼音首字母给前端");
