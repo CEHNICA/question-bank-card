@@ -36,6 +36,4 @@ def restore_legacy_assignments(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [("core", "0030_tag_system_refactor")]
 
-    operations = [
-        migrations.RunPython(reclassify_legacy_assignments, restore_legacy_assignments),
-    ]
+    operations = [migrations.RunPython(reclassify_legacy_assignments, restore_legacy_assignments)]

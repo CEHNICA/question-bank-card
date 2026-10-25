@@ -239,7 +239,7 @@ def build_catalogue_chain(count: int):
 
 def main() -> int:
     if args.reuse:
-        from core.models import LibraryTag, LibraryTagRelation
+        from core.models import LibraryTag
 
         concepts = list(LibraryTag.objects.filter(kind="knowledge").order_by("name"))
         methods = list(LibraryTag.objects.filter(kind="method").order_by("name"))
