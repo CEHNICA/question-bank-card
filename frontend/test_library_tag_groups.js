@@ -39,7 +39,8 @@ assert.match(managerJs, /tag-directory-letter-heading/, "每组有组头");
 assert.match(managerJs, /tag-directory-grid/, "组内是网格");
 assert.match(managerJs, /tag\.initial/, "分组字母用后端给的拼音首字母");
 assert.match(managerJs, /tag-directory-chip-count/, "每颗标签带题数");
-assert.match(managerCss, /grid-template-columns: repeat\(auto-fill, minmax\(148px, 1fr\)\)/, "网格按列铺开");
+assert.match(managerCss, /grid-template-columns: repeat\(auto-fill, minmax\(190px, 1fr\)\)/,
+  "网格每列 190 px 起 —— 1160 px 窗口下正好 4 列，标签名不被截断");
 
 // 「#」组排在最后 —— 认不出首字母的不假装它属于哪个字母。
 assert.match(managerJs, /\(a === "#" \? 1 : b === "#" \? -1 : a\.localeCompare\(b\)\)/, "认不出的排在最后");

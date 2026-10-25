@@ -234,7 +234,9 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
 .tag-directory-letter-heading { display: flex; align-items: baseline; gap: 7px; padding: 12px 10px 5px; color: var(--muted, #747971); font-size: 12px; }
 .tag-directory-letter-heading strong { color: var(--ink, #262c29); font-size: 13px; font-weight: 600; }
 .tag-directory-letter-heading small { font-size: 11px; font-variant-numeric: tabular-nums; }
-.tag-directory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 1px 6px; padding: 0 4px 10px; }
+/* 每列 190 px 起：1160 px 的窗口下正好 4 列，和参考图一样。
+   列再窄就只剩 150 px，「比例尺与相似比」这种七字标签要被截成「比例尺与相…」。 */
+.tag-directory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px 6px; padding: 0 4px 10px; }
 .tag-directory-chip { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; border-radius: 7px; }
 .tag-directory-chip:hover { background: #f6f7f3; }
 .tag-directory-chip.selected { background: #eaf3ed; }
