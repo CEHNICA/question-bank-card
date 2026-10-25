@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>题有据 · 找题与整理</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/library.css">
+  <link rel="stylesheet" href="/library-concepts.css">
+</head>
+<body class="library-page concepts-page">
+  <header class="topbar site-header app-topbar">
+    <div class="brand">
+      <a class="brand-link" href="/library">题有据</a>
+      <span class="brand-sub">找题与整理</span>
+    </div>
+    <div class="topbar-actions">
+      <a class="btn" href="/library">回到正式题库</a>
+    </div>
+  </header>
+
+  <main class="library-main">
+    <div class="library-workspace concepts-workspace">
+
+      <!-- 左栏：教材目录 / 数学主题 / 个人专题，三样各自独立 -->
+      <aside class="concepts-rail" id="conceptsRail" aria-label="查找题目">
+        <div class="concepts-rail-tabs" role="tablist" aria-label="入口">
+          <button type="button" class="concepts-rail-tab is-active" data-entry="textbook" role="tab" aria-selected="true">教材目录</button>
+          <button type="button" class="concepts-rail-tab" data-entry="concept" role="tab" aria-selected="false">数学主题</button>
+          <button type="button" class="concepts-rail-tab" data-entry="collection" role="tab" aria-selected="false">个人专题</button>
+        </div>
+        <div class="concepts-rail-body" id="conceptsRailBody">
+          <p class="concepts-hint">正在读目录…</p>
+        </div>
+      </aside>
+
+      <!-- 中间：搜索、条件条、题卡 -->
+      <section class="concepts-main" aria-label="题目">
+        <div class="concepts-search">
+          <input id="conceptsSearch" class="concepts-search-input" type="search"
+                 placeholder="搜题干、选项、答案、解析；也可以写一句话（例：第（1）问用构造中位线）"
+                 autocomplete="off" aria-label="搜索题目">
+          <button type="button" class="btn" id="conceptsSearchGo">找题</button>
+          <button type="button" class="btn" id="conceptsSaveSearch">保存这次搜索</button>
+          <select id="conceptsSavedSearches" class="concepts-saved-select" aria-label="已保存的搜索">
+            <option value="">已保存的搜索</option>
+          </select>
+        </div>
+
+        <div class="concepts-chips" id="conceptsChips" aria-label="当前条件"></div>
+
+        <div class="concepts-summary" id="conceptsSummary" aria-live="polite"></div>
+
+        <div class="concepts-list" id="conceptsList"></div>
+      </section>
+
+      <!-- 右侧：当前题整理 -->
+      <aside class="concepts-inspector" id="conceptsInspector" aria-label="整理这道题">
+        <p class="concepts-hint">左边点一道题，这里就能整理。</p>
+      </aside>
+
+    </div>
+  </main>
+
+  <script src="/qb-render.js"></script>
+  <script src="/library-concepts.js"></script>
+</body>
+</html>

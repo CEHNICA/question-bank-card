@@ -1415,3 +1415,28 @@ def witness_choice(first: dict | None, second: dict | None, witness: str, *, con
         if len(votes) > 1:
             return None
     return votes.pop() if votes else None
+
+
+# ---------------------------------------------------------------------------
+# 概念身份键
+#
+# 「中位线定理」和「中位线 定理」是同一个概念，「中位线定理」和「中位线性质」不是。
+# 所以归一化只动三种东西：全半角、大小写、空白；再加上中文标点 —— 那是排版噪声。
+#
+# 数学符号一律不动：「a-b」不能等于「ab」，「f(x)」不能等于「fx」。
+# 想靠去掉括号把「中位线定理（性质）」并进「中位线定理」，那是替用户做数学判断，不干。
+# ---------------------------------------------------------------------------
+
+_CONCEPT_NOISE = re.compile(r"[，,。、；;：:！!？?·…—–\"'“”‘’《》〈〉]")
+
+
+def concept_key(value: str) -> str:
+    """规范名的归一化形式。概念身份、搜索匹配、别名归并都用这一份。
+
+    放在 textnorm 里是因为它就是一个归一化函数：迁移回填和运行时必须算出
+    同一个结果，否则迁移后新旧两套对不上号。迁移文件里另写了一份等价实现
+    （历史迁移不该依赖会变的应用代码），测试断言两边一致。
+    """
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = re.sub(r"\s+", "", text)
+    return _CONCEPT_NOISE.sub("", text)

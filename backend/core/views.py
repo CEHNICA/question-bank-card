@@ -826,6 +826,11 @@ def _frontend(name: str, content_type: str):
 
 index_page = _frontend("index.html", "text/html; charset=utf-8")
 library_page = _frontend("library.html", "text/html; charset=utf-8")
+# 标签系统重构：找题与整理工作台。单独一个页面，不动 library.js ——
+# 那文件七千行，119 个前端测试按源码文本断言，动它会连带炸一片。
+library_concepts_page = _frontend("library-concepts.html", "text/html; charset=utf-8")
+library_concepts_script = _frontend("library-concepts.js", "application/javascript; charset=utf-8")
+library_concepts_styles = _frontend("library-concepts.css", "text/css; charset=utf-8")
 app_script = _frontend("app.js", "application/javascript; charset=utf-8")
 render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
