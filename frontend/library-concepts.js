@@ -284,6 +284,10 @@
         "教材目录只记「在哪本书的哪一节」。不知道版次的旧章节在「通用教学目录」里，不编造版本。",
       );
       ui.railBody.append(note);
+      const create = el("button", "concepts-rail-create", "＋新建章节");
+      create.type = "button";
+      create.addEventListener("click", () => createChapter());
+      ui.railBody.append(create);
       const textbooks = state.railData.textbooks || [];
       if (!textbooks.length) {
         ui.railBody.append(el("p", "concepts-hint", "还没有教材目录。"));
@@ -372,6 +376,10 @@
       "个人专题是老师自己组织的用法，和教材目录、数学概念各自独立。一道题可以进两个专题。",
     );
     ui.railBody.append(note);
+    const create = el("button", "concepts-rail-create", "＋新建专题");
+    create.type = "button";
+    create.addEventListener("click", () => createCollection());
+    ui.railBody.append(create);
     const collections = state.railData.collections || [];
     if (!collections.length) {
       ui.railBody.append(el("p", "concepts-hint", "还没有专题。"));
@@ -492,7 +500,12 @@
       return;
     }
     const nodes = [];
-    nodes.push(el("span", "concepts-count", `已确认匹配 ${result.confirmed_count ?? 0} 题`));
+    // 空条件时后端不细分桶（没逐题查关联），只报「一共多少题」。
+    if (result.confirmed_count === null || result.confirmed_count === undefined) {
+      nodes.push(el("span", "concepts-count", `共 ${result.total_count ?? result.count} 题`));
+    } else {
+      nodes.push(el("span", "concepts-count", `已确认匹配 ${result.confirmed_count} 题`));
+    }
     if (result.legacy_count) {
       nodes.push(el("span", "concepts-count is-legacy", `旧标签命中 ${result.legacy_count} 题（未定位具体解法）`));
     }
@@ -594,6 +607,84 @@
     return card;
   }
 
+  async function createChapter() {
+    const title = window.prompt("这一节叫什么？（比如「第十六章 二次方程」）");
+    if (!title || !title.trim()) return;
+    const textbooks = state.railData.textbooks || [];
+    const options = textbooks.map((item) => `${item.name}｜${item.id}`);
+    const choice = window.prompt(
+      textbooks.length
+        ? `放在哪本教材下？\n${options.map((text, index) => `${index + 1}. ${text.split("｜")[0]}`).join("\n")}\n填序号，留空放「通用教学目录」`
+        : "还没有教材，这一节先放在「通用教学目录」里",
+    );
+    let textbookId = "";
+    if (choice && choice.trim()) {
+      const index = Number(choice.trim()) - 1;
+      if (Number.isInteger(index) && textbooks[index]) textbookId = textbooks[index].id;
+    }
+    try {
+      await api("/api/library/chapters", {
+        method: "POST",
+        body: { title: title.trim(), textbook_id: textbookId },
+      });
+      await loadRail();
+    } catch (error) {
+      state.message = error.message;
+      renderSummary();
+    }
+  }
+
+  async function createCollection() {
+    const name = window.prompt("专题叫什么？（比如「周五小测」「易漏解」）");
+    if (!name || !name.trim()) return;
+    try {
+      await api("/api/library/collections", {
+        method: "POST",
+        body: { action: "create", name: name.trim() },
+      });
+      await loadRail();
+    } catch (error) {
+      state.message = error.message;
+      renderSummary();
+    }
+  }
+
+  async function toggleCollection(collectionId, member) {
+    try {
+      await api("/api/library/collections", {
+        method: "POST",
+        body: {
+          action: member ? "remove" : "add",
+          collection_id: collectionId,
+          publication_id: state.selected,
+        },
+      });
+      await selectQuestion(state.selected);
+      await loadRail();
+    } catch (error) {
+      state.message = error.message;
+      renderSummary();
+    }
+  }
+
+  async function attachChapter(chapterId) {
+    try {
+      await api("/api/library/placements", {
+        method: "POST",
+        body: {
+          action: "attach",
+          publication_id: state.selected,
+          chapter_id: chapterId,
+          relation: "teaching",
+        },
+      });
+      await selectQuestion(state.selected);
+    } catch (error) {
+      state.message = error.message;
+      renderSummary();
+    }
+  }
+
   // ---------------------------------------------------------------- 当前题
 
   async function selectQuestion(publicationId) {
@@ -607,6 +698,10 @@
     state.detail.coverage = assertions.coverage;
     state.detail.subquestions = assertions.subquestions;
     state.detail.variants = assertions.variants;
+    state.detail.collections = assertions.collections || [];
+    state.detail.placements = assertions.placements || [];
+    state.detail.operations = assertions.operations || [];
+    state.detail.tag_revision = assertions.tag_revision || 0;
     // 默认落在第一个解法分支上 —— 不然「记录采用的方法」一直灰着，
     // 老师要先想一遍该选哪个才用得上。
     const variants = assertions.variants || [];
@@ -744,6 +839,59 @@
       } else {
         statuses.forEach((item) => {
           body.append(el("p", "concepts-hint", `${item.scope_key} · ${item.status}`));
+        });
+      }
+
+      // ---- 教材对应 ----
+      // 来源位置和教学对应分开记，不互相冒充。
+      body.append(el("h4", "concepts-sub-title", "教材对应"));
+      const placements = state.detail.placements || [];
+      if (!placements.length) {
+        body.append(el("p", "concepts-hint", "还没挂到任何章节。"));
+      } else {
+        placements.forEach((item) => {
+          const row = el("div", "concepts-placement");
+          row.append(el("span", "concepts-placement-title", `${item.textbook_name} · ${item.chapter_title}`));
+          row.append(
+            el("span", "concepts-placement-kind", item.relation === "source" ? "来源位置" : "教学对应"),
+          );
+          body.append(row);
+        });
+      }
+      const chapters = state.railData.chapters || [];
+      if (chapters.length) {
+        const picker = el("select", "concepts-inline-select");
+        const blank = el("option", "", "挂到一节…");
+        blank.value = "";
+        picker.append(blank);
+        chapters.forEach((chapter) => {
+          const option = el("option", "", `${chapter.textbook_name} · ${chapter.title}`);
+          option.value = chapter.id;
+          picker.append(option);
+        });
+        picker.addEventListener("change", () => {
+          if (picker.value) attachChapter(picker.value);
+        });
+        body.append(picker);
+      }
+
+      // ---- 专题 ----
+      body.append(el("h4", "concepts-sub-title", "专题"));
+      const collections = state.railData.collections || [];
+      if (!collections.length) {
+        body.append(el("p", "concepts-hint", "还没有专题。左栏「个人专题」里可以新建。"));
+      } else {
+        collections.forEach((collection) => {
+          const row = el("div", "concepts-collection");
+          const inIt = (state.detail.collections || []).some(
+            (item) => item.collection_id === collection.id,
+          );
+          row.append(el("span", "concepts-collection-name", collection.name));
+          const toggle = el("button", "concepts-collection-toggle", inIt ? "移出" : "加入");
+          toggle.type = "button";
+          toggle.addEventListener("click", () => toggleCollection(collection.id, inIt));
+          row.append(toggle);
+          body.append(row);
         });
       }
     }));

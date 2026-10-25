@@ -372,6 +372,7 @@ class SearchSemanticsTests(RefactorTestBase):
             {"concept_groups": [{"ids": [str(primary.pk)], "roles": ["primary"], "all_or_any": "all"}]}
         )
         self.assertEqual(result["count"], 1)
+        self.assertEqual(result["confirmed_count"], 1)
 
         result = library_query.run_query(
             {"concept_groups": [{"ids": [str(supporting.pk)], "roles": ["primary"], "all_or_any": "all"}]}
@@ -528,6 +529,16 @@ class SearchSemanticsTests(RefactorTestBase):
             }
         )
         self.assertEqual(by_key["count"], 1)
+
+    def test_empty_query_reports_total_without_inventing_buckets(self):
+        """空查询只报「一共多少题」—— 没逐题查过的不能报成「已确认匹配」。"""
+        self.make_publication()
+        result = library_query.run_query({"query": {}})
+        self.assertEqual(result["count"], 1)
+        self.assertIsNone(result["confirmed_count"])
+        self.assertIsNone(result["legacy_count"])
+        self.assertEqual(result["total_count"], 1)
+        self.assertEqual(len(result["items"]), 1)
 
     def test_S12_unmatched_question_is_not_reported_as_unreviewed(self):
         """不满足条件的题是不匹配，不是「未整理」—— 两个混在一起，计数就没意义了。"""

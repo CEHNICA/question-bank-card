@@ -164,6 +164,8 @@ def publication_assertions_view(request, publication_id):
                 "subquestions": library_concepts.list_subquestions(publication),
                 "variants": library_concepts.list_variants(publication),
                 "operations": library_concepts.recent_assertion_operations(str(publication.pk)),
+                "placements": library_concepts.list_placements(publication),
+                "collections": library_concepts.list_publication_collections(publication),
                 "tag_revision": publication.tag_revision,
             }
         )
@@ -199,6 +201,31 @@ def publication_assertions_view(request, publication_id):
 # ---------------------------------------------------------------------------
 # 教材目录与专题
 # ---------------------------------------------------------------------------
+
+
+@csrf_exempt
+@_handle
+def placements_view(request):
+    """题目与教材章节的关联：来源位置 / 教学对应。"""
+    if request.method == "GET":
+        publication = PublishedQuestion.objects.filter(pk=request.GET.get("publication_id")).first()
+        if publication is None:
+            return _error("找不到这道题", 404)
+        return JsonResponse({"placements": library_concepts.list_placements(publication)})
+    if request.method != "POST":
+        return _error("不支持的请求方式", 405)
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容无法读取，什么都没改", 400)
+    action = str(payload.get("action") or "attach")
+    if action == "attach":
+        return JsonResponse(library_concepts.attach_placement(payload))
+    if action == "detach":
+        return JsonResponse(library_concepts.detach_placement(payload))
+    return _error(f"不认识的动作 {action}", 400)
 
 
 @csrf_exempt

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.db.models import Q
+
 from .models import (
     LibraryChapter,
     LibraryCollectionMember,
@@ -218,8 +220,83 @@ def _assignments_for(publication_ids: list[str]) -> list[LibraryTagAssignment]:
 
 
 def _is_confirmed(row: LibraryTagAssignment) -> bool:
-    """正式匹配：人工确认过，且依据当前有效。"""
-    return row.review_status == LibraryTagAssignment.ReviewStatus.CONFIRMED and not row.needs_review
+    """正式匹配：人工确认过，且依据当前有效。
+
+    三个条件缺一不可 —— 确认过、没标待复核、依据还成立。
+    少一个，「已确认匹配」就会把旧记录和需复核的也算进去。
+    """
+    return (
+        row.review_status == LibraryTagAssignment.ReviewStatus.CONFIRMED
+        and not row.needs_review
+        and row.evidence_status == LibraryTagAssignment.EvidenceStatus.CURRENT
+    )
+
+
+#: 「依据当前有效」在 SQL 里的写法。跟 _is_confirmed 一致，两边不能各说各的。
+_CONFIRMED_SQL = {
+    "review_status": LibraryTagAssignment.ReviewStatus.CONFIRMED,
+    "needs_review": False,
+    "evidence_status": LibraryTagAssignment.EvidenceStatus.CURRENT,
+}
+
+
+def _concept_candidate_ids(groups: list[dict], expanded_by_group: list[dict]) -> set[str]:
+    """概念条件先在库里算出候选题号。
+
+    这一步把「要在 Python 里逐题过一遍」的题量从全部题缩到真正相关的那些。
+    一万道题里挂着一个概念的，可能就三十道 —— 那三十道才值得细看。
+    """
+    result: set[str] | None = None
+    for group, expanded in zip(groups, expanded_by_group):
+        allowed: set[str] = set()
+        for ids in expanded.values():
+            allowed |= ids
+        # 已确认的和旧记录都要算进候选 —— 旧记录不进「已确认」，
+        # 但它得能进「旧标签命中」那一桶，不能在候选阶段就被滤掉。
+        rows = (
+            LibraryTagAssignment.objects.filter(tag_id__in=allowed, role__in=set(group["roles"]) | {ROLE_LEGACY})
+            .filter(Q(**_CONFIRMED_SQL) | Q(role=ROLE_LEGACY))
+            .values_list("publication_id", "tag_id")
+            .distinct()
+        )
+        if group["all_or_any"] == "all":
+            # 每个被问的概念自身或下级都要有，才算这一条成立。
+            per_wanted: dict[str, set[str]] = {}
+            for publication_id, tag_id in rows:
+                for wanted, ids in expanded.items():
+                    if str(tag_id) in ids:
+                        per_wanted.setdefault(wanted, set()).add(str(publication_id))
+            wanted_ids = set()
+            for wanted in group["ids"]:
+                wanted_ids |= per_wanted.get(wanted, set())
+            missing = [wanted for wanted in group["ids"] if not per_wanted.get(wanted)]
+            hits = set() if missing else wanted_ids
+        else:
+            hits = {str(publication_id) for publication_id, _ in rows}
+        result = hits if result is None else (result & hits)
+    return result or set()
+
+
+def _method_candidate_ids(groups: list[dict]) -> set[str]:
+    """方法条件先在库里算出候选题号。
+
+    这里只按「这道题挂过这几个方法」取，是**超集** —— 范围（哪一小问、哪个解法）
+    的精确判定留给后面那一层，因为那里才知道展示编号对应哪个小问。
+    一万道题里挂过某个方法的通常只有几百道，比遍历一万道省得多。
+    """
+    result: set[str] | None = None
+    for group in groups:
+        hits = {
+            str(publication_id)
+            for publication_id in (
+                LibraryTagAssignment.objects.filter(tag_id__in=group["ids"], role__in={ROLE_METHOD, ROLE_LEGACY})
+                .filter(Q(**_CONFIRMED_SQL) | Q(role=ROLE_LEGACY))
+                .values_list("publication_id", flat=True)
+                .distinct()
+            )
+        }
+        result = hits if result is None else (result & hits)
+    return result or set()
 
 
 def _is_legacy(row: LibraryTagAssignment) -> bool:
@@ -369,50 +446,76 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
     ``clue``（待核对线索）、``unknown``（排除条件下的未知）。
     """
     query = normalize_query(raw_query)
-    publications = list(
-        PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).order_by("-published_at")
-    )
-    if not publications:
-        return _empty_result(query)
 
-    ids = [str(row.pk) for row in publications]
-    by_id = {str(row.pk): row for row in publications}
+    # 「自身 + 下级」的展开范围按组算一次，别按题算 —— 目录上千道题时这是差一个数量级。
+    expanded_by_group = []
+    for group in query["concept_groups"]:
+        expanded_by_group.append(
+            {
+                wanted: descendant_tag_ids([wanted], include_descendants=group["include_descendants"])
+                for wanted in group["ids"]
+            }
+        )
 
-    # ---- 关键词与基础筛选 -------------------------------------------------
-    candidates: list[str] = ids
-    keywords = query["keywords"]
-    if keywords:
-        needle = " ".join(keywords).strip()
-        candidates = [pid for pid in candidates if needle in (by_id[pid].search_text or "")]
+    # 候选集先在库里收敛。概念和方法条件都能在 SQL 层算出「哪几道题可能相关」，
+    # 把要逐题细看的题量从全部题缩到真正相关的那些 —— 一万道题里挂着一个概念的
+    # 可能就三十道，那三十道才值得细看。
+    candidate_ids: set[str] | None = None
+    if query["concept_groups"]:
+        candidate_ids = _concept_candidate_ids(query["concept_groups"], expanded_by_group)
+    if query["method_groups"]:
+        method_ids = _method_candidate_ids(query["method_groups"])
+        candidate_ids = method_ids if candidate_ids is None else (candidate_ids & method_ids)
 
     filters = query["filters"]
+    rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+    if candidate_ids is not None:
+        rows = rows.filter(pk__in=candidate_ids)
+    # 关键词过滤下推到库里，不在 Python 里逐题扫题面。
+    for word in query["keywords"]:
+        rows = rows.filter(search_text__contains=word)
     if filters["question_type"]:
-        candidates = [pid for pid in candidates if by_id[pid].question_type == filters["question_type"]]
+        rows = rows.filter(question_type=filters["question_type"])
     if filters["source"]:
-        candidates = [pid for pid in candidates if by_id[pid].source_filename == filters["source"]]
+        rows = rows.filter(source_filename=filters["source"])
     if filters["collection"]:
         member_ids = {
             str(row.publication_id)
             for row in LibraryCollectionMember.objects.filter(collection_id=filters["collection"])
         }
-        candidates = [pid for pid in candidates if pid in member_ids]
-    if filters["chapter"]:
-        placed = {
-            str(row.publication_id) for row in LibraryQuestionPlacement.objects.filter(chapter_id=filters["chapter"])
-        }
-        candidates = [pid for pid in candidates if pid in placed]
-    if filters["textbook"]:
-        chapter_ids = {
-            str(row.id)
-            for row in LibraryChapter.objects.filter(textbook_id=filters["textbook"]).values_list("id", flat=True)
-        }
-        if chapter_ids:
-            placed = {
-                str(row.publication_id) for row in LibraryQuestionPlacement.objects.filter(chapter_id__in=chapter_ids)
+        rows = rows.filter(pk__in=list(member_ids))
+    if filters["chapter"] or filters["textbook"]:
+        chapter_ids = set()
+        if filters["chapter"]:
+            chapter_ids.add(filters["chapter"])
+        if filters["textbook"]:
+            chapter_ids |= {
+                str(row.id)
+                for row in LibraryChapter.objects.filter(textbook_id=filters["textbook"]).values_list("id", flat=True)
             }
-            candidates = [pid for pid in candidates if pid in placed]
+        placed = {
+            str(row.publication_id) for row in LibraryQuestionPlacement.objects.filter(chapter_id__in=chapter_ids)
+        }
+        rows = rows.filter(pk__in=list(placed))
 
-    rows = _assignments_for(candidates)
+    # 只取要用的字段。题面快照（content）是整段 JSON，取出来再丢掉最费时间。
+    publications = list(rows.order_by("-published_at").values("id", "number", "question_type", "source_filename"))
+    ids = [str(row["id"]) for row in publications]
+    by_id = {str(row["id"]): row for row in publications}
+
+    order = _sort_key(query["sort"])
+    filters = query["filters"]
+    has_filters = any(str(value or "").strip() for value in filters.values())
+    has_positive = bool(query["concept_groups"] or query["method_groups"] or has_filters or query["keywords"])
+
+    # 每道题的分类和命中理由都要查关联，一万道题全查一遍很贵。
+    # 空条件时全部题都在结果里，但界面只看得到前 limit 道 ——
+    # 后面那些算出来也没人看，只把要显示的那批算清楚。
+    compute_ids = set(ids)
+    if not has_positive and not query["exclusions"]["conditions"]:
+        compute_ids = set(sorted(ids, key=order)[: offset + limit])
+
+    rows = _assignments_for(sorted(compute_ids)) if compute_ids else []
     by_publication: dict[str, list[LibraryTagAssignment]] = {}
     for row in rows:
         by_publication.setdefault(str(row.publication_id), []).append(row)
@@ -433,17 +536,7 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
     method_results: dict[str, list[dict]] = {}
     legacy_method_results: dict[str, list[dict]] = {}
 
-    # 「自身 + 下级」的展开范围按组算一次，别按题算 —— 目录上千道题时这是差一个数量级。
-    expanded_by_group = []
-    for group in query["concept_groups"]:
-        expanded_by_group.append(
-            {
-                wanted: descendant_tag_ids([wanted], include_descendants=group["include_descendants"])
-                for wanted in group["ids"]
-            }
-        )
-
-    for pid in candidates:
+    for pid in sorted(compute_ids, key=order):
         rows_here = by_publication.get(pid, [])
 
         concept_ok = True
@@ -538,7 +631,6 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
                 clue_ids.append(pid)
 
     # ---- 排序与分页 ------------------------------------------------------
-    order = _sort_key(query["sort"])
     result_ids = confirmed_ids + legacy_ids
     # 没有排除条件时，「未整理」的题也要看得见 —— 空查询就是「全部」。
     # 它们单独一区，不混进正式匹配数。
@@ -547,9 +639,12 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
     # 于是没整理过的题也能看见。有条件时，不满足条件的题是不匹配，不该冒出来。
     has_filters = any(str(value or "").strip() for value in query["filters"].values())
     has_positive = bool(query["concept_groups"] or query["method_groups"] or has_filters or query["keywords"])
-    if not has_positive and not query["exclusions"]["conditions"]:
-        unreviewed_ids = [pid for pid in candidates if pid not in set(result_ids)]
-        result_ids = result_ids + unreviewed_ids
+    empty_query = not has_positive and not query["exclusions"]["conditions"]
+    if empty_query:
+        # 空条件：全部题都是结果。分类只算了要显示的那批（见 compute_ids），
+        # 所以统计报「一共多少题」，不细分桶 —— 没查过的不能报成「已确认」。
+        unreviewed_ids = [pid for pid in compute_ids if pid not in set(result_ids)]
+        result_ids = list(ids)
     result_ids = sorted(result_ids, key=order)
     total = len(result_ids)
     page = result_ids[offset : offset + limit]
@@ -572,9 +667,9 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
         items.append(
             {
                 "publication_id": pid,
-                "number": by_id[pid].number,
-                "question_type": by_id[pid].question_type,
-                "source_filename": by_id[pid].source_filename,
+                "number": by_id[pid]["number"],
+                "question_type": by_id[pid]["question_type"],
+                "source_filename": by_id[pid]["source_filename"],
                 "bucket": bucket,
                 "reasons": reasons,
             }
@@ -583,13 +678,14 @@ def run_query(raw_query: dict | None, *, limit: int = 200, offset: int = 0) -> d
     return {
         "query": query,
         "items": items,
-        "count": len(confirmed_ids),
+        # 空条件时报「一共多少题」；细分桶没算全，就不报 —— 把没查过的说成「已确认」是骗人。
+        "count": total if empty_query else len(confirmed_ids),
         "total_count": total,
-        "confirmed_count": len(confirmed_ids),
-        "legacy_count": len(legacy_ids),
+        "confirmed_count": None if empty_query else len(confirmed_ids),
+        "legacy_count": None if empty_query else len(legacy_ids),
         "clue_count": len(clue_ids),
-        "unknown_count": len(set(unknown_ids)),
-        "unreviewed_count": len(unreviewed_ids),
+        "unknown_count": None if empty_query else len(set(unknown_ids)),
+        "unreviewed_count": None if empty_query else len(unreviewed_ids),
         "excluded_count": len(excluded_ids),
     }
 

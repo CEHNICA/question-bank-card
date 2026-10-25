@@ -31,6 +31,7 @@ from .models import (
     LibraryCollection,
     LibraryCollectionMember,
     LibraryCoverage,
+    LibraryQuestionPlacement,
     LibrarySolutionVariant,
     LibrarySubquestion,
     LibraryTag,
@@ -515,20 +516,30 @@ def undo_assertion(payload: dict) -> dict:
 
 
 def recent_assertion_operations(publication_id: str, *, limit: int = 20) -> list[dict]:
-    """一道题上的关联改动历史。界面用它摆「撤销」。"""
+    """一道题上的关联改动历史。界面用它摆「撤销」。
+
+    ``publication_ids`` 是 JSON 字段，SQLite 不支持在它上面做 contains 查询
+    （Django 直接抛 NotSupportedError）。所以这里取最近的一批改动，在 Python 里
+    筛出这道题的 —— 改动记录本来就只增不减且量不大，这样最省事也最稳。
+    """
     rows = LibraryTagOperation.objects.filter(
-        publication_ids__contains=str(publication_id),
-        action__in=["attach_assertion", "detach_assertion", "undo_assertion"],
-    ).order_by("-created_at")[:limit]
-    return [
-        {
-            "id": str(row.pk),
-            "action": row.action,
-            "undone": bool(row.undone_at),
-            "created_at": row.created_at.isoformat(),
-        }
-        for row in rows
-    ]
+        action__in=["attach_assertion", "detach_assertion", "undo_assertion"]
+    ).order_by("-created_at")[:200]
+    result = []
+    for row in rows:
+        if str(publication_id) not in [str(item) for item in (row.publication_ids or [])]:
+            continue
+        result.append(
+            {
+                "id": str(row.pk),
+                "action": row.action,
+                "undone": bool(row.undone_at),
+                "created_at": row.created_at.isoformat(),
+            }
+        )
+        if len(result) >= limit:
+            break
+    return result
 
 
 def detach_assertion(payload: dict) -> dict:
@@ -700,6 +711,69 @@ def ensure_textbook(name: str, *, stage: str = "", volume: str = "", unspecified
 # ---------------------------------------------------------------------------
 # 个人专题
 # ---------------------------------------------------------------------------
+
+
+def list_placements(publication: PublishedQuestion) -> list[dict]:
+    """这道题挂在哪些教材章节上，以及是「来源位置」还是「教学对应」。"""
+    rows = LibraryQuestionPlacement.objects.filter(publication=publication).select_related("chapter")
+    result = []
+    for row in rows:
+        chapter = row.chapter
+        result.append(
+            {
+                "id": str(row.pk),
+                "chapter_id": str(chapter.pk),
+                "chapter_title": chapter.title,
+                "textbook_id": str(chapter.textbook_id or ""),
+                "textbook_name": chapter.textbook.name if chapter.textbook else "通用教学目录",
+                "relation": row.relation,
+                "confirmed": row.confirmed,
+                "basis": row.basis,
+            }
+        )
+    return result
+
+
+def attach_placement(payload: dict) -> dict:
+    """把题挂到某个教材章节上。
+
+    「来源位置」和「教学对应」分开记，互不冒充 ——
+    由「某章讲了某概念」不能反推所有该概念的题都出自那章。
+    """
+    publication = PublishedQuestion.objects.filter(pk=payload.get("publication_id")).first()
+    if publication is None:
+        raise AssertionError_("找不到这道题", 404)
+    chapter = LibraryChapter.objects.filter(pk=payload.get("chapter_id")).first()
+    if chapter is None:
+        raise AssertionError_("找不到这个章节", 404)
+    relation = str(payload.get("relation") or LibraryQuestionPlacement.Relation.TEACHING)
+    if relation not in dict(LibraryQuestionPlacement.Relation.choices):
+        raise AssertionError_(f"关系 {relation} 不认")
+    row, created = LibraryQuestionPlacement.objects.get_or_create(
+        publication=publication,
+        chapter=chapter,
+        relation=relation,
+        defaults={"confirmed": bool(payload.get("confirmed")), "basis": str(payload.get("basis") or "")[:500]},
+    )
+    return {"ok": True, "created": created, "placement": str(row.pk)}
+
+
+def detach_placement(payload: dict) -> dict:
+    """把题从章节上摘下来。题还在题库里，只是不挂那节。"""
+    deleted, _ = LibraryQuestionPlacement.objects.filter(pk=payload.get("placement_id")).delete()
+    if not deleted:
+        raise AssertionError_("找不到这条关联", 404)
+    return {"ok": True, "removed": deleted}
+
+
+def list_publication_collections(publication: PublishedQuestion) -> list[dict]:
+    """这道题在哪些专题里。专题成员只存引用，题面永远只有一份。"""
+    rows = (
+        LibraryCollectionMember.objects.filter(publication=publication)
+        .select_related("collection")
+        .order_by("collection__position", "collection__name")
+    )
+    return [{"collection_id": str(row.collection_id), "name": row.collection.name, "note": row.note} for row in rows]
 
 
 def list_collections() -> list[dict]:

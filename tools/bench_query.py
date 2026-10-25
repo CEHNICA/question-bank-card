@@ -40,6 +40,7 @@ parser.add_argument("--questions", type=int, default=1000)
 parser.add_argument("--runs", type=int, default=20)
 parser.add_argument("--seed", type=int, default=20261025)
 parser.add_argument("--json-out", default="")
+parser.add_argument("--reuse", action="store_true", help="复用库里已有数据，不重造")
 args = parser.parse_args()
 
 os.environ["QB_DATABASE"] = str(Path(args.database).resolve())
@@ -214,7 +215,14 @@ def percentile(values: list[float], fraction: float) -> float:
 
 
 def main() -> int:
-    concepts, methods = build(args.questions)
+    if args.reuse:
+        from core.models import LibraryTag
+
+        concepts = list(LibraryTag.objects.filter(kind="knowledge").order_by("name"))
+        methods = list(LibraryTag.objects.filter(kind="method").order_by("name"))
+        print(f"=== 复用已有数据：{len(concepts)} 个概念、{len(methods)} 个方法 ===")
+    else:
+        concepts, methods = build(args.questions)
     total_assignments = LibraryTagAssignment.objects.count()
     total_publications = PublishedQuestion.objects.count()
 

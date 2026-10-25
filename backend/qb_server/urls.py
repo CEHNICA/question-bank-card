@@ -142,6 +142,7 @@ urlpatterns = [
     path("api/library/assertions", library_refactor_views.assertions_view),
     path("api/library/<uuid:publication_id>/assertions", library_refactor_views.publication_assertions_view),
     path("api/library/textbooks", library_refactor_views.textbooks_view),
+    path("api/library/placements", library_refactor_views.placements_view),
     path("api/library/chapters", library_refactor_views.chapters_view),
     path("api/library/collections", library_refactor_views.collections_view),
     path("api/library/search", library_refactor_views.search_view),
