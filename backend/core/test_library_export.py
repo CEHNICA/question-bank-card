@@ -143,24 +143,28 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(list(PublishedQuestion.objects.values()), before)
         self.assertEqual(list(Question.objects.values()), questions)
 
-    def test_the_original_section_heading_is_printed_when_it_is_the_only_one(self):
-        # 2024 全国甲卷第 1 题 #270 的真实大题标题：分值和答题要求都在里面，
-        # 通用说法「一、选择题」两样都印不出来。
+    def test_the_original_section_heading_is_not_printed_but_the_short_chapter_name_is(self):
+        # 1.26.25：这一行以前印的是原卷那一整行（「一、选择题：本题共 12 小题…」），
+        # 屏幕上印的却是「一、选择题」—— 老师核对的是屏幕，拿到手的是文件，两边对不上。
+        # 现在两边都印题型名：那一行带着原卷的题数、分值和题号范围，跟老师挑的这几道题对不上。
         printed = "一、选择题：本题共 12 小题，每小题 5 分，共 60 分，在每小题给出的四个选项中，只有一项是符合题目要求的"
         first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
         second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
         result = self.post(self.payload([first, second]))
         self.assertEqual(result.status_code, 200, result.content[:300])
         text = "".join(document_xml(result.content).itertext())
-        self.assertIn(printed, text)
-        self.assertIn("共 60 分", text)
-        # 通用说法没有单独出现过（它本来是原标题的开头，所以只能比出现次数）。
-        self.assertEqual(text.count("一、选择题"), 1, text)
+        self.assertIn("一、选择题", text)
+        self.assertNotIn(printed, text)
+        self.assertNotIn("共 60 分", text)
+        self.assertNotIn("本题共", text)
 
-        # 半角句号按中文标点整理（微信图片那份原标题就是这么读的）。
-        self.assertEqual(
-            export._section_heading([{"content": {"section": "三、解答题：共77分.解答应写出文字说明."}}], 0, "解答题"),
-            "三、解答题：共77分。解答应写出文字说明。")
+        # 教材那种短章节名说的是「这些题出自哪一节」，对新卷子依然成立，照旧印。
+        third = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section="习题 3.1")
+        fourth = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section="习题 3.1")
+        result = self.post(self.payload([third, fourth]))
+        self.assertEqual(result.status_code, 200, result.content[:300])
+        text = "".join(document_xml(result.content).itertext())
+        self.assertIn("习题 3.1", text)
 
     def test_a_mixed_group_falls_back_to_the_generic_heading(self):
         # 组卷可以凑好几份卷子的题，这时原标题互相矛盾，只能用通用说法。
@@ -179,10 +183,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         # 没有标题、过长的标题都退回通用说法。
         self.assertEqual(export._section_heading([{"content": {"section": ""}}], 1, "填空题"), "二、填空题")
         self.assertEqual(export._section_heading([{"content": {"section": "习" * 300}}], 2, "填空题"), "三、填空题")
-        # 「单选题」不会被说成「选择题」。
+        # 大题说明和短章节名混在一起：长说明是噪音，不印；一句话说不准，用题型名。
         self.assertEqual(export._section_heading(
-            [{"content": {"section": "一、单选题（本小题共10个小题，每小题4分，共40分。）"}}], 0, "选择题"),
-            "一、单选题（本小题共10个小题，每小题4分，共40分。）")
+            [{"content": {"section": "一、选择题：本题共 12 小题"}}, {"content": {"section": "习题 3.1"}}],
+            0, "选择题"), "一、选择题")
+        # 只有一种短章节名时照旧印它。
+        self.assertEqual(export._section_heading(
+            [{"content": {"section": "习题 3.1"}}, {"content": {"section": "习题 3.1"}}], 0, "选择题"), "习题 3.1")
 
     def test_questions_only_omits_answer_fields_and_answer_pages(self):
         pub = self.publication(answer="不要出现在题目卷")

@@ -1669,26 +1669,28 @@ def _ordered(captured):
 def _section_heading(group, index, name) -> str:
     """组卷上印在每一组题前面的大题标题。
 
-    组建的卷子不一定是原卷：老师可能把好几份卷子的题凑在一起，这时候
-    「一、选择题」才是诚实的说法。但这一组里的题如果都来自同一个大题、
-    而那个大题的标题读下来了，就把原标题印出去——它带着通用说法丢掉的东西：
-    分值（「共 40 分」）和答题要求（「解答应写出文字说明、证明过程或演算步骤」），
-    而且不会把「单选题」说成「选择题」。
+    1.26.25：这一行以前印的是**原卷那一整行原文**（「一、选择题：本题共 12 小题，
+    每小题 5 分，共 60 分，在每小题给出的四个选项中…」），而屏幕上的组卷预览印的
+    是简简单单的「一、选择题」。老师核对的是屏幕、拿到手的是文件 —— 两边对不上，
+    等于没核对过（2026-10-24 老师报的问题）。现在两边都印题型名。
 
-    真库实测（2026-10-11，959 张）：13 份试卷共 47 个（资料 × 题型）分组里，
-    试卷的每一组标题都唯一；教材的分组标题是「习题 6.2」「复习题」这类章节名，
-    一组里常常好几种，那就照旧用通用说法。
+    为什么不再印原卷那一行：它带着**原卷**的题数、分值和题号范围
+    （「第 17 题~第 21 题为必考题」）。组卷的卷子题数是老师自己挑的、题号从 1 重排，
+    那一行对不上就不该印 —— 印上去学生会以为卷子漏了题。
 
-    印出来的题号是从 1 连续重排的，和原卷的「本题共 10 小题」未必对得上；
-    这是「删题组卷」本身就会有的差异，把分值留着比把它藏起来有用。
+    教材那种**短章节名**（「习题 3.1」「练习」）照旧印：它说的是这些题出自哪一节，
+    对新卷子依然成立。长章节名（教材一整章的大题说明）按卡面上那条规矩算噪音，不印。
+    短章节名的判定和卡面、搜索用的是同一条（library.section_label）。
     """
-    headings = {str((item.get("content") or {}).get("section") or "").strip() for item in group}
-    headings.discard("")
-    if len(headings) == 1:
-        printed = prose.full_width_punctuation(headings.pop()).strip()
-        if printed and len(printed) <= 200:
-            return printed
-    return f"{'一二三四五六'[index]}、{name}"
+    sections = {str((item.get("content") or {}).get("section") or "").strip() for item in group}
+    sections.discard("")
+    if len(sections) == 1:
+        label = library.section_label(next(iter(sections)))
+        if label:
+            return label
+    names = "一二三四五六"
+    prefix = names[index] if index < len(names) else str(index + 1)
+    return f"{prefix}、{name}"
 
 
 def _keep_unit(document, start):

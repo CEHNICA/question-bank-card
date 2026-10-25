@@ -160,6 +160,8 @@ class PdfExportTests(TestCase):
     def test_the_pdf_prints_the_same_section_heading_the_word_path_would(self):
         # PDF 在浏览器里分组、Word 在 Python 里分组，标题只有一条规则；
         # 两边各写一遍迟早对不上（这是真出过的：改完 Word 才发现 PDF 没跟上）。
+        # 1.26.25：屏幕上组卷预览印的也是这同一条 —— 老师核对的是屏幕，
+        # 拿到手的文件必须一模一样（以前屏幕印「一、选择题」、文件印原卷那一整行）。
         printed = "一、选择题：本题共 12 小题，每小题 5 分，共 60 分"
         first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
         second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
@@ -168,14 +170,21 @@ class PdfExportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         document = renderer.call_args.args[0]
         self.assertIn("sectionHeadings", document)
-        self.assertIn("共 60 分", document)
+        self.assertNotIn("共 60 分", document)
         self.assertEqual(
             pdf._section_headings([
                 {"type": "single_choice", "content": {"section": printed}},
                 {"type": "single_choice", "content": {"section": printed}},
                 {"type": "fill_blank", "content": {"section": ""}},
             ]),
-            {"single_choice": printed, "fill_blank": "二、填空题"})
+            {"single_choice": "一、选择题", "fill_blank": "二、填空题"})
+        # 教材那种短章节名照旧印。
+        self.assertEqual(
+            pdf._section_headings([
+                {"type": "single_choice", "content": {"section": "习题 3.1"}},
+                {"type": "single_choice", "content": {"section": "习题 3.1"}},
+            ]),
+            {"single_choice": "习题 3.1"})
 
     def test_request_guard_and_missing_answers(self):
         pub = self.publication()

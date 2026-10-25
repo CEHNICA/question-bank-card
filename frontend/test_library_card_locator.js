@@ -22,6 +22,9 @@ const start = js.indexOf("  function shortSection(item)");
 const end = js.indexOf("  function card(item)");
 assert.ok(start > 0 && end > start, "shortSection/cardLocator/sourceLocator 必须存在且排在 card() 前面");
 const scope = {};
+// 1.26.25：章节名的判定搬进了 ExamExport（跟组卷的大题标题共用同一条），
+// 所以这里要把那个模块放进作用域，卡面那条规则才算跑的是真代码。
+scope.window = { ExamExport: require("./exam-export.js") };
 vm.runInNewContext(js.slice(start, end), scope);
 assert.equal(typeof scope.shortSection, "function");
 assert.equal(typeof scope.sourceLocator, "function");

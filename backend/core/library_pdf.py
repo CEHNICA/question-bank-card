@@ -381,7 +381,11 @@ def _assets(frontend):
         return 'url("data:' + mime + ';base64,' + base64.b64encode(path.read_bytes()).decode("ascii") + '")'
     katex_css = re.sub(r"url\(([^)]+)\)", font, katex_css)
     css = "\n".join([read("styles.css"), katex_css, read("library.css")])
-    scripts = [read(name) for name in ("vendor/katex/katex.min.js", "qb-render.js", "library-solutions.js", "exam-layout.js")]
+    # 1.26.25：exam-export.js 也要带进来 —— 组卷预览的大题标题由它算
+    #（frontend/library.js 的 renderPrint），这个页面跑的正是预览那段真代码，
+    # 少一个模块它就报「sectionHeading 不是函数」。
+    scripts = [read(name) for name in ("vendor/katex/katex.min.js", "qb-render.js", "library-solutions.js",
+                                       "exam-export.js", "exam-layout.js")]
     return css, scripts
 
 

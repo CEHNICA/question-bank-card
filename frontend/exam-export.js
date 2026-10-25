@@ -167,6 +167,39 @@
     return paperGroups(items).flatMap(([, group]) => group.map((item) => item.id));
   }
 
+  // 1.26.25：组卷上每个大题前面那一行，屏幕预览和导出的文件必须是同一句话。
+  // 以前屏幕印「二、填空题」、导出印原卷那一整行（「二、填空题：本题共 4 小题，
+  // 每小题 5 分，共 20 分」）—— 老师核对的是屏幕，拿到手的是文件，两边对不上
+  // （2026-10-24 老师报的问题）。现在两边都印题型名。
+  //
+  // 原卷那一行带着原卷的题数、分值和题号范围（「第 17 题~第 21 题为必考题」）。
+  // 组卷的卷子题数是老师自己挑的、题号从 1 重排，那一行对不上就不该印。
+  //
+  // 教材那种短章节名（「习题 3.1」「练习」）照旧印：它说的是这些题出自哪一节，
+  // 对新卷子依然成立。长章节名按卡面上那条规矩算噪音，不印 ——
+  // 判定和后端 library.section_label 是同一条（frontend/testdata/section_labels.json
+  // 锁着两边），导出那边用同一个判定（backend/core/library_export.py 的 _section_heading）。
+  const SECTION_LABEL_MAX = 12;
+  const SECTION_LABEL_STOP = /[：:，,。;；]/;
+  const PAPER_SECTION_NAMES = ["一", "二", "三", "四", "五", "六"];
+
+  function shortSectionLabel(section) {
+    const text = String(section || "").trim();
+    if (!text || text.length > SECTION_LABEL_MAX || SECTION_LABEL_STOP.test(text)) return "";
+    return text;
+  }
+
+  function sectionHeading(group, index, name) {
+    const sections = new Set((group || [])
+      .map((item) => String(item && item.content && item.content.section || "").trim())
+      .filter(Boolean));
+    if (sections.size === 1) {
+      const label = shortSectionLabel([...sections][0]);
+      if (label) return label;
+    }
+    return `${PAPER_SECTION_NAMES[index] || index + 1}、${name}`;
+  }
+
   async function download(items, { title, print_options, solutions, format = "docx", preview_page_count } = {}) {
     if (downloading) throw new Error("正在导出，请稍候。");
     if (!Array.isArray(items) || !items.length) throw new Error("请先选题，再导出试卷。");
@@ -246,5 +279,6 @@
     } finally { downloading = false; }
   }
 
-  return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, paperGroups, paperOrder, download });
+  return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, paperGroups, paperOrder,
+    shortSectionLabel, sectionHeading, download });
 });

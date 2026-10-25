@@ -1190,10 +1190,10 @@
   // 章节名（习题 6.1、复习题）后端已经算好在 content.section 里，只有短标签
   // 才显示——试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题…」），
   // 放上去反而是噪音。
+  // 1.26.25：这条判定搬进 ExamExport（跟组卷的大题标题用的是同一条），
+  // 免得同一句规则在两个文件里各写一遍、改一边就忘了另一边。
   function shortSection(item) {
-    const section = String(item?.content?.section || "").trim();
-    if (!section || section.length > 12 || /[：:，,。;；]/.test(section)) return "";
-    return section;
+    return window.ExamExport.shortSectionLabel(item?.content?.section);
   }
 
   // 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 null。
@@ -5169,11 +5169,12 @@ $("selectedViewCount").textContent = String(state.basket.length);
         if (other.length) out.push(["其他", other]);
         return out;
       })();
-    const chinese = ["一", "二", "三", "四", "五", "六"];
     let number = 0;
     const answers = [];
     ordered.forEach(([name, group], index) => {
-      if (options.document !== "answers") ui.paper.append(node("h3", "print-section", `${chinese[index] || index + 1}、${name}`));
+      // 1.26.25：大题标题由 ExamExport 算 —— 屏幕预览和导出的文件用的是同一个定义，
+      // 老师核对过的和拿到手的必须是同一句话。
+      if (options.document !== "answers") ui.paper.append(node("h3", "print-section", window.ExamExport.sectionHeading(group, index, name)));
       group.forEach((item, position) => {
         number += 1;
         if (options.document !== "answers") {
