@@ -1,0 +1,82 @@
+{
+  "questions": 1000,
+  "assignments": 1534,
+  "runs_per_query": 20,
+  "seed": 20261025,
+  "target_p95_ms": 500.0,
+  "worst_p95_ms": 36.2,
+  "verdict": "达标",
+  "results": [
+    {
+      "query": "空条件（全部）",
+      "runs": 20,
+      "median_ms": 33.02,
+      "p95_ms": 36.2,
+      "max_ms": 49.59
+    },
+    {
+      "query": "主要考查＝单个概念",
+      "runs": 20,
+      "median_ms": 5.93,
+      "p95_ms": 7.57,
+      "max_ms": 20.92
+    },
+    {
+      "query": "主要考查＝三个概念（全中）",
+      "runs": 20,
+      "median_ms": 8.04,
+      "p95_ms": 8.64,
+      "max_ms": 9.58
+    },
+    {
+      "query": "主要考查＝十个概念（任一）",
+      "runs": 20,
+      "median_ms": 16.42,
+      "p95_ms": 17.75,
+      "max_ms": 31.45
+    },
+    {
+      "query": "包含下级概念",
+      "runs": 20,
+      "median_ms": 6.83,
+      "p95_ms": 8.3,
+      "max_ms": 9.69
+    },
+    {
+      "query": "方法＝单个（同解法）",
+      "runs": 20,
+      "median_ms": 5.32,
+      "p95_ms": 6.07,
+      "max_ms": 6.1
+    },
+    {
+      "query": "方法＝两个（同解法 AND）",
+      "runs": 20,
+      "median_ms": 5.88,
+      "p95_ms": 8.26,
+      "max_ms": 8.77
+    },
+    {
+      "query": "方法＝两个（分别存在）",
+      "runs": 20,
+      "median_ms": 6.29,
+      "p95_ms": 6.85,
+      "max_ms": 7.22
+    },
+    {
+      "query": "方法＋排除（未知单独计数）",
+      "runs": 20,
+      "median_ms": 4.68,
+      "p95_ms": 5.81,
+      "max_ms": 5.95
+    },
+    {
+      "query": "关键词＋题型",
+      "runs": 20,
+      "median_ms": 2.69,
+      "p95_ms": 3.45,
+      "max_ms": 3.61
+    }
+  ],
+  "note": "合成占位数据，不是数学测试集；换机器换题量数字不可比。"
+}

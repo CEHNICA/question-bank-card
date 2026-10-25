@@ -82,7 +82,7 @@ cd <worktree>\backend
 | R01 | 普通添加标签 | 不要求先维护完整目录 | ✓ | 测试 `test_R01_tagging_needs_no_catalogue_setup`；打包版实机：贴标签 200 |
 | R02 | 空标签、无解析题 | 能整理考点，不虚构方法依据 | ✓ | 测试 `test_R02_question_without_solution_gets_no_fabricated_method`：关联 1 条、依据 0 条 |
 | R03 | AI 生成完成 | 仅新增候选，不增加正式关联 | ✓ | 测试 `test_R03_ai_result_only_becomes_candidate` |
-| R04 | 修改后采纳候选 | 按人工修改后的内容写入并保留原建议 | **—** | **本轮未做**。新工作台只有整条采纳/拒绝，没有「先改再采纳」；老的候选编辑界面仍可用 |
+| R04 | 修改后采纳候选 | 按人工修改后的内容写入并保留原建议 | ✓ | 测试 `test_accept_writes_the_role_the_teacher_chosen`（改成「辅助用到」，正式关联的 role 就是 supporting）、`test_accept_keeps_the_original_suggestion`（原建议和理由原样留着，decision=accepted）、`test_accept_without_edit_uses_the_suggested_role`（没改就按建议的用途写，不落成「旧关联，作用未细分」） |
 | R05 | 解析版本改变 | 受影响的方法需复核；无关考点不整批失效 | **—** | **本轮未做**。数据模型有 `evidence_status=needs_recheck` 可承载，但事件未接 |
 | R06 | 改标签显示色或排序 | 不导致数学依据全面失效 | ✓ | 显示色/排序不在服务层写路径里（`Design-Decisions.md` §4 约束 8） |
 | R07 | 候选拒绝、刷新、重试 | 决策不丢失，不重复出现为新建议 | ✓ | 候选状态在 `LibraryTagSuggestion` 里持久化；迁移演练实测迁移前后状态一位不差 |
