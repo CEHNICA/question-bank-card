@@ -282,15 +282,7 @@ def prepare(payload):
                 )
             else:
                 method_context = library_tagging.current_method_source(publication)
-                method_snapshot = (
-                    {
-                        key: method_context[key]
-                        for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                        if key in method_context
-                    }
-                    if method_context
-                    else {}
-                )
+                method_snapshot = library_tagging.method_source_snapshot(publication)
                 job.tag_scope = True
                 job.save(update_fields=["tag_scope", "updated_at"])
                 proposal, _ = LibraryTagSuggestion.objects.get_or_create(
@@ -311,7 +303,7 @@ def prepare(payload):
                     proposal.question_fingerprint != fingerprint
                     or proposal.assignment_revision != publication.tag_revision
                     or proposal.taxonomy_revision != library_tagging.catalogue_state().revision
-                    or proposal.method_source != method_snapshot
+                    or not library_tagging.method_source_matches(proposal.method_source, method_snapshot)
                 ):
                     raise AssistantError("题目、标签目录或采用的解析在准备期间发生变化，请重新请求。")
                 existing_ids = {
@@ -496,17 +488,8 @@ def complete(payload):
             suggestion.publication = publication
             suggestion.question_fingerprint = fingerprint
             suggestion.assignment_revision = publication.tag_revision
-            method = library_tagging.current_method_source(publication)
-            current_method_source = (
-                {
-                    key: method[key]
-                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                    if key in method
-                }
-                if method
-                else {}
-            )
-            if current_method_source != (suggestion.method_source or {}):
+            current_method_source = library_tagging.method_source_snapshot(publication)
+            if not library_tagging.method_source_matches(suggestion.method_source, current_method_source):
                 raise AssistantError("题目采用的解析在生成期间发生变化，方法建议没有保存。")
             suggestion.generation_source = agent
             current = LibraryTagCatalogue.objects.get(pk=1)

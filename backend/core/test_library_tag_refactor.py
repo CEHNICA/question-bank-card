@@ -532,6 +532,57 @@ class CandidateEditTests(RefactorTestBase):
         )
         self.assertEqual({row.scope_key for row in rows}, {f"sub:{subquestions[0].pk}", f"sub:{subquestions[1].pk}"})
 
+    def test_accept_is_not_blocked_by_extra_fields_in_the_stored_snapshot(self):
+        """存进去的快照带了别的字段，也不该被判成「解析变了」。
+
+        比对只看「能判断解析有没有变」的那几项。两边都只取那几项 ——
+        拿全量去比，解析一个字都没改也会被判过期。
+        """
+        from core.models import LibraryTagSuggestion
+
+        publication = self.make_publication(
+            stem="（1）求证 AB=CD。\n（2）求证 AB∥CD。", analysis="（1）虚构推导。（2）虚构结论。"
+        )
+        library_concepts.ensure_subquestions(publication)
+        method = self.make_concept("候选方法", kind="method")
+        catalogue = library_tagging.catalogue_state()
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=publication,
+            status=LibraryTagSuggestion.Status.PENDING,
+            taxonomy_revision=catalogue.revision,
+            assignment_revision=publication.tag_revision,
+            # 多带了 analysis 和 image_data_urls —— 比对时应该被忽略掉。
+            method_source={
+                **library_tagging.method_source_snapshot(publication),
+                "analysis": "多带的一份解析原文",
+                "image_data_urls": ["data:image/jpeg;base64,虚构"],
+            },
+            suggestions=[
+                {
+                    "name": "候选方法",
+                    "tag_id": str(method.pk),
+                    "kind": "method",
+                    "role": "method",
+                    "scope": {"whole": True},
+                    "rationale": "虚构建议的理由。",
+                    "evidence": "虚构建议的依据。",
+                }
+            ],
+        )
+
+        result = library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(LibraryTagAssignment.objects.filter(publication=publication).count(), 1)
+
     def test_accept_without_edit_uses_the_suggested_role(self):
         """没改就按建议里的用途写，不能落成「旧关联，作用未细分」。"""
         publication = self.make_publication()

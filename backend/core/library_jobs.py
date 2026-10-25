@@ -130,22 +130,13 @@ def enqueue(
             from . import library_tagging
 
             catalogue = library_tagging.catalogue_state()
-            method = library_tagging.current_method_source(publication)
-            method_snapshot = (
-                {
-                    key: method[key]
-                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                    if key in method
-                }
-                if method
-                else {}
-            )
+            method_snapshot = library_tagging.method_source_snapshot(publication)
             latest = LibraryTagSuggestion.objects.filter(publication=publication).order_by("-created_at", "-id").first()
             same_result = bool(
                 latest
                 and latest.question_fingerprint == fingerprint
                 and latest.taxonomy_revision == catalogue.revision
-                and latest.method_source == method_snapshot
+                and library_tagging.method_source_matches(latest.method_source, method_snapshot)
                 and latest.status
                 in {
                     LibraryTagSuggestion.Status.PENDING,
@@ -192,16 +183,7 @@ def enqueue(
             from . import library_tagging
 
             catalogue = library_tagging.catalogue_state()
-            context = library_tagging.current_method_source(publication)
-            method_snapshot = (
-                {
-                    key: context[key]
-                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                    if key in context
-                }
-                if context
-                else {}
-            )
+            method_snapshot = library_tagging.method_source_snapshot(publication)
             LibraryTagSuggestion.objects.create(
                 job=job,
                 publication=publication,
@@ -529,17 +511,8 @@ def run_tag_proposal(publication: PublishedQuestion, suggestion: LibraryTagSugge
     # An empty user catalogue is valid: the model may propose a new candidate
     # which the user can create and accept explicitly.
     current_context = library_tagging.current_method_source(publication)
-    stored_source = suggestion.method_source or {}
-    source_snapshot = (
-        {
-            key: current_context[key]
-            for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-            if key in current_context
-        }
-        if current_context
-        else {}
-    )
-    if source_snapshot != stored_source:
+    source_snapshot = library_tagging.method_source_snapshot(publication)
+    if not library_tagging.method_source_matches(suggestion.method_source, source_snapshot):
         raise JobError("已保存解析在排队后发生变化；旧建议未生成，请重新请求。")
     question_images = _figure_urls(publication)
     method_images = current_context.get("image_data_urls", []) if current_context else []
@@ -634,17 +607,8 @@ def _bound_target(
             or catalogue.revision != proposal.taxonomy_revision
         ):
             raise JobError("题目标签或标签目录在生成期间发生变化，旧建议未保存；请重新请求。")
-        context = library_tagging.current_method_source(current)
-        source = (
-            {
-                key: context[key]
-                for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                if key in context
-            }
-            if context
-            else {}
-        )
-        if source != (proposal.method_source or {}):
+        source = library_tagging.method_source_snapshot(current)
+        if not library_tagging.method_source_matches(proposal.method_source, source):
             raise JobError("题目采用的解析在生成期间发生变化，旧建议未保存；请重新请求。")
     elif not job.solution_scope:
         _no_existing_result(current, job.kind)
@@ -701,16 +665,7 @@ def process_pending(limit: int = 5) -> int:
                 from . import library_tagging
 
                 catalogue = library_tagging.catalogue_state()
-                context = library_tagging.current_method_source(publication)
-                method_snapshot = (
-                    {
-                        key: context[key]
-                        for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                        if key in context
-                    }
-                    if context
-                    else {}
-                )
+                method_snapshot = library_tagging.method_source_snapshot(publication)
                 LibraryTagSuggestion.objects.get_or_create(
                     job=job,
                     defaults={

@@ -2530,17 +2530,7 @@ def resolve_suggestion(suggestion_id, payload):
             for index in indices
         )
         if needs_method_source:
-            context = current_method_source(publication)
-            current_source = (
-                {
-                    key: context[key]
-                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                    if key in context
-                }
-                if context
-                else {}
-            )
-            if current_source != (suggestion.method_source or {}):
+            if not method_source_matches(suggestion.method_source, current_method_source(publication)):
                 raise StaleTagSuggestionError("采用的解析版本或配图已变化，这批方法建议已过期，请重新建议。", 409)
         before = _snapshot_assignments(publication)
         suggestion_before = {
@@ -2978,3 +2968,37 @@ def current_method_source(publication):
             {key: item.get(key) for key in ("page_idx", "bbox", "parts", "source", "file")} for item in figures
         ],
     }
+
+
+# 判断「方法建议依据的那一版解析有没有变」只用这几项。
+#
+# 这一份以前散在六个地方各抄一遍 —— 抄漏一项、抄错一项，
+# 就会出现「解析一个字都没改，却说建议过期了」。
+# 存快照和比快照现在都走这两个函数。
+METHOD_SOURCE_KEYS = ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
+
+
+def method_source_snapshot(publication):
+    """当前解析版本里「能判断它有没有变」的那一份。
+
+    全量快照（含解析原文、图片 data url）只在拼提示词时用，不进数据库。
+    """
+    context = current_method_source(publication)
+    if not context:
+        return {}
+    return {key: context[key] for key in METHOD_SOURCE_KEYS if key in context}
+
+
+def method_source_matches(stored, current):
+    """存的那份和现在的还一致吗。
+
+    两边都只取比较用的那几项。存进去的快照可能还带着别的字段
+    （整份解析文字、图片 data url），拿全量去比会把「一样的」判成「变了」。
+    """
+
+    def pick(source):
+        if not isinstance(source, dict):
+            return {}
+        return {key: source[key] for key in METHOD_SOURCE_KEYS if key in source}
+
+    return pick(stored) == pick(current)
