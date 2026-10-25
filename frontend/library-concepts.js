@@ -287,29 +287,42 @@
       ui.railBody.append(note);
       const create = el("button", "concepts-rail-create", "＋新建章节");
       create.type = "button";
-      create.addEventListener("click", () => createChapter());
+      create.addEventListener("click", () => openChapterForm());
       ui.railBody.append(create);
       const textbooks = state.railData.textbooks || [];
-      if (!textbooks.length) {
+      const all = state.railData.chapters || [];
+      // 「通用教学目录」不是一本教材，它是不指定版本时章节的落脚处。
+      // 它不在教材表里，但章节可能属于它 —— 所以要单独列一组，
+      // 不然在新库上建的章节会一个都看不见。
+      const generic = all.filter((chapter) => !chapter.textbook_id);
+      if (!textbooks.length && !generic.length) {
         ui.railBody.append(el("p", "concepts-hint", "还没有教材目录。"));
         return;
       }
-      textbooks.forEach((textbook) => {
+      const groups = textbooks.map((textbook) => ({
+        id: textbook.id,
+        name: textbook.name,
+        chapters: all.filter((chapter) => chapter.textbook_id === textbook.id),
+      }));
+      if (generic.length) {
+        groups.push({ id: "", name: "通用教学目录", chapters: generic });
+      }
+      groups.forEach((group) => {
         const block = el("section", "concepts-rail-block");
-        block.append(el("h3", "concepts-rail-sub", textbook.name));
-        const chapters = (state.railData.chapters || []).filter(
-          (chapter) => chapter.textbook_id === textbook.id,
-        );
-        if (!chapters.length) {
+        block.append(el("h3", "concepts-rail-sub", group.name));
+        if (!group.chapters.length) {
           block.append(el("p", "concepts-hint", "这一本还没有章节。"));
         }
-        chapters.forEach((chapter) => {
-          const button = el("button", "concepts-rail-item", chapter.title);
+        // 章 → 节。目录本来就是有层级的，平着摆看不出哪节属于哪章。
+        chapterRows(group.chapters, "").forEach((row) => {
+          const button = el("button", "concepts-rail-item", row.chapter.title);
           button.type = "button";
+          button.style.paddingLeft = `${6 + row.depth * 14}px`;
+          if (row.depth > 0) button.classList.add("is-child");
           button.addEventListener("click", () => {
             state.query = emptyQuery();
-            state.query.filters.chapter = chapter.id;
-            state.query.filters.textbook = textbook.id;
+            state.query.filters.chapter = row.chapter.id;
+            if (group.id) state.query.filters.textbook = group.id;
             renderChips();
             runSearch();
           });
@@ -617,31 +630,87 @@
     return card;
   }
 
-  async function createChapter() {
-    const title = window.prompt("这一节叫什么？（比如「第十六章 二次方程」）");
-    if (!title || !title.trim()) return;
-    const textbooks = state.railData.textbooks || [];
-    const options = textbooks.map((item) => `${item.name}｜${item.id}`);
-    const choice = window.prompt(
-      textbooks.length
-        ? `放在哪本教材下？\n${options.map((text, index) => `${index + 1}. ${text.split("｜")[0]}`).join("\n")}\n填序号，留空放「通用教学目录」`
-        : "还没有教材，这一节先放在「通用教学目录」里",
-    );
-    let textbookId = "";
-    if (choice && choice.trim()) {
-      const index = Number(choice.trim()) - 1;
-      if (Number.isInteger(index) && textbooks[index]) textbookId = textbooks[index].id;
-    }
-    try {
-      await api("/api/library/chapters", {
-        method: "POST",
-        body: { title: title.trim(), textbook_id: textbookId },
+  /** 章节按父子层级排好：章在前，节跟在它下面。 */
+  function chapterRows(chapters, parentId, depth = 0) {
+    const rows = [];
+    chapters
+      .filter((chapter) => (chapter.parent_id || "") === (parentId || ""))
+      .forEach((chapter) => {
+        rows.push({ chapter, depth });
+        rows.push(...chapterRows(chapters, chapter.id, depth + 1));
       });
-      await loadRail();
-    } catch (error) {
-      state.message = error.message;
-      renderSummary();
-    }
+    return rows;
+  }
+
+  /** 新建一节：可以选放在哪本教材下、属于哪一章。 */
+  function openChapterForm() {
+    const form = el("div", "concepts-chapter-form");
+    const titleInput = el("input", "concepts-field-input");
+    titleInput.type = "text";
+    titleInput.placeholder = "比如「第十六章 二次方程」";
+    form.append(el("span", "concepts-field-label", "这一节叫什么"), titleInput);
+
+    const textbookSelect = el("select", "concepts-field-input");
+    const generic = el("option", "", "通用教学目录（版本未指定）");
+    generic.value = "";
+    textbookSelect.append(generic);
+    (state.railData.textbooks || []).forEach((textbook) => {
+      const option = el("option", "", textbook.name);
+      option.value = textbook.id;
+      textbookSelect.append(option);
+    });
+    form.append(el("span", "concepts-field-label", "放在哪本教材下"), textbookSelect);
+
+    const parentSelect = el("select", "concepts-field-input");
+    const noParent = el("option", "", "（作为最上面的一层）");
+    noParent.value = "";
+    parentSelect.append(noParent);
+    const refreshParents = () => {
+      parentSelect.replaceChildren(noParent);
+      const textbookId = textbookSelect.value;
+      (state.railData.chapters || [])
+        .filter((chapter) => (chapter.textbook_id || "") === (textbookId || ""))
+        .forEach((chapter) => {
+          const option = el("option", "", `在「${chapter.title}」下面`);
+          option.value = chapter.id;
+          parentSelect.append(option);
+        });
+    };
+    textbookSelect.addEventListener("change", refreshParents);
+    refreshParents();
+    form.append(el("span", "concepts-field-label", "属于哪一章"), parentSelect);
+
+    const status = el("p", "concepts-field-hint");
+    const actions = el("div", "concepts-maintain-actions");
+    const save = el("button", "btn", "建好");
+    save.type = "button";
+    save.addEventListener("click", async () => {
+      const title = titleInput.value.trim();
+      if (!title) {
+        status.textContent = "先给这一节起个名字。";
+        return;
+      }
+      try {
+        await api("/api/library/chapters", {
+          method: "POST",
+          body: {
+            title,
+            textbook_id: textbookSelect.value,
+            parent_id: parentSelect.value,
+          },
+        });
+        await loadRail();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
+    const cancel = el("button", "btn btn-quiet", "算了");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => form.remove());
+    actions.append(save, cancel);
+    form.append(actions, status);
+    ui.railBody.insertBefore(form, ui.railBody.children[2] || null);
+    titleInput.focus();
   }
 
   async function createCollection() {

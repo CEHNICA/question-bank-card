@@ -808,3 +808,33 @@
   font-size: 13px;
   padding: 2px 0;
 }
+
+/* 章节树：节比章缩进一格，父子关系一眼能分 */
+.concepts-rail-item.is-child {
+  font-size: 12.5px;
+  color: var(--qb-muted, #616a76);
+}
+
+.concepts-chapter-form {
+  margin: 4px 0 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--qb-border, #e6e8ec);
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.concepts-chapter-form .concepts-field-label {
+  display: block;
+  font-size: 11px;
+  margin: 6px 0 2px;
+  color: var(--qb-muted, #616a76);
+}
+
+.concepts-chapter-form .concepts-field-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid var(--qb-border, #e6e8ec);
+  border-radius: 8px;
+  background: #fff;
+}
