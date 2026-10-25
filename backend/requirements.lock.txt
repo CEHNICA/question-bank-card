@@ -9,6 +9,7 @@ Pillow==12.3.0
 PyMuPDF==1.28.2
 pywin32==312; platform_system == "Windows"
 python-docx==1.2.0
+pypinyin==0.55.0
 requests==2.34.2
 sqlparse==0.6.0
 tzdata==2026.4

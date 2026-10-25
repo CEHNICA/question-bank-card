@@ -128,6 +128,11 @@ hiddenimports = [
 # Django discovers contenttypes and its migrations at runtime.
 hiddenimports += collect_submodules("django.contrib.contenttypes")
 
+# pypinyin：标签管理窗口按拼音首字母分组用的。它的拼音词典分散在
+# 各个子模块里，静态分析不一定每个都跟得上 —— 整包收进去，少一颗字
+# 就落进「#」组，看着像归类错了。
+hiddenimports += collect_submodules("pypinyin")
+
 version_file = BUILD_ROOT / "version_info.txt"
 
 a = Analysis(

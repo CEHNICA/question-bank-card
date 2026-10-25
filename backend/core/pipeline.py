@@ -5041,6 +5041,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         probe := textnorm.anchor_reading_mismatch(
             printed,
             "".join([final.get("stem") or "", *(final.get("options") or {}).values(), final.get("analysis") or ""]),
+            origin or "",
         )
     ):
         flags.append(
@@ -6183,24 +6184,47 @@ def reconcile_anchor_reading_flags(paper: Paper, dry_run: bool = False) -> int:
       八下第 4 题 #1069 纸上印的是12 个直角三角形拼成的图形，卡上是四边形坐标
 
     这 5 张印在学生卷上和正常题一模一样，界面上也看不出异常。这里只加旗标，
-    不动一个字：人工改过字、人工核对过、已经通过的卡一律跳过（那是人的决定），
-    已经挂着这句话的也跳过。只提示，不擅自改。
+    不动一个字：人工改过字、人工核对过、已经通过的卡一律跳过（那是人的决定）。
+    只提示，不擅自改。
+
+    ⚠️ 反过来也做：判据修好之后，之前按老判据挂上去的话要撤掉（2026-10-24）。
+    老判据拿**出处**那句去比对，而出处早就被单独拆进「题源」字段了，认不出来是
+    必然的 —— 真库 10 张里 9 张是这么误报的（#1085~#1099，同一份卷子）。
+    撤旗标不撤销「通过」：内容一个字没动，卡本来就没问题。
     """
     printed_by_seq = {
         block.get("seq"): str(block.get("text") or "") for block in _block_dicts(paper) if block.get("seq") is not None
     }
     changed = 0
     for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
+        printed = printed_by_seq.get(question.source_anchor_seq)
+        reading = "".join([question.stem or "", *(question.options or {}).values(), question.analysis or ""])
+        if any(str(flag).startswith(ANCHOR_MISMATCH_FLAG_PREFIX) for flag in question.flags or []):
+            # 已经挂着这句话：按现在的判据重算一次。仍然成立就留着，不成立就撤。
+            #
+            # 保护口径跟「加旗标」那边不一样，这是有意的：
+            #   * 人工**改过字**、**已通过** —— 那是人对这张卡下的结论，不能动。
+            #   * 人工确认过「这题确实没图」 —— 跟这句话无关。不能因为它让误报永远
+            #     撤不掉：真库 #1089 就是这样（2026-10-25 凌晨人工确认无图，同一天
+            #     这条误报挂上了），撤旗标不动他那个确认，也不推翻他任何一个决定。
+            if not printed or question.approved or question.edited:
+                continue
+            if textnorm.anchor_reading_mismatch(printed, reading, question.origin or ""):
+                continue
+            question.flags = [
+                flag for flag in (question.flags or []) if not str(flag).startswith(ANCHOR_MISMATCH_FLAG_PREFIX)
+            ]
+            if question.state in {Question.State.GREEN, Question.State.YELLOW}:
+                question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+            if not dry_run:
+                question.save()
+            changed += 1
+            continue
         if _figure_decision_protected(question):
             continue
-        if any(str(flag).startswith(ANCHOR_MISMATCH_FLAG_PREFIX) for flag in question.flags or []):
-            continue
-        printed = printed_by_seq.get(question.source_anchor_seq)
         if not printed:
             continue
-        probe = textnorm.anchor_reading_mismatch(
-            printed, "".join([question.stem or "", *(question.options or {}).values(), question.analysis or ""])
-        )
+        probe = textnorm.anchor_reading_mismatch(printed, reading, question.origin or "")
         if not probe:
             continue
         question.flags = [

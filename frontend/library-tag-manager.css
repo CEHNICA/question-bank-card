@@ -227,3 +227,49 @@ body.library-tag-manager-open #libraryFilterToggle, body.library-tag-manager-ope
 .tag-directory-root-hint[hidden] { display: none; }
 .tag-directory-root-hint strong { color: var(--ink, #262c29); font-size: 14px; }
 .tag-directory-root-hint p { margin: 0; max-width: 460px; }
+
+/* 1.27.0：标签管理窗口按拼音首字母分组、组内平铺成网格。
+   三百多个标签竖着排要滚很久；按 A/B/C… 分开之后一屏能看全。 */
+.tag-directory-letter-group { margin-bottom: 4px; }
+.tag-directory-letter-heading { display: flex; align-items: baseline; gap: 7px; padding: 12px 10px 5px; color: var(--muted, #747971); font-size: 12px; }
+.tag-directory-letter-heading strong { color: var(--ink, #262c29); font-size: 13px; font-weight: 600; }
+.tag-directory-letter-heading small { font-size: 11px; font-variant-numeric: tabular-nums; }
+.tag-directory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 1px 6px; padding: 0 4px 10px; }
+.tag-directory-chip { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; border-radius: 7px; }
+.tag-directory-chip:hover { background: #f6f7f3; }
+.tag-directory-chip.selected { background: #eaf3ed; }
+.tag-directory-chip.focused { box-shadow: inset 2px 0 #2f7d68; }
+.tag-directory-chip.inactive { opacity: .68; }
+.tag-directory-chip-check { flex: none; width: 14px; height: 14px; margin: 0; accent-color: #236e60; opacity: 0; }
+.tag-directory-chip:hover .tag-directory-chip-check,
+.tag-directory-chip.selected .tag-directory-chip-check,
+.tag-directory-chip:focus-within .tag-directory-chip-check { opacity: 1; }
+/* 触屏上没有悬停，勾选框必须一直在 —— 否则根本没法批量归组。 */
+@media (hover: none) { .tag-directory-chip-check { opacity: 1; } }
+.tag-directory-chip .tag-directory-color { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #83a398; }
+.tag-directory-chip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; border: 0; background: transparent; color: var(--ink, #262c29); font: inherit; font-size: 13px; padding: 2px 0; cursor: pointer; }
+.tag-directory-chip-name:hover { color: #1d7062; }
+.tag-directory-chip-count { flex: none; color: var(--muted, #747971); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tag-directory-chip-count.is-zero { color: var(--faint, #b3b6af); }
+
+/* 1.27.0：左栏的「标签群组 (N)」和分组项。 */
+.tag-directory-group-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-right: 4px; }
+.tag-directory-group-title .tag-directory-nav-heading { padding-bottom: 6px; }
+.tag-directory-group-row { display: flex; align-items: center; gap: 2px; }
+.tag-directory-group-row .tag-directory-group { flex: 1 1 auto; min-width: 0; }
+.tag-directory-group-manage { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted, #747971); font-size: 15px; line-height: 1; cursor: pointer; }
+.tag-directory-group-manage:hover { background: #dcebe5; color: #206e60; }
+.tag-directory-group-menu { position: fixed; z-index: 60; display: grid; gap: 2px; min-width: 150px; padding: 5px; border: 1px solid var(--line, #e3e3dc); border-radius: 9px; background: #fff; box-shadow: 0 8px 22px rgba(35, 52, 45, .16); }
+.tag-directory-group-menu button { justify-content: flex-start; }
+
+/* 1.27.0：详情里的「所属分组」。 */
+.tag-directory-tag-groups { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line, #e3e3dc); }
+.tag-directory-tag-groups h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted, #747971); font-weight: 600; }
+.tag-directory-tag-group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 13px; }
+.tag-directory-tag-group-row > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tag-directory-group-picker { margin-top: 8px; width: 100%; padding: 6px 8px; min-height: 31px; border: 1px solid #d7e0d9; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; }
+.tag-directory-bulk-group { max-width: 150px; padding: 6px 8px; min-height: 31px; border: 1px solid #d7e0d9; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; }
+.tag-directory-dialog { padding: 20px; border: 1px solid var(--line, #e3e3dc); border-radius: 12px; background: #fff; max-width: 420px; width: calc(100% - 40px); }
+.tag-directory-dialog h2 { margin: 0 0 12px; font-size: 15px; }
+.tag-directory-dialog-input { width: 100%; padding: 9px 11px; border: 1px solid #cfdad2; border-radius: 8px; font: inherit; font-size: 14px; }
+.tag-directory-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
