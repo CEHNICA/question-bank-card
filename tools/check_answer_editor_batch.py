@@ -61,7 +61,7 @@ def restore(baseline: dict) -> None:
     connection = sqlite3.connect(DB)
     missed = []
     try:
-        for pub_id, (original, before) in baseline.items():
+        for pub_id, (_original, before) in baseline.items():
             key = db_key(pub_id)
             extra = connection.execute(
                 "select id from core_librarysolution where publication_id = ?", (key,)).fetchall()
@@ -207,7 +207,7 @@ def walk(baseline: dict) -> dict:
                 return {}
             # 基线：这几道题跑之前各有哪些解析行、extras 原文是什么。收尾按它还原。
             baseline.update({pub: (originals[pub], solution_ids(pub)) for pub in picked})
-            order = {pub: index + 1 for index, pub in enumerate(picked)}
+            {pub: index + 1 for index, pub in enumerate(picked)}
 
             for pub_id in picked:
                 page.locator(f"article#q-{pub_id} .library-card-select").check()

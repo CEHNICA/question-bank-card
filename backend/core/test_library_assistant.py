@@ -8,9 +8,15 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 from PIL import Image
 
-from . import features, library, library_assistant as assistant, library_ai_settings as service, library_jobs
+from . import (
+    features,
+    library,
+    library_ai_settings as service,
+    library_assistant as assistant,
+    library_jobs,
+    test_library_ai_settings as settings_tests,
+)
 from .models import LibraryJob, LibraryTag, LibraryTagSuggestion, PublishedQuestion, Question
-from . import test_library_ai_settings as settings_tests
 from .test_v110_types_origin import TempDataMixin
 
 

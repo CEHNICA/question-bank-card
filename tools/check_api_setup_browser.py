@@ -8,20 +8,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import json
+import sys
+import traceback
+import uuid
 from copy import deepcopy
 from functools import partial
-import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
-import sys
 from threading import Thread
-import traceback
 from urllib.parse import urlparse
-import uuid
 
 from playwright.async_api import async_playwright, expect
-
 
 ROOT = Path(__file__).resolve().parents[1]
 READING_PROVIDERS = ("modelscope", "minimax", "siliconflow")

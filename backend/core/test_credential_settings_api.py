@@ -29,6 +29,7 @@ def identity_transform(data: bytes, *, protect: bool) -> bytes:
 class MineruCredentialProbeTests(SimpleTestCase):
     def test_saving_a_token_without_a_documented_probe_does_not_make_any_api_request(self):
         import urllib.request
+
         import requests
 
         with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("must stay offline")), \

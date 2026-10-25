@@ -996,7 +996,7 @@ class _Merge:
                         self.notes.append(f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着")
                         continue
             changed = []
-            for field, label in (("answer", "答案"), ("analysis", "解析")):
+            for field, _label in (("answer", "答案"), ("analysis", "解析")):
                 if not str(local.get(field) or "").strip() and str(question.get(field) or "").strip():
                     changed.append((field, question[field]))
                 elif str(local.get(field) or "").strip():

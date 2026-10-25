@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -75,7 +74,7 @@ def choose_directory_view(request):
     from .export_preferences import desktop_capable
     if not desktop_capable():
         return _error("只有 Windows 桌面版能选文件夹；网页版请用浏览器的下载。", status=409)
-    from .native_folder_picker import choose_directory, FolderPickerError
+    from .native_folder_picker import FolderPickerError, choose_directory
     try:
         chosen = choose_directory("", "选择备份要存放的文件夹")
     except FolderPickerError as error:

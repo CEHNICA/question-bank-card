@@ -12,13 +12,12 @@
 import io
 from unittest import mock
 
+import pymupdf as fitz
 from django.test import TestCase
 from PIL import Image
-import pymupdf as fitz
 
-from . import intake, pipeline, views
+from . import intake, pipeline, test_manual_intake_review as manual_review, views
 from .models import Paper, Question, QuestionGroup
-from . import test_manual_intake_review as manual_review
 
 
 def scan_pdf() -> bytes:

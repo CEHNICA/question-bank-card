@@ -12,8 +12,7 @@ from unittest import mock
 
 from django.test import Client, SimpleTestCase, TestCase
 
-from . import mineru, pipeline
-from . import test_v110_types_origin as v110
+from . import mineru, pipeline, test_v110_types_origin as v110
 from .models import Paper
 from .pipeline import paper_dir
 from .test_v1107_reparse import fake_api
@@ -60,7 +59,7 @@ class StopTests(v110.TempDataMixin, TestCase):
 
         def extract(_source, archive, _pages, heartbeat=None, on_state=None, restart=None, cancel=None):
             assert cancel()
-            raise mineru.MineruCancelled()
+            raise mineru.MineruCancelled
 
         self.paper.refresh_from_db()
         with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):

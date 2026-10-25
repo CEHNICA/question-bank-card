@@ -9,9 +9,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
 import unicodedata
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,11 +44,10 @@ def seed():
     import django
     django.setup()
     from django.core.management import call_command
-    from django.utils import timezone
+
     from core import features, library, library_tagging
+    from core.models import LibraryTag, LibraryTagAssignment, LibraryTagSuggestion, Paper, PublishedQuestion, Question
     from core.tag_catalogue_seed import seed_catalogue
-    from core.models import (LibraryTag, LibraryTagAssignment, LibraryTagSuggestion,
-                             Paper, PublishedQuestion, Question)
 
     call_command("migrate", verbosity=0)
     features.save({"knowledge_tags": True, "ai_answer": False})
@@ -104,7 +103,7 @@ def seed():
 
 
 def check(base: str):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 
     _assert_isolated()
     if urlparse(base).hostname not in {"127.0.0.1", "localhost"}:

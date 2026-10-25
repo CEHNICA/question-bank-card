@@ -10,6 +10,7 @@
 import json
 import sys
 from pathlib import Path
+
 from playwright.sync_api import sync_playwright
 
 URL = "http://127.0.0.1:8803"
@@ -310,7 +311,7 @@ def run(pg):
         pg.goto(URL + "/library?bk=" + str(w), wait_until="load"); pg.wait_for_timeout(2400)
         if w <= 979:
             pg.click("#libraryFilterToggle"); pg.wait_for_timeout(600)
-        at_top = pg.evaluate(BULK)
+        pg.evaluate(BULK)
         pg.evaluate("() => window.scrollTo(0, 1200)"); pg.wait_for_timeout(700)
         far = pg.evaluate(BULK)
         # 正好等于，不是 <=：小于说明被顶栏或别的东西压住了

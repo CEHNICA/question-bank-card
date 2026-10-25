@@ -10,7 +10,6 @@ from django.utils import timezone
 from . import pipeline, segment
 from .models import Block, Paper, Question, QuestionGroup
 
-
 PAGES = [{"page_idx": 0, "width": 1000, "height": 1400}]
 
 

@@ -9,15 +9,14 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_handwritten_candidate
 """
-from unittest import mock
 from types import SimpleNamespace
+from unittest import mock
 
-from PIL import Image
 from django.test import SimpleTestCase
+from PIL import Image
 
 from core import figure_policy, pipeline, readers
 from core.models import Question
-
 
 CROP = Image.new("RGB", (8, 8), "white")
 
@@ -27,8 +26,11 @@ def labels(*specs):
             for index, box in enumerate(specs)}
 
 
+_DEFAULT_ENGINE = object()
+
+
 class HandwrittenCandidateTests(SimpleTestCase):
-    def call(self, *, source=None, answers=None, crop=CROP, engine=object()):
+    def call(self, *, source=None, answers=None, crop=CROP, engine=_DEFAULT_ENGINE):
         engine = engine if engine is not None else mock.Mock()
         verdict = answers if answers is not None else {1}
         with mock.patch.object(pipeline, "_figure_alone", return_value=crop) as crop_call, \

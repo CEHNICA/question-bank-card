@@ -22,9 +22,9 @@ lives in the frontend: the backend mutations run the Django test, the rest run n
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
     try:

@@ -21,7 +21,6 @@ import ctypes
 import hashlib
 import json
 import os
-from pathlib import Path
 import socket
 import sqlite3
 import subprocess
@@ -29,11 +28,11 @@ import sys
 import time
 import traceback
 import urllib.request
-from urllib.parse import urlparse
 import uuid
+from pathlib import Path
+from urllib.parse import urlparse
 
 import check_practice_browser as practice
-
 
 ROOT = Path(__file__).resolve().parents[1]
 FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -276,8 +275,9 @@ def browser_check(output: Path, port: int) -> int:
                 destination = output / "practice-actual.pdf"
                 downloads[0].save_as(destination)
                 expect(page.locator("#practiceDone")).to_be_visible()
-                import pymupdf
                 import unicodedata
+
+                import pymupdf
                 with pymupdf.open(destination) as document:
                     assert document.page_count == preview_pages, "Downloaded PDF page count differs from the preview"
                     assert all(abs(page.rect.width - 210 / 25.4 * 72) < 1 and

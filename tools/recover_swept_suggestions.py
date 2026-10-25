@@ -15,7 +15,7 @@ import shutil
 import socket
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 ROOT = os.path.join(os.environ["LOCALAPPDATA"], "QuestionBankCard")
 DB = os.path.join(ROOT, "db.sqlite3")
@@ -57,7 +57,7 @@ def main():
         "resolved_at, updated_at, job_id from core_librarytagsuggestion "
         "where status = 'stale' and message = ? and substr(resolved_at, 1, 16) = ? "
         "order by id", (SWEEP_MESSAGE, SWEEP_BUCKET)).fetchall()
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
     print("标签目录当前版本:", revision)
     print("待捞回的批次:", len(targets))
     print("其中带任务的:", sum(1 for row in targets if row["job_id"]))

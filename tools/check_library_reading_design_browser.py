@@ -8,10 +8,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import time
 import uuid
 import zipfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 import check_tag_hierarchy_browser as harness
@@ -22,9 +22,10 @@ original_seed = harness.seed
 
 def seed():
     original_seed()
+    from PIL import Image, ImageDraw
+
     from core import library, library_tagging
     from core.models import LibraryTag, LibraryTagAssignment, LibraryTagRelation, PublishedQuestion
-    from PIL import Image, ImageDraw
     fixtures = json.loads((harness.OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     questions = [PublishedQuestion.objects.get(pk=key) for key in fixtures["ids"]]
     geometry = LibraryTag.objects.get(pk=fixtures["tags"]["geometry"])
@@ -69,10 +70,10 @@ def seed():
 
 
 def check(base):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
     harness.harness.regression._assert_isolated()
     report = {"checks": [], "errors": [], "external_requests": [], "screenshots": [], "real_backend": True}
-    fixtures = json.loads((harness.OUTPUT / "fixture.json").read_text(encoding="utf-8"))
+    json.loads((harness.OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     with sync_playwright() as playwright:
         executable = next((str(path) for path in [Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"), Path(playwright.chromium.executable_path)] if path.is_file()), None)
         browser = playwright.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))

@@ -1,10 +1,10 @@
 """Offline library editing: immutable history, exact locks and source assets."""
-from copy import deepcopy
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.test import RequestFactory, TestCase, override_settings

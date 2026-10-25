@@ -6,12 +6,12 @@ loads credentials, or changes the application database.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from dataclasses import dataclass
 import json
 import math
-from pathlib import Path
 import sys
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
 
 Rect = tuple[float, float, float, float]
 Geometry = dict[int, list[Rect]]

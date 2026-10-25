@@ -5,11 +5,11 @@ Run --seed then start only Django (no worker) and run --url against that server.
 """
 
 import argparse
-from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import sys
+from copy import deepcopy
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +25,14 @@ def seed():
     sys.path.insert(0, str(ROOT / "backend"))
     import django
     django.setup()
+    import shutil
+
     from django.conf import settings
     from django.core.management import call_command
     from django.utils import timezone
+
     from core import library
-    from core.models import Paper, Question, PublishedQuestion
-    import shutil
+    from core.models import Paper, PublishedQuestion, Question
 
     call_command("migrate", verbosity=0)
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -84,7 +86,7 @@ def seed():
 
 
 def check(url):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
     ids = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))["ids"]
     errors = []
     with sync_playwright() as pw:

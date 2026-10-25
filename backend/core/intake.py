@@ -90,7 +90,7 @@ def prepare(paper: Paper, mode: str) -> Paper:
     if mode not in {"manual", "native"}:
         raise ValueError("请选择手工框题或本地文字 PDF")
     # Reuse only local rendering/conversion, never pipeline.parse.
-    from .pipeline import prepare_photos, convert_docx_to_pdf
+    from .pipeline import convert_docx_to_pdf, prepare_photos
     if paper.photos and not paper.render_path:
         prepare_photos(paper)
     if paper.kind == "docx" and not paper.render_path:
@@ -343,8 +343,8 @@ class ManualPreparationError(RuntimeError):
 
 def _prepare_manual_pages(paper: Paper, revision: int) -> Paper:
     """Prepare missing original pages without replacing old blocks or cards."""
-    from .pipeline import prepare_photos, convert_docx_to_pdf, _set_if_plan_current
     from . import mineru
+    from .pipeline import _set_if_plan_current, convert_docx_to_pdf, prepare_photos
 
     if paper.photos and not paper.render_path:
         target = Path(settings.DATA_ROOT) / str(paper.pk) / f"pages-manual-{revision}.pdf"
@@ -355,7 +355,7 @@ def _prepare_manual_pages(paper: Paper, revision: int) -> Paper:
         target = Path(settings.DATA_ROOT) / str(paper.pk) / f"converted-manual-{revision}.pdf"
         convert_docx_to_pdf(Path(paper.source_path), target)
         if not _set_if_plan_current(paper, revision, render_path=str(target)):
-            raise mineru.MineruCancelled()
+            raise mineru.MineruCancelled
     source, kind, digest = source_images.source_identity(paper)
     pages = imaging.page_sizes(source, kind)
     if not pages:

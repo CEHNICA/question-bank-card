@@ -217,8 +217,8 @@ def main() -> int:
     if args.worker:
         # The whole batch is queued at once, as a user dropping several files
         # would; the worker's main lane reads while its parse lane runs ahead.
-        from core.management.commands import run_worker
         from core.account_pool import lease_priority
+        from core.management.commands import run_worker
         batch = [item for item in (upload(spec) for spec in args.inputs) if item]
         started = now()
         stop = threading.Event()
@@ -242,7 +242,7 @@ def main() -> int:
         finished_at = {}
         while len(finished_at) < len(batch):
             progressed = False
-            for paper, label, files in batch:
+            for paper, label, _files in batch:
                 if paper.pk in finished_at:
                     continue
                 paper.refresh_from_db()

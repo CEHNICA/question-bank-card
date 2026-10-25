@@ -7,10 +7,10 @@ The temporary server closes even if a check fails.
 
 import argparse
 import asyncio
+import json
 from copy import deepcopy
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse

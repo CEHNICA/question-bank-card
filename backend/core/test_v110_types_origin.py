@@ -15,7 +15,19 @@ from unittest import mock
 from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from . import features, knowledge, library, library_ai_settings, library_jobs, pipeline, prose, qtypes, readers, segment, textnorm
+from . import (
+    features,
+    knowledge,
+    library,
+    library_ai_settings,
+    library_jobs,
+    pipeline,
+    prose,
+    qtypes,
+    readers,
+    segment,
+    textnorm,
+)
 from .models import Block, LibraryJob, Paper, PublishedQuestion, Question
 from .tests import PAGES, fake_page_pdf, tagged, two_column_paper
 

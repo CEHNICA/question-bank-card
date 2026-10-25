@@ -1,17 +1,17 @@
 """Independent regression review: local source bodies and late OCR boundaries."""
-from concurrent.futures import Future
-from copy import deepcopy
 import hashlib
 import io
 import json
-from pathlib import Path
 import tempfile
+from concurrent.futures import Future
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 import pymupdf as fitz
-from PIL import Image, ImageChops
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image, ImageChops
 
 from . import imaging, intake, library, native_pdf, pipeline, source_images
 from .models import Paper, PublishedQuestion, Question

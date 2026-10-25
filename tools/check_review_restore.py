@@ -16,7 +16,7 @@ def main():
     url = args.url.rstrip("/")
     if urlparse(url).hostname not in ("127.0.0.1", "localhost"):
         raise SystemExit("local only")
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
         executable = next((str(p) for p in (Path(pw.chromium.executable_path),

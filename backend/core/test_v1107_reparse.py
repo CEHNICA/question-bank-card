@@ -12,8 +12,7 @@ from unittest import mock
 
 from django.test import Client, SimpleTestCase, TestCase
 
-from . import mineru, pipeline
-from . import test_v110_types_origin as v110
+from . import mineru, pipeline, test_v110_types_origin as v110
 from .models import ImportChunk, Paper
 from .pipeline import paper_dir
 
@@ -58,7 +57,7 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
             if len(calls) == 1:
                 restart_file.write_text("restart", encoding="utf-8")  # the page asks while MinerU is slow
                 assert restart()
-                raise mineru.MineruRestart()
+                raise mineru.MineruRestart
             archive.write_bytes(b"zip")
 
         blocks = [{"seq": 1, "type": "text", "page_idx": 0, "bbox": [20, 30, 900, 80], "text": "1. 已知"}]

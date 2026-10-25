@@ -3,7 +3,7 @@ from django.test import TestCase
 
 from core import library_jobs, library_tagging
 from core.models import LibraryTag, LibraryTagRelation
-from core.tag_catalogue_seed import template_blueprint, seed_catalogue
+from core.tag_catalogue_seed import seed_catalogue, template_blueprint
 
 
 class HierarchyTemplateTests(TestCase):

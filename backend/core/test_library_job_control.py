@@ -1,15 +1,22 @@
 """Isolated lifecycle audit: finite API work and explicit assistant handoffs."""
-from copy import deepcopy
-from datetime import timedelta
 import json
 import os
-from unittest import mock
 import uuid
+from copy import deepcopy
+from datetime import timedelta
+from unittest import mock
 
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-from . import features, library, library_ai_settings as service, library_assistant as assistant, library_job_control as control, library_jobs
+from . import (
+    features,
+    library,
+    library_ai_settings as service,
+    library_assistant as assistant,
+    library_job_control as control,
+    library_jobs,
+)
 from .models import LibraryJob, LibrarySolution, PublishedQuestion
 from .test_v110_types_origin import TempDataMixin
 

@@ -7,7 +7,6 @@ Never writes.
 import json
 import os
 import sqlite3
-import sys
 from collections import Counter, defaultdict
 
 DB = os.path.join(os.environ.get("LOCALAPPDATA", ""), "QuestionBankCard", "db.sqlite3")
@@ -34,7 +33,7 @@ def main():
     papers = cursor.execute(
         "select id, filename, status from core_paper order by filename").fetchall()
     print("== 每份卷子的题数对账 ==")
-    for paper_id, filename, status in papers:
+    for paper_id, filename, _status in papers:
         rows = cursor.execute(
             "select state, approved_at is not null as ok, deleted_at is not null as gone, count(*) "
             "from core_question where paper_id = ? group by state, ok, gone", (paper_id,)).fetchall()
@@ -53,13 +52,13 @@ def main():
     print()
     print("== 既没入库、也没删掉、也不算待核的题 ==")
     found = 0
-    for paper_id, filename, status in papers:
+    for paper_id, filename, _status in papers:
         odd = cursor.execute(
             "select number, state, question_type, approved_at, deleted_at from core_question "
             "where paper_id = ? and approved_at is null and deleted_at is null "
             "and state not in ('green', 'yellow', 'red', 'waiting', 'reading')",
             (paper_id,)).fetchall()
-        for number, state, kind, approved_at, deleted_at in odd:
+        for number, state, kind, _approved_at, _deleted_at in odd:
             found += 1
             print("  %s 第 %s 题  状态=%s 题型=%s" % (filename[:36], number, state, kind))
     if not found:
@@ -67,7 +66,7 @@ def main():
 
     print()
     print("== 已被入库、但题目里写着有内容没并进来 ==")
-    for paper_id, filename, status in papers:
+    for paper_id, filename, _status in papers:
         notes = cursor.execute(
             "select notes from core_paper where id = ?", (paper_id,)).fetchone()[0]
         try:
@@ -86,8 +85,8 @@ def main():
     print()
     print("== 同一块图被两道题同时认领 ==")
     claims = defaultdict(list)
-    for paper_id, filename, status in papers:
-        for qid, number, regions in cursor.execute(
+    for paper_id, _filename, _status in papers:
+        for _qid, number, regions in cursor.execute(
                 "select id, number, regions from core_question where paper_id = ?", (paper_id,)):
             try:
                 rows = json.loads(regions) if isinstance(regions, str) else (regions or [])
@@ -127,7 +126,7 @@ def main():
     print("== 切题时记下的配图冲突（两题争同一块图）==")
     conflicts = 0
     dropped = 0
-    for paper_id, filename, status in papers:
+    for paper_id, filename, _status in papers:
         raw = cursor.execute(
             "select processing_plan from core_paper where id = ?", (paper_id,)).fetchone()[0]
         try:

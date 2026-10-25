@@ -94,7 +94,7 @@ def restore() -> None:
 def main() -> int:
     failures: list[str] = []
 
-    for label, path, _, test in DJANGO:
+    for label, _path, _, test in DJANGO:
         code, _ = run_django(test)
         if code != 0:
             print(f"[对照组] {label}：未改动实现时测试本应通过，实际失败")

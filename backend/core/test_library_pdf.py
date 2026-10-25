@@ -1,15 +1,15 @@
 """PDF export boundaries; renderer tests use synthesized local documents only."""
-from copy import deepcopy
-from contextlib import ExitStack
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
-from pathlib import Path
 import re
 import socket
 import struct
 import threading
 import time
+from contextlib import ExitStack
+from copy import deepcopy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from urllib.error import URLError
@@ -17,8 +17,7 @@ from urllib.error import URLError
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import path
 
-from . import library, library_pdf as pdf
-from . import test_library_export as fixtures
+from . import library, library_pdf as pdf, test_library_export as fixtures
 
 urlpatterns = [path("api/library/export-pdf", pdf.export_pdf_view)]
 COMPLETE = b"%PDF-1.7\nsynthetic offline test\n%%EOF\n"
@@ -556,9 +555,9 @@ class PdfTransportTests(SimpleTestCase):
             pdf._browser_path()
 
     def test_connection_path_is_owned_local_target(self):
-        for path in ("https://example.invalid", "/devtools/page/x?query=1", "/devtools/page/../secret", "/not-cdp"):
+        for target in ("https://example.invalid", "/devtools/page/x?query=1", "/devtools/page/../secret", "/not-cdp"):
             with mock.patch.object(pdf.socket, "create_connection") as connect, self.assertRaises(pdf.word.ExportError):
-                pdf._CDP(12345, path, time.monotonic() + 5)
+                pdf._CDP(12345, target, time.monotonic() + 5)
             connect.assert_not_called()
 
     def test_masked_request_and_fragmented_large_reply_with_ping(self):
@@ -571,7 +570,7 @@ class PdfTransportTests(SimpleTestCase):
             data = bytearray()
             while len(data) < count:
                 piece = stream.recv(count - len(data))
-                if not piece: raise ConnectionError()
+                if not piece: raise ConnectionError
                 data.extend(piece)
             return bytes(data)
         def frame(data, opcode, final=True):

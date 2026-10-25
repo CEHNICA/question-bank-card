@@ -7,8 +7,8 @@ import math
 import os
 import re
 import shutil
-import unicodedata
 import threading
+import unicodedata
 import uuid
 from collections import OrderedDict
 from copy import deepcopy
@@ -23,31 +23,75 @@ from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllo
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-
 from PIL import Image
 
-from .version import APP_VERSION
 from . import (
-    credential_settings, demo, features, imaging, import_planning, library, library_jobs, m3import,
-    mineru, photos, preferences, prose, qtypes, readers, region_reads, tables, intake, source_images, continue_ai_cut,
+    continue_ai_cut,
+    credential_settings,
+    demo,
+    features,
+    imaging,
+    import_planning,
+    intake,
+    library,
+    library_jobs,
+    m3import,
+    mineru,
+    photos,
+    preferences,
+    prose,
+    qtypes,
     question_layout,
+    readers,
+    region_reads,
+    source_images,
+    tables,
 )
 from .figure_policy import (
-    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, DECISION_FLAGS, FLAG_FOREIGN_FIGURE, FLAG_NO_FIGURE,
-    FLAG_ROW_FIGURE, FLAG_UNCUED_FIGURE,
-    FLAG_UNFOUND_FIGURE, OK, blocking_message, blocks_approval, candidate_key as figure_candidate_key,
-    canonical_candidate_key, cue_matches, figure_flag, legacy_candidate_key, paper_candidate_keys,
-    reusing_reviews, stored_or_derived_review,
+    BLOCKED_MISSING,
+    CONFIRMED_NO_FIGURE,
+    CONFLICT,
+    DECISION_FLAGS,
+    FLAG_FOREIGN_FIGURE,
+    FLAG_NO_FIGURE,
+    FLAG_ROW_FIGURE,
+    FLAG_UNCUED_FIGURE,
+    FLAG_UNFOUND_FIGURE,
+    OK,
+    blocking_message,
+    blocks_approval,
+    candidate_key as figure_candidate_key,
+    canonical_candidate_key,
+    cue_matches,
+    figure_flag,
+    legacy_candidate_key,
+    paper_candidate_keys,
+    reusing_reviews,
+    stored_or_derived_review,
 )
 from .models import (
-    Block, ImportChunk, LibraryJob, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
+    Block,
+    ImportChunk,
+    LibraryJob,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
     RegionRead,
 )
 from .pipeline import (
-    CUT_PRODUCED_NOTHING, TEXT_DRAFT_FLAGS, PageStore, candidates_in, check_spots, paper_dir,
-    preview_resegment, reorder_photo_pages, promote_saved_readings,
+    CUT_PRODUCED_NOTHING,
+    TEXT_DRAFT_FLAGS,
+    PageStore,
+    check_spots,
+    paper_dir,
+    preview_resegment,
+    promote_saved_readings,
+    reorder_photo_pages,
 )
 from .textnorm import fix_reading_symbols, fix_symbols, witness_key
+from .version import APP_VERSION
 
 FRONTEND = settings.FRONTEND_ROOT
 UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
@@ -230,7 +274,7 @@ def _valid_regions(paper: Paper, value) -> list[dict] | None:
 
 def _file(path: Path, content_type: str):
     if not path.is_file():
-        raise Http404()
+        raise Http404
     return FileResponse(path.open("rb"), content_type=content_type)
 
 
@@ -356,7 +400,7 @@ def _processing_json(paper: Paper) -> dict | None:
 # readings and took a second or more each time.  Any change to the row, the
 # paper's name or the card's group gives a new fingerprint, so a stale answer
 # is never reused.
-_VERDICTS: "OrderedDict[int, tuple[str, str, bool, bool, bool]]" = OrderedDict()
+_VERDICTS: OrderedDict[int, tuple[str, str, bool, bool, bool]] = OrderedDict()
 _VERDICTS_LIMIT = 50_000
 _VERDICTS_LOCK = threading.Lock()
 
@@ -775,7 +819,7 @@ def katex_asset(request, asset: str):
     elif re.fullmatch(r"fonts/KaTeX_[A-Za-z0-9_-]+\.(?:woff2?|ttf)", asset):
         content_type = {"woff2": "font/woff2", "woff": "font/woff", "ttf": "font/ttf"}[asset.rsplit(".", 1)[1]]
     else:
-        raise Http404()
+        raise Http404
     return _file(FRONTEND / "vendor" / "katex" / asset, content_type)
 
 
@@ -1760,7 +1804,7 @@ def question_deletion_restore(request, paper_id, batch_id):
 def page_preview(request, paper_id, page: int):
     paper = get_object_or_404(Paper, pk=paper_id)
     if page not in {p["page_idx"] for p in paper.pages}:
-        raise Http404()
+        raise Http404
     return _file(PageStore(paper).preview(page), "image/jpeg")
 
 
@@ -2931,7 +2975,7 @@ def question_action(request, question_id, action: str):
                     question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
             _clear_approval(question)
         else:
-            raise Http404()
+            raise Http404
         if action != "approve":
             question.content_revision += 1
             if action != "reread":
@@ -3004,7 +3048,7 @@ def question_crop(request, question_id):
 def question_figure(request, question_id, index: int):
     question = _question(question_id)
     if not 0 <= index < len(question.figures):
-        raise Http404()
+        raise Http404
     # 存下来的坐标裁不出图（框太小、页面被换过、缓存坏了）时，回一句能照着做的话，
     # 而不是让用户看着一张 500 白页。隔壁的 question_image 早就是这个做法。
     try:
@@ -3018,7 +3062,7 @@ def question_image(request, question_id, index: int):
         return HttpResponseNotAllowed(["GET"])
     question = _question(question_id)
     if not source_images.is_image(question) and question.processing_mode != "manual":
-        raise Http404()
+        raise Http404
     try:
         return _file(source_images.asset_file(question, index), "image/png")
     except (OSError, ValueError, IndexError, RuntimeError):
@@ -3032,7 +3076,7 @@ def question_ocr_figure(request, question_id, index: int):
     suggestion = question.ocr_suggestion or {}
     figures = suggestion.get("figures") or []
     if suggestion.get("revision") != question.content_revision or not 0 <= index < len(figures):
-        raise Http404()
+        raise Http404
     question.figures = figures
     # 这些坐标是模型给的，没有经过 _valid_bbox。裁不出来就回 409，不给 500。
     try:
@@ -3166,7 +3210,7 @@ def library_detail(request, publication_id):
 def library_figure(request, publication_id, name):
     get_object_or_404(PublishedQuestion, pk=publication_id)
     if not re.fullmatch(r"figure-\d{1,3}\.png", name):
-        raise Http404()
+        raise Http404
     return _file(settings.DATA_ROOT / "library" / str(publication_id) / name, "image/png")
 
 
@@ -3175,16 +3219,16 @@ def library_question_image(request, publication_id, name):
         return HttpResponseNotAllowed(["GET"])
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     if not re.fullmatch(r"question-\d{1,2}\.png", name):
-        raise Http404()
+        raise Http404
     image = next((item for item in (publication.content or {}).get("question_images", []) if item.get("file") == name), None)
     if (publication.content or {}).get("body_mode") != "source_image" or image is None:
-        raise Http404()
+        raise Http404
     path = settings.DATA_ROOT / "library" / str(publication_id) / name
     try:
         if hashlib.sha256(path.read_bytes()).hexdigest() != image["image_sha256"]:
             return _error("正式题原图校验失败，请检查快照文件", 409)
     except (OSError, KeyError):
-        raise Http404()
+        raise Http404 from None
     return _file(path, "image/png")
 
 
@@ -3470,7 +3514,6 @@ def library_jobs_view(request):
         targets = list(library_browse.library_rows(filters).order_by("published_at", "id"))
     elif payload.get("missing") is True:
         if kind == LibraryJob.Kind.TAGS:
-            from .models import LibraryTagAssignment
             targets = list(live.exclude(tag_assignments__tag__kind="knowledge",
                 tag_assignments__needs_review=False).exclude(tag_suggestions__status__in=[
                     "queued", "running", "pending"]).order_by("published_at", "id").distinct())
@@ -3491,8 +3534,8 @@ def library_jobs_view(request):
             and not (item.extras or {}).get("ai_answer")]
     requested = len(targets)
     if tag_scope:
-        from .models import LibraryTagCatalogue, LibraryTagSuggestion
         from . import library_tagging
+        from .models import LibraryTagSuggestion
         catalogue = library_tagging.catalogue_state()
         eligible = []
         for item in targets:
@@ -3561,7 +3604,7 @@ def library_jobs_cancel(request):
 def library_assistant_tasks(request):
     """Read the local assistant inbox without starting any cloud generation."""
     from . import library_assistant
-    from .library_browse import normalize_ids, BrowseError
+    from .library_browse import BrowseError, normalize_ids
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:

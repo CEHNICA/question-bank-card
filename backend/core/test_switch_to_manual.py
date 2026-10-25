@@ -1,17 +1,25 @@
 """One-action manual fallback: real local pages, offline late-result races."""
+import json
+import tempfile
 from copy import deepcopy
 from datetime import timedelta
-import json
 from pathlib import Path
-import tempfile
 from unittest import mock
 
-from PIL import Image
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 
-from . import intake, library, mineru, pipeline, region_reads, readers
-from . import test_local_intake as local_tests, test_manual_intake_review as review_tests
+from . import (
+    intake,
+    library,
+    mineru,
+    pipeline,
+    readers,
+    region_reads,
+    test_local_intake as local_tests,
+    test_manual_intake_review as review_tests,
+)
 from .models import Block, ImportChunk, Paper, Question, RegionRead
 
 
@@ -246,8 +254,8 @@ class SwitchToManualTests(TestCase):
         for ahead in (False, True):
             with self.subTest(ahead=ahead):
                 paper = self.paper(mode="mineru", status="queued")
-                def extract(*args, **kwargs):
-                    self.assertEqual(self.switch(paper).status_code, 200)
+                def extract(*args, _paper=paper, **kwargs):
+                    self.assertEqual(self.switch(_paper).status_code, 200)
                     raise mineru.MineruError("obsolete remote failure")
                 with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
                     if ahead:

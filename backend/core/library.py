@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from difflib import SequenceMatcher
 import hashlib
 import json
 import re
 import shutil
 import unicodedata
 import uuid
+from copy import deepcopy
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from django.conf import settings
@@ -18,10 +18,12 @@ from django.utils import timezone
 
 from . import demo, features, imaging, prose, qtypes, source_images
 from .figure_policy import (
+    CONFIRMED_NO_FIGURE,
     DECISION_FLAGS,
-    CONFIRMED_NO_FIGURE, blocking_message, blocks_approval, stored_or_derived_review,
+    blocking_message,
+    blocks_approval,
 )
-from .models import LibraryJob, Paper, PublishedQuestion, Question, QuestionGroup
+from .models import Paper, PublishedQuestion, Question, QuestionGroup
 from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = set(qtypes.CHOICE_TYPES)

@@ -9,7 +9,12 @@ from django.utils import timezone
 
 from . import library, pipeline, segment
 from .models import (
-    Block, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup,
+    Block,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
 )
 
 

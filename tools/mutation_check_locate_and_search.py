@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
     try:

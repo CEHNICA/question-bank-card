@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 r"""`manage.py reconcile_flags` 这条独立入口的守门测试。
 
 「重新切题」跑完末尾会顺带补几条兜底提示（几何挂图落在范围外、卡号那一行认不出、
@@ -22,9 +21,9 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 
+import pymupdf
 from django.core.management import CommandError, call_command
 from django.test import TestCase
-import pymupdf
 
 from . import figure_policy, pipeline, qtypes
 from .models import Block, Paper, Question, QuestionGroup
@@ -256,10 +255,10 @@ class ReconcileFlagsCommandTests(TestCase):
 
     def card(self, **values):
         self.counter += 1
-        base = dict(
-            paper=self.paper, group=self.group, number=self.counter,
-            processing_mode="auto", body_mode="text",
-            state=Question.State.GREEN, flags=[], figures=[], figure_review={})
+        base = {
+            "paper": self.paper, "group": self.group, "number": self.counter,
+            "processing_mode": "auto", "body_mode": "text",
+            "state": Question.State.GREEN, "flags": [], "figures": [], "figure_review": {}}
         base.update(values)
         return Question.objects.create(**base)
 
@@ -510,7 +509,6 @@ class ReconcileFlagsCommandTests(TestCase):
         行首除了空白不能有 ``#``，否则一句注释就能骗过去。
         """
         import inspect
-
         import re
 
         body = inspect.getsource(pipeline.segment_paper)

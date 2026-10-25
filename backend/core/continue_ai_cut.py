@@ -13,7 +13,6 @@ from django.shortcuts import get_object_or_404
 from . import demo, imaging, intake, mineru, readers, source_images
 from .models import Paper, Question, RegionRead
 
-
 ACTIVE = {Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING}
 
 

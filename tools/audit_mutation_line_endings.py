@@ -11,9 +11,9 @@ lists what is left instead of waiting for the next one to trip.
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 for _stream in (sys.stdout, sys.stderr):
     try:

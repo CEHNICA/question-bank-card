@@ -4,7 +4,6 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 
 

@@ -7,8 +7,8 @@
 守卫只提示、不删除：确实存在五选项的卷子，那是提示误伤的代价，而漏报要付的
 是学生做不出来。全库 87 张四选项卡与 14 张图选项卡不受影响。
 """
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 

@@ -11,17 +11,16 @@ import argparse
 import ast
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 from urllib.parse import urlparse
 
 import check_library_tags_browser as regression
-
 
 # Windows 控制台默认是 cp1252，而这个脚本最后要打印的通过清单里带着「正在排队」
 # 这样的中文。以前它在最后一行崩溃，退出码变成 1 —— 于是「所有检查都过了」
@@ -109,7 +108,7 @@ def seed():
 
 def check(base):
     """Real DOM, network contracts and persisted assignments are checked here."""
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 
     regression._assert_isolated()
     if urlparse(base).hostname not in {"127.0.0.1", "localhost"}:

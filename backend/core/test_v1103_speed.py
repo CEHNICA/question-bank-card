@@ -12,8 +12,7 @@ from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from . import library, views
-from . import test_v110_types_origin as v110
+from . import library, test_v110_types_origin as v110, views
 from .figure_policy import reusing_reviews, stored_or_derived_review
 from .models import Question
 

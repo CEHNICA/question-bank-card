@@ -112,7 +112,7 @@ class FigurePartsApiTests(TransactionTestCase):
         publication, created = library.publish(question)
         self.assertTrue(created)
         stored = paper_dir(self.paper).parent / "library"
-        files = [path for path in Path(stored).rglob("figure-1.png")]
+        files = list(Path(stored).rglob("figure-1.png"))
         self.assertEqual(len(files), 1)
         self.assertEqual(Image.open(files[0]).size, (800, 240))
         self.assertEqual(PublishedQuestion.objects.count(), 1)

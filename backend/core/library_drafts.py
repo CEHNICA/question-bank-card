@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import errno
 import json
 import os
@@ -11,6 +10,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 
 from django.conf import settings
@@ -198,22 +198,22 @@ def _read() -> dict:
         if not isinstance(data, dict) or set(data) != {"schema", "drafts"} or data["schema"] != 1 \
                 or isinstance(data["schema"], bool) or not isinstance(data["drafts"], list) \
                 or len(data["drafts"]) > MAX_DRAFTS:
-            raise ValueError()
+            raise ValueError
         seen = set()
         for draft in data["drafts"]:
-            if not isinstance(draft, dict) or set(draft) - STORED_FIELDS - {"solutions"} or not STORED_FIELDS <= set(draft):
-                raise ValueError()
+            if not isinstance(draft, dict) or set(draft) - STORED_FIELDS - {"solutions"} or not set(draft) >= STORED_FIELDS:
+                raise ValueError
             key = str(uuid.UUID(draft["id"]))
             if key != draft["id"] or key in seen:
-                raise ValueError()
+                raise ValueError
             seen.add(key)
             if _title(draft["title"]) != draft["title"] or normalize_ids(draft["ids"]) != draft["ids"]:
-                raise ValueError()
-            if not isinstance(draft["print_options"], dict) or not LEGACY_PRINT_KEYS <= set(draft["print_options"]):
-                raise ValueError()
+                raise ValueError
+            if not isinstance(draft["print_options"], dict) or not set(draft["print_options"]) >= LEGACY_PRINT_KEYS:
+                raise ValueError
             # Old saved papers intentionally retain their appendix layout.
             draft["print_options"] = _print_options(draft["print_options"], {"answer_layout": "appendix"}, ids=draft["ids"])
-            from .library_solutions import normalize_map, SolutionError
+            from .library_solutions import SolutionError, normalize_map
             try:
                 fixed = normalize_map(draft.get("solutions", {}), draft["ids"])
                 draft["solutions"] = {key: fixed.get(key, "origin") for key in draft["ids"]}
@@ -222,7 +222,7 @@ def _read() -> dict:
             _revision(draft["revision"])
             for field in ("created_at", "updated_at"):
                 if not isinstance(draft[field], str) or len(draft[field]) > 40:
-                    raise ValueError()
+                    raise ValueError
                 from datetime import datetime
                 datetime.fromisoformat(draft[field])
     except DraftError as error:
@@ -335,7 +335,7 @@ def _save(payload: dict, draft_id=None) -> dict:
         defaults["figure_overrides"] = {key: mode for key, mode in defaults["figure_overrides"].items() if key in ids}
         defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
         options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
-        from .library_solutions import normalize_map, SolutionError
+        from .library_solutions import SolutionError, normalize_map
         try:
             previous_solutions = {key: value for key, value in (draft.get("solutions", {}) if draft else {}).items() if key in ids}
             solutions = normalize_map(payload.get("solutions", previous_solutions), ids)

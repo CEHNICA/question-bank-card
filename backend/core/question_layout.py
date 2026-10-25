@@ -6,21 +6,29 @@ reading source rows. Every legacy topology write also advances that token.
 """
 from __future__ import annotations
 
-from collections import Counter
-from copy import deepcopy
 import hashlib
 import json
 import math
-from pathlib import Path
 import uuid
+from collections import Counter
+from copy import deepcopy
+from pathlib import Path
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F
 from django.utils import timezone
 
-from .models import (LibraryJob, Paper, PublishedQuestion, Question,
-                     QuestionDeletionBatch, QuestionGroup, QuestionLayoutOperation, RegionRead)
+from .models import (
+    LibraryJob,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
+    QuestionLayoutOperation,
+    RegionRead,
+)
 
 PALETTE_SIZE = 6
 ACTIVE_JOBS = (LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING)
@@ -448,8 +456,8 @@ def mutate(paper_id, payload, *, request_payload=None):
                         _clear_approval(question)
                         question.deleted_at, question.deletion_batch = timezone.now(), batch
                         question.save()
-                from .pipeline import candidates_in
                 from . import qtypes
+                from .pipeline import candidates_in
                 new = []
                 for target in targets:
                     question = Question.objects.create(paper=paper, **target,

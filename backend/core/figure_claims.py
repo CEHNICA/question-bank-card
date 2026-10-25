@@ -6,7 +6,6 @@ import re
 import unicodedata
 from collections import defaultdict
 
-
 _SHARED = re.compile(
     r"^第?\s*(?P<numbers>\d{1,3}(?:\s*[-—–~～至、,，和及]\s*\d{1,3})+)"
     r"\s*题\s*(?:共用|共同使用|使用同一)[^。\n]{0,30}?(?:图|图形|示意图)"

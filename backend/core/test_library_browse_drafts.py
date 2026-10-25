@@ -115,7 +115,7 @@ class LibraryBrowseDraftTests(TestCase):
         book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="b" * 64,
                                     material_type=Paper.MaterialType.BOOK)
         printed = []
-        for serial, anchor in enumerate((50, 10, 30, 20, 40), 1):
+        for _serial, anchor in enumerate((50, 10, 30, 20, 40), 1):
             question = Question.objects.create(
                 paper=book, number=1, question_type="single_choice", state="green",
                 stem=f"第 {anchor} 页那一条", source_anchor_seq=anchor)
@@ -128,7 +128,7 @@ class LibraryBrowseDraftTests(TestCase):
     def test_a_card_without_a_layout_anchor_goes_last_without_moving_the_others(self):
         book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="c" * 64)
         with_anchor, without = [], None
-        for serial, anchor in enumerate((30, None, 10), 1):
+        for _serial, anchor in enumerate((30, None, 10), 1):
             question = Question.objects.create(
                 paper=book, number=1, question_type="single_choice", state="green",
                 stem=f"锚点 {anchor}", source_anchor_seq=anchor)

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """验收试题篮把手的荧光呼吸灯。
 
 把手的状态全在 localStorage 里，所以这里用 add_init_script 播种试题篮，不写后端数据。
@@ -8,7 +7,6 @@
 """
 import argparse
 import asyncio
-import json
 import pathlib
 import re
 import sys
@@ -93,7 +91,7 @@ def distance_from_white(value):
 async def sample_cycle(page, steps=9):
     """Read the pseudo-element across more than one full period of the animation."""
     reads = []
-    for index in range(steps):
+    for _index in range(steps):
         reads.append(await page.evaluate(READ_AFTER))
         await page.wait_for_timeout(PERIOD_MS * 1.4 / steps)
     return reads
@@ -249,7 +247,7 @@ async def main():
         layers = spread_of(peak_shadow)
         notes.append(f"波峰溢光层：{layers}")
         check(bool(layers), f"解析出 {len(layers)} 层溢光")
-        for offset, blur, spread in layers:
+        for offset, blur, _spread in layers:
             # 设计点上这两个数**正好相等**（溢光往里收 blur/2，才不会顶出视口硬边）。
             # 两个值都是从 box-shadow 字符串里解析出来的，带小数末位；拿 13.9987 去比
             # 13.99875 会因为 5e-5 的差判成失败。留 0.1px，真露边是差好几像素的事。

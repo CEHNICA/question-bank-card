@@ -7,8 +7,8 @@
 """
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ def main():
     if urlparse(url).hostname not in ("127.0.0.1", "localhost"):
         raise SystemExit("Only a local server is allowed")
 
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 
     failures, checks = [], []
 
@@ -108,7 +108,7 @@ def main():
         expect(page.locator(".answer-editor-dialog[open]")).to_be_visible()
         page.wait_for_timeout(700)
 
-        publication = page.evaluate("""() => {
+        page.evaluate("""() => {
             const row = document.querySelector('.answer-list-row.active');
             return row ? (row.querySelector('input') || {}).getAttribute('aria-label') : null; }""")
         original_answer = page.input_value("#answerEditorResult")

@@ -36,7 +36,6 @@ from django.test import SimpleTestCase
 from . import textnorm
 from .textnorm import canon, witness_agrees, witness_key
 
-
 # Settled: a short stem, two fractions, no subscripted variables.  Both sides
 # are what the reader and MinerU actually produced for 汶源初四 #2.
 SETTLED_READING = {

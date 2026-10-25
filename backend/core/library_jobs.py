@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
 import io
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -19,8 +19,14 @@ from django.utils import timezone
 from PIL import Image
 
 from . import features, imaging, library, library_ai_settings, qtypes
-from .models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCatalogue,
-                     LibraryTagSuggestion, PublishedQuestion, Question)
+from .models import (
+    LibraryJob,
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagSuggestion,
+    PublishedQuestion,
+    Question,
+)
 
 logger = logging.getLogger("core")
 

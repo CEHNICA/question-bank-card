@@ -3,28 +3,42 @@
 Every original document and database row is synthesized in a temporary root.
 The browser and model services are never used by this module.
 """
-from copy import deepcopy
-from contextlib import ExitStack
 import json
-from pathlib import Path
 import tempfile
-from unittest import mock
 import uuid
+from contextlib import ExitStack
+from copy import deepcopy
+from pathlib import Path
+from unittest import mock
 
-from PIL import Image
-
-from django.db.models.query import QuerySet
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.models.query import QuerySet
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 
-from . import library, library_jobs, photos, pipeline, question_layout as layout, readers, region_reads, views
-from .models import (
-    LibraryJob, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionLayoutOperation,
-    QuestionGroup, RegionRead,
+from . import (
+    library,
+    library_jobs,
+    photos,
+    pipeline,
+    question_layout as layout,
+    readers,
+    region_reads,
+    test_manual_intake_review as manual_review,
+    views,
 )
-from . import test_manual_intake_review as manual_review
+from .models import (
+    LibraryJob,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
+    QuestionLayoutOperation,
+    RegionRead,
+)
 
 
 class QuestionLayoutTests(TestCase):
@@ -59,14 +73,14 @@ class QuestionLayoutTests(TestCase):
 
     def question(self, number=1, **fields):
         regions = fields.pop("regions", self.pieces())
-        values = dict(
-            paper=self.paper, group=self.group, number=number, regions=deepcopy(regions),
-            regions_auto=deepcopy(regions), stem=f"合成且人工改过的第 {number} 题",
-            options={"A": "甲", "B": "乙"}, question_type="single_choice",
-            body_mode="text", processing_mode="manual", start_source="manual",
-            source_kind=Question.SourceKind.MANUAL, edited=True, text_source="human",
-            state=Question.State.GREEN, type_locked=True,
-            figures=[], figure_review={"status": "confirmed_no_figure", "source": "human"})
+        values = {
+            "paper": self.paper, "group": self.group, "number": number, "regions": deepcopy(regions),
+            "regions_auto": deepcopy(regions), "stem": f"合成且人工改过的第 {number} 题",
+            "options": {"A": "甲", "B": "乙"}, "question_type": "single_choice",
+            "body_mode": "text", "processing_mode": "manual", "start_source": "manual",
+            "source_kind": Question.SourceKind.MANUAL, "edited": True, "text_source": "human",
+            "state": Question.State.GREEN, "type_locked": True,
+            "figures": [], "figure_review": {"status": "confirmed_no_figure", "source": "human"}}
         return Question.objects.create(**{**values, **fields})
 
     def post(self, url, payload):

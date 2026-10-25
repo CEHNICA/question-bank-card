@@ -34,7 +34,7 @@ class CutContrastTests(SimpleTestCase):
                 image = recolor(reference, paper=paper, ink=ink)
                 q6 = item(6, [[COLUMN[0], 765, COLUMN[1], 852]], y=774)
                 q7 = item(7, [[COLUMN[0], 845, COLUMN[1], 972]], y=854)
-                self.assertEqual(cuts.snap_cuts([q6, q7], lambda _p: image), 1)
+                self.assertEqual(cuts.snap_cuts([q6, q7], lambda _p, _image=image: _image), 1)
                 self.assertGreater(q6["regions"][0]["bbox"][3], 856)
                 self.assertGreater(q7["regions"][0]["bbox"][1], 856)
                 self.assertLess(q7["regions"][0]["bbox"][1], 866)
@@ -46,7 +46,7 @@ class CutContrastTests(SimpleTestCase):
                 image = recolor(reference, paper=paper, ink=ink)
                 q1 = item(1, [[COLUMN[0], 300, COLUMN[1], 498]], y=310)
                 q2 = item(2, [[COLUMN[0], 491, COLUMN[1], 700]], y=500)
-                cuts.snap_cuts([q1, q2], lambda _p: image)
+                cuts.snap_cuts([q1, q2], lambda _p, _image=image: _image)
                 self.assertLessEqual(q2["regions"][0]["bbox"][1], 500)
 
     def test_dark_uniform_strip_has_no_evidence_to_invent_a_white_gap(self):

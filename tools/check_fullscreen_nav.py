@@ -4,8 +4,8 @@
 """
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ def main():
     if urlparse(url).hostname not in ("127.0.0.1", "localhost"):
         raise SystemExit("Only a local server is allowed")
 
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 
     with sync_playwright() as pw:
         executable = next((str(p) for p in (Path(pw.chromium.executable_path),

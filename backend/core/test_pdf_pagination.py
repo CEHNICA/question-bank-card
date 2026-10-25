@@ -1,21 +1,20 @@
 """Real offline browser/PDF pagination checks with synthesized papers only."""
 import base64
-from copy import deepcopy
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import os
-from pathlib import Path
 import re
 import threading
 import time
-from unittest import mock, skipUnless
 import uuid
+from copy import deepcopy
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from unittest import mock, skipUnless
 
 from django.conf import settings
 from django.test import SimpleTestCase
 
 from . import library_pdf as pdf
-
 
 _GEOMETRY = r"""(()=>({pages:[...document.querySelectorAll('#printPaper .exam-page')].map(page=>{
  const z=parseFloat(getComputedStyle(page).transform.match(/^matrix\(([^,]+)/)?.[1])||1;
@@ -149,7 +148,7 @@ class SharedPdfPaginationTests(SimpleTestCase):
         self.assertEqual((preview_count,export_count),(2,2))
         self.assert_geometry(preview_geometry,geometry)
         questions=[q for page in geometry["pages"] for q in page["questions"]]
-        self.assertEqual(set(q["id"] for q in questions),set(x["id"] for x in self.items))
+        self.assertEqual({q["id"] for q in questions},{x["id"] for x in self.items})
         self.assertEqual(sum(len(q["images"]) for q in questions),1)
         space_mm=sum(s["rect"][3] for q in questions for s in q["spaces"])*25.4/96
         self.assertAlmostEqual(space_mm,180,delta=.05)

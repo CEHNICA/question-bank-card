@@ -19,12 +19,11 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable, Iterator
 
 from . import provider_catalog
-
 
 MAX_ACCOUNTS = 8
 MAX_ACCOUNT_CONCURRENCY = 8
@@ -229,7 +228,7 @@ class AccountLease:
 
     __slots__ = ("_pool", "_secret", "_slot", "_disable", "_disable_reason", "_delay", "_throttled", "_epoch")
 
-    def __init__(self, pool: "AccountPool", secret: str, slot: int, epoch: int = 0) -> None:
+    def __init__(self, pool: AccountPool, secret: str, slot: int, epoch: int = 0) -> None:
         self._pool = pool
         self._secret = secret
         self._slot = slot

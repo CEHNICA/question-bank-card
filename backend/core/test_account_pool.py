@@ -71,8 +71,8 @@ class AccountPoolTests(SimpleTestCase):
         keys = ("k1", "k2", "k3")
         pool = account_pool.AccountPool("test", keys)
         lock = threading.Lock()
-        active = {key: 0 for key in keys}
-        maxima = {key: 0 for key in keys}
+        active = dict.fromkeys(keys, 0)
+        maxima = dict.fromkeys(keys, 0)
         global_active = 0
         global_max = 0
 

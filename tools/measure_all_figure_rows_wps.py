@@ -46,7 +46,7 @@ def measure(path):
         rows = []
         number = 0
         for table in doc.Tables:
-            pictures = [shape for shape in table.Range.InlineShapes]
+            pictures = list(table.Range.InlineShapes)
             if not pictures:
                 continue
             number += 1

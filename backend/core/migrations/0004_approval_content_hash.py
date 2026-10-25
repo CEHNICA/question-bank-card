@@ -5,7 +5,6 @@ import json
 
 from django.db import migrations, models
 
-
 OPTION_KEYS = ("A", "B", "C", "D")
 CHOICE_TYPES = {"single_choice", "multiple_choice"}
 REVIEWABLE_STATES = {"green", "yellow"}

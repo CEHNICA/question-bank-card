@@ -14,7 +14,8 @@ db = os.path.join(os.environ["LOCALAPPDATA"], "QuestionBankCard", "db.sqlite3")
 conn = sqlite3.connect("file:%s?mode=ro" % db.replace("\\", "/"), uri=True)
 cur = conn.cursor()
 
-q = lambda sql, *a: cur.execute(sql, a).fetchone()[0]
+def q(sql, *a):
+    return cur.execute(sql, a).fetchone()[0]
 
 snapshot = {
     "db_bytes": os.path.getsize(db),

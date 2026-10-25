@@ -10,20 +10,18 @@ download is still refused rather than shipping a paper the reader cannot follow.
 from __future__ import annotations
 
 import base64
-from copy import deepcopy
 import hashlib
 import io
 import json
-import os
 import re
-import subprocess
 import tempfile
 import threading
 import time
 import unicodedata
 import warnings
-import zipfile
 import xml.sax
+import zipfile
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
 
@@ -32,7 +30,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import features, library, prose, tables
+from . import features, library, tables
 from .library_browse import BrowseError, normalize_ids
 from .library_drafts import DraftError, _print_options, _title
 from .models import PublishedQuestion
@@ -120,8 +118,8 @@ def _convert_math_root(root):
     Only that explicit shape is adapted; overset and large-operator limits keep
     their normal meaning. Bases recurse to preserve nested accents and roots.
     """
-    from lxml import etree
     import mathml2omml
+    from lxml import etree
     root = deepcopy(root)
     replacements = {}
     prefix = "QBEXPORTACCENT"
@@ -459,13 +457,14 @@ def _table_source(raw, where):
         for row in re.finditer(r"<tr\b[^>]*>([\s\S]*?)</tr\s*>", raw, re.I):
             cells = []
             for cell in re.finditer(r"<(td|th)\b([^>]*)>([\s\S]*?)</\1\s*>", row[1], re.I):
-                def span(name):
-                    match = re.search(rf"\b{name}\s*=\s*[\"']?(\d{{1,2}})", cell[2], re.I)
+                def span(name, source):
+                    match = re.search(rf"\b{name}\s*=\s*[\"']?(\d{{1,2}})", source, re.I)
                     return max(1, min(20, int(match[1]))) if match else 1
                 value = re.sub(r"<br\s*/?>", " ", cell[3], flags=re.I)
                 value = re.sub(r"<[^>]+>", "", value)
                 cells.append({"source": re.sub(r"\s+", " ", _decoded(value)).strip(),
-                              "header": cell[1].lower() == "th", "colspan": span("colspan"), "rowspan": span("rowspan")})
+                              "header": cell[1].lower() == "th",
+                              "colspan": span("colspan", cell[2]), "rowspan": span("rowspan", cell[2])})
             if cells:
                 rows.append(cells)
         if not rows or len(rows) > 60 or any(len(row) > 20 for row in rows):
@@ -737,8 +736,8 @@ def _recheck(captured, options, use_ai):
 
 
 def _font(run, size, bold=False):
-    from docx.shared import Pt
     from docx.oxml.ns import qn
+    from docx.shared import Pt
     run.font.name = "Cambria"
     run.font.size = Pt(size)
     run.bold = bold
@@ -1069,9 +1068,9 @@ def _table_column_widths(placements, width, size, text_width_mm=178.0):
 
 def _write_table(document, rows, size, where):
     from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Mm
     # Place rowspan cells into a complete grid; overlapping/out-of-bounds spans abort.
     grid, placements, width = {}, [], 0
     for r, row in enumerate(rows):
@@ -1384,9 +1383,9 @@ def _write_figure_line(document, pictures, text_width_mm=PREVIEW_TEXT_WIDTH_MM, 
       after the last.
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Mm
     # Widths arrive already resolved (teacher's millimetres, else 150 dpi natural
     # size); the height follows from the picture's own aspect ratio so a widened
     # diagram grows as tall as it needs and does not come out stretched.
@@ -1633,9 +1632,9 @@ def _option_columns(item, options, *, text_width_mm=178):
 
 
 def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
-    from docx.shared import Mm
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Mm
     letters = [key for key in "ABCDE" if f"options.{key}" in item["fields"] or any(image["slot"] == key for image in item["images"])]
     table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
@@ -1729,8 +1728,9 @@ def _keep_unit(document, start):
 
 
 def _paragraph_measure(paragraph, size, width_mm=178):
-    from docx.oxml.ns import qn
     import math
+
+    from docx.oxml.ns import qn
     spacing = paragraph.find(qn("w:pPr") + "/" + qn("w:spacing"))
     gap = int(spacing.get(qn("w:after"), str(PARAGRAPH_GAP_PT * 20))) * 25.4 / 1440 if spacing is not None \
         else PARAGRAPH_GAP_PT * 25.4 / 72
@@ -1800,8 +1800,8 @@ def _pagination(document, start, mode, size):
 
 
 def _question_gap(document):
-    from docx.shared import Pt
     from docx.oxml.ns import qn
+    from docx.shared import Pt
     last = list(document._element.body)[-2]
     if last.tag == qn("w:tbl"):
         # Word requires a paragraph after a table; use its invisible line for the
@@ -1832,9 +1832,9 @@ def _question_page_break(document, start):
 
 def _document(captured, title, options, mode):
     from docx import Document
-    from docx.shared import Mm, Pt
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Mm, Pt
     mode = _effective_document(captured, mode)
     inline_answers = mode == "combined" and options.get("answer_layout", "appendix") == "inline"
     document = Document()

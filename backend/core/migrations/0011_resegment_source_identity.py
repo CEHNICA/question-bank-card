@@ -2,7 +2,6 @@ import re
 
 from django.db import migrations, models
 
-
 EXAMPLE_RE = re.compile(r"(?:^|\s)(?:例题?|example|ex\.?)\s*\d+", re.I)
 EXERCISE_RE = re.compile(r"(?:练习|习题|exercise)", re.I)
 

@@ -1,13 +1,13 @@
 """Synthetic geometry counterexamples; no readers or application database."""
 from __future__ import annotations
 
-from contextlib import redirect_stderr, redirect_stdout
-from copy import deepcopy
 import io
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
+from pathlib import Path
 
 from . import score_layout
 

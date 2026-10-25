@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import shutil
+import sqlite3
 import tempfile
 import unittest
 import uuid
@@ -23,9 +23,18 @@ from pathlib import Path
 from django.test import TestCase, override_settings
 
 from core import library_transfer
-from core.models import (Block, LibrarySolution, LibraryTag, LibraryTagAssignment,
-                         LibraryTagGroup, Paper, PublishedQuestion, Question,
-                         QuestionDeletionBatch, QuestionGroup)
+from core.models import (
+    Block,
+    LibrarySolution,
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagGroup,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
+)
 
 
 class TransferFixture(TestCase):

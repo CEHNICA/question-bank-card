@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """一页里有三个字体私有区字符，整页的题不该因此从题库里消失。
 
 真卷验收（《凤城高一数学试题_打印版_v8.pdf》，2025 级高一质量检测一）：
@@ -21,7 +20,6 @@ import pymupdf
 from django.test import SimpleTestCase
 
 from . import native_pdf
-
 
 _PDF_DIRS = []
 

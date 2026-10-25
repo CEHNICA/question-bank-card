@@ -1,0 +1,136 @@
+[project]
+name = "tiyouju"
+description = "题有据 · 中学数学题卡与组卷工具（Windows 桌面版，本地离线运行）"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+# 版本号只有一处来源：backend/core/version.py。装包和显示都用它。
+dynamic = ["version"]
+# 运行期依赖。锁死的版本在 backend/requirements.lock.txt（部署、构建、CI 都用它）。
+dependencies = [
+  "Django>=5.2,<6",
+  "lxml>=4.9",
+  "mathml2omml>=0.0.2",
+  "Pillow>=10",
+  "PyMuPDF>=1.24",
+  "python-docx>=1.1",
+  "requests>=2.31",
+  "pywin32>=306; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+# 开发期工具：代码规范、类型检查、覆盖率。锁定的版本在 backend/requirements-dev.txt。
+dev = [
+  "ruff>=0.17",
+  "mypy>=1.14",
+  "coverage>=7.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/CEHNICA/question-bank-card"
+Issues = "https://github.com/CEHNICA/question-bank-card/issues"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "core.version.APP_VERSION" }
+
+[tool.setuptools]
+package-dir = { "" = "backend" }
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+include = ["core*"]
+
+# ---------------------------------------------------------------- 代码规范
+# ruff：Python 那一边的「编译错误当错误」。规则集是挑过的，不是全开：
+#   · E501 长行 —— 这个项目里长行多半是中文提示语和 HTML 片段，拆了反而难读；
+#   · E701/E702 一行多句 —— 这个项目本来就爱写紧凑写法（`if x: return`），不跟它较劲；
+#   · UP031 printf 格式化 —— 存量 80 多处，改了是大面积无意义 diff；
+#   · SIM105/SIM117/B905 —— 要么是风格，要么要改行为（zip strict），不在门禁里；
+#   · E402 模块顶部 import —— Django 的 settings 有时要后置导入。
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["packaging/.build", "packaging/dist", "tmp", ".git", "backend/.venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RET", "PIE", "RSE"]
+ignore = [
+  "E501",   # 长行
+  "E701",   # 一行多句（紧凑写法是这里的风格）
+  "E702",
+  "E402",   # import 不在文件顶部（Django settings 有时要后置）
+  "UP031",  # printf 格式化
+  "SIM105", # try/except/pass → contextlib.suppress
+  "SIM117", # 嵌套 with 合并
+  "B905",   # zip(strict=)
+  "RET503", # 缺 return
+  "RET504", # 多余赋值
+  "SIM102", # 嵌套 if 合并
+  "SIM115", # open 不在 with 里
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 入口脚本：按脚本写，没那么多分层
+"app_launcher.pyw" = ["F401"]
+"start_question_bank.py" = ["F401"]
+"create_shortcut.py" = ["F401"]
+"credential_dialog.py" = ["F401"]
+"credential_store.py" = ["F401"]
+"backup_question_bank.py" = ["F401"]
+# 测试：允许用假 DOM 的类名，允许未使用的夹具
+"**/test_*.py" = ["F401", "F811", "F841", "E402"]
+"test_*.py" = ["F401", "F811", "F841", "E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core"]
+combine-as-imports = true
+
+# ---------------------------------------------------------------- 类型检查
+# mypy：先把「明显写错」那几类挑出来，不是给全仓库上满配。
+# django 没有官方 type stub，所以第三方库一律按「没有类型信息」处理，
+# 重点看我们自己代码里的名字写错、参数个数不对这类问题。
+[tool.mypy]
+python_version = "3.12"
+files = ["backend/core"]
+exclude = ["backend/core/tests", "backend/core/test_.*\\.py$", "backend/core/migrations"]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+# 存量代码类型标注不全，一次性开 strict 会淹掉真正的问题。
+# 先把错误压到能一眼看完的量，再逐步收紧。
+disable_error_code = ["no-untyped-def", "no-any-return", "misc"]
+
+[[tool.mypy.overrides]]
+module = ["core.tests", "core.migrations.*", "core.test_.*"]
+ignore_errors = true
+
+# ---------------------------------------------------------------- 覆盖率
+[tool.coverage.run]
+branch = true
+source = ["backend/core"]
+omit = [
+  "backend/core/migrations/*",
+  "backend/core/test_*.py",
+  "backend/core/tests.py",
+  "backend/core/management/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]

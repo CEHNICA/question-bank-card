@@ -10,8 +10,7 @@ from unittest import mock
 
 from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
 
-from . import pipeline, readers, region_reads, textnorm
-from . import test_v110_types_origin as v110
+from . import pipeline, readers, region_reads, test_v110_types_origin as v110, textnorm
 from .models import Block, Question, RegionRead
 
 STEM = "（1）当 $x>0$ 时，求 $y=2x+\\dfrac{1}{x^{3}}$ 最小值；\n（2）当 $0<x<1$ 时，求 $y=x(1-x)^{2}$ 最大值。"

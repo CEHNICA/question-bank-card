@@ -9,8 +9,7 @@ from django.db.models.query import QuerySet
 from django.db.utils import OperationalError
 from django.test import TransactionTestCase
 
-from . import pipeline
-from . import test_manual_intake_review as manual_review
+from . import pipeline, test_manual_intake_review as manual_review
 from .models import Paper
 
 

@@ -20,8 +20,8 @@ import math
 
 from django.test import TestCase
 
-from core.models import Block, Paper, Question
 from core.figure_policy import candidate_key, legacy_candidate_key
+from core.models import Block, Paper, Question
 
 from .test_v110_types_origin import TempDataMixin
 
@@ -42,7 +42,7 @@ class CandidateIdentityTests(TestCase):
         for value in (90.55, 7.25, 0.35, 0.25, 57.05, 123.455, 191.55, 2.675):
             box = {"page_idx": 0, "bbox": [value, value + 10, value + 20, value + 30]}
             server = candidate_key(box)
-            browser = f"0:" + ",".join(_browser_number(v) for v in (value, value + 10, value + 20, value + 30))
+            browser = "0:" + ",".join(_browser_number(v) for v in (value, value + 10, value + 20, value + 30))
             self.assertEqual(server, browser, f"{value} 两边算出的身份必须一样")
 
     def test_the_old_rule_really_was_different(self):

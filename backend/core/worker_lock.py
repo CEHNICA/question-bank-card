@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """数据目录级别的独占锁：同一份数据只允许一个进程写。"""
 
 import os
@@ -25,4 +24,4 @@ class SingleInstance:
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self.handle.close()
-            raise SystemExit("已有一个题有据工作者在运行，本进程退出。")
+            raise SystemExit("已有一个题有据工作者在运行，本进程退出。") from None

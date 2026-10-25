@@ -11,8 +11,8 @@
 只提示、不删图：答案版卷子上解析里的图也许用户想留着当讲解用，删掉要人工确认，
 而误删一张真题图的代价比多提示一次大。
 """
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 

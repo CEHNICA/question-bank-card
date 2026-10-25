@@ -12,9 +12,9 @@ Run with the packaging build Python:
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 # Windows 控制台默认 cp1252，而每条结果都要打印「挡住 ✓ / 漏过 ✗」。以前它在
 # 第一条结果上就崩了，退出码变成 1 —— 于是「变异全被挡住」和「脚本自己坏了」

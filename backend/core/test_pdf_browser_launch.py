@@ -7,12 +7,12 @@ profile is synthesized here, without a database or user credentials.
 
 import io
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 from unittest import mock, skipUnless
 
 from django.test import SimpleTestCase
@@ -89,8 +89,8 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
         self.assertFalse(root.exists(), "The owned browser left its profile locked")
 
     def check_pdf(self, executable):
-        from PIL import Image, ImageDraw
         import pymupdf
+        from PIL import Image, ImageDraw
 
         image = Image.new("RGB", (200, 120), "white")
         drawing = ImageDraw.Draw(image)

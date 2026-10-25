@@ -15,8 +15,15 @@ from django.apps import apps as current_apps
 from django.test import TestCase, override_settings
 
 from core import library, library_browse, library_tagging
-from core.models import (LibraryTag, LibraryTagAssignment, LibraryTagCatalogue, LibraryTagSuggestion,
-                         Paper, PublishedQuestion, Question)
+from core.models import (
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagCatalogue,
+    LibraryTagSuggestion,
+    Paper,
+    PublishedQuestion,
+    Question,
+)
 
 migration_0029 = importlib.import_module("core.migrations.0029_realign_untouched_suggestions")
 

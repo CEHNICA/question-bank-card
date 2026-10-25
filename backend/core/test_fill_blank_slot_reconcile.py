@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """「题型标成填空题、题干里却没有可填位置」这条兜底旗标的守门测试。
 
 真库实测（2026-10-11，959 张）：符合判据的 37 张，30 张一条旗都没有、全是绿卡。
@@ -57,7 +56,7 @@ class FillBlankSlotReconcileTests(TestCase):
             self.suspect.save()
             self.assertEqual(pipeline.reconcile_fill_blank_slot_flags(self.paper), 0)
             self.assertEqual(Question.objects.get(pk=self.suspect.pk).flags,
-                             [f for f in self.suspect.flags])
+                             list(self.suspect.flags))
 
     def test_repeated_runs_add_the_flag_once(self):
         self.assertEqual(pipeline.reconcile_fill_blank_slot_flags(self.paper), 1)

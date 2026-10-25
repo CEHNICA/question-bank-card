@@ -5,15 +5,14 @@ library responses. All non-local requests and every write request are rejected.
 Requires Python Playwright and an installed Chrome/Edge or Playwright Chromium.
 """
 
+import json
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
 
 from playwright.sync_api import expect, sync_playwright
-
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "tmp" / "preview-browser"

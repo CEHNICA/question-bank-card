@@ -8,7 +8,6 @@ from django.test import SimpleTestCase, TestCase
 from . import figure_policy
 from .models import Paper, Question
 
-
 CANDIDATE = {"label": "1", "seq": 7, "page_idx": 0, "bbox": [130, 100, 260, 210]}
 
 

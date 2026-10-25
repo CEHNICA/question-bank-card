@@ -1,15 +1,14 @@
 """Hand-cut regions join normal reading/review, without an adoption step."""
-from copy import deepcopy
 import json
-from pathlib import Path
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
-from . import library, library_jobs, pipeline, source_images, views
-from . import test_manual_intake_review as manual_review
+from . import library, library_jobs, pipeline, source_images, test_manual_intake_review as manual_review, views
 from .models import Question
 
 
@@ -34,8 +33,8 @@ class DirectCutReadingTests(TransactionTestCase):
         self.addCleanup(patch.stop)
 
     def cut(self, number=1, **fields):
-        defaults = dict(paper=self.original, number=number, body_mode="source_image", processing_mode="manual",
-            question_type="free_response", state="yellow", regions=[{"page_idx": 0, "bbox": [40, 40, 900, 480]}])
+        defaults = {"paper": self.original, "number": number, "body_mode": "source_image", "processing_mode": "manual",
+            "question_type": "free_response", "state": "yellow", "regions": [{"page_idx": 0, "bbox": [40, 40, 900, 480]}]}
         return Question.objects.create(**{**defaults, **fields})
 
     def post(self, action, payload=None):

@@ -1,20 +1,19 @@
 """Optional second AI reading; isolated fixtures and no real cloud requests."""
 
-from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
-from . import features, library, library_jobs, pipeline, readers, views, test_manual_intake_review as manual_review
+from . import features, library, library_jobs, pipeline, readers, test_manual_intake_review as manual_review, views
 from .models import Question
 from .tests import tagged
-
 
 PRIMARY = readers.Engine("minimax", "isolated-primary")
 CHECKER = readers.Engine("siliconflow", "isolated-checker")

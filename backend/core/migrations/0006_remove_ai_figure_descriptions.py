@@ -9,7 +9,6 @@ import re
 
 from django.db import migrations
 
-
 OPTION_KEYS = {"A", "B", "C", "D"}
 REVIEW_FLAG = "已移除 AI 对配图内容的重复转写，请对照原卷检查配图后重新审核"
 TABLE_REVIEW_FLAG = "表格内容已改由原卷配图呈现，请对照原卷核对后重新审核"

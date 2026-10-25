@@ -80,8 +80,8 @@ class TidySavedCardsTests(TestCase):
         )
 
     def card(self, **fields):
-        base = dict(paper=self.paper, group=self.group, number=4,
-                    regions=[{"page_idx": 0, "bbox": [20, 100, 900, 260]}], state=Question.State.YELLOW)
+        base = {"paper": self.paper, "group": self.group, "number": 4,
+                    "regions": [{"page_idx": 0, "bbox": [20, 100, 900, 260]}], "state": Question.State.YELLOW}
         base.update(fields)
         return Question.objects.create(**base)
 

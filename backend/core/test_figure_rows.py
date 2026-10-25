@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from django.test import SimpleTestCase, TestCase
 
-from . import pipeline
-from . import figure_policy
+from . import figure_policy, pipeline
 from .figure_policy import automatic_review
 from .models import Paper, Question
 

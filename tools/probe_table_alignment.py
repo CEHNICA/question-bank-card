@@ -17,12 +17,12 @@ import django
 
 django.setup()
 
-from PIL import Image
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Mm
+from PIL import Image
 
 from core.library_export import PREVIEW_FIGURE_GAP_PX, PREVIEW_PX_PER_INCH, _figure_paper_size
 

@@ -6,8 +6,15 @@ from django.test import TestCase
 from django.utils import timezone
 
 from . import question_layout as layout, test_question_layout as fixtures
-from .models import (LibraryJob, PublishedQuestion, Question, QuestionDeletionBatch,
-                     QuestionLayoutOperation, QuestionGroup, RegionRead)
+from .models import (
+    LibraryJob,
+    PublishedQuestion,
+    Question,
+    QuestionDeletionBatch,
+    QuestionGroup,
+    QuestionLayoutOperation,
+    RegionRead,
+)
 
 
 class QuestionLayoutRenumberTests(TestCase):

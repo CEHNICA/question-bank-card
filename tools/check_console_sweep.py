@@ -93,7 +93,7 @@ def filtered_edit(page, publication: str) -> None:
     # 把它身上的筛选条件那个标签去掉，再保存——保存完它就不该符合筛选条件了。
     card.locator(".library-tags-edit").click()
     page.wait_for_selector("#tagEditorDialog[open]", timeout=8000)
-    picked = page.locator(f"#tagEditorPicked .library-tag", has_text=SEED[0])
+    picked = page.locator("#tagEditorPicked .library-tag", has_text=SEED[0])
     picked.click()
     page.locator("#tagEditorSearch").fill("抽样")
     page.wait_for_timeout(300)
@@ -120,7 +120,6 @@ def filtered_edit(page, publication: str) -> None:
 
 
 def main() -> int:
-    import urllib.parse
     publication, original = seed()
     print(f"样本题：{publication}（跑完恢复成 {original or '无标签'}）")
     try:

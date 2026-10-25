@@ -17,7 +17,7 @@ OUT = ROOT / "tmp" / "library-v111" / "browser"
 
 
 def check(base):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
     assert urlparse(base).hostname in ("127.0.0.1", "localhost")
     fixture = json.loads((ROOT / "tmp/library-ux-browser/fixture.json").read_text(encoding="utf-8"))
     OUT.mkdir(parents=True, exist_ok=True)

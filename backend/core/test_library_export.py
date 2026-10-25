@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import base64
 import hashlib
 import io
@@ -11,6 +10,7 @@ import os
 import tempfile
 import uuid
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 from urllib.parse import unquote
@@ -809,8 +809,8 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
 
     def test_global_and_per_question_columns_and_font_size_safe_fallback(self):
-        first = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
-        second = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCD"})
+        first = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", "短选项"))
+        second = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", "短选项"))
         # The per-question override still wins, and "four" is honoured: the PDF the
         # teacher checked prints these four-across, so the download has to agree.
         # (Until 2026-11-04 Word downgraded every four-option question to 2x2 by
@@ -820,7 +820,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         result = self.post(self.payload([first, second], print_options=options))
         tables = document_xml(result.content).findall(".//w:tbl", NS)
         self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [4])
-        first.content["options"] = {key: "长" * 14 for key in "ABCD"}  # wide enough to react to the font size
+        first.content["options"] = dict.fromkeys("ABCD", "长" * 14)  # wide enough to react to the font size
         first.save(update_fields=["content"])
         columns = []
         for size in (12, 16):
@@ -865,13 +865,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNotNone(writing_space("第二题专用题干标记", only_second))
 
     def test_five_options_and_wide_forced_four_never_drop_or_shrink_content(self):
-        pub = self.publication(kind="single_choice", options={key: "短选项" for key in "ABCDE"})
+        pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCDE", "短选项"))
         result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four"}))
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
         self.assertIn("E. 短选项", "".join(table.itertext()))
-        pub.content["options"] = {key: "长选项" * 30 for key in "ABCD"}
+        pub.content["options"] = dict.fromkeys("ABCD", "长选项" * 30)
         pub.save(update_fields=["content"])
         result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four", "font_size": 16}))
         xml = document_xml(result.content)
@@ -1144,7 +1144,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         # have always shown — styles.css turns four columns into two only under a
         # 680px container query, and exam-layout.js fitOptions writes an inline
         # grid-template-columns on every option list, which outranks it.
-        pub = self.publication(kind="single_choice", options={key: "离线选项" for key in "ABCD"})
+        pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", "离线选项"))
         result = self.post(self.payload([pub], print_options={"document": "questions"}))
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
@@ -1167,7 +1167,7 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_four_option_figures_use_the_same_two_columns_as_the_preview(self):
         # Diagrams on the choices are the case that reads worst when it drifts:
         # the preview shows them 2x2 and the download used to show four lines.
-        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", ""))
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True, exist_ok=True)
         pub.content["figures"] = []
@@ -1197,7 +1197,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIn("X-QB-Layout-Warning", response)
 
     def test_explicit_picture_columns_retain_all_labels_images_and_natural_width(self):
-        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", ""))
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True)
         pub.content["figures"] = []
@@ -1748,7 +1748,7 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_stem_and_option_figures_each_get_their_own_grid(self):
         # The stem row and the option grid are separate: each follows the
         # preview for its own area, and neither swallows the other's pictures.
-        pub = self.publication(kind="single_choice", options={key: "" for key in "ABCD"})
+        pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", ""))
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True, exist_ok=True)
         pub.content["figures"] = []
@@ -1796,9 +1796,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                          lambda: PublishedQuestion.objects.filter(pk=pub.id).update(content={**pub.content, "stem": "另一版"})):
             pub.status = "published"
             pub.save(update_fields=["content", "status"])
-            def changed(*args, **kwargs):
+            def changed(*args, _mutation=mutation, **kwargs):
                 data = original(*args, **kwargs)
-                mutation()
+                _mutation()
                 return data
             with mock.patch.object(export, "_document", side_effect=changed):
                 response = self.post(self.payload([pub]))

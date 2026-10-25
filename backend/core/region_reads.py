@@ -10,10 +10,10 @@
 
 from __future__ import annotations
 
-import logging
-import re
 import hashlib
 import json
+import logging
+import re
 from copy import deepcopy
 from datetime import timedelta
 
@@ -279,7 +279,7 @@ def _auto_reply(raw: str, base: dict) -> tuple[str, dict]:
             except ValueError:
                 recovered = None
             if not isinstance(recovered, str):
-                raise RegionError("识读结果没有完整文字，请重新框选或手动改字")
+                raise RegionError("识读结果没有完整文字，请重新框选或手动改字") from None
             text = clean(recovered, "auto", max_chars=None)
             return text, _manual(base, text, "识读文字已保留，但定位结果格式不完整，请手动选择位置。")
         text = clean(reply, "auto", max_chars=None)

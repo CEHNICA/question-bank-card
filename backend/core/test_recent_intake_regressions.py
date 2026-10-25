@@ -2,15 +2,23 @@
 from copy import deepcopy
 from unittest import mock
 
+import pymupdf as fitz
 from django.test import TransactionTestCase
 from django.utils import timezone
 from PIL import Image
-import pymupdf as fitz
 
-from . import intake, library, library_jobs, pipeline, readers, source_images, views
+from . import (
+    intake,
+    library,
+    library_jobs,
+    pipeline,
+    readers,
+    source_images,
+    test_direct_cut_reading as direct_cut,
+    test_tiyouju_cli as cli_tests,
+    views,
+)
 from .models import Paper, Question
-from . import test_direct_cut_reading as direct_cut
-from . import test_tiyouju_cli as cli_tests
 
 
 class RecentIntakeRegressionsTests(TransactionTestCase):

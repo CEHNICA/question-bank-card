@@ -13,7 +13,6 @@ from django.test import SimpleTestCase
 
 from . import pipeline
 
-
 RESEGMENT_FLAGS = [
     pipeline.FLAG_RESEGMENT_PRESERVED,
     pipeline.FLAG_RESEGMENT_EXCLUDED,

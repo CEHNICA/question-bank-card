@@ -6,7 +6,6 @@ from django.test import SimpleTestCase, TestCase
 from . import figure_claims, figure_policy, pipeline
 from .models import Paper, Question, QuestionGroup
 
-
 BOX = [100, 200, 450, 420]
 CUED = "如图，正六边形的顶点为 ABCDEF，求 ∠1+∠2"
 PLAIN = "在一个不透明的袋中有 2 个红球、3 个黄球和 4 个白球，求摸到红球的概率"
@@ -50,9 +49,9 @@ class FigureClaimWinnerIntegrationTests(TestCase):
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, number, stem, **extra):
-        values = dict(paper=self.paper, group=self.group, number=number, stem=stem,
-                      question_type="free_response", figures=[diagram()], state="green",
-                      figure_review={"status": "ok", "source": "automatic"}, flags=[])
+        values = {"paper": self.paper, "group": self.group, "number": number, "stem": stem,
+                      "question_type": "free_response", "figures": [diagram()], "state": "green",
+                      "figure_review": {"status": "ok", "source": "automatic"}, "flags": []}
         values.update(extra)
         return Question.objects.create(**values)
 

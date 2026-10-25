@@ -10,7 +10,6 @@ from django.test import TestCase, override_settings
 from . import pipeline, segment
 from .models import Block, Paper, PublishedQuestion, Question, QuestionDeletionBatch, QuestionGroup
 
-
 PAGES = [{"page_idx": 0, "width": 1000, "height": 1400}]
 
 

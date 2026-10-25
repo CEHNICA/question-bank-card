@@ -15,8 +15,8 @@ import django
 
 django.setup()
 
-from PIL import Image
 from docx import Document
+from PIL import Image
 
 from core.library_export import _figure_row_lines, _write_figure_line, _write_images
 

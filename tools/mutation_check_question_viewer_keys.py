@@ -16,9 +16,9 @@ Run with the packaging build Python:
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 # Windows 控制台默认 cp1252，每条结论要专门一算。据实说就写结论，别拿编码当借口。
 for _stream in (sys.stdout, sys.stderr):

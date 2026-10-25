@@ -81,7 +81,7 @@ def source_identity(paper) -> tuple[Path, str, str]:
 # finished descriptor turns a second visit to the same paper into a lookup.
 # The cache is only a shortcut: each crop's size and mtime are re-checked, so a
 # deleted or damaged crop is rebuilt (and fails again) exactly as before.
-_ASSETS: "OrderedDict[tuple, tuple[tuple[tuple[str, int, int], ...], list[dict]]]" = OrderedDict()
+_ASSETS: OrderedDict[tuple, tuple[tuple[tuple[str, int, int], ...], list[dict]]] = OrderedDict()
 _ASSETS_LIMIT = 4_000
 _ASSETS_LOCK = threading.Lock()
 

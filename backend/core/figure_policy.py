@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-from copy import deepcopy
-from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import math
 import re
 import unicodedata
-
+from copy import deepcopy
+from decimal import ROUND_HALF_UP, Decimal
 
 BLOCKED_MISSING = "blocked_missing"
 AUTO_EXCLUDED = "auto_excluded"
@@ -470,7 +469,7 @@ def resolve_automatic_figure_assignments(
         kind=str(kind or "unknown"),
         options=options or {},
     )
-    resolved.update({label: "decoration" for label in decorations})
+    resolved.update(dict.fromkeys(decorations, "decoration"))
 
     if has_figure_cue(stem, options):
         for candidate in candidates:
@@ -953,7 +952,7 @@ def recheck_automatic_review(
 
     pending = {f"pending-{index}" for index in range(unclassified_count)}
     excluded = {f"excluded-{index}" for index in range(excluded_count)}
-    assignments = {label: "none" for label in excluded}
+    assignments = dict.fromkeys(excluded, "none")
     return automatic_review(
         stem=stem,
         options=options,
@@ -1102,7 +1101,7 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
             assignments=judged,
         )
         assignments = validated_layout_assignments(primary, candidates, assignments)
-        assignments.update({label: "none" for label in ignored_labels})
+        assignments.update(dict.fromkeys(ignored_labels, "none"))
         review_figures = repaired_automatic_figures(
             figures=base_figures,
             candidates=candidates,

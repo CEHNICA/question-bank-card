@@ -13,8 +13,7 @@ from unittest import mock
 from django.test import SimpleTestCase, TestCase
 from PIL import Image, ImageDraw
 
-from . import cuts, pipeline, qtypes, readers, segment
-from . import test_v110_types_origin as v110
+from . import cuts, pipeline, qtypes, readers, segment, test_v110_types_origin as v110
 from .models import Block, Question, QuestionGroup
 from .tests import PAGES, block, tagged
 
@@ -94,7 +93,7 @@ class InkCutTests(SimpleTestCase):
             image = page(lines=[(489, 496), (500, 505.5), (515, 530)], strokes=[working])
             q6 = item(6, [[COLUMN[0], 300, COLUMN[1], 498]], y=310)
             q7 = item(7, [[COLUMN[0], 491, COLUMN[1], 700]], y=500)
-            cuts.snap_cuts([q6, q7], lambda _p: image)
+            cuts.snap_cuts([q6, q7], lambda _p, _image=image: _image)
             self.assertLessEqual(q7["regions"][0]["bbox"][1], 500, working)
             self.assertLessEqual(q6["regions"][0]["bbox"][3], 500, working)
 

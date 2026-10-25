@@ -38,7 +38,7 @@ def forwards(apps, schema_editor):
                   .exclude(system_key=LEGACY_GROUP_KEY)
                   .prefetch_related("tags")
                   .order_by("position", "name")):
-        members = [tag for tag in group.tags.all()]
+        members = list(group.tags.all())
         if not members:
             continue
 

@@ -12,7 +12,6 @@ import unicodedata
 
 from .figure_policy import has_figure_cue
 
-
 OPTION_SLOTS = frozenset("ABCDE")
 CHOICE_KINDS = frozenset({"single_choice", "multiple_choice"})
 TEXT_TYPES = frozenset({"", "text", "paragraph", "list", "list_item", "image_caption"})

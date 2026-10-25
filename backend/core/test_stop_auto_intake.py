@@ -1,22 +1,31 @@
 """Real isolated originals and offline race boundaries; never a user API/key."""
 from __future__ import annotations
 
-from datetime import timedelta
 import hashlib
 import io
 import json
-from pathlib import Path
 import tempfile
 import threading
-from unittest import mock
 import zipfile
+from datetime import timedelta
+from pathlib import Path
+from unittest import mock
 
-from django.test import TestCase, SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from . import account_pool, intake, library, mineru, pipeline, readers, views
+from . import (
+    account_pool,
+    intake,
+    library,
+    mineru,
+    pipeline,
+    readers,
+    test_local_intake as local_tests,
+    test_manual_intake_review as review_tests,
+    views,
+)
 from .models import Block, ImportChunk, Paper, Question
-from . import test_local_intake as local_tests, test_manual_intake_review as review_tests
 from .test_resilience import _Session
 from .test_v1107_reparse import fake_api
 
@@ -138,11 +147,11 @@ class StopAndAutoIntakeTests(TestCase):
             with self.subTest(retry=retry):
                 paper = self.paper(mode="mineru", status="queued")
                 real_parse = pipeline.parse
-                def at_boundary(current, *, revision):
-                    self.action(paper, "stop")
-                    if retry:
-                        self.action(paper, "retry")
-                    return real_parse(current, revision=revision)
+                def at_boundary(current, *, revision, _paper=paper, _retry=retry, _real_parse=real_parse):
+                    self.action(_paper, "stop")
+                    if _retry:
+                        self.action(_paper, "retry")
+                    return _real_parse(current, revision=revision)
                 with mock.patch.object(pipeline, "parse", side_effect=at_boundary), \
                         mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
                     pipeline.process_paper(paper)
@@ -187,7 +196,7 @@ class StopAndAutoIntakeTests(TestCase):
         def extract(*args, **kwargs):
             self.action(paper, "stop")
             self.assertEqual(self.client.delete(f"/api/papers/{paper.pk}", HTTP_X_QB_REQUEST="1").status_code, 200)
-            return None
+            return
         with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
             pipeline.process_paper(paper)
         self.assertFalse(Paper.objects.filter(pk=paper_id).exists())

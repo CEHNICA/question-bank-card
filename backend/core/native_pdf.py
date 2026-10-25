@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pymupdf as fitz
 
-
 # 一页里读不出来的替换字符超过这个比例，才当成「这页正文不可信」。
 # 零星几个不降级：文字层其余部分照常能用，把整页的题丢掉代价比留下几个空位大得多。
 UNREADABLE_PAGE_RATIO = 0.05

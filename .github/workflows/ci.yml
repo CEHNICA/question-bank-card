@@ -1,0 +1,57 @@
+name: ci
+
+# 每次推送和每个 PR 都跑：代码规范、类型检查、三组测试。
+# 任何一条不过，这个提交就不能合进去 —— 门禁的意义就在这里。
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# 同一个分支上的新推送取消旧的那次，省机器。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.lock.txt
+            backend/requirements-dev.txt
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: |
+          python -m pip install -r backend/requirements.lock.txt
+          python -m pip install -r backend/requirements-dev.txt
+          npm ci --no-audit --no-fund
+
+      - name: Code style (ruff check)
+        run: python -m ruff check backend tools
+      - name: Code style (ruff format)
+        run: python -m ruff format --check backend tools
+      - name: Code style (eslint)
+        run: npm run lint
+      - name: Types (mypy)
+        run: python -m mypy --config-file pyproject.toml backend/core
+
+      - name: Test desktop launcher
+        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
+      - name: Test backend
+        working-directory: backend
+        env:
+          QB_EXPORT_BROWSER_TEST: "1"
+        run: python manage.py test core
+      - name: Test frontend
+        run: node --test frontend/test_*.js

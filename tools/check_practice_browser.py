@@ -9,10 +9,8 @@ The browser and owned server are stopped in finally, including failed checks.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import socket
@@ -21,9 +19,10 @@ import subprocess
 import sys
 import time
 import traceback
-from urllib.parse import urlparse
 import urllib.request
 import uuid
+from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = USER = RECEIPT = BASE = BACKEND_PYTHON = None
@@ -138,7 +137,7 @@ def verify_private_data():
 
 
 def browser_check(modals_only=False):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
     with sync_playwright() as pw:
         chrome = next((str(p) for p in (Path(pw.chromium.executable_path),
             Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
@@ -456,7 +455,7 @@ def internal_mode(mode: str, output: Path, port: int, modals_only=False) -> int:
         from django.core.management import call_command
         if mode == "migrate":
             call_command("migrate", interactive=False, verbosity=0)
-            from core.models import Paper, Question, PublishedQuestion, LibraryJob
+            from core.models import LibraryJob, Paper, PublishedQuestion, Question
             assert not any(model.objects.exists() for model in (Paper, Question, PublishedQuestion, LibraryJob))
         else:
             call_command("runserver", f"127.0.0.1:{port}", use_reloader=False, verbosity=1)

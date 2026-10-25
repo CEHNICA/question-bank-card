@@ -1,9 +1,9 @@
 """Offline practice selection and export. Never create formal publications or jobs."""
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import io
+from copy import deepcopy
 from urllib.parse import quote
 
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
@@ -14,7 +14,7 @@ from PIL import Image
 from . import demo, library, library_pdf, source_images
 from .library_browse import BrowseError, normalize_ids
 from .library_drafts import DraftError, _print_options
-from .library_export import ExportError, MAX_IMAGE_BYTES, MAX_TOTAL_IMAGES
+from .library_export import MAX_IMAGE_BYTES, MAX_TOTAL_IMAGES, ExportError
 from .models import Paper
 
 

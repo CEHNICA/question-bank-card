@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import importlib
+import json
 import tempfile
 import uuid
 from pathlib import Path
@@ -15,9 +15,19 @@ from django.urls import path
 
 from core import library, library_browse, library_tagging
 from core.library_tag_reports import legacy_tag_migration_rows
-from core.models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCatalogue, LibraryTagGroup,
-                         LibraryTagOperation,
-                         LibraryTagSuggestion, Paper, PublishedQuestion, Question, QuestionGroup)
+from core.models import (
+    LibraryJob,
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagCatalogue,
+    LibraryTagGroup,
+    LibraryTagOperation,
+    LibraryTagSuggestion,
+    Paper,
+    PublishedQuestion,
+    Question,
+    QuestionGroup,
+)
 
 urlpatterns = [
     path("api/library/tags", library_tagging.catalogue_view),

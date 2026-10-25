@@ -2,13 +2,11 @@
 from copy import deepcopy
 from unittest import mock
 
-from PIL import Image
-
 from django.test import SimpleTestCase, TestCase
+from PIL import Image
 
 from . import figure_claims, figure_policy, pipeline
 from .models import Block, Paper, Question, QuestionGroup
-
 
 BOX = [100, 200, 450, 420]
 
@@ -145,9 +143,9 @@ class FigureClaimIntegrationTests(TestCase):
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, number, **extra):
-        values = dict(paper=self.paper, group=self.group, number=number, stem="如图，求面积",
-                      question_type="free_response", figures=[diagram()], state="green",
-                      figure_review={"status": "ok", "source": "automatic"}, flags=[])
+        values = {"paper": self.paper, "group": self.group, "number": number, "stem": "如图，求面积",
+                      "question_type": "free_response", "figures": [diagram()], "state": "green",
+                      "figure_review": {"status": "ok", "source": "automatic"}, "flags": []}
         values.update(extra)
         return Question.objects.create(**values)
 

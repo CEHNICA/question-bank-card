@@ -13,8 +13,7 @@ from unittest import mock
 
 from django.test import Client, SimpleTestCase, TestCase
 
-from . import mineru
-from . import test_v110_types_origin as v110
+from . import mineru, test_v110_types_origin as v110
 from .models import Paper
 from .pipeline import paper_dir
 

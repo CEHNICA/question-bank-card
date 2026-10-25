@@ -1,0 +1,8 @@
+# Prettier 不管这些：第三方代码、构建产物、巨大的数据文件。
+node_modules/
+packaging/.build/
+packaging/dist/
+frontend/vendor/
+frontend/testdata/
+tmp/
+*.min.js

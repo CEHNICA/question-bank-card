@@ -14,13 +14,12 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+import pymupdf as fitz
 from django.test import TestCase
 from PIL import Image
-import pymupdf as fitz
 
-from . import intake, mineru, pipeline, readers, views
+from . import intake, mineru, pipeline, readers, test_manual_intake_review as manual_review, views
 from .models import Block, Paper, Question, QuestionGroup
-from . import test_manual_intake_review as manual_review
 
 
 def scan_pdf(pages: int = 1) -> bytes:

@@ -8,7 +8,7 @@ import os
 import sqlite3
 import sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 DB = os.path.join(os.environ["LOCALAPPDATA"], "QuestionBankCard", "db.sqlite3")
 CN = timezone(timedelta(hours=8))
@@ -20,7 +20,7 @@ def cn(value):
     text = value.replace("Z", "+00:00")
     moment = datetime.fromisoformat(text)
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(CN).strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -92,7 +92,7 @@ def main():
 
     print()
     print("== tags created that day (Beijing) ==")
-    for pk, name, kind, active, created in cursor.execute(
+    for _pk, name, kind, active, created in cursor.execute(
             "select id, name, kind, active, created_at from core_librarytag "
             "order by created_at desc limit 5"):
         print("  %s  %s  %s  active=%s" % (cn(created), name, kind, active))

@@ -10,8 +10,7 @@ import json
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from . import library
-from . import test_v110_types_origin as v110
+from . import library, test_v110_types_origin as v110
 from .models import PublishedQuestion, Question
 
 

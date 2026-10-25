@@ -1,0 +1,87 @@
+name: release
+
+# 打个 v 开头的标签（比如 v1.26.28）就自动出安装包、自动发 Release。
+# 标签必须跟 backend/core/version.py 里的 APP_VERSION 对得上 —— 打包脚本开头就会查，
+# 对不上直接停手，不会装出一个版本号是假的包。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "这个标签对应版本 $version"
+
+      - name: Install Inno Setup 7
+        shell: pwsh
+        run: |
+          winget install --id JRSoftware.InnoSetup.7 --exact --source winget `
+            --accept-source-agreements --accept-package-agreements --silent
+          $iscc = Get-Item "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe" -ErrorAction SilentlyContinue
+          if (-not $iscc) { throw "装完还没找到 ISCC.exe —— 打包脚本需要 Inno Setup 7" }
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $iscc.FullName)
+
+      - name: Run the full check suite
+        shell: pwsh
+        run: |
+          python -m pip install -r backend/requirements.lock.txt
+          python -m pip install -r backend/requirements-dev.txt
+          npm ci --no-audit --no-fund
+          python -m ruff check backend tools
+          python -m ruff format --check backend tools
+          npm run lint
+          python -m mypy --config-file pyproject.toml backend/core
+          python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
+          Push-Location backend; try { python manage.py test core } finally { Pop-Location }
+          node --test frontend/test_*.js
+
+      - name: Build the installer and the portable folder
+        shell: pwsh
+        run: |
+          powershell -NoProfile -File packaging/build.ps1 -Version '${{ steps.version.outputs.version }}'
+
+      - name: Assemble the public assets
+        run: python packaging/make_release_essentials.py ${{ steps.version.outputs.version }}
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $notes = "docs/release-notes-v$version.md"
+          if (-not (Test-Path $notes)) { throw "找不到单版说明 $notes" }
+          gh release create "v$version" `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "题有据 $version" `
+            --notes-file $notes
+
+      - name: Upload the assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $assets = "packaging/dist/releases/$version-public"
+          Get-ChildItem $assets -File | ForEach-Object {
+            gh release upload "v$version" $_.FullName --repo $env:GITHUB_REPOSITORY
+          }

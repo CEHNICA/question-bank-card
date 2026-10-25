@@ -1,16 +1,15 @@
 """Native export delivery uses private directories and synthetic output only."""
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.http import HttpResponse
 from django.test import SimpleTestCase, override_settings
 from django.urls import path
 
-from . import export_preferences as preferences, library_pdf, library_export
-from . import native_folder_picker
+from . import export_preferences as preferences, library_export, library_pdf, native_folder_picker
 
 urlpatterns = [path("api/export-preferences", preferences.preferences_view),
                path("api/export-preferences/select", preferences.select_export_directory_view),
@@ -229,7 +228,7 @@ class ExportPreferenceTests(SimpleTestCase):
                 self.assertEqual(response.status_code, 409)
                 self.assertIn("已经打开", response.json()["error"])
                 another.assert_not_called()
-            return None
+            return
         with mock.patch.object(native_folder_picker, "choose_directory", side_effect=while_open) as choose:
             self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 200)
             choose.assert_called_once_with("")

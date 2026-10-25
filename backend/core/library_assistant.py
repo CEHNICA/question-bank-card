@@ -14,8 +14,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import features, imaging, library, library_ai_settings, library_jobs
-from .models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCatalogue,
-                     LibraryTagSuggestion, PublishedQuestion, Question)
+from .models import (
+    LibraryJob,
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagCatalogue,
+    LibraryTagSuggestion,
+    PublishedQuestion,
+    Question,
+)
 
 
 class AssistantError(ValueError):
@@ -93,7 +100,7 @@ def list_tasks(ids=None, limit=50):
     if ids is not None and (not isinstance(ids, (list, tuple)) or len(ids) > 500):
         raise AssistantError("题目 ID 列表最多 500 条。", 400)
     identities = [_uuid(item, "入库题目") for item in ids] if ids is not None else None
-    from .library_job_control import expire_api_jobs, assistant_handoff
+    from .library_job_control import assistant_handoff, expire_api_jobs
     expire_api_jobs()
     rows = LibraryJob.objects.filter(executor=LibraryJob.Executor.ASSISTANT, status__in=library_jobs.ACTIVE).select_related("publication")
     if identities is not None:

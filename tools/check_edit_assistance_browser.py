@@ -7,17 +7,17 @@ cloud API, credentials or real user records are used. UI writes are forbidden.
 """
 
 import argparse
-from copy import deepcopy
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
+from copy import deepcopy
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,11 +40,12 @@ def seed():
     sys.path.insert(0, str(ROOT / "backend"))
     import django
     django.setup()
+    import pymupdf as fitz
     from django.conf import settings
     from django.core.management import call_command
-    import pymupdf as fitz
-    from core.models import Block, Paper, Question, RegionRead
+
     from core import region_reads
+    from core.models import Block, Paper, Question, RegionRead
 
     call_command("migrate", verbosity=0)
     if not hasattr(region_reads, "recommendation_for"):
@@ -112,7 +113,7 @@ def check(url):
     isolated_paths()
     if urlparse(url).hostname not in ("127.0.0.1", "localhost"):
         raise SystemExit("Only a local isolated server is allowed")
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
 
     fixture = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     before = question_snapshot()

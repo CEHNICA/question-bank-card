@@ -9,8 +9,8 @@ from django.db.models import Count, F
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import features, library, library_jobs, library_ai_settings, qtypes
-from .models import LibraryJob, PublishedQuestion, LibraryTagAssignment
+from . import features, library, library_ai_settings, library_jobs, qtypes
+from .models import LibraryJob, LibraryTagAssignment, PublishedQuestion
 
 MAX_BATCH_IDS = 500
 DEFAULT_LIMIT = 40
@@ -132,8 +132,8 @@ def facet_counts(params) -> dict:
         reviews[key] += 1
     for value in library_rows(params, omit="answer").values_list("content__answer", flat=True):
         answers["yes" if str(value or "").strip() else "no"] += 1
-    from .models import LibraryTag
     from .library_tagging import descendant_ids, relation_context
+    from .models import LibraryTag
     context = relation_context()
     publications_by_tag = {}
     for tag_id, publication_id in LibraryTagAssignment.objects.filter(

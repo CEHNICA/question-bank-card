@@ -120,7 +120,7 @@ def main() -> int:
                     " const t = n ? n.textContent : '';"
                     " return t && !t.includes('正在排版'); }", timeout=120000)
             except Exception:
-                print(f"  ⚠ 排版 120 秒还没结束")
+                print("  ⚠ 排版 120 秒还没结束")
             settle = round(time.time() - started, 1)
             state = page.evaluate(STATE)
             print(f"\n篮里 {size} 题：铺开用了 {elapsed}s，排版落定到 {settle}s，纸上 {state['unique']} 道（{state['blocks']} 块，小问会拆块）")
@@ -150,7 +150,7 @@ def main() -> int:
                 # 导出」—— 大卷子到底导不导得出来、扛不扛得到，这是「组一份大卷子」
                 # 这个问题里唯一还没量过的一环。
                 posts: list[dict] = []
-                page.on("request", lambda r: posts.append({"route": r.url, "body": r.post_data})
+                page.on("request", lambda r, _posts=posts: _posts.append({"route": r.url, "body": r.post_data})
                         if "/export-docx" in r.url else None)
                 before = len(posts)
                 page.locator("#exportWord").click()

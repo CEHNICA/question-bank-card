@@ -4,8 +4,8 @@
 删掉任务不会丢来源：PublishedQuestion.paper 是 SET_NULL，卷名字符串和题面快照
 都抄在记录自己身上。
 """
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 from django.test import TestCase
 

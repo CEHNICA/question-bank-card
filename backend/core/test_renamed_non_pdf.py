@@ -10,14 +10,13 @@ import io
 import tempfile
 from pathlib import Path
 
+import pymupdf as fitz
 from django.conf import settings
 from django.test import TransactionTestCase
 from PIL import Image
-import pymupdf as fitz
 
 from . import imaging, views
 from .models import Paper
-
 
 NOT_A_PDF_HTML = b"<!DOCTYPE html><html><body>404</body></html>"
 NOT_A_PDF_SVG = (b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" '

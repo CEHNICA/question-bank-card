@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """重读把一道好题读坏时，系统该留住旧的，而不是照单全收。
 
 真实重跑实测（2026-10-11，24 张抽检）里出现过：
@@ -17,7 +16,6 @@ from django.test import TestCase, override_settings
 
 from core import pipeline
 from core.models import Paper, Question
-
 
 LONG = ("在同一直角坐标系内画出函数 $y=\\dfrac{2}{x}$ 与函数 $y=x-1$ 的图象，"
         "并利用图象求它们的交点坐标。\n\n"

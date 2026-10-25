@@ -7,17 +7,16 @@ physical printer is used. Existing QA failure evidence is left untouched.
 """
 
 import argparse
+import json
+import re
 from functools import partial
 from http.server import ThreadingHTTPServer
-import json
 from pathlib import Path
-import re
 from threading import Thread
 from urllib.parse import parse_qs, urlparse
 
-from playwright.sync_api import sync_playwright, expect
-
 from check_library_preview_browser import FrontendHandler, fixture_item
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tmp" / "library-recovery-browser"

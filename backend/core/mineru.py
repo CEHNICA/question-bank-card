@@ -9,8 +9,8 @@ import re
 import time
 import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.parse import quote, urlsplit
 
 import requests
@@ -328,7 +328,7 @@ class _TransientDownloadError(MineruError):
 
 def _check_cancel(cancel: Callable[[], bool] | None) -> None:
     if cancel is not None and cancel():
-        raise MineruCancelled()
+        raise MineruCancelled
 
 
 def _pause(seconds: float, cancel: Callable[[], bool] | None = None) -> None:
@@ -565,9 +565,9 @@ def request_extract_file(
                     "trace_id": trace_id,
                 })
             if cancel is not None and cancel():
-                raise MineruCancelled()
+                raise MineruCancelled
             if restart is not None and restart():
-                raise MineruRestart()
+                raise MineruRestart
             # A short exam is usually done within 10–20 s; poll briskly at first
             # and back off for long books so the API is not hammered.
             _pause(2 if time.monotonic() - started < 60 else 5, cancel)
@@ -629,7 +629,7 @@ def request_extract_file_from_pool(
                         continue
                     raise
         except AccountPoolCancelled:
-            raise MineruCancelled() from None
+            raise MineruCancelled from None
         except AccountPoolError:
             break
     if last_error is not None:

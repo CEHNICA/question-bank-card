@@ -5,9 +5,9 @@
      —— 改之前「上一题」是往前走的。
   2. 篮是右边缘一条常驻把手 + 抽屉面板，顶栏和导航抽屉里都不再有第二份。
 """
-import json
 import sys
 from pathlib import Path
+
 from playwright.sync_api import sync_playwright
 
 EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -61,7 +61,7 @@ EDIT = """() => { const ed = document.querySelector('.card.editing'); if (!ed) r
 def number(text):
     # 「第 12 题 / 共 4 题」只取前一个数：后面那个是总题数，拼起来就成了 124。
     import re
-    m = re.search(u'第\s*(\d+)\s*题', text)
+    m = re.search(r'第\s*(\d+)\s*题', text)
     return int(m.group(1)) if m else None
 
 
@@ -170,7 +170,7 @@ def run(pg):
             .map(n => Number((n.textContent.match(/第\\s*(\\d+)\\s*题/) || [])[1]))""")
         # 点到头为止：按钮自己会灰，那说明走到了最后一道，不是 bug。
         seq = [number(pg.evaluate(EDIT)["title"])]
-        for k in range(6):
+        for _k in range(6):
             st = pg.evaluate(EDIT)
             if st["nextDisabled"]: break
             pg.click("button:has-text('下一题')"); pg.wait_for_timeout(1500)
@@ -180,7 +180,7 @@ def run(pg):
         start = walkable.index(seq[0]) if seq[0] in walkable else -1
         check("连点下一题，一道不落地往前走", start >= 0 and seq == walkable[start:start + len(seq)], (seq, walkable))
         back = [seq[-1]]
-        for k in range(6):
+        for _k in range(6):
             st = pg.evaluate(EDIT)
             if st["prevDisabled"]: break
             pg.click("button:has-text('上一题')"); pg.wait_for_timeout(1500)
@@ -197,7 +197,7 @@ def run(pg):
         pg.screenshot(path=str(SHOT / "edit-figure.png"))
         # 「上一题」灰掉的断言要真走到头才有意义。走到头指的是当前这一屏题卡的第一张，
         # 不是题号 1 —— 回收站里的题和折叠起来的题不在这一屏里。
-        for k in range(30):
+        for _k in range(30):
             if pg.evaluate(EDIT)["prevDisabled"]: break
             pg.click("button:has-text('上一题')"); pg.wait_for_timeout(900)
         first = pg.evaluate(EDIT)

@@ -28,7 +28,6 @@ from docx.shared import Mm
 from core.library_export import (
     PREVIEW_FIGURE_GAP_PX,
     PREVIEW_PX_PER_INCH,
-    PREVIEW_TEXT_WIDTH_MM,
     _figure_paper_size,
     _figure_row_lines,
     _write_images,

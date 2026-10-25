@@ -8,8 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import path
 from PIL import Image
 
-from . import library, library_export, library_pdf, library_assistant, library_jobs
-from . import test_library_export as fixtures
+from . import library, library_assistant, library_export, library_jobs, library_pdf, test_library_export as fixtures
 
 urlpatterns = [path("api/library/export-docx", library_export.export_docx_view),
                path("api/library/export-pdf", library_pdf.export_pdf_view)]

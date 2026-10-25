@@ -13,6 +13,11 @@ backend/data/
 backend/runtime/
 backend/backups/
 
+# 前端工具链（eslint / prettier）只在开发期用，运行时零依赖。
+# package-lock.json **要**提交 —— 它是前端依赖的锁，跟 backend/requirements.lock.txt 一个性质。
+node_modules/
+.eslintcache
+
 packaging/.build/
 packaging/dist/
 tmp/

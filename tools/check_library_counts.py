@@ -16,19 +16,18 @@ or user data is touched.
 from __future__ import annotations
 
 import argparse
-from functools import partial
-from http.server import ThreadingHTTPServer
 import json
-from pathlib import Path
 import re
 import socket
 import sys
 import threading
-from urllib.parse import parse_qs, quote, urlencode, urlparse
-
-from playwright.sync_api import expect, sync_playwright
+from functools import partial
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from check_library_preview_browser import FrontendHandler, fixture_item
+from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tmp" / "library-counts"
@@ -258,7 +257,8 @@ def run(port: int) -> None:
                 report["cases"].append(entry)
                 # 题型固定五类 + 「全部」，一个都不能少；答案、审核两组和「更多筛选」都还在。
                 # 比的是标签不是数字 —— 数字本来就该跟着筛选变（0 是诚实的）。
-                labels = lambda rows: [row["text"].rstrip("0123456789") for row in rows]
+                def labels(rows):
+                    return [row["text"].rstrip("0123456789") for row in rows]
                 keeps_types = labels(after["types"]) == labels(before["types"])
                 keeps_groups = (after["answersHidden"] is False and after["reviewsHidden"] is False
                                 and after["advancedHidden"] is False)
@@ -310,8 +310,9 @@ def run(port: int) -> None:
                 free = lock_state(page)
                 entry = {"name": "已选题锁筛选、切回来解得开", "base": base, "locked": locked, "free": free}
                 report["cases"].append(entry)
-                everything = lambda state: ([state["search"], state["source"], state["sort"]]
-                                           + state["types"] + state["advanced"])
+                def everything(state):
+                    return ([state["search"], state["source"], state["sort"]]
+                            + state["types"] + state["advanced"])
                 all_locked = all(everything(locked))
                 # 判据是「和我进去之前一模一样」，不是「全都可点」：没有题的那几档
                 # 本来就该灰着，替它们解锁才是 bug。

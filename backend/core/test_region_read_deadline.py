@@ -1,13 +1,13 @@
 """Queued-without-worker, exact cancellation and bounded model waits, offline."""
 from __future__ import annotations
 
-from datetime import timedelta
 import json
 import threading
 import time
+from datetime import timedelta
 from unittest import mock
 
-from django.test import TestCase, SimpleTestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from . import account_pool, readers, region_reads

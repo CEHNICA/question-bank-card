@@ -7,9 +7,10 @@
 ``_inside_previous_opening`` 明写着 ``y < previous.y`` 就放弃——它只管前一题的第
 一行，起点倒退的情况它根本不看。所以这里单独钉住边界。
 """
-from django.test import SimpleTestCase
-from unittest import mock
 from types import SimpleNamespace
+from unittest import mock
+
+from django.test import SimpleTestCase
 
 from . import pipeline, segment
 

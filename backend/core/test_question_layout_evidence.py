@@ -1,10 +1,10 @@
 """Saved layout tokens must survive read-only display derivation and previews."""
-from copy import deepcopy
 import json
-from pathlib import Path
 import tempfile
-from unittest import mock
 import uuid
+from copy import deepcopy
+from pathlib import Path
+from unittest import mock
 
 from django.db import connection
 from django.test import TestCase, override_settings

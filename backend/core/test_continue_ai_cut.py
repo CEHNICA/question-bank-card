@@ -1,7 +1,7 @@
 """Offline continuation: CAS, true pipeline ownership, and original-page safety."""
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from unittest import mock
 
@@ -9,10 +9,16 @@ import pymupdf as fitz
 from django.test import TestCase
 from django.utils import timezone
 
-from . import continue_ai_cut, library, mineru, pipeline, readers
+from . import (
+    continue_ai_cut,
+    library,
+    mineru,
+    pipeline,
+    readers,
+    test_direct_cut_reading as direct_tests,
+    test_manual_intake_review as review_tests,
+)
 from .models import Block, ImportChunk, Paper, PublishedQuestion, Question, QuestionGroup, RegionRead
-from . import test_manual_intake_review as review_tests
-from . import test_direct_cut_reading as direct_tests
 
 
 class ContinueAICutTests(TestCase):
@@ -35,9 +41,9 @@ class ContinueAICutTests(TestCase):
             bbox=[80, y, 920, y + 40], text=f"{number}. Find x when x + 2 = 5.")
 
     def card(self, paper, number=1, **fields):
-        defaults = dict(paper=paper, number=number, processing_mode="manual", body_mode="text",
-            state="green", stem="Human question $x^2$", question_type="free_response", edited=True,
-            start_source="manual", source_kind="manual", regions=[{"page_idx": 0, "bbox": [80, 90, 920, 250]}])
+        defaults = {"paper": paper, "number": number, "processing_mode": "manual", "body_mode": "text",
+            "state": "green", "stem": "Human question $x^2$", "question_type": "free_response", "edited": True,
+            "start_source": "manual", "source_kind": "manual", "regions": [{"page_idx": 0, "bbox": [80, 90, 920, 250]}]}
         return Question.objects.create(**{**defaults, **fields})
 
     def test_revision_and_optional_field_types_are_strict(self):

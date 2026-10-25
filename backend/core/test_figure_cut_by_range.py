@@ -27,7 +27,6 @@ from django.test import SimpleTestCase
 from . import figure_policy, pipeline
 from .models import Question
 
-
 # 八下第 2 题 id=778 的真实坐标：候选图 [714,269,860,401] 只露出 55%。
 REGIONS = [{"page_idx": 10, "bbox": [98, 329, 914, 422]}]
 CANDIDATE = {"label": "1", "seq": 116, "page_idx": 10, "bbox": [714, 269, 860, 401]}

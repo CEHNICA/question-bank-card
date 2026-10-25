@@ -1,13 +1,13 @@
 """Edited solution overlays, immutable draft choices, and one-off AI boundaries."""
-from copy import deepcopy
 import io
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
 import uuid
 import zipfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,9 +15,19 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
-from . import features, library, library_assistant, library_drafts, library_export, library_jobs, library_pdf, library_question_editor as editor, library_solutions
+from . import (
+    features,
+    library,
+    library_assistant,
+    library_drafts,
+    library_export,
+    library_jobs,
+    library_pdf,
+    library_question_editor as editor,
+    library_solutions,
+)
 from .models import LibraryJob, LibrarySolution, Paper, PublishedQuestion, Question
-from .test_library_export import document_xml, field, math_field, NS
+from .test_library_export import NS, document_xml, field, math_field
 
 
 @override_settings(ROOT_URLCONF="qb_server.urls")

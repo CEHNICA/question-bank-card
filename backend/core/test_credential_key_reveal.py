@@ -1,8 +1,8 @@
 """Local pool viewing tests: synthetic encrypted files only, no network."""
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase, override_settings

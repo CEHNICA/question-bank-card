@@ -1,14 +1,23 @@
 """Saved crops -> explicit recognition -> normal drafts, with manual review."""
-from copy import deepcopy
 import json
-from pathlib import Path
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from . import account_pool, library, library_jobs, mineru, pipeline, readers, views, test_manual_intake_review as manual_review
+from . import (
+    account_pool,
+    library,
+    library_jobs,
+    mineru,
+    pipeline,
+    readers,
+    test_manual_intake_review as manual_review,
+    views,
+)
 from .models import Question
 
 
@@ -30,10 +39,10 @@ class CutQuestionReadingTests(TestCase):
         self.url = f"/api/papers/{self.original.pk}/read-cut-questions"
 
     def cut(self, number=1, **fields):
-        defaults = dict(paper=self.original, number=number, body_mode="source_image",
-            processing_mode="manual", question_type="free_response", state="yellow",
-            regions=[{"page_idx": 1, "bbox": [50, 50, 900, 420]},
-                     {"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        defaults = {"paper": self.original, "number": number, "body_mode": "source_image",
+            "processing_mode": "manual", "question_type": "free_response", "state": "yellow",
+            "regions": [{"page_idx": 1, "bbox": [50, 50, 900, 420]},
+                     {"page_idx": 0, "bbox": [50, 50, 900, 420]}]}
         return Question.objects.create(**{**defaults, **fields})
 
     def post(self, payload=None, *, url=None):

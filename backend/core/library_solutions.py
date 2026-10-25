@@ -1,16 +1,16 @@
 """Versioned solution overlays and private local assets, never OCR replacements."""
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import io
 import json
 import math
 import os
-from pathlib import Path
 import re
 import uuid
 import warnings
+from copy import deepcopy
+from pathlib import Path
 
 from django.conf import settings
 from django.db import OperationalError, transaction
@@ -61,7 +61,7 @@ def _asset_spec(publication_id, asset_id):
         if not isinstance(spec, dict) or spec.get("id") != key or spec.get("publication_id") != str(publication_id) \
                 or not isinstance(spec.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", spec["sha256"]) \
                 or type(spec.get("width")) is not int or type(spec.get("height")) is not int \
-                or not 1 <= spec["width"] or not 1 <= spec["height"] or spec["width"] * spec["height"] > MAX_PIXELS:
+                or not spec["width"] >= 1 or not spec["height"] >= 1 or spec["width"] * spec["height"] > MAX_PIXELS:
             raise ValueError
         return spec, target
     except (OSError, ValueError, KeyError, TypeError):

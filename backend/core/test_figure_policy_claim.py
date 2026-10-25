@@ -46,7 +46,6 @@ from django.test import SimpleTestCase
 
 from . import figure_policy
 
-
 FIGURE = {"slot": "stem", "page_idx": 0, "bbox": [10.0, 20.0, 90.0, 40.0], "source": "auto"}
 
 # The two real stems above.  Neither contains a cue the matcher recognises,

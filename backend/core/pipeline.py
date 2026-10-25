@@ -25,19 +25,50 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
-    cuts, demo, features, figure_assignment, figure_claims, figure_policy, imaging, import_planning, mineru, photos, printed_answers, prose, qtypes, readers, segment, tables,
-    textnorm, source_images,
+    cuts,
+    demo,
+    features,
+    figure_assignment,
+    figure_claims,
+    figure_policy,
+    imaging,
+    import_planning,
+    mineru,
+    photos,
+    printed_answers,
+    prose,
+    qtypes,
+    readers,
+    segment,
+    source_images,
+    tables,
+    textnorm,
 )
 from .account_pool import AccountPoolError, account_pool
 from .figure_policy import (
-    BLOCKED_MISSING, CONFIRMED_NO_FIGURE, CONFLICT, FLAG_NO_FIGURE, FLAG_UNCUED_FIGURE,
-    FLAG_UNFOUND_FIGURE, OK, automatic_review, figure_flag, has_figure_cue,
-    candidate_key, missing_choice_figure_slots, recheck_automatic_review,
-    resolve_automatic_figure_assignments, stored_or_derived_review,
+    BLOCKED_MISSING,
+    CONFIRMED_NO_FIGURE,
+    CONFLICT,
+    FLAG_NO_FIGURE,
+    FLAG_UNCUED_FIGURE,
+    FLAG_UNFOUND_FIGURE,
+    OK,
+    automatic_review,
+    candidate_key,
+    figure_flag,
+    has_figure_cue,
+    missing_choice_figure_slots,
+    recheck_automatic_review,
+    resolve_automatic_figure_assignments,
+    stored_or_derived_review,
     without_automatic_textbook_badges,
 )
 from .mineru import (
-    MAX_PDF_PAGES, MineruError, load_blocks, request_extract_file_from_pool, write_pdf_slice,
+    MAX_PDF_PAGES,
+    MineruError,
+    load_blocks,
+    request_extract_file_from_pool,
+    write_pdf_slice,
 )
 from .models import Block, ImportChunk, Paper, Question, QuestionDeletionBatch, QuestionGroup
 from .textnorm import same_reading
@@ -276,10 +307,7 @@ def _content_kind_review_flag(
 
 def _local_text_review_flag(flag: str) -> bool:
     return (
-        flag.startswith("本地版面规则判为")
-        or flag.startswith("AI 判断这段更像")
-        or flag.startswith("两次 AI 对这段是否为题目")
-        or flag.startswith("AI 看到的题号是 ")
+        flag.startswith(("本地版面规则判为", "AI 判断这段更像", "两次 AI 对这段是否为题目", "AI 看到的题号是 "))
     )
 
 
@@ -653,7 +681,7 @@ def _run_current(paper_id, revision: int) -> bool:
 
 def _check_run(paper_id, revision: int) -> None:
     if not _run_current(paper_id, revision):
-        raise mineru.MineruCancelled()
+        raise mineru.MineruCancelled
 
 
 def _sqlite_error_code(error: BaseException) -> int | None:
@@ -877,7 +905,7 @@ def _save_chunk(paper: Paper, revision: int, chunk_id: int, **fields) -> None:
     with transaction.atomic():
         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
         if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
-            raise mineru.MineruCancelled()
+            raise mineru.MineruCancelled
         ImportChunk.objects.filter(pk=chunk_id).update(**fields, updated_at=timezone.now())
 
 
@@ -993,7 +1021,7 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
                             cancelled.set()
                             for future in pending:
                                 future.cancel()
-                            raise mineru.MineruCancelled()
+                            raise mineru.MineruCancelled
                         done, pending = wait(
                             pending,
                             timeout=0.25,
@@ -1021,7 +1049,7 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
                                     current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
                                     if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
                                         cancelled.set()
-                                        raise mineru.MineruCancelled()
+                                        raise mineru.MineruCancelled
                                     job["download"].replace(job["archive"])
                                     results[job["sequence"]] = blocks
                                     ImportChunk.objects.filter(pk=job["pk"]).update(
@@ -1341,14 +1369,14 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         return
     plan_revision = int((paper.processing_plan or {}).get("revision", 0))
     if revision is not None and revision != plan_revision:
-        raise mineru.MineruCancelled()
+        raise mineru.MineruCancelled
     if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
         from . import intake
         if not paper.pages:
             intake.prepare(paper, paper.processing_plan["mode"])
         return
     if paper.status not in {Paper.Status.QUEUED, Paper.Status.PARSING}:
-        raise mineru.MineruCancelled()
+        raise mineru.MineruCancelled
     _check_continued_original(paper)
     if not _set_if_plan_current(paper, plan_revision, status=Paper.Status.PARSING, error=""):
         return
@@ -1358,13 +1386,13 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         target = folder / "converted.pdf"
         convert_docx_to_pdf(source, target)
         if not _set_if_plan_current(paper, plan_revision, render_path=str(target)):
-            raise mineru.MineruCancelled()
+            raise mineru.MineruCancelled
     if paper.photos and not paper.render_path:
         prepare_photos(paper, revision=plan_revision)
     render, kind = render_source(paper)
     if not paper.pages:
         if not _set_if_plan_current(paper, plan_revision, pages=imaging.page_sizes(render, kind)):
-            raise mineru.MineruCancelled()
+            raise mineru.MineruCancelled
     chunked = kind == "pdf" and (
         import_planning.pdf_requires_chunks(
             len(paper.pages), paper.material_type, MAX_PDF_PAGES,
@@ -1415,7 +1443,7 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
                     with transaction.atomic():
                         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
                         if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
-                            raise mineru.MineruCancelled()
+                            raise mineru.MineruCancelled
                         download.replace(archive)
                         if _preserve_continued_cards(current) and current.photos:
                             # A new upload reads the current render's order. The
@@ -1511,7 +1539,7 @@ def prepare_photos(paper: Paper, *, revision: int | None = None, render_target: 
     if revision is None:
         _set(paper, **fields)
     elif not _set_if_plan_current(paper, revision, **fields):
-        raise mineru.MineruCancelled()
+        raise mineru.MineruCancelled
 
 
 def _page_note(info: dict, ranges: dict[int, tuple | None] | None, prefix: str) -> str:
@@ -2816,7 +2844,7 @@ def segment_paper(paper: Paper) -> None:
         with transaction.atomic():
             current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
             if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
-                raise mineru.MineruCancelled()
+                raise mineru.MineruCancelled
             # Keep every previous group row and every card's group reference.
             # Prospective book regrouping belongs to the ordinary resegment
             # operation, never this explicitly additive continuation.
@@ -2827,7 +2855,7 @@ def segment_paper(paper: Paper) -> None:
         with transaction.atomic():
             current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
             if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
-                raise mineru.MineruCancelled()
+                raise mineru.MineruCancelled
             groups = _ensure_question_groups(paper)
     with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
         blocks, questions, notes, _diagnostics = _collect_segmentation_items(
@@ -3569,7 +3597,7 @@ def _caption_is_cut_out(cuts, captions, number: str) -> bool:
 def _caption_owner(cuts, captions, number: str):
     """这个编号该属于哪张图：同一页、左右对得上、且就印在框底下方不远处。"""
     best = None
-    for page_idx, x0, y0, x1, y1 in cuts:
+    for page_idx, x0, _y0, x1, y1 in cuts:
         for box in captions.get(page_idx, {}).get(number, []):
             cx0, cy0, cx1, cy1 = box
             gap = cy0 - y1
@@ -4427,7 +4455,7 @@ def _exclude_handwritten_candidates(engine, store, labels: dict, figure_source: 
     with any printing in it keeps the prompt, which is the safe direction: a printed
     figure dropped without a word is the expensive mistake.
     """
-    unclaimed = sorted(set(labels) - set((figure_source.get("figures") or {})),
+    unclaimed = sorted(set(labels) - set(figure_source.get("figures") or {}),
                        key=lambda value: int(value))
     if not unclaimed or engine is None:
         return {}
@@ -4697,7 +4725,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # Readers sometimes judge only some of the numbered boxes.  An unjudged box
     # made the card yellow (“原卷可能有图没有被找到”) although nothing was
     # missing; ask once, about just those boxes.
-    unjudged = sorted(set(labels) - set((figure_source.get("figures") or {})), key=lambda value: int(value))
+    unjudged = sorted(set(labels) - set(figure_source.get("figures") or {}), key=lambda value: int(value))
     if double_read and a and unjudged:
         try:
             extra = readers.classify_figures(primary, marked_url, number, unjudged)

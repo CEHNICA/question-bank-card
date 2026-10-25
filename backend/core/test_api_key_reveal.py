@@ -1,8 +1,8 @@
 """Explicit local credential viewing uses only synthetic offline credentials."""
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import TestCase

@@ -11,9 +11,9 @@ import json
 import os
 import sqlite3
 import subprocess
-import uuid
 import sys
 import urllib.request
+import uuid
 
 BASE = "http://127.0.0.1:8768"
 ROOT = r"C:\Users\17321\.minimax\sessions\mvs_fc946281665f4565a3d0ce7af01bd838\workspace\qbj-src"

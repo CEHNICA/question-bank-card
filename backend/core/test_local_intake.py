@@ -1,21 +1,21 @@
 """Local originals only: isolated files, generated PDFs and mocked readers."""
 from __future__ import annotations
 
-from concurrent.futures import Future
 import hashlib
 import io
 import json
-from pathlib import Path
 import tempfile
+from concurrent.futures import Future
+from pathlib import Path
 from unittest import mock
 
 import pymupdf as fitz
-from PIL import Image
-from django.test import TestCase, RequestFactory, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 
 from . import imaging, intake, library, native_pdf, pipeline, segment, source_images, views
-from .models import Paper, PublishedQuestion, Question, QuestionGroup, Block
+from .models import Block, Paper, PublishedQuestion, Question, QuestionGroup
 
 
 class InlineExecutor:
@@ -71,9 +71,9 @@ class LocalIntakeTests(TestCase):
 
     def question(self, paper, **kwargs):
         intake.prepare(paper, "manual")
-        defaults = dict(paper=paper, group=paper.question_groups.first(), number=1,
-            body_mode="source_image", processing_mode="manual", question_type="free_response",
-            regions=[{"page_idx": 0, "bbox": [30, 50, 950, 300]}], state=Question.State.YELLOW)
+        defaults = {"paper": paper, "group": paper.question_groups.first(), "number": 1,
+            "body_mode": "source_image", "processing_mode": "manual", "question_type": "free_response",
+            "regions": [{"page_idx": 0, "bbox": [30, 50, 950, 300]}], "state": Question.State.YELLOW}
         defaults.update(kwargs)
         return Question.objects.create(**defaults)
 

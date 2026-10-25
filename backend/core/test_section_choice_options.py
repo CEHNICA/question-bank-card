@@ -12,8 +12,8 @@
 - 加一条「选项被划掉也要照抄」的规则：3 次里 1 次读全四个、那次还多编了一个 E，
   对照组四张卡（正常四选×2、图选项、填空题）都没有变化——安全，但没用。
 """
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 

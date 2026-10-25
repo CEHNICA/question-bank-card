@@ -298,7 +298,7 @@ class WitnessPipelineTests(TestCase):
 
         def answer(prompt: str) -> str:
             lines = []
-            for index, first, second in _re.findall(r"第(\d+)处：.*?甲：(\S+)　乙：(\S+)", prompt):
+            for index, first, _second in _re.findall(r"第(\d+)处：.*?甲：(\S+)　乙：(\S+)", prompt):
                 # The reading's spelling is the one scripted below as ``x^2`` / ``美``.
                 reading_is_first = first in {"2", "美"}
                 wants_first = (side == "reading") == reading_is_first

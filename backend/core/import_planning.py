@@ -7,9 +7,8 @@ All source PDF page numbers in this module are one-based and inclusive.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
-
 
 MATERIAL_EXAM = "exam"
 MATERIAL_BOOK = "book"

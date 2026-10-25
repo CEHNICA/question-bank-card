@@ -12,20 +12,25 @@ import random
 import re
 import threading
 import time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from concurrent.futures import TimeoutError as FutureTimeout
-from dataclasses import dataclass
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 from contextlib import contextmanager
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import requests
 
-from . import preferences, provider_catalog
+from . import preferences, provider_catalog, qtypes
 from .account_pool import (
-    MINIMAX_PLANS, AccountPoolCancelled, AccountPoolError, account_pool, minimax_plan, provider_answered, provider_resting, rest_provider,
+    MINIMAX_PLANS,
+    AccountPoolCancelled,
+    AccountPoolError,
+    account_pool,
+    minimax_plan,
+    provider_answered,
+    provider_resting,
+    rest_provider,
     secrets_from_environment,
 )
-from . import qtypes
 from .textnorm import clean_option, clean_stem, fix_symbols, strip_type_label
 
 MINIMAX_MODEL = preferences.DEFAULT_MODELS["minimax"]  # legacy public constant

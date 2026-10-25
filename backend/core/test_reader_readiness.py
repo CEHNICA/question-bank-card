@@ -10,20 +10,18 @@ the entry that takes the teacher to the setting, and the one thing the scope is
 still allowed to stop: moving a request that was already under way.
 """
 
-from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import tempfile
+from copy import deepcopy
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from PIL import Image
 
-from . import intake, pipeline, provider_catalog, readers, views
-from . import test_manual_intake_review as manual_review
+from . import intake, pipeline, provider_catalog, readers, test_manual_intake_review as manual_review, views
 from .models import Question
-
 
 CONFIGURED = readers.Engine("modelscope", "isolated-ready")
 MISSING = "minimax_m3"

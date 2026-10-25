@@ -1,7 +1,7 @@
 """Passing saves a bank snapshot atomically; old publish stays idempotent."""
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from unittest import mock
 
 from django.test import TestCase

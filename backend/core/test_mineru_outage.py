@@ -3,22 +3,21 @@
 Only a synthetic PDF and test token enter the fixture. HTTPS storage URLs are
 rewritten by the test-only Session to the same loopback server; no cloud is used.
 """
+import json
+import socket
+import threading
 from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
-import socket
-import threading
 from unittest import mock
 
 import requests
 from django.test import TestCase
 from django.utils import timezone
 
-from . import account_pool, library, mineru, pipeline, readers
+from . import account_pool, library, mineru, pipeline, readers, test_manual_intake_review as originals
 from .models import Block, Paper, PublishedQuestion, Question
-from . import test_manual_intake_review as originals
 
 
 class _Clock:

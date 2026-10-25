@@ -15,12 +15,12 @@ DOM 上写着「已入库」不算数，这里断言的是任务从列表消失�
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tmp" / "task-delete-shots"
@@ -51,6 +51,7 @@ def seed():
     from django.conf import settings
     from django.core.management import call_command
     from django.utils import timezone
+
     from core import library
     from core.models import Paper, PublishedQuestion, Question
 

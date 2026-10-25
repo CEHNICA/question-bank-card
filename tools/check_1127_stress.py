@@ -2,9 +2,9 @@
 
 跑完 dev server 上真的那一份（tmp\accept2），每一步都量真实的 DOM 状态。
 """
-import json
 import sys
 from pathlib import Path
+
 from playwright.sync_api import sync_playwright
 
 EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -127,9 +127,9 @@ def run(pg):
         if label == "关抽屉": pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
         g = pg.evaluate(GEOM)
         spots.append((label, g["preview"]["l"], g["preview"]["t"]))
-    check("三个状态下按钮位置都不变", len({(l, t) for _, l, t in spots}) == 1, spots)
+    check("三个状态下按钮位置都不变", len({(left, t) for _, left, t in spots}) == 1, spots)
     # 1.12.7b 之后组卷预览在篮面板底部，不是顶栏那一条。别再拿「t < 96」当可见。
-    check("按钮在屏幕内且有尺寸", all(0 <= l and 0 < t < 900 for _, l, t in spots), spots)
+    check("按钮在屏幕内且有尺寸", all(left >= 0 and 0 < t < 900 for _, left, t in spots), spots)
     pg.click("#basketButton"); pg.wait_for_timeout(2500)
     check("点组卷预览能打开组卷窗口", pg.evaluate("() => Boolean(document.querySelector('#printSheet[open]'))"))
     pg.click("#closePrint"); pg.wait_for_timeout(600)

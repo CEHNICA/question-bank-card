@@ -4,9 +4,9 @@ Use the real settings, queue, HTTP view and worker code. Only encryption and
 the HTTP transport are synthetic; no real credential or cloud is consulted.
 """
 
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from unittest import mock
 
 from django.test import TransactionTestCase

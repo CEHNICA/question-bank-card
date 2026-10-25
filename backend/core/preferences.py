@@ -19,7 +19,6 @@ from django.conf import settings
 from . import provider_catalog
 from .account_pool import DEFAULT_MINIMAX_PLAN, MINIMAX_PLANS
 
-
 DEFAULTS = {
     "primary_engine": "minimax_m3",
     "checker_engine": "auto",

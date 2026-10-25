@@ -184,7 +184,7 @@ def main() -> int:
                 extra = ["--paper", paper]
             if name in RUN_FLAG:
                 extra.append("--run")
-            if not any(flag.startswith("--url") or flag.startswith("--base") for flag in extra):
+            if not any(flag.startswith(("--url", "--base")) for flag in extra):
                 extra = ["--url", base, *extra] if "--url" in _declared(name) else extra
 
             code, output, seconds = run_script(name, extra, env=env)

@@ -12,10 +12,10 @@ import importlib.util
 import json
 import os
 import sys
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
-from typing import Mapping
 
 from .account_pool import SERVICE_ENVIRONMENT, reset_account_pools
 

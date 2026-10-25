@@ -12,7 +12,6 @@ from PIL import Image
 from . import figure_policy, imaging, pipeline, readers
 from .models import Paper, Question, QuestionGroup
 
-
 REGION = {"page_idx": 0, "bbox": [0, 0, 1000, 1000]}
 BOX = [100, 200, 450, 420]
 CUED = "如图，正六边形的顶点为 ABCDEF，求 ∠1+∠2"
@@ -177,15 +176,15 @@ class GeometricOwnershipGateTests(TestCase):
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, **extra):
-        values = dict(paper=self.paper, group=self.group, number=13, stem=CUED,
-                      question_type="free_response", state="yellow", regions=[REGION],
-                      figure_candidates=[candidate(1)], figures=[owned(BOX)],
-                      figure_review={"status": "ok", "source": "automatic"},
-                      flags=[figure_policy.FLAG_ROW_FIGURE])
+        values = {"paper": self.paper, "group": self.group, "number": 13, "stem": CUED,
+                      "question_type": "free_response", "state": "yellow", "regions": [REGION],
+                      "figure_candidates": [candidate(1)], "figures": [owned(BOX)],
+                      "figure_review": {"status": "ok", "source": "automatic"},
+                      "flags": [figure_policy.FLAG_ROW_FIGURE]}
         values.update(extra)
         return Question.objects.create(**values)
 
-    def run_gate(self, answer, question=None, confirm=set()):
+    def run_gate(self, answer, question=None, confirm=frozenset()):
         store = mock.Mock()
         store.load.return_value = Image.new("RGB", (1000, 1000), "white")
         with mock.patch.object(pipeline, "PageStore", return_value=store), \
@@ -518,11 +517,11 @@ class AutomaticFigureGateTests(TestCase):
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, **extra):
-        values = dict(paper=self.paper, group=self.group, number=21, stem=CUED,
-                      question_type="free_response", state="yellow", regions=[REGION],
-                      figure_candidates=[candidate(1)],
-                      figures=[{"page_idx": 0, "bbox": list(BOX), "slot": "stem", "source": "auto"}],
-                      figure_review={"status": "ok", "source": "automatic"}, flags=[])
+        values = {"paper": self.paper, "group": self.group, "number": 21, "stem": CUED,
+                      "question_type": "free_response", "state": "yellow", "regions": [REGION],
+                      "figure_candidates": [candidate(1)],
+                      "figures": [{"page_idx": 0, "bbox": list(BOX), "slot": "stem", "source": "auto"}],
+                      "figure_review": {"status": "ok", "source": "automatic"}, "flags": []}
         values.update(extra)
         return Question.objects.create(**values)
 

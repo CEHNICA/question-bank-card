@@ -183,7 +183,7 @@ def run(tests):
 
 originals = {path: path.read_text(encoding="utf-8") for path in {entry[0] for entry in MUTATIONS}}
 backup = Path(tempfile.mkdtemp())
-for path, text in originals.items():
+for path, _text in originals.items():
     shutil.copy2(path, backup / path.name)
 
 
@@ -196,7 +196,7 @@ def write(path, text):
 
 failed = 0
 try:
-    for path, label, old, new, tests in MUTATIONS:
+    for path, label, old, new, _tests in MUTATIONS:
         source = originals[path]
         if source.count(old) != 1:
             print(f"[BAD ] {label}: pattern found {source.count(old)} times, need exactly 1")

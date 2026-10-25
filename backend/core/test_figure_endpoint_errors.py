@@ -52,11 +52,11 @@ class FigureEndpointTests(TestCase):
         self.paper.save(update_fields=["source_path", "pages"])
 
     def card(self, **extra):
-        values = dict(paper=self.paper, number=1, body_mode="text", processing_mode="auto",
-                      question_type="single_choice", state="yellow",
-                      regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
-                      figures=[{"page_idx": 0, "bbox": [100, 200, 450, 500],
-                                "slot": "stem", "source": "auto"}], flags=[])
+        values = {"paper": self.paper, "number": 1, "body_mode": "text", "processing_mode": "auto",
+                      "question_type": "single_choice", "state": "yellow",
+                      "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+                      "figures": [{"page_idx": 0, "bbox": [100, 200, 450, 500],
+                                "slot": "stem", "source": "auto"}], "flags": []}
         values.update(extra)
         return Question.objects.create(**values)
 

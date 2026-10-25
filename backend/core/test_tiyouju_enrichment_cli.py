@@ -15,9 +15,8 @@ from django.test import LiveServerTestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from . import features, library, library_ai_settings
-from .test_v110_types_origin import TempDataMixin
 from .test_tiyouju_cli import cli, run_json
-
+from .test_v110_types_origin import TempDataMixin
 
 PUBLICATION = "12345678-1234-5678-1234-567812345678"
 OTHER = "22345678-1234-5678-1234-567812345678"

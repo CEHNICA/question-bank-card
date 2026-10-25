@@ -1,6 +1,19 @@
 from django.urls import path
 
-from core import views, library_browse, library_drafts, library_export, library_pdf, library_solutions, library_question_editor, library_tags, library_tagging, api_key_reveal, export_preferences, practice, transfer_views
+from core import (
+    api_key_reveal,
+    export_preferences,
+    library_browse,
+    library_drafts,
+    library_export,
+    library_pdf,
+    library_question_editor,
+    library_solutions,
+    library_tagging,
+    practice,
+    transfer_views,
+    views,
+)
 
 urlpatterns = [
     path("", views.index_page),

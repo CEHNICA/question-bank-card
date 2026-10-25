@@ -46,14 +46,14 @@ class AnchorReadingFlagReconcileTests(TestCase):
 
     def card(self, **values):
         self.counter += 1
-        base = dict(
-            paper=self.paper, group=self.group, number=self.counter,
+        base = {
+            "paper": self.paper, "group": self.group, "number": self.counter,
             # 九上第 2 题 #1153 的真实情形：卡号对的是「下列函数…」，卡上却是整段读一读。
-            stem="读一读  反比例函数与三等分角  同学们都知道，关于尺规作图有著名的“三大不能”。",
-            regions=[{"page_idx": 0, "bbox": [100, 200, 900, 900]}],
-            processing_mode="auto", body_mode="text", source_anchor_seq=671,
-            state=Question.State.GREEN, flags=[], figures=[], figure_review={},
-        )
+            "stem": "读一读  反比例函数与三等分角  同学们都知道，关于尺规作图有著名的“三大不能”。",
+            "regions": [{"page_idx": 0, "bbox": [100, 200, 900, 900]}],
+            "processing_mode": "auto", "body_mode": "text", "source_anchor_seq": 671,
+            "state": Question.State.GREEN, "flags": [], "figures": [], "figure_review": {},
+        }
         base.update(values)
         return Question.objects.create(**base)
 

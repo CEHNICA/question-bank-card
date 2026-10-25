@@ -6,13 +6,11 @@ A fresh system-browser profile renders a fixed document with no network assets.
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
 import hashlib
 import html
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import secrets
 import socket
@@ -21,8 +19,10 @@ import subprocess
 import tempfile
 import threading
 import time
-from urllib.parse import quote
+from contextlib import contextmanager
+from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import quote
 from urllib.request import ProxyHandler, build_opener
 
 from django.conf import settings

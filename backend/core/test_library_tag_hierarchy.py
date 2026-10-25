@@ -7,8 +7,16 @@ from django.http import QueryDict
 from django.test import TestCase
 
 from core import library, library_browse, library_tagging
-from core.models import (LibraryTag, LibraryTagAssignment, LibraryTagRelation,
-                         LibraryTagSuggestion, LibraryTagOperation, Paper, Question, PublishedQuestion)
+from core.models import (
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagOperation,
+    LibraryTagRelation,
+    LibraryTagSuggestion,
+    Paper,
+    PublishedQuestion,
+    Question,
+)
 
 
 class LibraryTagHierarchyTests(TestCase):

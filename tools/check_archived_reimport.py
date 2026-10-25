@@ -8,10 +8,10 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -654,7 +654,7 @@ class ParseTests(TestCase):
 
 def fake_page_pdf(path: Path, pages: int = 1) -> None:
     images = []
-    for index in range(pages):
+    for _index in range(pages):
         image = Image.new("RGB", (1684, 1190), "white")
         draw = ImageDraw.Draw(image)
         for row in range(20):
@@ -1541,7 +1541,7 @@ class ApiTests(TestCase):
         library = self.client.get("/api/library").json()
         self.assertEqual(library["total"], 1)
         self.assertEqual(library["items"][0]["content"]["stem"], "如图，已知 $x=2$")
-        self.assertEqual(self.client.get(f"/api/library?q=x=2").json()["total"], 1)
+        self.assertEqual(self.client.get("/api/library?q=x=2").json()["total"], 1)
         malformed = self.client.get("/api/library?document=--------------------------------")
         self.assertEqual(malformed.status_code, 200)
         self.assertEqual(malformed.json()["total"], 0)

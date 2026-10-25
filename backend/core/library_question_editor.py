@@ -6,10 +6,10 @@ in the same transaction. Existing solution overlays remain on their versions.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 from django.conf import settings
 from django.db import OperationalError, transaction

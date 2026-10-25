@@ -12,7 +12,6 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import sqlite3
@@ -21,8 +20,9 @@ import sys
 import time
 import traceback
 import urllib.request
-from urllib.parse import urlparse
 import uuid
+from pathlib import Path
+from urllib.parse import urlparse
 
 import check_practice_browser as private
 from check_frozen_pdf_browser import stop_owned, wait_owned
@@ -139,6 +139,7 @@ def seed_old(output):
 def finish_seed(output):
     bootstrap()
     from django.utils import timezone
+
     from core import library
     from core.models import Question
     before = json.loads((output / "old-schema-snapshot.json").read_text(encoding="utf-8"))
@@ -162,7 +163,7 @@ def finish_seed(output):
 
 
 def browser_check(output, port):
-    from playwright.sync_api import sync_playwright, expect
+    from playwright.sync_api import expect, sync_playwright
     base = f"http://127.0.0.1:{port}"
     fixture = json.loads((output / "fixture.json").read_text(encoding="utf-8"))
     report = {"success": False, "passed": [], "page_errors": [], "forbidden_requests": [], "writes": [],

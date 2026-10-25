@@ -9,17 +9,17 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import time
 import traceback
+from pathlib import Path
 from urllib.parse import urlparse
 
-from playwright.sync_api import expect, sync_playwright
 import check_edit_assistance_browser as seed_helper
 from check_source_pan_browser import geometry, pan_and_release, wheel_anchor
+from playwright.sync_api import expect, sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
 OUTPUT=ROOT/"tmp"/"page-canvas-browser"
@@ -173,7 +173,7 @@ def check(url, fixture):
                 page.evaluate("()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
                 assert surface.bounding_box()==held_dimensions and zoom.inner_text()==held_zoom,"0/W resized the canvas during a draw"
                 page.mouse.click(**b)
-                def draw_state():
+                def draw_state(_a=a, _b=b, _zoom=zoom, _surface=surface, _viewport=viewport):
                     def at(point):
                         return page.evaluate("""([x,y])=>{const n=document.elementFromPoint(x,y);
                             return n?n.tagName.toLowerCase()+(n.id?'#'+n.id:'')
@@ -182,8 +182,8 @@ def check(url, fixture):
                             "result":page.locator("#pageCropResult").inner_text(),
                             "drawing":page.locator("#pageStage .edit-box.drawing").evaluate_all(
                                 "ns=>ns.map(n=>({l:n.style.left,t:n.style.top,w:n.style.width,h:n.style.height}))"),
-                            "a":a,"b":b,"at_a":at(a),"at_b":at(b),"zoom":zoom.inner_text(),
-                            "surface":surface.bounding_box(),"stage":viewport.bounding_box()}
+                            "a":_a,"b":_b,"at_a":at(_a),"at_b":at(_b),"zoom":_zoom.inner_text(),
+                            "surface":_surface.bounding_box(),"stage":_viewport.bounding_box()}
                 assert len(boxes(page))==len(original_boxes)+1,draw_state()
                 drawn=boxes(page)[-1];result["drawn_region"]=drawn
                 for key,target in (("left",2),("top",4),("width",5.5),("height",7)):

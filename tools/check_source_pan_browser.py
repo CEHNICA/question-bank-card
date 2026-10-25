@@ -6,17 +6,17 @@ Use --help first, then --run. This server owns only the supplied free port.
 """
 
 import argparse
+import json
+import socket
+import traceback
 from functools import partial
 from http.server import ThreadingHTTPServer
-import json
 from pathlib import Path
-import socket
 from threading import Thread
-import traceback
 from urllib.parse import urlparse
 
-from playwright.sync_api import expect, sync_playwright
 from check_library_preview_browser import FrontendHandler, fixture_item
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "tmp" / "source-pan-browser"
@@ -28,8 +28,8 @@ def synthetic_page(index):
         lines.append(f'<path d="M{x} 0V900" stroke="#d4dedd"/><text x="{x+3}" y="30">x{x}</text>')
     for y in range(50, 901, 50):
         lines.append(f'<path d="M0 {y}H650" stroke="#d4dedd"/><text x="8" y="{y-4}">y{y}</text>')
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="650" height="900" viewBox="0 0 650 900">'
-        f'<rect width="650" height="900" fill="white"/><g font-family="sans-serif" font-size="12">'
+    return ('<svg xmlns="http://www.w3.org/2000/svg" width="650" height="900" viewBox="0 0 650 900">'
+        '<rect width="650" height="900" fill="white"/><g font-family="sans-serif" font-size="12">'
         + "".join(lines) + f'<text x="180" y="420" font-size="34" fill="#00635d">OFFLINE PAGE {index+1}</text>'
         '<circle cx="325" cy="500" r="35" fill="#ffe3a4" stroke="#bb7200"/></g></svg>').encode()
 

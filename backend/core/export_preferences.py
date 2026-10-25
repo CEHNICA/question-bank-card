@@ -10,13 +10,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import stat
 import tempfile
 import threading
 import time
+from pathlib import Path
 from urllib.parse import quote, unquote
 
 from django.conf import settings
@@ -169,7 +169,7 @@ def select_export_directory_view(request):
     from .views import _body
     if _body(request, limit=1_000) != {}:
         return JsonResponse({"error": "选择文件夹的请求格式不正确。"}, status=400)
-    from .native_folder_picker import choose_directory, FolderPickerError
+    from .native_folder_picker import FolderPickerError, choose_directory
     if not _picker_lock.acquire(blocking=False):
         return JsonResponse({"error": "文件夹选择窗口已经打开，请先选择或取消。"}, status=409)
     try:

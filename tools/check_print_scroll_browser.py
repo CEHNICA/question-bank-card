@@ -4,15 +4,15 @@ Only synthetic frontend responses on localhost are used; no real data, worker,
 cloud or printer. Run --run; screenshots and a PDF go under checkout/tmp.
 """
 import argparse
+import json
 from functools import partial
 from http.server import ThreadingHTTPServer
-import json
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
 
-from playwright.sync_api import sync_playwright, expect
 from check_library_preview_browser import FrontendHandler, fixture_item
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tmp" / "print-scroll-browser"

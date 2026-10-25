@@ -7,9 +7,8 @@ body 上的 class、抽屉的 hidden）。只读题库，不改题。
 """
 
 import argparse
-import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]

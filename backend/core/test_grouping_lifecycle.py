@@ -24,7 +24,6 @@ from . import photos, pipeline, segment, views as core_views
 from .apps import discard_interrupted_deletes
 from .models import Block, Paper, PublishedQuestion, Question, QuestionGroup
 
-
 PAGES = [
     {"page_idx": index, "width": 1000, "height": 1400}
     for index in range(4)

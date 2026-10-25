@@ -2,7 +2,6 @@ from django.test import SimpleTestCase
 
 from . import segment
 
-
 PAGES = [
     {"page_idx": index, "width": 1000, "height": 1400}
     for index in range(8)

@@ -10,12 +10,12 @@ Browser requests outside loopback and all mutating requests are forbidden.
 import argparse
 import json
 import os
-from pathlib import Path
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +39,7 @@ def seed():
     import django
     django.setup()
     from django.core.management import call_command
+
     from core.models import Paper, Question
 
     call_command("migrate", verbosity=0)
@@ -63,7 +64,7 @@ def check(url):
     isolated_paths()
     if urlparse(url).hostname not in ("127.0.0.1", "localhost"):
         raise SystemExit("Only a local isolated server is allowed")
-    from playwright.sync_api import sync_playwright, expect, Error
+    from playwright.sync_api import Error, expect, sync_playwright
 
     fixtures = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     first, second = fixtures

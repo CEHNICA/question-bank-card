@@ -5,8 +5,9 @@ from pathlib import Path
 from unittest import mock
 
 from django.test import TestCase, override_settings
+
 from . import demo, practice
-from .models import Paper, PublishedQuestion, Question, LibraryJob, RegionRead
+from .models import LibraryJob, Paper, PublishedQuestion, Question, RegionRead
 
 
 class PracticeTests(TestCase):

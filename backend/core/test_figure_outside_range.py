@@ -154,13 +154,13 @@ class GeometricFigureFlagReconcileTests(TestCase):
 
     def card(self, **values):
         self.counter += 1
-        base = dict(
-            paper=self.paper, group=self.group, number=self.counter,
-            stem="如图，△ABC 的三个顶点分别为 A（1，2），求函数 $y=\\dfrac{k}{x}$ 的图象。",
-            regions=[{"page_idx": 1, "bbox": [83, 505, 899, 535]}],
-            processing_mode="auto", body_mode="text",
-            state=Question.State.GREEN, flags=[], figures=[], figure_review={},
-        )
+        base = {
+            "paper": self.paper, "group": self.group, "number": self.counter,
+            "stem": "如图，△ABC 的三个顶点分别为 A（1，2），求函数 $y=\\dfrac{k}{x}$ 的图象。",
+            "regions": [{"page_idx": 1, "bbox": [83, 505, 899, 535]}],
+            "processing_mode": "auto", "body_mode": "text",
+            "state": Question.State.GREEN, "flags": [], "figures": [], "figure_review": {},
+        }
         base.update(values)
         return Question.objects.create(**base)
 

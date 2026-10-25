@@ -1,0 +1,21 @@
+{
+  "name": "tiyouju-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "题有据前端工具链（开发期用；运行时零依赖，页面直接用 <script> 加载）",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test frontend/test_*.js",
+    "lint": "eslint frontend --ext .js",
+    "lint:fix": "eslint frontend --ext .js --fix",
+    "format": "prettier --write \"frontend/**/*.js\" \"frontend/**/*.css\"",
+    "format:check": "prettier --check \"frontend/**/*.js\" \"frontend/**/*.css\""
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "prettier": "3.6.2"
+  }
+}

@@ -1,13 +1,13 @@
 """Explicit one-question handoff carries identity/results without global changes."""
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase
 
 from .test_tiyouju_cli import cli, run_json
-from .test_tiyouju_enrichment_cli import prepared, PUBLICATION, JOB, FINGERPRINT, PNG
+from .test_tiyouju_enrichment_cli import FINGERPRINT, JOB, PNG, PUBLICATION, prepared
 
 
 class ScopedEnrichmentCliTests(SimpleTestCase):

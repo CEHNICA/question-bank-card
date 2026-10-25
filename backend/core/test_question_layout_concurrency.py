@@ -5,13 +5,12 @@ paper rows. It has no worker, credentials, original user files or network access
 """
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from django.test import SimpleTestCase
-
 
 SQLITE_RACE = r'''
 from copy import deepcopy

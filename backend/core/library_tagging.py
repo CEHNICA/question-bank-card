@@ -14,16 +14,24 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, Q
+from django.db.models import Count, F
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import library
-from .models import (LibraryJob, LibraryTag, LibraryTagAssignment, LibraryTagCatalogue,
-                     LibraryTagGroup, LibraryTagOperation, LibraryTagSuggestion, LibraryTagRelation,
-                     PublishedQuestion)
+from .models import (
+    LibraryJob,
+    LibraryTag,
+    LibraryTagAssignment,
+    LibraryTagCatalogue,
+    LibraryTagGroup,
+    LibraryTagOperation,
+    LibraryTagRelation,
+    LibraryTagSuggestion,
+    PublishedQuestion,
+)
 
 MAX_NAME = 100
 MAX_ALIASES = 20
@@ -185,7 +193,7 @@ def _validate_relations(rows):
         else:
             raise TaggingError("标签关系类型不正确")
     # Iterative topological sorting avoids recursion limits in user-built trees.
-    indegree = {key: 0 for key in kinds}
+    indegree = dict.fromkeys(kinds, 0)
     for values in children.values():
         for child in values:
             indegree[child] += 1
@@ -2152,9 +2160,9 @@ def normalize_ai_output(value, catalogue):
 
 
 def current_method_source(publication):
-    from . import library_solutions
-    from . import imaging
     from PIL import Image
+
+    from . import imaging, library_solutions
 
     image_data_urls = []
     image_hashes = []
