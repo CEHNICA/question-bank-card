@@ -369,7 +369,7 @@ def main() -> int:
             "ids": ids,
             "title": "虚构组卷",
             "print_options": {"answers": True},
-            "solutions": {key: "origin" for key in ids},
+            "solutions": dict.fromkeys(ids, "origin"),
         },
     )
     # 新建草稿返回 201，既有草稿返回 200 —— 两个都算成功。

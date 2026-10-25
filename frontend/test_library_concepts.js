@@ -133,6 +133,20 @@ assert.match(js, /TYPE_LABELS\[item\.question_type\]/, "题型显示中文");
 assert.match(js, /title: "未整理"/, "未整理单独一区");
 assert.match(js, /没贴标签不等于没有该知识或方法/, "未整理这一区把话说清楚");
 
+// 撤销要有真的逆操作和冲突检查 —— 后端做，界面给入口。
+assert.match(js, /撤销上次改动/, "界面上有撤销入口");
+assert.match(js, /action: "undo"/, "撤销走服务层的 undo，不是前端自己删");
+assert.match(
+  fs.readFileSync(path.join(__dirname, "..", "backend", "core", "library_concepts.py"), "utf8"),
+  /def undo_assertion/,
+  "撤销在服务层实现，有真正的逆操作",
+);
+assert.match(
+  fs.readFileSync(path.join(__dirname, "..", "backend", "core", "library_concepts.py"), "utf8"),
+  /撤销会盖掉那个改动，所以没做/,
+  "撤销带冲突检查：别人改过就不动",
+);
+
 // 窄窗口不压字。
 assert.match(css, /@media \(max-width: 820px\)/, "窄窗口有单独布局");
 assert.match(css, /@media \(max-width: 1180px\)/, "中等窗口有单独布局");

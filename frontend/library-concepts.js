@@ -638,6 +638,18 @@
     }
     ui.inspector.append(stem);
 
+    // ---- 撤销 ----------------------------------------------------------
+    // 撤销是真正的逆操作，后端带冲突检查：那条关联要是被别人改过，
+    // 撤销会拒绝并说清楚，不会盖掉别人的改动。
+    const undoable = (state.detail.operations || []).find((item) => !item.undone);
+    if (undoable) {
+      const undo = el("button", "concepts-undo", "撤销上次改动");
+      undo.type = "button";
+      undo.title = undoable.action === "attach_assertion" ? "撤销刚贴的标签" : "撤销刚才的移除";
+      undo.addEventListener("click", () => undoAssertion(undoable.id));
+      ui.inspector.append(undo);
+    }
+
     // ---- 主要考查 ------------------------------------------------------
     ui.inspector.append(section("主要考查", (body) => {
       listRole(body, "primary");
@@ -874,6 +886,24 @@
         body: {
           action: "detach",
           assignment_id: row.id,
+          client_request_id: newRequestId(),
+          expected_revision: state.detail.tag_revision || 0,
+        },
+      });
+      await selectQuestion(state.selected);
+    } catch (error) {
+      state.message = error.message;
+      renderSummary();
+    }
+  }
+
+  async function undoAssertion(operationId) {
+    try {
+      await api("/api/library/assertions", {
+        method: "POST",
+        body: {
+          action: "undo",
+          operation_id: operationId,
           client_request_id: newRequestId(),
           expected_revision: state.detail.tag_revision || 0,
         },

@@ -143,6 +143,8 @@ def assertions_view(request):
         return JsonResponse(library_concepts.attach_assertion(payload))
     if action == "detach":
         return JsonResponse(library_concepts.detach_assertion(payload))
+    if action == "undo":
+        return JsonResponse(library_concepts.undo_assertion(payload))
     return _error(f"不认识的动作 {action}", 400)
 
 
@@ -161,6 +163,8 @@ def publication_assertions_view(request, publication_id):
                 "coverage": library_concepts.coverage_for(publication),
                 "subquestions": library_concepts.list_subquestions(publication),
                 "variants": library_concepts.list_variants(publication),
+                "operations": library_concepts.recent_assertion_operations(str(publication.pk)),
+                "tag_revision": publication.tag_revision,
             }
         )
     if request.method != "POST":

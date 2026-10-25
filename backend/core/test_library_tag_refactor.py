@@ -225,6 +225,76 @@ class ConceptIdentityTests(RefactorTestBase):
         with self.assertRaises(library_tagging.TaggingError):
             library_concepts.attach_assertion(stale)
 
+    def test_undo_attach_puts_the_label_back(self):
+        """撤销「贴标签」= 真的把那条关联移除。"""
+        publication = self.make_publication()
+        concept = self.make_concept("圆的方程")
+        result = self.attach(publication, concept)
+
+        publication.refresh_from_db()
+        undone = library_concepts.undo_assertion(
+            {
+                "operation_id": result["operation"],
+                "client_request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            }
+        )
+        self.assertTrue(undone["ok"])
+        self.assertEqual(LibraryTagAssignment.objects.filter(publication=publication).count(), 0)
+
+    def test_undo_detach_puts_the_label_back(self):
+        """撤销「移除」= 按快照把那条关联原样建回来。"""
+        publication = self.make_publication()
+        concept = self.make_concept("圆的方程")
+        self.attach(publication, concept, rationale="这题主要考它")
+        row = LibraryTagAssignment.objects.get(publication=publication)
+        publication.refresh_from_db()
+        library_concepts.detach_assertion(
+            {
+                "assignment_id": str(row.pk),
+                "client_request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            }
+        )
+        self.assertEqual(LibraryTagAssignment.objects.filter(publication=publication).count(), 0)
+
+        publication.refresh_from_db()
+        operation = library_tagging.LibraryTagOperation.objects.filter(action="detach_assertion").first()
+        library_concepts.undo_assertion(
+            {
+                "operation_id": operation.pk,
+                "client_request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            }
+        )
+        restored = LibraryTagAssignment.objects.get(publication=publication)
+        self.assertEqual(restored.tag_id, concept.pk)
+        self.assertEqual(restored.role, "primary")
+        self.assertEqual(restored.rationale, "这题主要考它")
+
+    def test_undo_refuses_when_the_label_changed_underneath(self):
+        """撤销带冲突检查：那条关联被人改过就别动，别盖掉别人的改动。"""
+        publication = self.make_publication()
+        concept = self.make_concept("圆的方程")
+        result = self.attach(publication, concept)
+        row = LibraryTagAssignment.objects.get(publication=publication)
+        # 别人改了这条关联的用途。
+        row.role = "supporting"
+        row.save(update_fields=["role"])
+
+        publication.refresh_from_db()
+        with self.assertRaises(library_concepts.AssertionError_):
+            library_concepts.undo_assertion(
+                {
+                    "operation_id": result["operation"],
+                    "client_request_id": str(uuid.uuid4()),
+                    "expected_revision": publication.tag_revision,
+                }
+            )
+        # 别人的改动还在。
+        row.refresh_from_db()
+        self.assertEqual(row.role, "supporting")
+
 
 # ---------------------------------------------------------------------------
 # R：整理与候选
@@ -453,11 +523,7 @@ class SearchSemanticsTests(RefactorTestBase):
         by_key = library_query.run_query(
             {
                 "method_groups": [
-                    {
-                        "ids": [str(method.pk)],
-                        "subquestion": subquestions[0].stable_key,
-                        "cooccurrence": "same_variant",
-                    }
+                    {"ids": [str(method.pk)], "subquestion": subquestions[0].stable_key, "cooccurrence": "same_variant"}
                 ]
             }
         )

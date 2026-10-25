@@ -363,6 +363,13 @@ def attach_assertion(payload: dict) -> dict:
                 "tag_ids": [str(tag.pk) for tag in tags],
                 "variant_id": str(variant.pk) if variant else "",
                 "subquestion_id": str(subquestion.pk) if subquestion else "",
+                # 记下每条关联的编号和当时的模样，撤销的时候才知道
+                # 该动哪一条，以及它有没有被别人改过。
+                "assignment_ids": [str(row.pk) for row in created],
+                "assignments": [
+                    {"id": str(row.pk), "tag_id": str(row.tag_id), "role": row.role, "scope_key": row.scope_key}
+                    for row in created
+                ],
             },
         )
         library_tagging._sync_projection(publication.pk)
@@ -400,6 +407,130 @@ def _write_evidence(
     )
 
 
+def undo_assertion(payload: dict) -> dict:
+    """撤销一次关联改动。
+
+    撤销不是「再点一次删除」—— 它有真正的逆操作，而且带冲突检查：
+
+    * 撤销「贴标签」→ 把那几条关联移除；如果其中一条已经被人改过或删了，
+      这次撤销就**不**做，并说清楚哪一条对不上。
+    * 撤销「移除」→ 按快照把那条关联重新建回来；如果同一个位置已经有别的
+      关联了，同样不做。
+
+    撤销本身也记一条操作，所以能一直往回退。
+    """
+    from . import library_tagging
+
+    operation = LibraryTagOperation.objects.filter(pk=payload.get("operation_id")).first()
+    if operation is None:
+        raise AssertionError_("找不到这次操作", 404)
+    if operation.undone_at:
+        raise AssertionError_("这次操作已经撤销过了", 409)
+    if operation.action not in {"attach_assertion", "detach_assertion"}:
+        raise AssertionError_("这次操作不是贴标签，不能在这儿撤销")
+
+    request_id = payload.get("client_request_id")
+    if not request_id:
+        raise AssertionError_("缺 client_request_id")
+    request_hash = library_tagging._request_hash(payload)
+    existing = LibraryTagOperation.objects.filter(client_request_id=request_id).first()
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise AssertionError_("同一个请求 ID 带了不同的内容", 409)
+        return {"ok": True, "replayed": True, "operation": str(existing.pk)}
+
+    expected_revision = library_tagging._expected_revision(payload.get("expected_revision"))
+    with transaction.atomic():
+        if operation.action == "attach_assertion":
+            snapshot = operation.after_snapshot or {}
+            ids = [str(item) for item in snapshot.get("assignment_ids") or []]
+            rows = list(LibraryTagAssignment.objects.filter(pk__in=ids)) if ids else []
+            if len(rows) != len(ids):
+                raise AssertionError_("这次贴的标签已经被改过或删掉了，撤销会盖掉别人的改动，所以没做", 409)
+            # 逐条比对当时的模样：行还在但内容被改过，同样不能撤销。
+            expected = {str(item.get("id")): item for item in snapshot.get("assignments") or []}
+            for row in rows:
+                want = expected.get(str(row.pk))
+                if want is None:
+                    continue
+                if (
+                    str(row.tag_id) != str(want.get("tag_id"))
+                    or row.role != want.get("role")
+                    or row.scope_key != want.get("scope_key")
+                ):
+                    raise AssertionError_("这次贴的标签已经被改过，撤销会盖掉那个改动，所以没做", 409)
+            publication = rows[0].publication if rows else None
+            if publication is not None:
+                library_tagging._bump_publication(publication, expected_revision)
+            for row in rows:
+                row.delete()
+            if publication is not None:
+                library_tagging._sync_projection(publication.pk)
+            inverse = {"action": "attach_assertion", "assignment_ids": ids}
+        else:
+            snapshot = operation.before_snapshot or {}
+            publication = PublishedQuestion.objects.filter(pk=(operation.publication_ids or [""])[0]).first()
+            if publication is None:
+                raise AssertionError_("找不到这道题", 404)
+            library_tagging._bump_publication(publication, expected_revision)
+            tag = LibraryTag.objects.filter(pk=snapshot.get("tag_id")).first()
+            if tag is None:
+                raise AssertionError_("原来那个概念已经不在了，撤销没做", 409)
+            scope_key = str(snapshot.get("scope_key") or "whole")
+            if LibraryTagAssignment.objects.filter(
+                publication=publication, tag=tag, role=snapshot.get("role"), scope_key=scope_key
+            ).exists():
+                raise AssertionError_("同一个位置已经又有别的关联了，撤销会盖掉它，所以没做", 409)
+            row = LibraryTagAssignment.objects.create(
+                publication=publication,
+                tag=tag,
+                scope={"whole": scope_key == "whole"},
+                scope_key=scope_key,
+                role=snapshot.get("role") or LibraryTagAssignment.Role.LEGACY,
+                source=snapshot.get("source") or LibraryTagAssignment.Source.HUMAN,
+                rationale=str(snapshot.get("rationale") or "")[:500],
+                review_status=LibraryTagAssignment.ReviewStatus.CONFIRMED,
+                evidence_status=LibraryTagAssignment.EvidenceStatus.CURRENT,
+                variant=LibrarySolutionVariant.objects.filter(pk=snapshot.get("variant_id")).first()
+                if snapshot.get("variant_id")
+                else None,
+                subquestion=LibrarySubquestion.objects.filter(pk=snapshot.get("subquestion_id")).first()
+                if snapshot.get("subquestion_id")
+                else None,
+            )
+            library_tagging._sync_projection(publication.pk)
+            inverse = {"action": "detach_assertion", "assignment_id": str(row.pk)}
+
+        operation.undone_at = timezone.now()
+        operation.save(update_fields=["undone_at"])
+        LibraryTagOperation.objects.create(
+            client_request_id=uuid.UUID(str(request_id)),
+            request_hash=request_hash,
+            action="undo_assertion",
+            publication_ids=operation.publication_ids,
+            before_snapshot=dict(operation.after_snapshot or {}),
+            after_snapshot=inverse,
+        )
+    return {"ok": True, "replayed": False, "undone": operation.action}
+
+
+def recent_assertion_operations(publication_id: str, *, limit: int = 20) -> list[dict]:
+    """一道题上的关联改动历史。界面用它摆「撤销」。"""
+    rows = LibraryTagOperation.objects.filter(
+        publication_ids__contains=str(publication_id),
+        action__in=["attach_assertion", "detach_assertion", "undo_assertion"],
+    ).order_by("-created_at")[:limit]
+    return [
+        {
+            "id": str(row.pk),
+            "action": row.action,
+            "undone": bool(row.undone_at),
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
 def detach_assertion(payload: dict) -> dict:
     """移除一条关联。范围和用途要一起指明，不能整题一锅端。"""
     from . import library_tagging
@@ -427,6 +558,9 @@ def detach_assertion(payload: dict) -> dict:
             "scope_key": assignment.scope_key,
             "variant_id": str(assignment.variant_id or ""),
             "subquestion_id": str(assignment.subquestion_id or ""),
+            # 撤销要按原样建回来，所以来源和理由也得留着。
+            "source": assignment.source,
+            "rationale": assignment.rationale,
         }
         assignment.delete()
         operation = LibraryTagOperation.objects.create(
