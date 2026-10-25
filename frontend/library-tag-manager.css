@@ -34,6 +34,12 @@
 .tag-directory-menu > .button { width: 100%; justify-content: flex-start; }
 .tag-directory-menu > small { display: block; margin: 9px 4px 3px; color: var(--muted, #747971); line-height: 1.6; }
 .tag-directory-status { margin: 0 0 10px; min-height: 0; line-height: 1.5; }
+/* 1.27.0：状态条和「撤销」并排。撤销按钮在操作发生的地方就在眼前，
+   不用翻到页面底下的「操作记录」折叠区里找。 */
+.tag-directory-status-row { display: flex; align-items: flex-start; gap: 10px; }
+.tag-directory-status-row > .tag-directory-status { flex: 1 1 auto; margin-bottom: 10px; }
+.tag-directory-status-row > button { flex: none; margin-bottom: 10px; }
+.tag-directory-status-row > button[hidden] { display: none; }
 .tag-directory-status:empty { display: none; }
 .tag-directory-status.error { color: #aa3c30; background: #fff3ed; padding: 10px 12px; border-radius: 8px; }
 .tag-directory-body { display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; min-height: 460px; align-items: start; border: 1px solid var(--line, #e3e3dc); border-radius: 13px; background: var(--surface, #fff); overflow: clip; }

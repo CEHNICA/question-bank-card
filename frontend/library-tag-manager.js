@@ -56,6 +56,8 @@
     const state = { open: false, busy: false, scope: "all", query: "", selected: new Set(), focused: "", anchor: "", hierarchyKind: "", hierarchyNode: "",
       // 1.27.0：当前看的是哪个标签群组。空字符串表示没选群组（看的是上面那几个分类）。
       groupId: "",
+      // 1.27.0：上一步改动的操作编号 —— 状态条边上的「撤销」就指它。
+      lastOperation: "",
       // 1.25.38：进子级时记下「从哪里进来的」，返回上级按原路退；同一个标签有多个
       // 父级时也不至于退不动。
       hierarchyTrail: [],
@@ -92,7 +94,14 @@
     for (const kind of ["knowledge", "method", "custom", "legacy"]) mapType.add(new Option(kinds[kind], kind));
     mapType.addEventListener("change", () => { state.mapKind = mapType.value; state.focused = ""; state.selected.clear(); render(); });
     toolbar.append(views, searchBox, mapType, newTag, templates, advanced);
+    // 1.27.0：撤销按钮就摆在状态条边上。
+    // 以前撤销只在页面最底部的折叠区里 —— 建完组只提示一句「可在操作记录中撤销」，
+    // 那得翻到底下、展开才能找到按钮。撤销做得到不算数，找得到才算。
+    const statusRow = element("div", "tag-directory-status-row");
     const status = element("p", "tag-directory-status"); status.id = "tagManagerStatus"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+    const undoLast = button("撤销", () => undoLastOperation(), "button button-small");
+    undoLast.id = "tagManagerUndoLast"; undoLast.hidden = true; undoLast.title = "撤销上一步改动";
+    statusRow.append(status, undoLast);
     const body = element("div", "tag-directory-body"), sidebar = element("aside", "tag-directory-groups");
     const scopeNav = element("nav", "tag-directory-group-list");
     scopeNav.id = "tagManagerScopes"; scopeNav.setAttribute("aria-label", "标签范围");
@@ -149,7 +158,7 @@
     body.append(sidebar, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
     historyList.id = "tagManagerHistoryList"; history.append(historySummary, historyList);
-    page.append(header, toolbar, status, body, history); mount.append(page);
+    page.append(header, toolbar, statusRow, body, history); mount.append(page);
     let map = null;
     function ensureMap() {
       if (map || !root.QBLibraryTagMap) return map;
@@ -296,16 +305,27 @@
       try { const data = await options.request("/api/library/tags/operations"); renderHistory(data.operations || []); }
       catch (error) { historyList.replaceChildren(element("p", "", "记录暂时无法载入：" + error.message)); }
     }
-    async function run(operation, message = "已保存，可在操作记录中撤销") {
+    async function run(operation, message = "已保存") {
       if (state.busy) return false;
       setBusy(true); setNotice("正在保存…");
       try {
         const result = await operation();
         if (result === false || result === null) { setNotice(""); return false; }
         const catalogue = result?.catalogue || await options.loadCatalogue();
+        // 记下这一步的操作编号 —— 状态条边上的「撤销」就指它。
+        state.lastOperation = result?.operation_id || "";
         render(catalogue); setNotice(message); await reloadHistory(); return true;
       } catch (error) { setNotice(error.message + "；选择仍保留，请检查后重试。", true); return false; }
       finally { setBusy(false); if (state.questionContext) renderDetail(); }
+    }
+    // 1.27.0：撤销上一步。入口摆在状态条边上，不藏在页面底下的折叠区里。
+    async function undoLastOperation() {
+      const operationId = state.lastOperation;
+      if (!operationId || state.busy) return;
+      const ok = await run(() => options.request("/api/library/tags/undo", {
+        method: "POST", body: JSON.stringify({ operation_id: operationId })
+      }), "已撤销");
+      if (ok) { state.lastOperation = ""; render(); }
     }
     async function show(context = {}) {
       if (state.open) { if (context.view === "map") switchView("map", tagById(context.tagId)); else search.focus(); return; }
@@ -872,6 +892,7 @@
       if (state.view !== "map") { renderSidebar(); renderLocation(); renderList(); }
       else state.shown = [];
       renderDetail(); renderView(); status.textContent = state.notice; status.classList.toggle("error", state.error);
+      undoLast.hidden = !state.lastOperation;
       if (focusedId && !busy) (page.querySelector('[data-tag-id="' + CSS.escape(focusedId) + '"] ' + focusedControl) || page).focus({ preventScroll: true });
       if (busy) setBusy(true);
     }

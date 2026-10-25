@@ -66,6 +66,15 @@ assert.match(managerJs, /"catalogue:create_group": "新建标签群组"/, "操�
 assert.match(managerJs, /"catalogue:delete_group": "删除标签群组"/, "操作记录里有「删除标签群组」");
 assert.match(managerJs, /"catalogue:group_membership_batch": "批量调整标签所属分组"/, "操作记录里有「批量调整标签所属分组」");
 
+// 1.27.0：撤销入口摆在状态条边上，不藏在页面底下的折叠区里。
+// 「能做撤销」和「找得到撤销」是两回事 —— 找得到才算。
+assert.match(managerJs, /id = "tagManagerUndoLast"/, "状态条边上有撤销按钮");
+assert.match(managerJs, /page\.append\(header, toolbar, statusRow, body, history\)/, "状态条和撤销按钮一起摆");
+assert.match(managerJs, /state\.lastOperation = result\?\.operation_id \|\| ""/, "每次保存都记下这一步的操作编号");
+assert.match(managerJs, /async function undoLastOperation\(\)/, "有撤销上一步的动作");
+assert.match(managerJs, /"\/api\/library\/tags\/undo"/, "撤销走服务层的 undo 接口");
+assert.match(managerJs, /undoLast\.hidden = !state\.lastOperation/, "没有可撤销的操作时不摆这个按钮");
+
 // 「历史标签」这个词老师看不懂 —— 得说清楚它是什么，而且要**常驻可见**。
 // 悬停提示不算说明（这是这个项目一贯的规矩）。
 assert.match(managerJs, /function systemGroupHint\(kind, count\)/, "系统默认分组有说明");
